@@ -1,0 +1,16 @@
+@page "/settings"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@inject TodoX.Dashboard.Data.AppDbContext Db
+@using Microsoft.EntityFrameworkCore
+@using TodoX.Dashboard.Models
+
+<MudText Typo="Typo.h4" Class="mb-4">Cáº¥u hÃ¬nh há»‡ thá»‘ng</MudText>
+<MudTable Items="@SettingRows" Dense="true" Hover="true">
+    <HeaderContent><MudTh>Key</MudTh><MudTh>Value</MudTh><MudTh>MÃ´ táº£</MudTh></HeaderContent>
+    <RowTemplate><MudTd>@context.Key</MudTd><MudTd>@context.Value</MudTd><MudTd>@context.Description</MudTd></RowTemplate>
+</MudTable>
+
+@code {
+    private List<SystemSetting> SettingRows = new();
+    protected override async Task OnInitializedAsync() => SettingRows = await Db.SystemSettings.OrderBy(x => x.Key).ToListAsync();
+}

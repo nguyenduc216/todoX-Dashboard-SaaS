@@ -1,0 +1,39 @@
+@inherits LayoutComponentBase
+
+<MudThemeProvider />
+<MudPopoverProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />
+
+<MudLayout>
+    <MudAppBar Elevation="1">
+        <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start" OnClick="ToggleDrawer" />
+        <MudText Typo="Typo.h6">TodoX SaaS Dashboard</MudText>
+        <MudSpacer />
+        <MudButton Href="/logout" Color="Color.Inherit">Đăng xuất</MudButton>
+    </MudAppBar>
+
+    <MudDrawer @bind-Open="_drawerOpen" ClipMode="DrawerClipMode.Always" Elevation="2">
+        <MudNavMenu>
+            <MudNavLink Href="/" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Dashboard">Tổng quan</MudNavLink>
+            <MudNavLink Href="/customers" Icon="@Icons.Material.Filled.Business">Khách hàng</MudNavLink>
+            <MudNavLink Href="/accounts" Icon="@Icons.Material.Filled.People">Tài khoản KH</MudNavLink>
+            <MudNavLink Href="/wallets" Icon="@Icons.Material.Filled.AccountBalanceWallet">Ví token</MudNavLink>
+            <MudNavLink Href="/transactions" Icon="@Icons.Material.Filled.ReceiptLong">Giao dịch</MudNavLink>
+            <MudNavLink Href="/pricing" Icon="@Icons.Material.Filled.PriceCheck">Bảng giá</MudNavLink>
+            <MudNavLink Href="/render-jobs" Icon="@Icons.Material.Filled.MovieCreation">Render jobs</MudNavLink>
+            <MudNavLink Href="/settings" Icon="@Icons.Material.Filled.Settings">Hệ thống</MudNavLink>
+        </MudNavMenu>
+    </MudDrawer>
+
+    <MudMainContent>
+        <MudContainer MaxWidth="MaxWidth.False" Class="pa-6">
+            @Body
+        </MudContainer>
+    </MudMainContent>
+</MudLayout>
+
+@code {
+    private bool _drawerOpen = true;
+    private void ToggleDrawer() => _drawerOpen = !_drawerOpen;
+}

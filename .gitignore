@@ -1,0 +1,15 @@
+.vs/
+bin/
+obj/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+[Dd]ebug/
+[Rr]elease/
+publish/
+logs/
+
+appsettings.Production.json
+appsettings.Development.json

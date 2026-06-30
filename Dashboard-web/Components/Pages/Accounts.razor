@@ -1,0 +1,19 @@
+@page "/accounts"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@inject TodoX.Dashboard.Data.AppDbContext Db
+@using Microsoft.EntityFrameworkCore
+@using TodoX.Dashboard.Models
+
+<MudText Typo="Typo.h4" Class="mb-4">TÃ i khoáº£n khÃ¡ch hÃ ng</MudText>
+<MudTable Items="@AccountRows" Dense="true" Hover="true">
+    <HeaderContent><MudTh>KhÃ¡ch hÃ ng</MudTh><MudTh>User</MudTh><MudTh>Email</MudTh><MudTh>Tráº¡ng thÃ¡i</MudTh></HeaderContent>
+    <RowTemplate><MudTd>@context.Customer?.Name</MudTd><MudTd>@context.UserName</MudTd><MudTd>@context.Email</MudTd><MudTd>@context.Status</MudTd></RowTemplate>
+</MudTable>
+
+@code {
+    private List<CustomerAccount> AccountRows = new();
+    protected override async Task OnInitializedAsync()
+    {
+        AccountRows = await Db.CustomerAccounts.Include(x => x.Customer).OrderByDescending(x => x.CreatedAt).ToListAsync();
+    }
+}

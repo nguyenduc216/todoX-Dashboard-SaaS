@@ -1,0 +1,39 @@
+@page "/customers"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@inject TodoX.Dashboard.Data.AppDbContext Db
+@using Microsoft.EntityFrameworkCore
+@using TodoX.Dashboard.Models
+
+<MudText Typo="Typo.h4" Class="mb-4">KhÃ¡ch hÃ ng</MudText>
+<MudPaper Class="pa-4 mb-4">
+    <MudGrid>
+        <MudItem xs="12" md="4"><MudTextField T="string" Label="TÃªn khÃ¡ch hÃ ng" @bind-Value="NewCustomerName" /></MudItem>
+        <MudItem xs="12" md="3"><MudTextField T="string" Label="Email" @bind-Value="NewCustomerEmail" /></MudItem>
+        <MudItem xs="12" md="3"><MudTextField T="string" Label="SÄT" @bind-Value="NewCustomerPhone" /></MudItem>
+        <MudItem xs="12" md="2" Class="d-flex align-end"><MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="AddCustomerAsync">ThÃªm</MudButton></MudItem>
+    </MudGrid>
+</MudPaper>
+<MudTable Items="@CustomerRows" Dense="true" Hover="true">
+    <HeaderContent><MudTh>TÃªn</MudTh><MudTh>Email</MudTh><MudTh>SÄT</MudTh><MudTh>Tráº¡ng thÃ¡i</MudTh></HeaderContent>
+    <RowTemplate><MudTd>@context.Name</MudTd><MudTd>@context.Email</MudTd><MudTd>@context.Phone</MudTd><MudTd>@(context.IsActive ? "Active" : "Inactive")</MudTd></RowTemplate>
+</MudTable>
+
+@code {
+    private List<Customer> CustomerRows = new();
+    private string NewCustomerName = string.Empty;
+    private string? NewCustomerEmail;
+    private string? NewCustomerPhone;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+    private async Task LoadAsync() => CustomerRows = await Db.Customers.OrderByDescending(x => x.CreatedAt).ToListAsync();
+    private async Task AddCustomerAsync()
+    {
+        if (string.IsNullOrWhiteSpace(NewCustomerName)) return;
+        var customer = new Customer { Name = NewCustomerName.Trim(), Email = NewCustomerEmail, Phone = NewCustomerPhone };
+        Db.Customers.Add(customer);
+        Db.TokenWallets.Add(new TokenWallet { CustomerId = customer.Id, Balance = 0 });
+        await Db.SaveChangesAsync();
+        NewCustomerName = string.Empty; NewCustomerEmail = null; NewCustomerPhone = null;
+        await LoadAsync();
+    }
+}

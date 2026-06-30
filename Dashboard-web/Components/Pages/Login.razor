@@ -1,0 +1,42 @@
+@page "/login"
+@layout EmptyLayout
+@inject NavigationManager Nav
+@inject TodoX.Dashboard.Data.AppDbContext Db
+@inject TodoX.Dashboard.Services.PasswordService Passwords
+@using Microsoft.EntityFrameworkCore
+
+<MudThemeProvider />
+<MudPopoverProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />
+
+<div class="login-page">
+    <MudPaper Class="login-card pa-6" Elevation="8">
+        <MudText Typo="Typo.h4" Align="Align.Center" Class="mb-2">TodoX Dashboard</MudText>
+        <MudText Typo="Typo.body2" Align="Align.Center" Class="mb-6">ÄÄƒng nháº­p quáº£n trá»‹ há»‡ thá»‘ng</MudText>
+        <MudTextField T="string" Label="TÃ i khoáº£n" @bind-Value="UserName" Variant="Variant.Outlined" Class="mb-3" />
+        <MudTextField T="string" Label="Máº­t kháº©u" @bind-Value="Password" Variant="Variant.Outlined" InputType="InputType.Password" Class="mb-4" />
+        @if (!string.IsNullOrWhiteSpace(Error))
+        {
+            <MudAlert Severity="Severity.Error" Class="mb-3">@Error</MudAlert>
+        }
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" FullWidth="true" OnClick="LoginAsync">ÄÄƒng nháº­p</MudButton>
+    </MudPaper>
+</div>
+
+@code {
+    private string UserName = "admin";
+    private string Password = string.Empty;
+    private string? Error;
+
+    private async Task LoginAsync()
+    {
+        var user = await Db.SystemUsers.FirstOrDefaultAsync(x => x.UserName == UserName && x.IsActive);
+        if (user == null || !Passwords.Verify(Password, user.PasswordHash))
+        {
+            Error = "Sai tÃ i khoáº£n hoáº·c máº­t kháº©u.";
+            return;
+        }
+        Nav.NavigateTo("/", forceLoad: true);
+    }
+}

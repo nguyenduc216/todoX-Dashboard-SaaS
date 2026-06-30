@@ -1,0 +1,27 @@
+@page "/"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@inject TodoX.Dashboard.Data.AppDbContext Db
+@using Microsoft.EntityFrameworkCore
+
+<MudText Typo="Typo.h4" Class="mb-4">TodoX SaaS Dashboard</MudText>
+<MudGrid>
+    <MudItem xs="12" md="3"><MudPaper Class="pa-4"><MudText Typo="Typo.subtitle2">KhÃ¡ch hÃ ng</MudText><MudText Typo="Typo.h4">@CustomerCount</MudText></MudPaper></MudItem>
+    <MudItem xs="12" md="3"><MudPaper Class="pa-4"><MudText Typo="Typo.subtitle2">TÃ i khoáº£n</MudText><MudText Typo="Typo.h4">@AccountCount</MudText></MudPaper></MudItem>
+    <MudItem xs="12" md="3"><MudPaper Class="pa-4"><MudText Typo="Typo.subtitle2">VÃ­ token</MudText><MudText Typo="Typo.h4">@WalletCount</MudText></MudPaper></MudItem>
+    <MudItem xs="12" md="3"><MudPaper Class="pa-4"><MudText Typo="Typo.subtitle2">Render jobs</MudText><MudText Typo="Typo.h4">@JobCount</MudText></MudPaper></MudItem>
+</MudGrid>
+
+@code {
+    private int CustomerCount;
+    private int AccountCount;
+    private int WalletCount;
+    private int JobCount;
+
+    protected override async Task OnInitializedAsync()
+    {
+        CustomerCount = await Db.Customers.CountAsync();
+        AccountCount = await Db.CustomerAccounts.CountAsync();
+        WalletCount = await Db.TokenWallets.CountAsync();
+        JobCount = await Db.RenderJobs.CountAsync();
+    }
+}

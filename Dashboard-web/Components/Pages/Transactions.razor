@@ -1,0 +1,19 @@
+@page "/transactions"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@inject TodoX.Dashboard.Data.AppDbContext Db
+@using Microsoft.EntityFrameworkCore
+@using TodoX.Dashboard.Models
+
+<MudText Typo="Typo.h4" Class="mb-4">Giao dá»‹ch token</MudText>
+<MudTable Items="@TransactionRows" Dense="true" Hover="true">
+    <HeaderContent><MudTh>KhÃ¡ch hÃ ng</MudTh><MudTh>Loáº¡i</MudTh><MudTh>Sá»‘ Ä‘iá»ƒm</MudTh><MudTh>MÃ´ táº£</MudTh><MudTh>NgÃ y</MudTh></HeaderContent>
+    <RowTemplate><MudTd>@context.Customer?.Name</MudTd><MudTd>@context.Type</MudTd><MudTd>@context.Amount</MudTd><MudTd>@context.Description</MudTd><MudTd>@context.CreatedAt.ToLocalTime()</MudTd></RowTemplate>
+</MudTable>
+
+@code {
+    private List<TokenTransaction> TransactionRows = new();
+    protected override async Task OnInitializedAsync()
+    {
+        TransactionRows = await Db.TokenTransactions.Include(x => x.Customer).OrderByDescending(x => x.CreatedAt).ToListAsync();
+    }
+}

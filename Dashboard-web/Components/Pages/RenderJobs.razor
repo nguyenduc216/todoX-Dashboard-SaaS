@@ -1,0 +1,19 @@
+@page "/render-jobs"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@inject TodoX.Dashboard.Data.AppDbContext Db
+@using Microsoft.EntityFrameworkCore
+@using TodoX.Dashboard.Models
+
+<MudText Typo="Typo.h4" Class="mb-4">Render jobs</MudText>
+<MudTable Items="@JobRows" Dense="true" Hover="true">
+    <HeaderContent><MudTh>KhÃ¡ch hÃ ng</MudTh><MudTh>Loáº¡i</MudTh><MudTh>Tráº¡ng thÃ¡i</MudTh><MudTh>Thá»i lÆ°á»£ng</MudTh><MudTh>Token</MudTh><MudTh>NgÃ y</MudTh></HeaderContent>
+    <RowTemplate><MudTd>@context.Customer?.Name</MudTd><MudTd>@context.JobType</MudTd><MudTd>@context.Status</MudTd><MudTd>@context.DurationSeconds</MudTd><MudTd>@context.EstimatedToken</MudTd><MudTd>@context.CreatedAt.ToLocalTime()</MudTd></RowTemplate>
+</MudTable>
+
+@code {
+    private List<RenderJob> JobRows = new();
+    protected override async Task OnInitializedAsync()
+    {
+        JobRows = await Db.RenderJobs.Include(x => x.Customer).OrderByDescending(x => x.CreatedAt).ToListAsync();
+    }
+}

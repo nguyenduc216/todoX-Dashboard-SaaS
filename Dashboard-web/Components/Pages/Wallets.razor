@@ -1,0 +1,19 @@
+@page "/wallets"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@inject TodoX.Dashboard.Data.AppDbContext Db
+@using Microsoft.EntityFrameworkCore
+@using TodoX.Dashboard.Models
+
+<MudText Typo="Typo.h4" Class="mb-4">VÃ­ token</MudText>
+<MudTable Items="@WalletRows" Dense="true" Hover="true">
+    <HeaderContent><MudTh>KhÃ¡ch hÃ ng</MudTh><MudTh>Sá»‘ dÆ°</MudTh><MudTh>Äang giá»¯</MudTh><MudTh>Cáº­p nháº­t</MudTh></HeaderContent>
+    <RowTemplate><MudTd>@context.Customer?.Name</MudTd><MudTd>@context.Balance</MudTd><MudTd>@context.Reserved</MudTd><MudTd>@context.UpdatedAt.ToLocalTime()</MudTd></RowTemplate>
+</MudTable>
+
+@code {
+    private List<TokenWallet> WalletRows = new();
+    protected override async Task OnInitializedAsync()
+    {
+        WalletRows = await Db.TokenWallets.Include(x => x.Customer).OrderByDescending(x => x.UpdatedAt).ToListAsync();
+    }
+}

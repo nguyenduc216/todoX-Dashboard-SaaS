@@ -1,0 +1,16 @@
+@page "/pricing"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@inject TodoX.Dashboard.Data.AppDbContext Db
+@using Microsoft.EntityFrameworkCore
+@using TodoX.Dashboard.Models
+
+<MudText Typo="Typo.h4" Class="mb-4">Báº£ng giÃ¡ dá»‹ch vá»¥</MudText>
+<MudTable Items="@PricingRows" Dense="true" Hover="true">
+    <HeaderContent><MudTh>MÃ£</MudTh><MudTh>TÃªn dá»‹ch vá»¥</MudTh><MudTh>Base token</MudTh><MudTh>/giÃ¢y</MudTh><MudTh>Voice</MudTh><MudTh>Caption</MudTh></HeaderContent>
+    <RowTemplate><MudTd>@context.ServiceCode</MudTd><MudTd>@context.ServiceName</MudTd><MudTd>@context.BaseToken</MudTd><MudTd>@context.PerSecondToken</MudTd><MudTd>@context.VoiceEnabled</MudTd><MudTd>@context.CaptionEnabled</MudTd></RowTemplate>
+</MudTable>
+
+@code {
+    private List<PricingRule> PricingRows = new();
+    protected override async Task OnInitializedAsync() => PricingRows = await Db.PricingRules.OrderBy(x => x.ServiceCode).ToListAsync();
+}
