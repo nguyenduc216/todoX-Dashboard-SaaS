@@ -13,3 +13,5 @@ logs/
 
 appsettings.Production.json
 appsettings.Development.json
+Dashboard-web/Properties/launchSettings.json
+Dashboard-web/build-check.log
