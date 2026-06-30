@@ -1,7 +1,55 @@
 @page "/"
 
-<PageTitle>Home</PageTitle>
+<PageTitle>TodoX SaaS Dashboard</PageTitle>
 
-<h1>Hello, world!</h1>
+<MudText Typo="Typo.h4" Class="mb-2">TodoX SaaS Dashboard</MudText>
+<MudText Typo="Typo.body1" Class="mb-6">Trung tâm quản trị khách hàng, token, giao dịch và render jobs của hệ thống TodoX.</MudText>
 
-Welcome to your new app.
+<MudGrid>
+    <MudItem xs="12" sm="6" md="3">
+        <MudCard>
+            <MudCardContent>
+                <MudText Typo="Typo.subtitle2">Khách hàng</MudText>
+                <MudText Typo="Typo.h4">0</MudText>
+                <MudText Typo="Typo.caption">Sẽ kết nối database ở Sprint 2B</MudText>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+    <MudItem xs="12" sm="6" md="3">
+        <MudCard>
+            <MudCardContent>
+                <MudText Typo="Typo.subtitle2">Token đã bán</MudText>
+                <MudText Typo="Typo.h4">0</MudText>
+                <MudText Typo="Typo.caption">Theo dõi ví và giao dịch token</MudText>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+    <MudItem xs="12" sm="6" md="3">
+        <MudCard>
+            <MudCardContent>
+                <MudText Typo="Typo.subtitle2">Render Jobs</MudText>
+                <MudText Typo="Typo.h4">0</MudText>
+                <MudText Typo="Typo.caption">Prompt, image, voice, caption, video</MudText>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+    <MudItem xs="12" sm="6" md="3">
+        <MudCard>
+            <MudCardContent>
+                <MudText Typo="Typo.subtitle2">Doanh thu</MudText>
+                <MudText Typo="Typo.h4">0 đ</MudText>
+                <MudText Typo="Typo.caption">Sẽ tính theo giao dịch bán hàng</MudText>
+            </MudCardContent>
+        </MudCard>
+    </MudItem>
+</MudGrid>
+
+<MudPaper Class="pa-4 mt-6" Elevation="1">
+    <MudText Typo="Typo.h6">Trạng thái Sprint 2A</MudText>
+    <MudList T="string" Dense="true">
+        <MudListItem Text="Đã cài MudBlazor" Icon="@Icons.Material.Filled.CheckCircle" />
+        <MudListItem Text="Đã dựng sidebar và header" Icon="@Icons.Material.Filled.CheckCircle" />
+        <MudListItem Text="Đã tạo các trang placeholder cho Customer, Wallet, Render Jobs, Settings" Icon="@Icons.Material.Filled.CheckCircle" />
+        <MudListItem Text="Chưa kết nối PostgreSQL ở bước này" Icon="@Icons.Material.Filled.Info" />
+    </MudList>
+</MudPaper>

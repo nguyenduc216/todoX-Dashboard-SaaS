@@ -7,6 +7,9 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
+// TodoX UI services.
+builder.Services.AddMudServices();
+
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
