@@ -1,10 +1,15 @@
 .vs/
 bin/
 obj/
+logs/
+
 *.user
 *.suo
 *.userosscache
 *.sln.docstates
+*.log
+
+
 
 [Dd]ebug/
 [Rr]elease/
