@@ -1,0 +1,9 @@
+{
+  "RepoRoot": "D:\\todoX\\Dashboard-web\\TodoXPortal\\todoX-Dashboard-SaaS",
+  "ProjectPath": "TodoX.Web\\TodoX.Web.csproj",
+  "PublishPath": "TodoX.Web\\publish",
+  "LegacyArtifactPath": "artifacts\\publish\\TodoX.Web",
+  "IisSiteName": "TodoX Dashboard SaaS",
+  "LocalDomain": "dashboard.todox.local",
+  "Port": 80
+}

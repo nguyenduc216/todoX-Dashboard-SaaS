@@ -11,4 +11,11 @@
     <PackageReference Include="MudBlazor" Version="9.6.0" />
   </ItemGroup>
 
+  <!-- Stale published output lives under ./publish and must not be scanned by the build -->
+  <ItemGroup>
+    <Content Remove="publish/**" />
+    <None Remove="publish/**" />
+    <Compile Remove="publish/**" />
+  </ItemGroup>
+
 </Project>

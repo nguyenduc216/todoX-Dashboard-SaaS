@@ -16,41 +16,12 @@
 
         <MudSpacer />
 
-        <MudMenu Class="todox-notify-menu" AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight">
-            <ActivatorContent>
-                <MudBadge Content="@NotificationCount" Color="Color.Error" Overlap="true" Visible="@(NotificationCount > 0)" Class="todox-notify-badge">
-                    <MudIconButton Icon="@Icons.Material.Filled.Notifications" Color="Color.Warning" />
-                </MudBadge>
-            </ActivatorContent>
-            <ChildContent>
-                <div class="todox-notify-head">Thông báo</div>
-                <MudMenuItem>Không có thông báo mới</MudMenuItem>
-            </ChildContent>
-        </MudMenu>
+        <MudHidden Breakpoint="Breakpoint.SmAndDown">
+            <MudText Typo="Typo.body2" Class="todox-user-hello">Xin chào, <b>@UserDisplayName</b></MudText>
+        </MudHidden>
 
-        <MudMenu AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight" Class="todox-user-menu">
-            <ActivatorContent>
-                <div class="todox-user-activator">
-                    <MudHidden Breakpoint="Breakpoint.SmAndDown">
-                        <MudText Typo="Typo.body2" Class="todox-user-hello">Xin chào, <b>@UserDisplayName</b></MudText>
-                    </MudHidden>
-                    <MudAvatar Class="todox-avatar">@AvatarText</MudAvatar>
-                    <MudIcon Icon="@Icons.Material.Filled.KeyboardArrowDown" Color="Color.Warning" Size="Size.Small" />
-                </div>
-            </ActivatorContent>
-            <ChildContent>
-                <div class="todox-user-menu-head">
-                    <div class="todox-user-menu-name">@UserDisplayName</div>
-                    <div class="todox-user-menu-email">@UserEmail</div>
-                    <div class="todox-user-menu-role">@RoleLabel</div>
-                </div>
-                <MudDivider />
-                <MudMenuItem Icon="@Icons.Material.Filled.Person" Href="/settings">Hồ sơ cá nhân</MudMenuItem>
-                <MudMenuItem Icon="@Icons.Material.Filled.Settings" Href="/settings">Cài đặt</MudMenuItem>
-                <MudDivider />
-                <MudMenuItem Icon="@Icons.Material.Filled.Logout" OnClick="Logout">Đăng xuất</MudMenuItem>
-            </ChildContent>
-        </MudMenu>
+        <MudAvatar Class="todox-avatar">@AvatarText</MudAvatar>
+        <MudIconButton Icon="@Icons.Material.Filled.Logout" Color="Color.Warning" OnClick="Logout" />
     </MudAppBar>
 
     <MudDrawer @bind-Open="_drawerOpen"
@@ -100,20 +71,10 @@
 
         <div class="todox-sidebar-user">
             <MudAvatar Class="todox-sidebar-avatar">@AvatarText</MudAvatar>
-            <div class="todox-sidebar-user-info">
+            <div>
                 <div class="todox-sidebar-user-name">@UserDisplayName</div>
-                <div class="todox-sidebar-user-email">@UserEmail</div>
+                <div class="todox-sidebar-user-email">admin@todox.local</div>
             </div>
-            <MudMenu Icon="@Icons.Material.Filled.MoreVert"
-                     Color="Color.Inherit"
-                     Class="todox-sidebar-usermenu"
-                     AnchorOrigin="Origin.TopRight"
-                     TransformOrigin="Origin.BottomRight">
-                <MudMenuItem Icon="@Icons.Material.Filled.Person" Href="/settings">Tài khoản</MudMenuItem>
-                <MudMenuItem Icon="@Icons.Material.Filled.Settings" Href="/settings">Cài đặt</MudMenuItem>
-                <MudDivider />
-                <MudMenuItem Icon="@Icons.Material.Filled.Logout" OnClick="Logout">Đăng xuất</MudMenuItem>
-            </MudMenu>
         </div>
     </MudDrawer>
 
@@ -149,18 +110,6 @@
     };
 
     private string UserDisplayName => AuthState.CurrentUser?.DisplayName ?? "Admin";
-    private string UserEmail => AuthState.CurrentUser?.Email ?? "admin@todox.local";
-    private int NotificationCount => 3;
-
-    private string RoleLabel => AuthState.CurrentUser?.Role switch
-    {
-        TodoXUserRole.Admin => "Quản trị viên",
-        TodoXUserRole.SystemOperator => "Vận hành hệ thống",
-        TodoXUserRole.CustomerOwner => "Chủ tài khoản khách hàng",
-        TodoXUserRole.CustomerUser => "Người dùng khách hàng",
-        _ => "Quản trị viên"
-    };
-
     private string AvatarText => string.IsNullOrWhiteSpace(UserDisplayName)
         ? "A"
         : UserDisplayName.Trim()[0].ToString().ToUpperInvariant();

@@ -1,0 +1,72 @@
+﻿@inherits LayoutComponentBase
+@inject AuthStateService AuthState
+@inject NavigationManager Navigation
+
+<MudThemeProvider Theme="_theme" IsDarkMode="true" />
+<MudPopoverProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />
+
+<MudLayout Class="todox-shell">
+    <MudAppBar Class="todox-appbar" Elevation="0">
+        <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Warning" Edge="Edge.Start" OnClick="ToggleDrawer" />
+        <span class="todox-wordmark">Todo<span>X</span></span>
+        <MudSpacer />
+        <MudHidden Breakpoint="Breakpoint.SmAndDown">
+            <MudText Typo="Typo.body2" Class="me-4">Xin chÃ o, @UserDisplayName</MudText>
+        </MudHidden>
+        <MudAvatar Color="Color.Warning">@AvatarText</MudAvatar>
+        <MudIconButton Icon="@Icons.Material.Filled.Logout" Color="Color.Warning" OnClick="Logout" />
+    </MudAppBar>
+
+    <MudDrawer @bind-Open="_drawerOpen" Class="todox-drawer" Width="260px" Elevation="0" Variant="DrawerVariant.Responsive" Breakpoint="Breakpoint.Md">
+        <div class="todox-logo-row">
+            <span class="todox-wordmark">Todo<span>X</span></span>
+        </div>
+        <MudNavMenu Class="todox-nav">
+            <MudNavLink Href="/" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Dashboard">Dashboard</MudNavLink>
+            <MudNavLink Href="/admin-users" Icon="@Icons.Material.Filled.AdminPanelSettings">Quáº£n trá»‹ viÃªn</MudNavLink>
+            <MudNavLink Href="/customers" Icon="@Icons.Material.Filled.Groups">KhÃ¡ch hÃ ng</MudNavLink>
+            <MudNavLink Href="/customer-accounts" Icon="@Icons.Material.Filled.ManageAccounts">TÃ i khoáº£n khÃ¡ch hÃ ng</MudNavLink>
+            <MudNavLink Href="/wallets" Icon="@Icons.Material.Filled.AccountBalanceWallet">VÃ­ token</MudNavLink>
+            <MudNavLink Href="/render-jobs" Icon="@Icons.Material.Filled.Movie">Render Jobs</MudNavLink>
+            <MudNavLink Href="/settings" Icon="@Icons.Material.Filled.Settings">Cáº¥u hÃ¬nh</MudNavLink>
+        </MudNavMenu>
+    </MudDrawer>
+
+    <MudMainContent Class="todox-content todox-main-spacing">
+        @Body
+    </MudMainContent>
+</MudLayout>
+
+@code {
+    private bool _drawerOpen = true;
+
+    private readonly MudTheme _theme = new()
+    {
+        PaletteDark = new PaletteDark
+        {
+            Primary = "#ffbf2b",
+            Secondary = "#f59e0b",
+            Background = "#080a0f",
+            Surface = "#11151c",
+            DrawerBackground = "#080a0f",
+            AppbarBackground = "#080a0f",
+            AppbarText = "#f8fafc",
+            TextPrimary = "#f8fafc",
+            TextSecondary = "#9ca3af"
+        }
+    };
+
+    private string UserDisplayName => AuthState.CurrentUser?.DisplayName ?? "Admin";
+    private string AvatarText => string.IsNullOrWhiteSpace(UserDisplayName) ? "A" : UserDisplayName.Trim()[0].ToString().ToUpperInvariant();
+
+    private void ToggleDrawer() => _drawerOpen = !_drawerOpen;
+
+    private void Logout()
+    {
+        AuthState.SignOut();
+        Navigation.NavigateTo("/login");
+    }
+}
+

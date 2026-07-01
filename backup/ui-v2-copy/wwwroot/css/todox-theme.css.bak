@@ -1,0 +1,185 @@
+:root {
+    --todox-bg: #080a0f;
+    --todox-surface: #11151c;
+    --todox-surface-2: #171b24;
+    --todox-border: rgba(255, 191, 43, .18);
+    --todox-gold: #ffbf2b;
+    --todox-gold-2: #f59e0b;
+    --todox-text: #f8fafc;
+    --todox-muted: #9ca3af;
+    --todox-green: #22c55e;
+    --todox-red: #ef4444;
+}
+
+html, body {
+    background: var(--todox-bg) !important;
+    color: var(--todox-text);
+}
+
+body, .mud-typography, .mud-input, .mud-button, .mud-table {
+    font-family: Inter, Segoe UI, Arial, sans-serif !important;
+}
+
+.todox-shell {
+    min-height: 100vh;
+    background: radial-gradient(circle at 80% 5%, rgba(255,191,43,.14), transparent 30%),
+                linear-gradient(145deg, #090b10 0%, #0d1117 50%, #050608 100%);
+}
+
+.todox-appbar {
+    background: rgba(8, 10, 15, .92) !important;
+    border-bottom: 1px solid rgba(255,191,43,.16);
+    backdrop-filter: blur(12px);
+}
+
+.todox-drawer {
+    background: rgba(8, 10, 15, .96) !important;
+    border-right: 1px solid rgba(255,191,43,.16);
+}
+
+.todox-logo-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 18px 16px;
+}
+
+.todox-logo {
+    width: 144px;
+    max-width: 100%;
+    object-fit: contain;
+}
+
+.todox-logo-small {
+    width: 124px;
+    object-fit: contain;
+}
+
+.todox-content {
+    padding: 28px;
+}
+
+.todox-page-title {
+    color: #fff;
+    font-weight: 800;
+    letter-spacing: -.02em;
+}
+
+.todox-page-subtitle {
+    color: var(--todox-muted);
+}
+
+.todox-card,
+.todox-table-card,
+.todox-auth-card {
+    background: linear-gradient(180deg, rgba(25, 30, 40, .96), rgba(13, 17, 23, .98)) !important;
+    border: 1px solid var(--todox-border);
+    box-shadow: 0 20px 60px rgba(0,0,0,.28) !important;
+    color: var(--todox-text) !important;
+}
+
+.todox-stat-value {
+    color: #fff;
+    font-size: 2rem;
+    line-height: 1.15;
+    font-weight: 800;
+}
+
+.todox-gold {
+    color: var(--todox-gold) !important;
+}
+
+.todox-badge {
+    color: var(--todox-gold);
+    background: rgba(255,191,43,.12);
+    border: 1px solid rgba(255,191,43,.22);
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: .8rem;
+}
+
+.todox-auth-page {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: radial-gradient(circle at 20% 20%, rgba(255,191,43,.18), transparent 30%),
+                radial-gradient(circle at 80% 20%, rgba(255,191,43,.11), transparent 26%),
+                #050608;
+}
+
+.todox-auth-grid {
+    width: min(1120px, 100%);
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    align-items: stretch;
+}
+
+.todox-auth-hero {
+    background: linear-gradient(180deg, rgba(255,191,43,.12), rgba(255,191,43,.02)), #0b0e14;
+    border: 1px solid rgba(255,191,43,.18);
+    border-radius: 18px;
+    padding: 32px;
+    overflow: hidden;
+}
+
+.todox-auth-hero img {
+    width: 220px;
+    max-width: 80%;
+}
+
+.todox-auth-card {
+    border-radius: 18px !important;
+    padding: 8px;
+}
+
+.todox-primary-btn {
+    background: linear-gradient(135deg, var(--todox-gold), var(--todox-gold-2)) !important;
+    color: #111827 !important;
+    font-weight: 800 !important;
+}
+
+.todox-nav .mud-nav-link.active:not(.mud-nav-link-disabled),
+.todox-nav .mud-nav-link:hover {
+    background: rgba(255,191,43,.12) !important;
+    color: var(--todox-gold) !important;
+}
+
+.mud-paper,
+.mud-table,
+.mud-table-container {
+    color: var(--todox-text) !important;
+}
+
+.mud-input-control > .mud-input-control-input-container > .mud-input-label-inputcontrol,
+.mud-input > input.mud-input-root,
+.mud-input > textarea.mud-input-root,
+.mud-select .mud-input-slot {
+    color: var(--todox-text) !important;
+}
+
+@media (max-width: 960px) {
+    .todox-content {
+        padding: 18px;
+    }
+
+    .todox-auth-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .todox-auth-hero {
+        padding: 22px;
+    }
+}
+
+@media (max-width: 600px) {
+    .todox-content {
+        padding: 14px;
+    }
+
+    .todox-stat-value {
+        font-size: 1.55rem;
+    }
+}
