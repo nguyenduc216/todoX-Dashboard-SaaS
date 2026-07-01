@@ -1,0 +1,63 @@
+@page "/admin-users"
+@inject AccountService Accounts
+@inject ISnackbar Snackbar
+
+<PageTitle>Quản trị viên</PageTitle>
+
+<MudStack Spacing="3">
+    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-3">
+        <div>
+            <MudText Typo="Typo.h4" Class="todox-page-title">Quản lý tài khoản quản trị</MudText>
+            <MudText Typo="Typo.body1" Class="todox-page-subtitle">Danh sách tài khoản quản trị và vận hành hệ thống TodoX.</MudText>
+        </div>
+        <MudButton Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.Add" OnClick="AddSampleAdmin">Thêm quản trị viên</MudButton>
+    </MudStack>
+
+    <MudPaper Class="todox-table-card pa-4" Rounded="true">
+        <MudTable Items="@SystemUsers" Hover="true" Dense="true" Breakpoint="Breakpoint.Sm">
+            <HeaderContent>
+                <MudTh>Họ tên</MudTh>
+                <MudTh>Username</MudTh>
+                <MudTh>Email</MudTh>
+                <MudTh>Vai trò</MudTh>
+                <MudTh>Trạng thái</MudTh>
+                <MudTh>Ngày tạo</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="Họ tên">@context.FullName</MudTd>
+                <MudTd DataLabel="Username">@context.Username</MudTd>
+                <MudTd DataLabel="Email">@context.Email</MudTd>
+                <MudTd DataLabel="Vai trò"><span class="todox-badge">@context.Role</span></MudTd>
+                <MudTd DataLabel="Trạng thái">@StatusLabel(context.Status)</MudTd>
+                <MudTd DataLabel="Ngày tạo">@context.CreatedAt.ToString("dd/MM/yyyy")</MudTd>
+            </RowTemplate>
+        </MudTable>
+    </MudPaper>
+</MudStack>
+
+@code {
+    private IReadOnlyList<SystemUser> SystemUsers => Accounts.GetSystemUsers();
+
+    private static string StatusLabel(TodoXAccountStatus status) => status switch
+    {
+        TodoXAccountStatus.Active => "Hoạt động",
+        TodoXAccountStatus.Pending => "Chờ duyệt",
+        TodoXAccountStatus.Locked => "Đã khóa",
+        _ => status.ToString()
+    };
+
+    private void AddSampleAdmin()
+    {
+        Accounts.AddSystemUser(new SystemUser
+        {
+            Username = $"operator{SystemUsers.Count + 1}",
+            FullName = $"TodoX Operator {SystemUsers.Count + 1}",
+            Email = $"operator{SystemUsers.Count + 1}@todox.local",
+            Phone = "0900000000",
+            Password = "TodoX@123",
+            Role = TodoXUserRole.SystemOperator,
+            Status = TodoXAccountStatus.Active
+        });
+        Snackbar.Add("Đã thêm quản trị viên mẫu.", Severity.Success);
+    }
+}

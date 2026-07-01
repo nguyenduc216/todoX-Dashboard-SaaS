@@ -1,0 +1,53 @@
+@page "/customer-accounts"
+
+<PageTitle>Tài khoản khách hàng</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-2 todox-page-title">Tài khoản khách hàng</MudText>
+<MudText Typo="Typo.body1" Class="mb-6 todox-page-subtitle">Quản lý tài khoản đăng nhập của khách hàng TodoX SaaS.</MudText>
+
+<MudPaper Class="todox-panel pa-4" Elevation="0">
+    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="mb-4 todox-toolbar">
+        <MudText Typo="Typo.h6">Danh sách tài khoản khách hàng</MudText>
+        <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Add">Tạo tài khoản</MudButton>
+    </MudStack>
+
+    <MudTable Items="@CustomerAccountRows" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Class="todox-table">
+        <HeaderContent>
+            <MudTh>Khách hàng</MudTh>
+            <MudTh>Tên đăng nhập</MudTh>
+            <MudTh>Email</MudTh>
+            <MudTh>Vai trò</MudTh>
+            <MudTh>Trạng thái</MudTh>
+            <MudTh>Ngày tạo</MudTh>
+            <MudTh>Thao tác</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd DataLabel="Khách hàng">@context.CustomerName</MudTd>
+            <MudTd DataLabel="Tên đăng nhập">@context.Username</MudTd>
+            <MudTd DataLabel="Email">@context.Email</MudTd>
+            <MudTd DataLabel="Vai trò">
+                <MudChip T="string" Color="Color.Warning" Size="Size.Small">@context.Role</MudChip>
+            </MudTd>
+            <MudTd DataLabel="Trạng thái">
+                <MudChip T="string" Color="@(context.Status == "Hoạt động" ? Color.Success : Color.Error)" Size="Size.Small">@context.Status</MudChip>
+            </MudTd>
+            <MudTd DataLabel="Ngày tạo">@context.CreatedAt</MudTd>
+            <MudTd DataLabel="Thao tác">
+                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" />
+                <MudIconButton Icon="@Icons.Material.Filled.LockReset" Size="Size.Small" />
+                <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small" />
+            </MudTd>
+        </RowTemplate>
+    </MudTable>
+</MudPaper>
+
+@code {
+    private List<CustomerAccountRow> CustomerAccountRows { get; } = new()
+    {
+        new("Công ty T.A Tư vấn giải pháp", "ta_admin", "contact@todox.vn", "Owner", "Hoạt động", "30/06/2026"),
+        new("Nguyễn Văn A", "nguyenvana", "nguyenvana@gmail.com", "Customer", "Hoạt động", "30/06/2026"),
+        new("Trần Thị B", "tranthib", "tranthib@gmail.com", "Customer", "Tạm khóa", "30/06/2026")
+    };
+
+    private sealed record CustomerAccountRow(string CustomerName, string Username, string Email, string Role, string Status, string CreatedAt);
+}

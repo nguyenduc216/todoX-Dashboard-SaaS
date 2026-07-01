@@ -2,11 +2,64 @@
 
 <PageTitle>Khách hàng</PageTitle>
 
-<MudText Typo="Typo.h4" Class="mb-2">Khách hàng</MudText>
-<MudText Typo="Typo.body1" Class="mb-4">Quản lý khách hàng sử dụng dịch vụ TodoX SaaS.</MudText>
+<MudText Typo="Typo.h4" Class="mb-2 todox-page-title">Khách hàng</MudText>
+<MudText Typo="Typo.body1" Class="mb-6 todox-page-subtitle">Quản lý thông tin khách hàng sử dụng dịch vụ TodoX SaaS.</MudText>
 
-<MudPaper Class="pa-4" Elevation="1">
-    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">
-        Module khách hàng sẽ được kết nối PostgreSQL ở Sprint 2B/2C.
-    </MudAlert>
+<MudGrid Class="mb-4">
+    <MudItem xs="12" sm="6" md="3">
+        <MudPaper Class="todox-stat-card pa-4">
+            <MudText Typo="Typo.subtitle2">Tổng khách hàng</MudText>
+            <MudText Typo="Typo.h4">@CustomerRows.Count</MudText>
+        </MudPaper>
+    </MudItem>
+    <MudItem xs="12" sm="6" md="3">
+        <MudPaper Class="todox-stat-card pa-4">
+            <MudText Typo="Typo.subtitle2">Đang hoạt động</MudText>
+            <MudText Typo="Typo.h4">@CustomerRows.Count(x => x.Status == "Hoạt động")</MudText>
+        </MudPaper>
+    </MudItem>
+</MudGrid>
+
+<MudPaper Class="todox-panel pa-4" Elevation="0">
+    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="mb-4 todox-toolbar">
+        <MudText Typo="Typo.h6">Danh sách khách hàng</MudText>
+        <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Add">Thêm khách hàng</MudButton>
+    </MudStack>
+
+    <MudTable Items="@CustomerRows" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Class="todox-table">
+        <HeaderContent>
+            <MudTh>Mã KH</MudTh>
+            <MudTh>Tên khách hàng</MudTh>
+            <MudTh>Email</MudTh>
+            <MudTh>Số điện thoại</MudTh>
+            <MudTh>Gói dịch vụ</MudTh>
+            <MudTh>Trạng thái</MudTh>
+            <MudTh>Thao tác</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd DataLabel="Mã KH">@context.Code</MudTd>
+            <MudTd DataLabel="Tên khách hàng">@context.Name</MudTd>
+            <MudTd DataLabel="Email">@context.Email</MudTd>
+            <MudTd DataLabel="Số điện thoại">@context.Phone</MudTd>
+            <MudTd DataLabel="Gói dịch vụ">@context.Plan</MudTd>
+            <MudTd DataLabel="Trạng thái">
+                <MudChip T="string" Color="Color.Success" Size="Size.Small">@context.Status</MudChip>
+            </MudTd>
+            <MudTd DataLabel="Thao tác">
+                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" />
+                <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small" />
+            </MudTd>
+        </RowTemplate>
+    </MudTable>
 </MudPaper>
+
+@code {
+    private List<CustomerRow> CustomerRows { get; } = new()
+    {
+        new("CUS-0001", "Công ty T.A Tư vấn giải pháp", "contact@todox.vn", "0901234567", "Business", "Hoạt động"),
+        new("CUS-0002", "Nguyễn Văn A", "nguyenvana@gmail.com", "0912345678", "Starter", "Hoạt động"),
+        new("CUS-0003", "Trần Thị B", "tranthib@gmail.com", "0923456789", "Pro", "Hoạt động")
+    };
+
+    private sealed record CustomerRow(string Code, string Name, string Email, string Phone, string Plan, string Status);
+}

@@ -1,0 +1,53 @@
+@page "/login"
+@layout AuthLayout
+@inject AccountService Accounts
+@inject AuthStateService AuthState
+@inject NavigationManager Navigation
+@inject ISnackbar Snackbar
+
+<PageTitle>Đăng nhập TodoX</PageTitle>
+
+<div class="todox-auth-page">
+    <div class="todox-auth-grid">
+        <div class="todox-auth-hero">
+            <img src="img/todox-logo.jpg" alt="TodoX" />
+            <MudText Typo="Typo.h3" Class="mt-6 todox-page-title">TodoX SaaS</MudText>
+            <MudText Typo="Typo.body1" Class="todox-page-subtitle mt-2">Nền tảng quản trị khách hàng, token, render jobs và dịch vụ AI.</MudText>
+            <MudDivider Class="my-6" />
+            <MudText Typo="Typo.body2">Admin mặc định: <b>admin</b></MudText>
+            <MudText Typo="Typo.body2">Mật khẩu: <b>toDOx@123#2026</b></MudText>
+        </div>
+
+        <MudPaper Class="todox-auth-card pa-6" Rounded="true">
+            <MudText Typo="Typo.h5" Class="todox-page-title">Đăng nhập</MudText>
+            <MudText Typo="Typo.body2" Class="todox-page-subtitle mb-5">Truy cập bảng điều khiển TodoX.</MudText>
+
+            <MudTextField T="string" Label="Email hoặc username" Variant="Variant.Outlined" @bind-Value="_login.UsernameOrEmail" Immediate="true" Class="mb-3" />
+            <MudTextField T="string" Label="Mật khẩu" Variant="Variant.Outlined" @bind-Value="_login.Password" InputType="InputType.Password" Class="mb-4" />
+
+            <MudButton FullWidth="true" Class="todox-primary-btn" OnClick="DoLogin">Đăng nhập</MudButton>
+
+            <MudText Typo="Typo.body2" Align="Align.Center" Class="mt-5 todox-page-subtitle">
+                Chưa có tài khoản? <MudLink Href="/register" Class="todox-gold">Đăng ký khách hàng</MudLink>
+            </MudText>
+        </MudPaper>
+    </div>
+</div>
+
+@code {
+    private readonly LoginRequest _login = new() { UsernameOrEmail = "admin", Password = "toDOx@123#2026" };
+
+    private void DoLogin()
+    {
+        var user = Accounts.Login(_login);
+        if (user is null)
+        {
+            Snackbar.Add("Sai thông tin đăng nhập hoặc tài khoản chưa active.", Severity.Error);
+            return;
+        }
+
+        AuthState.SignIn(user);
+        Snackbar.Add("Đăng nhập thành công.", Severity.Success);
+        Navigation.NavigateTo("/");
+    }
+}

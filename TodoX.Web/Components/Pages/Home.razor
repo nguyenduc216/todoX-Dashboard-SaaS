@@ -1,55 +1,83 @@
 @page "/"
+@inject AccountService Accounts
 
 <PageTitle>TodoX SaaS Dashboard</PageTitle>
 
-<MudText Typo="Typo.h4" Class="mb-2">TodoX SaaS Dashboard</MudText>
-<MudText Typo="Typo.body1" Class="mb-6">Trung tâm quản trị khách hàng, token, giao dịch và render jobs của hệ thống TodoX.</MudText>
+<MudStack Spacing="3">
+    <div>
+        <MudText Typo="Typo.h4" Class="todox-page-title">Tổng quan hệ thống</MudText>
+        <MudText Typo="Typo.body1" Class="todox-page-subtitle">Trung tâm quản trị khách hàng, tài khoản, token và render jobs của TodoX.</MudText>
+    </div>
 
-<MudGrid>
-    <MudItem xs="12" sm="6" md="3">
-        <MudCard>
-            <MudCardContent>
-                <MudText Typo="Typo.subtitle2">Khách hàng</MudText>
-                <MudText Typo="Typo.h4">0</MudText>
-                <MudText Typo="Typo.caption">Sẽ kết nối database ở Sprint 2B</MudText>
-            </MudCardContent>
-        </MudCard>
-    </MudItem>
-    <MudItem xs="12" sm="6" md="3">
-        <MudCard>
-            <MudCardContent>
-                <MudText Typo="Typo.subtitle2">Token đã bán</MudText>
-                <MudText Typo="Typo.h4">0</MudText>
-                <MudText Typo="Typo.caption">Theo dõi ví và giao dịch token</MudText>
-            </MudCardContent>
-        </MudCard>
-    </MudItem>
-    <MudItem xs="12" sm="6" md="3">
-        <MudCard>
-            <MudCardContent>
-                <MudText Typo="Typo.subtitle2">Render Jobs</MudText>
-                <MudText Typo="Typo.h4">0</MudText>
-                <MudText Typo="Typo.caption">Prompt, image, voice, caption, video</MudText>
-            </MudCardContent>
-        </MudCard>
-    </MudItem>
-    <MudItem xs="12" sm="6" md="3">
-        <MudCard>
-            <MudCardContent>
-                <MudText Typo="Typo.subtitle2">Doanh thu</MudText>
-                <MudText Typo="Typo.h4">0 đ</MudText>
-                <MudText Typo="Typo.caption">Sẽ tính theo giao dịch bán hàng</MudText>
-            </MudCardContent>
-        </MudCard>
-    </MudItem>
-</MudGrid>
+    <MudGrid>
+        <MudItem xs="12" sm="6" lg="3">
+            <MudPaper Class="todox-card pa-5" Rounded="true">
+                <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+                    <MudText Typo="Typo.subtitle2">Khách hàng</MudText>
+                    <MudIcon Icon="@Icons.Material.Filled.Groups" Class="todox-gold" />
+                </MudStack>
+                <div class="todox-stat-value">@CustomerCount</div>
+                <MudText Typo="Typo.caption" Class="todox-page-subtitle">Thông tin khách hàng TodoX</MudText>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="12" sm="6" lg="3">
+            <MudPaper Class="todox-card pa-5" Rounded="true">
+                <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+                    <MudText Typo="Typo.subtitle2">Tài khoản</MudText>
+                    <MudIcon Icon="@Icons.Material.Filled.ManageAccounts" Class="todox-gold" />
+                </MudStack>
+                <div class="todox-stat-value">@AccountCount</div>
+                <MudText Typo="Typo.caption" Class="todox-page-subtitle">Admin và tài khoản khách hàng</MudText>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="12" sm="6" lg="3">
+            <MudPaper Class="todox-card pa-5" Rounded="true">
+                <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+                    <MudText Typo="Typo.subtitle2">Token đã bán</MudText>
+                    <MudIcon Icon="@Icons.Material.Filled.Token" Class="todox-gold" />
+                </MudStack>
+                <div class="todox-stat-value">0</div>
+                <MudText Typo="Typo.caption" Class="todox-page-subtitle">Kết nối wallet ở Sprint tiếp theo</MudText>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="12" sm="6" lg="3">
+            <MudPaper Class="todox-card pa-5" Rounded="true">
+                <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+                    <MudText Typo="Typo.subtitle2">Render Jobs</MudText>
+                    <MudIcon Icon="@Icons.Material.Filled.Movie" Class="todox-gold" />
+                </MudStack>
+                <div class="todox-stat-value">0</div>
+                <MudText Typo="Typo.caption" Class="todox-page-subtitle">Prompt, image, voice, caption, video</MudText>
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
 
-<MudPaper Class="pa-4 mt-6" Elevation="1">
-    <MudText Typo="Typo.h6">Trạng thái Sprint 2A</MudText>
-    <MudList T="string" Dense="true">
-        <MudListItem Text="Đã cài MudBlazor" Icon="@Icons.Material.Filled.CheckCircle" />
-        <MudListItem Text="Đã dựng sidebar và header" Icon="@Icons.Material.Filled.CheckCircle" />
-        <MudListItem Text="Đã tạo các trang placeholder cho Customer, Wallet, Render Jobs, Settings" Icon="@Icons.Material.Filled.CheckCircle" />
-        <MudListItem Text="Chưa kết nối PostgreSQL ở bước này" Icon="@Icons.Material.Filled.Info" />
-    </MudList>
-</MudPaper>
+    <MudGrid>
+        <MudItem xs="12" lg="7">
+            <MudPaper Class="todox-card pa-5" Rounded="true">
+                <MudText Typo="Typo.h6">Lộ trình Sprint hiện tại</MudText>
+                <MudDivider Class="my-3" />
+                <MudList T="string">
+                    <MudListItem Icon="@Icons.Material.Filled.CheckCircle">Đồng bộ màu sắc nhận diện TodoX theo logo</MudListItem>
+                    <MudListItem Icon="@Icons.Material.Filled.CheckCircle">Bổ sung responsive layout cho desktop và mobile</MudListItem>
+                    <MudListItem Icon="@Icons.Material.Filled.CheckCircle">Bổ sung đăng nhập, đăng ký và quản lý tài khoản cơ bản</MudListItem>
+                    <MudListItem Icon="@Icons.Material.Filled.Info">Dữ liệu hiện dùng in-memory; PostgreSQL schema/seed đã có script riêng</MudListItem>
+                </MudList>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="12" lg="5">
+            <MudPaper Class="todox-card pa-5" Rounded="true">
+                <MudText Typo="Typo.h6">Tài khoản mặc định</MudText>
+                <MudDivider Class="my-3" />
+                <MudText Typo="Typo.body2">Admin: <b>admin</b></MudText>
+                <MudText Typo="Typo.body2">Mật khẩu: <b>toDOx@123#2026</b></MudText>
+                <MudText Typo="Typo.body2" Class="mt-2">Khách demo: <b>demo@todox.local</b> / <b>Customer@123</b></MudText>
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+</MudStack>
+
+@code {
+    private int CustomerCount => Accounts.GetCustomers().Count;
+    private int AccountCount => Accounts.GetSystemUsers().Count + Accounts.GetCustomerAccounts().Count;
+}
