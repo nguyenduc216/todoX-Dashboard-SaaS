@@ -1,0 +1,65 @@
+@page "/settings/api-endpoints"
+@using TodoX.Web.Services.Settings
+@inject SettingsApiRepository Api
+
+<PageTitle>API Endpoints</PageTitle>
+
+<MudStack Spacing="3">
+    <div>
+        <MudText Typo="Typo.h4" Class="todox-page-title">API Endpoints &amp; Nhật ký</MudText>
+        <MudText Typo="Typo.body1" Class="todox-page-subtitle">Danh mục endpoint và log lời gọi gần đây (settings.api_endpoints / api_endpoint_logs).</MudText>
+    </div>
+
+    <MudPaper Class="todox-table-card pa-4" Rounded="true">
+        <MudText Typo="Typo.h6" Class="mb-2">Endpoints</MudText>
+        <MudDivider Class="mb-3" />
+        <MudTable Items="@_endpoints" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Class="todox-table">
+            <HeaderContent><MudTh>Mã</MudTh><MudTh>Tên</MudTh><MudTh>Method</MudTh><MudTh>Path</MudTh><MudTh>Trạng thái</MudTh></HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="Mã"><span class="todox-badge">@context.EndpointCode</span></MudTd>
+                <MudTd DataLabel="Tên">@context.EndpointName</MudTd>
+                <MudTd DataLabel="Method">@context.HttpMethod</MudTd>
+                <MudTd DataLabel="Path"><span class="todox-setting-value">@context.Path</span></MudTd>
+                <MudTd DataLabel="Trạng thái"><MudChip T="string" Size="Size.Small" Color="@(context.Enabled ? Color.Success : Color.Default)">@(context.Enabled ? "Bật" : "Tắt")</MudChip></MudTd>
+            </RowTemplate>
+        </MudTable>
+    </MudPaper>
+
+    <MudPaper Class="todox-table-card pa-4" Rounded="true">
+        <MudText Typo="Typo.h6" Class="mb-2">Nhật ký lời gọi gần đây</MudText>
+        <MudDivider Class="mb-3" />
+        <MudTable Items="@_logs" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Class="todox-table">
+            <HeaderContent><MudTh>Thời gian</MudTh><MudTh>Endpoint</MudTh><MudTh>Provider</MudTh><MudTh>Model</MudTh><MudTh>Kết quả</MudTh><MudTh>Latency</MudTh><MudTh>Lỗi</MudTh></HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="Thời gian">@context.CreatedAt.ToString("dd/MM HH:mm:ss")</MudTd>
+                <MudTd DataLabel="Endpoint">@context.EndpointCode</MudTd>
+                <MudTd DataLabel="Provider">@context.ProviderCode</MudTd>
+                <MudTd DataLabel="Model">@context.ModelCode</MudTd>
+                <MudTd DataLabel="Kết quả">
+                    <MudChip T="string" Size="Size.Small" Color="@StatusColor(context.Status)">@context.Status</MudChip>
+                </MudTd>
+                <MudTd DataLabel="Latency">@(context.LatencyMs is null ? "—" : context.LatencyMs + "ms")</MudTd>
+                <MudTd DataLabel="Lỗi">@context.ErrorMessage</MudTd>
+            </RowTemplate>
+            <NoRecordsContent><MudText Class="pa-4 todox-page-subtitle">Chưa có log nào.</MudText></NoRecordsContent>
+        </MudTable>
+    </MudPaper>
+</MudStack>
+
+@code {
+    private IReadOnlyList<ApiEndpointDto> _endpoints = new List<ApiEndpointDto>();
+    private IReadOnlyList<ApiEndpointLogDto> _logs = new List<ApiEndpointLogDto>();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _endpoints = await Api.GetEndpointsAsync();
+        _logs = await Api.GetRecentLogsAsync();
+    }
+
+    private static Color StatusColor(string s) => s switch
+    {
+        "success" => Color.Success,
+        "fallback" => Color.Warning,
+        _ => Color.Error
+    };
+}

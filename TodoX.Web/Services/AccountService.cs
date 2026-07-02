@@ -44,7 +44,22 @@ public sealed class AccountService
         }
 
         await _accounts.TouchLastLoginAsync(row.Id);
+        return await BuildSessionAsync(row);
+    }
 
+    /// <summary>Rebuild a session from a persisted user id (session restore). Null if account is gone/inactive.</summary>
+    public async Task<CurrentUserSession?> RehydrateSessionAsync(Guid userId)
+    {
+        var row = await _accounts.FindByIdAsync(userId);
+        if (row is null || !row.IsActive)
+        {
+            return null;
+        }
+        return await BuildSessionAsync(row);
+    }
+
+    private async Task<CurrentUserSession> BuildSessionAsync(AccountRepository.LoginRow row)
+    {
         var role = AccountRepository.RoleFromLoginCode(row.UserType, row.RoleCode);
         Guid? customerId = null;
         if (role is TodoXUserRole.CustomerOwner or TodoXUserRole.CustomerUser)
@@ -109,9 +124,12 @@ public sealed class AccountService
         return (true, "Đã đổi mật khẩu.");
     }
 
-    /// <summary>Update the current user's own profile (name/phone).</summary>
-    public Task UpdateOwnProfileAsync(Guid userId, string fullName, string? phone)
-        => _accounts.UpdateProfileAsync(userId, fullName, phone);
+    /// <summary>Update the current user's own profile (name/phone/gender/date of birth).</summary>
+    public Task UpdateOwnProfileAsync(Guid userId, string fullName, string? phone, string? gender, DateTime? dateOfBirth)
+        => _accounts.UpdateProfileAsync(userId, fullName, phone, gender, dateOfBirth);
+
+    public Task<(string? Gender, DateTime? Dob)> GetProfileExtrasAsync(Guid userId)
+        => _accounts.GetProfileExtrasAsync(userId);
 
     public async Task<(bool Success, string Message)> RegisterCustomerAsync(CustomerRegistration model)
     {
@@ -137,7 +155,9 @@ public sealed class AccountService
             Email = model.Email.Trim(),
             Phone = model.Phone.Trim(),
             TaxCode = model.TaxCode.Trim(),
-            Status = TodoXAccountStatus.Pending
+            Status = TodoXAccountStatus.Pending,
+            Gender = model.Gender,
+            DateOfBirth = model.DateOfBirth
         });
 
         await _customers.InsertCustomerAccountAsync(new CustomerAccount

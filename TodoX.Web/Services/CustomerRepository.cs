@@ -91,10 +91,10 @@ public sealed class CustomerRepository
             """
             INSERT INTO crm.customers
                 (id, tenant_id, customer_code, customer_type, full_name, company_name,
-                 email, phone, tax_code, address, status, created_at)
+                 email, phone, tax_code, address, status, gender, date_of_birth, created_at)
             VALUES
                 (@id, @tenant, @code, @ctype, @full, @company,
-                 @email, @phone, @tax, @address, @status, now());
+                 @email, @phone, @tax, @address, @status, @gender, @dob, now());
             """,
             new
             {
@@ -108,7 +108,9 @@ public sealed class CustomerRepository
                 phone = string.IsNullOrWhiteSpace(c.Phone) ? null : c.Phone,
                 tax = string.IsNullOrWhiteSpace(c.TaxCode) ? null : c.TaxCode,
                 address = string.IsNullOrWhiteSpace(c.Address) ? null : c.Address,
-                status = StatusToString(c.Status)
+                status = StatusToString(c.Status),
+                gender = string.IsNullOrWhiteSpace(c.Gender) ? null : c.Gender,
+                dob = c.DateOfBirth
             });
 
         return id;

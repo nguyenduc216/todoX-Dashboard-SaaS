@@ -27,10 +27,17 @@ builder.Services.AddScoped<CatalogAdminRepository>();
 builder.Services.AddScoped<SocialPageRepository>();
 builder.Services.AddScoped<AutomationSettingsRepository>();
 builder.Services.AddHttpClient<FacebookGraphService>();
+
+// Sprint 2F: media, image render (Vertex), avatar + chibi.
+builder.Services.AddScoped<TodoX.Web.Services.Media.IMediaFileService, TodoX.Web.Services.Media.MediaFileService>();
+builder.Services.AddScoped<TodoX.Web.Services.Settings.SettingsApiRepository>();
+builder.Services.AddHttpClient<TodoX.Web.Services.ImageRender.VertexClient>();
+builder.Services.AddScoped<TodoX.Web.Services.ImageRender.IImageRenderService, TodoX.Web.Services.ImageRender.VertexImageRenderService>();
+builder.Services.AddScoped<TodoX.Web.Services.Profile.IAvatarService, TodoX.Web.Services.Profile.AvatarService>();
+builder.Services.AddScoped<TodoX.Web.Services.Profile.IChibiAvatarService, TodoX.Web.Services.Profile.ChibiAvatarService>();
 builder.Services.AddScoped<AccountService>();
 builder.Services.AddScoped<AuthStateService>();
 builder.Services.AddScoped<StartupSeedFixer>();
-
 var app = builder.Build();
 
 // Load tenant and repair placeholder seed credentials (writes data only, never schema).

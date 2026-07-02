@@ -1,6 +1,7 @@
 @inherits LayoutComponentBase
 @implements IDisposable
 @inject AuthStateService AuthState
+@inject AccountService Accounts
 @inject NavigationManager Navigation
 
 <MudThemeProvider Theme="_theme" IsDarkMode="true" />
@@ -17,11 +18,13 @@
 
         <MudSpacer />
 
-        <MudMenu Class="todox-notify-menu" AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight">
+        <MudMenu @bind-Open="_notifyOpen" AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight" Class="todox-notify-menu">
             <ActivatorContent>
-                <MudBadge Content="@NotificationCount" Color="Color.Error" Overlap="true" Visible="@(NotificationCount > 0)" Class="todox-notify-badge">
-                    <MudIconButton Icon="@Icons.Material.Filled.Notifications" Color="Color.Warning" />
-                </MudBadge>
+                <div class="todox-activator" @onclick="@(() => _notifyOpen = !_notifyOpen)">
+                    <MudBadge Content="@NotificationCount" Color="Color.Error" Overlap="true" Visible="@(NotificationCount > 0)" Class="todox-notify-badge">
+                        <MudIcon Icon="@Icons.Material.Filled.Notifications" Color="Color.Warning" />
+                    </MudBadge>
+                </div>
             </ActivatorContent>
             <ChildContent>
                 <div class="todox-notify-head">Thông báo</div>
@@ -29,9 +32,9 @@
             </ChildContent>
         </MudMenu>
 
-        <MudMenu AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight" Class="todox-user-menu">
+        <MudMenu @bind-Open="_userMenuOpen" AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight" Class="todox-user-menu">
             <ActivatorContent>
-                <div class="todox-user-activator">
+                <div class="todox-user-activator" @onclick="@(() => _userMenuOpen = !_userMenuOpen)">
                     <MudHidden Breakpoint="Breakpoint.SmAndDown">
                         <MudText Typo="Typo.body2" Class="todox-user-hello">Xin chào, <b>@UserDisplayName</b></MudText>
                     </MudHidden>
@@ -127,7 +130,13 @@
             @if (CanModule("api_providers"))
             {
                 <MudNavLink Href="/api-settings" Icon="@Icons.Material.Filled.Api">
-                    Cài đặt API
+                    Cài đặt API (todox)
+                </MudNavLink>
+                <MudNavLink Href="/settings/api-providers" Icon="@Icons.Material.Filled.Dns">
+                    Nhà cung cấp API
+                </MudNavLink>
+                <MudNavLink Href="/settings/api-endpoints" Icon="@Icons.Material.Filled.SettingsEthernet">
+                    API Endpoints
                 </MudNavLink>
             }
             @if (CanModule("audit_logs"))
@@ -137,24 +146,6 @@
                 </MudNavLink>
             }
         </MudNavMenu>
-
-        <div class="todox-sidebar-user">
-            <MudAvatar Class="todox-sidebar-avatar">@AvatarText</MudAvatar>
-            <div class="todox-sidebar-user-info">
-                <div class="todox-sidebar-user-name">@UserDisplayName</div>
-                <div class="todox-sidebar-user-email">@UserEmail</div>
-            </div>
-            <MudMenu Icon="@Icons.Material.Filled.MoreVert"
-                     Color="Color.Inherit"
-                     Class="todox-sidebar-usermenu"
-                     AnchorOrigin="Origin.TopRight"
-                     TransformOrigin="Origin.BottomRight">
-                <MudMenuItem Icon="@Icons.Material.Filled.Person" Href="/profile">Tài khoản</MudMenuItem>
-                <MudMenuItem Icon="@Icons.Material.Filled.Password" Href="/profile">Đổi mật khẩu</MudMenuItem>
-                <MudDivider />
-                <MudMenuItem Icon="@Icons.Material.Filled.Logout" OnClick="Logout">Đăng xuất</MudMenuItem>
-            </MudMenu>
-        </div>
     </MudDrawer>
 
     <MudMainContent Class="todox-content">
@@ -171,6 +162,8 @@
 
 @code {
     private bool _drawerOpen = true;
+    private bool _userMenuOpen;
+    private bool _notifyOpen;
 
     private readonly MudTheme _theme = new()
     {
@@ -198,10 +191,24 @@
     protected override void OnInitialized()
     {
         AuthState.OnChange += HandleAuthChange;
-        // Guard: an unauthenticated visitor must not see the dashboard chrome.
-        if (!AuthState.IsAuthenticated)
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
         {
-            Navigation.NavigateTo("/login", forceLoad: false);
+            // Restore any persisted session (survives circuit reconnects & browser restarts
+            // when Remember Me was chosen). Uses JS interop so it must run after render.
+            if (!AuthState.IsInitialized)
+            {
+                await AuthState.InitializeAsync(id => Accounts.RehydrateSessionAsync(id));
+            }
+
+            // Only redirect once we know the real auth state.
+            if (!AuthState.IsAuthenticated)
+            {
+                Navigation.NavigateTo("/login", forceLoad: false);
+            }
         }
     }
 
@@ -224,9 +231,9 @@
 
     private void ToggleDrawer() => _drawerOpen = !_drawerOpen;
 
-    private void Logout()
+    private async Task Logout()
     {
-        AuthState.SignOut();
+        await AuthState.SignOutAsync();
         Navigation.NavigateTo("/login");
     }
 }

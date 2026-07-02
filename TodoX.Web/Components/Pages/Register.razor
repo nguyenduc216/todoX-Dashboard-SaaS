@@ -33,6 +33,16 @@
                     <MudTextField T="string" Label="Mã số thuế" Variant="Variant.Outlined" @bind-Value="_model.TaxCode" />
                 </MudItem>
                 <MudItem xs="12" sm="6">
+                    <MudSelect T="string" Label="Giới tính" Variant="Variant.Outlined" @bind-Value="_model.Gender">
+                        <MudSelectItem Value="@("male")">Nam</MudSelectItem>
+                        <MudSelectItem Value="@("female")">Nữ</MudSelectItem>
+                        <MudSelectItem Value="@("other")">Khác</MudSelectItem>
+                    </MudSelect>
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <MudDatePicker Label="Ngày sinh" Variant="Variant.Outlined" @bind-Date="_dob" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
                     <MudTextField T="string" Label="Mật khẩu" Variant="Variant.Outlined" @bind-Value="_model.Password" InputType="InputType.Password" />
                 </MudItem>
                 <MudItem xs="12" sm="6">
@@ -50,9 +60,11 @@
 
 @code {
     private readonly CustomerRegistration _model = new();
+    private DateTime? _dob;
 
     private async Task RegisterCustomer()
     {
+        _model.DateOfBirth = _dob;
         var result = await Accounts.RegisterCustomerAsync(_model);
         if (!result.Success)
         {

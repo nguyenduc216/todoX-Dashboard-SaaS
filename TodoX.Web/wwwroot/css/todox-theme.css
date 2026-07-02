@@ -81,6 +81,12 @@ body,
     transition: background .18s ease;
 }
 
+.todox-activator {
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+}
+
 .todox-user-activator:hover {
     background: rgba(255, 183, 0, .10);
 }
@@ -148,6 +154,7 @@ body,
 
 .todox-nav {
     padding-top: 24px;
+    padding-bottom: 24px;
 }
 
 .todox-nav .mud-nav-link {
@@ -180,50 +187,6 @@ body,
 .todox-nav .mud-nav-link.active .mud-icon-root,
 .todox-nav .mud-nav-link.mud-nav-link-active .mud-icon-root {
     color: var(--todox-gold) !important;
-}
-
-.todox-sidebar-user {
-    position: absolute;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    min-height: 86px;
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    padding: 18px 24px;
-    border-top: 1px solid rgba(255, 255, 255, .08);
-    background: rgba(5, 8, 13, .72);
-}
-
-.todox-sidebar-user-info {
-    flex: 1;
-    min-width: 0;
-}
-
-.todox-sidebar-user-name {
-    color: #ffffff;
-    font-weight: 800;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.todox-sidebar-user-email {
-    color: var(--todox-muted);
-    font-size: 13px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.todox-sidebar-usermenu .mud-icon-button {
-    color: rgba(255, 255, 255, .70) !important;
-}
-
-.todox-sidebar-usermenu .mud-icon-button:hover {
-    color: var(--todox-gold) !important;
-    background: rgba(255, 183, 0, .10) !important;
 }
 
 .todox-content {
@@ -510,10 +473,5 @@ img[src*="todox"] {
     .todox-breadcrumb {
         width: 100%;
         overflow-x: auto;
-    }
-
-    .todox-sidebar-user {
-        position: relative;
-        margin-top: 24px;
     }
 }

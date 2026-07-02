@@ -260,6 +260,26 @@ public sealed class AccountRepository
         await conn.ExecuteAsync("UPDATE auth.app_users SET last_login_at=now() WHERE id=@id;", new { id });
     }
 
+    /// <summary>Load a login row by user id (used to re-hydrate a persisted session).</summary>
+    public async Task<LoginRow?> FindByIdAsync(Guid id)
+    {
+        await _tenant.EnsureLoadedAsync();
+        using var conn = await _factory.OpenAsync();
+        return await conn.QuerySingleOrDefaultAsync<LoginRow>(
+            """
+            SELECT u.id AS Id, u.username AS Username, u.email AS Email,
+                   u.full_name AS FullName, u.display_name AS DisplayName,
+                   u.user_type AS UserType, u.password_hash AS PasswordHash, u.is_active AS IsActive,
+                   COALESCE(u.is_root,false) AS IsRoot,
+                   (SELECT r.code FROM auth.user_roles ur
+                      JOIN auth.roles r ON r.id = ur.role_id
+                     WHERE ur.user_id = u.id ORDER BY r.sort_order LIMIT 1) AS RoleCode
+              FROM auth.app_users u
+             WHERE u.tenant_id = @tenant AND u.id = @id
+             LIMIT 1;
+            """, new { tenant = _tenant.TenantId, id });
+    }
+
     public async Task<bool> SetPasswordByEmailAsync(string email, string passwordHash)
     {
         await _tenant.EnsureLoadedAsync();
@@ -288,15 +308,30 @@ public sealed class AccountRepository
             new { id, hash = passwordHash });
     }
 
-    public async Task UpdateProfileAsync(Guid id, string fullName, string? phone)
+    public async Task UpdateProfileAsync(Guid id, string fullName, string? phone, string? gender, DateTime? dateOfBirth)
     {
         using var conn = await _factory.OpenAsync();
         await conn.ExecuteAsync(
             """
             UPDATE auth.app_users
-               SET full_name=@full, display_name=@full, phone=@phone, updated_at=now()
+               SET full_name=@full, display_name=@full, phone=@phone,
+                   gender=@gender, date_of_birth=@dob, updated_at=now()
              WHERE id=@id;
-            """, new { id, full = fullName, phone = string.IsNullOrWhiteSpace(phone) ? null : phone });
+            """, new
+            {
+                id, full = fullName,
+                phone = string.IsNullOrWhiteSpace(phone) ? null : phone,
+                gender = string.IsNullOrWhiteSpace(gender) ? null : gender,
+                dob = dateOfBirth
+            });
+    }
+
+    public async Task<(string? Gender, DateTime? Dob)> GetProfileExtrasAsync(Guid id)
+    {
+        using var conn = await _factory.OpenAsync();
+        var row = await conn.QuerySingleOrDefaultAsync<(string? Gender, DateTime? Dob)>(
+            "SELECT gender AS Gender, date_of_birth AS Dob FROM auth.app_users WHERE id=@id;", new { id });
+        return row;
     }
 
     public static TodoXUserRole RoleFromLoginCode(string userType, string? roleCode)

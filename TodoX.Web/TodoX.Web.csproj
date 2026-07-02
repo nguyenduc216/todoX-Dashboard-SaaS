@@ -12,6 +12,7 @@
     <PackageReference Include="Npgsql" Version="9.0.2" />
     <PackageReference Include="Dapper" Version="2.1.66" />
     <PackageReference Include="BCrypt.Net-Next" Version="4.0.3" />
+    <PackageReference Include="Google.Apis.Auth" Version="1.68.0" />
   </ItemGroup>
 
   <!-- Stale published output lives under ./publish and must not be scanned by the build -->

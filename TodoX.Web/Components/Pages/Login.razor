@@ -26,7 +26,8 @@
             <MudTextField T="string" Label="Email hoặc username" Variant="Variant.Outlined" @bind-Value="_login.UsernameOrEmail" Immediate="true" Class="mb-3" OnKeyDown="OnKey" />
             <MudTextField T="string" Label="Mật khẩu" Variant="Variant.Outlined" @bind-Value="_login.Password" InputType="InputType.Password" Class="mb-2" Immediate="true" OnKeyDown="OnKey" />
 
-            <div class="d-flex justify-end mb-3">
+            <div class="d-flex justify-space-between align-center mb-3">
+                <MudCheckBox T="bool" @bind-Value="_rememberMe" Color="Color.Warning" Dense="true" Label="Ghi nhớ đăng nhập" />
                 <MudLink Href="/forgot-password" Class="todox-gold" Typo="Typo.body2">Quên mật khẩu?</MudLink>
             </div>
 
@@ -41,6 +42,7 @@
 
 @code {
     private readonly LoginRequest _login = new();
+    private bool _rememberMe = true;
     private bool _busy;
 
     private async Task OnKey(KeyboardEventArgs e)
@@ -61,7 +63,7 @@
                 return;
             }
 
-            AuthState.SignIn(user);
+            await AuthState.SignInAsync(user, _rememberMe);
             await Audit.LogAsync(user, "auth", "login", entityDisplay: user.Email, message: "Đăng nhập thành công");
             Snackbar.Add("Đăng nhập thành công.", Severity.Success);
             Navigation.NavigateTo("/");

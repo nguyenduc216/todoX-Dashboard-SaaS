@@ -1,46 +1,106 @@
 @page "/profile"
+@using TodoX.Web.Services.Profile
 @inject AuthStateService AuthState
 @inject AccountService Accounts
+@inject IAvatarService Avatars
 @inject ISnackbar Snackbar
+@inject NavigationManager Nav
 
 <PageTitle>Hồ sơ cá nhân</PageTitle>
 
 <MudStack Spacing="3">
     <div>
         <MudText Typo="Typo.h4" Class="todox-page-title">Hồ sơ cá nhân</MudText>
-        <MudText Typo="Typo.body1" Class="todox-page-subtitle">Cập nhật thông tin tài khoản và đổi mật khẩu.</MudText>
+        <MudText Typo="Typo.body1" Class="todox-page-subtitle">Cập nhật thông tin tài khoản, ảnh đại diện và đổi mật khẩu.</MudText>
     </div>
 
     <MudGrid>
-        <MudItem xs="12" md="6">
-            <MudPaper Class="todox-card pa-5" Rounded="true">
-                <MudText Typo="Typo.h6">Thông tin tài khoản</MudText>
-                <MudDivider Class="my-3" />
-                <MudTextField T="string" Label="Email" Value="@(AuthState.CurrentUser?.Email)" Variant="Variant.Outlined" ReadOnly="true" Class="mb-3" />
-                <MudTextField T="string" Label="Họ tên" @bind-Value="_fullName" Variant="Variant.Outlined" Class="mb-3" />
-                <MudTextField T="string" Label="Số điện thoại" @bind-Value="_phone" Variant="Variant.Outlined" Class="mb-3" />
-                <MudTextField T="string" Label="Vai trò" Value="@RoleLabel" Variant="Variant.Outlined" ReadOnly="true" Class="mb-4" />
-                <MudButton Class="todox-primary-btn" OnClick="SaveProfile" Disabled="_busy">Lưu thông tin</MudButton>
+        <MudItem xs="12" md="4">
+            <MudPaper Class="todox-card pa-5 d-flex flex-column align-center" Rounded="true">
+                <MudText Typo="Typo.h6" Class="mb-3 align-self-start">Ảnh đại diện</MudText>
+                <MudAvatar Style="height:140px;width:140px;" Class="mb-3">
+                    @if (!string.IsNullOrWhiteSpace(_avatarUrl))
+                    {
+                        <MudImage Src="@_avatarUrl" />
+                    }
+                    else
+                    {
+                        @AvatarText
+                    }
+                </MudAvatar>
+
+                <MudFileUpload T="IBrowserFile" Accept="image/png,image/jpeg,image/webp" FilesChanged="OnAvatarSelected" MaximumFileCount="1">
+                    <ActivatorContent>
+                        <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Upload" Disabled="_busy">
+                            Tải ảnh lên
+                        </MudButton>
+                    </ActivatorContent>
+                </MudFileUpload>
+
+                <MudButton Class="mt-2" Variant="Variant.Text" Color="Color.Warning" StartIcon="@Icons.Material.Filled.AutoAwesome"
+                           OnClick="@(() => Nav.NavigateTo("/profile/avatar"))">
+                    Tạo ảnh chibi
+                </MudButton>
             </MudPaper>
         </MudItem>
 
-        <MudItem xs="12" md="6">
+        <MudItem xs="12" md="8">
             <MudPaper Class="todox-card pa-5" Rounded="true">
+                <MudText Typo="Typo.h6">Thông tin tài khoản</MudText>
+                <MudDivider Class="my-3" />
+                <MudGrid>
+                    <MudItem xs="12" sm="6">
+                        <MudTextField T="string" Label="Email" Value="@(AuthState.CurrentUser?.Email)" Variant="Variant.Outlined" ReadOnly="true" />
+                    </MudItem>
+                    <MudItem xs="12" sm="6">
+                        <MudTextField T="string" Label="Họ tên" @bind-Value="_fullName" Variant="Variant.Outlined" />
+                    </MudItem>
+                    <MudItem xs="12" sm="6">
+                        <MudTextField T="string" Label="Số điện thoại" @bind-Value="_phone" Variant="Variant.Outlined" />
+                    </MudItem>
+                    <MudItem xs="12" sm="6">
+                        <MudSelect T="string" Label="Giới tính" @bind-Value="_gender" Variant="Variant.Outlined">
+                            <MudSelectItem Value="@("male")">Nam</MudSelectItem>
+                            <MudSelectItem Value="@("female")">Nữ</MudSelectItem>
+                            <MudSelectItem Value="@("other")">Khác</MudSelectItem>
+                        </MudSelect>
+                    </MudItem>
+                    <MudItem xs="12" sm="6">
+                        <MudDatePicker Label="Ngày sinh" @bind-Date="_dob" Variant="Variant.Outlined" />
+                    </MudItem>
+                    <MudItem xs="12" sm="6">
+                        <MudTextField T="string" Label="Vai trò" Value="@RoleLabel" Variant="Variant.Outlined" ReadOnly="true" />
+                    </MudItem>
+                </MudGrid>
+                <MudButton Class="todox-primary-btn mt-4" OnClick="SaveProfile" Disabled="_busy">Lưu thông tin</MudButton>
+            </MudPaper>
+
+            <MudPaper Class="todox-card pa-5 mt-4" Rounded="true">
                 <MudText Typo="Typo.h6">Đổi mật khẩu</MudText>
                 <MudDivider Class="my-3" />
-                <MudTextField T="string" Label="Mật khẩu hiện tại" @bind-Value="_currentPassword" InputType="InputType.Password" Variant="Variant.Outlined" Class="mb-3" />
-                <MudTextField T="string" Label="Mật khẩu mới" @bind-Value="_newPassword" InputType="InputType.Password" Variant="Variant.Outlined" Class="mb-3" />
-                <MudTextField T="string" Label="Xác nhận mật khẩu mới" @bind-Value="_confirmPassword" InputType="InputType.Password" Variant="Variant.Outlined" Class="mb-4"
-                              OnKeyDown="@(e => OnPwKey(e))" />
-                <MudButton Class="todox-primary-btn" OnClick="ChangePassword" Disabled="_busy">Đổi mật khẩu</MudButton>
+                <MudGrid>
+                    <MudItem xs="12" sm="4">
+                        <MudTextField T="string" Label="Mật khẩu hiện tại" @bind-Value="_currentPassword" InputType="InputType.Password" Variant="Variant.Outlined" />
+                    </MudItem>
+                    <MudItem xs="12" sm="4">
+                        <MudTextField T="string" Label="Mật khẩu mới" @bind-Value="_newPassword" InputType="InputType.Password" Variant="Variant.Outlined" />
+                    </MudItem>
+                    <MudItem xs="12" sm="4">
+                        <MudTextField T="string" Label="Xác nhận mật khẩu mới" @bind-Value="_confirmPassword" InputType="InputType.Password" Variant="Variant.Outlined" />
+                    </MudItem>
+                </MudGrid>
+                <MudButton Class="todox-primary-btn mt-4" OnClick="ChangePassword" Disabled="_busy">Đổi mật khẩu</MudButton>
             </MudPaper>
         </MudItem>
     </MudGrid>
 </MudStack>
 
 @code {
+    private string _avatarUrl = string.Empty;
     private string _fullName = string.Empty;
     private string _phone = string.Empty;
+    private string? _gender;
+    private DateTime? _dob;
     private string _currentPassword = string.Empty;
     private string _newPassword = string.Empty;
     private string _confirmPassword = string.Empty;
@@ -55,9 +115,45 @@
         _ => ""
     };
 
-    protected override void OnInitialized()
+    private string AvatarText => string.IsNullOrWhiteSpace(_fullName) ? "U" : _fullName.Trim()[0].ToString().ToUpperInvariant();
+
+    protected override async Task OnInitializedAsync()
     {
         _fullName = AuthState.CurrentUser?.DisplayName ?? string.Empty;
+        if (AuthState.CurrentUser is not null)
+        {
+            var uid = AuthState.CurrentUser.UserId;
+            var extras = await Accounts.GetProfileExtrasAsync(uid);
+            _gender = extras.Gender;
+            _dob = extras.Dob;
+            var avatar = await Avatars.GetCurrentAsync(uid);
+            _avatarUrl = avatar.AvatarUrl ?? string.Empty;
+        }
+    }
+
+    private async Task OnAvatarSelected(IBrowserFile file)
+    {
+        if (file is null || AuthState.CurrentUser is null) return;
+        _busy = true;
+        try
+        {
+            if (file.Size > 10 * 1024 * 1024)
+            {
+                Snackbar.Add("Ảnh vượt quá 10MB.", Severity.Error);
+                return;
+            }
+            using var ms = new MemoryStream();
+            await file.OpenReadStream(10 * 1024 * 1024).CopyToAsync(ms);
+            var info = await Avatars.UploadAsync(AuthState.CurrentUser.UserId, ms.ToArray(), file.Name, file.ContentType);
+            _avatarUrl = info.AvatarUrl ?? _avatarUrl;
+            if (_avatarUrl is not null) AuthState.UpdateDisplayName(_fullName);
+            Snackbar.Add("Đã cập nhật ảnh đại diện.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Lỗi tải ảnh: {ex.Message}", Severity.Error);
+        }
+        finally { _busy = false; }
     }
 
     private async Task SaveProfile()
@@ -68,20 +164,14 @@
             Snackbar.Add("Họ tên không được để trống.", Severity.Warning);
             return;
         }
-
         _busy = true;
         try
         {
-            await Accounts.UpdateOwnProfileAsync(AuthState.CurrentUser.UserId, _fullName.Trim(), _phone);
+            await Accounts.UpdateOwnProfileAsync(AuthState.CurrentUser.UserId, _fullName.Trim(), _phone, _gender, _dob);
             AuthState.UpdateDisplayName(_fullName.Trim());
             Snackbar.Add("Đã cập nhật thông tin.", Severity.Success);
         }
         finally { _busy = false; }
-    }
-
-    private async Task OnPwKey(KeyboardEventArgs e)
-    {
-        if (e.Key is "Enter" or "NumpadEnter") await ChangePassword();
     }
 
     private async Task ChangePassword()
@@ -93,10 +183,7 @@
             var (ok, message) = await Accounts.ChangePasswordAsync(
                 AuthState.CurrentUser.UserId, _currentPassword, _newPassword, _confirmPassword);
             Snackbar.Add(message, ok ? Severity.Success : Severity.Error);
-            if (ok)
-            {
-                _currentPassword = _newPassword = _confirmPassword = string.Empty;
-            }
+            if (ok) _currentPassword = _newPassword = _confirmPassword = string.Empty;
         }
         finally { _busy = false; }
     }

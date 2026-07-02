@@ -40,6 +40,8 @@ public sealed class CustomerProfile
     public string Address { get; set; } = string.Empty;
     public TodoXAccountStatus Status { get; set; } = TodoXAccountStatus.Active;
     public DateTime CreatedAt { get; set; } = DateTime.Now;
+    public string? Gender { get; set; }
+    public DateTime? DateOfBirth { get; set; }
 }
 
 public sealed class CustomerAccount
@@ -66,6 +68,8 @@ public sealed class CustomerRegistration
     public string TaxCode { get; set; } = string.Empty;
     public string Password { get; set; } = string.Empty;
     public string ConfirmPassword { get; set; } = string.Empty;
+    public string? Gender { get; set; }
+    public DateTime? DateOfBirth { get; set; }
 }
 
 public sealed class LoginRequest

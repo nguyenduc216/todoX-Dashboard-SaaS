@@ -1,0 +1,64 @@
+@page "/settings/api-providers"
+@using TodoX.Web.Services.Settings
+@inject SettingsApiRepository Api
+
+<PageTitle>Nhà cung cấp API</PageTitle>
+
+<MudStack Spacing="3">
+    <div>
+        <MudText Typo="Typo.h4" Class="todox-page-title">Nhà cung cấp &amp; Model API</MudText>
+        <MudText Typo="Typo.body1" Class="todox-page-subtitle">Provider, model và endpoint cấu hình trong settings.api_*. Khóa bí mật không hiển thị ở đây.</MudText>
+    </div>
+
+    <MudPaper Class="todox-table-card pa-4" Rounded="true">
+        <MudText Typo="Typo.h6" Class="mb-2">Nhà cung cấp</MudText>
+        <MudDivider Class="mb-3" />
+        <MudTable Items="@_providers" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Class="todox-table">
+            <HeaderContent>
+                <MudTh>Mã</MudTh><MudTh>Tên</MudTh><MudTh>Nhóm</MudTh><MudTh>SDK</MudTh><MudTh>Base URL</MudTh><MudTh>Khóa</MudTh><MudTh>Trạng thái</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="Mã"><span class="todox-badge">@context.ProviderCode</span></MudTd>
+                <MudTd DataLabel="Tên">@context.ProviderName</MudTd>
+                <MudTd DataLabel="Nhóm">@context.ProviderGroup</MudTd>
+                <MudTd DataLabel="SDK">@context.Sdk</MudTd>
+                <MudTd DataLabel="Base URL"><span class="todox-setting-value">@context.BaseUrl</span></MudTd>
+                <MudTd DataLabel="Khóa">
+                    @if (!string.IsNullOrWhiteSpace(context.CredentialKey))
+                    {
+                        <MudChip T="string" Size="Size.Small" Icon="@Icons.Material.Filled.Key" Color="Color.Success">@context.CredentialKey (ẩn)</MudChip>
+                    }
+                    else { <span class="todox-page-subtitle">—</span> }
+                </MudTd>
+                <MudTd DataLabel="Trạng thái">
+                    <MudChip T="string" Size="Size.Small" Color="@(context.Enabled ? Color.Success : Color.Default)">@(context.Enabled ? "Bật" : "Tắt")</MudChip>
+                </MudTd>
+            </RowTemplate>
+        </MudTable>
+    </MudPaper>
+
+    <MudPaper Class="todox-table-card pa-4" Rounded="true">
+        <MudText Typo="Typo.h6" Class="mb-2">Model</MudText>
+        <MudDivider Class="mb-3" />
+        <MudTable Items="@_models" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Class="todox-table">
+            <HeaderContent><MudTh>Mã model</MudTh><MudTh>Tên</MudTh><MudTh>Loại</MudTh><MudTh>Trạng thái</MudTh></HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="Mã model"><span class="todox-badge">@context.ModelCode</span></MudTd>
+                <MudTd DataLabel="Tên">@context.ModelName</MudTd>
+                <MudTd DataLabel="Loại">@context.ModelType</MudTd>
+                <MudTd DataLabel="Trạng thái"><MudChip T="string" Size="Size.Small" Color="@(context.Enabled ? Color.Success : Color.Default)">@(context.Enabled ? "Bật" : "Tắt")</MudChip></MudTd>
+            </RowTemplate>
+        </MudTable>
+    </MudPaper>
+</MudStack>
+
+@code {
+    private IReadOnlyList<ApiProviderDto> _providers = new List<ApiProviderDto>();
+    private IReadOnlyList<ApiProviderModelDto> _models = new List<ApiProviderModelDto>();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _providers = await Api.GetProvidersAsync();
+        _models = await Api.GetModelsAsync();
+    }
+}
