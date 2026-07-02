@@ -58,6 +58,10 @@ if (!app.Environment.IsDevelopment())
 
 app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true);
 app.UseHttpsRedirection();
+
+// Serve runtime-uploaded files (avatars, chibi, references) from wwwroot/uploads.
+app.UseStaticFiles();
+
 app.UseAntiforgery();
 
 app.MapStaticAssets();

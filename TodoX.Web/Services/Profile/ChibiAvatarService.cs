@@ -16,6 +16,8 @@ public sealed class ChibiGenerationDto
     public List<ChibiImage> Images { get; set; } = new();
     public Guid? SelectedMediaId { get; set; }
     public DateTime CreatedAt { get; set; }
+    public bool UsedFallback { get; set; }
+    public string? Error { get; set; }
 }
 
 public sealed class ChibiImage
@@ -120,6 +122,8 @@ public sealed class ChibiAvatarService : IChibiAvatarService
             Status = result.Ok ? "completed" : "failed",
             GeneratedPrompt = prompt,
             Images = images,
+            UsedFallback = result.UsedFallback,
+            Error = result.Error,
             CreatedAt = DateTime.UtcNow
         };
     }

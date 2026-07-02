@@ -136,5 +136,15 @@ public sealed class AuthStateService
         }
     }
 
+    /// <summary>Update the cached avatar url after an avatar change so the top bar refreshes.</summary>
+    public void UpdateAvatarUrl(string? avatarUrl)
+    {
+        if (CurrentUser is not null)
+        {
+            CurrentUser.AvatarUrl = avatarUrl;
+            NotifyStateChanged();
+        }
+    }
+
     private void NotifyStateChanged() => OnChange?.Invoke();
 }

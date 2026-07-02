@@ -74,6 +74,7 @@ public sealed class AccountService
             UserId = row.Id,
             DisplayName = row.FullName ?? row.DisplayName ?? row.Username ?? row.Email ?? "TodoX User",
             Email = row.Email ?? string.Empty,
+            AvatarUrl = row.AvatarUrl,
             Role = role,
             CustomerId = customerId,
             IsRoot = row.IsRoot,

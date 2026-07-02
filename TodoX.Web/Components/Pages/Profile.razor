@@ -146,7 +146,7 @@
             await file.OpenReadStream(10 * 1024 * 1024).CopyToAsync(ms);
             var info = await Avatars.UploadAsync(AuthState.CurrentUser.UserId, ms.ToArray(), file.Name, file.ContentType);
             _avatarUrl = info.AvatarUrl ?? _avatarUrl;
-            if (_avatarUrl is not null) AuthState.UpdateDisplayName(_fullName);
+            AuthState.UpdateAvatarUrl(info.AvatarUrl);
             Snackbar.Add("Đã cập nhật ảnh đại diện.", Severity.Success);
         }
         catch (Exception ex)

@@ -38,7 +38,16 @@
                     <MudHidden Breakpoint="Breakpoint.SmAndDown">
                         <MudText Typo="Typo.body2" Class="todox-user-hello">Xin chào, <b>@UserDisplayName</b></MudText>
                     </MudHidden>
-                    <MudAvatar Class="todox-avatar">@AvatarText</MudAvatar>
+                    <MudAvatar Class="todox-avatar">
+                        @if (!string.IsNullOrWhiteSpace(UserAvatarUrl))
+                        {
+                            <MudImage Src="@UserAvatarUrl" />
+                        }
+                        else
+                        {
+                            @AvatarText
+                        }
+                    </MudAvatar>
                     <MudIcon Icon="@Icons.Material.Filled.KeyboardArrowDown" Color="Color.Warning" Size="Size.Small" />
                 </div>
             </ActivatorContent>
@@ -183,6 +192,7 @@
 
     private string UserDisplayName => AuthState.CurrentUser?.DisplayName ?? "Người dùng";
     private string UserEmail => AuthState.CurrentUser?.Email ?? "";
+    private string? UserAvatarUrl => AuthState.CurrentUser?.AvatarUrl;
     private int NotificationCount => 3;
 
     private bool Can(string permission) => AuthState.CurrentUser?.Can(permission) == true;

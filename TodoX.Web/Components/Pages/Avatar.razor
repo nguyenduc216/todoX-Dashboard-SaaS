@@ -91,16 +91,26 @@
                 <MudPaper Class="todox-card pa-5" Rounded="true">
                     <MudText Typo="Typo.h6">Kết quả</MudText>
                     <MudDivider Class="my-3" />
-                    @if (_result is null || _result.Images.Count == 0)
+                    @if (_result is null)
                     {
                         <MudText Class="todox-page-subtitle">Chưa có ảnh. Bấm "Tạo ảnh chibi" để bắt đầu.</MudText>
                     }
+                    else if (_result.Status == "failed")
+                    {
+                        <MudAlert Severity="Severity.Error" Class="mb-3">
+                            Không tạo được ảnh từ Vertex AI. Lỗi: @(_result.Error ?? "không rõ"). Xem chi tiết ở trang API Endpoints.
+                        </MudAlert>
+                    }
+                    else if (_result.Images.Count == 0)
+                    {
+                        <MudText Class="todox-page-subtitle">Không có ảnh trả về.</MudText>
+                    }
                     else
                     {
-                        @if (_usedFallback)
+                        @if (_result.UsedFallback)
                         {
                             <MudAlert Severity="Severity.Info" Dense="true" Class="mb-3">
-                                Ảnh minh họa tạm (chưa gọi được Vertex AI thật). Khi hệ thống có kết nối/khóa hợp lệ sẽ sinh ảnh chibi thực tế.
+                                Ảnh minh họa tạm (đang bật MockMode). Tắt MockMode để sinh ảnh chibi thực từ Vertex AI.
                             </MudAlert>
                         }
                         <MudGrid>
@@ -127,7 +137,6 @@
 @code {
     private string? _gender = "male";
     private bool _busy;
-    private bool _usedFallback;
     private ChibiGenerationDto? _result;
     private MediaFileDto? _avatarMedia;
     private MediaFileDto? _logoMedia;
@@ -189,8 +198,6 @@
                 ProductMediaId = _productMedia?.Id,
                 SceneMediaId = _sceneMedia?.Id
             });
-            _usedFallback = _result.Status != "completed" || _result.Images.Any(i => (i.Url ?? "").Contains("/chibi/"));
-            // Determine fallback from whether Vertex succeeded — reflected by status.
             if (_result.Status == "failed")
             {
                 Snackbar.Add("Không tạo được ảnh. Xem nhật ký API.", Severity.Error);
@@ -214,6 +221,8 @@
         try
         {
             await Chibi.SelectAsync(AuthState.CurrentUser.UserId, _result.Id, mediaId);
+            var info = await Avatars.GetCurrentAsync(AuthState.CurrentUser.UserId);
+            AuthState.UpdateAvatarUrl(info.AvatarUrl);
             Snackbar.Add("Đã đặt làm ảnh đại diện.", Severity.Success);
         }
         catch (Exception ex)

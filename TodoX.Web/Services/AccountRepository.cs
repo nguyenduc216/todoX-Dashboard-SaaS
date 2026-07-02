@@ -232,6 +232,7 @@ public sealed class AccountRepository
         public bool IsActive { get; set; }
         public string? RoleCode { get; set; }
         public bool IsRoot { get; set; }
+        public string? AvatarUrl { get; set; }
     }
 
     public async Task<LoginRow?> FindForLoginAsync(string usernameOrEmail)
@@ -243,7 +244,7 @@ public sealed class AccountRepository
             SELECT u.id AS Id, u.username AS Username, u.email AS Email,
                    u.full_name AS FullName, u.display_name AS DisplayName,
                    u.user_type AS UserType, u.password_hash AS PasswordHash, u.is_active AS IsActive,
-                   COALESCE(u.is_root,false) AS IsRoot,
+                   COALESCE(u.is_root,false) AS IsRoot, u.avatar_url AS AvatarUrl,
                    (SELECT r.code FROM auth.user_roles ur
                       JOIN auth.roles r ON r.id = ur.role_id
                      WHERE ur.user_id = u.id ORDER BY r.sort_order LIMIT 1) AS RoleCode
@@ -270,7 +271,7 @@ public sealed class AccountRepository
             SELECT u.id AS Id, u.username AS Username, u.email AS Email,
                    u.full_name AS FullName, u.display_name AS DisplayName,
                    u.user_type AS UserType, u.password_hash AS PasswordHash, u.is_active AS IsActive,
-                   COALESCE(u.is_root,false) AS IsRoot,
+                   COALESCE(u.is_root,false) AS IsRoot, u.avatar_url AS AvatarUrl,
                    (SELECT r.code FROM auth.user_roles ur
                       JOIN auth.roles r ON r.id = ur.role_id
                      WHERE ur.user_id = u.id ORDER BY r.sort_order LIMIT 1) AS RoleCode

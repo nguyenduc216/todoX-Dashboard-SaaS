@@ -23,10 +23,11 @@ public sealed class VertexImageRenderService : IImageRenderService
     private readonly IMediaFileService _media;
     private readonly TenantContext _tenant;
     private readonly VertexClient _vertex;
+    private readonly IConfiguration _config;
     private readonly ILogger<VertexImageRenderService> _logger;
 
     public VertexImageRenderService(TodoXConnectionFactory factory, SettingsApiRepository settings,
-        IMediaFileService media, TenantContext tenant, VertexClient vertex,
+        IMediaFileService media, TenantContext tenant, VertexClient vertex, IConfiguration config,
         ILogger<VertexImageRenderService> logger)
     {
         _factory = factory;
@@ -34,6 +35,7 @@ public sealed class VertexImageRenderService : IImageRenderService
         _media = media;
         _tenant = tenant;
         _vertex = vertex;
+        _config = config;
         _logger = logger;
     }
 
@@ -56,24 +58,40 @@ public sealed class VertexImageRenderService : IImageRenderService
         // Insert the render request row (status=processing).
         await InsertRequestAsync(requestId, request, providerCode, modelCode, count);
 
+        var mockMode = _config.GetValue("ImageRender:MockMode", false);
+
         List<byte[]> images;
         string status;
         string? error = null;
-        try
+
+        if (mockMode)
         {
-            images = await _vertex.GenerateImagesAsync(request.Prompt, count, request.AspectRatio, ct);
-            result.UsedFallback = false;
-            status = "success";
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Vertex image render failed; using placeholder fallback.");
-            images = Enumerable.Range(0, count)
-                .Select(i => PlaceholderImage.Generate(request.Prompt, i))
-                .ToList();
+            // Explicit mock mode only: clearly labelled placeholder images.
+            images = Enumerable.Range(0, count).Select(i => PlaceholderImage.Generate(request.Prompt, i)).ToList();
             result.UsedFallback = true;
-            status = "fallback";
-            error = ex.Message;
+            status = "mock";
+            _logger.LogWarning("ImageRender running in MockMode — returning placeholder images.");
+        }
+        else
+        {
+            try
+            {
+                images = await _vertex.GenerateImagesAsync(request.Prompt, count, request.AspectRatio, ct);
+                result.UsedFallback = false;
+                status = "success";
+            }
+            catch (Exception ex)
+            {
+                // Real mode: do NOT fabricate images. Fail clearly and record the error.
+                _logger.LogError(ex, "Vertex image render failed (MockMode=false).");
+                sw.Stop();
+                result.Ok = false;
+                result.Error = ex.Message;
+                await CompleteRequestAsync(requestId, "failed", new List<Guid>(), ex.Message);
+                await _settings.LogCallAsync(_tenant.TenantId, request.UserId, EndpointCode, providerCode, modelCode,
+                    requestId, "failed", ex.Message, (int)sw.ElapsedMilliseconds);
+                return result;
+            }
         }
 
         // Persist generated images to media.media_files.

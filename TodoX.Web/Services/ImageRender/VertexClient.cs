@@ -29,10 +29,39 @@ public sealed class VertexClient
     {
         var project = _config["Vertex:ProjectId"] ?? throw new InvalidOperationException("Missing Vertex:ProjectId");
         var location = _config["Vertex:Location"] ?? "us-central1";
-        var model = _config["Vertex:ImageModel"] ?? "imagen-3.0-generate-001";
+
+        // Try the primary model, then the fallback model (mirrors the proven PowerShell script).
+        var models = new[] { _config["Vertex:ImageModel"], _config["Vertex:FallbackModel"] }
+            .Where(m => !string.IsNullOrWhiteSpace(m)).Select(m => m!).Distinct().ToArray();
+        if (models.Length == 0) models = new[] { "imagen-3.0-generate-002" };
 
         var token = await GetAccessTokenAsync(ct);
+        Exception? last = null;
 
+        foreach (var model in models)
+        {
+            try
+            {
+                var images = await CallModelAsync(token, project, location, model, prompt, count, aspectRatio, ct);
+                if (images.Count > 0)
+                {
+                    _logger.LogInformation("Vertex render OK with model {Model} ({N} images)", model, images.Count);
+                    return images;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning("Vertex model {Model} failed: {Msg}", model, ex.Message);
+                last = ex;
+            }
+        }
+
+        throw last ?? new InvalidOperationException("Vertex returned no images for any model.");
+    }
+
+    private async Task<List<byte[]>> CallModelAsync(string token, string project, string location, string model,
+        string prompt, int count, string aspectRatio, CancellationToken ct)
+    {
         var url = $"https://{location}-aiplatform.googleapis.com/v1/projects/{project}/locations/{location}/publishers/google/models/{model}:predict";
 
         var payload = new
@@ -41,9 +70,7 @@ public sealed class VertexClient
             parameters = new
             {
                 sampleCount = count,
-                aspectRatio = aspectRatio,
-                // Ask for base64-encoded bytes back.
-                includeRaiReason = true
+                aspectRatio
             }
         };
 
@@ -55,28 +82,38 @@ public sealed class VertexClient
         var body = await resp.Content.ReadAsStringAsync(ct);
         if (!resp.IsSuccessStatusCode)
         {
-            throw new InvalidOperationException($"Vertex predict HTTP {(int)resp.StatusCode}: {Truncate(body, 300)}");
+            throw new InvalidOperationException($"HTTP {(int)resp.StatusCode}: {Truncate(body, 400)}");
         }
 
         using var doc = JsonDocument.Parse(body);
         if (!doc.RootElement.TryGetProperty("predictions", out var preds) || preds.GetArrayLength() == 0)
         {
-            throw new InvalidOperationException("Vertex returned no predictions.");
+            throw new InvalidOperationException("No predictions in response.");
         }
 
         var images = new List<byte[]>();
         foreach (var p in preds.EnumerateArray())
         {
-            // Imagen returns bytesBase64Encoded per prediction.
-            if (p.TryGetProperty("bytesBase64Encoded", out var b64) && b64.GetString() is { } s)
+            // Imagen may return bytesBase64Encoded at the top or nested under image.
+            string? b64 = null;
+            if (p.TryGetProperty("bytesBase64Encoded", out var top) && top.ValueKind == JsonValueKind.String)
             {
-                images.Add(Convert.FromBase64String(s));
+                b64 = top.GetString();
+            }
+            else if (p.TryGetProperty("image", out var img) && img.TryGetProperty("bytesBase64Encoded", out var nested))
+            {
+                b64 = nested.GetString();
+            }
+
+            if (!string.IsNullOrWhiteSpace(b64))
+            {
+                images.Add(Convert.FromBase64String(b64));
             }
         }
 
         if (images.Count == 0)
         {
-            throw new InvalidOperationException("Vertex predictions contained no image bytes.");
+            throw new InvalidOperationException("Predictions contained no image bytes (possibly filtered by safety).");
         }
 
         return images;
