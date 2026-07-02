@@ -78,6 +78,15 @@
 </MudStack>
 
 @code {
-    private int CustomerCount => Accounts.GetCustomers().Count;
-    private int AccountCount => Accounts.GetSystemUsers().Count + Accounts.GetCustomerAccounts().Count;
+    private int CustomerCount;
+    private int AccountCount;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var customers = await Accounts.GetCustomersAsync();
+        var systemUsers = await Accounts.GetSystemUsersAsync();
+        var customerAccounts = await Accounts.GetCustomerAccountsAsync();
+        CustomerCount = customers.Count;
+        AccountCount = systemUsers.Count + customerAccounts.Count;
+    }
 }

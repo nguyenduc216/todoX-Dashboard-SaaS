@@ -81,4 +81,21 @@ public sealed class CurrentUserSession
     public string Email { get; set; } = string.Empty;
     public TodoXUserRole Role { get; set; }
     public bool IsAuthenticated { get; set; }
+
+    /// <summary>For customer logins: the crm.customers id this user belongs to (null for admin/operator).</summary>
+    public Guid? CustomerId { get; set; }
+
+    public bool IsCustomer => Role is TodoXUserRole.CustomerOwner or TodoXUserRole.CustomerUser;
+
+    /// <summary>Permission codes (module.action) granted via the user's roles.</summary>
+    public HashSet<string> Permissions { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    public bool IsRoot { get; set; }
+
+    /// <summary>True when the user has the given "module.action" permission (root has all).</summary>
+    public bool Can(string permission) => IsRoot || Permissions.Contains(permission);
+
+    /// <summary>True when the user has any action on the module (i.e. can see it).</summary>
+    public bool CanViewModule(string module)
+        => IsRoot || Permissions.Contains($"{module}.view") || Permissions.Any(p => p.StartsWith(module + ".", StringComparison.OrdinalIgnoreCase));
 }

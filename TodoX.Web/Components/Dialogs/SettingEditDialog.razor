@@ -1,0 +1,78 @@
+@using TodoX.Web.Services
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">Cập nhật cài đặt</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudStack Spacing="2">
+            <div>
+                <div class="todox-setting-key">@Setting.Key</div>
+                @if (!string.IsNullOrWhiteSpace(Setting.Description))
+                {
+                    <div class="todox-setting-desc">@Setting.Description</div>
+                }
+            </div>
+
+            @if (Setting.ValueType == "boolean")
+            {
+                <MudSelect T="string" @bind-Value="_value" Label="Giá trị" Variant="Variant.Outlined">
+                    <MudSelectItem Value="@("true")">Bật (true)</MudSelectItem>
+                    <MudSelectItem Value="@("false")">Tắt (false)</MudSelectItem>
+                </MudSelect>
+            }
+            else if (Setting.IsSecret)
+            {
+                <MudTextField T="string" @bind-Value="_value" Label="Giá trị bí mật mới"
+                              Variant="Variant.Outlined" InputType="InputType.Password"
+                              Placeholder="Nhập để thay thế, để trống nếu giữ nguyên" />
+                <MudText Typo="Typo.caption" Class="todox-page-subtitle">
+                    Giá trị hiện tại được ẩn. Để trống nếu không muốn thay đổi.
+                </MudText>
+            }
+            else if (Setting.ValueType == "number")
+            {
+                <MudTextField T="string" @bind-Value="_value" Label="Giá trị"
+                              Variant="Variant.Outlined" InputMode="InputMode.numeric" />
+            }
+            else
+            {
+                <MudTextField T="string" @bind-Value="_value" Label="Giá trị" Variant="Variant.Outlined" Lines="2" />
+            }
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Hủy</MudButton>
+        <MudButton Class="todox-primary-btn" OnClick="Submit">Lưu</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter] public ProviderSetting Setting { get; set; } = default!;
+
+    private string _value = string.Empty;
+    private bool _hadSecret;
+
+    protected override void OnInitialized()
+    {
+        _hadSecret = Setting.IsSecret;
+        // Never prefill a secret value into the editable field.
+        _value = Setting.IsSecret ? string.Empty : (Setting.Value ?? string.Empty);
+    }
+
+    private void Submit()
+    {
+        // For secrets, an empty box means "keep current" -> cancel the update.
+        if (_hadSecret && string.IsNullOrWhiteSpace(_value))
+        {
+            MudDialog.Cancel();
+            return;
+        }
+
+        MudDialog.Close(DialogResult.Ok(_value));
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}

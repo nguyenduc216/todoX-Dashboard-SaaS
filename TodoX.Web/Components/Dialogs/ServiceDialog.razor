@@ -1,0 +1,96 @@
+@using TodoX.Web.Services
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">@(_isNew ? "Thêm dịch vụ" : "Chỉnh sửa dịch vụ")</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudGrid>
+            <MudItem xs="12" sm="6">
+                <MudTextField T="string" Label="Mã dịch vụ" @bind-Value="_model.ServiceCode" Variant="Variant.Outlined" Required="true" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField T="string" Label="Tên dịch vụ" @bind-Value="_model.ServiceName" Variant="Variant.Outlined" Required="true" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudSelect T="Guid?" Label="Nhóm dịch vụ" @bind-Value="_model.CategoryId" Variant="Variant.Outlined" Clearable="true">
+                    @foreach (var c in Categories)
+                    {
+                        <MudSelectItem T="Guid?" Value="@c.Id">@c.CategoryName</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField T="string" Label="Loại (service_type)" @bind-Value="_model.ServiceType" Variant="Variant.Outlined"
+                              HelperText="vd: video_from_prompt, render_video, image" />
+            </MudItem>
+            <MudItem xs="12">
+                <MudTextField T="string" Label="Mô tả ngắn" @bind-Value="_model.ShortDescription" Variant="Variant.Outlined" />
+            </MudItem>
+            <MudItem xs="12">
+                <MudTextField T="string" Label="Mô tả chi tiết" @bind-Value="_model.Description" Variant="Variant.Outlined" Lines="3" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField T="string" Label="Ảnh thumbnail (URL)" @bind-Value="_model.ThumbnailUrl" Variant="Variant.Outlined" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField T="string" Label="Ảnh cover (URL)" @bind-Value="_model.CoverImageUrl" Variant="Variant.Outlined" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudSelect T="string" Label="Trạng thái" @bind-Value="_model.Status" Variant="Variant.Outlined">
+                    <MudSelectItem Value="@("active")">Đang bán</MudSelectItem>
+                    <MudSelectItem Value="@("inactive")">Ẩn</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudNumericField T="int" Label="Thứ tự hiển thị" @bind-Value="_model.SortOrder" Variant="Variant.Outlined" />
+            </MudItem>
+        </MudGrid>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Hủy</MudButton>
+        <MudButton Class="todox-primary-btn" OnClick="Submit">Lưu</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter] public ServiceDto? Source { get; set; }
+    [Parameter] public IReadOnlyList<ServiceCategoryDto> Categories { get; set; } = new List<ServiceCategoryDto>();
+
+    private ServiceDto _model = new();
+    private bool _isNew;
+
+    protected override void OnInitialized()
+    {
+        _isNew = Source is null;
+        _model = Source is null
+            ? new ServiceDto { Status = "active", ServiceType = "video_from_prompt", SortOrder = 0 }
+            : new ServiceDto
+            {
+                Id = Source.Id,
+                CategoryId = Source.CategoryId,
+                ServiceCode = Source.ServiceCode,
+                ServiceName = Source.ServiceName,
+                ServiceType = Source.ServiceType,
+                Description = Source.Description,
+                ShortDescription = Source.ShortDescription,
+                ThumbnailUrl = Source.ThumbnailUrl,
+                CoverImageUrl = Source.CoverImageUrl,
+                Status = Source.Status,
+                SortOrder = Source.SortOrder
+            };
+    }
+
+    private void Submit()
+    {
+        if (string.IsNullOrWhiteSpace(_model.ServiceCode) || string.IsNullOrWhiteSpace(_model.ServiceName))
+        {
+            return;
+        }
+        MudDialog.Close(DialogResult.Ok(_model));
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}

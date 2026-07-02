@@ -1,0 +1,161 @@
+@page "/permissions"
+@inject PermissionRepository PermRepo
+@inject AuthStateService AuthState
+@inject AuditRepository Audit
+@inject ISnackbar Snackbar
+
+<PageTitle>Phân quyền</PageTitle>
+
+<MudStack Spacing="3">
+    <div>
+        <MudText Typo="Typo.h4" Class="todox-page-title">Phân quyền theo nhóm</MudText>
+        <MudText Typo="Typo.body1" Class="todox-page-subtitle">Chọn nhóm (role) và tick quyền theo chức năng × thao tác. Chỉ khi được tick, tài khoản trong nhóm mới thực hiện được thao tác đó.</MudText>
+    </div>
+
+    <MudPaper Class="todox-card pa-4" Rounded="true">
+        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="3" Class="flex-wrap">
+            <MudSelect T="Guid" Label="Nhóm quyền" @bind-Value="_roleId" @bind-Value:after="OnRoleChanged" Variant="Variant.Outlined" Style="max-width:340px">
+                @foreach (var r in _roles)
+                {
+                    <MudSelectItem T="Guid" Value="@r.Id">@r.Name (@r.Code)</MudSelectItem>
+                }
+            </MudSelect>
+            @if (_selectedRole is not null)
+            {
+                <span class="todox-badge">@(_selectedRole.RoleType == "customer" ? "Nhóm khách hàng" : "Nhóm quản trị")</span>
+                <MudText Typo="Typo.body2" Class="todox-page-subtitle">@_checked.Count / @_allPermIds.Count quyền</MudText>
+            }
+            <MudSpacer />
+            <MudButton Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.Save" OnClick="Save"
+                       Disabled="@(_busy || _selectedRole is null || (_selectedRole?.IsSystem == true && _selectedRole?.Code == "administrator_root"))">
+                Lưu quyền
+            </MudButton>
+        </MudStack>
+    </MudPaper>
+
+    @if (_loading)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+    }
+    else if (_selectedRole is not null)
+    {
+        <MudPaper Class="todox-table-card pa-0" Rounded="true">
+            <MudSimpleTable Dense="true" Hover="true" Class="todox-perm-table" Style="overflow-x:auto">
+                <thead>
+                    <tr>
+                        <th style="text-align:left">Chức năng</th>
+                        @foreach (var act in _actions)
+                        {
+                            <th style="text-align:center">@ActionLabel(act)</th>
+                        }
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var module in _modules)
+                    {
+                        <tr>
+                            <td style="text-align:left"><b>@ModuleLabel(module)</b></td>
+                            @foreach (var act in _actions)
+                            {
+                                var pid = FindPermId(module, act);
+                                <td style="text-align:center">
+                                    @if (pid is not null)
+                                    {
+                                        <MudCheckBox T="bool" Value="@_checked.Contains(pid.Value)"
+                                                     ValueChanged="@(v => Toggle(pid.Value, v))" Dense="true" Color="Color.Warning" />
+                                    }
+                                    else
+                                    {
+                                        <span class="todox-perm-na">—</span>
+                                    }
+                                </td>
+                            }
+                        </tr>
+                    }
+                </tbody>
+            </MudSimpleTable>
+        </MudPaper>
+    }
+</MudStack>
+
+@code {
+    private bool _loading;
+    private bool _busy;
+    private IReadOnlyList<RoleDto> _roles = new List<RoleDto>();
+    private IReadOnlyList<PermissionDto> _allPerms = new List<PermissionDto>();
+    private HashSet<Guid> _allPermIds = new();
+    private Guid _roleId;
+    private RoleDto? _selectedRole;
+    private HashSet<Guid> _checked = new();
+
+    private List<string> _modules = new();
+    private List<string> _actions = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _roles = await PermRepo.GetRolesAsync();
+        _allPerms = await PermRepo.GetAllPermissionsAsync();
+        _allPermIds = _allPerms.Select(p => p.Id).ToHashSet();
+        _modules = _allPerms.Select(p => p.Module).Distinct().OrderBy(x => x).ToList();
+        // Common action columns in a sensible order; only those present are meaningful.
+        var order = new[] { "view", "create", "update", "delete", "approve", "reject", "activate", "deactivate", "assign_role", "assign_permission", "reset_password", "run", "test", "export", "import", "adjust" };
+        var present = _allPerms.Select(p => p.Action).Distinct().ToHashSet();
+        _actions = order.Where(present.Contains).ToList();
+
+        if (_roles.Count > 0)
+        {
+            _roleId = _roles.First(r => r.Code == "customer").Id is var cid && cid != Guid.Empty ? cid : _roles[0].Id;
+            await OnRoleChanged();
+        }
+    }
+
+    private async Task OnRoleChanged()
+    {
+        _loading = true;
+        _selectedRole = _roles.FirstOrDefault(r => r.Id == _roleId);
+        _checked = await PermRepo.GetRolePermissionIdsAsync(_roleId);
+        _loading = false;
+    }
+
+    private Guid? FindPermId(string module, string action)
+        => _allPerms.FirstOrDefault(p => p.Module == module && p.Action == action)?.Id;
+
+    private void Toggle(Guid pid, bool on)
+    {
+        if (on) _checked.Add(pid); else _checked.Remove(pid);
+    }
+
+    private async Task Save()
+    {
+        if (_selectedRole is null) return;
+        _busy = true;
+        try
+        {
+            await PermRepo.SetRolePermissionsAsync(_roleId, _checked);
+            await Audit.LogAsync(AuthState.CurrentUser, "permissions", "update",
+                entityDisplay: _selectedRole.Name, message: $"Cập nhật {_checked.Count} quyền cho nhóm {_selectedRole.Code}");
+            Snackbar.Add("Đã lưu phân quyền. Người dùng cần đăng nhập lại để áp dụng.", Severity.Success);
+        }
+        finally { _busy = false; }
+    }
+
+    private static string ActionLabel(string a) => a switch
+    {
+        "view" => "Xem", "create" => "Thêm", "update" => "Sửa", "delete" => "Xóa",
+        "approve" => "Duyệt", "reject" => "Từ chối", "activate" => "Kích hoạt", "deactivate" => "Vô hiệu",
+        "assign_role" => "Gán vai trò", "assign_permission" => "Gán quyền", "reset_password" => "Reset MK",
+        "run" => "Chạy", "test" => "Kiểm thử", "export" => "Xuất", "import" => "Nhập", "adjust" => "Điều chỉnh",
+        _ => a
+    };
+
+    private static string ModuleLabel(string m) => m switch
+    {
+        "admin_users" => "Quản trị viên", "customers" => "Khách hàng", "customer_accounts" => "Tài khoản KH",
+        "customer_pages" => "Trang mạng xã hội", "token_wallets" => "Ví token", "token_transactions" => "Giao dịch token",
+        "services" => "Dịch vụ", "render_jobs" => "Render Jobs", "publish_jobs" => "Đăng bài",
+        "api_providers" => "Nhà cung cấp API", "app_settings" => "Cấu hình", "settings" => "Cài đặt",
+        "audit_logs" => "Nhật ký", "roles" => "Vai trò", "permissions" => "Quyền",
+        "account_groups" => "Nhóm tài khoản", "dashboard" => "Dashboard", "llm_gateway" => "LLM Gateway",
+        _ => m
+    };
+}

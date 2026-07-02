@@ -1,65 +1,175 @@
 @page "/customers"
+@using TodoX.Web.Components.Dialogs
+@inject AccountService Accounts
+@inject AuditRepository Audit
+@inject AuthStateService AuthState
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
 
 <PageTitle>Khách hàng</PageTitle>
 
-<MudText Typo="Typo.h4" Class="mb-2 todox-page-title">Khách hàng</MudText>
-<MudText Typo="Typo.body1" Class="mb-6 todox-page-subtitle">Quản lý thông tin khách hàng sử dụng dịch vụ TodoX SaaS.</MudText>
-
-<MudGrid Class="mb-4">
-    <MudItem xs="12" sm="6" md="3">
-        <MudPaper Class="todox-stat-card pa-4">
-            <MudText Typo="Typo.subtitle2">Tổng khách hàng</MudText>
-            <MudText Typo="Typo.h4">@CustomerRows.Count</MudText>
-        </MudPaper>
-    </MudItem>
-    <MudItem xs="12" sm="6" md="3">
-        <MudPaper Class="todox-stat-card pa-4">
-            <MudText Typo="Typo.subtitle2">Đang hoạt động</MudText>
-            <MudText Typo="Typo.h4">@CustomerRows.Count(x => x.Status == "Hoạt động")</MudText>
-        </MudPaper>
-    </MudItem>
-</MudGrid>
-
-<MudPaper Class="todox-panel pa-4" Elevation="0">
-    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="mb-4 todox-toolbar">
-        <MudText Typo="Typo.h6">Danh sách khách hàng</MudText>
-        <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Add">Thêm khách hàng</MudButton>
+<MudStack Spacing="3">
+    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-3">
+        <div>
+            <MudText Typo="Typo.h4" Class="todox-page-title">Quản lý khách hàng</MudText>
+            <MudText Typo="Typo.body1" Class="todox-page-subtitle">Quản lý thông tin khách hàng sử dụng dịch vụ TodoX SaaS.</MudText>
+        </div>
+        <IfCan Permission="customers.create">
+            <MudButton Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.Add" OnClick="OpenCreate">Thêm khách hàng</MudButton>
+        </IfCan>
     </MudStack>
 
-    <MudTable Items="@CustomerRows" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Class="todox-table">
-        <HeaderContent>
-            <MudTh>Mã KH</MudTh>
-            <MudTh>Tên khách hàng</MudTh>
-            <MudTh>Email</MudTh>
-            <MudTh>Số điện thoại</MudTh>
-            <MudTh>Gói dịch vụ</MudTh>
-            <MudTh>Trạng thái</MudTh>
-            <MudTh>Thao tác</MudTh>
-        </HeaderContent>
-        <RowTemplate>
-            <MudTd DataLabel="Mã KH">@context.Code</MudTd>
-            <MudTd DataLabel="Tên khách hàng">@context.Name</MudTd>
-            <MudTd DataLabel="Email">@context.Email</MudTd>
-            <MudTd DataLabel="Số điện thoại">@context.Phone</MudTd>
-            <MudTd DataLabel="Gói dịch vụ">@context.Plan</MudTd>
-            <MudTd DataLabel="Trạng thái">
-                <MudChip T="string" Color="Color.Success" Size="Size.Small">@context.Status</MudChip>
-            </MudTd>
-            <MudTd DataLabel="Thao tác">
-                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" />
-                <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small" />
-            </MudTd>
-        </RowTemplate>
-    </MudTable>
-</MudPaper>
+    <MudGrid>
+        <MudItem xs="12" sm="6" md="3">
+            <MudPaper Class="todox-card pa-4">
+                <MudText Typo="Typo.subtitle2">Tổng khách hàng</MudText>
+                <div class="todox-stat-value">@_customers.Count</div>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="12" sm="6" md="3">
+            <MudPaper Class="todox-card pa-4">
+                <MudText Typo="Typo.subtitle2">Đang hoạt động</MudText>
+                <div class="todox-stat-value">@_customers.Count(x => x.Status == TodoXAccountStatus.Active)</div>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="12" sm="6" md="3">
+            <MudPaper Class="todox-card pa-4">
+                <MudText Typo="Typo.subtitle2">Chờ duyệt</MudText>
+                <div class="todox-stat-value">@_customers.Count(x => x.Status == TodoXAccountStatus.Pending)</div>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="12" sm="6" md="3">
+            <MudPaper Class="todox-card pa-4">
+                <MudText Typo="Typo.subtitle2">Đã khóa</MudText>
+                <div class="todox-stat-value">@_customers.Count(x => x.Status == TodoXAccountStatus.Locked)</div>
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+
+    <MudPaper Class="todox-table-card pa-4" Rounded="true">
+        <MudTextField T="string" @bind-Value="_search" Placeholder="Tìm theo tên, mã, email..."
+                      Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                      Immediate="true" Class="mb-3" Variant="Variant.Outlined" Margin="Margin.Dense" />
+
+        <MudTable Items="@Filtered" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Class="todox-table">
+            <HeaderContent>
+                <MudTh>Mã KH</MudTh>
+                <MudTh>Tên công ty</MudTh>
+                <MudTh>Người liên hệ</MudTh>
+                <MudTh>Email</MudTh>
+                <MudTh>Số điện thoại</MudTh>
+                <MudTh>Trạng thái</MudTh>
+                <MudTh>Ngày tạo</MudTh>
+                <MudTh Style="text-align:right">Thao tác</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="Mã KH">@context.CustomerCode</MudTd>
+                <MudTd DataLabel="Tên công ty">@context.CompanyName</MudTd>
+                <MudTd DataLabel="Người liên hệ">@context.ContactName</MudTd>
+                <MudTd DataLabel="Email">@context.Email</MudTd>
+                <MudTd DataLabel="Số điện thoại">@context.Phone</MudTd>
+                <MudTd DataLabel="Trạng thái">
+                    <MudChip T="string" Size="Size.Small" Color="@TodoXLabels.StatusColor(context.Status)">@TodoXLabels.Status(context.Status)</MudChip>
+                </MudTd>
+                <MudTd DataLabel="Ngày tạo">@context.CreatedAt.ToString("dd/MM/yyyy")</MudTd>
+                <MudTd DataLabel="Thao tác" Style="text-align:right">
+                    <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="@(() => OpenEdit(context))" />
+                    @if (context.Status == TodoXAccountStatus.Locked)
+                    {
+                        <MudIconButton Icon="@Icons.Material.Filled.LockOpen" Color="Color.Success" Size="Size.Small" OnClick="@(() => SetStatus(context, TodoXAccountStatus.Active))" />
+                    }
+                    else
+                    {
+                        <MudIconButton Icon="@Icons.Material.Filled.Lock" Color="Color.Warning" Size="Size.Small" OnClick="@(() => SetStatus(context, TodoXAccountStatus.Locked))" />
+                    }
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small" OnClick="@(() => Delete(context))" />
+                </MudTd>
+            </RowTemplate>
+            <NoRecordsContent>
+                <MudText Class="pa-4 todox-page-subtitle">Chưa có khách hàng nào.</MudText>
+            </NoRecordsContent>
+        </MudTable>
+    </MudPaper>
+</MudStack>
 
 @code {
-    private List<CustomerRow> CustomerRows { get; } = new()
-    {
-        new("CUS-0001", "Công ty T.A Tư vấn giải pháp", "contact@todox.vn", "0901234567", "Business", "Hoạt động"),
-        new("CUS-0002", "Nguyễn Văn A", "nguyenvana@gmail.com", "0912345678", "Starter", "Hoạt động"),
-        new("CUS-0003", "Trần Thị B", "tranthib@gmail.com", "0923456789", "Pro", "Hoạt động")
-    };
+    private IReadOnlyList<CustomerProfile> _customers = new List<CustomerProfile>();
+    private string _search = string.Empty;
 
-    private sealed record CustomerRow(string Code, string Name, string Email, string Phone, string Plan, string Status);
+    protected override async Task OnInitializedAsync() => await Reload();
+
+    private async Task Reload() => _customers = await Accounts.GetCustomersAsync();
+
+    private IEnumerable<CustomerProfile> Filtered
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(_search))
+            {
+                return _customers;
+            }
+
+            var q = _search.Trim();
+            return _customers.Where(x =>
+                x.CompanyName.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                x.CustomerCode.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                x.ContactName.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                x.Email.Contains(q, StringComparison.OrdinalIgnoreCase));
+        }
+    }
+
+    private async Task OpenCreate()
+    {
+        var dialog = await DialogService.ShowAsync<CustomerDialog>("Thêm khách hàng");
+        var result = await dialog.Result;
+        if (result is not null && !result.Canceled && result.Data is CustomerProfile model)
+        {
+            var (ok, message) = await Accounts.SaveCustomerAsync(model);
+            Snackbar.Add(message, ok ? Severity.Success : Severity.Error);
+            if (ok)
+            {
+                await Audit.LogAsync(AuthState.CurrentUser, "customers", "create", entityDisplay: model.CompanyName);
+                await Reload();
+            }
+        }
+    }
+
+    private async Task OpenEdit(CustomerProfile customer)
+    {
+        var parameters = new DialogParameters<CustomerDialog> { { x => x.Source, customer } };
+        var dialog = await DialogService.ShowAsync<CustomerDialog>("Chỉnh sửa khách hàng", parameters);
+        var result = await dialog.Result;
+        if (result is not null && !result.Canceled && result.Data is CustomerProfile model)
+        {
+            var (ok, message) = await Accounts.SaveCustomerAsync(model);
+            Snackbar.Add(message, ok ? Severity.Success : Severity.Error);
+            if (ok) await Reload();
+        }
+    }
+
+    private async Task SetStatus(CustomerProfile customer, TodoXAccountStatus status)
+    {
+        await Accounts.SetCustomerStatusAsync(customer.Id, status);
+        Snackbar.Add($"Đã cập nhật trạng thái: {TodoXLabels.Status(status)}.", Severity.Success);
+        await Reload();
+    }
+
+    private async Task Delete(CustomerProfile customer)
+    {
+        var confirm = await DialogService.ShowMessageBoxAsync(
+            "Xóa khách hàng",
+            $"Xóa \"{customer.CompanyName}\"? Các tài khoản đăng nhập liên quan cũng sẽ bị xóa.",
+            yesText: "Xóa", cancelText: "Hủy");
+
+        if (confirm == true)
+        {
+            var (ok, message) = await Accounts.DeleteCustomerAsync(customer.Id);
+            Snackbar.Add(message, ok ? Severity.Success : Severity.Error);
+            if (ok)
+            {
+                await Audit.LogAsync(AuthState.CurrentUser, "customers", "delete", entityDisplay: customer.CompanyName);
+                await Reload();
+            }
+        }
+    }
 }

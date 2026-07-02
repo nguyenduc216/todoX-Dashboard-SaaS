@@ -1,15 +1,90 @@
 @page "/render-jobs"
+@inject CatalogRepository Catalog
+@inject AuthStateService AuthState
 
 <PageTitle>Render Jobs</PageTitle>
 
 <MudStack Spacing="3">
     <div>
         <MudText Typo="Typo.h4" Class="todox-page-title">Render Jobs</MudText>
-        <MudText Typo="Typo.body1" Class="todox-page-subtitle">Theo dõi các job prompt, hình ảnh, voice, caption và video.</MudText>
+        <MudText Typo="Typo.body1" Class="todox-page-subtitle">Theo dõi đơn render video/hình ảnh AI của khách hàng.</MudText>
     </div>
 
-    <MudPaper Class="todox-card pa-5" Rounded="true">
-        <MudText Typo="Typo.h6">Danh sách job</MudText>
-        <MudAlert Severity="Severity.Info" Class="mt-4">Module render jobs sẽ kết nối API/Worker ở Sprint sau.</MudAlert>
+    <MudGrid>
+        <MudItem xs="6" sm="6" md="3">
+            <MudPaper Class="todox-card pa-4">
+                <MudText Typo="Typo.subtitle2">Đang xử lý</MudText>
+                <div class="todox-stat-value">@_stats.Processing</div>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="6" sm="6" md="3">
+            <MudPaper Class="todox-card pa-4">
+                <MudText Typo="Typo.subtitle2">Hoàn tất</MudText>
+                <div class="todox-stat-value">@_stats.Completed</div>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="6" sm="6" md="3">
+            <MudPaper Class="todox-card pa-4">
+                <MudText Typo="Typo.subtitle2">Trong hàng đợi</MudText>
+                <div class="todox-stat-value">@_stats.Queued</div>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="6" sm="6" md="3">
+            <MudPaper Class="todox-card pa-4">
+                <MudText Typo="Typo.subtitle2">Lỗi</MudText>
+                <div class="todox-stat-value">@_stats.Failed</div>
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+
+    <MudPaper Class="todox-table-card pa-4" Rounded="true">
+        <MudText Typo="Typo.h6" Class="mb-2">Danh sách đơn render</MudText>
+        <MudDivider Class="mb-3" />
+        <MudTable Items="@_orders" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Class="todox-table">
+            <HeaderContent>
+                <MudTh>Mã đơn</MudTh>
+                <MudTh>Khách hàng</MudTh>
+                <MudTh>Loại</MudTh>
+                <MudTh Style="text-align:right">Thời lượng</MudTh>
+                <MudTh Style="text-align:right">Token ước tính</MudTh>
+                <MudTh>Trạng thái</MudTh>
+                <MudTh>Tạo lúc</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="Mã đơn">@context.OrderCode</MudTd>
+                <MudTd DataLabel="Khách hàng">@context.CustomerName</MudTd>
+                <MudTd DataLabel="Loại">@context.ServiceType</MudTd>
+                <MudTd DataLabel="Thời lượng" Style="text-align:right">@(context.VideoSeconds > 0 ? context.VideoSeconds + "s" : "-")</MudTd>
+                <MudTd DataLabel="Token ước tính" Style="text-align:right">@context.EstimatedTokens.ToString("#,0")</MudTd>
+                <MudTd DataLabel="Trạng thái"><MudChip T="string" Size="Size.Small" Color="@StatusColor(context.Status)">@context.Status</MudChip></MudTd>
+                <MudTd DataLabel="Tạo lúc">@context.CreatedAt.ToString("dd/MM/yyyy HH:mm")</MudTd>
+            </RowTemplate>
+            <NoRecordsContent>
+                <MudStack AlignItems="AlignItems.Center" Class="pa-6" Spacing="2">
+                    <MudIcon Icon="@Icons.Material.Filled.Movie" Size="Size.Large" Class="todox-gold" />
+                    <MudText Class="todox-page-subtitle">Chưa có đơn render nào trong database.</MudText>
+                </MudStack>
+            </NoRecordsContent>
+        </MudTable>
     </MudPaper>
 </MudStack>
+
+@code {
+    private RenderStats _stats = new(0, 0, 0, 0, 0);
+    private IReadOnlyList<RenderOrderView> _orders = new List<RenderOrderView>();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var cid = AuthState.CurrentUser?.IsCustomer == true ? AuthState.CurrentUser.CustomerId : null;
+        _stats = await Catalog.GetRenderStatsAsync(cid);
+        _orders = await Catalog.GetRenderOrdersAsync(customerId: cid);
+    }
+
+    private static Color StatusColor(string status) => status switch
+    {
+        "Completed" or "Done" or "Success" => Color.Success,
+        "Processing" or "Rendering" or "Running" => Color.Info,
+        "Failed" or "Error" => Color.Error,
+        _ => Color.Warning
+    };
+}

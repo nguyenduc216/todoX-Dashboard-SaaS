@@ -1,0 +1,103 @@
+@page "/profile"
+@inject AuthStateService AuthState
+@inject AccountService Accounts
+@inject ISnackbar Snackbar
+
+<PageTitle>Hồ sơ cá nhân</PageTitle>
+
+<MudStack Spacing="3">
+    <div>
+        <MudText Typo="Typo.h4" Class="todox-page-title">Hồ sơ cá nhân</MudText>
+        <MudText Typo="Typo.body1" Class="todox-page-subtitle">Cập nhật thông tin tài khoản và đổi mật khẩu.</MudText>
+    </div>
+
+    <MudGrid>
+        <MudItem xs="12" md="6">
+            <MudPaper Class="todox-card pa-5" Rounded="true">
+                <MudText Typo="Typo.h6">Thông tin tài khoản</MudText>
+                <MudDivider Class="my-3" />
+                <MudTextField T="string" Label="Email" Value="@(AuthState.CurrentUser?.Email)" Variant="Variant.Outlined" ReadOnly="true" Class="mb-3" />
+                <MudTextField T="string" Label="Họ tên" @bind-Value="_fullName" Variant="Variant.Outlined" Class="mb-3" />
+                <MudTextField T="string" Label="Số điện thoại" @bind-Value="_phone" Variant="Variant.Outlined" Class="mb-3" />
+                <MudTextField T="string" Label="Vai trò" Value="@RoleLabel" Variant="Variant.Outlined" ReadOnly="true" Class="mb-4" />
+                <MudButton Class="todox-primary-btn" OnClick="SaveProfile" Disabled="_busy">Lưu thông tin</MudButton>
+            </MudPaper>
+        </MudItem>
+
+        <MudItem xs="12" md="6">
+            <MudPaper Class="todox-card pa-5" Rounded="true">
+                <MudText Typo="Typo.h6">Đổi mật khẩu</MudText>
+                <MudDivider Class="my-3" />
+                <MudTextField T="string" Label="Mật khẩu hiện tại" @bind-Value="_currentPassword" InputType="InputType.Password" Variant="Variant.Outlined" Class="mb-3" />
+                <MudTextField T="string" Label="Mật khẩu mới" @bind-Value="_newPassword" InputType="InputType.Password" Variant="Variant.Outlined" Class="mb-3" />
+                <MudTextField T="string" Label="Xác nhận mật khẩu mới" @bind-Value="_confirmPassword" InputType="InputType.Password" Variant="Variant.Outlined" Class="mb-4"
+                              OnKeyDown="@(e => OnPwKey(e))" />
+                <MudButton Class="todox-primary-btn" OnClick="ChangePassword" Disabled="_busy">Đổi mật khẩu</MudButton>
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+</MudStack>
+
+@code {
+    private string _fullName = string.Empty;
+    private string _phone = string.Empty;
+    private string _currentPassword = string.Empty;
+    private string _newPassword = string.Empty;
+    private string _confirmPassword = string.Empty;
+    private bool _busy;
+
+    private string RoleLabel => AuthState.CurrentUser?.Role switch
+    {
+        TodoXUserRole.Admin => "Quản trị viên",
+        TodoXUserRole.SystemOperator => "Vận hành hệ thống",
+        TodoXUserRole.CustomerOwner => "Chủ tài khoản khách hàng",
+        TodoXUserRole.CustomerUser => "Người dùng khách hàng",
+        _ => ""
+    };
+
+    protected override void OnInitialized()
+    {
+        _fullName = AuthState.CurrentUser?.DisplayName ?? string.Empty;
+    }
+
+    private async Task SaveProfile()
+    {
+        if (AuthState.CurrentUser is null) return;
+        if (string.IsNullOrWhiteSpace(_fullName))
+        {
+            Snackbar.Add("Họ tên không được để trống.", Severity.Warning);
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            await Accounts.UpdateOwnProfileAsync(AuthState.CurrentUser.UserId, _fullName.Trim(), _phone);
+            AuthState.UpdateDisplayName(_fullName.Trim());
+            Snackbar.Add("Đã cập nhật thông tin.", Severity.Success);
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task OnPwKey(KeyboardEventArgs e)
+    {
+        if (e.Key is "Enter" or "NumpadEnter") await ChangePassword();
+    }
+
+    private async Task ChangePassword()
+    {
+        if (AuthState.CurrentUser is null) return;
+        _busy = true;
+        try
+        {
+            var (ok, message) = await Accounts.ChangePasswordAsync(
+                AuthState.CurrentUser.UserId, _currentPassword, _newPassword, _confirmPassword);
+            Snackbar.Add(message, ok ? Severity.Success : Severity.Error);
+            if (ok)
+            {
+                _currentPassword = _newPassword = _confirmPassword = string.Empty;
+            }
+        }
+        finally { _busy = false; }
+    }
+}

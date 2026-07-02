@@ -20,5 +20,15 @@ public sealed class AuthStateService
         NotifyStateChanged();
     }
 
+    /// <summary>Update the cached display name after a profile edit.</summary>
+    public void UpdateDisplayName(string displayName)
+    {
+        if (CurrentUser is not null)
+        {
+            CurrentUser.DisplayName = displayName;
+            NotifyStateChanged();
+        }
+    }
+
     private void NotifyStateChanged() => OnChange?.Invoke();
 }

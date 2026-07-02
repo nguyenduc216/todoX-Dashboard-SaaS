@@ -1,0 +1,93 @@
+@page "/activity-logs"
+@inject AuditRepository Audit
+@inject AuthStateService AuthState
+
+<PageTitle>Nhật ký hoạt động</PageTitle>
+
+<MudStack Spacing="3">
+    <div>
+        <MudText Typo="Typo.h4" Class="todox-page-title">Nhật ký hoạt động</MudText>
+        <MudText Typo="Typo.body1" Class="todox-page-subtitle">
+            @(IsCustomer ? "Lịch sử thao tác của tài khoản bạn." : "Lịch sử thao tác của người dùng trong hệ thống.")
+        </MudText>
+    </div>
+
+    <MudPaper Class="todox-table-card pa-4" Rounded="true">
+        <MudTextField T="string" @bind-Value="_search" Placeholder="Tìm theo người dùng, chức năng, thao tác..."
+                      Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                      Immediate="true" Class="mb-3" Variant="Variant.Outlined" Margin="Margin.Dense" />
+
+        <MudTable Items="@Filtered" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Class="todox-table" Loading="_loading">
+            <HeaderContent>
+                <MudTh>Thời gian</MudTh>
+                <MudTh>Người thực hiện</MudTh>
+                <MudTh>Chức năng</MudTh>
+                <MudTh>Thao tác</MudTh>
+                <MudTh>Đối tượng</MudTh>
+                <MudTh>Kết quả</MudTh>
+                <MudTh>Chi tiết</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="Thời gian">@context.OccurredAt.ToString("dd/MM/yyyy HH:mm:ss")</MudTd>
+                <MudTd DataLabel="Người thực hiện">@(context.ActorDisplayName ?? context.ActorEmail ?? "—")</MudTd>
+                <MudTd DataLabel="Chức năng">@ModuleLabel(context.Module)</MudTd>
+                <MudTd DataLabel="Thao tác">@ActionLabel(context.Action)</MudTd>
+                <MudTd DataLabel="Đối tượng">@(context.EntityDisplay ?? "—")</MudTd>
+                <MudTd DataLabel="Kết quả">
+                    <MudChip T="string" Size="Size.Small" Color="@(context.Result == "success" ? Color.Success : Color.Error)">@context.Result</MudChip>
+                </MudTd>
+                <MudTd DataLabel="Chi tiết">@(context.Message ?? "")</MudTd>
+            </RowTemplate>
+            <NoRecordsContent>
+                <MudText Class="pa-4 todox-page-subtitle">Chưa có nhật ký hoạt động.</MudText>
+            </NoRecordsContent>
+        </MudTable>
+    </MudPaper>
+</MudStack>
+
+@code {
+    private bool _loading = true;
+    private string _search = string.Empty;
+    private IReadOnlyList<AuditLogView> _logs = new List<AuditLogView>();
+
+    private bool IsCustomer => AuthState.CurrentUser?.IsCustomer == true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (AuthState.CurrentUser is not null)
+        {
+            _logs = await Audit.GetRecentAsync(AuthState.CurrentUser);
+        }
+        _loading = false;
+    }
+
+    private IEnumerable<AuditLogView> Filtered
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(_search)) return _logs;
+            var q = _search.Trim();
+            return _logs.Where(x =>
+                (x.ActorDisplayName?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (x.ActorEmail?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                x.Module.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                x.Action.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                (x.EntityDisplay?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false));
+        }
+    }
+
+    private static string ActionLabel(string a) => a switch
+    {
+        "view" => "Xem", "create" => "Thêm", "update" => "Sửa", "delete" => "Xóa",
+        "login" => "Đăng nhập", "logout" => "Đăng xuất", "reset_password" => "Đặt lại MK",
+        "verify" => "Xác thực", _ => a
+    };
+
+    private static string ModuleLabel(string m) => m switch
+    {
+        "admin_users" => "Quản trị viên", "customers" => "Khách hàng", "customer_accounts" => "Tài khoản KH",
+        "customer_pages" => "Trang mạng xã hội", "token_wallets" => "Ví token", "services" => "Dịch vụ",
+        "render_jobs" => "Render Jobs", "api_providers" => "Cài đặt API", "settings" => "Cài đặt",
+        "permissions" => "Phân quyền", "auth" => "Xác thực", _ => m
+    };
+}

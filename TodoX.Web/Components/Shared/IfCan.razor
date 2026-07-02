@@ -1,0 +1,42 @@
+@using TodoX.Web.Services
+@inject AuthStateService AuthState
+
+@if (_allowed)
+{
+    @ChildContent
+}
+
+@code {
+    /// <summary>Permission code required, e.g. "services.create". If empty, only requires being authenticated.</summary>
+    [Parameter] public string? Permission { get; set; }
+
+    /// <summary>Alternative: require any action on this module (visibility check).</summary>
+    [Parameter] public string? Module { get; set; }
+
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    private bool _allowed;
+
+    protected override void OnParametersSet()
+    {
+        var user = AuthState.CurrentUser;
+        if (user is null || !user.IsAuthenticated)
+        {
+            _allowed = false;
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(Permission))
+        {
+            _allowed = user.Can(Permission);
+        }
+        else if (!string.IsNullOrWhiteSpace(Module))
+        {
+            _allowed = user.CanViewModule(Module);
+        }
+        else
+        {
+            _allowed = true;
+        }
+    }
+}

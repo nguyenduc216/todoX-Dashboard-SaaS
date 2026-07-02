@@ -2,6 +2,7 @@
 @layout AuthLayout
 @inject AccountService Accounts
 @inject AuthStateService AuthState
+@inject AuditRepository Audit
 @inject NavigationManager Navigation
 @inject ISnackbar Snackbar
 
@@ -22,10 +23,14 @@
             <MudText Typo="Typo.h5" Class="todox-page-title">Đăng nhập</MudText>
             <MudText Typo="Typo.body2" Class="todox-page-subtitle mb-5">Truy cập bảng điều khiển TodoX.</MudText>
 
-            <MudTextField T="string" Label="Email hoặc username" Variant="Variant.Outlined" @bind-Value="_login.UsernameOrEmail" Immediate="true" Class="mb-3" />
-            <MudTextField T="string" Label="Mật khẩu" Variant="Variant.Outlined" @bind-Value="_login.Password" InputType="InputType.Password" Class="mb-4" />
+            <MudTextField T="string" Label="Email hoặc username" Variant="Variant.Outlined" @bind-Value="_login.UsernameOrEmail" Immediate="true" Class="mb-3" OnKeyDown="OnKey" />
+            <MudTextField T="string" Label="Mật khẩu" Variant="Variant.Outlined" @bind-Value="_login.Password" InputType="InputType.Password" Class="mb-2" Immediate="true" OnKeyDown="OnKey" />
 
-            <MudButton FullWidth="true" Class="todox-primary-btn" OnClick="DoLogin">Đăng nhập</MudButton>
+            <div class="d-flex justify-end mb-3">
+                <MudLink Href="/forgot-password" Class="todox-gold" Typo="Typo.body2">Quên mật khẩu?</MudLink>
+            </div>
+
+            <MudButton FullWidth="true" Class="todox-primary-btn" OnClick="DoLogin" Disabled="_busy">Đăng nhập</MudButton>
 
             <MudText Typo="Typo.body2" Align="Align.Center" Class="mt-5 todox-page-subtitle">
                 Chưa có tài khoản? <MudLink Href="/register" Class="todox-gold">Đăng ký khách hàng</MudLink>
@@ -35,19 +40,32 @@
 </div>
 
 @code {
-    private readonly LoginRequest _login = new() { UsernameOrEmail = "admin", Password = "toDOx@123#2026" };
+    private readonly LoginRequest _login = new();
+    private bool _busy;
 
-    private void DoLogin()
+    private async Task OnKey(KeyboardEventArgs e)
     {
-        var user = Accounts.Login(_login);
-        if (user is null)
-        {
-            Snackbar.Add("Sai thông tin đăng nhập hoặc tài khoản chưa active.", Severity.Error);
-            return;
-        }
+        if (e.Key is "Enter" or "NumpadEnter") await DoLogin();
+    }
 
-        AuthState.SignIn(user);
-        Snackbar.Add("Đăng nhập thành công.", Severity.Success);
-        Navigation.NavigateTo("/");
+    private async Task DoLogin()
+    {
+        if (_busy) return;
+        _busy = true;
+        try
+        {
+            var user = await Accounts.LoginAsync(_login);
+            if (user is null)
+            {
+                Snackbar.Add("Sai thông tin đăng nhập hoặc tài khoản chưa active.", Severity.Error);
+                return;
+            }
+
+            AuthState.SignIn(user);
+            await Audit.LogAsync(user, "auth", "login", entityDisplay: user.Email, message: "Đăng nhập thành công");
+            Snackbar.Add("Đăng nhập thành công.", Severity.Success);
+            Navigation.NavigateTo("/");
+        }
+        finally { _busy = false; }
     }
 }

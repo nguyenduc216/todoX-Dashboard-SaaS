@@ -1,0 +1,144 @@
+@page "/api-settings"
+@inject AutomationSettingsRepository Settings
+@inject ISnackbar Snackbar
+
+<PageTitle>Cài đặt API</PageTitle>
+
+<MudStack Spacing="3">
+    <div>
+        <MudText Typo="Typo.h4" Class="todox-page-title">Cài đặt API &amp; Provider</MudText>
+        <MudText Typo="Typo.body1" Class="todox-page-subtitle">
+            Cấu hình khóa API và tham số cho Google Cloud, Woku, Veo, OpenRouter, TTS... (nguồn: database todox).
+        </MudText>
+    </div>
+
+    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true">
+        Giá trị bí mật (API key/secret) được ẩn để bảo mật. Bạn có thể nhập giá trị mới để cập nhật.
+    </MudAlert>
+
+    @if (_loading)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+    }
+    else
+    {
+        @foreach (var group in _groups)
+        {
+            <MudPaper Class="todox-card pa-5" Rounded="true">
+                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="mb-1">
+                    <MudIcon Icon="@CategoryIcon(group.Name)" Class="todox-gold" />
+                    <MudText Typo="Typo.h6">@CategoryLabel(group.Name)</MudText>
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Text">@group.Settings.Count mục</MudChip>
+                </MudStack>
+                <MudDivider Class="my-3" />
+                <MudTable Items="@group.Settings" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Class="todox-table">
+                    <HeaderContent>
+                        <MudTh>Khóa</MudTh>
+                        <MudTh>Giá trị</MudTh>
+                        <MudTh Style="text-align:right">Thao tác</MudTh>
+                    </HeaderContent>
+                    <RowTemplate>
+                        <MudTd DataLabel="Khóa">
+                            <div class="todox-setting-key">@context.Key</div>
+                            @if (!string.IsNullOrWhiteSpace(context.Description))
+                            {
+                                <div class="todox-setting-desc">@context.Description</div>
+                            }
+                        </MudTd>
+                        <MudTd DataLabel="Giá trị">
+                            @if (context.IsSecret)
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="@(context.IsConfigured ? Color.Success : Color.Default)"
+                                         Icon="@Icons.Material.Filled.Key">
+                                    @(context.IsConfigured ? "Đã cấu hình" : "Chưa cấu hình")
+                                </MudChip>
+                            }
+                            else if (context.ValueType == "boolean")
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="@(IsTrue(context.Value) ? Color.Success : Color.Default)">
+                                    @(IsTrue(context.Value) ? "Bật" : "Tắt")
+                                </MudChip>
+                            }
+                            else
+                            {
+                                <span class="todox-setting-value">@context.DisplayValue</span>
+                            }
+                        </MudTd>
+                        <MudTd DataLabel="Thao tác" Style="text-align:right">
+                            <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="@(() => Edit(context))" />
+                        </MudTd>
+                    </RowTemplate>
+                </MudTable>
+            </MudPaper>
+        }
+    }
+</MudStack>
+
+@code {
+    private bool _loading = true;
+    private IReadOnlyList<SettingCategory> _groups = new List<SettingCategory>();
+
+    // Provider/config categories most relevant to the admin (skip internal debug/paths noise).
+    private static readonly string[] ShownCategories =
+        { "woku", "vertex", "veo", "google", "cloudgemini", "openrouter", "llm", "tts", "telegram", "minio", "n8n", "api" };
+
+    protected override async Task OnInitializedAsync() => await Reload();
+
+    private async Task Reload()
+    {
+        _loading = true;
+        _groups = await Settings.GetGroupedAsync(ShownCategories);
+        _loading = false;
+    }
+
+    private static bool IsTrue(string? v) => v is "true" or "1" or "True" or "yes";
+
+    private async Task Edit(ProviderSetting setting)
+    {
+        var parameters = new DialogParameters<Components.Dialogs.SettingEditDialog>
+        {
+            { x => x.Setting, setting }
+        };
+        var dialog = await DialogServiceRef.ShowAsync<Components.Dialogs.SettingEditDialog>("Cập nhật cài đặt", parameters);
+        var result = await dialog.Result;
+        if (result is not null && !result.Canceled && result.Data is string newValue)
+        {
+            await Settings.UpdateAsync(setting.Key, newValue);
+            Snackbar.Add($"Đã cập nhật '{setting.Key}'.", Severity.Success);
+            await Reload();
+        }
+    }
+
+    [Inject] private IDialogService DialogServiceRef { get; set; } = default!;
+
+    private static string CategoryLabel(string c) => c switch
+    {
+        "woku" => "Woku Shop API",
+        "vertex" => "Google Vertex AI",
+        "veo" => "Veo (Video Generation)",
+        "google" => "Google Cloud",
+        "cloudgemini" => "Cloud Gemini",
+        "openrouter" => "OpenRouter",
+        "llm" => "LLM Router",
+        "tts" => "Text-to-Speech",
+        "telegram" => "Telegram Bot",
+        "minio" => "MinIO Storage",
+        "n8n" => "n8n Webhooks",
+        "api" => "Automation API",
+        _ => c
+    };
+
+    private static string CategoryIcon(string c) => c switch
+    {
+        "woku" => Icons.Material.Filled.ShoppingCart,
+        "vertex" or "google" or "cloudgemini" => Icons.Material.Filled.Cloud,
+        "veo" => Icons.Material.Filled.Movie,
+        "openrouter" or "llm" => Icons.Material.Filled.Hub,
+        "tts" => Icons.Material.Filled.RecordVoiceOver,
+        "telegram" => Icons.Material.Filled.Send,
+        "minio" => Icons.Material.Filled.Storage,
+        "n8n" => Icons.Material.Filled.AccountTree,
+        "api" => Icons.Material.Filled.Api,
+        _ => Icons.Material.Filled.Settings
+    };
+}

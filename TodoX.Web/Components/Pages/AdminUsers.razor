@@ -1,5 +1,7 @@
 @page "/admin-users"
+@using TodoX.Web.Components.Dialogs
 @inject AccountService Accounts
+@inject IDialogService DialogService
 @inject ISnackbar Snackbar
 
 <PageTitle>Quản trị viên</PageTitle>
@@ -10,11 +12,13 @@
             <MudText Typo="Typo.h4" Class="todox-page-title">Quản lý tài khoản quản trị</MudText>
             <MudText Typo="Typo.body1" Class="todox-page-subtitle">Danh sách tài khoản quản trị và vận hành hệ thống TodoX.</MudText>
         </div>
-        <MudButton Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.Add" OnClick="AddSampleAdmin">Thêm quản trị viên</MudButton>
+        <IfCan Permission="admin_users.create">
+            <MudButton Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.Add" OnClick="OpenCreate">Thêm quản trị viên</MudButton>
+        </IfCan>
     </MudStack>
 
     <MudPaper Class="todox-table-card pa-4" Rounded="true">
-        <MudTable Items="@SystemUsers" Hover="true" Dense="true" Breakpoint="Breakpoint.Sm">
+        <MudTable Items="@_users" Hover="true" Dense="true" Breakpoint="Breakpoint.Sm" Class="todox-table">
             <HeaderContent>
                 <MudTh>Họ tên</MudTh>
                 <MudTh>Username</MudTh>
@@ -22,42 +26,88 @@
                 <MudTh>Vai trò</MudTh>
                 <MudTh>Trạng thái</MudTh>
                 <MudTh>Ngày tạo</MudTh>
+                <MudTh Style="text-align:right">Thao tác</MudTh>
             </HeaderContent>
             <RowTemplate>
                 <MudTd DataLabel="Họ tên">@context.FullName</MudTd>
                 <MudTd DataLabel="Username">@context.Username</MudTd>
                 <MudTd DataLabel="Email">@context.Email</MudTd>
-                <MudTd DataLabel="Vai trò"><span class="todox-badge">@context.Role</span></MudTd>
-                <MudTd DataLabel="Trạng thái">@StatusLabel(context.Status)</MudTd>
+                <MudTd DataLabel="Vai trò"><span class="todox-badge">@TodoXLabels.Role(context.Role)</span></MudTd>
+                <MudTd DataLabel="Trạng thái">
+                    <MudChip T="string" Size="Size.Small" Color="@TodoXLabels.StatusColor(context.Status)">@TodoXLabels.Status(context.Status)</MudChip>
+                </MudTd>
                 <MudTd DataLabel="Ngày tạo">@context.CreatedAt.ToString("dd/MM/yyyy")</MudTd>
+                <MudTd DataLabel="Thao tác" Style="text-align:right">
+                    <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="@(() => OpenEdit(context))" />
+                    @if (context.Status == TodoXAccountStatus.Locked)
+                    {
+                        <MudIconButton Icon="@Icons.Material.Filled.LockOpen" Color="Color.Success" Size="Size.Small" OnClick="@(() => SetStatus(context, TodoXAccountStatus.Active))" />
+                    }
+                    else
+                    {
+                        <MudIconButton Icon="@Icons.Material.Filled.Lock" Color="Color.Warning" Size="Size.Small" OnClick="@(() => SetStatus(context, TodoXAccountStatus.Locked))" />
+                    }
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small" OnClick="@(() => Delete(context))" />
+                </MudTd>
             </RowTemplate>
+            <NoRecordsContent>
+                <MudText Class="pa-4 todox-page-subtitle">Chưa có quản trị viên nào.</MudText>
+            </NoRecordsContent>
         </MudTable>
     </MudPaper>
 </MudStack>
 
 @code {
-    private IReadOnlyList<SystemUser> SystemUsers => Accounts.GetSystemUsers();
+    private IReadOnlyList<SystemUser> _users = new List<SystemUser>();
 
-    private static string StatusLabel(TodoXAccountStatus status) => status switch
-    {
-        TodoXAccountStatus.Active => "Hoạt động",
-        TodoXAccountStatus.Pending => "Chờ duyệt",
-        TodoXAccountStatus.Locked => "Đã khóa",
-        _ => status.ToString()
-    };
+    protected override async Task OnInitializedAsync() => await Reload();
 
-    private void AddSampleAdmin()
+    private async Task Reload() => _users = await Accounts.GetSystemUsersAsync();
+
+    private async Task OpenCreate()
     {
-        Accounts.AddSystemUser(new SystemUser
+        var dialog = await DialogService.ShowAsync<SystemUserDialog>("Thêm quản trị viên");
+        var result = await dialog.Result;
+        if (result is not null && !result.Canceled && result.Data is SystemUser model)
         {
-            Username = $"operator{SystemUsers.Count + 1}",
-            FullName = $"TodoX Operator {SystemUsers.Count + 1}",
-            Email = $"operator{SystemUsers.Count + 1}@todox.local",
-            Phone = "0900000000",
-            Password = "TodoX@123",
-            Role = TodoXUserRole.SystemOperator,
-            Status = TodoXAccountStatus.Active
-        });
-        Snackbar.Add("Đã thêm quản trị viên mẫu.", Severity.Success);
+            var (ok, message) = await Accounts.SaveSystemUserAsync(model);
+            Snackbar.Add(message, ok ? Severity.Success : Severity.Error);
+            if (ok) await Reload();
+        }
+    }
+
+    private async Task OpenEdit(SystemUser user)
+    {
+        var parameters = new DialogParameters<SystemUserDialog> { { x => x.Source, user } };
+        var dialog = await DialogService.ShowAsync<SystemUserDialog>("Chỉnh sửa quản trị viên", parameters);
+        var result = await dialog.Result;
+        if (result is not null && !result.Canceled && result.Data is SystemUser model)
+        {
+            var (ok, message) = await Accounts.SaveSystemUserAsync(model);
+            Snackbar.Add(message, ok ? Severity.Success : Severity.Error);
+            if (ok) await Reload();
+        }
+    }
+
+    private async Task SetStatus(SystemUser user, TodoXAccountStatus status)
+    {
+        await Accounts.SetSystemUserStatusAsync(user.Id, status);
+        Snackbar.Add($"Đã cập nhật trạng thái: {TodoXLabels.Status(status)}.", Severity.Success);
+        await Reload();
+    }
+
+    private async Task Delete(SystemUser user)
+    {
+        var confirm = await DialogService.ShowMessageBoxAsync(
+            "Xóa quản trị viên",
+            $"Xóa tài khoản \"{user.Username}\"?",
+            yesText: "Xóa", cancelText: "Hủy");
+
+        if (confirm == true)
+        {
+            var (ok, message) = await Accounts.DeleteSystemUserAsync(user.Id);
+            Snackbar.Add(message, ok ? Severity.Success : Severity.Error);
+            if (ok) await Reload();
+        }
     }
 }

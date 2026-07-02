@@ -1,0 +1,93 @@
+@using TodoX.Web.Services
+@inject CatalogAdminRepository Catalog
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">Bảng giá · @Service.ServiceName</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudTable Items="@_tiers" Dense="true" Hover="true" Class="todox-table mb-4">
+            <HeaderContent>
+                <MudTh>Mã gói</MudTh>
+                <MudTh>Tên gói</MudTh>
+                <MudTh Style="text-align:right">Token</MudTh>
+                <MudTh Style="text-align:right">Giá (đ)</MudTh>
+                <MudTh Style="text-align:right">Tối đa (s)</MudTh>
+                <MudTh>Mặc định</MudTh>
+                <MudTh></MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd>@context.TierCode</MudTd>
+                <MudTd>@context.TierName</MudTd>
+                <MudTd Style="text-align:right">@context.TokenCost.ToString("#,0")</MudTd>
+                <MudTd Style="text-align:right">@(context.CurrencyPrice?.ToString("#,0") ?? "—")</MudTd>
+                <MudTd Style="text-align:right">@(context.MaxDurationSec?.ToString() ?? "—")</MudTd>
+                <MudTd>@(context.IsDefault ? "✔" : "")</MudTd>
+                <MudTd Style="text-align:right">
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small" OnClick="@(() => DeleteTier(context))" />
+                </MudTd>
+            </RowTemplate>
+            <NoRecordsContent><MudText Class="pa-3 todox-page-subtitle">Chưa có gói giá nào.</MudText></NoRecordsContent>
+        </MudTable>
+
+        <MudText Typo="Typo.subtitle2" Class="mb-2">Thêm gói giá</MudText>
+        <MudGrid Spacing="2">
+            <MudItem xs="6" sm="4"><MudTextField T="string" Label="Mã gói" @bind-Value="_new.TierCode" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="6" sm="4"><MudTextField T="string" Label="Tên gói" @bind-Value="_new.TierName" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+            <MudItem xs="6" sm="4"><MudNumericField T="decimal" Label="Token" @bind-Value="_new.TokenCost" Variant="Variant.Outlined" Margin="Margin.Dense" HideSpinButtons="true" /></MudItem>
+            <MudItem xs="6" sm="4"><MudNumericField T="decimal?" Label="Giá (đ)" @bind-Value="_new.CurrencyPrice" Variant="Variant.Outlined" Margin="Margin.Dense" HideSpinButtons="true" /></MudItem>
+            <MudItem xs="6" sm="4"><MudNumericField T="int?" Label="Tối đa (giây)" @bind-Value="_new.MaxDurationSec" Variant="Variant.Outlined" Margin="Margin.Dense" HideSpinButtons="true" /></MudItem>
+            <MudItem xs="6" sm="4" Class="d-flex align-center"><MudSwitch T="bool" @bind-Value="_new.IsDefault" Color="Color.Warning" Label="Mặc định" /></MudItem>
+            <MudItem xs="12" Class="d-flex justify-end">
+                <MudButton Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.Add" OnClick="AddTier">Thêm gói</MudButton>
+            </MudItem>
+        </MudGrid>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Close">Đóng</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public ServiceDto Service { get; set; } = default!;
+
+    private IReadOnlyList<ServicePricingTierDto> _tiers = new List<ServicePricingTierDto>();
+    private ServicePricingTierDto _new = new();
+
+    protected override async Task OnInitializedAsync() => await Reload();
+
+    private async Task Reload() => _tiers = await Catalog.GetTiersAsync(Service.Id);
+
+    private async Task AddTier()
+    {
+        if (string.IsNullOrWhiteSpace(_new.TierCode) || string.IsNullOrWhiteSpace(_new.TierName))
+        {
+            Snackbar.Add("Nhập mã và tên gói.", Severity.Warning);
+            return;
+        }
+        _new.ServiceId = Service.Id;
+        _new.IsActive = true;
+        try
+        {
+            await Catalog.InsertTierAsync(_new);
+            Snackbar.Add("Đã thêm gói giá.", Severity.Success);
+            _new = new ServicePricingTierDto();
+            await Reload();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Lỗi: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task DeleteTier(ServicePricingTierDto t)
+    {
+        await Catalog.DeleteTierAsync(t.Id);
+        Snackbar.Add("Đã xóa gói giá.", Severity.Success);
+        await Reload();
+    }
+
+    private void Close() => MudDialog.Close();
+}

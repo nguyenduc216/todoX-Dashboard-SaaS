@@ -1,26 +1,117 @@
 @page "/wallets"
+@inject BillingRepository Billing
+@inject AuthStateService AuthState
 
-<PageTitle>Ví token</PageTitle>
+<PageTitle>Quản lý token</PageTitle>
 
 <MudStack Spacing="3">
     <div>
-        <MudText Typo="Typo.h4" Class="todox-page-title">Ví token</MudText>
-        <MudText Typo="Typo.body1" Class="todox-page-subtitle">Khu vực quản lý số dư token và giao dịch sử dụng dịch vụ AI.</MudText>
+        <MudText Typo="Typo.h4" Class="todox-page-title">Quản lý token</MudText>
+        <MudText Typo="Typo.body1" Class="todox-page-subtitle">Theo dõi số dư token và giao dịch sử dụng dịch vụ AI của khách hàng.</MudText>
     </div>
 
     <MudGrid>
-        <MudItem xs="12" md="4">
-            <MudPaper Class="todox-card pa-5" Rounded="true">
-                <MudText Typo="Typo.subtitle2">Tổng token</MudText>
-                <div class="todox-stat-value">0</div>
-                <MudText Typo="Typo.caption" Class="todox-page-subtitle">Sẽ kết nối PostgreSQL ở Sprint tiếp theo</MudText>
+        <MudItem xs="12" sm="6" md="3">
+            <MudPaper Class="todox-card pa-4">
+                <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+                    <MudText Typo="Typo.subtitle2">Tổng token đã bán</MudText>
+                    <MudIcon Icon="@Icons.Material.Filled.Token" Class="todox-gold" />
+                </MudStack>
+                <div class="todox-stat-value">@_summary.SoldTotal.ToString("#,0")</div>
             </MudPaper>
         </MudItem>
-        <MudItem xs="12" md="8">
-            <MudPaper Class="todox-card pa-5" Rounded="true">
-                <MudText Typo="Typo.h6">Giao dịch gần đây</MudText>
-                <MudAlert Severity="Severity.Info" Class="mt-4">Module ví token đang ở trạng thái placeholder.</MudAlert>
+        <MudItem xs="12" sm="6" md="3">
+            <MudPaper Class="todox-card pa-4">
+                <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+                    <MudText Typo="Typo.subtitle2">Số dư khả dụng</MudText>
+                    <MudIcon Icon="@Icons.Material.Filled.AccountBalanceWallet" Class="todox-gold" />
+                </MudStack>
+                <div class="todox-stat-value">@_summary.TotalBalance.ToString("#,0")</div>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="12" sm="6" md="3">
+            <MudPaper Class="todox-card pa-4">
+                <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+                    <MudText Typo="Typo.subtitle2">Token tạm giữ</MudText>
+                    <MudIcon Icon="@Icons.Material.Filled.Lock" Class="todox-gold" />
+                </MudStack>
+                <div class="todox-stat-value">@_summary.TotalLocked.ToString("#,0")</div>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="12" sm="6" md="3">
+            <MudPaper Class="todox-card pa-4">
+                <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+                    <MudText Typo="Typo.subtitle2">Số ví</MudText>
+                    <MudIcon Icon="@Icons.Material.Filled.Wallet" Class="todox-gold" />
+                </MudStack>
+                <div class="todox-stat-value">@_summary.WalletCount</div>
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+
+    <MudGrid>
+        <MudItem xs="12" lg="5">
+            <MudPaper Class="todox-table-card pa-4" Rounded="true">
+                <MudText Typo="Typo.h6" Class="mb-2">Ví token theo khách hàng</MudText>
+                <MudDivider Class="mb-3" />
+                <MudTable Items="@_wallets" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Class="todox-table">
+                    <HeaderContent>
+                        <MudTh>Khách hàng</MudTh>
+                        <MudTh Style="text-align:right">Số dư</MudTh>
+                        <MudTh Style="text-align:right">Tạm giữ</MudTh>
+                        <MudTh>Trạng thái</MudTh>
+                    </HeaderContent>
+                    <RowTemplate>
+                        <MudTd DataLabel="Khách hàng">@context.CustomerName</MudTd>
+                        <MudTd DataLabel="Số dư" Style="text-align:right">@context.Balance.ToString("#,0")</MudTd>
+                        <MudTd DataLabel="Tạm giữ" Style="text-align:right">@context.LockedBalance.ToString("#,0")</MudTd>
+                        <MudTd DataLabel="Trạng thái"><MudChip T="string" Size="Size.Small" Color="Color.Success">@context.Status</MudChip></MudTd>
+                    </RowTemplate>
+                    <NoRecordsContent>
+                        <MudText Class="pa-4 todox-page-subtitle">Chưa có ví token nào.</MudText>
+                    </NoRecordsContent>
+                </MudTable>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="12" lg="7">
+            <MudPaper Class="todox-table-card pa-4" Rounded="true">
+                <MudText Typo="Typo.h6" Class="mb-2">Giao dịch token gần đây</MudText>
+                <MudDivider Class="mb-3" />
+                <MudTable Items="@_transactions" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Class="todox-table">
+                    <HeaderContent>
+                        <MudTh>Thời gian</MudTh>
+                        <MudTh>Khách hàng</MudTh>
+                        <MudTh>Loại</MudTh>
+                        <MudTh Style="text-align:right">Số lượng</MudTh>
+                        <MudTh Style="text-align:right">Số dư sau</MudTh>
+                    </HeaderContent>
+                    <RowTemplate>
+                        <MudTd DataLabel="Thời gian">@context.CreatedAt.ToString("dd/MM HH:mm")</MudTd>
+                        <MudTd DataLabel="Khách hàng">@context.CustomerName</MudTd>
+                        <MudTd DataLabel="Loại">@context.TransactionType</MudTd>
+                        <MudTd DataLabel="Số lượng" Style="text-align:right">@context.Amount.ToString("#,0")</MudTd>
+                        <MudTd DataLabel="Số dư sau" Style="text-align:right">@context.BalanceAfter.ToString("#,0")</MudTd>
+                    </RowTemplate>
+                    <NoRecordsContent>
+                        <MudText Class="pa-4 todox-page-subtitle">Chưa có giao dịch token nào.</MudText>
+                    </NoRecordsContent>
+                </MudTable>
             </MudPaper>
         </MudItem>
     </MudGrid>
 </MudStack>
+
+@code {
+    private TokenSummary _summary = new(0, 0, 0, 0);
+    private IReadOnlyList<WalletView> _wallets = new List<WalletView>();
+    private IReadOnlyList<TransactionView> _transactions = new List<TransactionView>();
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Customers see only their own wallet/transactions; admins see all.
+        var cid = AuthState.CurrentUser?.IsCustomer == true ? AuthState.CurrentUser.CustomerId : null;
+        _summary = await Billing.GetSummaryAsync(cid);
+        _wallets = await Billing.GetWalletsAsync(cid);
+        _transactions = await Billing.GetRecentTransactionsAsync(cid);
+    }
+}

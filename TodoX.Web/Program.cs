@@ -1,4 +1,5 @@
 using TodoX.Web.Components;
+using TodoX.Web.Data;
 using TodoX.Web.Services;
 using MudBlazor.Services;
 
@@ -11,14 +12,35 @@ builder.Services.AddRazorComponents()
 // TodoX UI services.
 builder.Services.AddMudServices();
 
-// Sprint 2B application services.
-// This Sprint uses an in-memory store so the UI can be tested immediately.
-// PostgreSQL schema/seed scripts are included in /database and will be wired to EF Core in the next Sprint.
-builder.Services.AddSingleton<TodoXMockDataStore>();
-builder.Services.AddScoped<AuthStateService>();
+// Data access to todo_saas (Foundation V2) via Npgsql + Dapper.
+builder.Services.AddSingleton<TodoXConnectionFactory>();
+builder.Services.AddSingleton<TodoXAutomationConnectionFactory>();
+builder.Services.AddSingleton<TenantContext>();
+builder.Services.AddSingleton<PasswordHasher>();
+builder.Services.AddScoped<AccountRepository>();
+builder.Services.AddScoped<CustomerRepository>();
+builder.Services.AddScoped<PermissionRepository>();
+builder.Services.AddScoped<AuditRepository>();
+builder.Services.AddScoped<BillingRepository>();
+builder.Services.AddScoped<CatalogRepository>();
+builder.Services.AddScoped<CatalogAdminRepository>();
+builder.Services.AddScoped<SocialPageRepository>();
+builder.Services.AddScoped<AutomationSettingsRepository>();
+builder.Services.AddHttpClient<FacebookGraphService>();
 builder.Services.AddScoped<AccountService>();
+builder.Services.AddScoped<AuthStateService>();
+builder.Services.AddScoped<StartupSeedFixer>();
 
 var app = builder.Build();
+
+// Load tenant and repair placeholder seed credentials (writes data only, never schema).
+using (var scope = app.Services.CreateScope())
+{
+    var tenant = scope.ServiceProvider.GetRequiredService<TenantContext>();
+    await tenant.EnsureLoadedAsync();
+    var fixer = scope.ServiceProvider.GetRequiredService<StartupSeedFixer>();
+    await fixer.RunAsync();
+}
 
 // Configure the HTTP request pipeline.
 if (!app.Environment.IsDevelopment())

@@ -9,6 +9,9 @@
 
   <ItemGroup>
     <PackageReference Include="MudBlazor" Version="9.6.0" />
+    <PackageReference Include="Npgsql" Version="9.0.2" />
+    <PackageReference Include="Dapper" Version="2.1.66" />
+    <PackageReference Include="BCrypt.Net-Next" Version="4.0.3" />
   </ItemGroup>
 
   <!-- Stale published output lives under ./publish and must not be scanned by the build -->

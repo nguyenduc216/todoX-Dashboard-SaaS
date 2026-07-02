@@ -295,6 +295,103 @@ h4 {
     font-weight: 900;
 }
 
+.todox-kv-table td {
+    padding: 8px 4px;
+    border: none !important;
+    color: var(--todox-text);
+}
+
+.todox-kv-table td:first-child {
+    color: var(--todox-muted);
+    width: 42%;
+}
+
+.todox-setting-key {
+    font-family: "Consolas", "Menlo", monospace;
+    font-weight: 700;
+    color: #ffffff;
+}
+
+.todox-setting-desc {
+    font-size: 12px;
+    color: var(--todox-muted);
+    margin-top: 2px;
+}
+
+.todox-setting-value {
+    font-family: "Consolas", "Menlo", monospace;
+    color: #c6d0dd;
+    word-break: break-all;
+}
+
+.todox-service-card {
+    overflow: hidden;
+    padding: 0 !important;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+.todox-service-cover {
+    position: relative;
+    height: 132px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, rgba(255, 183, 0, .14), rgba(8, 12, 18, .6));
+    border-bottom: 1px solid rgba(255, 183, 0, .18);
+}
+
+.todox-service-status {
+    position: absolute !important;
+    top: 10px;
+    right: 10px;
+}
+
+.todox-service-desc {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    min-height: 40px;
+}
+
+.todox-service-price {
+    color: var(--todox-gold);
+    font-size: 1.35rem;
+    font-weight: 900;
+}
+
+.todox-service-price-unit {
+    color: var(--todox-muted);
+    font-size: .8rem;
+    margin-left: 4px;
+}
+
+.todox-perm-table {
+    background: transparent !important;
+}
+
+.todox-perm-table th {
+    color: var(--todox-gold) !important;
+    font-weight: 700;
+    white-space: nowrap;
+    padding: 10px 8px !important;
+    position: sticky;
+    top: 0;
+    background: rgba(5, 8, 13, .9);
+}
+
+.todox-perm-table td {
+    color: var(--todox-text) !important;
+    padding: 4px 8px !important;
+    border-bottom: 1px solid rgba(255, 255, 255, .05) !important;
+}
+
+.todox-perm-na {
+    color: rgba(255, 255, 255, .2);
+}
+
 .todox-gold {
     color: var(--todox-gold) !important;
 }

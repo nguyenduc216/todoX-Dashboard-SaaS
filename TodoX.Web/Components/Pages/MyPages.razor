@@ -1,0 +1,183 @@
+@page "/my-pages"
+@using TodoX.Web.Components.Dialogs
+@inject AuthStateService AuthState
+@inject SocialPageRepository Pages
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+@inject NavigationManager Nav
+
+<PageTitle>Trang mạng xã hội</PageTitle>
+
+<MudStack Spacing="3">
+    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-3">
+        <div>
+            <MudText Typo="Typo.h4" Class="todox-page-title">Trang mạng xã hội của tôi</MudText>
+            <MudText Typo="Typo.body1" Class="todox-page-subtitle">Kết nối Fanpage/Page để hệ thống đăng bài tự động. Hiện hỗ trợ Facebook.</MudText>
+        </div>
+        <MudButton Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.Add" OnClick="OpenAdd" Disabled="@(_customerId is null)">Thêm Page</MudButton>
+    </MudStack>
+
+    @if (_customerId is null)
+    {
+        <MudAlert Severity="Severity.Warning">
+            Trang này dành cho tài khoản khách hàng. Tài khoản quản trị không gắn với hồ sơ khách hàng nên không có Page để quản lý.
+        </MudAlert>
+    }
+    else if (_loading)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+    }
+    else if (_pages.Count == 0)
+    {
+        <MudPaper Class="todox-card pa-8" Rounded="true">
+            <MudStack AlignItems="AlignItems.Center" Spacing="2">
+                <MudIcon Icon="@Icons.Custom.Brands.Facebook" Size="Size.Large" Class="todox-gold" />
+                <MudText Class="todox-page-subtitle">Chưa có Page nào. Bấm "Thêm Page" để kết nối Facebook.</MudText>
+            </MudStack>
+        </MudPaper>
+    }
+    else
+    {
+        <MudGrid>
+            @foreach (var pg in _pages)
+            {
+                <MudItem xs="12" sm="6" md="4">
+                    <MudPaper Class="todox-card pa-4" Rounded="true">
+                        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                            <MudIcon Icon="@PlatformIcon(pg.Platform)" Class="todox-gold" Size="Size.Large" />
+                            <div style="flex:1;min-width:0">
+                                <MudText Typo="Typo.h6" Style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">@pg.PageName</MudText>
+                                <MudText Typo="Typo.caption" Class="todox-page-subtitle">@pg.Platform</MudText>
+                            </div>
+                        </MudStack>
+                        <MudDivider Class="my-3" />
+                        <MudStack Spacing="1">
+                            <MudStack Row="true" Justify="Justify.SpaceBetween">
+                                <MudText Typo="Typo.body2" Class="todox-page-subtitle">Xác thực</MudText>
+                                <MudChip T="string" Size="Size.Small" Color="@VerifyColor(pg.VerificationStatus)">@VerifyLabel(pg.VerificationStatus)</MudChip>
+                            </MudStack>
+                            <MudStack Row="true" Justify="Justify.SpaceBetween">
+                                <MudText Typo="Typo.body2" Class="todox-page-subtitle">Token</MudText>
+                                <MudText Typo="Typo.body2">@(pg.HasToken ? (pg.TokenHint ?? "Đã lưu") : "Chưa có")</MudText>
+                            </MudStack>
+                            @if (!string.IsNullOrWhiteSpace(pg.PageUrl))
+                            {
+                                <MudLink Href="@pg.PageUrl" Target="_blank" Class="todox-gold" Typo="Typo.body2">Mở trang ↗</MudLink>
+                            }
+                        </MudStack>
+                        <MudStack Row="true" Justify="Justify.FlexEnd" Class="mt-3">
+                            <MudIconButton Icon="@Icons.Material.Filled.VerifiedUser" Size="Size.Small" Title="Xác thực token" OnClick="@(() => OpenConnect(pg))" />
+                            <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="@(() => OpenEdit(pg))" />
+                            <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small" OnClick="@(() => Delete(pg))" />
+                        </MudStack>
+                    </MudPaper>
+                </MudItem>
+            }
+        </MudGrid>
+    }
+</MudStack>
+
+@code {
+    private bool _loading = true;
+    private Guid? _customerId;
+    private IReadOnlyList<CustomerPageDto> _pages = new List<CustomerPageDto>();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _customerId = AuthState.CurrentUser?.CustomerId;
+        if (_customerId is not null)
+        {
+            await Reload();
+        }
+        _loading = false;
+    }
+
+    private async Task Reload()
+    {
+        if (_customerId is null) return;
+        _pages = await Pages.GetPagesAsync(_customerId.Value);
+    }
+
+    private static string PlatformIcon(string p) => p switch
+    {
+        "facebook" => Icons.Custom.Brands.Facebook,
+        "instagram" => Icons.Custom.Brands.Instagram,
+        "tiktok" => Icons.Custom.Brands.TikTok,
+        _ => Icons.Material.Filled.Public
+    };
+
+    private static Color VerifyColor(string v) => v switch
+    {
+        "verified" => Color.Success,
+        "failed" => Color.Error,
+        _ => Color.Default
+    };
+
+    private static string VerifyLabel(string v) => v switch
+    {
+        "verified" => "Đã xác thực",
+        "failed" => "Xác thực lỗi",
+        _ => "Chưa xác thực"
+    };
+
+    private async Task OpenAdd()
+    {
+        var parameters = new DialogParameters
+        {
+            ["CustomerId"] = _customerId!.Value,
+            ["CreatedBy"] = AuthState.CurrentUser!.UserId
+        };
+        var dialog = await DialogService.ShowAsync<PageConnectDialog>("Thêm & kết nối Page", parameters);
+        var result = await dialog.Result;
+        if (result is not null && !result.Canceled)
+        {
+            await Reload();
+        }
+    }
+
+    private async Task OpenConnect(CustomerPageDto page)
+    {
+        var parameters = new DialogParameters
+        {
+            ["CustomerId"] = _customerId!.Value,
+            ["CreatedBy"] = AuthState.CurrentUser!.UserId,
+            ["ExistingPage"] = page
+        };
+        var dialog = await DialogService.ShowAsync<PageConnectDialog>("Xác thực Page", parameters);
+        var result = await dialog.Result;
+        if (result is not null && !result.Canceled)
+        {
+            await Reload();
+        }
+    }
+
+    private async Task OpenEdit(CustomerPageDto page)
+    {
+        var parameters = new DialogParameters
+        {
+            ["CustomerId"] = _customerId!.Value,
+            ["CreatedBy"] = AuthState.CurrentUser!.UserId,
+            ["ExistingPage"] = page,
+            ["EditInfoOnly"] = true
+        };
+        var dialog = await DialogService.ShowAsync<PageConnectDialog>("Chỉnh sửa Page", parameters);
+        var result = await dialog.Result;
+        if (result is not null && !result.Canceled)
+        {
+            await Reload();
+        }
+    }
+
+    private async Task Delete(CustomerPageDto page)
+    {
+        var confirm = await DialogService.ShowMessageBoxAsync(
+            "Xóa Page", $"Xóa Page \"{page.PageName}\" và token liên quan?",
+            yesText: "Xóa", cancelText: "Hủy");
+        if (confirm == true)
+        {
+            await Pages.DeletePageAsync(page.Id);
+            Snackbar.Add("Đã xóa Page.", Severity.Success);
+            await Reload();
+        }
+    }
+}

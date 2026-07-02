@@ -1,0 +1,75 @@
+@using TodoX.Web.Models
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">@(_isNew ? "Thêm quản trị viên" : "Chỉnh sửa quản trị viên")</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudGrid>
+            <MudItem xs="12" sm="6">
+                <MudTextField T="string" Label="Họ tên" @bind-Value="_model.FullName" Variant="Variant.Outlined" Required="true" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField T="string" Label="Username" @bind-Value="_model.Username" Variant="Variant.Outlined" Required="true" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField T="string" Label="Email" @bind-Value="_model.Email" Variant="Variant.Outlined" Required="true" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField T="string" Label="Số điện thoại" @bind-Value="_model.Phone" Variant="Variant.Outlined" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudSelect T="TodoXUserRole" Label="Vai trò" @bind-Value="_model.Role" Variant="Variant.Outlined">
+                    <MudSelectItem Value="TodoXUserRole.Admin">Quản trị viên</MudSelectItem>
+                    <MudSelectItem Value="TodoXUserRole.SystemOperator">Vận hành hệ thống</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudSelect T="TodoXAccountStatus" Label="Trạng thái" @bind-Value="_model.Status" Variant="Variant.Outlined">
+                    <MudSelectItem Value="TodoXAccountStatus.Active">Hoạt động</MudSelectItem>
+                    <MudSelectItem Value="TodoXAccountStatus.Pending">Chờ duyệt</MudSelectItem>
+                    <MudSelectItem Value="TodoXAccountStatus.Locked">Đã khóa</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12">
+                <MudTextField T="string" Label="@(_isNew ? "Mật khẩu" : "Mật khẩu mới (để trống nếu giữ nguyên)")"
+                              @bind-Value="_model.Password" Variant="Variant.Outlined" InputType="InputType.Password" />
+            </MudItem>
+        </MudGrid>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Hủy</MudButton>
+        <MudButton Class="todox-primary-btn" OnClick="Submit">Lưu</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter] public SystemUser? Source { get; set; }
+
+    private SystemUser _model = new();
+    private bool _isNew;
+
+    protected override void OnInitialized()
+    {
+        _isNew = Source is null;
+        _model = Source is null
+            ? new SystemUser { Id = Guid.Empty, Role = TodoXUserRole.SystemOperator, Status = TodoXAccountStatus.Active }
+            : new SystemUser
+            {
+                Id = Source.Id,
+                FullName = Source.FullName,
+                Username = Source.Username,
+                Email = Source.Email,
+                Phone = Source.Phone,
+                Role = Source.Role,
+                Status = Source.Status,
+                CreatedAt = Source.CreatedAt,
+                Password = string.Empty
+            };
+    }
+
+    private void Submit() => MudDialog.Close(DialogResult.Ok(_model));
+    private void Cancel() => MudDialog.Cancel();
+}

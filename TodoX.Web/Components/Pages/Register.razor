@@ -51,9 +51,9 @@
 @code {
     private readonly CustomerRegistration _model = new();
 
-    private void RegisterCustomer()
+    private async Task RegisterCustomer()
     {
-        var result = Accounts.RegisterCustomer(_model);
+        var result = await Accounts.RegisterCustomerAsync(_model);
         if (!result.Success)
         {
             Snackbar.Add(result.Message, Severity.Error);

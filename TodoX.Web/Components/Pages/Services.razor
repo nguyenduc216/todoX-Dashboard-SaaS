@@ -1,0 +1,161 @@
+@page "/services"
+@using TodoX.Web.Components.Dialogs
+@inject CatalogAdminRepository Catalog
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+
+<PageTitle>Quản lý dịch vụ</PageTitle>
+
+<MudStack Spacing="3">
+    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-3">
+        <div>
+            <MudText Typo="Typo.h4" Class="todox-page-title">Quản lý dịch vụ</MudText>
+            <MudText Typo="Typo.body1" Class="todox-page-subtitle">Dịch vụ AI khách hàng có thể chọn: tên, nhóm, giá token, mô tả, hình minh họa.</MudText>
+        </div>
+        <IfCan Permission="services.create">
+            <MudButton Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.Add" OnClick="OpenCreate">Thêm dịch vụ</MudButton>
+        </IfCan>
+    </MudStack>
+
+    @if (_loading)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+    }
+    else if (_services.Count == 0)
+    {
+        <MudPaper Class="todox-card pa-8" Rounded="true">
+            <MudStack AlignItems="AlignItems.Center" Spacing="2">
+                <MudIcon Icon="@Icons.Material.Filled.Category" Size="Size.Large" Class="todox-gold" />
+                <MudText Class="todox-page-subtitle">Chưa có dịch vụ nào. Bấm "Thêm dịch vụ" để tạo.</MudText>
+            </MudStack>
+        </MudPaper>
+    }
+    else
+    {
+        <MudGrid>
+            @foreach (var svc in _services)
+            {
+                <MudItem xs="12" sm="6" md="4">
+                    <MudPaper Class="todox-card todox-service-card" Rounded="true">
+                        <div class="todox-service-cover" style="@CoverStyle(svc)">
+                            @if (string.IsNullOrWhiteSpace(svc.CoverImageUrl) && string.IsNullOrWhiteSpace(svc.ThumbnailUrl))
+                            {
+                                <MudIcon Icon="@Icons.Material.Filled.Movie" Size="Size.Large" Class="todox-gold" />
+                            }
+                            <MudChip T="string" Size="Size.Small" Class="todox-service-status"
+                                     Color="@(svc.Status == "active" ? Color.Success : Color.Default)">
+                                @(svc.Status == "active" ? "Đang bán" : "Ẩn")
+                            </MudChip>
+                        </div>
+                        <div class="pa-4">
+                            <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center">
+                                <MudText Typo="Typo.h6">@svc.ServiceName</MudText>
+                                @if (!string.IsNullOrWhiteSpace(svc.CategoryName))
+                                {
+                                    <span class="todox-badge">@svc.CategoryName</span>
+                                }
+                            </MudStack>
+                            <MudText Typo="Typo.body2" Class="todox-page-subtitle mt-1 todox-service-desc">
+                                @(svc.ShortDescription ?? svc.Description ?? "")
+                            </MudText>
+                            <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="mt-3">
+                                <div>
+                                    <span class="todox-service-price">@(svc.MinTokenCost?.ToString("#,0") ?? "—")</span>
+                                    <span class="todox-service-price-unit">token @(svc.TierCount > 0 ? $"· {svc.TierCount} gói" : "")</span>
+                                </div>
+                                <div>
+                                    <MudIconButton Icon="@Icons.Material.Filled.Sell" Size="Size.Small" Title="Bảng giá" OnClick="@(() => OpenTiers(svc))" />
+                                    <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="@(() => OpenEdit(svc))" />
+                                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small" OnClick="@(() => Delete(svc))" />
+                                </div>
+                            </MudStack>
+                        </div>
+                    </MudPaper>
+                </MudItem>
+            }
+        </MudGrid>
+    }
+</MudStack>
+
+@code {
+    private bool _loading = true;
+    private IReadOnlyList<ServiceDto> _services = new List<ServiceDto>();
+    private IReadOnlyList<ServiceCategoryDto> _categories = new List<ServiceCategoryDto>();
+
+    protected override async Task OnInitializedAsync() => await Reload();
+
+    private async Task Reload()
+    {
+        _loading = true;
+        _categories = await Catalog.GetCategoriesAsync();
+        _services = await Catalog.GetServicesAsync();
+        _loading = false;
+    }
+
+    private static string CoverStyle(ServiceDto s)
+    {
+        var url = !string.IsNullOrWhiteSpace(s.CoverImageUrl) ? s.CoverImageUrl : s.ThumbnailUrl;
+        return string.IsNullOrWhiteSpace(url) ? "" : $"background-image:url('{url}');background-size:cover;background-position:center;";
+    }
+
+    private async Task OpenCreate()
+    {
+        var parameters = new DialogParameters<ServiceDialog> { { x => x.Categories, _categories } };
+        var dialog = await DialogService.ShowAsync<ServiceDialog>("Thêm dịch vụ", parameters);
+        var result = await dialog.Result;
+        if (result is not null && !result.Canceled && result.Data is ServiceDto model)
+        {
+            if (await Catalog.ServiceCodeExistsAsync(model.ServiceCode))
+            {
+                Snackbar.Add("Mã dịch vụ đã tồn tại.", Severity.Error);
+                return;
+            }
+            await Catalog.InsertServiceAsync(model);
+            Snackbar.Add("Đã thêm dịch vụ.", Severity.Success);
+            await Reload();
+        }
+    }
+
+    private async Task OpenEdit(ServiceDto svc)
+    {
+        var parameters = new DialogParameters<ServiceDialog>
+        {
+            { x => x.Source, svc },
+            { x => x.Categories, _categories }
+        };
+        var dialog = await DialogService.ShowAsync<ServiceDialog>("Chỉnh sửa dịch vụ", parameters);
+        var result = await dialog.Result;
+        if (result is not null && !result.Canceled && result.Data is ServiceDto model)
+        {
+            if (await Catalog.ServiceCodeExistsAsync(model.ServiceCode, model.Id))
+            {
+                Snackbar.Add("Mã dịch vụ đã tồn tại.", Severity.Error);
+                return;
+            }
+            await Catalog.UpdateServiceAsync(model);
+            Snackbar.Add("Đã cập nhật dịch vụ.", Severity.Success);
+            await Reload();
+        }
+    }
+
+    private async Task OpenTiers(ServiceDto svc)
+    {
+        var parameters = new DialogParameters<ServiceTiersDialog> { { x => x.Service, svc } };
+        var options = new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true };
+        await DialogService.ShowAsync<ServiceTiersDialog>($"Bảng giá · {svc.ServiceName}", parameters, options);
+        await Reload();
+    }
+
+    private async Task Delete(ServiceDto svc)
+    {
+        var confirm = await DialogService.ShowMessageBoxAsync(
+            "Xóa dịch vụ", $"Xóa dịch vụ \"{svc.ServiceName}\" và toàn bộ bảng giá?",
+            yesText: "Xóa", cancelText: "Hủy");
+        if (confirm == true)
+        {
+            await Catalog.DeleteServiceAsync(svc.Id);
+            Snackbar.Add("Đã xóa dịch vụ.", Severity.Success);
+            await Reload();
+        }
+    }
+}

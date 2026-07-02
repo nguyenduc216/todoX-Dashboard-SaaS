@@ -1,4 +1,5 @@
 @inherits LayoutComponentBase
+@implements IDisposable
 @inject AuthStateService AuthState
 @inject NavigationManager Navigation
 
@@ -45,8 +46,8 @@
                     <div class="todox-user-menu-role">@RoleLabel</div>
                 </div>
                 <MudDivider />
-                <MudMenuItem Icon="@Icons.Material.Filled.Person" Href="/settings">Hồ sơ cá nhân</MudMenuItem>
-                <MudMenuItem Icon="@Icons.Material.Filled.Settings" Href="/settings">Cài đặt</MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Filled.Person" Href="/profile">Hồ sơ cá nhân</MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Filled.Password" Href="/profile">Đổi mật khẩu</MudMenuItem>
                 <MudDivider />
                 <MudMenuItem Icon="@Icons.Material.Filled.Logout" OnClick="Logout">Đăng xuất</MudMenuItem>
             </ChildContent>
@@ -69,33 +70,72 @@
                 Dashboard
             </MudNavLink>
 
-            <MudNavLink Href="/admin-users" Icon="@Icons.Material.Filled.AdminPanelSettings">
-                Quản trị viên
-            </MudNavLink>
-
-            <MudNavLink Href="/customers" Icon="@Icons.Material.Filled.Groups">
-                Quản lý khách hàng
-            </MudNavLink>
-
-            <MudNavLink Href="/customer-accounts" Icon="@Icons.Material.Filled.ManageAccounts">
-                Quản lý tài khoản
-            </MudNavLink>
-
-            <MudNavLink Href="/wallets" Icon="@Icons.Material.Filled.AccountBalanceWallet">
-                Quản lý token
-            </MudNavLink>
-
-            <MudNavLink Href="/render-jobs" Icon="@Icons.Material.Filled.Movie">
-                Render Jobs
-            </MudNavLink>
-
-            <MudNavLink Href="/settings" Icon="@Icons.Material.Filled.Settings">
-                Cài đặt hệ thống
-            </MudNavLink>
-
-            <MudNavLink Href="/settings" Icon="@Icons.Material.Filled.Article">
-                Nhật ký hoạt động
-            </MudNavLink>
+            @if (CanModule("admin_users"))
+            {
+                <MudNavLink Href="/admin-users" Icon="@Icons.Material.Filled.AdminPanelSettings">
+                    Quản trị viên
+                </MudNavLink>
+            }
+            @if (CanModule("customers"))
+            {
+                <MudNavLink Href="/customers" Icon="@Icons.Material.Filled.Groups">
+                    Quản lý khách hàng
+                </MudNavLink>
+            }
+            @if (CanModule("customer_accounts"))
+            {
+                <MudNavLink Href="/customer-accounts" Icon="@Icons.Material.Filled.ManageAccounts">
+                    Quản lý tài khoản
+                </MudNavLink>
+            }
+            @if (CanModule("token_wallets"))
+            {
+                <MudNavLink Href="/wallets" Icon="@Icons.Material.Filled.AccountBalanceWallet">
+                    Quản lý token
+                </MudNavLink>
+            }
+            @if (CanModule("services"))
+            {
+                <MudNavLink Href="/services" Icon="@Icons.Material.Filled.Category">
+                    Quản lý dịch vụ
+                </MudNavLink>
+            }
+            @if (CanModule("render_jobs"))
+            {
+                <MudNavLink Href="/render-jobs" Icon="@Icons.Material.Filled.Movie">
+                    Render Jobs
+                </MudNavLink>
+            }
+            @if (CanModule("customer_pages"))
+            {
+                <MudNavLink Href="/my-pages" Icon="@Icons.Material.Filled.Public">
+                    Trang mạng xã hội
+                </MudNavLink>
+            }
+            @if (CanModule("roles") || CanModule("permissions"))
+            {
+                <MudNavLink Href="/permissions" Icon="@Icons.Material.Filled.Security">
+                    Phân quyền
+                </MudNavLink>
+            }
+            @if (CanModule("settings") || CanModule("app_settings"))
+            {
+                <MudNavLink Href="/settings" Icon="@Icons.Material.Filled.Settings">
+                    Cài đặt hệ thống
+                </MudNavLink>
+            }
+            @if (CanModule("api_providers"))
+            {
+                <MudNavLink Href="/api-settings" Icon="@Icons.Material.Filled.Api">
+                    Cài đặt API
+                </MudNavLink>
+            }
+            @if (CanModule("audit_logs"))
+            {
+                <MudNavLink Href="/activity-logs" Icon="@Icons.Material.Filled.Article">
+                    Nhật ký hoạt động
+                </MudNavLink>
+            }
         </MudNavMenu>
 
         <div class="todox-sidebar-user">
@@ -109,8 +149,8 @@
                      Class="todox-sidebar-usermenu"
                      AnchorOrigin="Origin.TopRight"
                      TransformOrigin="Origin.BottomRight">
-                <MudMenuItem Icon="@Icons.Material.Filled.Person" Href="/settings">Tài khoản</MudMenuItem>
-                <MudMenuItem Icon="@Icons.Material.Filled.Settings" Href="/settings">Cài đặt</MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Filled.Person" Href="/profile">Tài khoản</MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Filled.Password" Href="/profile">Đổi mật khẩu</MudMenuItem>
                 <MudDivider />
                 <MudMenuItem Icon="@Icons.Material.Filled.Logout" OnClick="Logout">Đăng xuất</MudMenuItem>
             </MudMenu>
@@ -148,9 +188,26 @@
         }
     };
 
-    private string UserDisplayName => AuthState.CurrentUser?.DisplayName ?? "Admin";
-    private string UserEmail => AuthState.CurrentUser?.Email ?? "admin@todox.local";
+    private string UserDisplayName => AuthState.CurrentUser?.DisplayName ?? "Người dùng";
+    private string UserEmail => AuthState.CurrentUser?.Email ?? "";
     private int NotificationCount => 3;
+
+    private bool Can(string permission) => AuthState.CurrentUser?.Can(permission) == true;
+    private bool CanModule(string module) => AuthState.CurrentUser?.CanViewModule(module) == true;
+
+    protected override void OnInitialized()
+    {
+        AuthState.OnChange += HandleAuthChange;
+        // Guard: an unauthenticated visitor must not see the dashboard chrome.
+        if (!AuthState.IsAuthenticated)
+        {
+            Navigation.NavigateTo("/login", forceLoad: false);
+        }
+    }
+
+    private void HandleAuthChange() => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => AuthState.OnChange -= HandleAuthChange;
 
     private string RoleLabel => AuthState.CurrentUser?.Role switch
     {
@@ -158,11 +215,11 @@
         TodoXUserRole.SystemOperator => "Vận hành hệ thống",
         TodoXUserRole.CustomerOwner => "Chủ tài khoản khách hàng",
         TodoXUserRole.CustomerUser => "Người dùng khách hàng",
-        _ => "Quản trị viên"
+        _ => "Người dùng"
     };
 
     private string AvatarText => string.IsNullOrWhiteSpace(UserDisplayName)
-        ? "A"
+        ? "U"
         : UserDisplayName.Trim()[0].ToString().ToUpperInvariant();
 
     private void ToggleDrawer() => _drawerOpen = !_drawerOpen;

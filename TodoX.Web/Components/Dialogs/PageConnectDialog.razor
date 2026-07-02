@@ -1,0 +1,215 @@
+@using TodoX.Web.Services
+@inject SocialPageRepository Pages
+@inject FacebookGraphService Facebook
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">@Title</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudStack Spacing="3">
+            <MudGrid>
+                <MudItem xs="12" sm="6">
+                    <MudSelect T="string" Label="Nền tảng" @bind-Value="_platform" Variant="Variant.Outlined" Disabled="@(ExistingPage is not null)">
+                        <MudSelectItem Value="@("facebook")">Facebook</MudSelectItem>
+                        <MudSelectItem Value="@("instagram")">Instagram</MudSelectItem>
+                        <MudSelectItem Value="@("tiktok")">TikTok</MudSelectItem>
+                    </MudSelect>
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <MudTextField T="string" Label="Tên Page" @bind-Value="_pageName" Variant="Variant.Outlined" Required="true" />
+                </MudItem>
+                <MudItem xs="12">
+                    <MudTextField T="string" Label="Link Page" @bind-Value="_pageUrl" Variant="Variant.Outlined"
+                                  Placeholder="https://facebook.com/tenpage" />
+                </MudItem>
+            </MudGrid>
+
+            @if (!EditInfoOnly)
+            {
+                <MudDivider />
+                <MudText Typo="Typo.subtitle2">Xác thực để đăng bài tự động</MudText>
+
+                <MudTabs Rounded="true" Border="false" ApplyEffectsToContainer="true" PanelClass="pt-4">
+                    <MudTabPanel Text="Dán Access Token" Icon="@Icons.Material.Filled.Key">
+                        <MudTextField T="string" @bind-Value="_token" Label="Page Access Token"
+                                      Variant="Variant.Outlined" Lines="3"
+                                      Placeholder="Dán token lấy từ Facebook (Graph API Explorer / Business Settings)" />
+                        <MudText Typo="Typo.caption" Class="todox-page-subtitle mt-1">
+                            Hệ thống sẽ gọi Facebook Graph API để kiểm tra token và lấy thông tin Page.
+                        </MudText>
+                        @if (_validation is not null)
+                        {
+                            <MudAlert Severity="@(_validation.Ok ? Severity.Success : Severity.Error)" Dense="true" Class="mt-2">
+                                @if (_validation.Ok)
+                                {
+                                    <text>Hợp lệ — Page: <b>@_validation.Name</b> (id: @_validation.PageId).
+                                    Quyền: @(_validation.Permissions.Length > 0 ? string.Join(", ", _validation.Permissions) : "không đọc được")</text>
+                                }
+                                else
+                                {
+                                    <text>Token không hợp lệ: @_validation.Error</text>
+                                }
+                            </MudAlert>
+                        }
+                        <MudButton Class="mt-3" Variant="Variant.Outlined" Color="Color.Warning"
+                                   StartIcon="@Icons.Material.Filled.VerifiedUser" OnClick="ValidateToken" Disabled="_busy">
+                            Kiểm tra token
+                        </MudButton>
+                    </MudTabPanel>
+
+                    <MudTabPanel Text="Kết nối OAuth" Icon="@Icons.Custom.Brands.Facebook">
+                        <MudAlert Severity="Severity.Info" Dense="true">
+                            Kết nối OAuth cần cấu hình Facebook App (App ID/Secret) và domain công khai.
+                            Chưa được cấu hình trên hệ thống — vui lòng dùng "Dán Access Token", hoặc liên hệ quản trị để bật OAuth.
+                        </MudAlert>
+                        <MudButton Class="mt-3" Variant="Variant.Filled" Color="Color.Primary"
+                                   StartIcon="@Icons.Custom.Brands.Facebook" Disabled="true">
+                            Đăng nhập với Facebook (sắp có)
+                        </MudButton>
+                    </MudTabPanel>
+                </MudTabs>
+            }
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Hủy</MudButton>
+        <MudButton Class="todox-primary-btn" OnClick="Save" Disabled="_busy">Lưu</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter] public Guid CustomerId { get; set; }
+    [Parameter] public Guid CreatedBy { get; set; }
+    [Parameter] public CustomerPageDto? ExistingPage { get; set; }
+    [Parameter] public bool EditInfoOnly { get; set; }
+
+    private string _platform = "facebook";
+    private string _pageName = string.Empty;
+    private string _pageUrl = string.Empty;
+    private string _token = string.Empty;
+    private bool _busy;
+    private FacebookPageInfo? _validation;
+
+    private string Title => ExistingPage is null ? "Thêm & kết nối Page" : (EditInfoOnly ? "Chỉnh sửa Page" : "Xác thực Page");
+
+    protected override void OnInitialized()
+    {
+        if (ExistingPage is not null)
+        {
+            _platform = ExistingPage.Platform;
+            _pageName = ExistingPage.PageName;
+            _pageUrl = ExistingPage.PageUrl ?? string.Empty;
+        }
+    }
+
+    // continues below
+
+    private async Task ValidateToken()
+    {
+        if (string.IsNullOrWhiteSpace(_token))
+        {
+            Snackbar.Add("Dán token trước khi kiểm tra.", Severity.Warning);
+            return;
+        }
+
+        _busy = true;
+        _validation = await Facebook.ValidatePageTokenAsync(_token.Trim());
+        _busy = false;
+
+        if (_validation.Ok)
+        {
+            if (string.IsNullOrWhiteSpace(_pageName) && !string.IsNullOrWhiteSpace(_validation.Name))
+            {
+                _pageName = _validation.Name!;
+            }
+            Snackbar.Add("Token hợp lệ.", Severity.Success);
+        }
+        else
+        {
+            Snackbar.Add($"Token không hợp lệ: {_validation.Error}", Severity.Error);
+        }
+    }
+
+    private async Task Save()
+    {
+        if (string.IsNullOrWhiteSpace(_pageName))
+        {
+            Snackbar.Add("Nhập tên Page.", Severity.Warning);
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            // Create or update the page record.
+            Guid pageId;
+            if (ExistingPage is null)
+            {
+                pageId = await Pages.InsertPageAsync(new CustomerPageDto
+                {
+                    CustomerId = CustomerId,
+                    Platform = _platform,
+                    PageName = _pageName.Trim(),
+                    PageUrl = string.IsNullOrWhiteSpace(_pageUrl) ? null : _pageUrl.Trim(),
+                    Status = "pending",
+                    VerificationStatus = "not_verified"
+                }, CreatedBy);
+            }
+            else
+            {
+                pageId = ExistingPage.Id;
+                await Pages.UpdatePageAsync(new CustomerPageDto
+                {
+                    Id = pageId,
+                    Platform = _platform,
+                    PageName = _pageName.Trim(),
+                    PageUrl = string.IsNullOrWhiteSpace(_pageUrl) ? null : _pageUrl.Trim(),
+                    ExternalPageId = ExistingPage.ExternalPageId,
+                    Username = ExistingPage.Username
+                });
+            }
+
+            // If a token was provided, validate (if not already) and persist it.
+            if (!EditInfoOnly && !string.IsNullOrWhiteSpace(_token))
+            {
+                _validation ??= await Facebook.ValidatePageTokenAsync(_token.Trim());
+
+                await Pages.SaveAccessTokenAsync(
+                    pageId, CustomerId, _platform, _token.Trim(),
+                    FacebookGraphService.Hint(_token.Trim()),
+                    _validation.Ok ? "valid" : "invalid",
+                    _validation.Permissions);
+
+                await Pages.SetVerificationAsync(
+                    pageId,
+                    _validation.Ok ? "verified" : "failed",
+                    _validation.Ok ? "active" : "pending",
+                    _validation.PageId,
+                    null);
+
+                Snackbar.Add(_validation.Ok ? "Đã lưu & xác thực Page." : "Đã lưu Page nhưng token chưa hợp lệ.",
+                    _validation.Ok ? Severity.Success : Severity.Warning);
+            }
+            else
+            {
+                Snackbar.Add("Đã lưu thông tin Page.", Severity.Success);
+            }
+
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Lỗi: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}

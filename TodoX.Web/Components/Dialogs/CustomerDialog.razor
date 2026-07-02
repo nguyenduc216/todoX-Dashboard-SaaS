@@ -1,0 +1,72 @@
+@using TodoX.Web.Models
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">@(_isNew ? "Thêm khách hàng" : "Chỉnh sửa khách hàng")</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudGrid>
+            <MudItem xs="12" sm="6">
+                <MudTextField T="string" Label="Tên công ty" @bind-Value="_model.CompanyName" Variant="Variant.Outlined" Required="true" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField T="string" Label="Người liên hệ" @bind-Value="_model.ContactName" Variant="Variant.Outlined" Required="true" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField T="string" Label="Email" @bind-Value="_model.Email" Variant="Variant.Outlined" Required="true" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField T="string" Label="Số điện thoại" @bind-Value="_model.Phone" Variant="Variant.Outlined" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField T="string" Label="Mã số thuế" @bind-Value="_model.TaxCode" Variant="Variant.Outlined" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudSelect T="TodoXAccountStatus" Label="Trạng thái" @bind-Value="_model.Status" Variant="Variant.Outlined">
+                    <MudSelectItem Value="TodoXAccountStatus.Active">Hoạt động</MudSelectItem>
+                    <MudSelectItem Value="TodoXAccountStatus.Pending">Chờ duyệt</MudSelectItem>
+                    <MudSelectItem Value="TodoXAccountStatus.Locked">Đã khóa</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12">
+                <MudTextField T="string" Label="Địa chỉ" @bind-Value="_model.Address" Variant="Variant.Outlined" Lines="2" />
+            </MudItem>
+        </MudGrid>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Hủy</MudButton>
+        <MudButton Class="todox-primary-btn" OnClick="Submit">Lưu</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter] public CustomerProfile? Source { get; set; }
+
+    private CustomerProfile _model = new();
+    private bool _isNew;
+
+    protected override void OnInitialized()
+    {
+        _isNew = Source is null;
+        _model = Source is null
+            ? new CustomerProfile { Id = Guid.Empty, Status = TodoXAccountStatus.Active }
+            : new CustomerProfile
+            {
+                Id = Source.Id,
+                CustomerCode = Source.CustomerCode,
+                CompanyName = Source.CompanyName,
+                ContactName = Source.ContactName,
+                Email = Source.Email,
+                Phone = Source.Phone,
+                TaxCode = Source.TaxCode,
+                Address = Source.Address,
+                Status = Source.Status,
+                CreatedAt = Source.CreatedAt
+            };
+    }
+
+    private void Submit() => MudDialog.Close(DialogResult.Ok(_model));
+    private void Cancel() => MudDialog.Cancel();
+}

@@ -1,53 +1,165 @@
 @page "/customer-accounts"
+@using TodoX.Web.Components.Dialogs
+@inject AccountService Accounts
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
 
 <PageTitle>Tài khoản khách hàng</PageTitle>
 
-<MudText Typo="Typo.h4" Class="mb-2 todox-page-title">Tài khoản khách hàng</MudText>
-<MudText Typo="Typo.body1" Class="mb-6 todox-page-subtitle">Quản lý tài khoản đăng nhập của khách hàng TodoX SaaS.</MudText>
-
-<MudPaper Class="todox-panel pa-4" Elevation="0">
-    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="mb-4 todox-toolbar">
-        <MudText Typo="Typo.h6">Danh sách tài khoản khách hàng</MudText>
-        <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Add">Tạo tài khoản</MudButton>
+<MudStack Spacing="3">
+    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-3">
+        <div>
+            <MudText Typo="Typo.h4" Class="todox-page-title">Quản lý tài khoản</MudText>
+            <MudText Typo="Typo.body1" Class="todox-page-subtitle">Quản lý tài khoản đăng nhập của khách hàng TodoX SaaS.</MudText>
+        </div>
+        <IfCan Permission="customer_accounts.create">
+            <MudButton Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.Add" OnClick="OpenCreate" Disabled="@(_customers.Count == 0)">Tạo tài khoản</MudButton>
+        </IfCan>
     </MudStack>
 
-    <MudTable Items="@CustomerAccountRows" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Class="todox-table">
-        <HeaderContent>
-            <MudTh>Khách hàng</MudTh>
-            <MudTh>Tên đăng nhập</MudTh>
-            <MudTh>Email</MudTh>
-            <MudTh>Vai trò</MudTh>
-            <MudTh>Trạng thái</MudTh>
-            <MudTh>Ngày tạo</MudTh>
-            <MudTh>Thao tác</MudTh>
-        </HeaderContent>
-        <RowTemplate>
-            <MudTd DataLabel="Khách hàng">@context.CustomerName</MudTd>
-            <MudTd DataLabel="Tên đăng nhập">@context.Username</MudTd>
-            <MudTd DataLabel="Email">@context.Email</MudTd>
-            <MudTd DataLabel="Vai trò">
-                <MudChip T="string" Color="Color.Warning" Size="Size.Small">@context.Role</MudChip>
-            </MudTd>
-            <MudTd DataLabel="Trạng thái">
-                <MudChip T="string" Color="@(context.Status == "Hoạt động" ? Color.Success : Color.Error)" Size="Size.Small">@context.Status</MudChip>
-            </MudTd>
-            <MudTd DataLabel="Ngày tạo">@context.CreatedAt</MudTd>
-            <MudTd DataLabel="Thao tác">
-                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" />
-                <MudIconButton Icon="@Icons.Material.Filled.LockReset" Size="Size.Small" />
-                <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small" />
-            </MudTd>
-        </RowTemplate>
-    </MudTable>
-</MudPaper>
+    @if (_customers.Count == 0)
+    {
+        <MudAlert Severity="Severity.Warning">Chưa có khách hàng nào. Vui lòng thêm khách hàng trước khi tạo tài khoản đăng nhập.</MudAlert>
+    }
+
+    <MudPaper Class="todox-table-card pa-4" Rounded="true">
+        <MudTextField T="string" @bind-Value="_search" Placeholder="Tìm theo tên, email, khách hàng..."
+                      Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                      Immediate="true" Class="mb-3" Variant="Variant.Outlined" Margin="Margin.Dense" />
+
+        <MudTable Items="@Filtered" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Class="todox-table">
+            <HeaderContent>
+                <MudTh>Khách hàng</MudTh>
+                <MudTh>Họ tên</MudTh>
+                <MudTh>Email</MudTh>
+                <MudTh>Vai trò</MudTh>
+                <MudTh>Trạng thái</MudTh>
+                <MudTh>Ngày tạo</MudTh>
+                <MudTh Style="text-align:right">Thao tác</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="Khách hàng">@context.CompanyName</MudTd>
+                <MudTd DataLabel="Họ tên">@context.FullName</MudTd>
+                <MudTd DataLabel="Email">@context.Email</MudTd>
+                <MudTd DataLabel="Vai trò"><MudChip T="string" Color="Color.Warning" Size="Size.Small">@TodoXLabels.Role(context.Role)</MudChip></MudTd>
+                <MudTd DataLabel="Trạng thái">
+                    <MudChip T="string" Size="Size.Small" Color="@TodoXLabels.StatusColor(context.Status)">@TodoXLabels.Status(context.Status)</MudChip>
+                </MudTd>
+                <MudTd DataLabel="Ngày tạo">@context.CreatedAt.ToString("dd/MM/yyyy")</MudTd>
+                <MudTd DataLabel="Thao tác" Style="text-align:right">
+                    <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="@(() => OpenEdit(context))" />
+                    <MudIconButton Icon="@Icons.Material.Filled.LockReset" Size="Size.Small" Title="Đặt lại mật khẩu" OnClick="@(() => ResetPassword(context))" />
+                    @if (context.Status == TodoXAccountStatus.Locked)
+                    {
+                        <MudIconButton Icon="@Icons.Material.Filled.LockOpen" Color="Color.Success" Size="Size.Small" OnClick="@(() => SetStatus(context, TodoXAccountStatus.Active))" />
+                    }
+                    else
+                    {
+                        <MudIconButton Icon="@Icons.Material.Filled.Lock" Color="Color.Warning" Size="Size.Small" OnClick="@(() => SetStatus(context, TodoXAccountStatus.Locked))" />
+                    }
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small" OnClick="@(() => Delete(context))" />
+                </MudTd>
+            </RowTemplate>
+            <NoRecordsContent>
+                <MudText Class="pa-4 todox-page-subtitle">Chưa có tài khoản khách hàng nào.</MudText>
+            </NoRecordsContent>
+        </MudTable>
+    </MudPaper>
+</MudStack>
 
 @code {
-    private List<CustomerAccountRow> CustomerAccountRows { get; } = new()
-    {
-        new("Công ty T.A Tư vấn giải pháp", "ta_admin", "contact@todox.vn", "Owner", "Hoạt động", "30/06/2026"),
-        new("Nguyễn Văn A", "nguyenvana", "nguyenvana@gmail.com", "Customer", "Hoạt động", "30/06/2026"),
-        new("Trần Thị B", "tranthib", "tranthib@gmail.com", "Customer", "Tạm khóa", "30/06/2026")
-    };
+    private IReadOnlyList<CustomerAccount> _accounts = new List<CustomerAccount>();
+    private IReadOnlyList<CustomerProfile> _customers = new List<CustomerProfile>();
+    private string _search = string.Empty;
 
-    private sealed record CustomerAccountRow(string CustomerName, string Username, string Email, string Role, string Status, string CreatedAt);
+    protected override async Task OnInitializedAsync() => await Reload();
+
+    private async Task Reload()
+    {
+        _accounts = await Accounts.GetCustomerAccountsAsync();
+        _customers = await Accounts.GetCustomersAsync();
+    }
+
+    private IEnumerable<CustomerAccount> Filtered
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(_search))
+            {
+                return _accounts;
+            }
+
+            var q = _search.Trim();
+            return _accounts.Where(x =>
+                x.FullName.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                x.Email.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                x.CompanyName.Contains(q, StringComparison.OrdinalIgnoreCase));
+        }
+    }
+
+    private async Task OpenCreate()
+    {
+        var parameters = new DialogParameters<CustomerAccountDialog> { { x => x.Customers, _customers } };
+        var dialog = await DialogService.ShowAsync<CustomerAccountDialog>("Tạo tài khoản khách hàng", parameters);
+        var result = await dialog.Result;
+        if (result is not null && !result.Canceled && result.Data is CustomerAccount model)
+        {
+            var (ok, message) = await Accounts.SaveCustomerAccountAsync(model);
+            Snackbar.Add(message, ok ? Severity.Success : Severity.Error);
+            if (ok) await Reload();
+        }
+    }
+
+    private async Task OpenEdit(CustomerAccount account)
+    {
+        var parameters = new DialogParameters<CustomerAccountDialog>
+        {
+            { x => x.Source, account },
+            { x => x.Customers, _customers }
+        };
+        var dialog = await DialogService.ShowAsync<CustomerAccountDialog>("Chỉnh sửa tài khoản", parameters);
+        var result = await dialog.Result;
+        if (result is not null && !result.Canceled && result.Data is CustomerAccount model)
+        {
+            var (ok, message) = await Accounts.SaveCustomerAccountAsync(model);
+            Snackbar.Add(message, ok ? Severity.Success : Severity.Error);
+            if (ok) await Reload();
+        }
+    }
+
+    private async Task ResetPassword(CustomerAccount account)
+    {
+        var newPassword = await DialogService.ShowMessageBoxAsync(
+            "Đặt lại mật khẩu",
+            (MarkupString)$"Đặt lại mật khẩu cho <b>{account.Email}</b> về mặc định <b>Customer@123</b>?",
+            yesText: "Đặt lại", cancelText: "Hủy");
+
+        if (newPassword == true)
+        {
+            var (ok, message) = await Accounts.ResetCustomerAccountPasswordAsync(account.Id, "Customer@123");
+            Snackbar.Add(message, ok ? Severity.Success : Severity.Error);
+        }
+    }
+
+    private async Task SetStatus(CustomerAccount account, TodoXAccountStatus status)
+    {
+        await Accounts.SetCustomerAccountStatusAsync(account.Id, status);
+        Snackbar.Add($"Đã cập nhật trạng thái: {TodoXLabels.Status(status)}.", Severity.Success);
+        await Reload();
+    }
+
+    private async Task Delete(CustomerAccount account)
+    {
+        var confirm = await DialogService.ShowMessageBoxAsync(
+            "Xóa tài khoản",
+            $"Xóa tài khoản đăng nhập \"{account.Email}\"?",
+            yesText: "Xóa", cancelText: "Hủy");
+
+        if (confirm == true)
+        {
+            var (ok, message) = await Accounts.DeleteCustomerAccountAsync(account.Id);
+            Snackbar.Add(message, ok ? Severity.Success : Severity.Error);
+            if (ok) await Reload();
+        }
+    }
 }
