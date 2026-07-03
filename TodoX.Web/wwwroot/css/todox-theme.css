@@ -87,6 +87,12 @@ body,
     align-items: center;
 }
 
+.todox-prompt-box textarea {
+    font-family: "Consolas", "Menlo", monospace !important;
+    font-size: 12.5px !important;
+    line-height: 1.5 !important;
+}
+
 .todox-user-activator:hover {
     background: rgba(255, 183, 0, .10);
 }

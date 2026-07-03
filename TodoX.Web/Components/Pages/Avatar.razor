@@ -5,16 +5,29 @@
 @inject IAvatarService Avatars
 @inject IChibiAvatarService Chibi
 @inject IMediaFileService MediaFiles
+@inject WalletService Wallet
+@inject TokenSettingsService TokenSettings
 @inject TenantContext Tenant
+@inject IDialogService DialogService
 @inject ISnackbar Snackbar
 
 <PageTitle>Tạo ảnh chibi</PageTitle>
 
 <MudStack Spacing="3">
-    <div>
-        <MudText Typo="Typo.h4" Class="todox-page-title">Ảnh đại diện chibi</MudText>
-        <MudText Typo="Typo.body1" Class="todox-page-subtitle">Tải ảnh tham chiếu và để TodoX tạo 3 ảnh chibi chuyên nghiệp để bạn chọn.</MudText>
-    </div>
+    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
+        <div>
+            <MudText Typo="Typo.h4" Class="todox-page-title">Ảnh đại diện chibi</MudText>
+            <MudText Typo="Typo.body1" Class="todox-page-subtitle">Chỉnh prompt, chọn số lượng và để TodoX tạo ảnh chibi. Có thể sửa prompt và render lại từng ảnh.</MudText>
+        </div>
+        @if (IsCustomer)
+        {
+            <span class="todox-badge" style="font-size:.95rem">Số dư: @_balance.ToString("#,0") token</span>
+        }
+        else
+        {
+            <span class="todox-badge">Tài khoản quản trị · miễn phí token</span>
+        }
+    </MudStack>
 
     @if (AuthState.CurrentUser is null)
     {
@@ -28,57 +41,37 @@
                     <MudText Typo="Typo.h6">Ảnh tham chiếu</MudText>
                     <MudDivider Class="my-3" />
                     <MudStack Spacing="3">
-                        <div class="d-flex align-center justify-space-between gap-2">
-                            <div class="d-flex align-center gap-2">
-                                @if (_avatarMedia is not null) { <MudAvatar><MudImage Src="@_avatarMedia.PublicUrl" /></MudAvatar> }
-                                <MudText Typo="Typo.body2">Ảnh khuôn mặt / avatar @(_avatarMedia is null ? "" : "✔")</MudText>
-                            </div>
-                            <MudFileUpload T="IBrowserFile" Accept="image/png,image/jpeg,image/webp" MaximumFileCount="1"
-                                           FilesChanged="@(f => OnRefSelected("avatar", f))">
-                                <ActivatorContent><MudIconButton Icon="@Icons.Material.Filled.Upload" Color="Color.Warning" Size="Size.Small" /></ActivatorContent>
-                            </MudFileUpload>
-                        </div>
-                        <div class="d-flex align-center justify-space-between gap-2">
-                            <div class="d-flex align-center gap-2">
-                                @if (_logoMedia is not null) { <MudAvatar><MudImage Src="@_logoMedia.PublicUrl" /></MudAvatar> }
-                                <MudText Typo="Typo.body2">Logo thương hiệu (tùy chọn) @(_logoMedia is null ? "" : "✔")</MudText>
-                            </div>
-                            <MudFileUpload T="IBrowserFile" Accept="image/png,image/jpeg,image/webp" MaximumFileCount="1"
-                                           FilesChanged="@(f => OnRefSelected("logo", f))">
-                                <ActivatorContent><MudIconButton Icon="@Icons.Material.Filled.Upload" Color="Color.Warning" Size="Size.Small" /></ActivatorContent>
-                            </MudFileUpload>
-                        </div>
-                        <div class="d-flex align-center justify-space-between gap-2">
-                            <div class="d-flex align-center gap-2">
-                                @if (_productMedia is not null) { <MudAvatar><MudImage Src="@_productMedia.PublicUrl" /></MudAvatar> }
-                                <MudText Typo="Typo.body2">Ảnh sản phẩm (tùy chọn) @(_productMedia is null ? "" : "✔")</MudText>
-                            </div>
-                            <MudFileUpload T="IBrowserFile" Accept="image/png,image/jpeg,image/webp" MaximumFileCount="1"
-                                           FilesChanged="@(f => OnRefSelected("product", f))">
-                                <ActivatorContent><MudIconButton Icon="@Icons.Material.Filled.Upload" Color="Color.Warning" Size="Size.Small" /></ActivatorContent>
-                            </MudFileUpload>
-                        </div>
-                        <div class="d-flex align-center justify-space-between gap-2">
-                            <div class="d-flex align-center gap-2">
-                                @if (_sceneMedia is not null) { <MudAvatar><MudImage Src="@_sceneMedia.PublicUrl" /></MudAvatar> }
-                                <MudText Typo="Typo.body2">Ảnh bối cảnh (tùy chọn) @(_sceneMedia is null ? "" : "✔")</MudText>
-                            </div>
-                            <MudFileUpload T="IBrowserFile" Accept="image/png,image/jpeg,image/webp" MaximumFileCount="1"
-                                           FilesChanged="@(f => OnRefSelected("scene", f))">
-                                <ActivatorContent><MudIconButton Icon="@Icons.Material.Filled.Upload" Color="Color.Warning" Size="Size.Small" /></ActivatorContent>
-                            </MudFileUpload>
-                        </div>
+                        @RefRow("avatar", "Ảnh khuôn mặt / avatar", _avatarMedia)
+                        @RefRow("logo", "Logo thương hiệu (tùy chọn)", _logoMedia)
+                        @RefRow("product", "Ảnh sản phẩm (tùy chọn)", _productMedia)
+                        @RefRow("scene", "Ảnh bối cảnh (tùy chọn)", _sceneMedia)
                     </MudStack>
 
-                    <MudSelect T="string" Label="Giới tính nhân vật" @bind-Value="_gender" Variant="Variant.Outlined" Class="mt-3">
-                        <MudSelectItem Value="@("male")">Nam</MudSelectItem>
-                        <MudSelectItem Value="@("female")">Nữ</MudSelectItem>
-                        <MudSelectItem Value="@("other")">Khác</MudSelectItem>
-                    </MudSelect>
+                    <MudGrid Class="mt-2">
+                        <MudItem xs="7">
+                            <MudSelect T="string" Label="Giới tính nhân vật" @bind-Value="_gender" Variant="Variant.Outlined" Margin="Margin.Dense">
+                                <MudSelectItem Value="@("male")">Nam</MudSelectItem>
+                                <MudSelectItem Value="@("female")">Nữ</MudSelectItem>
+                                <MudSelectItem Value="@("other")">Khác</MudSelectItem>
+                            </MudSelect>
+                        </MudItem>
+                        <MudItem xs="5">
+                            <MudNumericField T="int" Label="Số lượng ảnh" @bind-Value="_count" Min="1" Max="6" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                        </MudItem>
+                    </MudGrid>
 
-                    <MudButton Class="todox-primary-btn mt-4" FullWidth="true" StartIcon="@Icons.Material.Filled.AutoAwesome"
-                               OnClick="GenerateChibi" Disabled="_busy">
-                        @(_busy ? "Đang tạo..." : "Tạo ảnh chibi")
+                    <MudExpansionPanels Class="mt-2" Elevation="0">
+                        <MudExpansionPanel Text="Prompt chuẩn (có thể chỉnh sửa)">
+                            <MudTextField T="string" @bind-Value="_basePrompt" Variant="Variant.Outlined" Lines="10" Class="todox-prompt-box" />
+                            <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Refresh" OnClick="ResetPrompt">
+                                Đặt lại prompt mặc định
+                            </MudButton>
+                        </MudExpansionPanel>
+                    </MudExpansionPanels>
+
+                    <MudButton Class="todox-primary-btn mt-3" FullWidth="true" StartIcon="@Icons.Material.Filled.AutoAwesome"
+                               OnClick="ConfirmAndGenerate" Disabled="_busy">
+                        @(_busy ? "Đang tạo..." : $"Tạo {_count} ảnh chibi")
                     </MudButton>
                     @if (_busy)
                     {
@@ -93,36 +86,35 @@
                     <MudDivider Class="my-3" />
                     @if (_result is null)
                     {
-                        <MudText Class="todox-page-subtitle">Chưa có ảnh. Bấm "Tạo ảnh chibi" để bắt đầu.</MudText>
+                        <MudText Class="todox-page-subtitle">Chưa có ảnh. Chỉnh số lượng/prompt rồi bấm "Tạo ảnh chibi".</MudText>
                     }
-                    else if (_result.Status == "failed")
+                    else if (_result.Status == "failed" && _result.Images.Count == 0)
                     {
                         <MudAlert Severity="Severity.Error" Class="mb-3">
-                            Không tạo được ảnh từ Vertex AI. Lỗi: @(_result.Error ?? "không rõ"). Xem chi tiết ở trang API Endpoints.
+                            Không tạo được ảnh. Lỗi: @(_result.Error ?? "không rõ"). Xem chi tiết ở trang API Endpoints.
                         </MudAlert>
-                    }
-                    else if (_result.Images.Count == 0)
-                    {
-                        <MudText Class="todox-page-subtitle">Không có ảnh trả về.</MudText>
                     }
                     else
                     {
-                        @if (_result.UsedFallback)
-                        {
-                            <MudAlert Severity="Severity.Info" Dense="true" Class="mb-3">
-                                Ảnh minh họa tạm (đang bật MockMode). Tắt MockMode để sinh ảnh chibi thực từ Vertex AI.
-                            </MudAlert>
-                        }
                         <MudGrid>
                             @foreach (var img in _result.Images)
                             {
-                                <MudItem xs="12" sm="4">
+                                <MudItem xs="12" sm="6">
                                     <MudPaper Class="todox-card pa-2" Rounded="true">
-                                        <MudImage Src="@img.Url" Fluid="true" Style="border-radius:8px;aspect-ratio:1/1;object-fit:cover;width:100%" />
-                                        <MudButton Class="todox-primary-btn mt-2" FullWidth="true" Size="Size.Small"
-                                                   OnClick="@(() => SelectChibi(img.MediaId))" Disabled="_busy">
-                                            Chọn làm avatar
-                                        </MudButton>
+                                        @if (img.Status == "failed")
+                                        {
+                                            <MudAlert Severity="Severity.Error" Dense="true">Ảnh lỗi</MudAlert>
+                                        }
+                                        else
+                                        {
+                                            <MudImage Src="@img.Url" Fluid="true" Style="border-radius:8px;aspect-ratio:1/1;object-fit:cover;width:100%" />
+                                        }
+                                        <MudStack Row="true" Class="mt-2" Spacing="1">
+                                            <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Edit"
+                                                       OnClick="@(() => EditAndRerender(img))" Disabled="_busy">Sửa prompt</MudButton>
+                                            <MudButton Size="Size.Small" Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.Check"
+                                                       OnClick="@(() => SelectChibi(img.MediaId))" Disabled="@(_busy || img.Status == "failed")">Chọn</MudButton>
+                                        </MudStack>
                                     </MudPaper>
                                 </MudItem>
                             }
@@ -136,25 +128,53 @@
 
 @code {
     private string? _gender = "male";
+    private int _count = 3;
+    private string _basePrompt = string.Empty;
     private bool _busy;
+    private decimal _balance;
+    private decimal _imageCost = 10;
     private ChibiGenerationDto? _result;
     private MediaFileDto? _avatarMedia;
     private MediaFileDto? _logoMedia;
     private MediaFileDto? _productMedia;
     private MediaFileDto? _sceneMedia;
 
+    private bool IsCustomer => AuthState.CurrentUser?.IsCustomer == true;
+
     protected override async Task OnInitializedAsync()
     {
-        // Preload the current avatar as the default face reference.
-        if (AuthState.CurrentUser is not null)
+        if (AuthState.CurrentUser is null) return;
+        _imageCost = await TokenSettings.GetChibiImageCostAsync();
+        ResetPrompt();
+        var current = await Avatars.GetCurrentAsync(AuthState.CurrentUser.UserId);
+        if (current.MediaId is Guid mid)
         {
-            var current = await Avatars.GetCurrentAsync(AuthState.CurrentUser.UserId);
-            if (current.MediaId is Guid mid)
-            {
-                _avatarMedia = await MediaFiles.GetAsync(mid);
-            }
+            _avatarMedia = await MediaFiles.GetAsync(mid);
+        }
+        await RefreshBalance();
+    }
+
+    private async Task RefreshBalance()
+    {
+        if (IsCustomer && AuthState.CurrentUser?.CustomerId is Guid cid)
+        {
+            _balance = await Wallet.GetBalanceAsync(cid);
         }
     }
+
+    private void ResetPrompt()
+        => _basePrompt = Chibi.BuildDefaultPrompt(_gender, _avatarMedia is not null, _logoMedia is not null, _productMedia is not null, _sceneMedia is not null);
+
+    private RenderFragment RefRow(string slot, string label, MediaFileDto? media) =>@<div class="d-flex align-center justify-space-between gap-2">
+        <div class="d-flex align-center gap-2">
+            @if (media is not null) { <MudAvatar><MudImage Src="@media.PublicUrl" /></MudAvatar> }
+            <MudText Typo="Typo.body2">@label @(media is null ? "" : "✔")</MudText>
+        </div>
+        <MudFileUpload T="IBrowserFile" Accept="image/png,image/jpeg,image/webp" MaximumFileCount="1"
+                       FilesChanged="@(f => OnRefSelected(slot, f))">
+            <ActivatorContent><MudIconButton Icon="@Icons.Material.Filled.Upload" Color="Color.Warning" Size="Size.Small" /></ActivatorContent>
+        </MudFileUpload>
+    </div>;
 
     private async Task OnRefSelected(string slot, IBrowserFile file)
     {
@@ -174,6 +194,7 @@
                 case "product": _productMedia = media; break;
                 case "scene": _sceneMedia = media; break;
             }
+            ResetPrompt();
             Snackbar.Add("Đã tải ảnh tham chiếu.", Severity.Success);
         }
         catch (Exception ex)
@@ -182,34 +203,102 @@
         }
     }
 
-    private async Task GenerateChibi()
+    private async Task ConfirmAndGenerate()
     {
         if (AuthState.CurrentUser is null) return;
+
+        if (IsCustomer)
+        {
+            var total = _imageCost * _count;
+            if (_balance < total)
+            {
+                Snackbar.Add($"Không đủ token: cần {total:#,0}, còn {_balance:#,0}.", Severity.Error);
+                return;
+            }
+            var ok = await DialogService.ShowMessageBoxAsync("Xác nhận trừ token",
+                (MarkupString)$"Tạo <b>{_count}</b> ảnh chibi sẽ trừ <b>{total:#,0} token</b> (số dư: {_balance:#,0}). Tiếp tục?",
+                yesText: "Đồng ý", cancelText: "Hủy");
+            if (ok != true) return;
+        }
+
+        await Generate();
+    }
+
+    private async Task Generate()
+    {
         _busy = true;
         _result = null;
         try
         {
             _result = await Chibi.GenerateAsync(new ChibiGenerateInput
             {
-                UserId = AuthState.CurrentUser.UserId,
+                UserId = AuthState.CurrentUser!.UserId,
+                CustomerId = AuthState.CurrentUser.CustomerId,
+                IsCustomer = IsCustomer,
                 Gender = _gender,
+                Count = _count,
+                BasePromptOverride = _basePrompt,
                 AvatarMediaId = _avatarMedia?.Id,
                 LogoMediaId = _logoMedia?.Id,
                 ProductMediaId = _productMedia?.Id,
                 SceneMediaId = _sceneMedia?.Id
             });
-            if (_result.Status == "failed")
+            await RefreshBalance();
+            if (_result.Status == "failed" && _result.Images.Count == 0)
             {
                 Snackbar.Add("Không tạo được ảnh. Xem nhật ký API.", Severity.Error);
             }
             else
             {
-                Snackbar.Add("Đã tạo 3 ảnh chibi.", Severity.Success);
+                var msg = IsCustomer
+                    ? $"Đã tạo {_result.Images.Count} ảnh. Đã trừ {_result.Charged:#,0} token, còn {_result.BalanceAfter:#,0}."
+                    : $"Đã tạo {_result.Images.Count} ảnh chibi.";
+                Snackbar.Add(msg, Severity.Success);
             }
         }
         catch (Exception ex)
         {
             Snackbar.Add($"Lỗi tạo chibi: {ex.Message}", Severity.Error);
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task EditAndRerender(ChibiImage img)
+    {
+        if (AuthState.CurrentUser is null) return;
+
+        var parameters = new DialogParameters { ["Prompt"] = img.PromptUsed ?? _basePrompt };
+        var dialog = await DialogService.ShowAsync<Components.Dialogs.PromptEditDialog>("Sửa prompt & render lại", parameters);
+        var res = await dialog.Result;
+        if (res is null || res.Canceled || res.Data is not string newPrompt || string.IsNullOrWhiteSpace(newPrompt)) return;
+
+        if (IsCustomer)
+        {
+            if (_balance < _imageCost)
+            {
+                Snackbar.Add($"Không đủ token: cần {_imageCost:#,0}, còn {_balance:#,0}.", Severity.Error);
+                return;
+            }
+            var ok = await DialogService.ShowMessageBoxAsync("Xác nhận trừ token",
+                (MarkupString)$"Render lại 1 ảnh sẽ trừ <b>{_imageCost:#,0} token</b>. Tiếp tục?",
+                yesText: "Đồng ý", cancelText: "Hủy");
+            if (ok != true) return;
+        }
+
+        _busy = true;
+        try
+        {
+            var updated = await Chibi.RerenderAsync(AuthState.CurrentUser.UserId,
+                AuthState.CurrentUser.CustomerId, IsCustomer, img.RenderId, newPrompt);
+            // Update the image in the current result.
+            var idx = _result!.Images.FindIndex(x => x.RenderId == img.RenderId);
+            if (idx >= 0) _result.Images[idx] = updated;
+            await RefreshBalance();
+            Snackbar.Add(IsCustomer ? $"Đã render lại. Đã trừ {_imageCost:#,0} token, còn {_balance:#,0}." : "Đã render lại ảnh.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Lỗi render lại: {ex.Message}", Severity.Error);
         }
         finally { _busy = false; }
     }

@@ -34,10 +34,13 @@ builder.Services.AddScoped<TodoX.Web.Services.Settings.SettingsApiRepository>();
 builder.Services.AddHttpClient<TodoX.Web.Services.ImageRender.VertexClient>();
 builder.Services.AddScoped<TodoX.Web.Services.ImageRender.IImageRenderService, TodoX.Web.Services.ImageRender.VertexImageRenderService>();
 builder.Services.AddScoped<TodoX.Web.Services.Profile.IAvatarService, TodoX.Web.Services.Profile.AvatarService>();
+builder.Services.AddHttpClient<TodoX.Web.Services.Profile.GeminiPromptService>();
 builder.Services.AddScoped<TodoX.Web.Services.Profile.IChibiAvatarService, TodoX.Web.Services.Profile.ChibiAvatarService>();
 builder.Services.AddScoped<AccountService>();
 builder.Services.AddScoped<AuthStateService>();
 builder.Services.AddScoped<StartupSeedFixer>();
+builder.Services.AddScoped<TokenSettingsService>();
+builder.Services.AddScoped<WalletService>();
 var app = builder.Build();
 
 // Load tenant and repair placeholder seed credentials (writes data only, never schema).
@@ -47,6 +50,12 @@ using (var scope = app.Services.CreateScope())
     await tenant.EnsureLoadedAsync();
     var fixer = scope.ServiceProvider.GetRequiredService<StartupSeedFixer>();
     await fixer.RunAsync();
+
+    // Sprint 2G: seed pricing defaults and ensure every customer has a token wallet.
+    var tokenSettings = scope.ServiceProvider.GetRequiredService<TokenSettingsService>();
+    await tokenSettings.EnsureDefaultsAsync();
+    var wallets = scope.ServiceProvider.GetRequiredService<WalletService>();
+    await wallets.SeedCustomerWalletsAsync();
 }
 
 // Configure the HTTP request pipeline.

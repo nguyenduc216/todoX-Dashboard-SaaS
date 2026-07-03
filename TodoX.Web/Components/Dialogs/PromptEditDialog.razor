@@ -1,0 +1,28 @@
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">Sửa prompt & render lại</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudText Typo="Typo.body2" Class="todox-page-subtitle mb-2">
+            Chỉnh prompt bên dưới rồi render lại. Prompt đã sửa sẽ dùng trực tiếp (không qua Gemini).
+        </MudText>
+        <MudTextField T="string" @bind-Value="_prompt" Variant="Variant.Outlined" Lines="12" Class="todox-prompt-box" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Hủy</MudButton>
+        <MudButton Class="todox-primary-btn" OnClick="Submit">Render lại</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter] public string Prompt { get; set; } = string.Empty;
+
+    private string _prompt = string.Empty;
+
+    protected override void OnInitialized() => _prompt = Prompt;
+
+    private void Submit() => MudDialog.Close(DialogResult.Ok(_prompt));
+    private void Cancel() => MudDialog.Cancel();
+}

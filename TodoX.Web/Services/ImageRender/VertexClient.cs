@@ -1,13 +1,14 @@
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using Google.Apis.Auth.OAuth2;
 
 namespace TodoX.Web.Services.ImageRender;
 
 /// <summary>
 /// Thin client for Google Vertex AI Imagen (predict). Authenticates with the service-account
-/// JSON key at Vertex:ServiceAccountKeyPath and calls the model's :predict endpoint.
-/// Throws on any failure so the caller can fall back to a placeholder.
+/// JSON key at Vertex:ServiceAccountKeyPath by signing a JWT (RS256) and exchanging it for an
+/// access token at oauth2.googleapis.com — mirroring the proven PowerShell test script.
+/// Throws on any failure so the caller can decide how to handle it.
 /// </summary>
 public sealed class VertexClient
 {
@@ -15,7 +16,10 @@ public sealed class VertexClient
     private readonly IConfiguration _config;
     private readonly IWebHostEnvironment _env;
     private readonly ILogger<VertexClient> _logger;
-    private GoogleCredential? _credential;
+
+    private ServiceAccountKey? _sa;
+    private string? _cachedToken;
+    private DateTimeOffset _tokenExpiry;
 
     public VertexClient(HttpClient http, IConfiguration config, IWebHostEnvironment env, ILogger<VertexClient> logger)
     {
@@ -23,6 +27,14 @@ public sealed class VertexClient
         _config = config;
         _env = env;
         _logger = logger;
+    }
+
+    private sealed class ServiceAccountKey
+    {
+        public string client_email { get; set; } = string.Empty;
+        public string private_key { get; set; } = string.Empty;
+        public string project_id { get; set; } = string.Empty;
+        public string token_uri { get; set; } = "https://oauth2.googleapis.com/token";
     }
 
     public async Task<List<byte[]>> GenerateImagesAsync(string prompt, int count, string aspectRatio, CancellationToken ct)
@@ -82,6 +94,12 @@ public sealed class VertexClient
         var body = await resp.Content.ReadAsStringAsync(ct);
         if (!resp.IsSuccessStatusCode)
         {
+            // Imagen returns HTTP 400 when every image is removed by the safety filter — surface a clear message.
+            if (body.Contains("filtered out", StringComparison.OrdinalIgnoreCase)
+                || body.Contains("safety", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("Ảnh bị bộ lọc an toàn của Imagen loại bỏ. Hãy chỉnh prompt (tránh nội dung nhạy cảm) và thử lại.");
+            }
             throw new InvalidOperationException($"HTTP {(int)resp.StatusCode}: {Truncate(body, 400)}");
         }
 
@@ -121,22 +139,80 @@ public sealed class VertexClient
 
     private async Task<string> GetAccessTokenAsync(CancellationToken ct)
     {
-        _credential ??= LoadCredential();
-        var scoped = _credential.CreateScoped("https://www.googleapis.com/auth/cloud-platform");
-        var token = await scoped.UnderlyingCredential.GetAccessTokenForRequestAsync(cancellationToken: ct);
-        return token ?? throw new InvalidOperationException("Could not obtain Google access token.");
+        // Reuse a cached token until shortly before expiry.
+        if (_cachedToken is not null && DateTimeOffset.UtcNow < _tokenExpiry.AddMinutes(-5))
+        {
+            return _cachedToken;
+        }
+
+        var sa = LoadServiceAccount();
+        var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        var exp = now + 3600;
+
+        var header = Base64Url(Encoding.UTF8.GetBytes("{\"alg\":\"RS256\",\"typ\":\"JWT\"}"));
+        var claimJson = JsonSerializer.Serialize(new Dictionary<string, object>
+        {
+            ["iss"] = sa.client_email,
+            ["scope"] = "https://www.googleapis.com/auth/cloud-platform",
+            ["aud"] = sa.token_uri,
+            ["iat"] = now,
+            ["exp"] = exp
+        });
+        var claim = Base64Url(Encoding.UTF8.GetBytes(claimJson));
+        var unsigned = $"{header}.{claim}";
+
+        using var rsa = RSA.Create();
+        // System.Text.Json already unescapes "\n" in the JSON string into real newlines,
+        // so the PEM is used as-is (matches the proven PowerShell/node signing path).
+        rsa.ImportFromPem(sa.private_key);
+        var signature = rsa.SignData(Encoding.UTF8.GetBytes(unsigned), HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        var jwt = $"{unsigned}.{Base64Url(signature)}";
+
+        var form = new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["grant_type"] = "urn:ietf:params:oauth:grant-type:jwt-bearer",
+            ["assertion"] = jwt
+        });
+
+        using var resp = await _http.PostAsync(sa.token_uri, form, ct);
+        var body = await resp.Content.ReadAsStringAsync(ct);
+        if (!resp.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException($"Token exchange HTTP {(int)resp.StatusCode}: {Truncate(body, 300)}");
+        }
+
+        using var doc = JsonDocument.Parse(body);
+        var token = doc.RootElement.TryGetProperty("access_token", out var t) ? t.GetString() : null;
+        if (string.IsNullOrEmpty(token))
+        {
+            throw new InvalidOperationException($"No access_token in token response: {Truncate(body, 200)}");
+        }
+
+        _cachedToken = token;
+        _tokenExpiry = DateTimeOffset.UtcNow.AddSeconds(3600);
+        return token;
     }
 
-    private GoogleCredential LoadCredential()
+    /// <summary>Exposed for other Vertex callers (e.g. Gemini text) to reuse the SA credential.</summary>
+    public Task<string> AcquireAccessTokenAsync(CancellationToken ct = default) => GetAccessTokenAsync(ct);
+
+    private ServiceAccountKey LoadServiceAccount()
     {
+        if (_sa is not null) return _sa;
         var rel = _config["Vertex:ServiceAccountKeyPath"] ?? "keys/todox-vertex-sa.json";
         var path = Path.IsPathRooted(rel) ? rel : Path.Combine(_env.ContentRootPath, rel);
         if (!File.Exists(path))
         {
             throw new FileNotFoundException($"Vertex service account key not found at {rel}");
         }
-        return GoogleCredential.FromFile(path);
+        var json = File.ReadAllText(path);
+        _sa = JsonSerializer.Deserialize<ServiceAccountKey>(json)
+            ?? throw new InvalidOperationException("Invalid service account JSON.");
+        return _sa;
     }
+
+    private static string Base64Url(byte[] bytes)
+        => Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
 
     private static string Truncate(string s, int max) => s.Length <= max ? s : s[..max];
 }
