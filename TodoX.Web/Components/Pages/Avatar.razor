@@ -84,15 +84,21 @@
                 <MudPaper Class="todox-card pa-5" Rounded="true">
                     <MudText Typo="Typo.h6">Kết quả</MudText>
                     <MudDivider Class="my-3" />
+                    @if (!string.IsNullOrWhiteSpace(_lastError))
+                    {
+                        <MudAlert Severity="Severity.Error" Class="mb-3" ContentAlignment="HorizontalAlignment.Left"
+                                  ShowCloseIcon="true" CloseIconClicked="@(() => _lastError = null)">
+                            <MudText Typo="Typo.subtitle2">Chi tiết lỗi (copy gửi hỗ trợ):</MudText>
+                            <pre class="todox-error-pre">@_lastError</pre>
+                        </MudAlert>
+                    }
                     @if (_result is null)
                     {
                         <MudText Class="todox-page-subtitle">Chưa có ảnh. Chỉnh số lượng/prompt rồi bấm "Tạo ảnh chibi".</MudText>
                     }
                     else if (_result.Status == "failed" && _result.Images.Count == 0)
                     {
-                        <MudAlert Severity="Severity.Error" Class="mb-3">
-                            Không tạo được ảnh. Lỗi: @(_result.Error ?? "không rõ"). Xem chi tiết ở trang API Endpoints.
-                        </MudAlert>
+                        <MudText Class="todox-page-subtitle">Không tạo được ảnh. Xem chi tiết lỗi phía trên.</MudText>
                     }
                     else
                     {
@@ -130,6 +136,7 @@
     private string? _gender = "male";
     private int _count = 3;
     private string _basePrompt = string.Empty;
+    private string? _lastError;
     private bool _busy;
     private decimal _balance;
     private decimal _imageCost = 10;
@@ -228,6 +235,7 @@
     {
         _busy = true;
         _result = null;
+        _lastError = null;
         try
         {
             _result = await Chibi.GenerateAsync(new ChibiGenerateInput
@@ -244,20 +252,25 @@
                 SceneMediaId = _sceneMedia?.Id
             });
             await RefreshBalance();
+            if (!string.IsNullOrWhiteSpace(_result.Error))
+            {
+                _lastError = _result.Error;
+            }
             if (_result.Status == "failed" && _result.Images.Count == 0)
             {
-                Snackbar.Add("Không tạo được ảnh. Xem nhật ký API.", Severity.Error);
+                Snackbar.Add("Không tạo được ảnh. Xem chi tiết lỗi trên trang.", Severity.Error);
             }
             else
             {
                 var msg = IsCustomer
-                    ? $"Đã tạo {_result.Images.Count} ảnh. Đã trừ {_result.Charged:#,0} token, còn {_result.BalanceAfter:#,0}."
-                    : $"Đã tạo {_result.Images.Count} ảnh chibi.";
+                    ? $"Đã tạo {_result.Images.Count(x => x.Status != "failed")} ảnh. Đã trừ {_result.Charged:#,0} token, còn {_result.BalanceAfter:#,0}."
+                    : $"Đã tạo {_result.Images.Count(x => x.Status != "failed")} ảnh chibi.";
                 Snackbar.Add(msg, Severity.Success);
             }
         }
         catch (Exception ex)
         {
+            _lastError = ex.ToString();
             Snackbar.Add($"Lỗi tạo chibi: {ex.Message}", Severity.Error);
         }
         finally { _busy = false; }
@@ -298,6 +311,7 @@
         }
         catch (Exception ex)
         {
+            _lastError = ex.ToString();
             Snackbar.Add($"Lỗi render lại: {ex.Message}", Severity.Error);
         }
         finally { _busy = false; }

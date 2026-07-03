@@ -93,6 +93,17 @@ body,
     line-height: 1.5 !important;
 }
 
+.todox-error-pre {
+    white-space: pre-wrap;
+    word-break: break-word;
+    user-select: all;
+    font-family: "Consolas", "Menlo", monospace;
+    font-size: 12px;
+    margin: 6px 0 0 0;
+    max-height: 260px;
+    overflow: auto;
+}
+
 .todox-user-activator:hover {
     background: rgba(255, 183, 0, .10);
 }

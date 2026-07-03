@@ -76,13 +76,17 @@ public sealed partial class ChibiAvatarService
             {
                 anyFail = true;
                 var renderId = await InsertRenderAsync(generationId, input.UserId, null, null, basePrompt, prompt, result.Model, "failed", result.Error);
-                images.Add(new ChibiImage { RenderId = renderId, Status = "failed", PromptInput = basePrompt, PromptUsed = prompt });
+                images.Add(new ChibiImage { RenderId = renderId, Status = "failed", PromptInput = basePrompt, PromptUsed = prompt, Error = result.Error });
             }
         }
 
         var okImages = images.Where(x => x.Status != "failed").ToList();
         var status = okImages.Count > 0 ? "completed" : "failed";
-        await CompleteGenerationAsync(generationId, status, okImages, Guid.Empty, anyFail && okImages.Count == 0 ? "Vertex render failed" : null);
+        await CompleteGenerationAsync(generationId, status, okImages, Guid.Empty,
+            anyFail && okImages.Count == 0 ? images.FirstOrDefault(x => x.Error is not null)?.Error : null);
+
+        // Surface the first concrete render error (full text) so the UI can show it for support.
+        var firstError = images.FirstOrDefault(x => !string.IsNullOrWhiteSpace(x.Error))?.Error;
 
         return new ChibiGenerationDto
         {
@@ -92,7 +96,7 @@ public sealed partial class ChibiAvatarService
             Images = images,
             Charged = charge.Charged,
             BalanceAfter = charge.BalanceAfter,
-            Error = status == "failed" ? "Không tạo được ảnh từ Vertex." : null,
+            Error = firstError,
             CreatedAt = DateTime.UtcNow
         };
     }

@@ -16,6 +16,7 @@ public sealed class ChibiImage
     public string? PromptInput { get; set; }
     public string? PromptUsed { get; set; }
     public string Status { get; set; } = "completed";
+    public string? Error { get; set; }
 }
 
 public sealed class ChibiGenerationDto

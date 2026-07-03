@@ -82,7 +82,10 @@ public sealed class VertexClient
             parameters = new
             {
                 sampleCount = count,
-                aspectRatio
+                aspectRatio,
+                // Chibi avatars depict people; Imagen silently returns 0 images unless person
+                // generation is explicitly allowed. Verified: without this, predictions is empty.
+                personGeneration = "allow_all"
             }
         };
 
@@ -106,10 +109,11 @@ public sealed class VertexClient
         using var doc = JsonDocument.Parse(body);
         if (!doc.RootElement.TryGetProperty("predictions", out var preds) || preds.GetArrayLength() == 0)
         {
-            throw new InvalidOperationException("No predictions in response.");
+            throw new InvalidOperationException($"[{model}] Không có 'predictions' trong phản hồi. Response: {Truncate(body, 600)}");
         }
 
         var images = new List<byte[]>();
+        string? raiReason = null;
         foreach (var p in preds.EnumerateArray())
         {
             // Imagen may return bytesBase64Encoded at the top or nested under image.
@@ -123,6 +127,9 @@ public sealed class VertexClient
                 b64 = nested.GetString();
             }
 
+            // Capture any safety / RAI filter reason the model returned.
+            if (p.TryGetProperty("raiFilteredReason", out var rai)) raiReason = rai.GetString();
+
             if (!string.IsNullOrWhiteSpace(b64))
             {
                 images.Add(Convert.FromBase64String(b64));
@@ -131,7 +138,10 @@ public sealed class VertexClient
 
         if (images.Count == 0)
         {
-            throw new InvalidOperationException("Predictions contained no image bytes (possibly filtered by safety).");
+            var reason = string.IsNullOrWhiteSpace(raiReason)
+                ? $"phản hồi không chứa ảnh. Response: {Truncate(body, 600)}"
+                : $"bị bộ lọc an toàn loại bỏ (raiFilteredReason: {raiReason}).";
+            throw new InvalidOperationException($"[{model}] Không có ảnh — {reason}");
         }
 
         return images;
