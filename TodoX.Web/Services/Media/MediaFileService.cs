@@ -1,5 +1,6 @@
 using Dapper;
 using TodoX.Web.Data;
+using TodoX.Web.Services.ImageRender;
 
 namespace TodoX.Web.Services.Media;
 
@@ -33,6 +34,8 @@ public interface IMediaFileService
 
     /// <summary>Verify a media row belongs to the given user (ownership check).</summary>
     Task<bool> IsOwnedByAsync(Guid mediaId, Guid userId, CancellationToken ct = default);
+
+    Task<ReferenceImage?> BuildReferenceImageAsync(Guid mediaId, string role, Guid userId, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -135,6 +138,37 @@ public sealed class MediaFileService : IMediaFileService
         var uploadRoot = _config["Storage:LocalUploadRoot"] ?? "wwwroot/uploads";
         var absPath = Path.Combine(_env.ContentRootPath, uploadRoot, media.ObjectKey.Replace('/', Path.DirectorySeparatorChar));
         return File.Exists(absPath) ? await File.ReadAllBytesAsync(absPath, ct) : null;
+    }
+
+    public async Task<ReferenceImage?> BuildReferenceImageAsync(Guid mediaId, string role, Guid userId, CancellationToken ct = default)
+    {
+        var media = await GetAsync(mediaId, ct);
+        if (media is null || !media.IsActive)
+        {
+            throw new InvalidOperationException($"Khong tim thay anh tham chieu {role} hoac anh da bi vo hieu hoa.");
+        }
+
+        if (media.UserId is Guid owner && owner != userId)
+        {
+            throw new InvalidOperationException($"Anh tham chieu {role} khong thuoc ve nguoi dung hien tai.");
+        }
+
+        var bytes = await ReadBytesAsync(mediaId, ct);
+        if (bytes is null || bytes.Length == 0)
+        {
+            throw new InvalidOperationException($"Da chon anh tham chieu {role} nhung he thong khong doc duoc noi dung tep.");
+        }
+
+        return new ReferenceImage
+        {
+            MediaId = media.Id,
+            Role = role,
+            MimeType = media.MimeType,
+            Bytes = bytes,
+            Base64 = Convert.ToBase64String(bytes),
+            Url = media.PublicUrl ?? media.FileUrl,
+            FileName = media.FileName
+        };
     }
 
     public async Task<bool> IsOwnedByAsync(Guid mediaId, Guid userId, CancellationToken ct = default)

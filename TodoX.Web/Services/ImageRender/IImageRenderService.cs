@@ -5,6 +5,10 @@ public sealed class ReferenceImage
     public Guid? MediaId { get; set; }
     public string? Url { get; set; }
     public string? Base64 { get; set; }
+    public string? Role { get; set; }
+    public string? MimeType { get; set; }
+    public byte[]? Bytes { get; set; }
+    public string? FileName { get; set; }
 }
 
 public sealed class ImageRenderRequestModel
@@ -18,6 +22,7 @@ public sealed class ImageRenderRequestModel
     public Guid? UserId { get; set; }
     public Guid? CustomerId { get; set; }
     public string FileCategory { get; set; } = "render";
+    public bool RequireReferenceImages { get; set; } = false;
 }
 
 public sealed class GeneratedImage

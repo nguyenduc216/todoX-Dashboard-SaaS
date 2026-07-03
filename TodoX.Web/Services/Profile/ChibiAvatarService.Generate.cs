@@ -10,13 +10,22 @@ public sealed partial class ChibiAvatarService
     {
         await _tenant.EnsureLoadedAsync(ct);
         var count = Math.Clamp(input.Count, 1, 6);
-        var basePrompt = string.IsNullOrWhiteSpace(input.BasePromptOverride)
-            ? BuildDefaultPrompt(input.Gender, input.AvatarMediaId is not null,
-                input.LogoMediaId is not null, input.ProductMediaId is not null, input.SceneMediaId is not null)
-            : input.BasePromptOverride!;
+        var template = await GetDefaultPromptTemplateAsync(ct);
+        var defaultPrompt = ResolvePromptTemplate(template, input);
+        var finalPrompt = !string.IsNullOrWhiteSpace(input.PromptOverride)
+            ? input.PromptOverride.Trim()
+            : !string.IsNullOrWhiteSpace(input.BasePromptOverride)
+                ? input.BasePromptOverride.Trim()
+                : defaultPrompt;
+        var refs = await BuildReferenceImagesAsync(input, ct);
+
+        if (input.AvatarMediaId is not null && !refs.Any(x => x.Role == "avatar" && x.Bytes?.Length > 0))
+        {
+            throw new InvalidOperationException("Anh avatar da chon nhung he thong khong doc duoc noi dung anh de gui sang Vertex.");
+        }
 
         var generationId = Guid.NewGuid();
-        await InsertGenerationAsync(generationId, input, basePrompt);
+        await InsertGenerationAsync(generationId, input, finalPrompt);
 
         // Charge tokens up-front for the whole batch (customers only). Admin => no charge.
         var imageCost = await _tokenSettings.GetChibiImageCostAsync();
@@ -32,58 +41,38 @@ public sealed partial class ChibiAvatarService
             return new ChibiGenerationDto { Id = generationId, Status = "failed", Error = charge.Error };
         }
 
-        // Ask Gemini for N distinct scenario prompts from the base prompt.
-        List<string> prompts;
-        try
-        {
-            prompts = await _gemini.GenerateVariationsAsync(basePrompt, count, ct);
-            // Log the Gemini call as usage (no wallet charge; secondary call).
-            var geminiCost = await _tokenSettings.GetGeminiPromptCostAsync();
-            await _wallet.LogUsageOnlyAsync(input.IsCustomer ? input.CustomerId : null, input.UserId,
-                "google-vertex-ai", _gemini.ModelCode, "gemini_prompt", 1, geminiCost, "gemini-generate",
-                unit: "call", referenceId: generationId, referenceType: "chibi_generation");
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Gemini variation failed; using base prompt for all images.");
-            prompts = Enumerable.Range(0, count).Select(_ => basePrompt).ToList();
-        }
-
-        // Render each prompt as one image; each becomes a render row.
         var images = new List<ChibiImage>();
-        var anyFail = false;
-        for (var i = 0; i < count; i++)
+        var result = await _render.RenderAsync(new ImageRenderRequestModel
         {
-            var prompt = prompts[Math.Min(i, prompts.Count - 1)];
-            var result = await _render.RenderAsync(new ImageRenderRequestModel
-            {
-                Prompt = prompt,
-                Count = 1,
-                AspectRatio = "1:1",
-                MimeType = "image/png",
-                UserId = input.UserId,
-                CustomerId = input.CustomerId,
-                FileCategory = "chibi"
-            }, ct);
+            Prompt = finalPrompt,
+            ReferenceImages = refs,
+            Count = count,
+            AspectRatio = "1:1",
+            MimeType = "image/png",
+            UserId = input.UserId,
+            CustomerId = input.CustomerId,
+            FileCategory = "chibi",
+            RequireReferenceImages = input.AvatarMediaId is not null
+        }, ct);
 
-            if (result.Ok && result.Data.Count > 0)
+        if (result.Ok && result.Data.Count > 0)
+        {
+            foreach (var d in result.Data)
             {
-                var d = result.Data[0];
-                var renderId = await InsertRenderAsync(generationId, input.UserId, d.MediaId, d.Url, basePrompt, prompt, result.Model);
-                images.Add(new ChibiImage { RenderId = renderId, MediaId = d.MediaId, Url = d.Url, PromptInput = basePrompt, PromptUsed = prompt });
+                var renderId = await InsertRenderAsync(generationId, input.UserId, d.MediaId, d.Url, finalPrompt, finalPrompt, result.Model);
+                images.Add(new ChibiImage { RenderId = renderId, MediaId = d.MediaId, Url = d.Url, PromptInput = finalPrompt, PromptUsed = finalPrompt });
             }
-            else
-            {
-                anyFail = true;
-                var renderId = await InsertRenderAsync(generationId, input.UserId, null, null, basePrompt, prompt, result.Model, "failed", result.Error);
-                images.Add(new ChibiImage { RenderId = renderId, Status = "failed", PromptInput = basePrompt, PromptUsed = prompt, Error = result.Error });
-            }
+        }
+        else
+        {
+            var renderId = await InsertRenderAsync(generationId, input.UserId, null, null, finalPrompt, finalPrompt, result.Model, "failed", result.Error);
+            images.Add(new ChibiImage { RenderId = renderId, Status = "failed", PromptInput = finalPrompt, PromptUsed = finalPrompt, Error = result.Error });
         }
 
         var okImages = images.Where(x => x.Status != "failed").ToList();
         var status = okImages.Count > 0 ? "completed" : "failed";
         await CompleteGenerationAsync(generationId, status, okImages, Guid.Empty,
-            anyFail && okImages.Count == 0 ? images.FirstOrDefault(x => x.Error is not null)?.Error : null);
+            okImages.Count == 0 ? images.FirstOrDefault(x => x.Error is not null)?.Error : null);
 
         // Surface the first concrete render error (full text) so the UI can show it for support.
         var firstError = images.FirstOrDefault(x => !string.IsNullOrWhiteSpace(x.Error))?.Error;
@@ -92,7 +81,7 @@ public sealed partial class ChibiAvatarService
         {
             Id = generationId,
             Status = status,
-            GeneratedPrompt = basePrompt,
+            GeneratedPrompt = finalPrompt,
             Images = images,
             Charged = charge.Charged,
             BalanceAfter = charge.BalanceAfter,

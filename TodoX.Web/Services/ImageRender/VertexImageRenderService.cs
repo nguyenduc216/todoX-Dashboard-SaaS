@@ -58,6 +58,17 @@ public sealed class VertexImageRenderService : IImageRenderService
         // Insert the render request row (status=processing).
         await InsertRequestAsync(requestId, request, providerCode, modelCode, count);
 
+        if (request.RequireReferenceImages && !request.ReferenceImages.Any(HasReferencePayload))
+        {
+            var message = "Request yeu cau anh tham chieu nhung khong co bytes/base64/url hop le de gui sang Vertex.";
+            result.Ok = false;
+            result.Error = message;
+            await CompleteRequestAsync(requestId, "failed", new List<Guid>(), message);
+            await _settings.LogCallAsync(_tenant.TenantId, request.UserId, EndpointCode, providerCode, modelCode,
+                requestId, "failed", message, (int)sw.ElapsedMilliseconds);
+            return result;
+        }
+
         var mockMode = _config.GetValue("ImageRender:MockMode", false);
 
         List<byte[]> images;
@@ -76,7 +87,9 @@ public sealed class VertexImageRenderService : IImageRenderService
         {
             try
             {
-                images = await _vertex.GenerateImagesAsync(request.Prompt, count, request.AspectRatio, ct);
+                images = await _vertex.GenerateImagesAsync(request.Prompt, request.ReferenceImages, count, request.AspectRatio, ct);
+                result.Model = _vertex.LastModelUsed ?? modelCode;
+                modelCode = result.Model;
                 result.UsedFallback = false;
                 status = "success";
             }
@@ -117,7 +130,17 @@ public sealed class VertexImageRenderService : IImageRenderService
     private async Task InsertRequestAsync(Guid id, ImageRenderRequestModel r, string providerCode, string modelCode, int count)
     {
         using var conn = await _factory.OpenAsync();
-        var refJson = JsonSerializer.Serialize(r.ReferenceImages.Select(x => new { x.MediaId, x.Url }));
+        var refJson = JsonSerializer.Serialize(r.ReferenceImages.Select(x => new
+        {
+            x.Role,
+            x.MediaId,
+            x.Url,
+            x.MimeType,
+            HasBytes = x.Bytes?.Length > 0,
+            ByteLength = x.Bytes?.Length ?? 0,
+            HasBase64 = !string.IsNullOrWhiteSpace(x.Base64),
+            x.FileName
+        }));
         await conn.ExecuteAsync(
             """
             INSERT INTO render.image_render_requests
@@ -147,5 +170,12 @@ public sealed class VertexImageRenderService : IImageRenderService
             """,
             new { id, status = status == "success" ? "completed" : status,
                   ids = JsonSerializer.Serialize(mediaIds), err = error });
+    }
+
+    private static bool HasReferencePayload(ReferenceImage image)
+    {
+        return image.Bytes?.Length > 0
+            || !string.IsNullOrWhiteSpace(image.Base64)
+            || !string.IsNullOrWhiteSpace(image.Url);
     }
 }

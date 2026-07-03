@@ -136,6 +136,12 @@
                     Cài đặt hệ thống
                 </MudNavLink>
             }
+            @if (CanModule("prompt_templates") || CanModule("settings") || CanModule("app_settings"))
+            {
+                <MudNavLink Href="/settings/prompt-templates" Icon="@Icons.Material.Filled.AutoFixHigh">
+                    Quản lý prompt
+                </MudNavLink>
+            }
             @if (CanModule("api_providers"))
             {
                 <MudNavLink Href="/api-settings" Icon="@Icons.Material.Filled.Api">

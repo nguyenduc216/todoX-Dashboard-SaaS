@@ -44,18 +44,32 @@
                         @RefRow("avatar", "Ảnh khuôn mặt / avatar", _avatarMedia)
                         @RefRow("logo", "Logo thương hiệu (tùy chọn)", _logoMedia)
                         @RefRow("product", "Ảnh sản phẩm (tùy chọn)", _productMedia)
+                        @RefRow("uniform", "Đồng phục / trang phục (tùy chọn)", _uniformMedia)
                         @RefRow("scene", "Ảnh bối cảnh (tùy chọn)", _sceneMedia)
                     </MudStack>
 
+                    @if (_avatarMedia is null)
+                    {
+                        <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-3">
+                            Ban chua chon anh khuon mat. He thong se tao chibi theo gioi tinh, do giong khuon mat se thap.
+                        </MudAlert>
+                    }
+
                     <MudGrid Class="mt-2">
-                        <MudItem xs="7">
-                            <MudSelect T="string" Label="Giới tính nhân vật" @bind-Value="_gender" Variant="Variant.Outlined" Margin="Margin.Dense">
+                        <MudItem xs="12" sm="4">
+                            <MudSelect T="string" Label="Giới tính nhân vật" Value="@_gender" ValueChanged="OnGenderChanged" Variant="Variant.Outlined" Margin="Margin.Dense">
                                 <MudSelectItem Value="@("male")">Nam</MudSelectItem>
                                 <MudSelectItem Value="@("female")">Nữ</MudSelectItem>
                                 <MudSelectItem Value="@("other")">Khác</MudSelectItem>
                             </MudSelect>
                         </MudItem>
-                        <MudItem xs="5">
+                        <MudItem xs="12" sm="4">
+                            <MudSelect T="string" Label="Góc máy" Value="@_cameraAngle" ValueChanged="OnCameraAngleChanged" Variant="Variant.Outlined" Margin="Margin.Dense">
+                                <MudSelectItem Value="@("half_body")">Nửa người</MudSelectItem>
+                                <MudSelectItem Value="@("full_body")">Toàn thân</MudSelectItem>
+                            </MudSelect>
+                        </MudItem>
+                        <MudItem xs="12" sm="4">
                             <MudNumericField T="int" Label="Số lượng ảnh" @bind-Value="_count" Min="1" Max="6" Variant="Variant.Outlined" Margin="Margin.Dense" />
                         </MudItem>
                     </MudGrid>
@@ -134,6 +148,7 @@
 
 @code {
     private string? _gender = "male";
+    private string? _cameraAngle = "half_body";
     private int _count = 3;
     private string _basePrompt = string.Empty;
     private string? _lastError;
@@ -144,6 +159,7 @@
     private MediaFileDto? _avatarMedia;
     private MediaFileDto? _logoMedia;
     private MediaFileDto? _productMedia;
+    private MediaFileDto? _uniformMedia;
     private MediaFileDto? _sceneMedia;
 
     private bool IsCustomer => AuthState.CurrentUser?.IsCustomer == true;
@@ -152,12 +168,12 @@
     {
         if (AuthState.CurrentUser is null) return;
         _imageCost = await TokenSettings.GetChibiImageCostAsync();
-        ResetPrompt();
         var current = await Avatars.GetCurrentAsync(AuthState.CurrentUser.UserId);
         if (current.MediaId is Guid mid)
         {
             _avatarMedia = await MediaFiles.GetAsync(mid);
         }
+        await ResetPrompt();
         await RefreshBalance();
     }
 
@@ -169,13 +185,37 @@
         }
     }
 
-    private void ResetPrompt()
-        => _basePrompt = Chibi.BuildDefaultPrompt(_gender, _avatarMedia is not null, _logoMedia is not null, _productMedia is not null, _sceneMedia is not null);
+    private async Task ResetPrompt()
+    {
+        var template = await Chibi.GetDefaultPromptTemplateAsync();
+        _basePrompt = Chibi.ResolvePromptTemplate(template, new ChibiGenerateInput
+        {
+            Gender = _gender,
+            CameraAngle = _cameraAngle,
+            AvatarMediaId = _avatarMedia?.Id,
+            LogoMediaId = _logoMedia?.Id,
+            ProductMediaId = _productMedia?.Id,
+            UniformMediaId = _uniformMedia?.Id,
+            SceneMediaId = _sceneMedia?.Id
+        });
+    }
+
+    private async Task OnGenderChanged(string? value)
+    {
+        _gender = value;
+        await ResetPrompt();
+    }
+
+    private async Task OnCameraAngleChanged(string? value)
+    {
+        _cameraAngle = value;
+        await ResetPrompt();
+    }
 
     private RenderFragment RefRow(string slot, string label, MediaFileDto? media) =>@<div class="d-flex align-center justify-space-between gap-2">
         <div class="d-flex align-center gap-2">
             @if (media is not null) { <MudAvatar><MudImage Src="@media.PublicUrl" /></MudAvatar> }
-            <MudText Typo="Typo.body2">@label @(media is null ? "" : "✔")</MudText>
+            <MudText Typo="Typo.body2">@label - @(media is null ? "missing" : "loaded")</MudText>
         </div>
         <MudFileUpload T="IBrowserFile" Accept="image/png,image/jpeg,image/webp" MaximumFileCount="1"
                        FilesChanged="@(f => OnRefSelected(slot, f))">
@@ -199,9 +239,10 @@
                 case "avatar": _avatarMedia = media; break;
                 case "logo": _logoMedia = media; break;
                 case "product": _productMedia = media; break;
+                case "uniform": _uniformMedia = media; break;
                 case "scene": _sceneMedia = media; break;
             }
-            ResetPrompt();
+            await ResetPrompt();
             Snackbar.Add("Đã tải ảnh tham chiếu.", Severity.Success);
         }
         catch (Exception ex)
@@ -244,11 +285,13 @@
                 CustomerId = AuthState.CurrentUser.CustomerId,
                 IsCustomer = IsCustomer,
                 Gender = _gender,
+                CameraAngle = _cameraAngle,
                 Count = _count,
-                BasePromptOverride = _basePrompt,
+                PromptOverride = _basePrompt,
                 AvatarMediaId = _avatarMedia?.Id,
                 LogoMediaId = _logoMedia?.Id,
                 ProductMediaId = _productMedia?.Id,
+                UniformMediaId = _uniformMedia?.Id,
                 SceneMediaId = _sceneMedia?.Id
             });
             await RefreshBalance();

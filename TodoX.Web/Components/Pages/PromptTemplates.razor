@@ -1,0 +1,285 @@
+@page "/settings/prompt-templates"
+@using TodoX.Web.Services.Settings
+@inject IPromptTemplateService PromptTemplateSvc
+@inject AuthStateService AuthState
+@inject ISnackbar Snackbar
+
+<PageTitle>Quản lý prompt</PageTitle>
+
+<MudStack Spacing="3">
+    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
+        <div>
+            <MudText Typo="Typo.h4" Class="todox-page-title">Quản lý prompt</MudText>
+            <MudText Typo="Typo.body1" Class="todox-page-subtitle">Cập nhật prompt mẫu, negative prompt và version history cho các luồng tạo ảnh.</MudText>
+        </div>
+        <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Add" OnClick="NewTemplate">
+            Tạo prompt
+        </MudButton>
+    </MudStack>
+
+    @if (!string.IsNullOrWhiteSpace(_error))
+    {
+        <MudAlert Severity="Severity.Error">@_error</MudAlert>
+    }
+
+    @if (_loading)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+    }
+    else
+    {
+        <MudGrid>
+            <MudItem xs="12" lg="5">
+                <MudPaper Class="todox-card pa-5" Rounded="true">
+                    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="mb-2">
+                        <MudText Typo="Typo.h6">Prompt templates</MudText>
+                        <MudTextField T="string" @bind-Value="_filter" Placeholder="Lọc prompt..." Variant="Variant.Outlined"
+                                      Margin="Margin.Dense" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" />
+                    </MudStack>
+                    <MudTable Items="@FilteredTemplates" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Class="todox-table">
+                        <HeaderContent>
+                            <MudTh>Prompt</MudTh>
+                            <MudTh>Loại</MudTh>
+                            <MudTh>Trạng thái</MudTh>
+                        </HeaderContent>
+                        <RowTemplate>
+                            <MudTd DataLabel="Prompt">
+                                <MudButton Variant="Variant.Text" Color="Color.Warning" OnClick="@(() => SelectTemplate(context))">
+                                    @context.PromptName
+                                </MudButton>
+                                <div class="todox-setting-desc">@context.PromptCode</div>
+                            </MudTd>
+                            <MudTd DataLabel="Loại">
+                                <span class="todox-badge">@context.PromptType</span>
+                                <div class="todox-setting-desc">v@context.VersionNo · @context.LanguageCode</div>
+                            </MudTd>
+                            <MudTd DataLabel="Trạng thái">
+                                <MudChip T="string" Size="Size.Small" Color="@(context.IsActive ? Color.Success : Color.Default)">
+                                    @(context.IsActive ? "Bật" : "Tắt")
+                                </MudChip>
+                                @if (context.IsDefault)
+                                {
+                                    <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined">Default</MudChip>
+                                }
+                            </MudTd>
+                        </RowTemplate>
+                        <NoRecordsContent>
+                            <MudText Class="pa-4 todox-page-subtitle">Chưa có prompt template.</MudText>
+                        </NoRecordsContent>
+                    </MudTable>
+                </MudPaper>
+            </MudItem>
+
+            <MudItem xs="12" lg="7">
+                <MudPaper Class="todox-card pa-5" Rounded="true">
+                    <MudText Typo="Typo.h6">@(_edit.Id is null ? "Tạo prompt" : "Chỉnh prompt")</MudText>
+                    <MudDivider Class="my-3" />
+
+                    <MudGrid>
+                        <MudItem xs="12" sm="6">
+                            <MudTextField T="string" Label="Mã prompt" @bind-Value="_edit.PromptCode" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                        </MudItem>
+                        <MudItem xs="12" sm="6">
+                            <MudTextField T="string" Label="Tên prompt" @bind-Value="_edit.PromptName" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                        </MudItem>
+                        <MudItem xs="12" sm="4">
+                            <MudTextField T="string" Label="Nhóm" @bind-Value="_edit.PromptGroup" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                        </MudItem>
+                        <MudItem xs="12" sm="4">
+                            <MudTextField T="string" Label="Loại" @bind-Value="_edit.PromptType" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                        </MudItem>
+                        <MudItem xs="12" sm="4">
+                            <MudTextField T="string" Label="Ngôn ngữ" @bind-Value="_edit.LanguageCode" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                        </MudItem>
+                    </MudGrid>
+
+                    <MudStack Row="true" Spacing="3" Class="my-2 flex-wrap">
+                        <MudSwitch T="bool" @bind-Value="_edit.IsDefault" Color="Color.Warning" Label="Default" />
+                        <MudSwitch T="bool" @bind-Value="_edit.IsActive" Color="Color.Success" Label="Đang bật" />
+                        <MudSwitch T="bool" @bind-Value="_edit.IsSystem" Color="Color.Default" Label="System" />
+                    </MudStack>
+
+                    <MudTextField T="string" Label="Template text" @bind-Value="_edit.TemplateText"
+                                  Variant="Variant.Outlined" Lines="10" Class="todox-prompt-box" />
+                    <MudTextField T="string" Label="Negative prompt" @bind-Value="_edit.NegativePrompt"
+                                  Variant="Variant.Outlined" Lines="3" Class="mt-3" />
+                    <MudTextField T="string" Label="Template JSON" @bind-Value="_edit.TemplateJson"
+                                  Variant="Variant.Outlined" Lines="5" Class="mt-3" />
+                    <MudGrid Class="mt-1">
+                        <MudItem xs="12" md="4">
+                            <MudTextField T="string" Label="Variables JSON" @bind-Value="_edit.Variables" Variant="Variant.Outlined" Lines="3" />
+                        </MudItem>
+                        <MudItem xs="12" md="4">
+                            <MudTextField T="string" Label="Reference schema JSON" @bind-Value="_edit.ReferenceSchema" Variant="Variant.Outlined" Lines="3" />
+                        </MudItem>
+                        <MudItem xs="12" md="4">
+                            <MudTextField T="string" Label="Output schema JSON" @bind-Value="_edit.OutputSchema" Variant="Variant.Outlined" Lines="3" />
+                        </MudItem>
+                    </MudGrid>
+                    <MudTextField T="string" Label="Ghi chú thay đổi" @bind-Value="_edit.ChangeNote" Variant="Variant.Outlined" Lines="2" Class="mt-3" />
+
+                    <MudStack Row="true" Spacing="2" Class="mt-3">
+                        <MudButton Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.Save" OnClick="Save" Disabled="_saving">
+                            @(_saving ? "Đang lưu..." : "Lưu prompt")
+                        </MudButton>
+                        <MudButton Variant="Variant.Text" Color="Color.Default" OnClick="ResetEdit">Hoàn tác</MudButton>
+                    </MudStack>
+
+                    <MudExpansionPanels Class="mt-4" Elevation="0">
+                        <MudExpansionPanel Text="Version history">
+                            <MudTable Items="@_versions" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Class="todox-table">
+                                <HeaderContent>
+                                    <MudTh>Version</MudTh>
+                                    <MudTh>Ghi chú</MudTh>
+                                    <MudTh>Ngày tạo</MudTh>
+                                </HeaderContent>
+                                <RowTemplate>
+                                    <MudTd DataLabel="Version">v@context.VersionNo</MudTd>
+                                    <MudTd DataLabel="Ghi chú">@context.ChangeNote</MudTd>
+                                    <MudTd DataLabel="Ngày tạo">@context.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</MudTd>
+                                </RowTemplate>
+                                <NoRecordsContent>
+                                    <MudText Class="pa-4 todox-page-subtitle">Chưa có lịch sử version.</MudText>
+                                </NoRecordsContent>
+                            </MudTable>
+                        </MudExpansionPanel>
+                    </MudExpansionPanels>
+                </MudPaper>
+            </MudItem>
+        </MudGrid>
+    }
+</MudStack>
+
+@code {
+    private bool _loading = true;
+    private bool _saving;
+    private string? _error;
+    private string? _filter;
+    private IReadOnlyList<PromptTemplateDto> _templates = new List<PromptTemplateDto>();
+    private IReadOnlyList<PromptTemplateVersionDto> _versions = new List<PromptTemplateVersionDto>();
+    private PromptTemplateEditModel _edit = NewEditModel();
+    private PromptTemplateEditModel _original = NewEditModel();
+
+    private IEnumerable<PromptTemplateDto> FilteredTemplates
+        => string.IsNullOrWhiteSpace(_filter)
+            ? _templates
+            : _templates.Where(x => x.PromptName.Contains(_filter, StringComparison.OrdinalIgnoreCase)
+                || x.PromptCode.Contains(_filter, StringComparison.OrdinalIgnoreCase)
+                || x.PromptType.Contains(_filter, StringComparison.OrdinalIgnoreCase));
+
+    protected override async Task OnInitializedAsync() => await Reload();
+
+    private async Task Reload()
+    {
+        _loading = true;
+        _error = null;
+        try
+        {
+            _templates = await PromptTemplateSvc.ListAsync();
+            var selected = _templates.FirstOrDefault(x => x.IsDefault && x.PromptType == "avatar_chibi") ?? _templates.FirstOrDefault();
+            if (selected is not null) await SelectTemplate(selected);
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task SelectTemplate(PromptTemplateDto template)
+    {
+        _edit = FromDto(template);
+        _original = FromDto(template);
+        _versions = await PromptTemplateSvc.GetVersionsAsync(template.Id);
+    }
+
+    private void NewTemplate()
+    {
+        _edit = NewEditModel();
+        _original = NewEditModel();
+        _versions = new List<PromptTemplateVersionDto>();
+    }
+
+    private void ResetEdit()
+    {
+        _edit = Clone(_original);
+    }
+
+    private async Task Save()
+    {
+        _saving = true;
+        try
+        {
+            var saved = await PromptTemplateSvc.SaveAsync(_edit, AuthState.CurrentUser?.UserId);
+            Snackbar.Add("Đã lưu prompt template.", Severity.Success);
+            _templates = await PromptTemplateSvc.ListAsync();
+            await SelectTemplate(saved);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Lỗi lưu prompt: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private static PromptTemplateEditModel FromDto(PromptTemplateDto dto) => new()
+    {
+        Id = dto.Id,
+        PromptCode = dto.PromptCode,
+        PromptName = dto.PromptName,
+        PromptGroup = dto.PromptGroup,
+        PromptType = dto.PromptType,
+        LanguageCode = dto.LanguageCode,
+        TemplateText = dto.TemplateText,
+        TemplateJson = dto.TemplateJson,
+        NegativePrompt = dto.NegativePrompt,
+        Variables = dto.Variables,
+        ReferenceSchema = dto.ReferenceSchema,
+        OutputSchema = dto.OutputSchema,
+        IsDefault = dto.IsDefault,
+        IsActive = dto.IsActive,
+        IsSystem = dto.IsSystem,
+        Description = dto.Description
+    };
+
+    private static PromptTemplateEditModel NewEditModel() => new()
+    {
+        PromptCode = "avatar_chibi_custom_v1",
+        PromptName = "Avatar chibi custom",
+        PromptGroup = "image",
+        PromptType = "avatar_chibi",
+        LanguageCode = "vi",
+        TemplateText = "Tạo 3 ảnh avatar chibi 3D. Nhân vật: {{GENDER}}. Góc máy: {{CAMERA_ANGLE}}. Có avatar: {{HAS_AVATAR}}. Có logo: {{HAS_LOGO}}. Có sản phẩm: {{HAS_PRODUCT}}. Có đồng phục: {{HAS_UNIFORM}}. Có bối cảnh: {{HAS_SCENE}}.",
+        Variables = """["GENDER","CAMERA_ANGLE","HAS_AVATAR","HAS_LOGO","HAS_PRODUCT","HAS_UNIFORM","HAS_SCENE"]""",
+        ReferenceSchema = """{"avatar":{"required":false},"logo":{"required":false},"product":{"required":false},"uniform":{"required":false},"scene":{"required":false}}""",
+        OutputSchema = """{"image_count":3,"format":"png","aspect_ratio":"1:1"}""",
+        IsActive = true
+    };
+
+    private static PromptTemplateEditModel Clone(PromptTemplateEditModel model) => new()
+    {
+        Id = model.Id,
+        PromptCode = model.PromptCode,
+        PromptName = model.PromptName,
+        PromptGroup = model.PromptGroup,
+        PromptType = model.PromptType,
+        LanguageCode = model.LanguageCode,
+        TemplateText = model.TemplateText,
+        TemplateJson = model.TemplateJson,
+        NegativePrompt = model.NegativePrompt,
+        Variables = model.Variables,
+        ReferenceSchema = model.ReferenceSchema,
+        OutputSchema = model.OutputSchema,
+        IsDefault = model.IsDefault,
+        IsActive = model.IsActive,
+        IsSystem = model.IsSystem,
+        Description = model.Description,
+        ChangeNote = model.ChangeNote
+    };
+}

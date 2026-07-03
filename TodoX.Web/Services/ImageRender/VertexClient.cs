@@ -20,6 +20,7 @@ public sealed class VertexClient
     private ServiceAccountKey? _sa;
     private string? _cachedToken;
     private DateTimeOffset _tokenExpiry;
+    public string? LastModelUsed { get; private set; }
 
     public VertexClient(HttpClient http, IConfiguration config, IWebHostEnvironment env, ILogger<VertexClient> logger)
     {
@@ -37,14 +38,21 @@ public sealed class VertexClient
         public string token_uri { get; set; } = "https://oauth2.googleapis.com/token";
     }
 
-    public async Task<List<byte[]>> GenerateImagesAsync(string prompt, int count, string aspectRatio, CancellationToken ct)
+    public Task<List<byte[]>> GenerateImagesAsync(string prompt, int count, string aspectRatio, CancellationToken ct)
+        => GenerateImagesAsync(prompt, Array.Empty<ReferenceImage>(), count, aspectRatio, ct);
+
+    public async Task<List<byte[]>> GenerateImagesAsync(string prompt, IReadOnlyList<ReferenceImage> referenceImages,
+        int count, string aspectRatio, CancellationToken ct = default)
     {
         var project = _config["Vertex:ProjectId"] ?? throw new InvalidOperationException("Missing Vertex:ProjectId");
         var location = _config["Vertex:Location"] ?? "us-central1";
+        LastModelUsed = null;
 
-        // Try the primary model, then the fallback model (mirrors the proven PowerShell script).
-        var models = new[] { _config["Vertex:ImageModel"], _config["Vertex:FallbackModel"] }
-            .Where(m => !string.IsNullOrWhiteSpace(m)).Select(m => m!).Distinct().ToArray();
+        var hasReferences = NormalizeReferenceImages(referenceImages).Count > 0;
+        var models = hasReferences
+            ? new[] { _config["Vertex:CapabilityModel"] ?? "imagen-3.0-capability-001" }
+            : new[] { _config["Vertex:ImageModel"], _config["Vertex:FallbackModel"] }
+                .Where(m => !string.IsNullOrWhiteSpace(m)).Select(m => m!).Distinct().ToArray();
         if (models.Length == 0) models = new[] { "imagen-3.0-generate-002" };
 
         var token = await GetAccessTokenAsync(ct);
@@ -54,9 +62,10 @@ public sealed class VertexClient
         {
             try
             {
-                var images = await CallModelAsync(token, project, location, model, prompt, count, aspectRatio, ct);
+                var images = await CallModelAsync(token, project, location, model, prompt, referenceImages, count, aspectRatio, ct);
                 if (images.Count > 0)
                 {
+                    LastModelUsed = model;
                     _logger.LogInformation("Vertex render OK with model {Model} ({N} images)", model, images.Count);
                     return images;
                 }
@@ -72,14 +81,21 @@ public sealed class VertexClient
     }
 
     private async Task<List<byte[]>> CallModelAsync(string token, string project, string location, string model,
-        string prompt, int count, string aspectRatio, CancellationToken ct)
+        string prompt, IReadOnlyList<ReferenceImage> referenceImages, int count, string aspectRatio, CancellationToken ct)
     {
         var url = $"https://{location}-aiplatform.googleapis.com/v1/projects/{project}/locations/{location}/publishers/google/models/{model}:predict";
-
-        var payload = new
+        var refs = NormalizeReferenceImages(referenceImages);
+        if (refs.Count > 0 && !SupportsReferenceImages(model))
         {
-            instances = new[] { new { prompt } },
-            parameters = new
+            throw new InvalidOperationException($"Model hien tai ({model}) khong ho tro anh tham chieu. Can cau hinh Gemini/Imagen image model co ho tro image input.");
+        }
+
+        object instance = refs.Count == 0
+            ? new { prompt }
+            : new { prompt = BuildCapabilityPrompt(prompt, refs), referenceImages = BuildCapabilityReferences(refs) };
+
+        object parameters = refs.Count == 0
+            ? new
             {
                 sampleCount = count,
                 aspectRatio,
@@ -87,7 +103,15 @@ public sealed class VertexClient
                 // generation is explicitly allowed. Verified: without this, predictions is empty.
                 personGeneration = "allow_all"
             }
-        };
+            : new
+            {
+                sampleCount = count,
+                aspectRatio,
+                personGeneration = "allow_all",
+                editMode = "EDIT_MODE_DEFAULT"
+            };
+
+        var payload = new { instances = new[] { instance }, parameters };
 
         using var req = new HttpRequestMessage(HttpMethod.Post, url);
         req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
@@ -145,6 +169,132 @@ public sealed class VertexClient
         }
 
         return images;
+    }
+
+    private static List<ReferenceImage> NormalizeReferenceImages(IReadOnlyList<ReferenceImage> referenceImages)
+    {
+        var order = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["avatar"] = 0,
+            ["logo"] = 1,
+            ["product"] = 2,
+            ["uniform"] = 3,
+            ["scene"] = 4
+        };
+
+        return referenceImages
+            .Where(x => x.Bytes?.Length > 0 || !string.IsNullOrWhiteSpace(x.Base64))
+            .Select(x =>
+            {
+                if (string.IsNullOrWhiteSpace(x.Base64) && x.Bytes?.Length > 0)
+                {
+                    x.Base64 = Convert.ToBase64String(x.Bytes);
+                }
+                if (string.IsNullOrWhiteSpace(x.MimeType))
+                {
+                    x.MimeType = "image/png";
+                }
+                return x;
+            })
+            .OrderBy(x => x.Role is not null && order.TryGetValue(x.Role, out var n) ? n : 99)
+            .ToList();
+    }
+
+    private static string BuildCapabilityPrompt(string prompt, IReadOnlyList<ReferenceImage> refs)
+    {
+        var lines = new List<string>();
+        foreach (var item in refs.Select((image, index) => new { image, id = index + 1 }))
+        {
+            var role = item.image.Role ?? string.Empty;
+            if (role.Equals("avatar", StringComparison.OrdinalIgnoreCase))
+            {
+                lines.Add($"Use the person/avatar reference [{item.id}] as the main identity guidance for the chibi character.");
+            }
+            else if (role.Equals("product", StringComparison.OrdinalIgnoreCase))
+            {
+                lines.Add($"Use the product reference [{item.id}] as product guidance if the character holds or interacts with a product.");
+            }
+            else if (role.Equals("logo", StringComparison.OrdinalIgnoreCase))
+            {
+                lines.Add($"Use the brand/logo style reference [{item.id}] only for brand colors or a small tasteful badge.");
+            }
+            else if (role.Equals("uniform", StringComparison.OrdinalIgnoreCase))
+            {
+                lines.Add($"Use the uniform/clothing reference [{item.id}] for clothing shape, main colors, and brand identity details.");
+            }
+            else if (role.Equals("scene", StringComparison.OrdinalIgnoreCase))
+            {
+                lines.Add($"Use the background/scene style reference [{item.id}] only as simplified cinematic background inspiration.");
+            }
+            else
+            {
+                lines.Add($"Use reference image [{item.id}] as visual guidance.");
+            }
+        }
+
+        return prompt.Trim() + Environment.NewLine + Environment.NewLine + string.Join(Environment.NewLine, lines);
+    }
+
+    private static object[] BuildCapabilityReferences(IReadOnlyList<ReferenceImage> refs)
+    {
+        return refs.Select((image, index) =>
+        {
+            var referenceImage = new { bytesBase64Encoded = image.Base64 };
+            var id = index + 1;
+            var role = image.Role ?? string.Empty;
+
+            if (role.Equals("avatar", StringComparison.OrdinalIgnoreCase))
+            {
+                return (object)new
+                {
+                    referenceType = "REFERENCE_TYPE_SUBJECT",
+                    referenceId = id,
+                    referenceImage,
+                    subjectImageConfig = new
+                    {
+                        subjectDescription = "person in the avatar reference",
+                        subjectType = "SUBJECT_TYPE_PERSON"
+                    }
+                };
+            }
+
+            if (role.Equals("product", StringComparison.OrdinalIgnoreCase))
+            {
+                return (object)new
+                {
+                    referenceType = "REFERENCE_TYPE_SUBJECT",
+                    referenceId = id,
+                    referenceImage,
+                    subjectImageConfig = new
+                    {
+                        subjectDescription = "product in the product reference",
+                        subjectType = "SUBJECT_TYPE_PRODUCT"
+                    }
+                };
+            }
+
+            return (object)new
+            {
+                referenceType = "REFERENCE_TYPE_STYLE",
+                referenceId = id,
+                referenceImage,
+                styleImageConfig = new
+                {
+                    styleDescription = role.Equals("logo", StringComparison.OrdinalIgnoreCase)
+                        ? "brand logo colors and simple badge style"
+                        : role.Equals("uniform", StringComparison.OrdinalIgnoreCase)
+                            ? "uniform and clothing style"
+                            : "cinematic background style"
+                }
+            };
+        }).ToArray();
+    }
+
+    private static bool SupportsReferenceImages(string model)
+    {
+        return model.Contains("capability", StringComparison.OrdinalIgnoreCase)
+            || model.Contains("edit", StringComparison.OrdinalIgnoreCase)
+            || model.Contains("imagegeneration@006", StringComparison.OrdinalIgnoreCase);
     }
 
     private async Task<string> GetAccessTokenAsync(CancellationToken ct)

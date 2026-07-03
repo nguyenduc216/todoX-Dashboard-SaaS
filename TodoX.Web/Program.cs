@@ -31,6 +31,8 @@ builder.Services.AddHttpClient<FacebookGraphService>();
 // Sprint 2F: media, image render (Vertex), avatar + chibi.
 builder.Services.AddScoped<TodoX.Web.Services.Media.IMediaFileService, TodoX.Web.Services.Media.MediaFileService>();
 builder.Services.AddScoped<TodoX.Web.Services.Settings.SettingsApiRepository>();
+builder.Services.AddScoped<TodoX.Web.Services.Settings.PromptTemplateRepository>();
+builder.Services.AddScoped<TodoX.Web.Services.Settings.IPromptTemplateService, TodoX.Web.Services.Settings.PromptTemplateService>();
 builder.Services.AddHttpClient<TodoX.Web.Services.ImageRender.VertexClient>();
 builder.Services.AddScoped<TodoX.Web.Services.ImageRender.IImageRenderService, TodoX.Web.Services.ImageRender.VertexImageRenderService>();
 builder.Services.AddScoped<TodoX.Web.Services.Profile.IAvatarService, TodoX.Web.Services.Profile.AvatarService>();
