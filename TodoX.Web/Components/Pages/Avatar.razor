@@ -1,5 +1,6 @@
 @page "/profile/avatar"
 @using System.Text.Json
+@using Microsoft.AspNetCore.Components.Forms
 @using TodoX.Web.Services.Profile
 @using TodoX.Web.Services.Media
 @using TodoX.Web.Services.ImageRender
@@ -165,6 +166,7 @@
                                             {
                                                 <div class="avatar-card-overlay">
                                                     <MudProgressCircular Indeterminate="true" Color="Color.Warning" Size="Size.Small" />
+                                                    <MudText Typo="Typo.body2">Đang render lại...</MudText>
                                                 </div>
                                             }
                                             @if (img.Status == "failed")
@@ -345,12 +347,27 @@
                 <MudIconButton Icon="@Icons.Material.Filled.Visibility" Color="Color.Info" Size="Size.Small" OnClick="@(() => ViewReference(slot, label, media))" />
                 <MudIconButton Icon="@Icons.Material.Filled.Close" Color="Color.Error" Size="Size.Small" OnClick="@(() => ClearReference(slot))" />
             }
-            <MudFileUpload T="IBrowserFile" Accept="image/png,image/jpeg,image/webp" MaximumFileCount="1"
-                           FilesChanged="@(f => OnRefSelected(slot, f))">
-                <ActivatorContent><MudIconButton Icon="@Icons.Material.Filled.Upload" Color="Color.Warning" Size="Size.Small" /></ActivatorContent>
-            </MudFileUpload>
+            <label class="avatar-upload-btn" title="Upload">
+                <MudIcon Icon="@Icons.Material.Filled.Upload" Size="Size.Small" />
+                <InputFile OnChange="@(e => OnRefInputChanged(slot, e))" accept="image/png,image/jpeg,image/webp" />
+            </label>
         </div>
     </div>;
+
+    private async Task OnRefInputChanged(string slot, InputFileChangeEventArgs args)
+    {
+        var file = args.File;
+        if (slot == "logo")
+        {
+            _uiLogs.Add(new RenderLogEntry
+            {
+                Step = "LOGO_INPUT_CHANGED",
+                Message = "Logo input changed on frontend.",
+                Data = new { file.Name, file.Size, file.ContentType }
+            });
+        }
+        await OnRefSelected(slot, file);
+    }
 
     private async Task OnRefSelected(string slot, IBrowserFile file)
     {
@@ -363,6 +380,15 @@
             await Tenant.EnsureLoadedAsync();
             var media = await MediaFiles.SaveAsync(ms.ToArray(), file.Name, file.ContentType,
                 $"chibi_ref_{slot}", AuthState.CurrentUser.UserId, null, Tenant.TenantId);
+            if (slot == "logo")
+            {
+                _uiLogs.Add(new RenderLogEntry
+                {
+                    Step = "LOGO_MEDIA_SAVED",
+                    Message = "Logo media saved and registered as logo reference.",
+                    Data = new { media.Id, media.FileName, media.MimeType, media.FileSizeBytes, media.PublicUrl, category = media.FileCategory }
+                });
+            }
             switch (slot)
             {
                 case "avatar": _avatarMedia = media; break;
@@ -542,11 +568,19 @@
 
         _busy = true;
         _rerenderingRenderId = img.RenderId;
+        _uiLogs.Add(new RenderLogEntry
+        {
+            Step = "UI_RERENDER_STATE_SET",
+            Message = "Per-card rerender state set on frontend.",
+            Data = new { img.RenderId, img.Index }
+        });
+        StateHasChanged();
         try
         {
             var updated = await Chibi.RerenderAsync(AuthState.CurrentUser.UserId,
                 AuthState.CurrentUser.CustomerId, IsCustomer, img.RenderId, newPrompt);
             // Update the image in the current result.
+            updated.Index = img.Index;
             var idx = _result!.Images.FindIndex(x => x.RenderId == img.RenderId);
             if (idx >= 0) _result.Images[idx] = updated;
             _uiLogs.Add(new RenderLogEntry { Step = "UI_RERENDER_COMPLETED", Message = "Single image rerender completed.", Data = new { img.RenderId, updated.MediaId, updated.Url } });

@@ -1,62 +1,55 @@
-﻿@page "/activity-logs"
+@page "/activity-logs"
 @page "/activity-logs/{LogCode}"
 @using System.Text.Json
 @inject AuditRepository Audit
 @inject AuthStateService AuthState
+@inject IDialogService DialogService
 
-<PageTitle>Nháº­t kÃ½ hoáº¡t Ä‘á»™ng</PageTitle>
+<PageTitle>Nhật ký hoạt động</PageTitle>
 
 <MudStack Spacing="3">
     <div>
-        <MudText Typo="Typo.h4" Class="todox-page-title">Nháº­t kÃ½ hoáº¡t Ä‘á»™ng</MudText>
+        <MudText Typo="Typo.h4" Class="todox-page-title">Nhật ký hoạt động</MudText>
         <MudText Typo="Typo.body1" Class="todox-page-subtitle">
-            @(IsCustomer ? "Lá»‹ch sá»­ thao tÃ¡c cá»§a tÃ i khoáº£n báº¡n." : "Lá»‹ch sá»­ thao tÃ¡c cá»§a ngÆ°á»i dÃ¹ng trong há»‡ thá»‘ng.")
+            @(IsCustomer ? "Lịch sử thao tác của tài khoản bạn." : "Lịch sử thao tác của người dùng trong hệ thống.")
         </MudText>
     </div>
 
-    @if (_detail is not null)
-    {
-        <MudPaper Class="todox-card pa-4" Rounded="true">
-            <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
-                <div>
-                    <MudText Typo="Typo.h6">Chi tiet log @_detail.EntityDisplay</MudText>
-                    <MudText Typo="Typo.caption" Class="todox-page-subtitle">@_detail.OccurredAt.ToString("dd/MM/yyyy HH:mm:ss") · @_detail.Feature · @_detail.Result</MudText>
-                </div>
-                <MudChip T="string" Size="Size.Small" Color='@(_detail.Result == "success" ? Color.Success : Color.Error)'>@_detail.Result</MudChip>
-            </MudStack>
-            <MudDivider Class="my-3" />
-            <pre class="avatar-render-log">@PrettyJson(_detail.Message)</pre>
-        </MudPaper>
-    }
-
     <MudPaper Class="todox-table-card pa-4" Rounded="true">
-        <MudTextField T="string" @bind-Value="_search" Placeholder="TÃ¬m theo ngÆ°á»i dÃ¹ng, chá»©c nÄƒng, thao tÃ¡c..."
+        <MudTextField T="string" @bind-Value="_search" Placeholder="Tìm theo người dùng, chức năng, thao tác, mã log..."
                       Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
                       Immediate="true" Class="mb-3" Variant="Variant.Outlined" Margin="Margin.Dense" />
 
         <MudTable Items="@Filtered" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Class="todox-table" Loading="_loading">
             <HeaderContent>
-                <MudTh>Thá»i gian</MudTh>
-                <MudTh>NgÆ°á»i thá»±c hiá»‡n</MudTh>
-                <MudTh>Chá»©c nÄƒng</MudTh>
-                <MudTh>Thao tÃ¡c</MudTh>
-                <MudTh>Äá»‘i tÆ°á»£ng</MudTh>
-                <MudTh>Káº¿t quáº£</MudTh>
-                <MudTh>Chi tiáº¿t</MudTh>
+                <MudTh>Thời gian</MudTh>
+                <MudTh>Người thực hiện</MudTh>
+                <MudTh>Chức năng</MudTh>
+                <MudTh>Thao tác</MudTh>
+                <MudTh>Mã log</MudTh>
+                <MudTh>Kết quả</MudTh>
+                <MudTh>Mô tả</MudTh>
+                <MudTh>Chi tiết</MudTh>
             </HeaderContent>
             <RowTemplate>
-                <MudTd DataLabel="Thá»i gian">@context.OccurredAt.ToString("dd/MM/yyyy HH:mm:ss")</MudTd>
-                <MudTd DataLabel="NgÆ°á»i thá»±c hiá»‡n">@(context.ActorDisplayName ?? context.ActorEmail ?? "â€”")</MudTd>
-                <MudTd DataLabel="Chá»©c nÄƒng">@ModuleLabel(context.Module)</MudTd>
-                <MudTd DataLabel="Thao tÃ¡c">@ActionLabel(context.Action)</MudTd>
-                <MudTd DataLabel="Äá»‘i tÆ°á»£ng">@(context.EntityDisplay ?? "â€”")</MudTd>
-                <MudTd DataLabel="Káº¿t quáº£">
-                    <MudChip T="string" Size="Size.Small" Color="@(context.Result == "success" ? Color.Success : Color.Error)">@context.Result</MudChip>
+                <MudTd DataLabel="Thời gian">@context.OccurredAt.ToString("dd/MM/yyyy HH:mm:ss")</MudTd>
+                <MudTd DataLabel="Người thực hiện">@(context.ActorDisplayName ?? context.ActorEmail ?? "-")</MudTd>
+                <MudTd DataLabel="Chức năng">@ModuleLabel(context.Module)</MudTd>
+                <MudTd DataLabel="Thao tác">@ActionLabel(context.Action)</MudTd>
+                <MudTd DataLabel="Mã log">@(context.EntityDisplay ?? "-")</MudTd>
+                <MudTd DataLabel="Kết quả">
+                    <MudChip T="string" Size="Size.Small" Color="@(context.Result == "success" ? Color.Success : Color.Error)">@ResultLabel(context.Result)</MudChip>
                 </MudTd>
-                <MudTd DataLabel="Chi tiáº¿t">@(context.Message ?? "")</MudTd>
+                <MudTd DataLabel="Mô tả">
+                    <span class="activity-summary">@Summary(context)</span>
+                </MudTd>
+                <MudTd DataLabel="Chi tiết">
+                    <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Info" StartIcon="@Icons.Material.Filled.Visibility"
+                               OnClick="@(() => ShowDetail(context))">Xem chi tiết</MudButton>
+                </MudTd>
             </RowTemplate>
             <NoRecordsContent>
-                <MudText Class="pa-4 todox-page-subtitle">ChÆ°a cÃ³ nháº­t kÃ½ hoáº¡t Ä‘á»™ng.</MudText>
+                <MudText Class="pa-4 todox-page-subtitle">Chưa có nhật ký hoạt động.</MudText>
             </NoRecordsContent>
         </MudTable>
     </MudPaper>
@@ -66,7 +59,7 @@
     private bool _loading = true;
     private string _search = string.Empty;
     private IReadOnlyList<AuditLogView> _logs = new List<AuditLogView>();
-    private AuditLogDetail? _detail;
+    private AuditLogView? _pendingDetail;
 
     [Parameter] public string? LogCode { get; set; }
 
@@ -79,11 +72,25 @@
             _logs = await Audit.GetRecentAsync(AuthState.CurrentUser);
             if (!string.IsNullOrWhiteSpace(LogCode))
             {
-                _detail = await Audit.GetByEntityDisplayAsync(AuthState.CurrentUser, LogCode);
                 _search = LogCode;
+                var row = _logs.FirstOrDefault(x => string.Equals(x.EntityDisplay, LogCode, StringComparison.OrdinalIgnoreCase));
+                if (row is not null)
+                {
+                    _pendingDetail = row;
+                }
             }
         }
         _loading = false;
+    }
+
+    protected override Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && _pendingDetail is not null)
+        {
+            ShowDetail(_pendingDetail);
+            _pendingDetail = null;
+        }
+        return Task.CompletedTask;
     }
 
     private IEnumerable<AuditLogView> Filtered
@@ -97,36 +104,138 @@
                 (x.ActorEmail?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false) ||
                 x.Module.Contains(q, StringComparison.OrdinalIgnoreCase) ||
                 x.Action.Contains(q, StringComparison.OrdinalIgnoreCase) ||
-                (x.EntityDisplay?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false));
+                (x.EntityDisplay?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                Summary(x).Contains(q, StringComparison.OrdinalIgnoreCase));
         }
+    }
+
+    private void ShowDetail(AuditLogView row)
+    {
+        var parameters = new DialogParameters
+        {
+            ["OccurredAt"] = row.OccurredAt,
+            ["Module"] = ModuleLabel(row.Module),
+            ["Action"] = ActionLabel(row.Action),
+            ["LogCode"] = row.EntityDisplay,
+            ["Result"] = ResultLabel(row.Result),
+            ["Summary"] = Summary(row),
+            ["RawMessage"] = row.Message
+        };
+        _ = DialogService.ShowAsync<Components.Dialogs.ActivityLogDetailDialog>("Chi tiết nhật ký", parameters,
+            new DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true });
+    }
+
+    private static string Summary(AuditLogView row)
+    {
+        if (TryReadJson(row.Message, out var root))
+        {
+            var taskType = GetString(root, "taskType") ?? row.Feature ?? row.Action;
+            var quantity = GetInt(root, "input", "quantity") ?? GetInt(root, "quantity");
+            var index = GetInt(root, "input", "index") ?? GetInt(root, "outputs", 0, "index");
+
+            if (string.Equals(taskType, "avatar-render", StringComparison.OrdinalIgnoreCase))
+            {
+                return quantity is > 1 ? $"Render ảnh avatar với {quantity} biến thể" : "Render ảnh avatar";
+            }
+
+            if (string.Equals(taskType, "avatar-rerender", StringComparison.OrdinalIgnoreCase))
+            {
+                return index is > 0 ? $"Render lại ảnh avatar #{index}" : "Render lại ảnh avatar";
+            }
+        }
+
+        if (row.Module == "avatar_render")
+        {
+            return row.Action == "rerender" ? "Render lại ảnh avatar" : "Render ảnh avatar";
+        }
+
+        return string.IsNullOrWhiteSpace(row.Message) ? ActionLabel(row.Action) : Truncate(row.Message, 96);
+    }
+
+    private static bool TryReadJson(string? text, out JsonElement root)
+    {
+        root = default;
+        if (string.IsNullOrWhiteSpace(text)) return false;
+        try
+        {
+            using var doc = JsonDocument.Parse(text);
+            root = doc.RootElement.Clone();
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static string? GetString(JsonElement root, params object[] path)
+    {
+        return TryGet(root, out var value, path) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+    }
+
+    private static int? GetInt(JsonElement root, params object[] path)
+    {
+        if (!TryGet(root, out var value, path)) return null;
+        return value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var n) ? n : null;
+    }
+
+    private static bool TryGet(JsonElement root, out JsonElement value, params object[] path)
+    {
+        value = root;
+        foreach (var segment in path)
+        {
+            if (segment is string name)
+            {
+                if (value.ValueKind != JsonValueKind.Object || !value.TryGetProperty(name, out value)) return false;
+            }
+            else if (segment is int index)
+            {
+                if (value.ValueKind != JsonValueKind.Array || value.GetArrayLength() <= index) return false;
+                value = value[index];
+            }
+        }
+        return true;
     }
 
     private static string ActionLabel(string a) => a switch
     {
-        "view" => "Xem", "create" => "ThÃªm", "update" => "Sá»­a", "delete" => "XÃ³a",
-        "login" => "ÄÄƒng nháº­p", "logout" => "ÄÄƒng xuáº¥t", "reset_password" => "Äáº·t láº¡i MK",
-        "verify" => "XÃ¡c thá»±c", _ => a
+        "view" => "Xem",
+        "create" => "Thêm",
+        "update" => "Sửa",
+        "delete" => "Xóa",
+        "login" => "Đăng nhập",
+        "logout" => "Đăng xuất",
+        "reset_password" => "Đặt lại mật khẩu",
+        "verify" => "Xác thực",
+        "render" => "Render",
+        "rerender" => "Render lại",
+        _ => a
     };
 
     private static string ModuleLabel(string m) => m switch
     {
-        "admin_users" => "Quáº£n trá»‹ viÃªn", "customers" => "KhÃ¡ch hÃ ng", "customer_accounts" => "TÃ i khoáº£n KH",
-        "customer_pages" => "Trang máº¡ng xÃ£ há»™i", "token_wallets" => "VÃ­ token", "services" => "Dá»‹ch vá»¥",
-        "render_jobs" => "Render Jobs", "avatar_render" => "Avatar Render", "api_providers" => "CÃ i Ä‘áº·t API", "settings" => "CÃ i Ä‘áº·t",
-        "permissions" => "PhÃ¢n quyá»n", "auth" => "XÃ¡c thá»±c", _ => m
+        "admin_users" => "Quản trị viên",
+        "customers" => "Khách hàng",
+        "customer_accounts" => "Tài khoản khách hàng",
+        "customer_pages" => "Trang mạng xã hội",
+        "token_wallets" => "Ví token",
+        "services" => "Dịch vụ",
+        "render_jobs" => "Render Jobs",
+        "avatar_render" => "Avatar Render",
+        "api_providers" => "Cài đặt API",
+        "settings" => "Cài đặt",
+        "permissions" => "Phân quyền",
+        "auth" => "Xác thực",
+        _ => m
     };
 
-    private static string PrettyJson(string? message)
+    private static string ResultLabel(string r) => r switch
     {
-        if (string.IsNullOrWhiteSpace(message)) return string.Empty;
-        try
-        {
-            using var doc = JsonDocument.Parse(message);
-            return JsonSerializer.Serialize(doc.RootElement, new JsonSerializerOptions { WriteIndented = true });
-        }
-        catch
-        {
-            return message;
-        }
-    }
+        "success" => "Thành công",
+        "failed" => "Thất bại",
+        _ => r
+    };
+
+    private static string Truncate(string text, int max)
+        => text.Length <= max ? text : text[..max] + "...";
 }

@@ -1,0 +1,202 @@
+@using System.Text.Json
+@inject IJSRuntime JS
+
+<MudDialog>
+    <TitleContent>
+        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="gap-2">
+            <div>
+                <MudText Typo="Typo.h6">Chi tiết nhật ký</MudText>
+                <MudText Typo="Typo.caption" Class="todox-page-subtitle">@LogCode · @OccurredAt.ToString("dd/MM/yyyy HH:mm:ss")</MudText>
+            </div>
+            <MudChip T="string" Size="Size.Small" Color="@(Result == "Thành công" ? Color.Success : Color.Error)">@Result</MudChip>
+        </MudStack>
+    </TitleContent>
+    <DialogContent>
+        <MudStack Spacing="3">
+            <MudPaper Class="activity-detail-section pa-3" Rounded="true">
+                <MudText Typo="Typo.subtitle2">Tổng quan</MudText>
+                <MudGrid Class="mt-1">
+                    <MudItem xs="12" sm="6"><MudText Typo="Typo.body2"><b>Chức năng:</b> @Module</MudText></MudItem>
+                    <MudItem xs="12" sm="6"><MudText Typo="Typo.body2"><b>Thao tác:</b> @Action</MudText></MudItem>
+                    <MudItem xs="12"><MudText Typo="Typo.body2"><b>Mô tả:</b> @Summary</MudText></MudItem>
+                </MudGrid>
+            </MudPaper>
+
+            @if (_jsonReady)
+            {
+                @if (!string.IsNullOrWhiteSpace(_finalPrompt))
+                {
+                    <MudPaper Class="activity-detail-section pa-3" Rounded="true">
+                        <MudText Typo="Typo.subtitle2">Prompt cuối cùng</MudText>
+                        <pre class="activity-pre">@_finalPrompt</pre>
+                    </MudPaper>
+                }
+
+                @if (_references.Count > 0)
+                {
+                    <MudPaper Class="activity-detail-section pa-3" Rounded="true">
+                        <MudText Typo="Typo.subtitle2">Ảnh tham chiếu</MudText>
+                        <div class="activity-image-strip">
+                            @foreach (var item in _references)
+                            {
+                                <a href="@item.Url" target="_blank" class="activity-image-item">
+                                    <img src="@item.Url" alt="@item.Label" />
+                                    <span>@item.Label</span>
+                                </a>
+                            }
+                        </div>
+                    </MudPaper>
+                }
+
+                @if (_outputs.Count > 0)
+                {
+                    <MudPaper Class="activity-detail-section pa-3" Rounded="true">
+                        <MudText Typo="Typo.subtitle2">Ảnh kết quả</MudText>
+                        <div class="activity-image-strip">
+                            @foreach (var item in _outputs)
+                            {
+                                <a href="@item.Url" target="_blank" class="activity-image-item">
+                                    <img src="@item.Url" alt="@item.Label" />
+                                    <span>@item.Label</span>
+                                </a>
+                            }
+                        </div>
+                    </MudPaper>
+                }
+
+                @if (_timeline.Count > 0)
+                {
+                    <MudPaper Class="activity-detail-section pa-3" Rounded="true">
+                        <MudText Typo="Typo.subtitle2">Timeline</MudText>
+                        <MudTimeline Dense="true" Class="mt-2">
+                            @foreach (var step in _timeline)
+                            {
+                                <MudTimelineItem Color="@(step.Level == "error" ? Color.Error : step.Level == "warning" ? Color.Warning : Color.Success)">
+                                    <MudText Typo="Typo.body2"><b>@step.Step</b> · @step.Message</MudText>
+                                    <MudText Typo="Typo.caption" Class="todox-page-subtitle">@step.Timestamp</MudText>
+                                </MudTimelineItem>
+                            }
+                        </MudTimeline>
+                    </MudPaper>
+                }
+            }
+
+            <MudPaper Class="activity-detail-section pa-3" Rounded="true">
+                <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+                    <MudText Typo="Typo.subtitle2">Raw JSON detail</MudText>
+                    <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.ContentCopy" OnClick="CopyRaw">Copy</MudButton>
+                </MudStack>
+                <pre class="activity-json-pre">@_prettyRaw</pre>
+            </MudPaper>
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton Class="todox-primary-btn" OnClick="Close">Đóng</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public DateTime OccurredAt { get; set; }
+    [Parameter] public string? Module { get; set; }
+    [Parameter] public string? Action { get; set; }
+    [Parameter] public string? LogCode { get; set; }
+    [Parameter] public string? Result { get; set; }
+    [Parameter] public string? Summary { get; set; }
+    [Parameter] public string? RawMessage { get; set; }
+
+    private bool _jsonReady;
+    private string _prettyRaw = string.Empty;
+    private string? _finalPrompt;
+    private readonly List<ActivityImage> _references = new();
+    private readonly List<ActivityImage> _outputs = new();
+    private readonly List<ActivityStep> _timeline = new();
+
+    protected override void OnInitialized()
+    {
+        _prettyRaw = PrettyJson(RawMessage);
+        if (string.IsNullOrWhiteSpace(RawMessage)) return;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(RawMessage);
+            var root = doc.RootElement;
+            _jsonReady = true;
+            _finalPrompt = root.TryGetProperty("finalPrompt", out var prompt) ? prompt.GetString() : null;
+
+            if (root.TryGetProperty("references", out var refs) && refs.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in refs.EnumerateArray())
+                {
+                    var url = GetString(item, "Url") ?? GetString(item, "url");
+                    if (!string.IsNullOrWhiteSpace(url))
+                    {
+                        _references.Add(new ActivityImage(GetString(item, "Role") ?? GetString(item, "role") ?? "reference", url));
+                    }
+                }
+            }
+
+            if (root.TryGetProperty("outputs", out var outputs) && outputs.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in outputs.EnumerateArray())
+                {
+                    var url = GetString(item, "Url") ?? GetString(item, "url");
+                    if (!string.IsNullOrWhiteSpace(url))
+                    {
+                        _outputs.Add(new ActivityImage($"#{GetInt(item, "Index") ?? GetInt(item, "index") ?? 0}", url));
+                    }
+                }
+            }
+
+            if (root.TryGetProperty("timeline", out var timeline) && timeline.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in timeline.EnumerateArray())
+                {
+                    _timeline.Add(new ActivityStep(
+                        GetString(item, "Step") ?? GetString(item, "step") ?? "step",
+                        GetString(item, "Message") ?? GetString(item, "message") ?? string.Empty,
+                        GetString(item, "Level") ?? GetString(item, "level") ?? "info",
+                        GetString(item, "Timestamp") ?? GetString(item, "timestamp") ?? string.Empty));
+                }
+            }
+        }
+        catch
+        {
+            _jsonReady = false;
+        }
+    }
+
+    private async Task CopyRaw()
+    {
+        await JS.InvokeVoidAsync("navigator.clipboard.writeText", _prettyRaw);
+    }
+
+    private static string PrettyJson(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return string.Empty;
+        try
+        {
+            using var doc = JsonDocument.Parse(text);
+            return JsonSerializer.Serialize(doc.RootElement, new JsonSerializerOptions { WriteIndented = true });
+        }
+        catch
+        {
+            return text;
+        }
+    }
+
+    private static string? GetString(JsonElement root, string name)
+    {
+        return root.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+    }
+
+    private static int? GetInt(JsonElement root, string name)
+    {
+        return root.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var n) ? n : null;
+    }
+
+    private void Close() => MudDialog.Close();
+
+    private sealed record ActivityImage(string Label, string Url);
+    private sealed record ActivityStep(string Step, string Message, string Level, string Timestamp);
+}
