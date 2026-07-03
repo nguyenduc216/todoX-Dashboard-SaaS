@@ -1,45 +1,62 @@
-@page "/activity-logs"
+﻿@page "/activity-logs"
+@page "/activity-logs/{LogCode}"
+@using System.Text.Json
 @inject AuditRepository Audit
 @inject AuthStateService AuthState
 
-<PageTitle>Nhật ký hoạt động</PageTitle>
+<PageTitle>Nháº­t kÃ½ hoáº¡t Ä‘á»™ng</PageTitle>
 
 <MudStack Spacing="3">
     <div>
-        <MudText Typo="Typo.h4" Class="todox-page-title">Nhật ký hoạt động</MudText>
+        <MudText Typo="Typo.h4" Class="todox-page-title">Nháº­t kÃ½ hoáº¡t Ä‘á»™ng</MudText>
         <MudText Typo="Typo.body1" Class="todox-page-subtitle">
-            @(IsCustomer ? "Lịch sử thao tác của tài khoản bạn." : "Lịch sử thao tác của người dùng trong hệ thống.")
+            @(IsCustomer ? "Lá»‹ch sá»­ thao tÃ¡c cá»§a tÃ i khoáº£n báº¡n." : "Lá»‹ch sá»­ thao tÃ¡c cá»§a ngÆ°á»i dÃ¹ng trong há»‡ thá»‘ng.")
         </MudText>
     </div>
 
+    @if (_detail is not null)
+    {
+        <MudPaper Class="todox-card pa-4" Rounded="true">
+            <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
+                <div>
+                    <MudText Typo="Typo.h6">Chi tiet log @_detail.EntityDisplay</MudText>
+                    <MudText Typo="Typo.caption" Class="todox-page-subtitle">@_detail.OccurredAt.ToString("dd/MM/yyyy HH:mm:ss") · @_detail.Feature · @_detail.Result</MudText>
+                </div>
+                <MudChip T="string" Size="Size.Small" Color='@(_detail.Result == "success" ? Color.Success : Color.Error)'>@_detail.Result</MudChip>
+            </MudStack>
+            <MudDivider Class="my-3" />
+            <pre class="avatar-render-log">@PrettyJson(_detail.Message)</pre>
+        </MudPaper>
+    }
+
     <MudPaper Class="todox-table-card pa-4" Rounded="true">
-        <MudTextField T="string" @bind-Value="_search" Placeholder="Tìm theo người dùng, chức năng, thao tác..."
+        <MudTextField T="string" @bind-Value="_search" Placeholder="TÃ¬m theo ngÆ°á»i dÃ¹ng, chá»©c nÄƒng, thao tÃ¡c..."
                       Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
                       Immediate="true" Class="mb-3" Variant="Variant.Outlined" Margin="Margin.Dense" />
 
         <MudTable Items="@Filtered" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Class="todox-table" Loading="_loading">
             <HeaderContent>
-                <MudTh>Thời gian</MudTh>
-                <MudTh>Người thực hiện</MudTh>
-                <MudTh>Chức năng</MudTh>
-                <MudTh>Thao tác</MudTh>
-                <MudTh>Đối tượng</MudTh>
-                <MudTh>Kết quả</MudTh>
-                <MudTh>Chi tiết</MudTh>
+                <MudTh>Thá»i gian</MudTh>
+                <MudTh>NgÆ°á»i thá»±c hiá»‡n</MudTh>
+                <MudTh>Chá»©c nÄƒng</MudTh>
+                <MudTh>Thao tÃ¡c</MudTh>
+                <MudTh>Äá»‘i tÆ°á»£ng</MudTh>
+                <MudTh>Káº¿t quáº£</MudTh>
+                <MudTh>Chi tiáº¿t</MudTh>
             </HeaderContent>
             <RowTemplate>
-                <MudTd DataLabel="Thời gian">@context.OccurredAt.ToString("dd/MM/yyyy HH:mm:ss")</MudTd>
-                <MudTd DataLabel="Người thực hiện">@(context.ActorDisplayName ?? context.ActorEmail ?? "—")</MudTd>
-                <MudTd DataLabel="Chức năng">@ModuleLabel(context.Module)</MudTd>
-                <MudTd DataLabel="Thao tác">@ActionLabel(context.Action)</MudTd>
-                <MudTd DataLabel="Đối tượng">@(context.EntityDisplay ?? "—")</MudTd>
-                <MudTd DataLabel="Kết quả">
+                <MudTd DataLabel="Thá»i gian">@context.OccurredAt.ToString("dd/MM/yyyy HH:mm:ss")</MudTd>
+                <MudTd DataLabel="NgÆ°á»i thá»±c hiá»‡n">@(context.ActorDisplayName ?? context.ActorEmail ?? "â€”")</MudTd>
+                <MudTd DataLabel="Chá»©c nÄƒng">@ModuleLabel(context.Module)</MudTd>
+                <MudTd DataLabel="Thao tÃ¡c">@ActionLabel(context.Action)</MudTd>
+                <MudTd DataLabel="Äá»‘i tÆ°á»£ng">@(context.EntityDisplay ?? "â€”")</MudTd>
+                <MudTd DataLabel="Káº¿t quáº£">
                     <MudChip T="string" Size="Size.Small" Color="@(context.Result == "success" ? Color.Success : Color.Error)">@context.Result</MudChip>
                 </MudTd>
-                <MudTd DataLabel="Chi tiết">@(context.Message ?? "")</MudTd>
+                <MudTd DataLabel="Chi tiáº¿t">@(context.Message ?? "")</MudTd>
             </RowTemplate>
             <NoRecordsContent>
-                <MudText Class="pa-4 todox-page-subtitle">Chưa có nhật ký hoạt động.</MudText>
+                <MudText Class="pa-4 todox-page-subtitle">ChÆ°a cÃ³ nháº­t kÃ½ hoáº¡t Ä‘á»™ng.</MudText>
             </NoRecordsContent>
         </MudTable>
     </MudPaper>
@@ -49,6 +66,9 @@
     private bool _loading = true;
     private string _search = string.Empty;
     private IReadOnlyList<AuditLogView> _logs = new List<AuditLogView>();
+    private AuditLogDetail? _detail;
+
+    [Parameter] public string? LogCode { get; set; }
 
     private bool IsCustomer => AuthState.CurrentUser?.IsCustomer == true;
 
@@ -57,6 +77,11 @@
         if (AuthState.CurrentUser is not null)
         {
             _logs = await Audit.GetRecentAsync(AuthState.CurrentUser);
+            if (!string.IsNullOrWhiteSpace(LogCode))
+            {
+                _detail = await Audit.GetByEntityDisplayAsync(AuthState.CurrentUser, LogCode);
+                _search = LogCode;
+            }
         }
         _loading = false;
     }
@@ -78,16 +103,30 @@
 
     private static string ActionLabel(string a) => a switch
     {
-        "view" => "Xem", "create" => "Thêm", "update" => "Sửa", "delete" => "Xóa",
-        "login" => "Đăng nhập", "logout" => "Đăng xuất", "reset_password" => "Đặt lại MK",
-        "verify" => "Xác thực", _ => a
+        "view" => "Xem", "create" => "ThÃªm", "update" => "Sá»­a", "delete" => "XÃ³a",
+        "login" => "ÄÄƒng nháº­p", "logout" => "ÄÄƒng xuáº¥t", "reset_password" => "Äáº·t láº¡i MK",
+        "verify" => "XÃ¡c thá»±c", _ => a
     };
 
     private static string ModuleLabel(string m) => m switch
     {
-        "admin_users" => "Quản trị viên", "customers" => "Khách hàng", "customer_accounts" => "Tài khoản KH",
-        "customer_pages" => "Trang mạng xã hội", "token_wallets" => "Ví token", "services" => "Dịch vụ",
-        "render_jobs" => "Render Jobs", "api_providers" => "Cài đặt API", "settings" => "Cài đặt",
-        "permissions" => "Phân quyền", "auth" => "Xác thực", _ => m
+        "admin_users" => "Quáº£n trá»‹ viÃªn", "customers" => "KhÃ¡ch hÃ ng", "customer_accounts" => "TÃ i khoáº£n KH",
+        "customer_pages" => "Trang máº¡ng xÃ£ há»™i", "token_wallets" => "VÃ­ token", "services" => "Dá»‹ch vá»¥",
+        "render_jobs" => "Render Jobs", "avatar_render" => "Avatar Render", "api_providers" => "CÃ i Ä‘áº·t API", "settings" => "CÃ i Ä‘áº·t",
+        "permissions" => "PhÃ¢n quyá»n", "auth" => "XÃ¡c thá»±c", _ => m
     };
+
+    private static string PrettyJson(string? message)
+    {
+        if (string.IsNullOrWhiteSpace(message)) return string.Empty;
+        try
+        {
+            using var doc = JsonDocument.Parse(message);
+            return JsonSerializer.Serialize(doc.RootElement, new JsonSerializerOptions { WriteIndented = true });
+        }
+        catch
+        {
+            return message;
+        }
+    }
 }

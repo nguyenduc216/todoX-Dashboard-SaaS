@@ -13,6 +13,8 @@ public sealed class ChibiImage
 {
     public Guid RenderId { get; set; }
     public Guid MediaId { get; set; }
+    public int Index { get; set; }
+    public string? LogCode { get; set; }
     public string? Url { get; set; }
     public string? PromptInput { get; set; }
     public string? PromptUsed { get; set; }
@@ -23,6 +25,8 @@ public sealed class ChibiImage
 public sealed class ChibiGenerationDto
 {
     public Guid Id { get; set; }
+    public Guid RenderJobId { get; set; }
+    public string? LogCode { get; set; }
     public string Status { get; set; } = string.Empty;
     public string? GeneratedPrompt { get; set; }
     public List<ChibiImage> Images { get; set; } = new();
@@ -32,6 +36,7 @@ public sealed class ChibiGenerationDto
     public string? Error { get; set; }
     public decimal Charged { get; set; }
     public decimal BalanceAfter { get; set; }
+    public List<RenderLogEntry> Logs { get; set; } = new();
 }
 
 public sealed class ChibiGenerateInput
@@ -39,14 +44,17 @@ public sealed class ChibiGenerateInput
     public Guid UserId { get; set; }
     public Guid? CustomerId { get; set; }
     public bool IsCustomer { get; set; }
+    public string? CharacterType { get; set; } = "chibi";
     public string? Gender { get; set; }
     public string? CameraAngle { get; set; }
+    public string? Outfit { get; set; } = "vest";
     public int Count { get; set; } = 3;
     public string? BasePromptOverride { get; set; }
     public string? PromptOverride { get; set; }
     public Guid? AvatarMediaId { get; set; }
     public Guid? LogoMediaId { get; set; }
     public Guid? ProductMediaId { get; set; }
+    public string? ProductImageUrl { get; set; }
     public Guid? UniformMediaId { get; set; }
     public Guid? SceneMediaId { get; set; }
 }
@@ -71,6 +79,7 @@ public sealed partial class ChibiAvatarService : IChibiAvatarService
     private readonly IPromptTemplateService _promptTemplates;
     private readonly IAvatarService _avatars;
     private readonly GeminiPromptService _gemini;
+    private readonly AvatarRenderActivityLogService _activityLogs;
     private readonly WalletService _wallet;
     private readonly TokenSettingsService _tokenSettings;
     private readonly TenantContext _tenant;
@@ -79,7 +88,8 @@ public sealed partial class ChibiAvatarService : IChibiAvatarService
     private const string FallbackPromptTemplate = "Create exactly 3 premium 3D chibi avatar variations based on the user avatar reference if available. Gender: {{GENDER}}. Style: cute, professional, friendly, modern, premium Pixar-quality 3D collectible mascot, suitable for TodoX SaaS profile avatar. Preserve recognizable facial identity from the avatar reference without making it photorealistic. Use large expressive eyes, friendly smile, cute proportions about 3 heads tall, clean centered square avatar composition, soft global illumination, luxury golden lighting, high detail. If a logo reference is provided, integrate brand colors or a small tasteful logo badge naturally on clothing/accessory/background. If product reference is provided, let the character hold or interact naturally with the product. If background reference is provided, use it only as inspiration and redesign into a simplified cinematic background, do not copy exactly. No text, no watermark, no extra fingers, no bad anatomy, no cropped face. Output PNG, square 1:1.";
 
     public ChibiAvatarService(TodoXConnectionFactory factory, IImageRenderService render,
-        IMediaFileService media, IPromptTemplateService promptTemplates, IAvatarService avatars, GeminiPromptService gemini, WalletService wallet,
+        IMediaFileService media, IPromptTemplateService promptTemplates, IAvatarService avatars, GeminiPromptService gemini,
+        AvatarRenderActivityLogService activityLogs, WalletService wallet,
         TokenSettingsService tokenSettings, TenantContext tenant, ILogger<ChibiAvatarService> logger)
     {
         _factory = factory;
@@ -88,6 +98,7 @@ public sealed partial class ChibiAvatarService : IChibiAvatarService
         _promptTemplates = promptTemplates;
         _avatars = avatars;
         _gemini = gemini;
+        _activityLogs = activityLogs;
         _wallet = wallet;
         _tokenSettings = tokenSettings;
         _tenant = tenant;
@@ -152,16 +163,52 @@ public sealed partial class ChibiAvatarService : IChibiAvatarService
     {
         var gender = input.Gender switch { "male" => "male", "female" => "female", _ => "other" };
         var cameraAngle = NormalizeCameraAngle(input.CameraAngle);
+        var characterType = NormalizeCharacterType(input.CharacterType);
+        var outfit = NormalizeOutfit(input.Outfit);
+        var imageCount = Math.Clamp(input.Count, 1, 4);
         var resolved = (string.IsNullOrWhiteSpace(template) ? FallbackPromptTemplate : template)
+            .Replace("{{CHARACTER_TYPE}}", characterType, StringComparison.OrdinalIgnoreCase)
+            .Replace("{{CHARACTER_TYPE_TEXT}}", CharacterTypeText(characterType), StringComparison.OrdinalIgnoreCase)
             .Replace("{{GENDER}}", gender, StringComparison.OrdinalIgnoreCase)
+            .Replace("{{GENDER_TEXT}}", gender == "female" ? "nu" : "nam", StringComparison.OrdinalIgnoreCase)
             .Replace("{{CAMERA_ANGLE}}", cameraAngle, StringComparison.OrdinalIgnoreCase)
+            .Replace("{{CAMERA_SHOT_TEXT}}", CameraShotText(input.CameraAngle), StringComparison.OrdinalIgnoreCase)
+            .Replace("{{OUTFIT}}", outfit, StringComparison.OrdinalIgnoreCase)
+            .Replace("{{OUTFIT_TEXT}}", OutfitText(outfit), StringComparison.OrdinalIgnoreCase)
             .Replace("{{HAS_AVATAR}}", input.AvatarMediaId is null ? "no" : "yes", StringComparison.OrdinalIgnoreCase)
             .Replace("{{HAS_LOGO}}", input.LogoMediaId is null ? "no" : "yes", StringComparison.OrdinalIgnoreCase)
             .Replace("{{HAS_PRODUCT}}", input.ProductMediaId is null ? "no" : "yes", StringComparison.OrdinalIgnoreCase)
             .Replace("{{HAS_UNIFORM}}", input.UniformMediaId is null ? "no" : "yes", StringComparison.OrdinalIgnoreCase)
             .Replace("{{HAS_SCENE}}", input.SceneMediaId is null ? "no" : "yes", StringComparison.OrdinalIgnoreCase);
 
-        return resolved.Trim() + """
+        var directives = new StringBuilder();
+        directives.AppendLine($"Create {imageCount} {CharacterTypeText(characterType)} avatar image{(imageCount == 1 ? string.Empty : "s")} for a {((gender == "female") ? "female" : "male")} character.");
+        directives.AppendLine($"Camera shot: {CameraShotText(input.CameraAngle)}. Main outfit: {OutfitText(outfit)}.");
+        directives.AppendLine("Make the result sharp, premium, cinematic, friendly, and suitable for a TodoX profile or brand avatar.");
+        directives.AppendLine();
+        directives.Append(resolved.Trim());
+        directives.AppendLine();
+        directives.AppendLine();
+        directives.AppendLine("Image count requirements:");
+        directives.AppendLine($"Create exactly {imageCount} distinct avatar image variation{(imageCount == 1 ? string.Empty : "s")}.");
+        directives.AppendLine("Each variation must keep the same character identity and reference constraints, but vary pose, camera angle, expression, composition, lighting, or product interaction.");
+        directives.AppendLine($"Return {imageCount} final image{(imageCount == 1 ? string.Empty : "s")}.");
+
+        if (input.ProductMediaId is not null)
+        {
+            directives.AppendLine();
+            directives.AppendLine("PRODUCT MANDATORY VISUAL CONSTRAINT:");
+            directives.AppendLine("Use the PRODUCT reference image as a mandatory visual constraint. The final image must clearly include the same product, preserving its main shape, color, package design, and visible details. The character should hold it, stand next to it, or interact with it naturally. Do not replace it with a generic object.");
+        }
+
+        if (input.LogoMediaId is not null)
+        {
+            directives.AppendLine();
+            directives.AppendLine("LOGO TRANSPARENCY CONSTRAINT:");
+            directives.AppendLine("Use the logo reference without turning transparent areas into a black square or dark background. Preserve the transparent logo appearance; if a background is needed, use a clean white or transparent-safe treatment.");
+        }
+
+        return directives.ToString() + """
 
 Reference images:
 - Personal avatar/face reference: {{AVATAR_STATUS}}.
@@ -202,6 +249,18 @@ Use reference images as visual guidance, not as exact copies. Prioritize face id
         return refs;
     }
 
+    private async Task<MediaFileDto?> DownloadProductReferenceAsync(ChibiGenerateInput input, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(input.ProductImageUrl) || input.ProductMediaId is not null)
+        {
+            return null;
+        }
+
+        await _tenant.EnsureLoadedAsync(ct);
+        return await _media.DownloadAndSaveImageAsync(input.ProductImageUrl, "chibi_ref_product_url",
+            input.UserId, input.CustomerId, _tenant.TenantId, ct);
+    }
+
     private static string ComposePromptTemplate(PromptTemplateDto template)
     {
         if (string.IsNullOrWhiteSpace(template.NegativePrompt))
@@ -217,11 +276,46 @@ Use reference images as visual guidance, not as exact copies. Prioritize face id
     {
         return cameraAngle switch
         {
+            "close_up" => "can mat",
             "full_body" => "toan than",
             "half_body" => "nua nguoi",
             _ => "nua nguoi"
         };
     }
+
+    private static string NormalizeCharacterType(string? characterType)
+        => characterType?.Equals("cartoon", StringComparison.OrdinalIgnoreCase) == true ? "cartoon" : "chibi";
+
+    private static string NormalizeOutfit(string? outfit) => outfit switch
+    {
+        "dress" => "dress",
+        "formal" => "formal",
+        "tshirt" => "tshirt",
+        "swimwear" => "swimwear",
+        _ => "vest"
+    };
+
+    private static string CharacterTypeText(string characterType) => characterType switch
+    {
+        "cartoon" => "modern semi-realistic cartoon character, friendly and expressive",
+        _ => "cute 3D chibi character with large head, small body, expressive friendly face"
+    };
+
+    private static string CameraShotText(string? cameraShot) => cameraShot switch
+    {
+        "close_up" => "close-up portrait",
+        "full_body" => "full-body view",
+        _ => "half-body view"
+    };
+
+    private static string OutfitText(string outfit) => outfit switch
+    {
+        "dress" => "elegant dress suitable for a female character",
+        "formal" => "professional formal office outfit",
+        "tshirt" => "young dynamic T-shirt outfit",
+        "swimwear" => "context-appropriate tasteful swimwear, non-explicit",
+        _ => "professional elegant vest"
+    };
 
     // GenerateAsync + RerenderAsync in ChibiAvatarService.Generate.cs (partial)
 }

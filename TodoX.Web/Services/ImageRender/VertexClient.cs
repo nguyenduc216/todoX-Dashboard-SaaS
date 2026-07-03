@@ -176,8 +176,8 @@ public sealed class VertexClient
         var order = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
         {
             ["avatar"] = 0,
-            ["logo"] = 1,
-            ["product"] = 2,
+            ["product"] = 1,
+            ["logo"] = 2,
             ["uniform"] = 3,
             ["scene"] = 4
         };
@@ -212,11 +212,11 @@ public sealed class VertexClient
             }
             else if (role.Equals("product", StringComparison.OrdinalIgnoreCase))
             {
-                lines.Add($"Use the product reference [{item.id}] as product guidance if the character holds or interacts with a product.");
+                lines.Add($"Use the product reference [{item.id}] as a mandatory visual constraint. The final image must clearly include the same product, preserving its main shape, color, package design, and visible details. The character should hold it, stand next to it, or interact with it naturally. Do not replace it with a generic object.");
             }
             else if (role.Equals("logo", StringComparison.OrdinalIgnoreCase))
             {
-                lines.Add($"Use the brand/logo style reference [{item.id}] only for brand colors or a small tasteful badge.");
+                lines.Add($"Use the brand/logo style reference [{item.id}] only for brand colors or a small tasteful badge. Do not render transparent logo areas as a black square or dark background; preserve the transparent look or use a clean white/transparent-safe treatment.");
             }
             else if (role.Equals("uniform", StringComparison.OrdinalIgnoreCase))
             {
@@ -239,7 +239,7 @@ public sealed class VertexClient
     {
         return refs.Select((image, index) =>
         {
-            var referenceImage = new { bytesBase64Encoded = image.Base64 };
+            var referenceImage = new { bytesBase64Encoded = image.Base64, mimeType = image.MimeType ?? "image/png" };
             var id = index + 1;
             var role = image.Role ?? string.Empty;
 

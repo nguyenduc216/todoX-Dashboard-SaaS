@@ -1,0 +1,36 @@
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">@Title</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudStack Spacing="2">
+            @if (!string.IsNullOrWhiteSpace(ImageUrl))
+            {
+                <img src="@ImageUrl" alt="@Title" class="reference-lightbox-image" />
+            }
+            <MudText Typo="Typo.body2">@(FileName ?? ImageUrl)</MudText>
+            @if (!string.IsNullOrWhiteSpace(MimeType) || !string.IsNullOrWhiteSpace(SizeText))
+            {
+                <MudText Typo="Typo.caption" Class="todox-page-subtitle">@MimeType @SizeText</MudText>
+            }
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        @if (!string.IsNullOrWhiteSpace(ImageUrl))
+        {
+            <MudButton Href="@ImageUrl" Target="_blank" StartIcon="@Icons.Material.Filled.Download">Tai xuong</MudButton>
+        }
+        <MudButton Class="todox-primary-btn" OnClick="Close">Dong</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public string Title { get; set; } = "Anh tham chieu";
+    [Parameter] public string? ImageUrl { get; set; }
+    [Parameter] public string? FileName { get; set; }
+    [Parameter] public string? MimeType { get; set; }
+    [Parameter] public string? SizeText { get; set; }
+
+    private void Close() => MudDialog.Close();
+}

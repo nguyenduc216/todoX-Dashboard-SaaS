@@ -8,6 +8,9 @@ public sealed record AuditLogView(DateTime OccurredAt, string? ActorDisplayName,
     string Module, string? Feature, string Action, string? EntityDisplay, string Result,
     string? Severity, string? Message);
 
+public sealed record AuditLogDetail(DateTime OccurredAt, string Module, string? Feature, string Action,
+    string? EntityDisplay, string Result, string? Severity, string? Message);
+
 /// <summary>Read/write access to audit.audit_logs (Foundation V2). Tenant + optional actor scoped.</summary>
 public sealed class AuditRepository
 {
@@ -73,5 +76,23 @@ public sealed class AuditRepository
             """,
             new { tenant = _tenant.TenantId, all = !user.IsCustomer, uid = user.UserId, limit });
         return rows.ToList();
+    }
+
+    public async Task<AuditLogDetail?> GetByEntityDisplayAsync(CurrentUserSession user, string entityDisplay)
+    {
+        await _tenant.EnsureLoadedAsync();
+        using var conn = await _factory.OpenAsync();
+        return await conn.QueryFirstOrDefaultAsync<AuditLogDetail>(
+            """
+            SELECT occurred_at AS OccurredAt, module AS Module, feature AS Feature, action AS Action,
+                   entity_display AS EntityDisplay, result AS Result, severity AS Severity, message AS Message
+              FROM audit.audit_logs
+             WHERE tenant_id = @tenant
+               AND entity_display = @entity
+               AND (@all OR actor_user_id = @uid)
+             ORDER BY occurred_at DESC
+             LIMIT 1;
+            """,
+            new { tenant = _tenant.TenantId, entity = entityDisplay, all = !user.IsCustomer, uid = user.UserId });
     }
 }

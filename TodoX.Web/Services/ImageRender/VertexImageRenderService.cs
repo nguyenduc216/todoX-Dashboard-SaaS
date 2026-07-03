@@ -44,6 +44,7 @@ public sealed class VertexImageRenderService : IImageRenderService
         await _tenant.EnsureLoadedAsync(ct);
         var sw = Stopwatch.StartNew();
         var requestId = Guid.NewGuid();
+        var correlationId = request.CorrelationId ?? requestId;
         var count = Math.Clamp(request.Count, 1, 4);
 
         // Resolve endpoint -> provider -> model from settings.api_*.
@@ -54,6 +55,45 @@ public sealed class VertexImageRenderService : IImageRenderService
         var modelCode = model?.ModelCode ?? "imagen-3.0-generate-001";
 
         var result = new ImageRenderResult { RequestId = requestId, Provider = providerCode, Model = modelCode };
+        void AddLog(string step, string message, object? data = null, string level = "info")
+        {
+            var entry = new RenderLogEntry { Step = step, Message = message, Data = data, Level = level };
+            result.Logs.Add(entry);
+            _logger.LogInformation("IMAGE_RENDER correlationId={CorrelationId} requestId={RequestId} step={Step} message={Message} data={@Data}",
+                correlationId, requestId, step, message, data);
+        }
+        AddLog("RENDER_REQUEST_RECEIVED", "Image render request received.", new
+        {
+            correlationId,
+            requestId,
+            request.LogCode,
+            count,
+            request.ImageCount,
+            request.VariationIndex,
+            request.Gender,
+            request.CharacterType,
+            request.Outfit,
+            request.CameraAngle,
+            referenceCount = request.ReferenceImages.Count,
+            promptLength = request.Prompt.Length
+        });
+        foreach (var reference in request.ReferenceImages)
+        {
+            AddLog("REFERENCE_IMAGE_RECEIVED", $"Reference image queued: {reference.Role}.", new
+            {
+                reference.Role,
+                reference.MediaId,
+                reference.MimeType,
+                reference.SizeBytes,
+                reference.Width,
+                reference.Height,
+                reference.HasAlpha,
+                reference.ObjectKey,
+                reference.Url,
+                base64Length = reference.Base64?.Length ?? 0,
+                byteLength = reference.Bytes?.Length ?? 0
+            });
+        }
 
         // Insert the render request row (status=processing).
         await InsertRequestAsync(requestId, request, providerCode, modelCode, count);
@@ -63,6 +103,7 @@ public sealed class VertexImageRenderService : IImageRenderService
             var message = "Request yeu cau anh tham chieu nhung khong co bytes/base64/url hop le de gui sang Vertex.";
             result.Ok = false;
             result.Error = message;
+            AddLog("RENDER_FAILED", message, level: "error");
             await CompleteRequestAsync(requestId, "failed", new List<Guid>(), message);
             await _settings.LogCallAsync(_tenant.TenantId, request.UserId, EndpointCode, providerCode, modelCode,
                 requestId, "failed", message, (int)sw.ElapsedMilliseconds);
@@ -81,17 +122,20 @@ public sealed class VertexImageRenderService : IImageRenderService
             images = Enumerable.Range(0, count).Select(i => PlaceholderImage.Generate(request.Prompt, i)).ToList();
             result.UsedFallback = true;
             status = "mock";
+            AddLog("MOCK_IMAGE_RESPONSE", "Mock mode generated placeholder images.", new { count = images.Count }, "warning");
             _logger.LogWarning("ImageRender running in MockMode — returning placeholder images.");
         }
         else
         {
             try
             {
+                AddLog("GEMINI_IMAGE_REQUEST", "Calling Vertex Imagen.", new { model = modelCode, count, request.AspectRatio, referenceCount = request.ReferenceImages.Count });
                 images = await _vertex.GenerateImagesAsync(request.Prompt, request.ReferenceImages, count, request.AspectRatio, ct);
                 result.Model = _vertex.LastModelUsed ?? modelCode;
                 modelCode = result.Model;
                 result.UsedFallback = false;
                 status = "success";
+                AddLog("GEMINI_IMAGE_RESPONSE", "Vertex Imagen returned images.", new { model = modelCode, count = images.Count, byteLengths = images.Select(x => x.Length).ToArray() });
             }
             catch (Exception ex)
             {
@@ -100,6 +144,7 @@ public sealed class VertexImageRenderService : IImageRenderService
                 sw.Stop();
                 result.Ok = false;
                 result.Error = ex.Message;
+                AddLog("RENDER_FAILED", ex.Message, level: "error");
                 await CompleteRequestAsync(requestId, "failed", new List<Guid>(), ex.Message);
                 await _settings.LogCallAsync(_tenant.TenantId, request.UserId, EndpointCode, providerCode, modelCode,
                     requestId, "failed", ex.Message, (int)sw.ElapsedMilliseconds);
@@ -115,6 +160,7 @@ public sealed class VertexImageRenderService : IImageRenderService
                 request.FileCategory, request.UserId, request.CustomerId, _tenant.TenantId, ct);
             mediaIds.Add(saved.Id);
             result.Data.Add(new GeneratedImage { Index = i, MediaId = saved.Id, Url = saved.PublicUrl });
+            AddLog("RENDER_RESULT_STORED", "Generated image stored as media.", new { index = i, saved.Id, saved.PublicUrl, saved.MimeType, saved.FileSizeBytes });
         }
 
         result.Ok = images.Count > 0;
@@ -123,6 +169,7 @@ public sealed class VertexImageRenderService : IImageRenderService
         await CompleteRequestAsync(requestId, status, mediaIds, error);
         await _settings.LogCallAsync(_tenant.TenantId, request.UserId, EndpointCode, providerCode, modelCode,
             requestId, status, error, (int)sw.ElapsedMilliseconds);
+        AddLog("RENDER_COMPLETED", "Image render request completed.", new { status, elapsedMs = sw.ElapsedMilliseconds, mediaIds });
 
         return result;
     }
@@ -136,9 +183,17 @@ public sealed class VertexImageRenderService : IImageRenderService
             x.MediaId,
             x.Url,
             x.MimeType,
+            x.SizeBytes,
+            x.Width,
+            x.Height,
+            x.HasAlpha,
+            x.ObjectKey,
+            x.SourceType,
+            x.SourceUrl,
             HasBytes = x.Bytes?.Length > 0,
             ByteLength = x.Bytes?.Length ?? 0,
             HasBase64 = !string.IsNullOrWhiteSpace(x.Base64),
+            Base64Length = x.Base64?.Length ?? 0,
             x.FileName
         }));
         await conn.ExecuteAsync(

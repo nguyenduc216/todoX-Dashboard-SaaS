@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using Dapper;
 using TodoX.Web.Services.ImageRender;
@@ -9,7 +10,55 @@ public sealed partial class ChibiAvatarService
     public async Task<ChibiGenerationDto> GenerateAsync(ChibiGenerateInput input, CancellationToken ct = default)
     {
         await _tenant.EnsureLoadedAsync(ct);
-        var count = Math.Clamp(input.Count, 1, 6);
+        var logs = new List<RenderLogEntry>();
+        var logCode = AvatarRenderActivityLogService.GenerateLogCode();
+        void AddLog(string step, string message, object? data = null, string level = "info")
+        {
+            var entry = new RenderLogEntry { Step = step, Message = message, Data = data, Level = level };
+            logs.Add(entry);
+            _logger.LogInformation("CHIBI_RENDER {Step} {Message} {@Data}", step, message, data);
+        }
+
+        var generationId = Guid.NewGuid();
+        AddLog("LOG_CODE_GENERATED", "Generated render log code.", new { logCode });
+        if (!string.IsNullOrWhiteSpace(input.ProductImageUrl) && input.ProductMediaId is null)
+        {
+            try
+            {
+                AddLog("PRODUCT_URL_DOWNLOAD_START", "Downloading product reference image from URL.", new { input.ProductImageUrl });
+                var downloaded = await DownloadProductReferenceAsync(input, ct);
+                input.ProductMediaId = downloaded?.Id;
+                AddLog("PRODUCT_URL_DOWNLOAD_SUCCESS", "Downloaded product reference image from URL.", new
+                {
+                    input.ProductImageUrl,
+                    mediaId = downloaded?.Id,
+                    downloaded?.MimeType,
+                    downloaded?.FileSizeBytes,
+                    downloaded?.PublicUrl
+                });
+            }
+            catch (Exception ex)
+            {
+                AddLog("PRODUCT_URL_DOWNLOAD_FAILED", ex.Message, new { input.ProductImageUrl }, "error");
+                throw;
+            }
+        }
+
+        var count = Math.Clamp(input.Count, 1, 4);
+        AddLog("RENDER_REQUEST_RECEIVED", "Received chibi avatar render request.", new
+        {
+            renderJobId = generationId,
+            requestedCount = input.Count,
+            imageCount = count,
+            input.Gender,
+            input.CameraAngle,
+            hasAvatar = input.AvatarMediaId is not null,
+            hasLogo = input.LogoMediaId is not null,
+            hasProduct = input.ProductMediaId is not null,
+            hasUniform = input.UniformMediaId is not null,
+            hasScene = input.SceneMediaId is not null
+        });
+
         var template = await GetDefaultPromptTemplateAsync(ct);
         var defaultPrompt = ResolvePromptTemplate(template, input);
         var finalPrompt = !string.IsNullOrWhiteSpace(input.PromptOverride)
@@ -17,14 +66,31 @@ public sealed partial class ChibiAvatarService
             : !string.IsNullOrWhiteSpace(input.BasePromptOverride)
                 ? input.BasePromptOverride.Trim()
                 : defaultPrompt;
+        finalPrompt = EnsureRenderDirectives(finalPrompt, input, count);
         var refs = await BuildReferenceImagesAsync(input, ct);
+        foreach (var reference in refs)
+        {
+            AddLog("REFERENCE_IMAGE_RECEIVED", $"Reference image loaded: {reference.Role}.", new
+            {
+                reference.Role,
+                reference.MediaId,
+                reference.MimeType,
+                reference.SizeBytes,
+                reference.Width,
+                reference.Height,
+                reference.HasAlpha,
+                reference.ObjectKey,
+                reference.Url,
+                base64Length = reference.Base64?.Length ?? 0
+            });
+        }
 
         if (input.AvatarMediaId is not null && !refs.Any(x => x.Role == "avatar" && x.Bytes?.Length > 0))
         {
             throw new InvalidOperationException("Anh avatar da chon nhung he thong khong doc duoc noi dung anh de gui sang Vertex.");
         }
 
-        var generationId = Guid.NewGuid();
+        AddLog("PROMPT_BUILT", "Final render prompt prepared.", new { promptLength = finalPrompt.Length, imageCount = count });
         await InsertGenerationAsync(generationId, input, finalPrompt);
 
         // Charge tokens up-front for the whole batch (customers only). Admin => no charge.
@@ -38,35 +104,74 @@ public sealed partial class ChibiAvatarService
         if (!charge.Ok)
         {
             await CompleteGenerationAsync(generationId, "failed", new List<ChibiImage>(), Guid.Empty, charge.Error);
-            return new ChibiGenerationDto { Id = generationId, Status = "failed", Error = charge.Error };
+            AddLog("RENDER_FAILED", charge.Error ?? "Token charge failed.", level: "error");
+            await _activityLogs.WriteAsync(input.UserId, input.CustomerId, logCode, "avatar-render", "failed",
+                BuildActivityInput(input, count), finalPrompt, refs, new List<ChibiImage>(), logs, charge.Error, ct);
+            return new ChibiGenerationDto { Id = generationId, RenderJobId = generationId, LogCode = logCode, Status = "failed", Error = charge.Error, Logs = logs };
         }
 
         var images = new List<ChibiImage>();
-        var result = await _render.RenderAsync(new ImageRenderRequestModel
+        var prompts = new List<string> { finalPrompt };
+        if (count > 1)
         {
-            Prompt = finalPrompt,
-            ReferenceImages = refs,
-            Count = count,
-            AspectRatio = "1:1",
-            MimeType = "image/png",
-            UserId = input.UserId,
-            CustomerId = input.CustomerId,
-            FileCategory = "chibi",
-            RequireReferenceImages = input.AvatarMediaId is not null
-        }, ct);
-
-        if (result.Ok && result.Data.Count > 0)
-        {
-            foreach (var d in result.Data)
+            try
             {
-                var renderId = await InsertRenderAsync(generationId, input.UserId, d.MediaId, d.Url, finalPrompt, finalPrompt, result.Model);
-                images.Add(new ChibiImage { RenderId = renderId, MediaId = d.MediaId, Url = d.Url, PromptInput = finalPrompt, PromptUsed = finalPrompt });
+                AddLog("GEMINI_SCRIPT_REQUEST", "Requesting Gemini prompt variations.", new { model = _gemini.ModelCode, imageCount = count });
+                prompts = await _gemini.GenerateVariationsAsync(finalPrompt, count, ct);
+                AddLog("GEMINI_SCRIPT_RESPONSE", "Gemini returned prompt variations.", new { count = prompts.Count, lengths = prompts.Select(x => x.Length).ToArray() });
+            }
+            catch (Exception ex)
+            {
+                prompts = BuildFallbackVariations(finalPrompt, count);
+                AddLog("GEMINI_SCRIPT_FALLBACK", "Gemini variation generation failed; using deterministic prompt variations.", new { error = ex.Message, count = prompts.Count }, "warning");
             }
         }
-        else
+
+        for (var i = 0; i < count; i++)
         {
-            var renderId = await InsertRenderAsync(generationId, input.UserId, null, null, finalPrompt, finalPrompt, result.Model, "failed", result.Error);
-            images.Add(new ChibiImage { RenderId = renderId, Status = "failed", PromptInput = finalPrompt, PromptUsed = finalPrompt, Error = result.Error });
+            var promptUsed = EnsureVariationDirective(prompts[Math.Min(i, prompts.Count - 1)], i + 1, count);
+            AddLog("GEMINI_IMAGE_REQUEST", $"Rendering variation {i + 1}/{count}.", new
+            {
+                variationIndex = i + 1,
+                promptLength = promptUsed.Length,
+                referenceCount = refs.Count
+            });
+
+            var result = await _render.RenderAsync(new ImageRenderRequestModel
+            {
+                CorrelationId = generationId,
+                Prompt = promptUsed,
+                ReferenceImages = refs,
+                Count = 1,
+                ImageCount = count,
+                VariationIndex = i + 1,
+                Gender = input.Gender,
+                CharacterType = input.CharacterType,
+                Outfit = input.Outfit,
+                CameraAngle = input.CameraAngle,
+                AspectRatio = "1:1",
+                MimeType = "image/png",
+                UserId = input.UserId,
+                CustomerId = input.CustomerId,
+                FileCategory = "chibi",
+                LogCode = logCode,
+                RequireReferenceImages = input.AvatarMediaId is not null || refs.Count > 0
+            }, ct);
+            logs.AddRange(result.Logs);
+
+            if (result.Ok && result.Data.Count > 0)
+            {
+                var d = result.Data[0];
+                var renderId = await InsertRenderAsync(generationId, input.UserId, d.MediaId, d.Url, finalPrompt, promptUsed, result.Model);
+                images.Add(new ChibiImage { Index = i, RenderId = renderId, MediaId = d.MediaId, Url = d.Url, PromptInput = finalPrompt, PromptUsed = promptUsed, LogCode = logCode });
+                AddLog("RENDER_RESULT_STORED", $"Stored variation {i + 1}/{count}.", new { renderId, d.MediaId, d.Url, result.RequestId, result.Model });
+            }
+            else
+            {
+                var renderId = await InsertRenderAsync(generationId, input.UserId, null, null, finalPrompt, promptUsed, result.Model, "failed", result.Error);
+                images.Add(new ChibiImage { Index = i, RenderId = renderId, Status = "failed", PromptInput = finalPrompt, PromptUsed = promptUsed, Error = result.Error, LogCode = logCode });
+                AddLog("GEMINI_IMAGE_RESPONSE", $"Variation {i + 1}/{count} failed.", new { renderId, result.RequestId, result.Error }, "error");
+            }
         }
 
         var okImages = images.Where(x => x.Status != "failed").ToList();
@@ -76,47 +181,67 @@ public sealed partial class ChibiAvatarService
 
         // Surface the first concrete render error (full text) so the UI can show it for support.
         var firstError = images.FirstOrDefault(x => !string.IsNullOrWhiteSpace(x.Error))?.Error;
+        AddLog(status == "completed" ? "RENDER_COMPLETED" : "RENDER_FAILED",
+            $"Chibi render job {status}.", new { renderJobId = generationId, okCount = okImages.Count, failedCount = images.Count - okImages.Count },
+            status == "completed" ? "info" : "error");
+        await _activityLogs.WriteAsync(input.UserId, input.CustomerId, logCode, "avatar-render", status,
+            BuildActivityInput(input, count), finalPrompt, refs, images, logs, firstError, ct);
 
         return new ChibiGenerationDto
         {
             Id = generationId,
+            RenderJobId = generationId,
+            LogCode = logCode,
             Status = status,
             GeneratedPrompt = finalPrompt,
             Images = images,
             Charged = charge.Charged,
             BalanceAfter = charge.BalanceAfter,
             Error = firstError,
-            CreatedAt = DateTime.UtcNow
+            CreatedAt = DateTime.UtcNow,
+            Logs = logs
         };
     }
 
     public async Task<ChibiImage> RerenderAsync(Guid userId, Guid? customerId, bool isCustomer, Guid renderId, string prompt, CancellationToken ct = default)
     {
         await _tenant.EnsureLoadedAsync(ct);
+        var logCode = AvatarRenderActivityLogService.GenerateLogCode();
+        var logs = new List<RenderLogEntry>();
+        void AddLog(string step, string message, object? data = null, string level = "info")
+        {
+            logs.Add(new RenderLogEntry { Step = step, Message = message, Data = data, Level = level });
+            _logger.LogInformation("CHIBI_RERENDER {LogCode} {Step} {Message} {@Data}", logCode, step, message, data);
+        }
+        AddLog("LOG_CODE_GENERATED", "Generated rerender log code.", new { logCode, renderId });
 
-        // Verify the render belongs to the user.
         Guid generationId;
         using (var conn = await _factory.OpenAsync(ct))
         {
             var gen = await conn.ExecuteScalarAsync<Guid?>(
                 "SELECT generation_id FROM auth.user_avatar_renders WHERE id=@id AND user_id=@uid;",
                 new { id = renderId, uid = userId });
-            if (gen is null) throw new InvalidOperationException("Bản render không thuộc về người dùng.");
+            if (gen is null) throw new InvalidOperationException("Ban render khong thuoc ve nguoi dung.");
             generationId = gen.Value;
         }
 
-        // Charge one image (customers only). Edited prompt => NO Gemini optimization.
         var imageCost = await _tokenSettings.GetChibiImageCostAsync();
         var charge = await _wallet.ChargeAsync(isCustomer ? customerId : null, userId, imageCost, 1,
             "chibi_image", "google-vertex-ai", "imagen-3.0-generate-002", "Vertex-image-render",
             unit: "image", referenceId: renderId, referenceType: "chibi_rerender");
         if (!charge.Ok)
         {
-            throw new InvalidOperationException(charge.Error ?? "Không đủ token.");
+            AddLog("RERENDER_FAILED", charge.Error ?? "Token charge failed.", level: "error");
+            await _activityLogs.WriteAsync(userId, customerId, logCode, "avatar-rerender", "failed",
+                new { renderId, generationId }, prompt, new List<ReferenceImage>(), new List<ChibiImage>(), logs, charge.Error, ct);
+            throw new InvalidOperationException(charge.Error ?? "Khong du token.");
         }
 
+        AddLog("GEMINI_IMAGE_REQUEST", "Calling image render service for one rerender.", new { renderId, generationId, promptLength = prompt.Length });
         var result = await _render.RenderAsync(new ImageRenderRequestModel
         {
+            CorrelationId = generationId,
+            LogCode = logCode,
             Prompt = prompt,
             Count = 1,
             AspectRatio = "1:1",
@@ -125,16 +250,24 @@ public sealed partial class ChibiAvatarService
             CustomerId = customerId,
             FileCategory = "chibi"
         }, ct);
+        logs.AddRange(result.Logs);
 
         if (!result.Ok || result.Data.Count == 0)
         {
             await UpdateRenderAsync(renderId, null, null, prompt, prompt, "failed", result.Error);
-            throw new InvalidOperationException(result.Error ?? "Vertex render lỗi.");
+            AddLog("RERENDER_FAILED", result.Error ?? "Render failed.", level: "error");
+            await _activityLogs.WriteAsync(userId, customerId, logCode, "avatar-rerender", "failed",
+                new { renderId, generationId }, prompt, new List<ReferenceImage>(), new List<ChibiImage>(), logs, result.Error, ct);
+            throw new InvalidOperationException(result.Error ?? "Vertex render loi.");
         }
 
         var d = result.Data[0];
         await UpdateRenderAsync(renderId, d.MediaId, d.Url, prompt, prompt, "completed", null);
-        return new ChibiImage { RenderId = renderId, MediaId = d.MediaId, Url = d.Url, PromptInput = prompt, PromptUsed = prompt };
+        var image = new ChibiImage { RenderId = renderId, MediaId = d.MediaId, Url = d.Url, PromptInput = prompt, PromptUsed = prompt, LogCode = logCode };
+        AddLog("RERENDER_COMPLETED", "Single image rerender completed.", new { renderId, d.MediaId, d.Url });
+        await _activityLogs.WriteAsync(userId, customerId, logCode, "avatar-rerender", "completed",
+            new { renderId, generationId }, prompt, new List<ReferenceImage>(), new List<ChibiImage> { image }, logs, null, ct);
+        return image;
     }
 
     // ---------- DB helpers ----------
@@ -200,6 +333,78 @@ public sealed partial class ChibiAvatarService
              WHERE id=@id;
             """, new { id, status, json, err = error });
     }
+
+    private static object BuildActivityInput(ChibiGenerateInput input, int count) => new
+    {
+        input.UserId,
+        input.CustomerId,
+        input.CharacterType,
+        input.Gender,
+        input.CameraAngle,
+        input.Outfit,
+        quantity = count,
+        references = new
+        {
+            avatar = input.AvatarMediaId,
+            logo = input.LogoMediaId,
+            product = input.ProductMediaId,
+            productUrl = input.ProductImageUrl,
+            uniform = input.UniformMediaId,
+            scene = input.SceneMediaId
+        },
+        userEditedPrompt = !string.IsNullOrWhiteSpace(input.PromptOverride)
+    };
+
+    private static string EnsureRenderDirectives(string prompt, ChibiGenerateInput input, int count)
+    {
+        var sb = new StringBuilder(prompt.Trim());
+        if (!prompt.Contains("Image count requirements", StringComparison.OrdinalIgnoreCase))
+        {
+            sb.AppendLine();
+            sb.AppendLine();
+            sb.AppendLine("Image count requirements:");
+            sb.AppendLine($"Create exactly {count} distinct avatar image variation{(count == 1 ? string.Empty : "s")}.");
+            sb.AppendLine("Each variation must keep the same character identity and reference constraints, but vary pose, camera angle, expression, composition, lighting, or product interaction.");
+            sb.AppendLine($"Return {count} final image{(count == 1 ? string.Empty : "s")}.");
+        }
+
+        if (input.ProductMediaId is not null
+            && !prompt.Contains("PRODUCT MANDATORY VISUAL CONSTRAINT", StringComparison.OrdinalIgnoreCase))
+        {
+            sb.AppendLine();
+            sb.AppendLine("PRODUCT MANDATORY VISUAL CONSTRAINT:");
+            sb.AppendLine("Use the PRODUCT reference image as a mandatory visual constraint. The final image must clearly include the same product, preserving its main shape, color, package design, and visible details. The character should hold it, stand next to it, or interact with it naturally. Do not replace it with a generic object.");
+        }
+
+        if (input.LogoMediaId is not null
+            && !prompt.Contains("LOGO TRANSPARENCY CONSTRAINT", StringComparison.OrdinalIgnoreCase))
+        {
+            sb.AppendLine();
+            sb.AppendLine("LOGO TRANSPARENCY CONSTRAINT:");
+            sb.AppendLine("Use the logo reference without turning transparent areas into a black square or dark background. Preserve the transparent logo appearance; if a background is needed, use a clean white or transparent-safe treatment.");
+        }
+
+        return sb.ToString().Trim();
+    }
+
+    private static List<string> BuildFallbackVariations(string prompt, int count)
+    {
+        var styles = new[]
+        {
+            "Variation pose: friendly front-facing half-body pose with warm studio lighting.",
+            "Variation pose: cheerful three-quarter angle with the character naturally presenting the product.",
+            "Variation pose: confident full-body mascot stance with clean premium background depth.",
+            "Variation pose: playful close portrait with expressive eyes and subtle brand details."
+        };
+
+        return Enumerable.Range(0, count)
+            .Select(i => EnsureVariationDirective(prompt + Environment.NewLine + styles[i % styles.Length], i + 1, count))
+            .ToList();
+    }
+
+    private static string EnsureVariationDirective(string prompt, int index, int count)
+        => prompt.Trim() + Environment.NewLine + Environment.NewLine
+           + $"Variation #{index} of {count}: produce exactly one final PNG image for this variation. Keep the same identity and all reference constraints.";
 
     public async Task<IReadOnlyList<ChibiGenerationDto>> GetGenerationsAsync(Guid userId, CancellationToken ct = default)
     {

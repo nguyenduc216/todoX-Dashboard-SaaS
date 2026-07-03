@@ -37,6 +37,7 @@ builder.Services.AddHttpClient<TodoX.Web.Services.ImageRender.VertexClient>();
 builder.Services.AddScoped<TodoX.Web.Services.ImageRender.IImageRenderService, TodoX.Web.Services.ImageRender.VertexImageRenderService>();
 builder.Services.AddScoped<TodoX.Web.Services.Profile.IAvatarService, TodoX.Web.Services.Profile.AvatarService>();
 builder.Services.AddHttpClient<TodoX.Web.Services.Profile.GeminiPromptService>();
+builder.Services.AddScoped<TodoX.Web.Services.Profile.AvatarRenderActivityLogService>();
 builder.Services.AddScoped<TodoX.Web.Services.Profile.IChibiAvatarService, TodoX.Web.Services.Profile.ChibiAvatarService>();
 builder.Services.AddScoped<AccountService>();
 builder.Services.AddScoped<AuthStateService>();

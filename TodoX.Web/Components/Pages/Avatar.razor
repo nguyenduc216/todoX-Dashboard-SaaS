@@ -1,6 +1,8 @@
 @page "/profile/avatar"
+@using System.Text.Json
 @using TodoX.Web.Services.Profile
 @using TodoX.Web.Services.Media
+@using TodoX.Web.Services.ImageRender
 @inject AuthStateService AuthState
 @inject IAvatarService Avatars
 @inject IChibiAvatarService Chibi
@@ -10,6 +12,7 @@
 @inject TenantContext Tenant
 @inject IDialogService DialogService
 @inject ISnackbar Snackbar
+@inject NavigationManager Nav
 
 <PageTitle>Tạo ảnh chibi</PageTitle>
 
@@ -55,28 +58,55 @@
                         </MudAlert>
                     }
 
+                    <MudTextField T="string" Label="URL anh san pham (tuy chon)" Value="@_productImageUrl" ValueChanged="OnProductUrlChanged"
+                                  Variant="Variant.Outlined" Margin="Margin.Dense" Class="mt-3"
+                                  Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Link" />
+                    <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.CloudDownload"
+                               Disabled="@(_busy || string.IsNullOrWhiteSpace(_productImageUrl))" OnClick="ImportProductUrl">
+                        Tai anh san pham tu URL
+                    </MudButton>
+
                     <MudGrid Class="mt-2">
                         <MudItem xs="12" sm="4">
-                            <MudSelect T="string" Label="Giới tính nhân vật" Value="@_gender" ValueChanged="OnGenderChanged" Variant="Variant.Outlined" Margin="Margin.Dense">
+                            <MudSelect T="string" Label="Kieu nhan vat" Value="@_characterType" ValueChanged="OnCharacterTypeChanged" Variant="Variant.Outlined" Margin="Margin.Dense">
+                                <MudSelectItem Value="@("chibi")">Chibi</MudSelectItem>
+                                <MudSelectItem Value="@("cartoon")">Hoat hinh</MudSelectItem>
+                            </MudSelect>
+                        </MudItem>
+                        <MudItem xs="12" sm="4">
+                            <MudSelect T="string" Label="Gioi tinh" Value="@_gender" ValueChanged="OnGenderChanged" Variant="Variant.Outlined" Margin="Margin.Dense">
                                 <MudSelectItem Value="@("male")">Nam</MudSelectItem>
-                                <MudSelectItem Value="@("female")">Nữ</MudSelectItem>
-                                <MudSelectItem Value="@("other")">Khác</MudSelectItem>
+                                <MudSelectItem Value="@("female")">Nu</MudSelectItem>
                             </MudSelect>
                         </MudItem>
                         <MudItem xs="12" sm="4">
-                            <MudSelect T="string" Label="Góc máy" Value="@_cameraAngle" ValueChanged="OnCameraAngleChanged" Variant="Variant.Outlined" Margin="Margin.Dense">
-                                <MudSelectItem Value="@("half_body")">Nửa người</MudSelectItem>
-                                <MudSelectItem Value="@("full_body")">Toàn thân</MudSelectItem>
+                            <MudSelect T="string" Label="Goc may" Value="@_cameraAngle" ValueChanged="OnCameraAngleChanged" Variant="Variant.Outlined" Margin="Margin.Dense">
+                                <MudSelectItem Value="@("close_up")">Can mat</MudSelectItem>
+                                <MudSelectItem Value="@("half_body")">Nua nguoi</MudSelectItem>
+                                <MudSelectItem Value="@("full_body")">Toan than</MudSelectItem>
+                            </MudSelect>
+                        </MudItem>
+                        <MudItem xs="12" sm="8">
+                            <MudSelect T="string" Label="Trang phuc" Value="@_outfit" ValueChanged="OnOutfitChanged" Variant="Variant.Outlined" Margin="Margin.Dense">
+                                <MudSelectItem Value="@("vest")">Vest</MudSelectItem>
+                                <MudSelectItem Value="@("dress")">Vay</MudSelectItem>
+                                <MudSelectItem Value="@("formal")">Do tay</MudSelectItem>
+                                <MudSelectItem Value="@("tshirt")">Do thun</MudSelectItem>
+                                <MudSelectItem Value="@("swimwear")">Do tam</MudSelectItem>
                             </MudSelect>
                         </MudItem>
                         <MudItem xs="12" sm="4">
-                            <MudNumericField T="int" Label="Số lượng ảnh" @bind-Value="_count" Min="1" Max="6" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                            <MudNumericField T="int" Label="So luong anh" Value="@_count" ValueChanged="OnCountChanged" Min="1" Max="4" Variant="Variant.Outlined" Margin="Margin.Dense" />
                         </MudItem>
                     </MudGrid>
 
                     <MudExpansionPanels Class="mt-2" Elevation="0">
                         <MudExpansionPanel Text="Prompt chuẩn (có thể chỉnh sửa)">
-                            <MudTextField T="string" @bind-Value="_basePrompt" Variant="Variant.Outlined" Lines="10" Class="todox-prompt-box" />
+                            @if (_promptEdited)
+                            {
+                                <MudAlert Severity="Severity.Info" Dense="true" Class="mb-2">Prompt da duoc chinh tay.</MudAlert>
+                            }
+                            <MudTextField T="string" Value="@_basePrompt" ValueChanged="OnPromptChanged" Variant="Variant.Outlined" Lines="10" Class="todox-prompt-box" />
                             <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Refresh" OnClick="ResetPrompt">
                                 Đặt lại prompt mặc định
                             </MudButton>
@@ -106,39 +136,74 @@
                             <pre class="todox-error-pre">@_lastError</pre>
                         </MudAlert>
                     }
-                    @if (_result is null)
+                    <div Class='@($"avatar-result-zone {(_busy ? "is-rendering" : string.Empty)}")'>
+                        @if (_busy && _rerenderingRenderId is null)
+                        {
+                            <div class="avatar-loading-overlay">
+                                <MudProgressCircular Indeterminate="true" Color="Color.Warning" Size="Size.Medium" />
+                                <MudText Typo="Typo.body2">Dang render...</MudText>
+                            </div>
+                        }
+                        @if (_result is null)
+                        {
+                            <div class="avatar-render-placeholder">
+                                <MudText Class="todox-page-subtitle">Chua co anh. Chinh so luong/prompt roi bam tao anh chibi.</MudText>
+                            </div>
+                        }
+                        else if (_result.Status == "failed" && _result.Images.Count == 0)
+                        {
+                            <MudText Class="todox-page-subtitle">Khong tao duoc anh. Xem chi tiet loi phia tren.</MudText>
+                        }
+                        else
+                        {
+                            <MudGrid>
+                                @foreach (var img in _result.Images)
+                                {
+                                    <MudItem xs="12" sm="6">
+                                        <MudPaper Class='@($"todox-card pa-2 avatar-render-card {(IsCardRendering(img) ? "is-rendering" : string.Empty)}")' Rounded="true">
+                                            @if (IsCardRendering(img))
+                                            {
+                                                <div class="avatar-card-overlay">
+                                                    <MudProgressCircular Indeterminate="true" Color="Color.Warning" Size="Size.Small" />
+                                                </div>
+                                            }
+                                            @if (img.Status == "failed")
+                                            {
+                                                <MudAlert Severity="Severity.Error" Dense="true">Anh loi</MudAlert>
+                                            }
+                                            else
+                                            {
+                                                <MudImage Src="@img.Url" Fluid="true" Style="border-radius:8px;aspect-ratio:1/1;object-fit:cover;width:100%" />
+                                            }
+                                            <MudStack Row="true" Class="mt-2" Spacing="1">
+                                                <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Edit"
+                                                           OnClick="@(() => EditAndRerender(img))" Disabled="@IsActionDisabled(img)">Sua prompt</MudButton>
+                                                <MudButton Size="Size.Small" Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.Check"
+                                                           OnClick="@(() => SelectChibi(img.MediaId))" Disabled="@(IsActionDisabled(img) || img.Status == "failed")">Chon</MudButton>
+                                                @if (!string.IsNullOrWhiteSpace(img.Url))
+                                                {
+                                                    <MudIconButton Icon="@Icons.Material.Filled.Download" Size="Size.Small" Href="@img.Url" Target="_blank" Disabled="@IsActionDisabled(img)" />
+                                                }
+                                            </MudStack>
+                                            <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="mt-2">
+                                                <MudText Typo="Typo.caption">Log: @(img.LogCode ?? _result?.LogCode ?? "-")</MudText>
+                                                @if (!string.IsNullOrWhiteSpace(img.LogCode ?? _result?.LogCode))
+                                                {
+                                                    <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Info" OnClick="@(() => OpenLog(img.LogCode ?? _result!.LogCode!))">Xem chi tiet log</MudButton>
+                                                }
+                                            </MudStack>
+                                        </MudPaper>
+                                    </MudItem>
+                                }
+                            </MudGrid>
+                        }
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(_result?.LogCode))
                     {
-                        <MudText Class="todox-page-subtitle">Chưa có ảnh. Chỉnh số lượng/prompt rồi bấm "Tạo ảnh chibi".</MudText>
-                    }
-                    else if (_result.Status == "failed" && _result.Images.Count == 0)
-                    {
-                        <MudText Class="todox-page-subtitle">Không tạo được ảnh. Xem chi tiết lỗi phía trên.</MudText>
-                    }
-                    else
-                    {
-                        <MudGrid>
-                            @foreach (var img in _result.Images)
-                            {
-                                <MudItem xs="12" sm="6">
-                                    <MudPaper Class="todox-card pa-2" Rounded="true">
-                                        @if (img.Status == "failed")
-                                        {
-                                            <MudAlert Severity="Severity.Error" Dense="true">Ảnh lỗi</MudAlert>
-                                        }
-                                        else
-                                        {
-                                            <MudImage Src="@img.Url" Fluid="true" Style="border-radius:8px;aspect-ratio:1/1;object-fit:cover;width:100%" />
-                                        }
-                                        <MudStack Row="true" Class="mt-2" Spacing="1">
-                                            <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Edit"
-                                                       OnClick="@(() => EditAndRerender(img))" Disabled="_busy">Sửa prompt</MudButton>
-                                            <MudButton Size="Size.Small" Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.Check"
-                                                       OnClick="@(() => SelectChibi(img.MediaId))" Disabled="@(_busy || img.Status == "failed")">Chọn</MudButton>
-                                        </MudStack>
-                                    </MudPaper>
-                                </MudItem>
-                            }
-                        </MudGrid>
+                        <MudAlert Severity="Severity.Info" Dense="true" Class="mt-3">
+                            Ma log: <b>@_result.LogCode</b>
+                            <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Info" OnClick="@(() => OpenLog(_result.LogCode!))">Xem chi tiet log</MudButton>
+                        </MudAlert>
                     }
                 </MudPaper>
             </MudItem>
@@ -148,14 +213,20 @@
 
 @code {
     private string? _gender = "male";
+    private string? _characterType = "chibi";
     private string? _cameraAngle = "half_body";
+    private string? _outfit = "vest";
     private int _count = 3;
     private string _basePrompt = string.Empty;
+    private string? _productImageUrl;
+    private bool _promptEdited;
     private string? _lastError;
     private bool _busy;
+    private Guid? _rerenderingRenderId;
     private decimal _balance;
     private decimal _imageCost = 10;
     private ChibiGenerationDto? _result;
+    private readonly List<RenderLogEntry> _uiLogs = new();
     private MediaFileDto? _avatarMedia;
     private MediaFileDto? _logoMedia;
     private MediaFileDto? _productMedia;
@@ -163,6 +234,7 @@
     private MediaFileDto? _sceneMedia;
 
     private bool IsCustomer => AuthState.CurrentUser?.IsCustomer == true;
+    private IReadOnlyList<RenderLogEntry> RenderLogs => _result?.Logs.Count > 0 ? _result.Logs : _uiLogs;
 
     protected override async Task OnInitializedAsync()
     {
@@ -190,37 +262,94 @@
         var template = await Chibi.GetDefaultPromptTemplateAsync();
         _basePrompt = Chibi.ResolvePromptTemplate(template, new ChibiGenerateInput
         {
+            CharacterType = _characterType,
             Gender = _gender,
             CameraAngle = _cameraAngle,
+            Outfit = _outfit,
+            Count = Math.Clamp(_count, 1, 4),
             AvatarMediaId = _avatarMedia?.Id,
             LogoMediaId = _logoMedia?.Id,
             ProductMediaId = _productMedia?.Id,
+            ProductImageUrl = _productImageUrl,
             UniformMediaId = _uniformMedia?.Id,
             SceneMediaId = _sceneMedia?.Id
         });
+        _promptEdited = false;
+    }
+
+    private async Task RefreshPromptIfClean()
+    {
+        if (!_promptEdited)
+        {
+            await ResetPrompt();
+        }
+    }
+
+    private async Task OnCharacterTypeChanged(string? value)
+    {
+        _characterType = value;
+        await RefreshPromptIfClean();
     }
 
     private async Task OnGenderChanged(string? value)
     {
         _gender = value;
-        await ResetPrompt();
+        await RefreshPromptIfClean();
     }
 
     private async Task OnCameraAngleChanged(string? value)
     {
         _cameraAngle = value;
-        await ResetPrompt();
+        await RefreshPromptIfClean();
     }
 
-    private RenderFragment RefRow(string slot, string label, MediaFileDto? media) =>@<div class="d-flex align-center justify-space-between gap-2">
+    private async Task OnOutfitChanged(string? value)
+    {
+        _outfit = value;
+        await RefreshPromptIfClean();
+    }
+
+    private async Task OnCountChanged(int value)
+    {
+        _count = Math.Clamp(value, 1, 4);
+        await RefreshPromptIfClean();
+    }
+
+    private async Task OnProductUrlChanged(string? value)
+    {
+        _productImageUrl = value;
+        await RefreshPromptIfClean();
+    }
+
+    private Task OnPromptChanged(string value)
+    {
+        _basePrompt = value;
+        _promptEdited = true;
+        return Task.CompletedTask;
+    }
+
+    private RenderFragment RefRow(string slot, string label, MediaFileDto? media) =>@<div class="avatar-reference-row">
         <div class="d-flex align-center gap-2">
-            @if (media is not null) { <MudAvatar><MudImage Src="@media.PublicUrl" /></MudAvatar> }
-            <MudText Typo="Typo.body2">@label - @(media is null ? "missing" : "loaded")</MudText>
+            <div class="avatar-reference-thumb @(slot == "logo" ? "logo-preview-bg" : string.Empty)">
+                @if (media is not null) { <img src="@media.PublicUrl" alt="@label" /> }
+                else { <MudIcon Icon="@Icons.Material.Filled.Image" Size="Size.Small" /> }
+            </div>
+            <div>
+                <MudText Typo="Typo.body2">@label</MudText>
+                <MudText Typo="Typo.caption" Class="todox-page-subtitle">@(media is null ? "missing" : $"loaded · {media.FileName}")</MudText>
+            </div>
         </div>
-        <MudFileUpload T="IBrowserFile" Accept="image/png,image/jpeg,image/webp" MaximumFileCount="1"
-                       FilesChanged="@(f => OnRefSelected(slot, f))">
-            <ActivatorContent><MudIconButton Icon="@Icons.Material.Filled.Upload" Color="Color.Warning" Size="Size.Small" /></ActivatorContent>
-        </MudFileUpload>
+        <div class="d-flex align-center gap-1">
+            @if (media is not null)
+            {
+                <MudIconButton Icon="@Icons.Material.Filled.Visibility" Color="Color.Info" Size="Size.Small" OnClick="@(() => ViewReference(slot, label, media))" />
+                <MudIconButton Icon="@Icons.Material.Filled.Close" Color="Color.Error" Size="Size.Small" OnClick="@(() => ClearReference(slot))" />
+            }
+            <MudFileUpload T="IBrowserFile" Accept="image/png,image/jpeg,image/webp" MaximumFileCount="1"
+                           FilesChanged="@(f => OnRefSelected(slot, f))">
+                <ActivatorContent><MudIconButton Icon="@Icons.Material.Filled.Upload" Color="Color.Warning" Size="Size.Small" /></ActivatorContent>
+            </MudFileUpload>
+        </div>
     </div>;
 
     private async Task OnRefSelected(string slot, IBrowserFile file)
@@ -242,7 +371,13 @@
                 case "uniform": _uniformMedia = media; break;
                 case "scene": _sceneMedia = media; break;
             }
-            await ResetPrompt();
+            await RefreshPromptIfClean();
+            _uiLogs.Add(new RenderLogEntry
+            {
+                Step = "REFERENCE_IMAGE_UPLOADED",
+                Message = $"Reference image uploaded: {slot}.",
+                Data = new { slot, media.Id, media.MimeType, media.FileSizeBytes, media.PublicUrl, file.Name, file.ContentType }
+            });
             Snackbar.Add("Đã tải ảnh tham chiếu.", Severity.Success);
         }
         catch (Exception ex)
@@ -251,13 +386,68 @@
         }
     }
 
+    private async Task ViewReference(string slot, string label, MediaFileDto media)
+    {
+        var parameters = new DialogParameters
+        {
+            ["Title"] = label,
+            ["ImageUrl"] = media.PublicUrl ?? media.FileUrl,
+            ["FileName"] = media.FileName,
+            ["MimeType"] = media.MimeType,
+            ["SizeText"] = media.FileSizeBytes is null ? null : $"{media.FileSizeBytes:#,0} bytes"
+        };
+        await DialogService.ShowAsync<Components.Dialogs.ReferenceImageLightboxDialog>($"Xem {slot}", parameters,
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true });
+    }
+
+    private async Task ClearReference(string slot)
+    {
+        switch (slot)
+        {
+            case "avatar": _avatarMedia = null; break;
+            case "logo": _logoMedia = null; break;
+            case "product": _productMedia = null; break;
+            case "uniform": _uniformMedia = null; break;
+            case "scene": _sceneMedia = null; break;
+        }
+        await RefreshPromptIfClean();
+    }
+
+    private async Task ImportProductUrl()
+    {
+        if (AuthState.CurrentUser is null || string.IsNullOrWhiteSpace(_productImageUrl)) return;
+        _busy = true;
+        try
+        {
+            await Tenant.EnsureLoadedAsync();
+            _uiLogs.Add(new RenderLogEntry { Step = "PRODUCT_URL_DOWNLOAD_START", Message = "Downloading product image URL.", Data = new { url = _productImageUrl } });
+            var media = await MediaFiles.DownloadAndSaveImageAsync(_productImageUrl, "chibi_ref_product_url",
+                AuthState.CurrentUser.UserId, AuthState.CurrentUser.CustomerId, Tenant.TenantId);
+            _productMedia = media;
+            _uiLogs.Add(new RenderLogEntry
+            {
+                Step = "PRODUCT_URL_DOWNLOAD_SUCCESS",
+                Message = "Product image URL stored as media.",
+                Data = new { media.Id, media.MimeType, media.FileSizeBytes, media.PublicUrl, sourceUrl = _productImageUrl }
+            });
+            await RefreshPromptIfClean();
+            Snackbar.Add("Da tai anh san pham tu URL.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            _uiLogs.Add(new RenderLogEntry { Step = "PRODUCT_URL_DOWNLOAD_FAILED", Message = ex.Message, Data = new { url = _productImageUrl }, Level = "error" });
+            Snackbar.Add($"Loi URL san pham: {ex.Message}", Severity.Error);
+        }
+        finally { _busy = false; }
+    }
+
     private async Task ConfirmAndGenerate()
     {
         if (AuthState.CurrentUser is null) return;
 
         if (IsCustomer)
         {
-            var total = _imageCost * _count;
+            var total = _imageCost * Math.Clamp(_count, 1, 4);
             if (_balance < total)
             {
                 Snackbar.Add($"Không đủ token: cần {total:#,0}, còn {_balance:#,0}.", Severity.Error);
@@ -275,8 +465,14 @@
     private async Task Generate()
     {
         _busy = true;
-        _result = null;
         _lastError = null;
+        _uiLogs.Clear();
+        _uiLogs.Add(new RenderLogEntry
+        {
+            Step = "UI_RENDER_SUBMITTED",
+            Message = "User submitted chibi render request.",
+            Data = new { count = Math.Clamp(_count, 1, 4), hasAvatar = _avatarMedia is not null, hasLogo = _logoMedia is not null, hasProduct = _productMedia is not null }
+        });
         try
         {
             _result = await Chibi.GenerateAsync(new ChibiGenerateInput
@@ -284,13 +480,16 @@
                 UserId = AuthState.CurrentUser!.UserId,
                 CustomerId = AuthState.CurrentUser.CustomerId,
                 IsCustomer = IsCustomer,
+                CharacterType = _characterType,
                 Gender = _gender,
                 CameraAngle = _cameraAngle,
-                Count = _count,
+                Outfit = _outfit,
+                Count = Math.Clamp(_count, 1, 4),
                 PromptOverride = _basePrompt,
                 AvatarMediaId = _avatarMedia?.Id,
                 LogoMediaId = _logoMedia?.Id,
                 ProductMediaId = _productMedia?.Id,
+                ProductImageUrl = _productImageUrl,
                 UniformMediaId = _uniformMedia?.Id,
                 SceneMediaId = _sceneMedia?.Id
             });
@@ -342,6 +541,7 @@
         }
 
         _busy = true;
+        _rerenderingRenderId = img.RenderId;
         try
         {
             var updated = await Chibi.RerenderAsync(AuthState.CurrentUser.UserId,
@@ -349,6 +549,7 @@
             // Update the image in the current result.
             var idx = _result!.Images.FindIndex(x => x.RenderId == img.RenderId);
             if (idx >= 0) _result.Images[idx] = updated;
+            _uiLogs.Add(new RenderLogEntry { Step = "UI_RERENDER_COMPLETED", Message = "Single image rerender completed.", Data = new { img.RenderId, updated.MediaId, updated.Url } });
             await RefreshBalance();
             Snackbar.Add(IsCustomer ? $"Đã render lại. Đã trừ {_imageCost:#,0} token, còn {_balance:#,0}." : "Đã render lại ảnh.", Severity.Success);
         }
@@ -357,7 +558,7 @@
             _lastError = ex.ToString();
             Snackbar.Add($"Lỗi render lại: {ex.Message}", Severity.Error);
         }
-        finally { _busy = false; }
+        finally { _rerenderingRenderId = null; _busy = false; }
     }
 
     private async Task SelectChibi(Guid mediaId)
@@ -376,5 +577,20 @@
             Snackbar.Add($"Lỗi: {ex.Message}", Severity.Error);
         }
         finally { _busy = false; }
+    }
+
+    private bool IsCardRendering(ChibiImage image)
+        => _rerenderingRenderId == image.RenderId;
+
+    private bool IsActionDisabled(ChibiImage image)
+        => (_busy && _rerenderingRenderId is null) || IsCardRendering(image);
+
+    private void OpenLog(string logCode)
+        => Nav.NavigateTo($"/activity-logs/{Uri.EscapeDataString(logCode)}");
+
+    private static string FormatLog(RenderLogEntry entry)
+    {
+        var data = entry.Data is null ? string.Empty : " " + JsonSerializer.Serialize(entry.Data);
+        return $"[{entry.Timestamp:HH:mm:ss}] {entry.Level.ToUpperInvariant()} {entry.Step}: {entry.Message}{data}";
     }
 }

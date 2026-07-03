@@ -9,10 +9,19 @@ public sealed class ReferenceImage
     public string? MimeType { get; set; }
     public byte[]? Bytes { get; set; }
     public string? FileName { get; set; }
+    public long? SizeBytes { get; set; }
+    public int? Width { get; set; }
+    public int? Height { get; set; }
+    public bool? HasAlpha { get; set; }
+    public string? ObjectKey { get; set; }
+    public string SourceType { get; set; } = "upload";
+    public string? SourceUrl { get; set; }
 }
 
 public sealed class ImageRenderRequestModel
 {
+    public Guid? CorrelationId { get; set; }
+    public string? LogCode { get; set; }
     public string Prompt { get; set; } = string.Empty;
     public List<ReferenceImage> ReferenceImages { get; set; } = new();
     public int Count { get; set; } = 1;
@@ -23,6 +32,12 @@ public sealed class ImageRenderRequestModel
     public Guid? CustomerId { get; set; }
     public string FileCategory { get; set; } = "render";
     public bool RequireReferenceImages { get; set; } = false;
+    public string? Gender { get; set; }
+    public string? CharacterType { get; set; }
+    public string? Outfit { get; set; }
+    public string? CameraAngle { get; set; }
+    public int? VariationIndex { get; set; }
+    public int? ImageCount { get; set; }
 }
 
 public sealed class GeneratedImage
@@ -42,6 +57,16 @@ public sealed class ImageRenderResult
     public Guid RequestId { get; set; }
     public bool UsedFallback { get; set; }
     public string? Error { get; set; }
+    public List<RenderLogEntry> Logs { get; set; } = new();
+}
+
+public sealed class RenderLogEntry
+{
+    public DateTime Timestamp { get; set; } = DateTime.UtcNow;
+    public string Level { get; set; } = "info";
+    public string Step { get; set; } = string.Empty;
+    public string Message { get; set; } = string.Empty;
+    public object? Data { get; set; }
 }
 
 public interface IImageRenderService
