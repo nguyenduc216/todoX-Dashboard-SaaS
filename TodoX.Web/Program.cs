@@ -1,6 +1,7 @@
 using TodoX.Web.Components;
 using TodoX.Web.Data;
 using TodoX.Web.Services;
+using TodoX.Web.Services.Render;
 using MudBlazor.Services;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -44,6 +45,9 @@ builder.Services.AddScoped<AuthStateService>();
 builder.Services.AddScoped<StartupSeedFixer>();
 builder.Services.AddScoped<TokenSettingsService>();
 builder.Services.AddScoped<WalletService>();
+builder.Services.AddScoped<IRenderJobService, RenderJobService>();
+builder.Services.AddScoped<IRenderJobDispatcher, RenderJobDispatcher>();
+builder.Services.AddHostedService<RenderJobWorker>();
 var app = builder.Build();
 
 // Load tenant and repair placeholder seed credentials (writes data only, never schema).
@@ -54,7 +58,7 @@ using (var scope = app.Services.CreateScope())
     var fixer = scope.ServiceProvider.GetRequiredService<StartupSeedFixer>();
     await fixer.RunAsync();
 
-    // Sprint 2G: seed pricing defaults and ensure every customer has a token wallet.
+    // Sprint 2G: seed point pricing defaults and ensure every customer has a point wallet.
     var tokenSettings = scope.ServiceProvider.GetRequiredService<TokenSettingsService>();
     await tokenSettings.EnsureDefaultsAsync();
     var wallets = scope.ServiceProvider.GetRequiredService<WalletService>();

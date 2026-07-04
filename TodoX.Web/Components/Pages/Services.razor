@@ -10,7 +10,7 @@
     <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-3">
         <div>
             <MudText Typo="Typo.h4" Class="todox-page-title">Quản lý dịch vụ</MudText>
-            <MudText Typo="Typo.body1" Class="todox-page-subtitle">Dịch vụ AI khách hàng có thể chọn: tên, nhóm, giá token, mô tả, hình minh họa.</MudText>
+            <MudText Typo="Typo.body1" Class="todox-page-subtitle">Dịch vụ AI khách hàng có thể chọn: tên, nhóm, giá điểm, mô tả, hình minh họa.</MudText>
         </div>
         <IfCan Permission="services.create">
             <MudButton Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.Add" OnClick="OpenCreate">Thêm dịch vụ</MudButton>
@@ -61,7 +61,7 @@
                             <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="mt-3">
                                 <div>
                                     <span class="todox-service-price">@(svc.MinTokenCost?.ToString("#,0") ?? "—")</span>
-                                    <span class="todox-service-price-unit">token @(svc.TierCount > 0 ? $"· {svc.TierCount} gói" : "")</span>
+                                    <span class="todox-service-price-unit">điểm @(svc.TierCount > 0 ? $"· {svc.TierCount} gói" : "")</span>
                                 </div>
                                 <div>
                                     <MudIconButton Icon="@Icons.Material.Filled.Sell" Size="Size.Small" Title="Bảng giá" OnClick="@(() => OpenTiers(svc))" />

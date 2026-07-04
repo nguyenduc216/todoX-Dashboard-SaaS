@@ -522,10 +522,20 @@ h4 {
     min-height: 240px;
 }
 
+.avatar-stage-frame {
+    max-width: 520px;
+}
+
 .avatar-render-placeholder {
+    position: relative;
     display: flex;
     align-items: center;
+    justify-content: center;
     min-height: 220px;
+    overflow: hidden;
+    border: 1px dashed rgba(255, 183, 0, 0.22);
+    border-radius: 8px;
+    background: rgba(5, 12, 20, 0.42);
 }
 
 .avatar-render-card {
@@ -577,7 +587,7 @@ h4 {
 }
 
 .avatar-card-overlay::after {
-    content: "Dang render lai...";
+    content: attr(data-status);
     position: relative;
     z-index: 2;
     padding: 7px 12px;
@@ -586,6 +596,10 @@ h4 {
     color: #ffd56a;
     font-size: 13px;
     font-weight: 700;
+}
+
+.avatar-card-overlay:not([data-status])::after {
+    content: "Dang xu ly...";
 }
 
 .avatar-card-overlay .mud-progress-circular,
@@ -615,6 +629,37 @@ h4 {
     border-radius: 8px;
     padding: 12px;
     background: rgba(0, 0, 0, 0.22);
+}
+
+.avatar-upload-btn {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    overflow: hidden;
+    cursor: pointer;
+    border: 1px solid rgba(255, 183, 0, 0.42);
+    border-radius: 8px;
+    color: #ffb700;
+    background: rgba(255, 183, 0, 0.08);
+}
+
+.avatar-upload-btn:hover {
+    border-color: rgba(255, 211, 106, 0.74);
+    background: rgba(255, 183, 0, 0.14);
+}
+
+.avatar-hidden-file-input,
+.avatar-upload-btn input[type="file"] {
+    position: absolute !important;
+    inset: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    opacity: 0 !important;
+    cursor: pointer !important;
+    font-size: 0 !important;
 }
 
 @media (max-width: 600px) {

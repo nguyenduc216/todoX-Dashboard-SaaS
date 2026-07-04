@@ -4,8 +4,8 @@ using TodoX.Web.Data;
 namespace TodoX.Web.Services;
 
 /// <summary>
-/// Reads/writes pricing + wallet defaults from system.app_settings, with sane fallbacks.
-/// Keys: token.cost.chibi_image, token.cost.gemini_prompt, token.default_wallet_balance.
+/// Reads/writes point pricing + wallet defaults from system.app_settings, with sane fallbacks.
+/// Legacy setting keys still use token.* to avoid a disruptive DB rename in Phase 1.
 /// </summary>
 public sealed class TokenSettingsService
 {
@@ -52,9 +52,9 @@ public sealed class TokenSettingsService
             """
             INSERT INTO system.app_settings (id, setting_key, setting_group, setting_type, setting_value, description, is_active, created_at)
             VALUES
-                (gen_random_uuid(), @k1, 'billing', 'number', '10',  'Token trừ cho mỗi ảnh chibi', true, now()),
-                (gen_random_uuid(), @k2, 'billing', 'number', '1',   'Token trừ cho mỗi lần Gemini sinh prompt', true, now()),
-                (gen_random_uuid(), @k3, 'billing', 'number', '100', 'Số dư token mặc định cho tài khoản khách hàng', true, now())
+                (gen_random_uuid(), @k1, 'billing', 'number', '10',  'Điểm trừ cho mỗi ảnh chibi', true, now()),
+                (gen_random_uuid(), @k2, 'billing', 'number', '1',   'Điểm trừ cho mỗi lần Gemini sinh prompt', true, now()),
+                (gen_random_uuid(), @k3, 'billing', 'number', '100', 'Số dư điểm mặc định cho tài khoản khách hàng', true, now())
             ON CONFLICT (setting_key) DO NOTHING;
             """, new { k1 = KeyChibiImage, k2 = KeyGeminiPrompt, k3 = KeyDefaultBalance });
     }

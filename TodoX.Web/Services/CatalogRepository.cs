@@ -10,7 +10,7 @@ public sealed record RenderOrderView(Guid Id, string OrderCode, string CustomerN
     int VideoSeconds, bool HasVoice, bool HasCaption, decimal EstimatedTokens, decimal ActualTokens,
     string Status, string? ResultUrl, DateTime CreatedAt);
 
-public sealed record RenderStats(int Processing, int Completed, int Queued, int Failed, int Total);
+public sealed record RenderStats(long Processing, long Completed, long Queued, long Failed, long Total);
 
 /// <summary>Read access to public.service_packages and public.render_orders (Foundation V2).</summary>
 public sealed class CatalogRepository

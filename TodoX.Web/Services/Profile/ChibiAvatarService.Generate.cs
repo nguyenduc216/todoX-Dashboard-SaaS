@@ -102,7 +102,7 @@ public sealed partial class ChibiAvatarService
         AddLog("PROMPT_BUILT", "Final render prompt prepared.", new { promptLength = finalPrompt.Length, imageCount = count });
         await InsertGenerationAsync(generationId, input, finalPrompt);
 
-        // Charge tokens up-front for the whole batch (customers only). Admin => no charge.
+        // Charge points up-front for the whole batch (customers only). Admin => no charge.
         var imageCost = await _tokenSettings.GetChibiImageCostAsync();
         var total = imageCost * count;
         var charge = await _wallet.ChargeAsync(
@@ -113,7 +113,7 @@ public sealed partial class ChibiAvatarService
         if (!charge.Ok)
         {
             await CompleteGenerationAsync(generationId, "failed", new List<ChibiImage>(), Guid.Empty, charge.Error);
-            AddLog("RENDER_FAILED", charge.Error ?? "Token charge failed.", level: "error");
+            AddLog("RENDER_FAILED", charge.Error ?? "Point charge failed.", level: "error");
             await _activityLogs.WriteAsync(input.UserId, input.CustomerId, logCode, "avatar-render", "failed",
                 BuildActivityInput(input, count), finalPrompt, refs, new List<ChibiImage>(), logs, charge.Error, ct);
             return new ChibiGenerationDto { Id = generationId, RenderJobId = generationId, LogCode = logCode, Status = "failed", Error = charge.Error, Logs = logs };
@@ -276,10 +276,10 @@ public sealed partial class ChibiAvatarService
             unit: "image", referenceId: renderId, referenceType: "chibi_rerender");
         if (!charge.Ok)
         {
-            AddLog("RERENDER_FAILED", charge.Error ?? "Token charge failed.", level: "error");
+            AddLog("RERENDER_FAILED", charge.Error ?? "Point charge failed.", level: "error");
             await _activityLogs.WriteAsync(userId, customerId, logCode, "avatar-rerender", "failed",
                 new { renderId, generationId, input = BuildActivityInput(refInput, 1) }, rerenderPrompt, refs, new List<ChibiImage>(), logs, charge.Error, ct);
-            throw new InvalidOperationException(charge.Error ?? "Khong du token.");
+            throw new InvalidOperationException(charge.Error ?? "Không đủ điểm.");
         }
 
         AddLog("GEMINI_IMAGE_REQUEST", "Calling image render service for one rerender.", new { renderId, generationId, promptLength = rerenderPrompt.Length, referenceCount = refs.Count });
@@ -419,15 +419,15 @@ public sealed partial class ChibiAvatarService
         }
 
         if (input.ProductMediaId is not null
+            && !prompt.Contains("PRODUCT MUST APPEAR IN THE FINAL IMAGE", StringComparison.OrdinalIgnoreCase)
             && !prompt.Contains("PRODUCT MANDATORY IN-FRAME CONSTRAINT", StringComparison.OrdinalIgnoreCase))
         {
             sb.AppendLine();
-            sb.AppendLine("PRODUCT MANDATORY IN-FRAME CONSTRAINT:");
-            sb.AppendLine("A product reference image is provided. The final avatar image MUST clearly include the exact product inside the visible frame.");
-            sb.AppendLine("The product must be visible, recognizable, and not hidden, cropped out, blurred, or treated only as inspiration.");
-            sb.AppendLine("Place the product naturally in one of these ways: held in the character's hand, next to the character, on a small pedestal/base, or in the foreground beside the character.");
-            sb.AppendLine("Preserve the product's main shape, color, package design, material, logo, label, and distinctive details from the reference image.");
-            sb.AppendLine("Do not omit the product. Do not replace it with a generic object. Do not change it into a different product.");
+            sb.AppendLine("PRODUCT MUST APPEAR IN THE FINAL IMAGE:");
+            sb.AppendLine("The product reference is not optional. The final image must clearly show the exact product inside the visible frame.");
+            sb.AppendLine("The product must be recognizable by shape, color, label, packaging, logo, and key visual details.");
+            sb.AppendLine("The character must hold the product, point to it, stand next to it, or present it on a small pedestal in the foreground.");
+            sb.AppendLine("Do not omit the product. Do not hide it in the background. Do not replace it with a generic similar object.");
             sb.AppendLine("If the camera shot is close-up, keep the product partially or fully visible in the frame while preserving the character as the main subject.");
         }
 

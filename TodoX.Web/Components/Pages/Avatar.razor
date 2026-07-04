@@ -25,11 +25,11 @@
         </div>
         @if (IsCustomer)
         {
-            <span class="todox-badge" style="font-size:.95rem">Số dư: @_balance.ToString("#,0") token</span>
+            <span class="todox-badge" style="font-size:.95rem">Số dư: @_balance.ToString("#,0") điểm</span>
         }
         else
         {
-            <span class="todox-badge">Tài khoản quản trị · miễn phí token</span>
+            <span class="todox-badge">Tài khoản quản trị · miễn phí điểm</span>
         }
     </MudStack>
 
@@ -143,19 +143,32 @@
                             <pre class="todox-error-pre">@_lastError</pre>
                         </MudAlert>
                     }
-                    <div Class='@($"avatar-result-zone {(_busy ? "is-rendering" : string.Empty)}")'>
-                        @if (_busy && _rerenderingRenderId is null)
-                        {
-                            <div class="avatar-loading-overlay">
-                                <MudProgressCircular Indeterminate="true" Color="Color.Warning" Size="Size.Medium" />
-                                <MudText Typo="Typo.body2">Dang render...</MudText>
-                            </div>
-                        }
+                    <div class='@($"avatar-result-zone {(_busy ? "is-rendering" : string.Empty)}")'>
                         @if (_result is null)
                         {
-                            <div class="avatar-render-placeholder">
-                                <MudText Class="todox-page-subtitle">Chua co anh. Chinh so luong/prompt roi bam tao anh chibi.</MudText>
-                            </div>
+                            @if (!string.IsNullOrWhiteSpace(PreviewFrameUrl))
+                            {
+                                <div class="avatar-stage-frame">
+                                    <div class="avatar-render-image-shell">
+                                        <MudImage Src="@PreviewFrameUrl" Fluid="true" Style="border-radius:8px;aspect-ratio:1/1;object-fit:cover;width:100%" />
+                                        @if (_busy && _rerenderingRenderId is null)
+                                        {
+                                            <div class="avatar-card-overlay" data-status="Dang render..." aria-label="Dang render anh"></div>
+                                        }
+                                    </div>
+                                    <MudText Typo="Typo.caption" Class="todox-page-subtitle mt-2">Preview avatar dau vao</MudText>
+                                </div>
+                            }
+                            else
+                            {
+                                <div class="avatar-render-placeholder">
+                                    <MudText Class="todox-page-subtitle">Chua co anh. Tai avatar hoac chinh prompt roi bam tao anh chibi.</MudText>
+                                    @if (_busy && _rerenderingRenderId is null)
+                                    {
+                                        <div class="avatar-card-overlay" data-status="Dang render..." aria-label="Dang render anh"></div>
+                                    }
+                                </div>
+                            }
                         }
                         else if (_result.Status == "failed" && _result.Images.Count == 0)
                         {
@@ -178,7 +191,7 @@
                                                     <MudImage Src="@img.Url" Fluid="true" Style="border-radius:8px;aspect-ratio:1/1;object-fit:cover;width:100%" />
                                                     @if (IsCardRendering(img))
                                                     {
-                                                        <div class="avatar-card-overlay" aria-label="Dang render lai anh"></div>
+                                                        <div class="avatar-card-overlay" data-status="Dang render lai..." aria-label="Dang render lai anh"></div>
                                                     }
                                                 </div>
                                             }
@@ -243,6 +256,7 @@
 
     private bool IsCustomer => AuthState.CurrentUser?.IsCustomer == true;
     private IReadOnlyList<RenderLogEntry> RenderLogs => _result?.Logs.Count > 0 ? _result.Logs : _uiLogs;
+    private string? PreviewFrameUrl => _avatarMedia?.PublicUrl ?? _avatarMedia?.FileUrl;
 
     protected override async Task OnInitializedAsync()
     {
@@ -355,7 +369,7 @@
             }
             <label class="avatar-upload-btn" title="Upload">
                 <MudIcon Icon="@Icons.Material.Filled.Upload" Size="Size.Small" />
-                <InputFile OnChange="@(e => OnRefInputChanged(slot, e))" accept="image/png,image/jpeg,image/webp" />
+                <InputFile Class="avatar-hidden-file-input" OnChange="@(e => OnRefInputChanged(slot, e))" accept="image/png,image/jpeg,image/webp" />
             </label>
         </div>
     </div>;
@@ -482,11 +496,11 @@
             var total = _imageCost * Math.Clamp(_count, 1, 4);
             if (_balance < total)
             {
-                Snackbar.Add($"Không đủ token: cần {total:#,0}, còn {_balance:#,0}.", Severity.Error);
+                Snackbar.Add($"Không đủ điểm: cần {total:#,0}, còn {_balance:#,0}.", Severity.Error);
                 return;
             }
-            var ok = await DialogService.ShowMessageBoxAsync("Xác nhận trừ token",
-                (MarkupString)$"Tạo <b>{_count}</b> ảnh chibi sẽ trừ <b>{total:#,0} token</b> (số dư: {_balance:#,0}). Tiếp tục?",
+            var ok = await DialogService.ShowMessageBoxAsync("Xác nhận trừ điểm",
+                (MarkupString)$"Tạo <b>{_count}</b> ảnh chibi sẽ trừ <b>{total:#,0} điểm</b> (số dư: {_balance:#,0}). Tiếp tục?",
                 yesText: "Đồng ý", cancelText: "Hủy");
             if (ok != true) return;
         }
@@ -498,6 +512,7 @@
     {
         _busy = true;
         _lastError = null;
+        _result = null;
         _uiLogs.Clear();
         _uiLogs.Add(new RenderLogEntry
         {
@@ -505,6 +520,8 @@
             Message = "User submitted chibi render request.",
             Data = new { count = Math.Clamp(_count, 1, 4), hasAvatar = _avatarMedia is not null, hasLogo = _logoMedia is not null, hasProduct = _productMedia is not null }
         });
+        await InvokeAsync(StateHasChanged);
+        await Task.Yield();
         try
         {
             _result = await Chibi.GenerateAsync(new ChibiGenerateInput
@@ -537,7 +554,7 @@
             else
             {
                 var msg = IsCustomer
-                    ? $"Đã tạo {_result.Images.Count(x => x.Status != "failed")} ảnh. Đã trừ {_result.Charged:#,0} token, còn {_result.BalanceAfter:#,0}."
+                    ? $"Đã tạo {_result.Images.Count(x => x.Status != "failed")} ảnh. Đã trừ {_result.Charged:#,0} điểm, còn {_result.BalanceAfter:#,0}."
                     : $"Đã tạo {_result.Images.Count(x => x.Status != "failed")} ảnh chibi.";
                 Snackbar.Add(msg, Severity.Success);
             }
@@ -563,11 +580,11 @@
         {
             if (_balance < _imageCost)
             {
-                Snackbar.Add($"Không đủ token: cần {_imageCost:#,0}, còn {_balance:#,0}.", Severity.Error);
+                Snackbar.Add($"Không đủ điểm: cần {_imageCost:#,0}, còn {_balance:#,0}.", Severity.Error);
                 return;
             }
-            var ok = await DialogService.ShowMessageBoxAsync("Xác nhận trừ token",
-                (MarkupString)$"Render lại 1 ảnh sẽ trừ <b>{_imageCost:#,0} token</b>. Tiếp tục?",
+            var ok = await DialogService.ShowMessageBoxAsync("Xác nhận trừ điểm",
+                (MarkupString)$"Render lại 1 ảnh sẽ trừ <b>{_imageCost:#,0} điểm</b>. Tiếp tục?",
                 yesText: "Đồng ý", cancelText: "Hủy");
             if (ok != true) return;
         }
@@ -593,7 +610,7 @@
             if (idx >= 0) _result.Images[idx] = updated;
             _uiLogs.Add(new RenderLogEntry { Step = "UI_RERENDER_COMPLETED", Message = "Single image rerender completed.", Data = new { img.RenderId, updated.MediaId, updated.Url } });
             await RefreshBalance();
-            Snackbar.Add(IsCustomer ? $"Đã render lại. Đã trừ {_imageCost:#,0} token, còn {_balance:#,0}." : "Đã render lại ảnh.", Severity.Success);
+            Snackbar.Add(IsCustomer ? $"Đã render lại. Đã trừ {_imageCost:#,0} điểm, còn {_balance:#,0}." : "Đã render lại ảnh.", Severity.Success);
         }
         catch (Exception ex)
         {

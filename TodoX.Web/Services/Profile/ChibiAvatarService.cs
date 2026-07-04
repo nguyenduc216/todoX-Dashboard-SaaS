@@ -197,12 +197,11 @@ public sealed partial class ChibiAvatarService : IChibiAvatarService
         if (input.ProductMediaId is not null)
         {
             directives.AppendLine();
-            directives.AppendLine("PRODUCT MANDATORY IN-FRAME CONSTRAINT:");
-            directives.AppendLine("A product reference image is provided. The final avatar image MUST clearly include the exact product inside the visible frame.");
-            directives.AppendLine("The product must be visible, recognizable, and not hidden, cropped out, blurred, or treated only as inspiration.");
-            directives.AppendLine("Place the product naturally in one of these ways: held in the character's hand, next to the character, on a small pedestal/base, or in the foreground beside the character.");
-            directives.AppendLine("Preserve the product's main shape, color, package design, material, logo, label, and distinctive details from the reference image.");
-            directives.AppendLine("Do not omit the product. Do not replace it with a generic object. Do not change it into a different product.");
+            directives.AppendLine("PRODUCT MUST APPEAR IN THE FINAL IMAGE:");
+            directives.AppendLine("The product reference is not optional. The final image must clearly show the exact product inside the visible frame.");
+            directives.AppendLine("The product must be recognizable by shape, color, label, packaging, logo, and key visual details.");
+            directives.AppendLine("The character must hold the product, point to it, stand next to it, or present it on a small pedestal in the foreground.");
+            directives.AppendLine("Do not omit the product. Do not hide it in the background. Do not replace it with a generic similar object.");
         }
 
         if (input.LogoMediaId is not null)

@@ -46,7 +46,7 @@
                 <MudTh>Khách hàng</MudTh>
                 <MudTh>Loại</MudTh>
                 <MudTh Style="text-align:right">Thời lượng</MudTh>
-                <MudTh Style="text-align:right">Token ước tính</MudTh>
+                <MudTh Style="text-align:right">Điểm ước tính</MudTh>
                 <MudTh>Trạng thái</MudTh>
                 <MudTh>Tạo lúc</MudTh>
             </HeaderContent>
@@ -55,7 +55,7 @@
                 <MudTd DataLabel="Khách hàng">@context.CustomerName</MudTd>
                 <MudTd DataLabel="Loại">@context.ServiceType</MudTd>
                 <MudTd DataLabel="Thời lượng" Style="text-align:right">@(context.VideoSeconds > 0 ? context.VideoSeconds + "s" : "-")</MudTd>
-                <MudTd DataLabel="Token ước tính" Style="text-align:right">@context.EstimatedTokens.ToString("#,0")</MudTd>
+                <MudTd DataLabel="Điểm ước tính" Style="text-align:right">@context.EstimatedTokens.ToString("#,0")</MudTd>
                 <MudTd DataLabel="Trạng thái"><MudChip T="string" Size="Size.Small" Color="@StatusColor(context.Status)">@context.Status</MudChip></MudTd>
                 <MudTd DataLabel="Tạo lúc">@context.CreatedAt.ToString("dd/MM/yyyy HH:mm")</MudTd>
             </RowTemplate>

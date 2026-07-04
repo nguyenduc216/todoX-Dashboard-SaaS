@@ -2,19 +2,19 @@
 @inject BillingRepository Billing
 @inject AuthStateService AuthState
 
-<PageTitle>Quản lý token</PageTitle>
+<PageTitle>Quản lý điểm</PageTitle>
 
 <MudStack Spacing="3">
     <div>
-        <MudText Typo="Typo.h4" Class="todox-page-title">Quản lý token</MudText>
-        <MudText Typo="Typo.body1" Class="todox-page-subtitle">Theo dõi số dư token và giao dịch sử dụng dịch vụ AI của khách hàng.</MudText>
+        <MudText Typo="Typo.h4" Class="todox-page-title">Quản lý điểm</MudText>
+        <MudText Typo="Typo.body1" Class="todox-page-subtitle">Theo dõi số dư điểm và giao dịch sử dụng dịch vụ AI của khách hàng.</MudText>
     </div>
 
     <MudGrid>
         <MudItem xs="12" sm="6" md="3">
             <MudPaper Class="todox-card pa-4">
                 <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
-                    <MudText Typo="Typo.subtitle2">Tổng token đã bán</MudText>
+                    <MudText Typo="Typo.subtitle2">Tổng điểm đã bán</MudText>
                     <MudIcon Icon="@Icons.Material.Filled.Token" Class="todox-gold" />
                 </MudStack>
                 <div class="todox-stat-value">@_summary.SoldTotal.ToString("#,0")</div>
@@ -32,7 +32,7 @@
         <MudItem xs="12" sm="6" md="3">
             <MudPaper Class="todox-card pa-4">
                 <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
-                    <MudText Typo="Typo.subtitle2">Token tạm giữ</MudText>
+                    <MudText Typo="Typo.subtitle2">Điểm tạm giữ</MudText>
                     <MudIcon Icon="@Icons.Material.Filled.Lock" Class="todox-gold" />
                 </MudStack>
                 <div class="todox-stat-value">@_summary.TotalLocked.ToString("#,0")</div>
@@ -52,7 +52,7 @@
     <MudGrid>
         <MudItem xs="12" lg="5">
             <MudPaper Class="todox-table-card pa-4" Rounded="true">
-                <MudText Typo="Typo.h6" Class="mb-2">Ví token theo khách hàng</MudText>
+                <MudText Typo="Typo.h6" Class="mb-2">Ví điểm theo khách hàng</MudText>
                 <MudDivider Class="mb-3" />
                 <MudTable Items="@_wallets" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Class="todox-table">
                     <HeaderContent>
@@ -68,14 +68,14 @@
                         <MudTd DataLabel="Trạng thái"><MudChip T="string" Size="Size.Small" Color="Color.Success">@context.Status</MudChip></MudTd>
                     </RowTemplate>
                     <NoRecordsContent>
-                        <MudText Class="pa-4 todox-page-subtitle">Chưa có ví token nào.</MudText>
+                        <MudText Class="pa-4 todox-page-subtitle">Chưa có ví điểm nào.</MudText>
                     </NoRecordsContent>
                 </MudTable>
             </MudPaper>
         </MudItem>
         <MudItem xs="12" lg="7">
             <MudPaper Class="todox-table-card pa-4" Rounded="true">
-                <MudText Typo="Typo.h6" Class="mb-2">Giao dịch token gần đây</MudText>
+                <MudText Typo="Typo.h6" Class="mb-2">Giao dịch điểm gần đây</MudText>
                 <MudDivider Class="mb-3" />
                 <MudTable Items="@_transactions" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Class="todox-table">
                     <HeaderContent>
@@ -93,7 +93,7 @@
                         <MudTd DataLabel="Số dư sau" Style="text-align:right">@context.BalanceAfter.ToString("#,0")</MudTd>
                     </RowTemplate>
                     <NoRecordsContent>
-                        <MudText Class="pa-4 todox-page-subtitle">Chưa có giao dịch token nào.</MudText>
+                        <MudText Class="pa-4 todox-page-subtitle">Chưa có giao dịch điểm nào.</MudText>
                     </NoRecordsContent>
                 </MudTable>
             </MudPaper>

@@ -8,7 +8,7 @@ public sealed record WalletBalance(Guid WalletId, decimal Balance, decimal Locke
 public sealed record ChargeResult(bool Ok, decimal Charged, decimal BalanceAfter, string? Error);
 
 /// <summary>
-/// Token wallet operations: balance lookups, deductions with ledger entries, and per-API-call
+/// Point wallet operations: balance lookups, deductions with ledger entries, and per-provider-call
 /// usage logging (billing.token_usage_logs). Admin/root accounts are never charged.
 /// </summary>
 public sealed class WalletService
@@ -35,7 +35,7 @@ public sealed class WalletService
             new { cid = customerId }) ?? 0m;
     }
 
-    /// <summary>Ensure a wallet exists for the customer, seeded with the default balance.</summary>
+    /// <summary>Ensure a point wallet exists for the customer, seeded with the default balance.</summary>
     public async Task<Guid> EnsureWalletAsync(Guid customerId)
     {
         await _tenant.EnsureLoadedAsync();
@@ -56,7 +56,7 @@ public sealed class WalletService
     }
 
     /// <summary>
-    /// Deduct tokens for an operation and write ledger + usage-log rows.
+    /// Deduct points for an operation and write ledger + usage-log rows.
     /// If customerId is null (admin/operator) no deduction happens but usage is still logged (charged=false).
     /// </summary>
     public async Task<ChargeResult> ChargeAsync(Guid? customerId, Guid? userId, decimal amount, int quantity,
@@ -82,7 +82,7 @@ public sealed class WalletService
         {
             await LogUsageAsync(conn, customerId, userId, providerCode, modelCode, operation, quantity,
                 unit, amount, charged: false, referenceType, referenceId, endpointCode, "insufficient");
-            return new ChargeResult(false, 0, balance, $"Không đủ token (cần {amount:0}, còn {balance:0}).");
+            return new ChargeResult(false, 0, balance, $"Không đủ điểm (cần {amount:0}, còn {balance:0}).");
         }
 
         var after = balance - amount;
@@ -104,13 +104,13 @@ public sealed class WalletService
             {
                 tenant = _tenant.TenantId, wallet = walletId, amount, before = balance, after,
                 reftype = referenceType ?? operation, refid = referenceId,
-                desc = $"Trừ {amount:0} token cho {operation} ({quantity} {unit})", user = userId
+                desc = $"Trừ {amount:0} điểm cho {operation} ({quantity} {unit})", user = userId
             });
 
         await LogUsageAsync(conn, customerId, userId, providerCode, modelCode, operation, quantity,
             unit, amount, charged: true, referenceType, referenceId, endpointCode, "success");
 
-        _logger.LogInformation("Charged {Amount} tokens to customer {Cid} for {Op}; balance {After}", amount, customerId, operation, after);
+        _logger.LogInformation("Charged {Amount} points to customer {Cid} for {Op}; balance {After}", amount, customerId, operation, after);
         return new ChargeResult(true, amount, after, null);
     }
 
@@ -145,7 +145,7 @@ public sealed class WalletService
             });
     }
 
-    /// <summary>Startup: create wallets for customers without one, seeded with the default balance.</summary>
+    /// <summary>Startup: create point wallets for customers without one, seeded with the default balance.</summary>
     public async Task SeedCustomerWalletsAsync()
     {
         await _tenant.EnsureLoadedAsync();
@@ -160,7 +160,7 @@ public sealed class WalletService
             """, new { seed });
         if (created > 0)
         {
-            _logger.LogInformation("Seeded {N} customer wallets with {Seed} tokens.", created, seed);
+            _logger.LogInformation("Seeded {N} customer point wallets with {Seed} points.", created, seed);
         }
     }
 }
