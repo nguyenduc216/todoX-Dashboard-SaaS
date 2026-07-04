@@ -58,6 +58,12 @@
                             Ban chua chon anh khuon mat. He thong se tao chibi theo gioi tinh, do giong khuon mat se thap.
                         </MudAlert>
                     }
+                    @if (_productMedia is not null)
+                    {
+                        <MudAlert Severity="Severity.Info" Dense="true" Class="mt-3">
+                            Anh san pham se duoc yeu cau xuat hien ro trong khung hinh render.
+                        </MudAlert>
+                    }
 
                     <MudTextField T="string" Label="URL anh san pham (tuy chon)" Value="@_productImageUrl" ValueChanged="OnProductUrlChanged"
                                   Variant="Variant.Outlined" Margin="Margin.Dense" Class="mt-3"
@@ -162,20 +168,19 @@
                                 {
                                     <MudItem xs="12" sm="6">
                                         <MudPaper Class='@($"todox-card pa-2 avatar-render-card {(IsCardRendering(img) ? "is-rendering" : string.Empty)}")' Rounded="true">
-                                            @if (IsCardRendering(img))
-                                            {
-                                                <div class="avatar-card-overlay">
-                                                    <MudProgressCircular Indeterminate="true" Color="Color.Warning" Size="Size.Small" />
-                                                    <MudText Typo="Typo.body2">Đang render lại...</MudText>
-                                                </div>
-                                            }
                                             @if (img.Status == "failed")
                                             {
                                                 <MudAlert Severity="Severity.Error" Dense="true">Anh loi</MudAlert>
                                             }
                                             else
                                             {
-                                                <MudImage Src="@img.Url" Fluid="true" Style="border-radius:8px;aspect-ratio:1/1;object-fit:cover;width:100%" />
+                                                <div class="avatar-render-image-shell">
+                                                    <MudImage Src="@img.Url" Fluid="true" Style="border-radius:8px;aspect-ratio:1/1;object-fit:cover;width:100%" />
+                                                    @if (IsCardRendering(img))
+                                                    {
+                                                        <div class="avatar-card-overlay" aria-label="Dang render lai anh"></div>
+                                                    }
+                                                </div>
                                             }
                                             <MudStack Row="true" Class="mt-2" Spacing="1">
                                                 <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Edit"
@@ -225,6 +230,7 @@
     private string? _lastError;
     private bool _busy;
     private Guid? _rerenderingRenderId;
+    private readonly HashSet<Guid> _rerenderingIds = new();
     private decimal _balance;
     private decimal _imageCost = 10;
     private ChibiGenerationDto? _result;
@@ -568,13 +574,15 @@
 
         _busy = true;
         _rerenderingRenderId = img.RenderId;
+        _rerenderingIds.Add(img.RenderId);
         _uiLogs.Add(new RenderLogEntry
         {
             Step = "UI_RERENDER_STATE_SET",
             Message = "Per-card rerender state set on frontend.",
             Data = new { img.RenderId, img.Index }
         });
-        StateHasChanged();
+        await InvokeAsync(StateHasChanged);
+        await Task.Yield();
         try
         {
             var updated = await Chibi.RerenderAsync(AuthState.CurrentUser.UserId,
@@ -592,7 +600,13 @@
             _lastError = ex.ToString();
             Snackbar.Add($"Lỗi render lại: {ex.Message}", Severity.Error);
         }
-        finally { _rerenderingRenderId = null; _busy = false; }
+        finally
+        {
+            _rerenderingIds.Remove(img.RenderId);
+            _rerenderingRenderId = null;
+            _busy = false;
+            await InvokeAsync(StateHasChanged);
+        }
     }
 
     private async Task SelectChibi(Guid mediaId)
@@ -614,10 +628,10 @@
     }
 
     private bool IsCardRendering(ChibiImage image)
-        => _rerenderingRenderId == image.RenderId;
+        => _rerenderingIds.Contains(image.RenderId) || _rerenderingRenderId == image.RenderId;
 
     private bool IsActionDisabled(ChibiImage image)
-        => (_busy && _rerenderingRenderId is null) || IsCardRendering(image);
+        => (_busy && _rerenderingIds.Count == 0 && _rerenderingRenderId is null) || IsCardRendering(image);
 
     private void OpenLog(string logCode)
         => Nav.NavigateTo($"/activity-logs/{Uri.EscapeDataString(logCode)}");

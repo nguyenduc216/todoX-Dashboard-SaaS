@@ -149,7 +149,18 @@
             return row.Action == "rerender" ? "Render lại ảnh avatar" : "Render ảnh avatar";
         }
 
-        return string.IsNullOrWhiteSpace(row.Message) ? ActionLabel(row.Action) : Truncate(row.Message, 96);
+        if (string.IsNullOrWhiteSpace(row.Message))
+        {
+            return ActionLabel(row.Action);
+        }
+
+        var trimmed = row.Message.TrimStart();
+        if (trimmed.StartsWith("{", StringComparison.Ordinal) || trimmed.StartsWith("[", StringComparison.Ordinal))
+        {
+            return ActionLabel(row.Action);
+        }
+
+        return Truncate(row.Message, 96);
     }
 
     private static bool TryReadJson(string? text, out JsonElement root)

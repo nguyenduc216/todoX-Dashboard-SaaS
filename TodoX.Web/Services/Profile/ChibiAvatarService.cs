@@ -85,7 +85,7 @@ public sealed partial class ChibiAvatarService : IChibiAvatarService
     private readonly TenantContext _tenant;
     private readonly ILogger<ChibiAvatarService> _logger;
 
-    private const string FallbackPromptTemplate = "Create exactly 3 premium 3D chibi avatar variations based on the user avatar reference if available. Gender: {{GENDER}}. Style: cute, professional, friendly, modern, premium Pixar-quality 3D collectible mascot, suitable for TodoX SaaS profile avatar. Preserve recognizable facial identity from the avatar reference without making it photorealistic. Use large expressive eyes, friendly smile, cute proportions about 3 heads tall, clean centered square avatar composition, soft global illumination, luxury golden lighting, high detail. If a logo reference is provided, integrate brand colors or a small tasteful logo badge naturally on clothing/accessory/background. If product reference is provided, let the character hold or interact naturally with the product. If background reference is provided, use it only as inspiration and redesign into a simplified cinematic background, do not copy exactly. No text, no watermark, no extra fingers, no bad anatomy, no cropped face. Output PNG, square 1:1.";
+    private const string FallbackPromptTemplate = "Create exactly 3 premium 3D chibi avatar variations based on the user avatar reference if available. Gender: {{GENDER}}. Style: cute, professional, friendly, modern, premium Pixar-quality 3D collectible mascot, suitable for TodoX SaaS profile avatar. Preserve recognizable facial identity from the avatar reference without making it photorealistic. Use large expressive eyes, friendly smile, cute proportions about 3 heads tall, clean centered square avatar composition, soft global illumination, luxury golden lighting, high detail. If a logo reference is provided, integrate brand colors or a small tasteful logo badge naturally on clothing/accessory/background. If a product reference is provided, the final avatar image MUST clearly include the exact product inside the frame, preserving the product shape, color, packaging, logo, label, material, and distinctive details. If background reference is provided, use it only as inspiration and redesign into a simplified cinematic background, do not copy exactly. No text, no watermark, no extra fingers, no bad anatomy, no cropped face. Output PNG, square 1:1.";
 
     public ChibiAvatarService(TodoXConnectionFactory factory, IImageRenderService render,
         IMediaFileService media, IPromptTemplateService promptTemplates, IAvatarService avatars, GeminiPromptService gemini,
@@ -197,8 +197,12 @@ public sealed partial class ChibiAvatarService : IChibiAvatarService
         if (input.ProductMediaId is not null)
         {
             directives.AppendLine();
-            directives.AppendLine("PRODUCT MANDATORY VISUAL CONSTRAINT:");
-            directives.AppendLine("Use the PRODUCT reference image as a mandatory visual constraint. The final image must clearly include the same product, preserving its main shape, color, package design, and visible details. The character should hold it, stand next to it, or interact with it naturally. Do not replace it with a generic object.");
+            directives.AppendLine("PRODUCT MANDATORY IN-FRAME CONSTRAINT:");
+            directives.AppendLine("A product reference image is provided. The final avatar image MUST clearly include the exact product inside the visible frame.");
+            directives.AppendLine("The product must be visible, recognizable, and not hidden, cropped out, blurred, or treated only as inspiration.");
+            directives.AppendLine("Place the product naturally in one of these ways: held in the character's hand, next to the character, on a small pedestal/base, or in the foreground beside the character.");
+            directives.AppendLine("Preserve the product's main shape, color, package design, material, logo, label, and distinctive details from the reference image.");
+            directives.AppendLine("Do not omit the product. Do not replace it with a generic object. Do not change it into a different product.");
         }
 
         if (input.LogoMediaId is not null)

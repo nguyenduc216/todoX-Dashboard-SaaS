@@ -449,12 +449,6 @@ h4 {
     padding: 8px;
 }
 
-img[src*="logo"],
-img[src*="TodoX"],
-img[src*="todox"] {
-    display: none !important;
-}
-
 @media (max-width: 960px) {
     .todox-content {
         padding: 92px 18px 18px 18px !important;
@@ -476,6 +470,151 @@ img[src*="todox"] {
     .todox-stat-value {
         font-size: 2rem;
     }
+}
+
+/* Avatar Studio repair styles. Keep these in the theme layer so uploaded
+   avatar/logo/product previews are never hidden by broad layout rules. */
+.avatar-reference-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 10px;
+    border: 1px solid rgba(255, 183, 0, 0.22);
+    border-radius: 8px;
+    background: rgba(8, 16, 24, 0.54);
+    min-width: 0;
+}
+
+.avatar-reference-thumb {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 52px;
+    height: 52px;
+    flex: 0 0 52px;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 8px;
+    background: #121b25;
+}
+
+.avatar-reference-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block !important;
+}
+
+.logo-preview-bg {
+    background-color: #e9eef3;
+    background-image:
+        linear-gradient(45deg, #c9d1d9 25%, transparent 25%),
+        linear-gradient(-45deg, #c9d1d9 25%, transparent 25%),
+        linear-gradient(45deg, transparent 75%, #c9d1d9 75%),
+        linear-gradient(-45deg, transparent 75%, #c9d1d9 75%);
+    background-size: 16px 16px;
+    background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+}
+
+.avatar-result-zone {
+    position: relative;
+    min-height: 240px;
+}
+
+.avatar-render-placeholder {
+    display: flex;
+    align-items: center;
+    min-height: 220px;
+}
+
+.avatar-render-card {
+    position: relative;
+    overflow: hidden;
+    height: 100%;
+    min-height: 240px;
+}
+
+.avatar-render-card.is-rendering {
+    outline: 1px solid rgba(255, 183, 0, 0.65);
+}
+
+.avatar-render-image-shell {
+    position: relative;
+    overflow: hidden;
+    border-radius: 8px;
+    aspect-ratio: 1 / 1;
+    background: rgba(5, 12, 20, 0.55);
+}
+
+.avatar-render-image-shell img,
+.avatar-render-image-shell .mud-image-root {
+    width: 100% !important;
+    height: 100% !important;
+    object-fit: cover;
+    display: block !important;
+}
+
+.avatar-card-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 3;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    background: rgba(8, 14, 22, 0.62);
+    backdrop-filter: blur(1px);
+    pointer-events: none;
+}
+
+.avatar-card-overlay::before {
+    content: "";
+    position: absolute;
+    inset: -45%;
+    background: linear-gradient(110deg, transparent 20%, rgba(255, 193, 7, 0.22) 45%, rgba(255, 255, 255, 0.34) 50%, rgba(255, 193, 7, 0.22) 55%, transparent 80%);
+    animation: todox-render-flash 1.15s linear infinite;
+}
+
+.avatar-card-overlay::after {
+    content: "Dang render lai...";
+    position: relative;
+    z-index: 2;
+    padding: 7px 12px;
+    border-radius: 999px;
+    background: rgba(0, 0, 0, 0.44);
+    color: #ffd56a;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.avatar-card-overlay .mud-progress-circular,
+.avatar-card-overlay .mud-typography {
+    display: none !important;
+}
+
+@keyframes todox-render-flash {
+    from { transform: translateX(-45%) rotate(8deg); }
+    to { transform: translateX(45%) rotate(8deg); }
+}
+
+.activity-summary {
+    display: inline-block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    vertical-align: bottom;
+}
+
+.activity-json-pre {
+    max-height: 62vh;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 8px;
+    padding: 12px;
+    background: rgba(0, 0, 0, 0.22);
 }
 
 @media (max-width: 600px) {

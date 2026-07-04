@@ -7,6 +7,15 @@ namespace TodoX.Web.Services.Profile;
 
 public sealed partial class ChibiAvatarService
 {
+    private sealed class GenerationReferenceRow
+    {
+        public Guid? AvatarMediaId { get; set; }
+        public Guid? LogoMediaId { get; set; }
+        public Guid? ProductMediaId { get; set; }
+        public Guid? SceneMediaId { get; set; }
+        public string? Gender { get; set; }
+    }
+
     public async Task<ChibiGenerationDto> GenerateAsync(ChibiGenerateInput input, CancellationToken ct = default)
     {
         await _tenant.EnsureLoadedAsync(ct);
@@ -216,6 +225,7 @@ public sealed partial class ChibiAvatarService
         AddLog("LOG_CODE_GENERATED", "Generated rerender log code.", new { logCode, renderId });
 
         Guid generationId;
+        GenerationReferenceRow? refMeta;
         using (var conn = await _factory.OpenAsync(ct))
         {
             var gen = await conn.ExecuteScalarAsync<Guid?>(
@@ -223,7 +233,42 @@ public sealed partial class ChibiAvatarService
                 new { id = renderId, uid = userId });
             if (gen is null) throw new InvalidOperationException("Ban render khong thuoc ve nguoi dung.");
             generationId = gen.Value;
+            refMeta = await conn.QuerySingleOrDefaultAsync<GenerationReferenceRow>(
+                """
+                SELECT reference_avatar_media_id AS AvatarMediaId,
+                       reference_logo_media_id AS LogoMediaId,
+                       reference_product_media_id AS ProductMediaId,
+                       reference_scene_media_id AS SceneMediaId,
+                       gender AS Gender
+                  FROM auth.user_chibi_generations
+                 WHERE id=@generationId AND user_id=@userId;
+                """,
+                new { generationId, userId });
         }
+
+        var refInput = new ChibiGenerateInput
+        {
+            UserId = userId,
+            CustomerId = customerId,
+            IsCustomer = isCustomer,
+            AvatarMediaId = refMeta?.AvatarMediaId,
+            LogoMediaId = refMeta?.LogoMediaId,
+            ProductMediaId = refMeta?.ProductMediaId,
+            SceneMediaId = refMeta?.SceneMediaId,
+            Gender = refMeta?.Gender,
+            Count = 1
+        };
+        var refs = await BuildReferenceImagesAsync(refInput, ct);
+        var rerenderPrompt = EnsureRenderDirectives(prompt, refInput, 1);
+        AddLog("RERENDER_REFERENCES_RESOLVED", "Resolved original reference images for rerender.", new
+        {
+            generationId,
+            referenceCount = refs.Count,
+            hasAvatar = refInput.AvatarMediaId is not null,
+            hasLogo = refInput.LogoMediaId is not null,
+            hasProduct = refInput.ProductMediaId is not null,
+            hasScene = refInput.SceneMediaId is not null
+        });
 
         var imageCost = await _tokenSettings.GetChibiImageCostAsync();
         var charge = await _wallet.ChargeAsync(isCustomer ? customerId : null, userId, imageCost, 1,
@@ -233,40 +278,45 @@ public sealed partial class ChibiAvatarService
         {
             AddLog("RERENDER_FAILED", charge.Error ?? "Token charge failed.", level: "error");
             await _activityLogs.WriteAsync(userId, customerId, logCode, "avatar-rerender", "failed",
-                new { renderId, generationId }, prompt, new List<ReferenceImage>(), new List<ChibiImage>(), logs, charge.Error, ct);
+                new { renderId, generationId, input = BuildActivityInput(refInput, 1) }, rerenderPrompt, refs, new List<ChibiImage>(), logs, charge.Error, ct);
             throw new InvalidOperationException(charge.Error ?? "Khong du token.");
         }
 
-        AddLog("GEMINI_IMAGE_REQUEST", "Calling image render service for one rerender.", new { renderId, generationId, promptLength = prompt.Length });
+        AddLog("GEMINI_IMAGE_REQUEST", "Calling image render service for one rerender.", new { renderId, generationId, promptLength = rerenderPrompt.Length, referenceCount = refs.Count });
         var result = await _render.RenderAsync(new ImageRenderRequestModel
         {
             CorrelationId = generationId,
             LogCode = logCode,
-            Prompt = prompt,
+            Prompt = rerenderPrompt,
+            ReferenceImages = refs,
             Count = 1,
+            ImageCount = 1,
+            VariationIndex = 1,
+            Gender = refInput.Gender,
             AspectRatio = "1:1",
             MimeType = "image/png",
             UserId = userId,
             CustomerId = customerId,
-            FileCategory = "chibi"
+            FileCategory = "chibi",
+            RequireReferenceImages = refs.Count > 0
         }, ct);
         logs.AddRange(result.Logs);
 
         if (!result.Ok || result.Data.Count == 0)
         {
-            await UpdateRenderAsync(renderId, null, null, prompt, prompt, "failed", result.Error);
+            await UpdateRenderAsync(renderId, null, null, prompt, rerenderPrompt, "failed", result.Error);
             AddLog("RERENDER_FAILED", result.Error ?? "Render failed.", level: "error");
             await _activityLogs.WriteAsync(userId, customerId, logCode, "avatar-rerender", "failed",
-                new { renderId, generationId }, prompt, new List<ReferenceImage>(), new List<ChibiImage>(), logs, result.Error, ct);
+                new { renderId, generationId, input = BuildActivityInput(refInput, 1) }, rerenderPrompt, refs, new List<ChibiImage>(), logs, result.Error, ct);
             throw new InvalidOperationException(result.Error ?? "Vertex render loi.");
         }
 
         var d = result.Data[0];
-        await UpdateRenderAsync(renderId, d.MediaId, d.Url, prompt, prompt, "completed", null);
-        var image = new ChibiImage { RenderId = renderId, MediaId = d.MediaId, Url = d.Url, PromptInput = prompt, PromptUsed = prompt, LogCode = logCode };
+        await UpdateRenderAsync(renderId, d.MediaId, d.Url, prompt, rerenderPrompt, "completed", null);
+        var image = new ChibiImage { RenderId = renderId, MediaId = d.MediaId, Url = d.Url, PromptInput = prompt, PromptUsed = rerenderPrompt, LogCode = logCode };
         AddLog("RERENDER_COMPLETED", "Single image rerender completed.", new { renderId, d.MediaId, d.Url });
         await _activityLogs.WriteAsync(userId, customerId, logCode, "avatar-rerender", "completed",
-            new { renderId, generationId }, prompt, new List<ReferenceImage>(), new List<ChibiImage> { image }, logs, null, ct);
+            new { renderId, generationId, input = BuildActivityInput(refInput, 1) }, rerenderPrompt, refs, new List<ChibiImage> { image }, logs, null, ct);
         return image;
     }
 
@@ -369,11 +419,16 @@ public sealed partial class ChibiAvatarService
         }
 
         if (input.ProductMediaId is not null
-            && !prompt.Contains("PRODUCT MANDATORY VISUAL CONSTRAINT", StringComparison.OrdinalIgnoreCase))
+            && !prompt.Contains("PRODUCT MANDATORY IN-FRAME CONSTRAINT", StringComparison.OrdinalIgnoreCase))
         {
             sb.AppendLine();
-            sb.AppendLine("PRODUCT MANDATORY VISUAL CONSTRAINT:");
-            sb.AppendLine("Use the PRODUCT reference image as a mandatory visual constraint. The final image must clearly include the same product, preserving its main shape, color, package design, and visible details. The character should hold it, stand next to it, or interact with it naturally. Do not replace it with a generic object.");
+            sb.AppendLine("PRODUCT MANDATORY IN-FRAME CONSTRAINT:");
+            sb.AppendLine("A product reference image is provided. The final avatar image MUST clearly include the exact product inside the visible frame.");
+            sb.AppendLine("The product must be visible, recognizable, and not hidden, cropped out, blurred, or treated only as inspiration.");
+            sb.AppendLine("Place the product naturally in one of these ways: held in the character's hand, next to the character, on a small pedestal/base, or in the foreground beside the character.");
+            sb.AppendLine("Preserve the product's main shape, color, package design, material, logo, label, and distinctive details from the reference image.");
+            sb.AppendLine("Do not omit the product. Do not replace it with a generic object. Do not change it into a different product.");
+            sb.AppendLine("If the camera shot is close-up, keep the product partially or fully visible in the frame while preserving the character as the main subject.");
         }
 
         if (input.LogoMediaId is not null
@@ -404,7 +459,7 @@ public sealed partial class ChibiAvatarService
 
     private static string EnsureVariationDirective(string prompt, int index, int count)
         => prompt.Trim() + Environment.NewLine + Environment.NewLine
-           + $"Variation #{index} of {count}: produce exactly one final PNG image for this variation. Keep the same identity and all reference constraints.";
+           + $"Variation #{index} of {count}: produce exactly one final PNG image for this variation. Keep the same identity and all reference constraints. If a product reference exists, keep the product clearly visible inside this variation's frame.";
 
     public async Task<IReadOnlyList<ChibiGenerationDto>> GetGenerationsAsync(Guid userId, CancellationToken ct = default)
     {
