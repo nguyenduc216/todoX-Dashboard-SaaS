@@ -23,6 +23,11 @@
         </MudButton>
     </MudStack>
 
+    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Class="mt-2">
+        Sau khi tải file ZIP, hãy giải nén rồi vào <b>chrome://extensions</b>,
+        bật <b>Developer mode</b>, bấm <b>Load unpacked</b> và chọn thư mục chứa <b>manifest.json</b>.
+    </MudAlert>
+
     @if (!CanView)
     {
         <MudAlert Severity="Severity.Warning">
@@ -166,31 +171,54 @@
 
     protected override async Task OnInitializedAsync()
     {
-        _customerId = AuthState.CurrentUser?.CustomerId;
-        if (CanView && _customerId is not null)
+        try
         {
-            await Reload();
+            _customerId = AuthState.CurrentUser?.CustomerId;
+            if (CanView && _customerId is not null)
+            {
+                await Reload();
+            }
         }
-        _loading = false;
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Không tải được trang link video tham chiếu: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+        }
     }
 
     private async Task Reload()
     {
         if (_customerId is null)
         {
+            _loading = false;
             return;
         }
 
         _loading = true;
-        _items = await Videos.GetAsync(new ReferenceVideoFilter
+
+        try
         {
-            CustomerId = _customerId.Value,
-            Platform = _platform,
-            Status = _status,
-            Search = _search,
-            Limit = 200
-        });
-        _loading = false;
+            _items = await Videos.GetAsync(new ReferenceVideoFilter
+            {
+                CustomerId = _customerId.Value,
+                Platform = string.IsNullOrWhiteSpace(_platform) ? null : _platform,
+                Status = string.IsNullOrWhiteSpace(_status) ? null : _status,
+                Search = string.IsNullOrWhiteSpace(_search) ? null : _search,
+                Limit = 200
+            });
+        }
+        catch (Exception ex)
+        {
+            _items = Array.Empty<ReferenceVideoDto>();
+            Snackbar.Add($"Không tải được danh sách link video: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+        }
     }
 
     private async Task DownloadExtension()
@@ -226,9 +254,16 @@
             return;
         }
 
-        await Videos.SoftDeleteAsync(_customerId.Value, item.Id);
+        try
+        {
+            await Videos.SoftDeleteAsync(_customerId.Value, item.Id);
         Snackbar.Add("Đã xóa link video tham chiếu.", Severity.Success);
-        await Reload();
+            await Reload();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Không xóa được link video: {ex.Message}", Severity.Error);
+        }
     }
 
     private static string DisplayTitle(ReferenceVideoDto item)

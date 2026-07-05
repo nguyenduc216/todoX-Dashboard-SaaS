@@ -55,11 +55,11 @@ public sealed class ExtensionTokenService
             SELECT t.customer_id AS CustomerId,
                    t.user_id AS UserId,
                    c.company_name AS CustomerName,
-                   u.email AS UserEmail,
+                   COALESCE(u.email, u.username, u.display_name) AS UserEmail,
                    true AS IsValid
               FROM content.extension_tokens t
               LEFT JOIN crm.customers c ON c.id = t.customer_id
-              LEFT JOIN auth.users u ON u.id = t.user_id
+              LEFT JOIN auth.app_users u ON u.id = t.user_id
              WHERE t.token_hash = @hash
                AND t.is_active = true
                AND t.revoked_at IS NULL
