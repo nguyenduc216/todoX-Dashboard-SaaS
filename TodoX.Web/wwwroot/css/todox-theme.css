@@ -593,6 +593,105 @@ h4 {
     font-weight: 700;
 }
 
+.todox-reference-thumb-button {
+    position: relative;
+    width: 72px;
+    height: 96px;
+    border: 1px solid rgba(255, 183, 0, 0.35);
+    border-radius: 10px;
+    overflow: hidden;
+    padding: 0;
+    background: #090f18;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+}
+
+.todox-reference-thumb-button img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+    border: 0;
+    border-radius: 0;
+    transition: transform 0.16s ease, filter 0.16s ease;
+}
+
+.todox-reference-thumb-button:hover img {
+    transform: scale(1.04);
+    filter: brightness(0.82);
+}
+
+.todox-reference-thumb-play {
+    position: absolute;
+    left: 6px;
+    bottom: 6px;
+    width: 28px;
+    height: 28px;
+    border-radius: 999px;
+    background: rgba(255, 183, 0, 0.92);
+    color: #111827;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.38);
+}
+
+.todox-video-preview-dialog .mud-dialog-content {
+    padding-top: 8px;
+}
+
+.todox-video-preview-frame {
+    width: 100%;
+    min-height: 520px;
+    border-radius: 18px;
+    overflow: hidden;
+    border: 1px solid rgba(255, 183, 0, 0.25);
+    background: #05080d;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.todox-video-preview-frame iframe {
+    width: 100%;
+    height: 620px;
+    border: 0;
+    background: #05080d;
+}
+
+.todox-video-preview-fallback {
+    width: 100%;
+    min-height: 520px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 16px;
+    padding: 24px;
+}
+
+.todox-video-preview-fallback img {
+    max-width: 280px;
+    max-height: 480px;
+    object-fit: cover;
+    border-radius: 18px;
+    border: 1px solid rgba(255, 183, 0, 0.3);
+}
+
+@media (max-width: 768px) {
+    .todox-video-preview-frame,
+    .todox-video-preview-fallback {
+        min-height: 420px;
+    }
+
+    .todox-video-preview-frame iframe {
+        height: 480px;
+    }
+}
+
 .todox-perm-table {
     background: transparent !important;
 }

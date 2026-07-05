@@ -30,12 +30,16 @@ public sealed class AuthStateService
 
     public event Action? OnChange;
 
-    private sealed record PersistedAuth(Guid UserId, bool Remember, Guid? ImpersonatorUserId = null);
+    private sealed record PersistedAuth(
+        Guid UserId,
+        bool Remember,
+        Guid? ImpersonatorUserId = null,
+        string? ImpersonatorDisplayName = null);
 
     public async Task SignInAsync(CurrentUserSession user, bool rememberMe)
     {
         CurrentUser = user;
-        var marker = new PersistedAuth(user.UserId, rememberMe, user.ImpersonatorUserId);
+        var marker = CreateMarker(user, rememberMe);
         try
         {
             if (rememberMe)
@@ -90,6 +94,8 @@ public sealed class AuthStateService
             return false;
         }
 
+        original.ImpersonatorUserId = null;
+        original.ImpersonatorDisplayName = null;
         await SignInAsync(original, rememberMe: false);
         return true;
     }
@@ -116,9 +122,13 @@ public sealed class AuthStateService
                 {
                     if (marker.ImpersonatorUserId is Guid actorId)
                     {
-                        var actor = await rehydrate(actorId);
                         session.ImpersonatorUserId = actorId;
-                        session.ImpersonatorDisplayName = actor?.DisplayName;
+                        session.ImpersonatorDisplayName = marker.ImpersonatorDisplayName;
+                        if (string.IsNullOrWhiteSpace(session.ImpersonatorDisplayName))
+                        {
+                            var actor = await rehydrate(actorId);
+                            session.ImpersonatorDisplayName = actor?.DisplayName;
+                        }
                     }
                     CurrentUser = session;
                 }
@@ -157,6 +167,9 @@ public sealed class AuthStateService
 
         return null;
     }
+
+    private static PersistedAuth CreateMarker(CurrentUserSession user, bool rememberMe)
+        => new(user.UserId, rememberMe, user.ImpersonatorUserId, user.ImpersonatorDisplayName);
 
     /// <summary>Update the cached display name after a profile edit.</summary>
     public void UpdateDisplayName(string displayName)

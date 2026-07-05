@@ -1,9 +1,12 @@
 @page "/reference-videos"
+@using TodoX.Web.Components.Dialogs
+@implements IDisposable
 @inject AuthStateService AuthState
 @inject ReferenceVideoRepository Videos
 @inject ExtensionPackageService ExtensionPackages
 @inject IJSRuntime JS
 @inject ISnackbar Snackbar
+@inject IDialogService DialogService
 
 <PageTitle>Link video tham chiếu</PageTitle>
 
@@ -28,7 +31,11 @@
         bật <b>Developer mode</b>, bấm <b>Load unpacked</b> và chọn thư mục chứa <b>manifest.json</b>.
     </MudAlert>
 
-    @if (!CanView)
+    @if (!AuthState.IsInitialized)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+    }
+    else if (!CanView)
     {
         <MudAlert Severity="Severity.Warning">
             Bạn chưa được phân quyền xem link video tham chiếu.
@@ -106,7 +113,24 @@
                             <div class="todox-reference-video-main">
                                 @if (!string.IsNullOrWhiteSpace(context.ThumbnailUrl))
                                 {
-                                    <img src="@context.ThumbnailUrl" alt="@DisplayTitle(context)" />
+                                    <button type="button"
+                                            class="todox-reference-thumb-button"
+                                            title="Xem video"
+                                            @onclick="@(() => OpenPreview(context))"
+                                            @onclick:stopPropagation="true">
+                                        <img src="@context.ThumbnailUrl" alt="@DisplayTitle(context)" />
+                                        <span class="todox-reference-thumb-play">
+                                            <MudIcon Icon="@Icons.Material.Filled.PlayArrow" Size="Size.Small" />
+                                        </span>
+                                    </button>
+                                }
+                                else
+                                {
+                                    <MudIconButton Icon="@Icons.Material.Filled.PlayCircle"
+                                                   Color="Color.Warning"
+                                                   Size="Size.Small"
+                                                   Title="Xem video"
+                                                   OnClick="@(() => OpenPreview(context))" />
                                 }
                                 <div>
                                     <div class="todox-reference-video-title">@DisplayTitle(context)</div>
@@ -158,6 +182,7 @@
 
     private bool _loading = true;
     private bool _downloadBusy;
+    private bool _loaded;
     private Guid? _customerId;
     private string? _platform;
     private string? _status;
@@ -171,12 +196,17 @@
 
     protected override async Task OnInitializedAsync()
     {
+        AuthState.OnChange += HandleAuthChanged;
+
         try
         {
-            _customerId = AuthState.CurrentUser?.CustomerId;
-            if (CanView && _customerId is not null)
+            if (AuthState.IsInitialized)
             {
-                await Reload();
+                await LoadIfAllowedAsync();
+            }
+            else
+            {
+                _loading = false;
             }
         }
         catch (Exception ex)
@@ -187,6 +217,32 @@
         {
             _loading = false;
         }
+    }
+
+    private async void HandleAuthChanged()
+    {
+        await InvokeAsync(async () =>
+        {
+            if (!_loaded && AuthState.IsInitialized)
+            {
+                await LoadIfAllowedAsync();
+            }
+
+            StateHasChanged();
+        });
+    }
+
+    private async Task LoadIfAllowedAsync()
+    {
+        _customerId = AuthState.CurrentUser?.CustomerId;
+        if (CanView && _customerId is not null)
+        {
+            await Reload();
+            _loaded = true;
+            return;
+        }
+
+        _loading = false;
     }
 
     private async Task Reload()
@@ -264,6 +320,30 @@
         {
             Snackbar.Add($"Không xóa được link video: {ex.Message}", Severity.Error);
         }
+    }
+
+    private async Task OpenPreview(ReferenceVideoDto item)
+    {
+        var parameters = new DialogParameters
+        {
+            ["Video"] = item
+        };
+
+        var options = new DialogOptions
+        {
+            MaxWidth = MaxWidth.Large,
+            FullWidth = true,
+            CloseButton = true,
+            CloseOnEscapeKey = true,
+            BackdropClick = true
+        };
+
+        await DialogService.ShowAsync<ReferenceVideoPreviewDialog>("Xem video tham chiếu", parameters, options);
+    }
+
+    public void Dispose()
+    {
+        AuthState.OnChange -= HandleAuthChanged;
     }
 
     private static string DisplayTitle(ReferenceVideoDto item)

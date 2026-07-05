@@ -1,0 +1,184 @@
+@using Microsoft.AspNetCore.WebUtilities
+@using System.Text.RegularExpressions
+@using TodoX.Web.Models
+
+<MudDialog Class="todox-video-preview-dialog">
+    <TitleContent>
+        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="w-100">
+            <div>
+                <MudText Typo="Typo.h6">@DisplayTitle</MudText>
+                <MudText Typo="Typo.caption" Class="todox-page-subtitle">@Video?.SourceUrl</MudText>
+            </div>
+            <MudChip T="string" Size="Size.Small" Color="Color.Warning">@PlatformLabel</MudChip>
+        </MudStack>
+    </TitleContent>
+
+    <DialogContent>
+        @if (Video is null)
+        {
+            <MudAlert Severity="Severity.Warning">Khong co du lieu video.</MudAlert>
+        }
+        else
+        {
+            <MudStack Spacing="2">
+                <div class="todox-video-preview-frame">
+                    @if (CanEmbed)
+                    {
+                        <iframe src="@EmbedUrl"
+                                title="@DisplayTitle"
+                                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                                allowfullscreen>
+                        </iframe>
+                    }
+                    else
+                    {
+                        <div class="todox-video-preview-fallback">
+                            @if (!string.IsNullOrWhiteSpace(Video.ThumbnailUrl))
+                            {
+                                <img src="@Video.ThumbnailUrl" alt="@DisplayTitle" />
+                            }
+                            <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">
+                                Nen tang nay co the chan hien thi truc tiep trong popup. Vui long bam "Mo video goc".
+                            </MudAlert>
+                        </div>
+                    }
+                </div>
+
+                <MudPaper Class="pa-3 todox-card" Rounded="true">
+                    <MudText Typo="Typo.subtitle2">@DisplayTitle</MudText>
+
+                    @if (!string.IsNullOrWhiteSpace(Video.Description))
+                    {
+                        <MudText Typo="Typo.body2" Class="mt-1">@Video.Description</MudText>
+                    }
+
+                    @if (!string.IsNullOrWhiteSpace(Video.ChannelName) || !string.IsNullOrWhiteSpace(Video.AuthorHandle))
+                    {
+                        <MudText Typo="Typo.caption" Class="todox-page-subtitle mt-1">
+                            Kenh: @ChannelLabel
+                        </MudText>
+                    }
+
+                    @if (Video.Hashtags.Length > 0)
+                    {
+                        <div class="todox-reference-tags mt-2">
+                            @foreach (var tag in Video.Hashtags.Take(10))
+                            {
+                                <span>@tag</span>
+                            }
+                        </div>
+                    }
+                </MudPaper>
+            </MudStack>
+        }
+    </DialogContent>
+
+    <DialogActions>
+        @if (Video is not null)
+        {
+            <MudButton Variant="Variant.Outlined"
+                       Color="Color.Warning"
+                       StartIcon="@Icons.Material.Filled.OpenInNew"
+                       Href="@Video.SourceUrl"
+                       Target="_blank">
+                Mo video goc
+            </MudButton>
+        }
+
+        <MudButton Variant="Variant.Filled"
+                   Color="Color.Warning"
+                   OnClick="Close">
+            Dong
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public ReferenceVideoDto? Video { get; set; }
+
+    private string DisplayTitle =>
+        string.IsNullOrWhiteSpace(Video?.Title)
+            ? Video?.SourceUrl ?? "Video tham chieu"
+            : Video.Title;
+
+    private string ChannelLabel => Video?.ChannelName ?? Video?.AuthorHandle ?? "-";
+
+    private string PlatformLabel => Video?.Platform switch
+    {
+        "tiktok" => "TikTok",
+        "youtube" => "YouTube",
+        "facebook" => "Facebook",
+        "instagram" => "Instagram",
+        _ => "Khac"
+    };
+
+    private bool CanEmbed => !string.IsNullOrWhiteSpace(EmbedUrl);
+
+    private string? EmbedUrl
+    {
+        get
+        {
+            if (Video is null || string.IsNullOrWhiteSpace(Video.SourceUrl))
+            {
+                return null;
+            }
+
+            return Video.Platform?.ToLowerInvariant() switch
+            {
+                "youtube" => BuildYoutubeEmbedUrl(Video.SourceUrl),
+                "tiktok" => BuildTikTokEmbedUrl(Video.SourceUrl, Video.ExternalVideoId),
+                _ => null
+            };
+        }
+    }
+
+    private static string? BuildYoutubeEmbedUrl(string sourceUrl)
+    {
+        if (!Uri.TryCreate(sourceUrl, UriKind.Absolute, out var uri))
+        {
+            return null;
+        }
+
+        string? videoId = null;
+        if (uri.Host.Contains("youtu.be", StringComparison.OrdinalIgnoreCase))
+        {
+            videoId = uri.AbsolutePath.Trim('/');
+        }
+        else if (uri.Host.Contains("youtube.com", StringComparison.OrdinalIgnoreCase))
+        {
+            var query = QueryHelpers.ParseQuery(uri.Query);
+            if (query.TryGetValue("v", out var v))
+            {
+                videoId = v.ToString();
+            }
+            else if (uri.AbsolutePath.StartsWith("/shorts/", StringComparison.OrdinalIgnoreCase))
+            {
+                videoId = uri.AbsolutePath.Replace("/shorts/", "", StringComparison.OrdinalIgnoreCase).Trim('/');
+            }
+        }
+
+        return string.IsNullOrWhiteSpace(videoId)
+            ? null
+            : $"https://www.youtube.com/embed/{Uri.EscapeDataString(videoId)}";
+    }
+
+    private static string? BuildTikTokEmbedUrl(string sourceUrl, string? externalVideoId)
+    {
+        var videoId = externalVideoId;
+        if (string.IsNullOrWhiteSpace(videoId))
+        {
+            var match = Regex.Match(sourceUrl, @"/video/(\d+)");
+            if (match.Success)
+            {
+                videoId = match.Groups[1].Value;
+            }
+        }
+
+        return string.IsNullOrWhiteSpace(videoId)
+            ? null
+            : $"https://www.tiktok.com/embed/v2/{Uri.EscapeDataString(videoId)}";
+    }
+
+    private void Close() => MudDialog.Close();
+}

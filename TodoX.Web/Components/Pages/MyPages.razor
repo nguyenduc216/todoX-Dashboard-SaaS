@@ -1,5 +1,6 @@
 @page "/my-pages"
 @using TodoX.Web.Components.Dialogs
+@implements IDisposable
 @inject AuthStateService AuthState
 @inject SocialPageRepository Pages
 @inject IDialogService DialogService
@@ -22,7 +23,11 @@
         }
     </MudStack>
 
-    @if (!CanViewPages)
+    @if (!AuthState.IsInitialized)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+    }
+    else if (!CanViewPages)
     {
         <MudAlert Severity="Severity.Warning">
             Bạn chưa được phân quyền xem/quản lý trang mạng xã hội. Vui lòng liên hệ quản trị viên.
@@ -99,6 +104,7 @@
 
 @code {
     private bool _loading = true;
+    private bool _loaded;
     private Guid? _customerId;
     private IReadOnlyList<CustomerPageDto> _pages = new List<CustomerPageDto>();
 
@@ -111,6 +117,33 @@
 
     protected override async Task OnInitializedAsync()
     {
+        AuthState.OnChange += HandleAuthChanged;
+
+        if (AuthState.IsInitialized)
+        {
+            await LoadIfAllowedAsync();
+        }
+        else
+        {
+            _loading = false;
+        }
+    }
+
+    private async void HandleAuthChanged()
+    {
+        await InvokeAsync(async () =>
+        {
+            if (!_loaded && AuthState.IsInitialized)
+            {
+                await LoadIfAllowedAsync();
+            }
+
+            StateHasChanged();
+        });
+    }
+
+    private async Task LoadIfAllowedAsync()
+    {
         _customerId = AuthState.CurrentUser?.CustomerId;
         if (!CanViewPages)
         {
@@ -121,7 +154,9 @@
         if (_customerId is not null)
         {
             await Reload();
+            _loaded = true;
         }
+
         _loading = false;
     }
 
@@ -216,5 +251,10 @@
             Snackbar.Add("Đã xóa Page.", Severity.Success);
             await Reload();
         }
+    }
+
+    public void Dispose()
+    {
+        AuthState.OnChange -= HandleAuthChanged;
     }
 }
