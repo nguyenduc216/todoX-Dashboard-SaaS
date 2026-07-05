@@ -16,9 +16,23 @@
             <MudPaper Class="activity-detail-section pa-3" Rounded="true">
                 <MudText Typo="Typo.subtitle2">Tổng quan</MudText>
                 <MudGrid Class="mt-1">
-                    <MudItem xs="12" sm="6"><MudText Typo="Typo.body2"><b>Chức năng:</b> @Module</MudText></MudItem>
-                    <MudItem xs="12" sm="6"><MudText Typo="Typo.body2"><b>Thao tác:</b> @Action</MudText></MudItem>
-                    <MudItem xs="12"><MudText Typo="Typo.body2"><b>Mô tả:</b> @Summary</MudText></MudItem>
+                    <MudItem xs="12" sm="6">
+                        <MudText Typo="Typo.body2"><b>Chức năng:</b> @Module</MudText>
+                    </MudItem>
+                    <MudItem xs="12" sm="6">
+                        <MudText Typo="Typo.body2"><b>Thao tác:</b> @Action</MudText>
+                    </MudItem>
+                    <MudItem xs="12">
+                        <MudText Typo="Typo.body2" Class="activity-detail-message"><b>Mô tả:</b> @DisplayMessage</MudText>
+                    </MudItem>
+                    @if (!string.IsNullOrWhiteSpace(ImpersonationReason))
+                    {
+                        <MudItem xs="12">
+                            <MudAlert Severity="Severity.Info" Dense="true" Class="activity-detail-reason">
+                                <b>Lý do đăng nhập hộ:</b> @ImpersonationReason
+                            </MudAlert>
+                        </MudItem>
+                    }
                 </MudGrid>
             </MudPaper>
 
@@ -72,7 +86,7 @@
                             @foreach (var step in _timeline)
                             {
                                 <MudTimelineItem Color="@(step.Level == "error" ? Color.Error : step.Level == "warning" ? Color.Warning : Color.Success)">
-                                    <MudText Typo="Typo.body2"><b>@step.Step</b> · @step.Message</MudText>
+                                    <MudText Typo="Typo.body2" Class="activity-detail-message"><b>@step.Step</b> · @step.Message</MudText>
                                     <MudText Typo="Typo.caption" Class="todox-page-subtitle">@step.Timestamp</MudText>
                                 </MudTimelineItem>
                             }
@@ -83,7 +97,7 @@
 
             <MudPaper Class="activity-detail-section pa-3" Rounded="true">
                 <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
-                    <MudText Typo="Typo.subtitle2">Raw JSON detail</MudText>
+                    <MudText Typo="Typo.subtitle2">Raw detail</MudText>
                     <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.ContentCopy" OnClick="CopyRaw">Copy</MudButton>
                 </MudStack>
                 <pre class="activity-json-pre">@_prettyRaw</pre>
@@ -111,6 +125,9 @@
     private readonly List<ActivityImage> _references = new();
     private readonly List<ActivityImage> _outputs = new();
     private readonly List<ActivityStep> _timeline = new();
+
+    private string DisplayMessage => GetFullMessageWithoutReason();
+    private string? ImpersonationReason => ExtractReason(RawMessage);
 
     protected override void OnInitialized()
     {
@@ -164,6 +181,28 @@
         {
             _jsonReady = false;
         }
+    }
+
+    private string GetFullMessageWithoutReason()
+    {
+        var raw = RawMessage?.Trim();
+        if (!string.IsNullOrWhiteSpace(raw) && !raw.StartsWith("{", StringComparison.Ordinal) && !raw.StartsWith("[", StringComparison.Ordinal))
+        {
+            var reasonMarker = raw.IndexOf(". Reason:", StringComparison.OrdinalIgnoreCase);
+            return reasonMarker >= 0 ? raw[..reasonMarker].Trim() : raw;
+        }
+
+        return Summary?.Trim() ?? string.Empty;
+    }
+
+    private static string? ExtractReason(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return null;
+        var marker = "Reason:";
+        var index = text.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+        if (index < 0) return null;
+        var reason = text[(index + marker.Length)..].Trim();
+        return string.IsNullOrWhiteSpace(reason) ? null : reason;
     }
 
     private async Task CopyRaw()

@@ -1,36 +1,131 @@
-<MudDialog>
+@using Microsoft.JSInterop
+@using TodoX.Web.Services.Media
+@inject IJSRuntime JS
+@inject AuthStateService AuthState
+@inject IMediaFileService MediaFiles
+@inject ISnackbar Snackbar
+
+<MudDialog Class="image-editor-dialog">
     <TitleContent>
-        <MudText Typo="Typo.h6">@Title</MudText>
+        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="image-editor-title">
+            <MudText Typo="Typo.h6">@Title</MudText>
+            <MudIconButton Icon="@Icons.Material.Filled.Close" Color="Color.Default" OnClick="Close" />
+        </MudStack>
     </TitleContent>
     <DialogContent>
-        <MudStack Spacing="2">
-            @if (!string.IsNullOrWhiteSpace(ImageUrl))
-            {
-                <img src="@ImageUrl" alt="@Title" class="reference-lightbox-image" />
-            }
-            <MudText Typo="Typo.body2">@(FileName ?? ImageUrl)</MudText>
-            @if (!string.IsNullOrWhiteSpace(MimeType) || !string.IsNullOrWhiteSpace(SizeText))
-            {
-                <MudText Typo="Typo.caption" Class="todox-page-subtitle">@MimeType @SizeText</MudText>
-            }
-        </MudStack>
+        <div class="image-editor-shell">
+            <div class="image-editor-toolbar">
+                <MudTooltip Text="Thu nhỏ">
+                    <MudIconButton Icon="@Icons.Material.Filled.ZoomOut" OnClick="ZoomOut" />
+                </MudTooltip>
+                <MudText Typo="Typo.caption">@($"{_zoom:P0}")</MudText>
+                <MudTooltip Text="Phóng to">
+                    <MudIconButton Icon="@Icons.Material.Filled.ZoomIn" OnClick="ZoomIn" />
+                </MudTooltip>
+                <MudDivider Vertical="true" FlexItem="true" />
+                <MudTooltip Text="Xoay trái">
+                    <MudIconButton Icon="@Icons.Material.Filled.RotateLeft" OnClick="RotateLeft" />
+                </MudTooltip>
+                <MudTooltip Text="Xoay phải">
+                    <MudIconButton Icon="@Icons.Material.Filled.RotateRight" OnClick="RotateRight" />
+                </MudTooltip>
+                <MudDivider Vertical="true" FlexItem="true" />
+                <MudTooltip Text="Cắt ảnh vuông ở giữa">
+                    <MudIconButton Icon="@Icons.Material.Filled.Crop" Color="@(_crop ? Color.Warning : Color.Default)" OnClick="ToggleCrop" />
+                </MudTooltip>
+                <MudTooltip Text="Đặt lại">
+                    <MudIconButton Icon="@Icons.Material.Filled.RestartAlt" OnClick="ResetView" />
+                </MudTooltip>
+                <MudSpacer />
+                @if (!string.IsNullOrWhiteSpace(ImageUrl))
+                {
+                    <MudTooltip Text="Tải xuống">
+                        <MudIconButton Icon="@Icons.Material.Filled.Download" Href="@ImageUrl" Target="_blank" />
+                    </MudTooltip>
+                }
+                <MudButton Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.Save" Disabled="@(!CanSave || _saving)" OnClick="SaveEdited">
+                    @(_saving ? "Đang lưu..." : "Lưu thay thế")
+                </MudButton>
+            </div>
+
+            <div class="image-editor-stage">
+                @if (!string.IsNullOrWhiteSpace(ImageUrl))
+                {
+                    <img id="@_imageElementId"
+                         src="@ImageUrl"
+                         alt="@Title"
+                         class='@($"image-editor-img {(_crop ? "is-cropping" : string.Empty)}")'
+                         style="@ImageStyle" />
+                    @if (_crop)
+                    {
+                        <div class="image-editor-crop-box"></div>
+                    }
+                }
+            </div>
+
+            <div class="image-editor-meta">
+                <span>@(string.IsNullOrWhiteSpace(FileName) ? "Ảnh đang xem" : FileName)</span>
+                <span>@MimeType @SizeText</span>
+            </div>
+        </div>
     </DialogContent>
-    <DialogActions>
-        @if (!string.IsNullOrWhiteSpace(ImageUrl))
-        {
-            <MudButton Href="@ImageUrl" Target="_blank" StartIcon="@Icons.Material.Filled.Download">Tai xuong</MudButton>
-        }
-        <MudButton Class="todox-primary-btn" OnClick="Close">Dong</MudButton>
-    </DialogActions>
 </MudDialog>
 
 @code {
     [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
-    [Parameter] public string Title { get; set; } = "Anh tham chieu";
+    [Parameter] public string Title { get; set; } = "Ảnh";
     [Parameter] public string? ImageUrl { get; set; }
     [Parameter] public string? FileName { get; set; }
     [Parameter] public string? MimeType { get; set; }
     [Parameter] public string? SizeText { get; set; }
+    [Parameter] public Guid? MediaId { get; set; }
+
+    private readonly string _imageElementId = $"image-editor-{Guid.NewGuid():N}";
+    private double _zoom = 1;
+    private int _rotation;
+    private bool _crop;
+    private bool _saving;
+
+    private bool CanSave => MediaId is not null && AuthState.CurrentUser is not null && !string.IsNullOrWhiteSpace(ImageUrl);
+    private string ImageStyle => $"transform: scale({_zoom.ToString(System.Globalization.CultureInfo.InvariantCulture)}) rotate({_rotation}deg);";
+
+    private void ZoomIn() => _zoom = Math.Min(4, Math.Round(_zoom + 0.1, 2));
+    private void ZoomOut() => _zoom = Math.Max(0.2, Math.Round(_zoom - 0.1, 2));
+    private void RotateLeft() => _rotation = (_rotation - 90) % 360;
+    private void RotateRight() => _rotation = (_rotation + 90) % 360;
+    private void ToggleCrop() => _crop = !_crop;
+
+    private void ResetView()
+    {
+        _zoom = 1;
+        _rotation = 0;
+        _crop = false;
+    }
+
+    private async Task SaveEdited()
+    {
+        if (!CanSave || MediaId is null || AuthState.CurrentUser is null) return;
+        _saving = true;
+        try
+        {
+            var dataUrl = await JS.InvokeAsync<string>("todoxImageEditor.exportEditedImage",
+                _imageElementId, _rotation, _crop, "image/png");
+            var comma = dataUrl.IndexOf(',');
+            var base64 = comma >= 0 ? dataUrl[(comma + 1)..] : dataUrl;
+            var bytes = Convert.FromBase64String(base64);
+            await MediaFiles.ReplaceContentAsync(MediaId.Value, bytes, "image/png", AuthState.CurrentUser.UserId);
+            Snackbar.Add("Đã lưu ảnh chỉnh sửa.", Severity.Success);
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Không lưu được ảnh: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
 
     private void Close() => MudDialog.Close();
 }

@@ -1,8 +1,11 @@
 @page "/profile"
+@using Microsoft.AspNetCore.Components.Forms
+@using TodoX.Web.Components.Dialogs
 @using TodoX.Web.Services.Profile
 @inject AuthStateService AuthState
 @inject AccountService Accounts
 @inject IAvatarService Avatars
+@inject IDialogService DialogService
 @inject ISnackbar Snackbar
 @inject NavigationManager Nav
 
@@ -16,31 +19,38 @@
 
     <MudGrid>
         <MudItem xs="12" md="4">
-            <MudPaper Class="todox-card pa-5 d-flex flex-column align-center" Rounded="true">
+            <MudPaper Class="todox-card profile-avatar-card pa-5" Rounded="true">
                 <MudText Typo="Typo.h6" Class="mb-3 align-self-start">Ảnh đại diện</MudText>
-                <MudAvatar Style="height:140px;width:140px;" Class="mb-3">
+
+                <button type="button"
+                        class="@($"profile-avatar-frame {(!string.IsNullOrWhiteSpace(_avatarUrl) ? "is-clickable" : string.Empty)}")"
+                        disabled="@string.IsNullOrWhiteSpace(_avatarUrl)"
+                        @onclick="ViewAvatar">
                     @if (!string.IsNullOrWhiteSpace(_avatarUrl))
                     {
-                        <MudImage Src="@_avatarUrl" />
+                        <img src="@_avatarUrl" alt="Ảnh đại diện" />
                     }
                     else
                     {
-                        @AvatarText
+                        <span>@AvatarText</span>
                     }
-                </MudAvatar>
+                </button>
 
-                <MudFileUpload T="IBrowserFile" Accept="image/png,image/jpeg,image/webp" FilesChanged="OnAvatarSelected" MaximumFileCount="1">
-                    <ActivatorContent>
-                        <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Upload" Disabled="_busy">
-                            Tải ảnh lên
-                        </MudButton>
-                    </ActivatorContent>
-                </MudFileUpload>
+                <label class="@($"profile-avatar-upload {(_busy ? "is-disabled" : string.Empty)}")">
+                    <MudIcon Icon="@Icons.Material.Filled.Upload" Size="Size.Small" />
+                    <span>Tải ảnh đại diện</span>
+                    <InputFile OnChange="OnAvatarSelected" accept="image/png,image/jpeg,image/webp" disabled="@_busy" />
+                </label>
 
                 <MudButton Class="mt-2" Variant="Variant.Text" Color="Color.Warning" StartIcon="@Icons.Material.Filled.AutoAwesome"
                            OnClick="@(() => Nav.NavigateTo("/profile/avatar"))">
                     Tạo ảnh chibi
                 </MudButton>
+
+                @if (!string.IsNullOrWhiteSpace(_avatarUrl))
+                {
+                    <MudText Typo="Typo.caption" Class="todox-page-subtitle mt-2">Bấm vào ảnh để xem phóng to.</MudText>
+                }
             </MudPaper>
         </MudItem>
 
@@ -97,6 +107,7 @@
 
 @code {
     private string _avatarUrl = string.Empty;
+    private Guid? _avatarMediaId;
     private string _fullName = string.Empty;
     private string _phone = string.Empty;
     private string? _gender;
@@ -128,11 +139,13 @@
             _dob = extras.Dob;
             var avatar = await Avatars.GetCurrentAsync(uid);
             _avatarUrl = avatar.AvatarUrl ?? string.Empty;
+            _avatarMediaId = avatar.MediaId;
         }
     }
 
-    private async Task OnAvatarSelected(IBrowserFile file)
+    private async Task OnAvatarSelected(InputFileChangeEventArgs e)
     {
+        var file = e.File;
         if (file is null || AuthState.CurrentUser is null) return;
         _busy = true;
         try
@@ -142,10 +155,13 @@
                 Snackbar.Add("Ảnh vượt quá 10MB.", Severity.Error);
                 return;
             }
+
+            await using var stream = file.OpenReadStream(10 * 1024 * 1024);
             using var ms = new MemoryStream();
-            await file.OpenReadStream(10 * 1024 * 1024).CopyToAsync(ms);
+            await stream.CopyToAsync(ms);
             var info = await Avatars.UploadAsync(AuthState.CurrentUser.UserId, ms.ToArray(), file.Name, file.ContentType);
             _avatarUrl = info.AvatarUrl ?? _avatarUrl;
+            _avatarMediaId = info.MediaId;
             AuthState.UpdateAvatarUrl(info.AvatarUrl);
             Snackbar.Add("Đã cập nhật ảnh đại diện.", Severity.Success);
         }
@@ -153,7 +169,25 @@
         {
             Snackbar.Add($"Lỗi tải ảnh: {ex.Message}", Severity.Error);
         }
-        finally { _busy = false; }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task ViewAvatar()
+    {
+        if (string.IsNullOrWhiteSpace(_avatarUrl)) return;
+
+        var parameters = new DialogParameters<ReferenceImageLightboxDialog>
+        {
+            ["Title"] = "Ảnh đại diện",
+            ["ImageUrl"] = _avatarUrl,
+            ["FileName"] = "Ảnh đại diện",
+            ["MediaId"] = _avatarMediaId
+        };
+        await DialogService.ShowAsync<ReferenceImageLightboxDialog>("Xem ảnh đại diện", parameters,
+            new DialogOptions { FullScreen = true, CloseButton = true, MaxWidth = MaxWidth.False });
     }
 
     private async Task SaveProfile()
@@ -171,7 +205,10 @@
             AuthState.UpdateDisplayName(_fullName.Trim());
             Snackbar.Add("Đã cập nhật thông tin.", Severity.Success);
         }
-        finally { _busy = false; }
+        finally
+        {
+            _busy = false;
+        }
     }
 
     private async Task ChangePassword()
@@ -185,6 +222,9 @@
             Snackbar.Add(message, ok ? Severity.Success : Severity.Error);
             if (ok) _currentPassword = _newPassword = _confirmPassword = string.Empty;
         }
-        finally { _busy = false; }
+        finally
+        {
+            _busy = false;
+        }
     }
 }

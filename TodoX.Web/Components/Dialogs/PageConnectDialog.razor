@@ -1,6 +1,8 @@
 @using TodoX.Web.Services
 @inject SocialPageRepository Pages
 @inject FacebookGraphService Facebook
+@inject FacebookOAuthService FacebookOAuth
+@inject NavigationManager Nav
 @inject ISnackbar Snackbar
 
 <MudDialog>
@@ -44,7 +46,7 @@
                             <MudAlert Severity="@(_validation.Ok ? Severity.Success : Severity.Error)" Dense="true" Class="mt-2">
                                 @if (_validation.Ok)
                                 {
-                                    <text>Hợp lệ — Page: <b>@_validation.Name</b> (id: @_validation.PageId).
+                                    <text>Hợp lệ - Page: <b>@_validation.Name</b> (id: @_validation.PageId).
                                     Quyền: @(_validation.Permissions.Length > 0 ? string.Join(", ", _validation.Permissions) : "không đọc được")</text>
                                 }
                                 else
@@ -61,12 +63,21 @@
 
                     <MudTabPanel Text="Kết nối OAuth" Icon="@Icons.Custom.Brands.Facebook">
                         <MudAlert Severity="Severity.Info" Dense="true">
-                            Kết nối OAuth cần cấu hình Facebook App (App ID/Secret) và domain công khai.
-                            Chưa được cấu hình trên hệ thống — vui lòng dùng "Dán Access Token", hoặc liên hệ quản trị để bật OAuth.
+                            Kết nối OAuth dùng Facebook App để lấy danh sách Page người dùng đã cấp quyền và tự lưu Page Access Token.
                         </MudAlert>
-                        <MudButton Class="mt-3" Variant="Variant.Filled" Color="Color.Primary"
-                                   StartIcon="@Icons.Custom.Brands.Facebook" Disabled="true">
-                            Đăng nhập với Facebook (sắp có)
+                        @if (!FacebookOAuthEnabled)
+                        {
+                            <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2">
+                                Chưa cấu hình Facebook App ID/App Secret hoặc chưa bật OAuth. Vui lòng cấu hình trong Cài đặt API.
+                            </MudAlert>
+                        }
+                        <MudButton Class="mt-3"
+                                   Variant="Variant.Filled"
+                                   Color="Color.Primary"
+                                   StartIcon="@Icons.Custom.Brands.Facebook"
+                                   Disabled="@(!FacebookOAuthEnabled || _busy)"
+                                   OnClick="StartFacebookOAuth">
+                            Đăng nhập với Facebook
                         </MudButton>
                     </MudTabPanel>
                 </MudTabs>
@@ -95,6 +106,7 @@
     private FacebookPageInfo? _validation;
 
     private string Title => ExistingPage is null ? "Thêm & kết nối Page" : (EditInfoOnly ? "Chỉnh sửa Page" : "Xác thực Page");
+    private bool FacebookOAuthEnabled => FacebookOAuth.IsEnabled;
 
     protected override void OnInitialized()
     {
@@ -105,8 +117,6 @@
             _pageUrl = ExistingPage.PageUrl ?? string.Empty;
         }
     }
-
-    // continues below
 
     private async Task ValidateToken()
     {
@@ -134,6 +144,25 @@
         }
     }
 
+    private void StartFacebookOAuth()
+    {
+        if (CustomerId == Guid.Empty || CreatedBy == Guid.Empty)
+        {
+            Snackbar.Add("Thiếu thông tin khách hàng hoặc người dùng để bắt đầu OAuth.", Severity.Error);
+            return;
+        }
+
+        try
+        {
+            var url = FacebookOAuth.BuildLoginUrl(CustomerId, CreatedBy);
+            Nav.NavigateTo(url, forceLoad: true);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Không thể bắt đầu Facebook OAuth: {ex.Message}", Severity.Error);
+        }
+    }
+
     private async Task Save()
     {
         if (string.IsNullOrWhiteSpace(_pageName))
@@ -145,7 +174,6 @@
         _busy = true;
         try
         {
-            // Create or update the page record.
             Guid pageId;
             if (ExistingPage is null)
             {
@@ -173,13 +201,15 @@
                 });
             }
 
-            // If a token was provided, validate (if not already) and persist it.
             if (!EditInfoOnly && !string.IsNullOrWhiteSpace(_token))
             {
                 _validation ??= await Facebook.ValidatePageTokenAsync(_token.Trim());
 
                 await Pages.SaveAccessTokenAsync(
-                    pageId, CustomerId, _platform, _token.Trim(),
+                    pageId,
+                    CustomerId,
+                    _platform,
+                    _token.Trim(),
                     FacebookGraphService.Hint(_token.Trim()),
                     _validation.Ok ? "valid" : "invalid",
                     _validation.Permissions);

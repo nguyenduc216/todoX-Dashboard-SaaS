@@ -1,5 +1,6 @@
 @page "/api-settings"
 @inject AutomationSettingsRepository Settings
+@inject IDialogService DialogService
 @inject ISnackbar Snackbar
 
 <PageTitle>Cài đặt API</PageTitle>
@@ -8,13 +9,33 @@
     <div>
         <MudText Typo="Typo.h4" Class="todox-page-title">Cài đặt API &amp; Provider</MudText>
         <MudText Typo="Typo.body1" Class="todox-page-subtitle">
-            Cấu hình khóa API và tham số cho Google Cloud, Woku, Veo, OpenRouter, TTS... (nguồn: database todox).
+            Cấu hình khóa API và tham số cho Google Cloud, Woku, Veo, OpenRouter, TTS, Facebook OAuth... (nguồn: database todox).
         </MudText>
     </div>
 
     <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true">
         Giá trị bí mật (API key/secret) được ẩn để bảo mật. Bạn có thể nhập giá trị mới để cập nhật.
     </MudAlert>
+
+    <MudPaper Class="todox-card pa-5" Rounded="true">
+        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="mb-1">
+            <MudIcon Icon="@Icons.Custom.Brands.Facebook" Class="todox-gold" />
+            <MudText Typo="Typo.h6">Facebook App Configuration URLs</MudText>
+        </MudStack>
+        <MudText Typo="Typo.body2" Class="todox-page-subtitle">
+            Copy các link sau vào Meta Developer Console.
+        </MudText>
+        <MudDivider Class="my-3" />
+        <MudList T="string" Dense="true" Class="todox-facebook-config-list">
+            <MudListItem>App Domains: dashboard.todox.vn</MudListItem>
+            <MudListItem>Site URL: https://dashboard.todox.vn</MudListItem>
+            <MudListItem>Valid OAuth Redirect URI: https://dashboard.todox.vn/auth/facebook/callback</MudListItem>
+            <MudListItem>Privacy Policy URL: https://dashboard.todox.vn/privacy</MudListItem>
+            <MudListItem>Terms of Service URL: https://dashboard.todox.vn/terms</MudListItem>
+            <MudListItem>User Data Deletion URL: https://dashboard.todox.vn/data-deletion</MudListItem>
+            <MudListItem>Data Deletion Callback URL: https://dashboard.todox.vn/facebook/data-deletion</MudListItem>
+        </MudList>
+    </MudPaper>
 
     @if (_loading)
     {
@@ -78,9 +99,8 @@
     private bool _loading = true;
     private IReadOnlyList<SettingCategory> _groups = new List<SettingCategory>();
 
-    // Provider/config categories most relevant to the admin (skip internal debug/paths noise).
     private static readonly string[] ShownCategories =
-        { "woku", "vertex", "veo", "google", "cloudgemini", "openrouter", "llm", "tts", "telegram", "minio", "n8n", "api" };
+        { "facebook", "woku", "vertex", "veo", "google", "cloudgemini", "openrouter", "llm", "tts", "telegram", "minio", "n8n", "api" };
 
     protected override async Task OnInitializedAsync() => await Reload();
 
@@ -99,7 +119,7 @@
         {
             { x => x.Setting, setting }
         };
-        var dialog = await DialogServiceRef.ShowAsync<Components.Dialogs.SettingEditDialog>("Cập nhật cài đặt", parameters);
+        var dialog = await DialogService.ShowAsync<Components.Dialogs.SettingEditDialog>("Cập nhật cài đặt", parameters);
         var result = await dialog.Result;
         if (result is not null && !result.Canceled && result.Data is string newValue)
         {
@@ -109,10 +129,9 @@
         }
     }
 
-    [Inject] private IDialogService DialogServiceRef { get; set; } = default!;
-
     private static string CategoryLabel(string c) => c switch
     {
+        "facebook" => "Facebook OAuth / Meta App",
         "woku" => "Woku Shop API",
         "vertex" => "Google Vertex AI",
         "veo" => "Veo (Video Generation)",
@@ -130,6 +149,7 @@
 
     private static string CategoryIcon(string c) => c switch
     {
+        "facebook" => Icons.Custom.Brands.Facebook,
         "woku" => Icons.Material.Filled.ShoppingCart,
         "vertex" or "google" or "cloudgemini" => Icons.Material.Filled.Cloud,
         "veo" => Icons.Material.Filled.Movie,

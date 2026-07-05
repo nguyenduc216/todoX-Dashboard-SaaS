@@ -1,0 +1,50 @@
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">Lý do đăng nhập hộ</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudStack Spacing="2">
+            <MudAlert Severity="Severity.Warning" Dense="true">
+                Bạn sắp chuyển phiên làm việc sang tài khoản <b>@TargetDisplay</b>. Vui lòng nhập lý do để lưu nhật ký kiểm tra.
+            </MudAlert>
+            <MudTextField T="string"
+                          Label="Lý do"
+                          @bind-Value="_reason"
+                          Variant="Variant.Outlined"
+                          Lines="4"
+                          AutoFocus="true"
+                          Immediate="true"
+                          Required="true"
+                          Error="@_showError"
+                          ErrorText="Vui lòng nhập lý do đăng nhập hộ." />
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton Variant="Variant.Text" OnClick="Cancel">Hủy</MudButton>
+        <MudButton Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.SupervisedUserCircle" OnClick="Submit">
+            Đăng nhập hộ
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public string TargetDisplay { get; set; } = "tài khoản này";
+
+    private string _reason = string.Empty;
+    private bool _showError;
+
+    private void Submit()
+    {
+        var reason = _reason.Trim();
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            _showError = true;
+            return;
+        }
+
+        MudDialog.Close(DialogResult.Ok(reason));
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}

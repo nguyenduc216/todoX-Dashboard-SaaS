@@ -1,0 +1,278 @@
+@page "/reference-videos"
+@inject AuthStateService AuthState
+@inject ReferenceVideoRepository Videos
+@inject ExtensionPackageService ExtensionPackages
+@inject IJSRuntime JS
+@inject ISnackbar Snackbar
+
+<PageTitle>Link video tham chiếu</PageTitle>
+
+<MudStack Spacing="3">
+    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-3">
+        <div>
+            <MudText Typo="Typo.h4" Class="todox-page-title">Link video tham chiếu</MudText>
+            <MudText Typo="Typo.body1" Class="todox-page-subtitle">
+                Quản lý video TikTok/YouTube được khách hàng thêm từ Chrome Extension.
+            </MudText>
+        </div>
+        <MudButton Class="todox-primary-btn"
+                   StartIcon="@Icons.Material.Filled.Download"
+                   Disabled="@(!CanDownloadExtension || _customerId is null || _downloadBusy)"
+                   OnClick="DownloadExtension">
+            Tải Chrome Extension
+        </MudButton>
+    </MudStack>
+
+    @if (!CanView)
+    {
+        <MudAlert Severity="Severity.Warning">
+            Bạn chưa được phân quyền xem link video tham chiếu.
+        </MudAlert>
+    }
+    else if (_customerId is null)
+    {
+        <MudAlert Severity="Severity.Warning">
+            Trang này dành cho tài khoản khách hàng. Tài khoản quản trị không gắn với hồ sơ khách hàng nên không có dữ liệu video tham chiếu.
+        </MudAlert>
+    }
+    else
+    {
+        <MudPaper Class="todox-card pa-4" Rounded="true">
+            <MudGrid>
+                <MudItem xs="12" sm="3">
+                    <MudSelect T="string" Label="Nền tảng" @bind-Value="_platform" Variant="Variant.Outlined" Clearable="true">
+                        <MudSelectItem Value="@("tiktok")">TikTok</MudSelectItem>
+                        <MudSelectItem Value="@("youtube")">YouTube</MudSelectItem>
+                    </MudSelect>
+                </MudItem>
+                <MudItem xs="12" sm="3">
+                    <MudSelect T="string" Label="Trạng thái" @bind-Value="_status" Variant="Variant.Outlined" Clearable="true">
+                        @foreach (var status in Statuses)
+                        {
+                            <MudSelectItem Value="@status">@StatusLabel(status)</MudSelectItem>
+                        }
+                    </MudSelect>
+                </MudItem>
+                <MudItem xs="12" sm="4">
+                    <MudTextField T="string" Label="Tìm kiếm" @bind-Value="_search" Variant="Variant.Outlined"
+                                  Placeholder="Tiêu đề, kênh, link..." />
+                </MudItem>
+                <MudItem xs="12" sm="2" Class="d-flex align-center">
+                    <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Search" OnClick="Reload">
+                        Lọc
+                    </MudButton>
+                </MudItem>
+            </MudGrid>
+        </MudPaper>
+
+        @if (_loading)
+        {
+            <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+        }
+        else if (_items.Count == 0)
+        {
+            <MudPaper Class="todox-card pa-8" Rounded="true">
+                <MudStack AlignItems="AlignItems.Center" Spacing="2">
+                    <MudIcon Icon="@Icons.Material.Filled.VideoLibrary" Size="Size.Large" Class="todox-gold" />
+                    <MudText Class="todox-page-subtitle">Chưa có link video tham chiếu nào.</MudText>
+                </MudStack>
+            </MudPaper>
+        }
+        else
+        {
+            <MudPaper Class="todox-table-card pa-0" Rounded="true">
+                <MudTable Items="@_items" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Class="todox-table">
+                    <HeaderContent>
+                        <MudTh>Nền tảng</MudTh>
+                        <MudTh>Video / link</MudTh>
+                        <MudTh>Kênh</MudTh>
+                        <MudTh>Hashtag</MudTh>
+                        <MudTh>Ngày thêm</MudTh>
+                        <MudTh>Trạng thái</MudTh>
+                        <MudTh Style="text-align:right">Thao tác</MudTh>
+                    </HeaderContent>
+                    <RowTemplate>
+                        <MudTd DataLabel="Nền tảng">
+                            <MudChip T="string" Size="Size.Small" Color="@PlatformColor(context.Platform)">
+                                @PlatformLabel(context.Platform)
+                            </MudChip>
+                        </MudTd>
+                        <MudTd DataLabel="Video / link">
+                            <div class="todox-reference-video-main">
+                                @if (!string.IsNullOrWhiteSpace(context.ThumbnailUrl))
+                                {
+                                    <img src="@context.ThumbnailUrl" alt="@DisplayTitle(context)" />
+                                }
+                                <div>
+                                    <div class="todox-reference-video-title">@DisplayTitle(context)</div>
+                                    <MudLink Href="@context.SourceUrl" Target="_blank" Typo="Typo.caption" Class="todox-gold">@context.SourceUrl</MudLink>
+                                </div>
+                            </div>
+                        </MudTd>
+                        <MudTd DataLabel="Kênh">
+                            @if (!string.IsNullOrWhiteSpace(context.ChannelUrl))
+                            {
+                                <MudLink Href="@context.ChannelUrl" Target="_blank">@ChannelLabel(context)</MudLink>
+                            }
+                            else
+                            {
+                                @ChannelLabel(context)
+                            }
+                        </MudTd>
+                        <MudTd DataLabel="Hashtag">
+                            <div class="todox-reference-tags">
+                                @foreach (var tag in context.Hashtags.Take(4))
+                                {
+                                    <span>@tag</span>
+                                }
+                            </div>
+                        </MudTd>
+                        <MudTd DataLabel="Ngày thêm">@context.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</MudTd>
+                        <MudTd DataLabel="Trạng thái">
+                            <MudChip T="string" Size="Size.Small" Color="@StatusColor(context.Status)">@StatusLabel(context.Status)</MudChip>
+                        </MudTd>
+                        <MudTd DataLabel="Thao tác" Style="text-align:right">
+                            @if (CanDelete)
+                            {
+                                <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                               Color="Color.Error"
+                                               Size="Size.Small"
+                                               Title="Xóa"
+                                               OnClick="@(() => Delete(context))" />
+                            }
+                        </MudTd>
+                    </RowTemplate>
+                </MudTable>
+            </MudPaper>
+        }
+    }
+</MudStack>
+
+@code {
+    private static readonly string[] Statuses = { "new", "queued", "processing", "completed", "failed", "ignored" };
+
+    private bool _loading = true;
+    private bool _downloadBusy;
+    private Guid? _customerId;
+    private string? _platform;
+    private string? _status;
+    private string? _search;
+    private IReadOnlyList<ReferenceVideoDto> _items = new List<ReferenceVideoDto>();
+
+    private bool Can(string permission) => AuthState.CurrentUser?.Can(permission) == true;
+    private bool CanView => Can("reference_videos.view");
+    private bool CanDelete => Can("reference_videos.delete");
+    private bool CanDownloadExtension => Can("extension.download");
+
+    protected override async Task OnInitializedAsync()
+    {
+        _customerId = AuthState.CurrentUser?.CustomerId;
+        if (CanView && _customerId is not null)
+        {
+            await Reload();
+        }
+        _loading = false;
+    }
+
+    private async Task Reload()
+    {
+        if (_customerId is null)
+        {
+            return;
+        }
+
+        _loading = true;
+        _items = await Videos.GetAsync(new ReferenceVideoFilter
+        {
+            CustomerId = _customerId.Value,
+            Platform = _platform,
+            Status = _status,
+            Search = _search,
+            Limit = 200
+        });
+        _loading = false;
+    }
+
+    private async Task DownloadExtension()
+    {
+        var user = AuthState.CurrentUser;
+        if (user?.CustomerId is null || !CanDownloadExtension)
+        {
+            Snackbar.Add("Bạn chưa có quyền tải Chrome Extension.", Severity.Warning);
+            return;
+        }
+
+        _downloadBusy = true;
+        try
+        {
+            var package = await ExtensionPackages.CreateForUserAsync(user.CustomerId.Value, user.UserId);
+            await JS.InvokeVoidAsync("todoxDownload.saveBase64File", package.FileName, package.ContentType, Convert.ToBase64String(package.Bytes));
+            Snackbar.Add("Đã tạo file Chrome Extension. Token chỉ nằm trong file vừa tải.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Không tạo được extension: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _downloadBusy = false;
+        }
+    }
+
+    private async Task Delete(ReferenceVideoDto item)
+    {
+        if (_customerId is null || !CanDelete)
+        {
+            return;
+        }
+
+        await Videos.SoftDeleteAsync(_customerId.Value, item.Id);
+        Snackbar.Add("Đã xóa link video tham chiếu.", Severity.Success);
+        await Reload();
+    }
+
+    private static string DisplayTitle(ReferenceVideoDto item)
+        => string.IsNullOrWhiteSpace(item.Title) ? item.SourceUrl : item.Title;
+
+    private static string ChannelLabel(ReferenceVideoDto item)
+        => item.ChannelName ?? item.AuthorHandle ?? "-";
+
+    private static string PlatformLabel(string platform) => platform switch
+    {
+        "tiktok" => "TikTok",
+        "youtube" => "YouTube",
+        "facebook" => "Facebook",
+        "instagram" => "Instagram",
+        _ => "Khác"
+    };
+
+    private static Color PlatformColor(string platform) => platform switch
+    {
+        "tiktok" => Color.Secondary,
+        "youtube" => Color.Error,
+        "facebook" => Color.Info,
+        "instagram" => Color.Warning,
+        _ => Color.Default
+    };
+
+    private static string StatusLabel(string status) => status switch
+    {
+        "new" => "Mới",
+        "queued" => "Đã xếp hàng",
+        "processing" => "Đang xử lý",
+        "completed" => "Hoàn tất",
+        "failed" => "Lỗi",
+        "ignored" => "Bỏ qua",
+        _ => status
+    };
+
+    private static Color StatusColor(string status) => status switch
+    {
+        "completed" => Color.Success,
+        "failed" => Color.Error,
+        "processing" => Color.Info,
+        "queued" => Color.Warning,
+        "ignored" => Color.Default,
+        _ => Color.Secondary
+    };
+}

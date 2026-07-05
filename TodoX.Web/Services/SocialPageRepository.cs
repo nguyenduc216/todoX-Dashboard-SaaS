@@ -150,4 +150,88 @@ public sealed class SocialPageRepository
                 token = tokenValue, hint = tokenHint, perm = permJson, vstatus = validationStatus
             });
     }
+
+    public async Task UpsertFacebookPageFromOAuthAsync(
+        Guid customerId,
+        Guid createdBy,
+        string externalPageId,
+        string pageName,
+        string? pageAccessToken,
+        CancellationToken ct = default)
+    {
+        await _tenant.EnsureLoadedAsync();
+        using var conn = await _factory.OpenAsync(ct);
+
+        var pageId = await conn.ExecuteScalarAsync<Guid?>(
+            """
+            SELECT id
+              FROM social.customer_pages
+             WHERE tenant_id = @tenant
+               AND customer_id = @cid
+               AND platform = 'facebook'
+               AND external_page_id = @externalPageId
+             ORDER BY created_at DESC
+             LIMIT 1;
+            """,
+            new { tenant = _tenant.TenantId, cid = customerId, externalPageId });
+
+        if (pageId is null)
+        {
+            pageId = Guid.NewGuid();
+            await conn.ExecuteAsync(
+                """
+                INSERT INTO social.customer_pages
+                    (id, tenant_id, customer_id, platform, page_name, page_url, external_page_id,
+                     username, status, verification_status, metadata, connected_at, last_checked_at, created_at, created_by)
+                VALUES
+                    (@id, @tenant, @cid, 'facebook', @name, @url, @externalPageId,
+                     @externalPageId, 'active', 'verified', '{}'::jsonb, now(), now(), now(), @by);
+                """,
+                new
+                {
+                    id = pageId.Value,
+                    tenant = _tenant.TenantId,
+                    cid = customerId,
+                    name = pageName,
+                    url = $"https://facebook.com/{externalPageId}",
+                    externalPageId,
+                    by = createdBy
+                });
+        }
+        else
+        {
+            await conn.ExecuteAsync(
+                """
+                UPDATE social.customer_pages
+                   SET page_name = @name,
+                       page_url = COALESCE(page_url, @url),
+                       username = COALESCE(username, @externalPageId),
+                       status = 'active',
+                       verification_status = 'verified',
+                       connected_at = COALESCE(connected_at, now()),
+                       last_checked_at = now(),
+                       updated_at = now()
+                 WHERE id = @id;
+                """,
+                new
+                {
+                    id = pageId.Value,
+                    name = pageName,
+                    url = $"https://facebook.com/{externalPageId}",
+                    externalPageId
+                });
+        }
+
+        if (!string.IsNullOrWhiteSpace(pageAccessToken))
+        {
+            await SaveAccessTokenAsync(
+                pageId.Value,
+                customerId,
+                "facebook",
+                pageAccessToken.Trim(),
+                FacebookGraphService.Hint(pageAccessToken.Trim()),
+                "valid",
+                new[] { "oauth" });
+        }
+    }
 }

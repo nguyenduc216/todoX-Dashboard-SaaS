@@ -1,8 +1,11 @@
 @page "/admin-users"
 @using TodoX.Web.Components.Dialogs
 @inject AccountService Accounts
+@inject AuthStateService AuthState
+@inject AuditRepository Audit
 @inject IDialogService DialogService
 @inject ISnackbar Snackbar
+@inject NavigationManager Nav
 
 <PageTitle>Quản trị viên</PageTitle>
 
@@ -38,6 +41,16 @@
                 </MudTd>
                 <MudTd DataLabel="Ngày tạo">@context.CreatedAt.ToString("dd/MM/yyyy")</MudTd>
                 <MudTd DataLabel="Thao tác" Style="text-align:right">
+                    @if (CanImpersonate(context.Id))
+                    {
+                        <MudButton Variant="Variant.Text"
+                                   Color="Color.Info"
+                                   Size="Size.Small"
+                                   StartIcon="@Icons.Material.Filled.SupervisedUserCircle"
+                                   OnClick="@(() => Impersonate(context))">
+                            Đăng nhập hộ
+                        </MudButton>
+                    }
                     <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="@(() => OpenEdit(context))" />
                     @if (context.Status == TodoXAccountStatus.Locked)
                     {
@@ -109,5 +122,53 @@
             Snackbar.Add(message, ok ? Severity.Success : Severity.Error);
             if (ok) await Reload();
         }
+    }
+
+    private bool CanImpersonate(Guid targetUserId)
+    {
+        var current = AuthState.CurrentUser;
+        return current is not null
+            && current.UserId != targetUserId
+            && !current.IsImpersonating
+            && (current.IsRoot
+                || current.Role is TodoXUserRole.Admin
+                || current.CanViewModule("admin_users")
+                || current.Can("admin_users.update"));
+    }
+
+    private async Task Impersonate(SystemUser user)
+    {
+        var current = AuthState.CurrentUser;
+        if (current is null || !CanImpersonate(user.Id)) return;
+
+        var reason = await RequestImpersonationReason(user.Email);
+        if (string.IsNullOrWhiteSpace(reason)) return;
+
+        var target = await Accounts.RehydrateSessionAsync(user.Id);
+        if (target is null)
+        {
+            Snackbar.Add("Tài khoản không active hoặc không tồn tại.", Severity.Error);
+            return;
+        }
+
+        await Audit.LogAsync(current, "admin_users", "impersonate",
+            entityDisplay: user.Email, message: $"Impersonate admin user {user.Id}. Reason: {reason}");
+        await AuthState.ImpersonateAsync(target, current);
+        Snackbar.Add($"Đang đăng nhập dưới tài khoản {target.DisplayName}.", Severity.Warning);
+        Nav.NavigateTo("/", forceLoad: true);
+    }
+
+    private async Task<string?> RequestImpersonationReason(string targetDisplay)
+    {
+        var parameters = new DialogParameters<ImpersonationReasonDialog>
+        {
+            { x => x.TargetDisplay, targetDisplay }
+        };
+        var dialog = await DialogService.ShowAsync<ImpersonationReasonDialog>("Lý do đăng nhập hộ", parameters,
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true });
+        var result = await dialog.Result;
+        return result is not null && !result.Canceled && result.Data is string reason
+            ? reason.Trim()
+            : null;
     }
 }

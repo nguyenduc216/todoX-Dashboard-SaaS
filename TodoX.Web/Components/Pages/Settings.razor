@@ -1,12 +1,15 @@
 @page "/settings"
 @inject CatalogRepository Catalog
+@inject MrTodoXAvatarService MrTodoXAvatar
+@inject SystemImageStorage SystemImageStorage
+@inject ISnackbar Snackbar
 
 <PageTitle>Cài đặt hệ thống</PageTitle>
 
 <MudStack Spacing="3">
     <div>
         <MudText Typo="Typo.h4" Class="todox-page-title">Cài đặt hệ thống</MudText>
-        <MudText Typo="Typo.body1" Class="todox-page-subtitle">Cấu hình SaaS, LLM provider/router và thông tin triển khai TodoX.</MudText>
+        <MudText Typo="Typo.body1" Class="todox-page-subtitle">Cấu hình SaaS, LLM provider/router, nhận diện TodoX và thông tin triển khai.</MudText>
     </div>
 
     <MudGrid>
@@ -18,7 +21,7 @@
                     <tbody>
                         <tr><td>Sản phẩm</td><td>TodoX SaaS Dashboard</td></tr>
                         <tr><td>Giao diện</td><td>Dark + Gold (nhận diện TodoX)</td></tr>
-                        <tr><td>Database</td><td>PostgreSQL — Foundation V2 (đã cài)</td></tr>
+                        <tr><td>Database</td><td>PostgreSQL - Foundation V2</td></tr>
                         <tr><td>Automation API</td><td>V9 API-first (/api/v9, /api/llm)</td></tr>
                     </tbody>
                 </MudSimpleTable>
@@ -42,8 +45,80 @@
                     </RowTemplate>
                 </MudTable>
                 <MudText Typo="Typo.caption" Class="todox-page-subtitle mt-2">
-                    Hiển thị theo DatabaseContract (todox_llm_routers). Chỉnh sửa sẽ mở khi nối API cấu hình.
+                    Hiển thị theo DatabaseContract. Chỉnh sửa provider nằm trong nhóm cài đặt API.
                 </MudText>
+            </MudPaper>
+        </MudItem>
+
+        <MudItem xs="12">
+            <MudPaper Class="todox-card pa-5" Rounded="true">
+                <MudStack Spacing="3">
+                    <div>
+                        <MudText Typo="Typo.h6">Hình ảnh đại diện TodoX / Mr. todoX</MudText>
+                        <MudText Typo="Typo.body2" Class="todox-page-subtitle">
+                            Ảnh này được dùng làm nhân vật đại diện trong các thumbnail dịch vụ render bằng AI.
+                        </MudText>
+                    </div>
+
+                    <MudStack Row="true" AlignItems="AlignItems.Start" Spacing="3" Class="flex-wrap">
+                        <div class="todox-mr-avatar-preview">
+                            @if (!string.IsNullOrWhiteSpace(_mrTodoXAvatarUrl))
+                            {
+                                <img src="@_mrTodoXAvatarUrl" alt="Mr. todoX" />
+                            }
+                            else
+                            {
+                                <div class="todox-mr-avatar-empty">
+                                    <MudIcon Icon="@Icons.Material.Filled.SmartToy" Size="Size.Large" />
+                                    <span>Chưa có ảnh Mr. todoX</span>
+                                </div>
+                            }
+                        </div>
+
+                        <MudStack Spacing="2" Class="todox-mr-avatar-form">
+                            <MudTextField T="string"
+                                          Label="URL ảnh Mr. todoX"
+                                          @bind-Value="_mrTodoXAvatarUrl"
+                                          Variant="Variant.Outlined"
+                                          Margin="Margin.Dense" />
+
+                            <MudTextField T="string"
+                                          Label="Mô tả Mr. todoX dùng khi render"
+                                          @bind-Value="_mrTodoXPrompt"
+                                          Variant="Variant.Outlined"
+                                          Lines="4" />
+
+                            <MudStack Row="true" Spacing="2" Class="flex-wrap">
+                                <label class="@($"profile-avatar-upload {(_mrTodoXBusy ? "is-disabled" : string.Empty)}")">
+                                    <MudIcon Icon="@Icons.Material.Filled.Upload" Size="Size.Small" />
+                                    <span>Upload ảnh Mr. todoX</span>
+                                    <InputFile OnChange="UploadMrTodoXAvatar" accept="image/png,image/jpeg,image/webp" disabled="@_mrTodoXBusy" />
+                                </label>
+
+                                <MudButton Variant="Variant.Filled"
+                                           Color="Color.Warning"
+                                           StartIcon="@Icons.Material.Filled.Save"
+                                           OnClick="SaveMrTodoXSettings"
+                                           Disabled="@_mrTodoXBusy">
+                                    Lưu cài đặt
+                                </MudButton>
+
+                                <MudButton Variant="Variant.Text"
+                                           Color="Color.Error"
+                                           StartIcon="@Icons.Material.Filled.Delete"
+                                           OnClick="ClearMrTodoXAvatar"
+                                           Disabled="@_mrTodoXBusy">
+                                    Xóa ảnh
+                                </MudButton>
+                            </MudStack>
+
+                            @if (_mrTodoXBusy)
+                            {
+                                <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+                            }
+                        </MudStack>
+                    </MudStack>
+                </MudStack>
             </MudPaper>
         </MudItem>
 
@@ -79,7 +154,7 @@
                     </NoRecordsContent>
                 </MudTable>
                 <MudText Typo="Typo.caption" Class="todox-page-subtitle mt-2">
-                    Dữ liệu đọc trực tiếp từ public.service_packages (Foundation V2).
+                    Dữ liệu đọc trực tiếp từ public.service_packages.
                 </MudText>
             </MudPaper>
         </MudItem>
@@ -88,13 +163,75 @@
 
 @code {
     private IReadOnlyList<ServicePackageView> _packages = new List<ServicePackageView>();
+    private string? _mrTodoXAvatarUrl;
+    private string _mrTodoXPrompt = string.Empty;
+    private bool _mrTodoXBusy;
 
     protected override async Task OnInitializedAsync()
     {
         _packages = await Catalog.GetServicePackagesAsync();
+        var mrTodoX = await MrTodoXAvatar.GetAsync();
+        _mrTodoXAvatarUrl = mrTodoX.AvatarUrl;
+        _mrTodoXPrompt = mrTodoX.PromptDescription;
     }
 
-    // Reference values from the V9 DatabaseContract (todox_llm_routers). Read-only preview.
+    private async Task UploadMrTodoXAvatar(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        if (file is null) return;
+
+        _mrTodoXBusy = true;
+        try
+        {
+            var url = await SystemImageStorage.SaveMrTodoXAvatarAsync(file);
+            _mrTodoXAvatarUrl = url;
+            await MrTodoXAvatar.SaveAvatarUrlAsync(url);
+            Snackbar.Add("Đã upload ảnh Mr. todoX.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Upload ảnh Mr. todoX lỗi: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _mrTodoXBusy = false;
+        }
+    }
+
+    private async Task SaveMrTodoXSettings()
+    {
+        _mrTodoXBusy = true;
+        try
+        {
+            await MrTodoXAvatar.SaveAvatarUrlAsync(_mrTodoXAvatarUrl);
+            await MrTodoXAvatar.SavePromptAsync(_mrTodoXPrompt);
+            Snackbar.Add("Đã lưu cài đặt Mr. todoX.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Lưu cài đặt Mr. todoX lỗi: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _mrTodoXBusy = false;
+        }
+    }
+
+    private async Task ClearMrTodoXAvatar()
+    {
+        _mrTodoXBusy = true;
+        try
+        {
+            _mrTodoXAvatarUrl = null;
+            await MrTodoXAvatar.SaveAvatarUrlAsync(null);
+            Snackbar.Add("Đã xóa URL ảnh Mr. todoX.", Severity.Success);
+        }
+        finally
+        {
+            _mrTodoXBusy = false;
+        }
+    }
+
     private readonly List<RouterRow> _routers = new()
     {
         new("CloudGemini", "Google Cloud", "gemini-2.5-pro"),

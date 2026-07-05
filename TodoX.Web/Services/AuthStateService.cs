@@ -30,12 +30,12 @@ public sealed class AuthStateService
 
     public event Action? OnChange;
 
-    private sealed record PersistedAuth(Guid UserId, bool Remember);
+    private sealed record PersistedAuth(Guid UserId, bool Remember, Guid? ImpersonatorUserId = null);
 
     public async Task SignInAsync(CurrentUserSession user, bool rememberMe)
     {
         CurrentUser = user;
-        var marker = new PersistedAuth(user.UserId, rememberMe);
+        var marker = new PersistedAuth(user.UserId, rememberMe, user.ImpersonatorUserId);
         try
         {
             if (rememberMe)
@@ -68,6 +68,32 @@ public sealed class AuthStateService
         NotifyStateChanged();
     }
 
+    public Task ImpersonateAsync(CurrentUserSession target, CurrentUserSession actor)
+    {
+        target.ImpersonatorUserId = actor.ImpersonatorUserId ?? actor.UserId;
+        target.ImpersonatorDisplayName = actor.ImpersonatorDisplayName ?? actor.DisplayName;
+        return SignInAsync(target, rememberMe: false);
+    }
+
+    public async Task<bool> StopImpersonationAsync(Func<Guid, Task<CurrentUserSession?>> rehydrate)
+    {
+        var originalUserId = CurrentUser?.ImpersonatorUserId;
+        if (originalUserId is null)
+        {
+            return false;
+        }
+
+        var original = await rehydrate(originalUserId.Value);
+        if (original is null)
+        {
+            await SignOutAsync();
+            return false;
+        }
+
+        await SignInAsync(original, rememberMe: false);
+        return true;
+    }
+
     /// <summary>
     /// Attempt to restore the session from browser storage. Must be called from
     /// OnAfterRenderAsync (interactive) since it uses JS interop. Uses the provided
@@ -88,6 +114,12 @@ public sealed class AuthStateService
                 var session = await rehydrate(marker.UserId);
                 if (session is not null)
                 {
+                    if (marker.ImpersonatorUserId is Guid actorId)
+                    {
+                        var actor = await rehydrate(actorId);
+                        session.ImpersonatorUserId = actorId;
+                        session.ImpersonatorDisplayName = actor?.DisplayName;
+                    }
                     CurrentUser = session;
                 }
                 else

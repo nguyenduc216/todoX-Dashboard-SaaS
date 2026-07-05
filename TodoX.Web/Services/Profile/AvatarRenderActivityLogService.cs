@@ -54,6 +54,8 @@ public sealed class AvatarRenderActivityLogService
                     r.MediaId,
                     r.Url,
                     r.FileName,
+                    r.DisplayName,
+                    r.PromptRoleDescription,
                     r.MimeType,
                     r.SizeBytes,
                     r.Width,

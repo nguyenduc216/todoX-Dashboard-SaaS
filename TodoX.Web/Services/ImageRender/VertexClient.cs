@@ -21,6 +21,7 @@ public sealed class VertexClient
     private string? _cachedToken;
     private DateTimeOffset _tokenExpiry;
     public string? LastModelUsed { get; private set; }
+    public string? LastRenderModeUsed { get; private set; }
 
     public VertexClient(HttpClient http, IConfiguration config, IWebHostEnvironment env, ILogger<VertexClient> logger)
     {
@@ -47,25 +48,74 @@ public sealed class VertexClient
         var project = _config["Vertex:ProjectId"] ?? throw new InvalidOperationException("Missing Vertex:ProjectId");
         var location = _config["Vertex:Location"] ?? "us-central1";
         LastModelUsed = null;
+        LastRenderModeUsed = null;
 
-        var hasReferences = NormalizeReferenceImages(referenceImages).Count > 0;
-        var models = hasReferences
-            ? new[] { _config["Vertex:CapabilityModel"] ?? "imagen-3.0-capability-001" }
-            : new[] { _config["Vertex:ImageModel"], _config["Vertex:FallbackModel"] }
-                .Where(m => !string.IsNullOrWhiteSpace(m)).Select(m => m!).Distinct().ToArray();
-        if (models.Length == 0) models = new[] { "imagen-3.0-generate-002" };
+        foreach (var dropped in referenceImages.Where(x => x.Bytes?.Length is not > 0 && string.IsNullOrWhiteSpace(x.Base64)))
+        {
+            _logger.LogWarning("REFERENCE_IMAGE_DROPPED role={Role} mediaId={MediaId} reason=missing bytes/base64", dropped.Role, dropped.MediaId);
+        }
 
+        var refs = NormalizeReferenceImages(referenceImages);
+        var hasReferences = refs.Count > 0;
         var token = await GetAccessTokenAsync(ct);
+
+        if (hasReferences)
+        {
+            var referenceMode = (_config["Vertex:ReferenceRenderMode"] ?? "gemini_generate_content").Trim();
+            var fallbackMode = (_config["Vertex:ReferenceFallbackMode"] ?? "imagen_capability_predict").Trim();
+            var orderedRoles = refs.Select(x => x.Role ?? "reference").ToArray();
+            _logger.LogInformation("REFERENCE_RENDER_MODE_SELECTED mode={Mode} fallback={Fallback} referenceCount={ReferenceCount} orderedRoles={OrderedRoles}",
+                referenceMode, fallbackMode, refs.Count, orderedRoles);
+
+            if (referenceMode.Equals("gemini_generate_content", StringComparison.OrdinalIgnoreCase)
+                || referenceMode.Equals("auto", StringComparison.OrdinalIgnoreCase))
+            {
+                var geminiModel = _config["Vertex:GeminiImageModel"] ?? "gemini-2.5-flash-image";
+                try
+                {
+                    var images = await CallGeminiImageGenerateContentAsync(token, project, location, geminiModel, prompt, refs, aspectRatio, count, ct);
+                    LastModelUsed = geminiModel;
+                    LastRenderModeUsed = "gemini_generate_content";
+                    _logger.LogInformation("Vertex reference render OK with Gemini model {Model} ({N} images)", geminiModel, images.Count);
+                    return images;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Gemini image generateContent failed.");
+                    if (!fallbackMode.Equals("imagen_capability_predict", StringComparison.OrdinalIgnoreCase))
+                    {
+                        throw;
+                    }
+                }
+            }
+
+            if (referenceMode.Equals("imagen_capability_predict", StringComparison.OrdinalIgnoreCase)
+                || referenceMode.Equals("auto", StringComparison.OrdinalIgnoreCase)
+                || fallbackMode.Equals("imagen_capability_predict", StringComparison.OrdinalIgnoreCase))
+            {
+                var capabilityModel = _config["Vertex:CapabilityModel"] ?? "imagen-3.0-capability-001";
+                var images = await CallModelAsync(token, project, location, capabilityModel, prompt, refs, count, aspectRatio, ct);
+                LastModelUsed = capabilityModel;
+                LastRenderModeUsed = "imagen_capability_predict";
+                _logger.LogInformation("Vertex reference render OK with capability model {Model} ({N} images)", capabilityModel, images.Count);
+                return images;
+            }
+        }
+
+        var models = new[] { _config["Vertex:ImageModel"], _config["Vertex:FallbackModel"] }
+            .Where(m => !string.IsNullOrWhiteSpace(m)).Select(m => m!).Distinct().ToArray();
+        if (models.Length == 0) models = new[] { "imagen-3.0-generate-002" };
         Exception? last = null;
 
         foreach (var model in models)
         {
             try
             {
-                var images = await CallModelAsync(token, project, location, model, prompt, referenceImages, count, aspectRatio, ct);
+                var images = await CallModelAsync(token, project, location, model, prompt, refs, count, aspectRatio, ct);
                 if (images.Count > 0)
                 {
                     LastModelUsed = model;
+                    LastRenderModeUsed = "imagen_text_to_image";
                     _logger.LogInformation("Vertex render OK with model {Model} ({N} images)", model, images.Count);
                     return images;
                 }
@@ -171,6 +221,181 @@ public sealed class VertexClient
         return images;
     }
 
+    private async Task<List<byte[]>> CallGeminiImageGenerateContentAsync(string token, string project, string location, string model,
+        string prompt, IReadOnlyList<ReferenceImage> refs, string aspectRatio, int count, CancellationToken ct)
+    {
+        var url = $"https://{location}-aiplatform.googleapis.com/v1/projects/{project}/locations/{location}/publishers/google/models/{model}:generateContent";
+        var images = new List<byte[]>();
+        var runs = Math.Clamp(count, 1, 4);
+
+        for (var i = 0; i < runs; i++)
+        {
+            var runPrompt = BuildGeminiReferencePrompt(prompt, refs, aspectRatio, i + 1, runs);
+            var parts = new List<object> { new { text = runPrompt } };
+            foreach (var image in refs)
+            {
+                var data = image.Base64;
+                if (string.IsNullOrWhiteSpace(data) && image.Bytes?.Length > 0)
+                {
+                    data = Convert.ToBase64String(image.Bytes);
+                }
+
+                if (string.IsNullOrWhiteSpace(data))
+                {
+                    _logger.LogWarning("REFERENCE_IMAGE_DROPPED role={Role} mediaId={MediaId} reason=no base64 payload for Gemini inlineData",
+                        image.Role, image.MediaId);
+                    continue;
+                }
+
+                var mimeType = NormalizeMimeType(image.MimeType);
+                parts.Add(new { inlineData = new { mimeType, data } });
+                _logger.LogInformation("REFERENCE_INLINE_DATA_PART_ADDED role={Role} mediaId={MediaId} mimeType={MimeType} base64Length={Base64Length} byteLength={ByteLength} sentAsInlineData=true",
+                    image.Role, image.MediaId, mimeType, data.Length, image.Bytes?.Length ?? 0);
+            }
+
+            var payload = new
+            {
+                contents = new[]
+                {
+                    new
+                    {
+                        role = "user",
+                        parts
+                    }
+                },
+                generationConfig = new
+                {
+                    responseModalities = new[] { "IMAGE" }
+                }
+            };
+
+            _logger.LogInformation("GEMINI_GENERATE_CONTENT_REQUEST model={Model} referenceCount={ReferenceCount} variation={Variation}/{Total} promptLength={PromptLength}",
+                model, refs.Count, i + 1, runs, runPrompt.Length);
+
+            using var req = new HttpRequestMessage(HttpMethod.Post, url);
+            req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+            req.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+
+            using var resp = await _http.SendAsync(req, ct);
+            var body = await resp.Content.ReadAsStringAsync(ct);
+            if (!resp.IsSuccessStatusCode)
+            {
+                throw new InvalidOperationException($"Gemini generateContent HTTP {(int)resp.StatusCode}: {Truncate(body, 500)}");
+            }
+
+            var parsed = ParseGeminiGenerateContentImages(body);
+            _logger.LogInformation("GEMINI_GENERATE_CONTENT_RESPONSE model={Model} imageCount={ImageCount} variation={Variation}/{Total} bodyLength={BodyLength}",
+                model, parsed.Count, i + 1, runs, body.Length);
+
+            if (parsed.Count == 0)
+            {
+                _logger.LogWarning("GEMINI_GENERATE_CONTENT_NO_IMAGE model={Model} variation={Variation}/{Total} response={Response}",
+                    model, i + 1, runs, Truncate(body, 700));
+                continue;
+            }
+
+            images.Add(parsed[0]);
+        }
+
+        if (images.Count == 0)
+        {
+            throw new InvalidOperationException($"[{model}] Gemini generateContent khong tra ve anh.");
+        }
+
+        return images;
+    }
+
+    private static string BuildGeminiReferencePrompt(string prompt, IReadOnlyList<ReferenceImage> refs, string aspectRatio, int index, int count)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine(prompt.Trim());
+        sb.AppendLine();
+        sb.AppendLine("Reference image map in the exact order attached after this text:");
+        foreach (var item in refs.Select((image, i) => new { image, number = i + 1 }))
+        {
+            var role = item.image.Role?.Trim().ToLowerInvariant() ?? "reference";
+            var description = role switch
+            {
+                "avatar" => "main person identity and facial likeness for the chibi avatar",
+                "product" => "mandatory product/object that must remain recognizable in the final image",
+                "logo" => "brand/logo reference for logo placement, color and identity details",
+                "uniform" => "uniform/clothing reference; preserve clothing shape, main colors and brand details",
+                "scene" or "background" => "background/scene style reference",
+                _ => item.image.PromptRoleDescription ?? "visual reference"
+            };
+            sb.AppendLine($"[{item.number}] role={role}: {description}.");
+        }
+
+        sb.AppendLine();
+        sb.AppendLine("Use every attached inline image as visual input. Preserve product, logo and uniform references when present; do not replace them with generic alternatives.");
+        sb.AppendLine($"Output a single final PNG image, aspect ratio {aspectRatio}.");
+        if (count > 1)
+        {
+            sb.AppendLine($"This is variation {index} of {count}; keep all reference constraints and vary pose, expression, composition, lighting or camera angle.");
+        }
+
+        return sb.ToString().Trim();
+    }
+
+    private static List<byte[]> ParseGeminiGenerateContentImages(string body)
+    {
+        using var doc = JsonDocument.Parse(body);
+        var images = new List<byte[]>();
+        if (!doc.RootElement.TryGetProperty("candidates", out var candidates) || candidates.ValueKind != JsonValueKind.Array)
+        {
+            return images;
+        }
+
+        foreach (var candidate in candidates.EnumerateArray())
+        {
+            if (!candidate.TryGetProperty("content", out var content)
+                || !content.TryGetProperty("parts", out var parts)
+                || parts.ValueKind != JsonValueKind.Array)
+            {
+                continue;
+            }
+
+            foreach (var part in parts.EnumerateArray())
+            {
+                var inline = TryGetPropertyCaseInsensitive(part, "inlineData", out var inlineData)
+                    ? inlineData
+                    : TryGetPropertyCaseInsensitive(part, "inline_data", out var inlineDataSnake)
+                        ? inlineDataSnake
+                        : default;
+
+                if (inline.ValueKind != JsonValueKind.Object
+                    || !TryGetPropertyCaseInsensitive(inline, "data", out var dataElement)
+                    || dataElement.ValueKind != JsonValueKind.String)
+                {
+                    continue;
+                }
+
+                var b64 = dataElement.GetString();
+                if (!string.IsNullOrWhiteSpace(b64))
+                {
+                    images.Add(Convert.FromBase64String(b64));
+                }
+            }
+        }
+
+        return images;
+    }
+
+    private static bool TryGetPropertyCaseInsensitive(JsonElement element, string name, out JsonElement value)
+    {
+        foreach (var property in element.EnumerateObject())
+        {
+            if (property.Name.Equals(name, StringComparison.OrdinalIgnoreCase))
+            {
+                value = property.Value;
+                return true;
+            }
+        }
+
+        value = default;
+        return false;
+    }
+
     private static List<ReferenceImage> NormalizeReferenceImages(IReadOnlyList<ReferenceImage> referenceImages)
     {
         var order = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
@@ -179,7 +404,8 @@ public sealed class VertexClient
             ["product"] = 1,
             ["logo"] = 2,
             ["uniform"] = 3,
-            ["scene"] = 4
+            ["scene"] = 4,
+            ["background"] = 4
         };
 
         return referenceImages
@@ -190,14 +416,28 @@ public sealed class VertexClient
                 {
                     x.Base64 = Convert.ToBase64String(x.Bytes);
                 }
-                if (string.IsNullOrWhiteSpace(x.MimeType))
-                {
-                    x.MimeType = "image/png";
-                }
+                x.MimeType = NormalizeMimeType(x.MimeType);
                 return x;
             })
             .OrderBy(x => x.Role is not null && order.TryGetValue(x.Role, out var n) ? n : 99)
             .ToList();
+    }
+
+    private static string NormalizeMimeType(string? mimeType)
+    {
+        if (string.IsNullOrWhiteSpace(mimeType))
+        {
+            return "image/png";
+        }
+
+        var normalized = mimeType.Trim().ToLowerInvariant();
+        return normalized switch
+        {
+            "image/jpg" => "image/jpeg",
+            "image/pjpeg" => "image/jpeg",
+            "image/x-png" => "image/png",
+            _ => normalized
+        };
     }
 
     private static string BuildCapabilityPrompt(string prompt, IReadOnlyList<ReferenceImage> refs)

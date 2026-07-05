@@ -90,9 +90,21 @@ public sealed class VertexImageRenderService : IImageRenderService
                 reference.HasAlpha,
                 reference.ObjectKey,
                 reference.Url,
+                reference.FileName,
+                reference.DisplayName,
+                reference.PromptRoleDescription,
                 base64Length = reference.Base64?.Length ?? 0,
                 byteLength = reference.Bytes?.Length ?? 0
             });
+            if (!HasReferencePayload(reference))
+            {
+                AddLog("REFERENCE_IMAGE_DROPPED", $"Reference image dropped: {reference.Role}.", new
+                {
+                    reference.Role,
+                    reference.MediaId,
+                    reason = "missing bytes/base64/url"
+                }, "warning");
+            }
         }
 
         // Insert the render request row (status=processing).
@@ -129,13 +141,59 @@ public sealed class VertexImageRenderService : IImageRenderService
         {
             try
             {
-                AddLog("GEMINI_IMAGE_REQUEST", "Calling Vertex Imagen.", new { model = modelCode, count, request.AspectRatio, referenceCount = request.ReferenceImages.Count });
+                var hasReferences = request.ReferenceImages.Any(HasReferencePayload);
+                var configuredMode = hasReferences
+                    ? _config["Vertex:ReferenceRenderMode"] ?? "gemini_generate_content"
+                    : "imagen_text_to_image";
+                var fallbackMode = _config["Vertex:ReferenceFallbackMode"] ?? "imagen_capability_predict";
+                var orderedRoles = request.ReferenceImages
+                    .Where(HasReferencePayload)
+                    .Select(x => x.Role ?? "reference")
+                    .ToArray();
+                AddLog("REFERENCE_RENDER_MODE_SELECTED", "Selected image render mode.", new
+                {
+                    mode = configuredMode,
+                    fallbackMode,
+                    referenceCount = orderedRoles.Length,
+                    orderedRoles
+                });
+                if (hasReferences && (configuredMode.Equals("gemini_generate_content", StringComparison.OrdinalIgnoreCase)
+                    || configuredMode.Equals("auto", StringComparison.OrdinalIgnoreCase)))
+                {
+                    foreach (var reference in request.ReferenceImages.Where(HasReferencePayload))
+                    {
+                        AddLog("REFERENCE_INLINE_DATA_PART_ADDED", $"Reference inlineData prepared: {reference.Role}.", new
+                        {
+                            reference.Role,
+                            reference.MediaId,
+                            mimeType = string.IsNullOrWhiteSpace(reference.MimeType) ? "image/png" : reference.MimeType,
+                            base64Length = reference.Base64?.Length ?? 0,
+                            byteLength = reference.Bytes?.Length ?? 0,
+                            sentAsInlineData = true
+                        });
+                    }
+
+                    AddLog("GEMINI_GENERATE_CONTENT_REQUEST", "Calling Gemini image generateContent.", new
+                    {
+                        model = _config["Vertex:GeminiImageModel"] ?? "gemini-2.5-flash-image",
+                        count,
+                        request.AspectRatio,
+                        referenceCount = orderedRoles.Length,
+                        orderedRoles
+                    });
+                }
+                AddLog("GEMINI_IMAGE_REQUEST", "Calling Vertex image render.", new { model = modelCode, count, request.AspectRatio, referenceCount = request.ReferenceImages.Count, mode = configuredMode });
                 images = await _vertex.GenerateImagesAsync(request.Prompt, request.ReferenceImages, count, request.AspectRatio, ct);
                 result.Model = _vertex.LastModelUsed ?? modelCode;
                 modelCode = result.Model;
                 result.UsedFallback = false;
                 status = "success";
-                AddLog("GEMINI_IMAGE_RESPONSE", "Vertex Imagen returned images.", new { model = modelCode, count = images.Count, byteLengths = images.Select(x => x.Length).ToArray() });
+                var actualMode = _vertex.LastRenderModeUsed ?? configuredMode;
+                if (actualMode.Equals("gemini_generate_content", StringComparison.OrdinalIgnoreCase))
+                {
+                    AddLog("GEMINI_GENERATE_CONTENT_RESPONSE", "Gemini generateContent returned images.", new { model = modelCode, count = images.Count, byteLengths = images.Select(x => x.Length).ToArray(), mode = actualMode });
+                }
+                AddLog("GEMINI_IMAGE_RESPONSE", "Vertex image render returned images.", new { model = modelCode, count = images.Count, byteLengths = images.Select(x => x.Length).ToArray(), mode = actualMode });
             }
             catch (Exception ex)
             {
@@ -144,6 +202,11 @@ public sealed class VertexImageRenderService : IImageRenderService
                 sw.Stop();
                 result.Ok = false;
                 result.Error = ex.Message;
+                if (ex.Message.Contains("generateContent", StringComparison.OrdinalIgnoreCase)
+                    && ex.Message.Contains("khong tra ve anh", StringComparison.OrdinalIgnoreCase))
+                {
+                    AddLog("GEMINI_GENERATE_CONTENT_NO_IMAGE", ex.Message, level: "error");
+                }
                 AddLog("RENDER_FAILED", ex.Message, level: "error");
                 await CompleteRequestAsync(requestId, "failed", new List<Guid>(), ex.Message);
                 await _settings.LogCallAsync(_tenant.TenantId, request.UserId, EndpointCode, providerCode, modelCode,
@@ -194,7 +257,9 @@ public sealed class VertexImageRenderService : IImageRenderService
             ByteLength = x.Bytes?.Length ?? 0,
             HasBase64 = !string.IsNullOrWhiteSpace(x.Base64),
             Base64Length = x.Base64?.Length ?? 0,
-            x.FileName
+            x.FileName,
+            x.DisplayName,
+            x.PromptRoleDescription
         }));
         await conn.ExecuteAsync(
             """

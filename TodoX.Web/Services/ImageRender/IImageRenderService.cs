@@ -9,6 +9,8 @@ public sealed class ReferenceImage
     public string? MimeType { get; set; }
     public byte[]? Bytes { get; set; }
     public string? FileName { get; set; }
+    public string? DisplayName { get; set; }
+    public string? PromptRoleDescription { get; set; }
     public long? SizeBytes { get; set; }
     public int? Width { get; set; }
     public int? Height { get; set; }

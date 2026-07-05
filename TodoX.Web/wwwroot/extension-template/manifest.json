@@ -1,0 +1,41 @@
+{
+  "manifest_version": 3,
+  "name": "TodoX Video Collector",
+  "version": "1.0.0",
+  "description": "Add TikTok and YouTube video links to TodoX reference video library.",
+  "permissions": ["storage"],
+  "host_permissions": [
+    "https://www.tiktok.com/*",
+    "https://m.tiktok.com/*",
+    "https://www.youtube.com/*",
+    "https://youtu.be/*",
+    "https://dashboard.todox.vn/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["https://www.tiktok.com/*", "https://m.tiktok.com/*"],
+      "js": ["content.js"],
+      "css": ["styles.css"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://www.youtube.com/*"],
+      "js": ["youtube-content.js"],
+      "css": ["styles.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["config.json"],
+      "matches": [
+        "https://www.tiktok.com/*",
+        "https://m.tiktok.com/*",
+        "https://www.youtube.com/*"
+      ]
+    }
+  ]
+}

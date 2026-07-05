@@ -1,0 +1,56 @@
+@page "/auth/facebook/callback"
+@inject NavigationManager Nav
+@inject FacebookOAuthService FacebookOAuth
+@inject ISnackbar Snackbar
+
+<PageTitle>Facebook OAuth Callback - TodoX</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Small" Class="py-8">
+    <MudPaper Class="todox-card pa-6" Rounded="true">
+        <MudText Typo="Typo.h5">Đang kết nối Facebook...</MudText>
+        <MudProgressLinear Indeterminate="true" Color="Color.Warning" Class="mt-4" />
+        <MudText Class="todox-page-subtitle mt-3">@_message</MudText>
+    </MudPaper>
+</MudContainer>
+
+@code {
+    private string _message = "Vui lòng chờ trong giây lát.";
+
+    protected override async Task OnInitializedAsync()
+    {
+        var uri = Nav.ToAbsoluteUri(Nav.Uri);
+        var query = Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(uri.Query);
+
+        var code = query.TryGetValue("code", out var codeValue) ? codeValue.ToString() : null;
+        var state = query.TryGetValue("state", out var stateValue) ? stateValue.ToString() : null;
+        var error = query.TryGetValue("error", out var errorValue) ? errorValue.ToString() : null;
+        var errorDescription = query.TryGetValue("error_description", out var errDescValue) ? errDescValue.ToString() : null;
+
+        if (!string.IsNullOrWhiteSpace(error))
+        {
+            _message = $"Facebook trả về lỗi: {errorDescription ?? error}";
+            Snackbar.Add(_message, Severity.Error);
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(code) || string.IsNullOrWhiteSpace(state))
+        {
+            _message = "Callback không hợp lệ: thiếu code hoặc state.";
+            Snackbar.Add(_message, Severity.Error);
+            return;
+        }
+
+        var result = await FacebookOAuth.HandleCallbackAsync(code, state);
+
+        if (!result.Success)
+        {
+            _message = result.Message;
+            Snackbar.Add(result.Message, Severity.Error);
+            return;
+        }
+
+        _message = result.Message;
+        Snackbar.Add(result.Message, Severity.Success);
+        Nav.NavigateTo("/my-pages");
+    }
+}

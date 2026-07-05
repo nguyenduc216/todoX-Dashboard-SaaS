@@ -187,9 +187,27 @@ h1:focus {
     min-height: 240px;
 }
 
+.avatar-render-image-shell {
+    position: relative;
+    overflow: hidden;
+    border-radius: 8px;
+    aspect-ratio: 1 / 1;
+    width: 100%;
+    max-width: 100%;
+    background: rgba(5, 12, 20, 0.55);
+}
+
 .avatar-render-card img,
-.avatar-render-card .mud-image-root {
-    max-height: 420px;
+.avatar-render-card .mud-image-root,
+.avatar-render-image-shell img,
+.avatar-render-image {
+    width: 100% !important;
+    height: 100% !important;
+    max-width: 100% !important;
+    max-height: 100% !important;
+    object-fit: cover;
+    display: block !important;
+    border-radius: 8px;
 }
 
 .avatar-render-card.is-rendering {
@@ -239,6 +257,37 @@ h1:focus {
     border-radius: 8px;
     background: rgba(8, 16, 24, 0.54);
     min-width: 0;
+}
+
+.avatar-reference-main {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.avatar-reference-copy {
+    min-width: 0;
+    overflow: hidden;
+}
+
+.avatar-reference-copy .mud-typography {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.avatar-reference-copy .todox-page-subtitle {
+    display: none;
+}
+
+.avatar-reference-actions {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 4px;
+    flex: 0 0 auto;
 }
 
 .avatar-reference-thumb {
@@ -306,8 +355,12 @@ h1:focus {
 .avatar-upload-btn input[type="file"] {
     position: absolute;
     inset: 0;
+    width: 100%;
+    height: 100%;
     opacity: 0;
     cursor: pointer;
+    color: transparent;
+    font-size: 0;
 }
 
 .activity-summary {
@@ -322,6 +375,125 @@ h1:focus {
 .activity-detail-section {
     border: 1px solid rgba(255, 183, 0, 0.18);
     background: rgba(8, 16, 24, 0.54);
+}
+
+/* TodoX Permission Matrix - sticky header, sticky first column, visible horizontal scroll */
+.todox-perm-scroll {
+    width: 100%;
+    max-width: 100%;
+    max-height: calc(100vh - 300px);
+    min-height: 360px;
+    overflow: auto;
+    position: relative;
+    border-radius: 8px;
+    scrollbar-gutter: stable both-edges;
+}
+
+.todox-perm-table {
+    border-collapse: separate;
+    border-spacing: 0;
+    min-width: 1320px;
+    width: max-content;
+    color: #ffffff;
+}
+
+.todox-perm-table th,
+.todox-perm-table td {
+    min-width: 86px;
+    height: 56px;
+    padding: 10px 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    background: #0b1118;
+    text-align: center;
+    white-space: nowrap;
+}
+
+.todox-perm-table thead th,
+.todox-perm-sticky-head {
+    top: 0;
+    position: sticky;
+    z-index: 6;
+    background: #05080d !important;
+    color: #ffb700;
+    font-weight: 700;
+    box-shadow: 0 1px 0 rgba(255, 183, 0, 0.22);
+}
+
+.todox-perm-sticky-col {
+    position: sticky;
+    left: 0;
+    z-index: 5;
+    min-width: 220px !important;
+    max-width: 280px;
+    text-align: left !important;
+    background: #0b1118 !important;
+    box-shadow: 1px 0 0 rgba(255, 255, 255, 0.08);
+}
+
+.todox-perm-sticky-head.todox-perm-sticky-col {
+    z-index: 8;
+    background: #05080d !important;
+}
+
+.todox-perm-module-cell {
+    color: #ffffff;
+    font-weight: 700;
+}
+
+.todox-perm-module-check,
+.todox-perm-action-check {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.todox-perm-module-check {
+    justify-content: flex-start;
+}
+
+.todox-perm-action-check {
+    justify-content: center;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.todox-perm-action-check span {
+    font-size: 0.85rem;
+    line-height: 1.15;
+}
+
+.todox-perm-na {
+    color: rgba(255, 255, 255, 0.35);
+}
+
+.todox-perm-scroll::-webkit-scrollbar {
+    height: 14px;
+    width: 14px;
+}
+
+.todox-perm-scroll::-webkit-scrollbar-track {
+    background: #070b10;
+    border-radius: 999px;
+}
+
+.todox-perm-scroll::-webkit-scrollbar-thumb {
+    background: #ffb700;
+    border-radius: 999px;
+    border: 3px solid #070b10;
+}
+
+.todox-perm-scroll::-webkit-scrollbar-thumb:hover {
+    background: #ffd45a;
+}
+
+@media (max-width: 900px) {
+    .todox-perm-scroll {
+        max-height: calc(100vh - 240px);
+    }
+
+    .todox-perm-sticky-col {
+        min-width: 180px !important;
+    }
 }
 
 .activity-pre,

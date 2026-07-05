@@ -35,6 +35,9 @@ public interface IMediaFileService
     /// <summary>Read raw bytes for a media file (used to pass reference images to the render API).</summary>
     Task<byte[]?> ReadBytesAsync(Guid id, CancellationToken ct = default);
 
+    Task<MediaFileDto> ReplaceContentAsync(Guid mediaId, byte[] content, string mimeType,
+        Guid userId, CancellationToken ct = default);
+
     /// <summary>Verify a media row belongs to the given user (ownership check).</summary>
     Task<bool> IsOwnedByAsync(Guid mediaId, Guid userId, CancellationToken ct = default);
 
@@ -152,6 +155,49 @@ public sealed class MediaFileService : IMediaFileService
         return File.Exists(absPath) ? await File.ReadAllBytesAsync(absPath, ct) : null;
     }
 
+    public async Task<MediaFileDto> ReplaceContentAsync(Guid mediaId, byte[] content, string mimeType,
+        Guid userId, CancellationToken ct = default)
+    {
+        var media = await GetAsync(mediaId, ct)
+            ?? throw new InvalidOperationException("Không tìm thấy ảnh cần lưu.");
+        if (media.UserId is Guid owner && owner != userId)
+        {
+            throw new InvalidOperationException("Bạn không có quyền sửa ảnh này.");
+        }
+
+        mimeType = NormalizeMimeType(mimeType, media.FileName);
+        if (content.Length == 0) throw new InvalidOperationException("Tệp rỗng.");
+        if (content.Length > MaxBytes) throw new InvalidOperationException("Tệp vượt quá 10MB.");
+        if (!AllowedMime.Contains(mimeType)) throw new InvalidOperationException("Chỉ chấp nhận ảnh PNG, JPEG, WEBP.");
+        if (string.IsNullOrWhiteSpace(media.ObjectKey))
+        {
+            throw new InvalidOperationException("Ảnh không có đường dẫn lưu trữ để ghi đè.");
+        }
+
+        var uploadRoot = _config["Storage:LocalUploadRoot"] ?? "wwwroot/uploads";
+        var absPath = Path.Combine(_env.ContentRootPath, uploadRoot, media.ObjectKey.Replace('/', Path.DirectorySeparatorChar));
+        var absDir = Path.GetDirectoryName(absPath);
+        if (!string.IsNullOrWhiteSpace(absDir))
+        {
+            Directory.CreateDirectory(absDir);
+        }
+
+        await File.WriteAllBytesAsync(absPath, content, ct);
+
+        using var conn = await _factory.OpenAsync(ct);
+        await conn.ExecuteAsync(
+            """
+            UPDATE media.media_files
+               SET mime_type=@mime, file_size_bytes=@size
+             WHERE id=@id;
+            """,
+            new { id = mediaId, mime = mimeType, size = (long)content.Length, user = userId });
+
+        media.MimeType = mimeType;
+        media.FileSizeBytes = content.Length;
+        return media;
+    }
+
     public async Task<ReferenceImage?> BuildReferenceImageAsync(Guid mediaId, string role, Guid userId, CancellationToken ct = default)
     {
         var media = await GetAsync(mediaId, ct);
@@ -187,7 +233,9 @@ public sealed class MediaFileService : IMediaFileService
             SourceUrl = media.FileCategory.Contains("_url", StringComparison.OrdinalIgnoreCase) ? media.FileUrl : null,
             Base64 = Convert.ToBase64String(bytes),
             Url = media.PublicUrl ?? media.FileUrl,
-            FileName = media.FileName
+            FileName = media.FileName,
+            DisplayName = media.FileName,
+            PromptRoleDescription = role
         };
     }
 

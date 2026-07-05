@@ -65,14 +65,6 @@
                         </MudAlert>
                     }
 
-                    <MudTextField T="string" Label="URL anh san pham (tuy chon)" Value="@_productImageUrl" ValueChanged="OnProductUrlChanged"
-                                  Variant="Variant.Outlined" Margin="Margin.Dense" Class="mt-3"
-                                  Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Link" />
-                    <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.CloudDownload"
-                               Disabled="@(_busy || string.IsNullOrWhiteSpace(_productImageUrl))" OnClick="ImportProductUrl">
-                        Tai anh san pham tu URL
-                    </MudButton>
-
                     <MudGrid Class="mt-2">
                         <MudItem xs="12" sm="4">
                             <MudSelect T="string" Label="Kieu nhan vat" Value="@_characterType" ValueChanged="OnCharacterTypeChanged" Variant="Variant.Outlined" Margin="Margin.Dense">
@@ -150,7 +142,7 @@
                             {
                                 <div class="avatar-stage-frame">
                                     <div class="avatar-render-image-shell">
-                                        <MudImage Src="@PreviewFrameUrl" Fluid="true" Style="border-radius:8px;aspect-ratio:1/1;object-fit:cover;width:100%" />
+                                        <img class="avatar-render-image is-clickable" src="@PreviewFrameUrl" alt="Preview avatar dau vao" @onclick="@(() => ViewReference("avatar", "Ảnh avatar", _avatarMedia))" />
                                         @if (_busy && _rerenderingRenderId is null)
                                         {
                                             <div class="avatar-card-overlay" data-status="Dang render..." aria-label="Dang render anh"></div>
@@ -188,7 +180,7 @@
                                             else
                                             {
                                                 <div class="avatar-render-image-shell">
-                                                    <MudImage Src="@img.Url" Fluid="true" Style="border-radius:8px;aspect-ratio:1/1;object-fit:cover;width:100%" />
+                                                    <img class="avatar-render-image is-clickable" src="@img.Url" alt="Anh chibi da render" @onclick="@(() => ViewRenderedImage(img))" />
                                                     @if (IsCardRendering(img))
                                                     {
                                                         <div class="avatar-card-overlay" data-status="Dang render lai..." aria-label="Dang render lai anh"></div>
@@ -351,21 +343,21 @@
     }
 
     private RenderFragment RefRow(string slot, string label, MediaFileDto? media) =>@<div class="avatar-reference-row">
-        <div class="d-flex align-center gap-2">
+        <div class="avatar-reference-main">
             <div class="avatar-reference-thumb @(slot == "logo" ? "logo-preview-bg" : string.Empty)">
                 @if (media is not null) { <img src="@media.PublicUrl" alt="@label" /> }
                 else { <MudIcon Icon="@Icons.Material.Filled.Image" Size="Size.Small" /> }
             </div>
-            <div>
+            <div class="avatar-reference-copy">
                 <MudText Typo="Typo.body2">@label</MudText>
                 <MudText Typo="Typo.caption" Class="todox-page-subtitle">@(media is null ? "missing" : $"loaded · {media.FileName}")</MudText>
             </div>
         </div>
-        <div class="d-flex align-center gap-1">
+        <div class="avatar-reference-actions">
             @if (media is not null)
             {
                 <MudIconButton Icon="@Icons.Material.Filled.Visibility" Color="Color.Info" Size="Size.Small" OnClick="@(() => ViewReference(slot, label, media))" />
-                <MudIconButton Icon="@Icons.Material.Filled.Close" Color="Color.Error" Size="Size.Small" OnClick="@(() => ClearReference(slot))" />
+                <MudIconButton Icon="@Icons.Material.Filled.Cancel" Color="Color.Error" Size="Size.Small" OnClick="@(() => ClearReference(slot))" />
             }
             <label class="avatar-upload-btn" title="Upload">
                 <MudIcon Icon="@Icons.Material.Filled.Upload" Size="Size.Small" />
@@ -432,18 +424,35 @@
         }
     }
 
-    private async Task ViewReference(string slot, string label, MediaFileDto media)
+    private async Task ViewReference(string slot, string label, MediaFileDto? media)
     {
+        if (media is null) return;
         var parameters = new DialogParameters
         {
             ["Title"] = label,
             ["ImageUrl"] = media.PublicUrl ?? media.FileUrl,
             ["FileName"] = media.FileName,
             ["MimeType"] = media.MimeType,
-            ["SizeText"] = media.FileSizeBytes is null ? null : $"{media.FileSizeBytes:#,0} bytes"
+            ["SizeText"] = media.FileSizeBytes is null ? null : $"{media.FileSizeBytes:#,0} bytes",
+            ["MediaId"] = media.Id
         };
         await DialogService.ShowAsync<Components.Dialogs.ReferenceImageLightboxDialog>($"Xem {slot}", parameters,
-            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true });
+            new DialogOptions { FullScreen = true, FullWidth = true, CloseOnEscapeKey = true });
+    }
+
+    private async Task ViewRenderedImage(ChibiImage image)
+    {
+        if (string.IsNullOrWhiteSpace(image.Url)) return;
+        var parameters = new DialogParameters
+        {
+            ["Title"] = "Ảnh chibi đã render",
+            ["ImageUrl"] = image.Url,
+            ["FileName"] = image.Url.Split('/').LastOrDefault(),
+            ["MimeType"] = "image/png",
+            ["MediaId"] = image.MediaId
+        };
+        await DialogService.ShowAsync<Components.Dialogs.ReferenceImageLightboxDialog>("Xem ảnh", parameters,
+            new DialogOptions { FullScreen = true, FullWidth = true, CloseOnEscapeKey = true });
     }
 
     private async Task ClearReference(string slot)

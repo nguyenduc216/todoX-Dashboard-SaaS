@@ -3,6 +3,7 @@
 @inject AuthStateService AuthState
 @inject AccountService Accounts
 @inject NavigationManager Navigation
+@inject ISnackbar Snackbar
 
 <MudThemeProvider Theme="_theme" IsDarkMode="true" />
 <MudPopoverProvider />
@@ -17,6 +18,17 @@
         </div>
 
         <MudSpacer />
+
+        @if (AuthState.CurrentUser?.IsImpersonating == true)
+        {
+            <MudButton Size="Size.Small"
+                       Variant="Variant.Outlined"
+                       Color="Color.Warning"
+                       StartIcon="@Icons.Material.Filled.SupervisedUserCircle"
+                       OnClick="StopImpersonation">
+                Đang đăng nhập hộ · Thoát
+            </MudButton>
+        }
 
         <MudMenu @bind-Open="_notifyOpen" AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight" Class="todox-notify-menu">
             <ActivatorContent>
@@ -41,7 +53,7 @@
                     <MudAvatar Class="todox-avatar">
                         @if (!string.IsNullOrWhiteSpace(UserAvatarUrl))
                         {
-                            <MudImage Src="@UserAvatarUrl" />
+                            <img src="@UserAvatarUrl" alt="Ảnh đại diện" class="todox-avatar-img" />
                         }
                         else
                         {
@@ -72,10 +84,6 @@
                Elevation="0"
                Variant="DrawerVariant.Responsive"
                Breakpoint="Breakpoint.Md">
-
-        <div class="todox-sidebar-logo">
-            <span class="todox-logo-text">Todo<span>X</span></span>
-        </div>
 
         <MudNavMenu Class="todox-nav">
             <MudNavLink Href="/" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Dashboard">
@@ -122,6 +130,12 @@
             {
                 <MudNavLink Href="/my-pages" Icon="@Icons.Material.Filled.Public">
                     Trang mạng xã hội
+                </MudNavLink>
+            }
+            @if (CanModule("reference_videos"))
+            {
+                <MudNavLink Href="/reference-videos" Icon="@Icons.Material.Filled.VideoLibrary">
+                    Link video tham chiếu
                 </MudNavLink>
             }
             @if (CanModule("roles") || CanModule("permissions"))
@@ -213,19 +227,33 @@
     {
         if (firstRender)
         {
-            // Restore any persisted session (survives circuit reconnects & browser restarts
-            // when Remember Me was chosen). Uses JS interop so it must run after render.
             if (!AuthState.IsInitialized)
             {
                 await AuthState.InitializeAsync(id => Accounts.RehydrateSessionAsync(id));
             }
 
-            // Only redirect once we know the real auth state.
-            if (!AuthState.IsAuthenticated)
+            if (!AuthState.IsAuthenticated && !IsPublicRoute())
             {
                 Navigation.NavigateTo("/login", forceLoad: false);
             }
         }
+    }
+
+    private bool IsPublicRoute()
+    {
+        var path = new Uri(Navigation.Uri).AbsolutePath.TrimEnd('/').ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            path = "/";
+        }
+
+        return path is "/privacy"
+            or "/terms"
+            or "/data-deletion"
+            or "/auth/facebook/callback"
+            or "/login"
+            or "/register"
+            or "/forgot-password";
     }
 
     private void HandleAuthChange() => InvokeAsync(StateHasChanged);
@@ -251,5 +279,12 @@
     {
         await AuthState.SignOutAsync();
         Navigation.NavigateTo("/login");
+    }
+
+    private async Task StopImpersonation()
+    {
+        var ok = await AuthState.StopImpersonationAsync(Accounts.RehydrateSessionAsync);
+        Snackbar.Add(ok ? "Đã quay lại tài khoản quản trị." : "Không quay lại được tài khoản quản trị.", ok ? Severity.Success : Severity.Warning);
+        Navigation.NavigateTo("/", forceLoad: true);
     }
 }

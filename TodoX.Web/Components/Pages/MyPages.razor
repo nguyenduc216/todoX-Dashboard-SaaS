@@ -12,12 +12,23 @@
     <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-3">
         <div>
             <MudText Typo="Typo.h4" Class="todox-page-title">Trang mạng xã hội của tôi</MudText>
-            <MudText Typo="Typo.body1" Class="todox-page-subtitle">Kết nối Fanpage/Page để hệ thống đăng bài tự động. Hiện hỗ trợ Facebook.</MudText>
+            <MudText Typo="Typo.body1" Class="todox-page-subtitle">
+                Kết nối Facebook Page, Instagram Page, TikTok Page để hệ thống đăng bài/reup video tự động.
+            </MudText>
         </div>
-        <MudButton Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.Add" OnClick="OpenAdd" Disabled="@(_customerId is null)">Thêm Page</MudButton>
+        @if (CanCreatePage)
+        {
+            <MudButton Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.Add" OnClick="OpenAdd" Disabled="@(_customerId is null)">Thêm Page</MudButton>
+        }
     </MudStack>
 
-    @if (_customerId is null)
+    @if (!CanViewPages)
+    {
+        <MudAlert Severity="Severity.Warning">
+            Bạn chưa được phân quyền xem/quản lý trang mạng xã hội. Vui lòng liên hệ quản trị viên.
+        </MudAlert>
+    }
+    else if (_customerId is null)
     {
         <MudAlert Severity="Severity.Warning">
             Trang này dành cho tài khoản khách hàng. Tài khoản quản trị không gắn với hồ sơ khách hàng nên không có Page để quản lý.
@@ -32,7 +43,7 @@
         <MudPaper Class="todox-card pa-8" Rounded="true">
             <MudStack AlignItems="AlignItems.Center" Spacing="2">
                 <MudIcon Icon="@Icons.Custom.Brands.Facebook" Size="Size.Large" Class="todox-gold" />
-                <MudText Class="todox-page-subtitle">Chưa có Page nào. Bấm "Thêm Page" để kết nối Facebook.</MudText>
+                <MudText Class="todox-page-subtitle">Chưa có Page nào. Bấm "Thêm Page" để kết nối.</MudText>
             </MudStack>
         </MudPaper>
     }
@@ -62,13 +73,22 @@
                             </MudStack>
                             @if (!string.IsNullOrWhiteSpace(pg.PageUrl))
                             {
-                                <MudLink Href="@pg.PageUrl" Target="_blank" Class="todox-gold" Typo="Typo.body2">Mở trang ↗</MudLink>
+                                <MudLink Href="@pg.PageUrl" Target="_blank" Class="todox-gold" Typo="Typo.body2">Mở trang</MudLink>
                             }
                         </MudStack>
                         <MudStack Row="true" Justify="Justify.FlexEnd" Class="mt-3">
-                            <MudIconButton Icon="@Icons.Material.Filled.VerifiedUser" Size="Size.Small" Title="Xác thực token" OnClick="@(() => OpenConnect(pg))" />
-                            <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="@(() => OpenEdit(pg))" />
-                            <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small" OnClick="@(() => Delete(pg))" />
+                            @if (CanActivatePage)
+                            {
+                                <MudIconButton Icon="@Icons.Material.Filled.VerifiedUser" Size="Size.Small" Title="Xác thực token" OnClick="@(() => OpenConnect(pg))" />
+                            }
+                            @if (CanUpdatePage)
+                            {
+                                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="@(() => OpenEdit(pg))" />
+                            }
+                            @if (CanDeletePage)
+                            {
+                                <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small" OnClick="@(() => Delete(pg))" />
+                            }
                         </MudStack>
                     </MudPaper>
                 </MudItem>
@@ -82,9 +102,22 @@
     private Guid? _customerId;
     private IReadOnlyList<CustomerPageDto> _pages = new List<CustomerPageDto>();
 
+    private bool Can(string permission) => AuthState.CurrentUser?.Can(permission) == true;
+    private bool CanViewPages => Can("customer_pages.view");
+    private bool CanCreatePage => Can("customer_pages.create");
+    private bool CanUpdatePage => Can("customer_pages.update");
+    private bool CanDeletePage => Can("customer_pages.delete");
+    private bool CanActivatePage => Can("customer_pages.activate") || Can("customer_pages.update");
+
     protected override async Task OnInitializedAsync()
     {
         _customerId = AuthState.CurrentUser?.CustomerId;
+        if (!CanViewPages)
+        {
+            _loading = false;
+            return;
+        }
+
         if (_customerId is not null)
         {
             await Reload();
@@ -122,9 +155,10 @@
 
     private async Task OpenAdd()
     {
+        if (_customerId is null || !CanCreatePage) return;
         var parameters = new DialogParameters
         {
-            ["CustomerId"] = _customerId!.Value,
+            ["CustomerId"] = _customerId.Value,
             ["CreatedBy"] = AuthState.CurrentUser!.UserId
         };
         var dialog = await DialogService.ShowAsync<PageConnectDialog>("Thêm & kết nối Page", parameters);
@@ -137,9 +171,10 @@
 
     private async Task OpenConnect(CustomerPageDto page)
     {
+        if (_customerId is null || !CanActivatePage) return;
         var parameters = new DialogParameters
         {
-            ["CustomerId"] = _customerId!.Value,
+            ["CustomerId"] = _customerId.Value,
             ["CreatedBy"] = AuthState.CurrentUser!.UserId,
             ["ExistingPage"] = page
         };
@@ -153,9 +188,10 @@
 
     private async Task OpenEdit(CustomerPageDto page)
     {
+        if (_customerId is null || !CanUpdatePage) return;
         var parameters = new DialogParameters
         {
-            ["CustomerId"] = _customerId!.Value,
+            ["CustomerId"] = _customerId.Value,
             ["CreatedBy"] = AuthState.CurrentUser!.UserId,
             ["ExistingPage"] = page,
             ["EditInfoOnly"] = true
@@ -170,6 +206,7 @@
 
     private async Task Delete(CustomerPageDto page)
     {
+        if (!CanDeletePage) return;
         var confirm = await DialogService.ShowMessageBoxAsync(
             "Xóa Page", $"Xóa Page \"{page.PageName}\" và token liên quan?",
             yesText: "Xóa", cancelText: "Hủy");

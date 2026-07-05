@@ -86,6 +86,9 @@ public sealed class CurrentUserSession
     public string? AvatarUrl { get; set; }
     public TodoXUserRole Role { get; set; }
     public bool IsAuthenticated { get; set; }
+    public Guid? ImpersonatorUserId { get; set; }
+    public string? ImpersonatorDisplayName { get; set; }
+    public bool IsImpersonating => ImpersonatorUserId is not null;
 
     /// <summary>For customer logins: the crm.customers id this user belongs to (null for admin/operator).</summary>
     public Guid? CustomerId { get; set; }

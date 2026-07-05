@@ -12,6 +12,7 @@ public sealed partial class ChibiAvatarService
         public Guid? AvatarMediaId { get; set; }
         public Guid? LogoMediaId { get; set; }
         public Guid? ProductMediaId { get; set; }
+        public Guid? UniformMediaId { get; set; }
         public Guid? SceneMediaId { get; set; }
         public string? Gender { get; set; }
     }
@@ -238,6 +239,7 @@ public sealed partial class ChibiAvatarService
                 SELECT reference_avatar_media_id AS AvatarMediaId,
                        reference_logo_media_id AS LogoMediaId,
                        reference_product_media_id AS ProductMediaId,
+                       reference_uniform_media_id AS UniformMediaId,
                        reference_scene_media_id AS SceneMediaId,
                        gender AS Gender
                   FROM auth.user_chibi_generations
@@ -254,6 +256,7 @@ public sealed partial class ChibiAvatarService
             AvatarMediaId = refMeta?.AvatarMediaId,
             LogoMediaId = refMeta?.LogoMediaId,
             ProductMediaId = refMeta?.ProductMediaId,
+            UniformMediaId = refMeta?.UniformMediaId,
             SceneMediaId = refMeta?.SceneMediaId,
             Gender = refMeta?.Gender,
             Count = 1
@@ -267,6 +270,7 @@ public sealed partial class ChibiAvatarService
             hasAvatar = refInput.AvatarMediaId is not null,
             hasLogo = refInput.LogoMediaId is not null,
             hasProduct = refInput.ProductMediaId is not null,
+            hasUniform = refInput.UniformMediaId is not null,
             hasScene = refInput.SceneMediaId is not null
         });
 
@@ -329,16 +333,16 @@ public sealed partial class ChibiAvatarService
             """
             INSERT INTO auth.user_chibi_generations
                 (id, tenant_id, user_id, status, prompt, generated_prompt, gender,
-                 reference_avatar_media_id, reference_logo_media_id, reference_product_media_id, reference_scene_media_id, created_at)
+                 reference_avatar_media_id, reference_logo_media_id, reference_product_media_id, reference_uniform_media_id, reference_scene_media_id, created_at)
             VALUES
                 (@id, @tenant, @uid, 'processing', @prompt, @prompt, @gender,
-                 @avatar, @logo, @product, @scene, now());
+                 @avatar, @logo, @product, @uniform, @scene, now());
             """,
             new
             {
                 id, tenant = _tenant.TenantId, uid = input.UserId, prompt, gender = input.Gender,
                 avatar = input.AvatarMediaId, logo = input.LogoMediaId,
-                product = input.ProductMediaId, scene = input.SceneMediaId
+                product = input.ProductMediaId, uniform = input.UniformMediaId, scene = input.SceneMediaId
             });
     }
 
@@ -437,6 +441,15 @@ public sealed partial class ChibiAvatarService
             sb.AppendLine();
             sb.AppendLine("LOGO TRANSPARENCY CONSTRAINT:");
             sb.AppendLine("Use the logo reference without turning transparent areas into a black square or dark background. Preserve the transparent logo appearance; if a background is needed, use a clean white or transparent-safe treatment.");
+        }
+
+        if (input.UniformMediaId is not null
+            && !prompt.Contains("UNIFORM MUST MATCH REFERENCE", StringComparison.OrdinalIgnoreCase))
+        {
+            sb.AppendLine();
+            sb.AppendLine("UNIFORM MUST MATCH REFERENCE:");
+            sb.AppendLine("Use the uniform/clothing reference for the character outfit. Preserve the main garment shape, colors, logo placement, material impression, and recognizable brand details.");
+            sb.AppendLine("Do not replace the uniform with a generic hoodie, suit, or unrelated clothing style unless the reference itself shows that style.");
         }
 
         return sb.ToString().Trim();

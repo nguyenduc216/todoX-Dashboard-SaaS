@@ -172,6 +172,16 @@ public sealed class CustomerRepository
         return $"CUST-{count + 1:0000}";
     }
 
+    private static async Task<Guid> GetRoleIdAsync(System.Data.IDbConnection conn, string roleCode,
+        System.Data.IDbTransaction? tx = null)
+    {
+        var roleId = await conn.ExecuteScalarAsync<Guid?>(
+            "SELECT id FROM auth.roles WHERE code = @code LIMIT 1;",
+            new { code = roleCode }, tx);
+
+        return roleId ?? throw new InvalidOperationException($"Role '{roleCode}' not found in auth.roles.");
+    }
+
     // ===================== Customer accounts (auth.app_users + crm.customer_users) =====================
 
     public async Task<IReadOnlyList<CustomerAccount>> GetCustomerAccountsAsync()
@@ -226,41 +236,57 @@ public sealed class CustomerRepository
         await _tenant.EnsureLoadedAsync();
         using var conn = await _factory.OpenAsync();
         var id = Guid.NewGuid();
+        using var tx = conn.BeginTransaction();
 
-        await conn.ExecuteAsync(
-            """
-            INSERT INTO auth.app_users
-                (id, tenant_id, user_type, username, email, phone, password_hash,
-                 display_name, full_name, is_root, is_active, created_at)
-            VALUES
-                (@id, @tenant, 'customer', @username, @email, @phone, @hash,
-                 @full, @full, false, @active, now());
-            """,
-            new
-            {
-                id,
-                tenant = _tenant.TenantId,
-                username = string.IsNullOrWhiteSpace(a.Email) ? null : a.Email,
-                email = string.IsNullOrWhiteSpace(a.Email) ? null : a.Email,
-                phone = string.IsNullOrWhiteSpace(a.Phone) ? null : a.Phone,
-                hash = passwordHash,
-                full = a.FullName,
-                active = a.Status == TodoXAccountStatus.Active
-            });
+        try
+        {
+            await conn.ExecuteAsync(
+                """
+                INSERT INTO auth.app_users
+                    (id, tenant_id, user_type, username, email, phone, password_hash,
+                     display_name, full_name, is_root, is_active, created_at)
+                VALUES
+                    (@id, @tenant, 'customer', @username, @email, @phone, @hash,
+                     @full, @full, false, @active, now());
+                """,
+                new
+                {
+                    id,
+                    tenant = _tenant.TenantId,
+                    username = string.IsNullOrWhiteSpace(a.Email) ? null : a.Email,
+                    email = string.IsNullOrWhiteSpace(a.Email) ? null : a.Email,
+                    phone = string.IsNullOrWhiteSpace(a.Phone) ? null : a.Phone,
+                    hash = passwordHash,
+                    full = a.FullName,
+                    active = a.Status == TodoXAccountStatus.Active
+                }, tx);
 
-        await conn.ExecuteAsync(
-            """
-            INSERT INTO crm.customer_users (customer_id, user_id, relation_type, is_primary)
-            VALUES (@cid, @uid, @rel, @primary)
-            ON CONFLICT DO NOTHING;
-            """,
-            new
-            {
-                cid = a.CustomerId,
-                uid = id,
-                rel = a.Role == TodoXUserRole.CustomerOwner ? "owner" : "member",
-                primary = a.Role == TodoXUserRole.CustomerOwner
-            });
+            await conn.ExecuteAsync(
+                """
+                INSERT INTO crm.customer_users (customer_id, user_id, relation_type, is_primary)
+                VALUES (@cid, @uid, @rel, @primary)
+                ON CONFLICT DO NOTHING;
+                """,
+                new
+                {
+                    cid = a.CustomerId,
+                    uid = id,
+                    rel = a.Role == TodoXUserRole.CustomerOwner ? "owner" : "member",
+                    primary = a.Role == TodoXUserRole.CustomerOwner
+                }, tx);
+
+            var roleId = await GetRoleIdAsync(conn, "customer", tx);
+            await conn.ExecuteAsync(
+                "INSERT INTO auth.user_roles (user_id, role_id) VALUES (@uid, @rid) ON CONFLICT DO NOTHING;",
+                new { uid = id, rid = roleId }, tx);
+
+            tx.Commit();
+        }
+        catch
+        {
+            tx.Rollback();
+            throw;
+        }
 
         return id;
     }
@@ -268,38 +294,54 @@ public sealed class CustomerRepository
     public async Task UpdateCustomerAccountAsync(CustomerAccount a, string? newPasswordHash)
     {
         using var conn = await _factory.OpenAsync();
-        await conn.ExecuteAsync(
-            """
-            UPDATE auth.app_users
-               SET username=@username, email=@email, phone=@phone,
-                   full_name=@full, display_name=@full, is_active=@active,
-                   password_hash=COALESCE(@hash, password_hash), updated_at=now()
-             WHERE id=@id;
-            """,
-            new
-            {
-                id = a.Id,
-                username = string.IsNullOrWhiteSpace(a.Email) ? null : a.Email,
-                email = string.IsNullOrWhiteSpace(a.Email) ? null : a.Email,
-                phone = string.IsNullOrWhiteSpace(a.Phone) ? null : a.Phone,
-                full = a.FullName,
-                active = a.Status == TodoXAccountStatus.Active,
-                hash = newPasswordHash
-            });
+        using var tx = conn.BeginTransaction();
+        try
+        {
+            await conn.ExecuteAsync(
+                """
+                UPDATE auth.app_users
+                   SET username=@username, email=@email, phone=@phone,
+                       full_name=@full, display_name=@full, is_active=@active,
+                       password_hash=COALESCE(@hash, password_hash), updated_at=now()
+                 WHERE id=@id;
+                """,
+                new
+                {
+                    id = a.Id,
+                    username = string.IsNullOrWhiteSpace(a.Email) ? null : a.Email,
+                    email = string.IsNullOrWhiteSpace(a.Email) ? null : a.Email,
+                    phone = string.IsNullOrWhiteSpace(a.Phone) ? null : a.Phone,
+                    full = a.FullName,
+                    active = a.Status == TodoXAccountStatus.Active,
+                    hash = newPasswordHash
+                }, tx);
 
-        await conn.ExecuteAsync(
-            """
-            UPDATE crm.customer_users
-               SET relation_type=@rel, is_primary=@primary, customer_id=@cid
-             WHERE user_id=@uid;
-            """,
-            new
-            {
-                uid = a.Id,
-                cid = a.CustomerId,
-                rel = a.Role == TodoXUserRole.CustomerOwner ? "owner" : "member",
-                primary = a.Role == TodoXUserRole.CustomerOwner
-            });
+            await conn.ExecuteAsync(
+                """
+                UPDATE crm.customer_users
+                   SET relation_type=@rel, is_primary=@primary, customer_id=@cid
+                 WHERE user_id=@uid;
+                """,
+                new
+                {
+                    uid = a.Id,
+                    cid = a.CustomerId,
+                    rel = a.Role == TodoXUserRole.CustomerOwner ? "owner" : "member",
+                    primary = a.Role == TodoXUserRole.CustomerOwner
+                }, tx);
+
+            var roleId = await GetRoleIdAsync(conn, "customer", tx);
+            await conn.ExecuteAsync(
+                "INSERT INTO auth.user_roles (user_id, role_id) VALUES (@uid, @rid) ON CONFLICT DO NOTHING;",
+                new { uid = a.Id, rid = roleId }, tx);
+
+            tx.Commit();
+        }
+        catch
+        {
+            tx.Rollback();
+            throw;
+        }
     }
 
     public async Task SetCustomerAccountActiveAsync(Guid id, bool active)
@@ -341,4 +383,3 @@ public sealed class CustomerRepository
             "SELECT customer_id FROM crm.customer_users WHERE user_id=@uid LIMIT 1;", new { uid = userId });
     }
 }
-

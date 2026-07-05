@@ -1,4 +1,9 @@
 @using TodoX.Web.Services
+@inject AuthStateService AuthState
+@inject MrTodoXAvatarService MrTodoXAvatar
+@inject ServiceThumbnailRenderService ThumbnailRender
+@inject SystemImageStorage SystemImageStorage
+@inject ISnackbar Snackbar
 
 <MudDialog>
     <TitleContent>
@@ -28,14 +33,53 @@
                 <MudTextField T="string" Label="Mô tả ngắn" @bind-Value="_model.ShortDescription" Variant="Variant.Outlined" />
             </MudItem>
             <MudItem xs="12">
-                <MudTextField T="string" Label="Mô tả chi tiết" @bind-Value="_model.Description" Variant="Variant.Outlined" Lines="3" />
+                <MudTextField T="string" Label="Mô tả chi tiết" @bind-Value="_model.Description" Variant="Variant.Outlined" Lines="4" />
             </MudItem>
-            <MudItem xs="12" sm="6">
-                <MudTextField T="string" Label="Ảnh thumbnail (URL)" @bind-Value="_model.ThumbnailUrl" Variant="Variant.Outlined" />
+
+            <MudItem xs="12">
+                <MudPaper Class="service-thumbnail-tool pa-3" Rounded="true">
+                    <MudStack Spacing="2">
+                        <MudStack Row="true" AlignItems="AlignItems.Start" Spacing="3" Class="flex-wrap">
+                            <div class="service-thumbnail-preview">
+                                @if (!string.IsNullOrWhiteSpace(_model.ThumbnailUrl))
+                                {
+                                    <img src="@_model.ThumbnailUrl" alt="Thumbnail dịch vụ" />
+                                }
+                                else
+                                {
+                                    <div class="todox-mr-avatar-empty">
+                                        <MudIcon Icon="@Icons.Material.Filled.Image" Size="Size.Large" />
+                                        <span>Chưa có thumbnail</span>
+                                    </div>
+                                }
+                            </div>
+                            <MudStack Spacing="2" Class="service-thumbnail-fields">
+                                <MudTextField T="string" Label="Ảnh thumbnail (URL)" @bind-Value="_model.ThumbnailUrl" Variant="Variant.Outlined" />
+                                <MudTextField T="string" Label="Ảnh cover (URL)" @bind-Value="_model.CoverImageUrl" Variant="Variant.Outlined" />
+                                <MudStack Row="true" Spacing="2" Class="flex-wrap">
+                                    <label class="@($"profile-avatar-upload {(_thumbnailBusy ? "is-disabled" : string.Empty)}")">
+                                        <MudIcon Icon="@Icons.Material.Filled.Upload" Size="Size.Small" />
+                                        <span>Upload thumbnail</span>
+                                        <InputFile OnChange="UploadThumbnail" accept="image/png,image/jpeg,image/webp" disabled="@_thumbnailBusy" />
+                                    </label>
+                                    <MudButton Variant="Variant.Outlined"
+                                               Color="Color.Warning"
+                                               StartIcon="@Icons.Material.Filled.AutoAwesome"
+                                               Disabled="@_thumbnailBusy"
+                                               OnClick="RenderThumbnail">
+                                        Render theo mô tả
+                                    </MudButton>
+                                </MudStack>
+                                @if (_thumbnailBusy)
+                                {
+                                    <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+                                }
+                            </MudStack>
+                        </MudStack>
+                    </MudStack>
+                </MudPaper>
             </MudItem>
-            <MudItem xs="12" sm="6">
-                <MudTextField T="string" Label="Ảnh cover (URL)" @bind-Value="_model.CoverImageUrl" Variant="Variant.Outlined" />
-            </MudItem>
+
             <MudItem xs="12" sm="6">
                 <MudSelect T="string" Label="Trạng thái" @bind-Value="_model.Status" Variant="Variant.Outlined">
                     <MudSelectItem Value="@("active")">Đang bán</MudSelectItem>
@@ -61,6 +105,7 @@
 
     private ServiceDto _model = new();
     private bool _isNew;
+    private bool _thumbnailBusy;
 
     protected override void OnInitialized()
     {
@@ -71,6 +116,7 @@
             {
                 Id = Source.Id,
                 CategoryId = Source.CategoryId,
+                CategoryName = Source.CategoryName,
                 ServiceCode = Source.ServiceCode,
                 ServiceName = Source.ServiceName,
                 ServiceType = Source.ServiceType,
@@ -82,6 +128,77 @@
                 SortOrder = Source.SortOrder
             };
     }
+
+    private async Task UploadThumbnail(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        if (file is null) return;
+
+        _thumbnailBusy = true;
+        try
+        {
+            var url = await SystemImageStorage.SaveServiceThumbnailAsync(file);
+            _model.ThumbnailUrl = url;
+            Snackbar.Add("Đã upload thumbnail dịch vụ.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Upload thumbnail lỗi: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _thumbnailBusy = false;
+        }
+    }
+
+    private async Task RenderThumbnail()
+    {
+        if (string.IsNullOrWhiteSpace(_model.ServiceName) || string.IsNullOrWhiteSpace(_model.Description))
+        {
+            Snackbar.Add("Vui lòng nhập tên dịch vụ và mô tả chi tiết trước khi render.", Severity.Warning);
+            return;
+        }
+
+        _thumbnailBusy = true;
+        try
+        {
+            var mrTodoX = await MrTodoXAvatar.GetAsync();
+            if (string.IsNullOrWhiteSpace(mrTodoX.AvatarUrl))
+            {
+                Snackbar.Add("Chưa cấu hình ảnh Mr. todoX. Hệ thống sẽ dùng mô tả nhân vật trong prompt.", Severity.Warning);
+            }
+
+            var result = await ThumbnailRender.RenderAsync(new ServiceThumbnailRenderRequest
+            {
+                ServiceCode = _model.ServiceCode,
+                ServiceName = _model.ServiceName,
+                GroupName = SelectedCategoryName,
+                ServiceType = _model.ServiceType,
+                ShortDescription = _model.ShortDescription,
+                DetailedDescription = _model.Description,
+                User = AuthState.CurrentUser
+            });
+
+            if (!result.Ok || string.IsNullOrWhiteSpace(result.ImageUrl))
+            {
+                Snackbar.Add($"Render thumbnail lỗi: {result.Error ?? "Không nhận được ảnh."}", Severity.Error);
+                return;
+            }
+
+            _model.ThumbnailUrl = result.ImageUrl;
+            Snackbar.Add("Đã render thumbnail dịch vụ có Mr. todoX.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Render thumbnail lỗi: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _thumbnailBusy = false;
+        }
+    }
+
+    private string? SelectedCategoryName => Categories.FirstOrDefault(x => x.Id == _model.CategoryId)?.CategoryName ?? _model.CategoryName;
 
     private void Submit()
     {
