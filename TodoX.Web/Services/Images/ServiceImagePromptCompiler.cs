@@ -18,7 +18,19 @@ public sealed class ServiceImagePromptCompiler
         p.AppendLine(plan.MainVisual.VisualStory);
         p.AppendLine();
         p.AppendLine("Required objects:");
-        foreach (var obj in plan.MainVisual.Objects.Distinct())
+        var requiredObjects = plan.ServiceType?.Equals("ai_video_from_prompt_character", StringComparison.OrdinalIgnoreCase) == true
+            ? plan.MainVisual.Objects
+                .Concat(new[]
+                {
+                    "prompt input panel",
+                    "character/avatar selection card",
+                    "background/scene selection card",
+                    "render job status",
+                    "vertical video preview frame",
+                    "automated posting/scheduling status"
+                })
+            : plan.MainVisual.Objects;
+        foreach (var obj in requiredObjects.Distinct(StringComparer.OrdinalIgnoreCase))
         {
             p.AppendLine($"- {obj}");
         }
@@ -29,6 +41,11 @@ public sealed class ServiceImagePromptCompiler
         p.AppendLine("- Leave reserved space for brand character if required.");
         p.AppendLine("- Avoid small unreadable text and random logos.");
         p.AppendLine("- Use abstract UI labels or simple shapes instead of real brand logos unless provided.");
+        if (plan.ServiceType?.Equals("ai_video_from_prompt_character", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            p.AppendLine("- Do not add unrelated platform names, platform logos, repost workflows, or cross-channel movement concepts.");
+            p.AppendLine("- Make the flow read as: user prompt plus selected character and scene become a rendered vertical video job.");
+        }
         p.AppendLine(plan.MainVisual.Composition);
         p.AppendLine();
         p.AppendLine("Style:");

@@ -114,6 +114,7 @@ public sealed class ServiceThumbnailRenderService
                 : ImageRenderRequestModel.PipelineModelGenerate,
             PreserveFixedAssets = request.PreserveFixedAssets,
             Theme = request.PreserveFixedAssets ? request.Theme ?? "yellow_black" : request.Theme,
+            ServiceType = request.ServiceType,
             PosterTextHeadline = request.PreserveFixedAssets ? request.PosterTextHeadline : null,
             PosterTextSubheadline = request.PreserveFixedAssets ? request.PosterTextSubheadline : null,
             PosterTextFooter = request.PreserveFixedAssets ? request.PosterTextFooter : null,

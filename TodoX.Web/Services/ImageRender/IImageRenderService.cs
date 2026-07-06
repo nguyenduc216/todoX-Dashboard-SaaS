@@ -32,6 +32,7 @@ public sealed class ImageRenderRequestModel
     public string RenderPipeline { get; set; } = PipelineModelGenerate;
     public bool PreserveFixedAssets { get; set; }
     public string? Theme { get; set; }
+    public string? ServiceType { get; set; }
     public string? PosterTextHeadline { get; set; }
     public string? PosterTextSubheadline { get; set; }
     public string? PosterTextFooter { get; set; }

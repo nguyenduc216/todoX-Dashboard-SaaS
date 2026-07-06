@@ -75,6 +75,7 @@ public sealed class VertexImageRenderService : IImageRenderService
             request.RenderPipeline,
             request.PreserveFixedAssets,
             request.Theme,
+            request.ServiceType,
             request.Gender,
             request.CharacterType,
             request.Outfit,
@@ -146,8 +147,17 @@ public sealed class VertexImageRenderService : IImageRenderService
         if (mockMode)
         {
             // Explicit mock mode only: clearly labelled placeholder images.
+            var mockPrompt = useFixedAssetPipeline ? BuildBackgroundOnlyPrompt(request) : request.Prompt;
+            if (useFixedAssetPipeline)
+            {
+                AddLog("BACKGROUND_ONLY_PROMPT_BUILT", "Built background-only prompt for fixed asset pipeline.", new
+                {
+                    promptLength = mockPrompt.Length,
+                    prompt = mockPrompt
+                });
+            }
             images = Enumerable.Range(0, count)
-                .Select(i => PlaceholderImage.Generate(useFixedAssetPipeline ? BuildBackgroundOnlyPrompt(request) : request.Prompt, i))
+                .Select(i => PlaceholderImage.Generate(mockPrompt, i))
                 .ToList();
             if (useFixedAssetPipeline && fixedAssets.Count > 0)
             {
@@ -383,21 +393,40 @@ public sealed class VertexImageRenderService : IImageRenderService
         var theme = request.Theme?.Equals("yellow_black", StringComparison.OrdinalIgnoreCase) == true
             ? "black and gold"
             : string.IsNullOrWhiteSpace(request.Theme) ? "black and gold" : request.Theme;
+        var aspectRatio = string.IsNullOrWhiteSpace(request.AspectRatio) ? "9:16" : request.AspectRatio;
+        var isReupTikTokFacebook = request.ServiceType?.Equals("tiktok_to_facebook_reup", StringComparison.OrdinalIgnoreCase) == true
+            || HasAllReupTerms(request.Prompt);
+        var platformPolicy = isReupTikTokFacebook
+            ? "Use only the platform transfer concepts explicitly present in the user service intent."
+            : "Do not add unrelated platform logos, repost workflows, or cross-channel movement concepts.";
 
         return $"""
-        Create a premium vertical 9:16 service poster background only.
-        No robot. No mascot. No character. No human.
-        Theme: {theme}, futuristic AI automation, digital marketing.
-        Left side: TikTok source video frame.
-        Right side: Facebook destination feed frame.
-        Show bright gold data arrows and streaming media flow from TikTok to Facebook.
-        Add subtle dashboard and growth chart elements.
-        Leave clean empty center or bottom-center space for a brand robot asset to be composited later.
-        Avoid small unreadable text.
+        Create a premium vertical {aspectRatio} service poster background only.
+        Theme: {theme}, futuristic AI automation, modern SaaS service illustration.
 
-        User service intent:
+        Important fixed asset policy:
+        No robot. No mascot. No brand character. No human mascot.
+        The TodoX brand robot will be composited later by code as a fixed asset.
+        Leave clean empty center or bottom-center space for the brand robot asset.
+
+        User service intent and visual plan:
         {request.Prompt}
+
+        Composition requirements:
+        - Make the service workflow clear at a glance.
+        - Use abstract UI panels, data flows, output previews, dashboard cards, and automation signals based only on the user service intent.
+        - Avoid small unreadable text.
+        - {platformPolicy}
         """;
+    }
+
+    private static bool HasAllReupTerms(string text)
+    {
+        var value = text.ToLowerInvariant();
+        var hasTikTok = value.Contains("tiktok");
+        var hasFacebook = value.Contains("facebook");
+        var hasReup = value.Contains("reup") || value.Contains("đăng lại") || value.Contains("dang lai");
+        return hasTikTok && hasFacebook && hasReup;
     }
 
     private async Task<List<byte[]>> CompositeFixedAssetsAsync(
@@ -437,6 +466,14 @@ public sealed class VertexImageRenderService : IImageRenderService
                 fixedAsset.Role,
                 fixedAsset.MediaId,
                 loadedByteLength = compositeRequest.LoadedAssetByteLength,
+                transparency = new
+                {
+                    compositeRequest.AssetHasAlphaBefore,
+                    compositeRequest.AssetHasAlphaAfter,
+                    compositeRequest.AssetBackgroundRemoved,
+                    compositeRequest.AssetBackgroundRemovalMethod,
+                    compositeRequest.AssetBackgroundRemovalTolerance
+                },
                 canvasWidth = compositeRequest.Placement?.CanvasWidth,
                 canvasHeight = compositeRequest.Placement?.CanvasHeight,
                 robotPlacement = compositeRequest.Placement is null ? null : new
@@ -450,9 +487,9 @@ public sealed class VertexImageRenderService : IImageRenderService
             }, "info");
             addLog("TEXT_OVERLAY_APPLIED", "Poster text overlay applied by code.", new
             {
-                headline = string.IsNullOrWhiteSpace(request.PosterTextHeadline) ? "REUP VIDEO TIKTOK" : request.PosterTextHeadline,
-                subheadline = string.IsNullOrWhiteSpace(request.PosterTextSubheadline) ? "SANG FACEBOOK" : request.PosterTextSubheadline,
-                footer = string.IsNullOrWhiteSpace(request.PosterTextFooter) ? "XÂY DỰNG KÊNH TỰ ĐỘNG" : request.PosterTextFooter
+                headline = string.IsNullOrWhiteSpace(request.PosterTextHeadline) ? "TODOX AI" : request.PosterTextHeadline,
+                subheadline = string.IsNullOrWhiteSpace(request.PosterTextSubheadline) ? "DỊCH VỤ TỰ ĐỘNG HÓA" : request.PosterTextSubheadline,
+                footer = string.IsNullOrWhiteSpace(request.PosterTextFooter) ? "TodoX" : request.PosterTextFooter
             }, "info");
         }
 

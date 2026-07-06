@@ -1,5 +1,6 @@
 ﻿using System.Diagnostics;
 using System.Text.Json;
+using TodoX.Web.Models;
 using TodoX.Web.Services.Images;
 using TodoX.Web.Services.Profile;
 
@@ -84,6 +85,17 @@ public sealed class MarketingImageRenderService
             result.AnalyzerProvider = analyzerResult.Provider;
             result.UsedAnalyzerFallback = analyzerResult.UsedFallback;
             var analysis = analyzerResult.Analysis;
+            var ruleAnalysis = AnalyzeBrief(request);
+            var forcedRulePlan = false;
+            if (ruleAnalysis.DetectedServiceType.Equals("ai_video_from_prompt_character", StringComparison.OrdinalIgnoreCase)
+                && !analysis.DetectedServiceType.Equals("tiktok_to_facebook_reup", StringComparison.OrdinalIgnoreCase))
+            {
+                analysis.DetectedServiceType = ruleAnalysis.DetectedServiceType;
+                analysis.Confidence = Math.Max(analysis.Confidence, 0.9);
+                analysis.ClassificationReason = "Local rule override: video prompt + character + scene workflow detected.";
+                analysis.ExcludedServiceTypes = BuildExcludedTypes(analysis.DetectedServiceType);
+                forcedRulePlan = true;
+            }
             Add("03_BRIEF_ANALYZED", "Đã phân tích brief", "Brief analyzer classified the service intent.",
                 input: new { originalBrief = request.Brief },
                 output: analysis,
@@ -91,6 +103,7 @@ public sealed class MarketingImageRenderService
                 {
                     analyzerProvider = analyzerResult.Provider,
                     analyzerFallback = analyzerResult.UsedFallback,
+                    localRuleOverride = forcedRulePlan,
                     analyzerError = analyzerResult.Error,
                     rawResponse = analyzerResult.RawResponse
                 },
@@ -99,7 +112,7 @@ public sealed class MarketingImageRenderService
                 error: analyzerResult.Error);
 
             var plan = request.RecreatePlan || request.ExistingPlan is null
-                ? analyzerResult.Plan
+                ? forcedRulePlan ? CreateRenderPlan(request, analysis) : analyzerResult.Plan
                 : request.ExistingPlan;
             result.RenderPlan = plan;
             var universalPlan = request.RecreatePlan || request.ExistingUniversalPlan is null
@@ -141,6 +154,17 @@ public sealed class MarketingImageRenderService
                     finalCompiledPrompt = compiled.Prompt,
                     forbiddenTermsChecked = true
                 });
+
+            var forbiddenQc = CheckForbiddenTermsForService(plan, universalPlan, compiledPrompt);
+            if (!forbiddenQc.Ok)
+            {
+                Add("06_FORBIDDEN_TERMS_BLOCKED", "Chặn prompt sai nghiệp vụ", "Forbidden platform/reup terms detected before calling render API.",
+                    input: new { plan.ServiceType, compiledPrompt, universalPlan },
+                    output: forbiddenQc,
+                    level: "error",
+                    error: string.Join(", ", forbiddenQc.ForbiddenTermsFound));
+                throw new InvalidOperationException($"Render plan chứa từ khóa không phù hợp: {string.Join(", ", forbiddenQc.ForbiddenTermsFound)}");
+            }
 
             var classification = ClassifyReferences(request);
             Add("07_REFERENCE_IMAGES_CLASSIFIED", "PhÃ¢n loáº¡i áº£nh tham chiáº¿u", "Reference images classified before render.",
@@ -323,14 +347,21 @@ public sealed class MarketingImageRenderService
     private static MarketingRenderPlan CreateRenderPlan(MarketingImageRenderRequest request, MarketingBriefAnalysis analysis)
     {
         var isReupFlow = analysis.MentionsTikTok && analysis.MentionsFacebook && analysis.MentionsReup;
+        var isVideoPromptCharacter = analysis.DetectedServiceType.Equals("ai_video_from_prompt_character", StringComparison.OrdinalIgnoreCase);
         var headline = isReupFlow
             ? "REUP VIDEO TIKTOK"
+            : isVideoPromptCharacter
+                ? "TẠO VIDEO TỪ PROMPT"
             : ToPosterHeadline(analysis.ServiceName);
         var subheadline = isReupFlow
             ? "SANG FACEBOOK"
+            : isVideoPromptCharacter
+                ? "VÀ NHÂN VẬT AI"
             : ToPosterSubheadline(request.ShortDescription ?? request.Brief);
         var footer = isReupFlow
             ? "XÃ‚Y Dá»°NG KÃŠNH Tá»° Äá»˜NG"
+            : isVideoPromptCharacter
+                ? "TodoX Video AI"
             : "Tá»° Äá»˜NG HÃ“A CÃ™NG TODOX";
 
         var visualElements = isReupFlow
@@ -341,6 +372,16 @@ public sealed class MarketingImageRenderService
                 "gold data arrows from TikTok to Facebook",
                 "subtle dashboard and growth chart"
             }
+            : isVideoPromptCharacter
+                ? new List<string>
+                {
+                    "prompt input box",
+                    "character selection card",
+                    "scene/background selection card",
+                    "AI render job pipeline",
+                    "vertical video preview frame",
+                    "automation scheduling status"
+                }
             : new List<string>
             {
                 "premium SaaS dashboard background",
@@ -369,11 +410,15 @@ public sealed class MarketingImageRenderService
                     ? ImageRenderRequestModel.PipelineBackgroundThenComposite
                     : ImageRenderRequestModel.PipelineModelGenerate
             },
-            ForbiddenTerms = request.PreserveFixedAssets
-                ? new List<string> { "robot", "mascot", "character", "human" }
-                : new List<string> { "small unreadable text", "random logo" },
+            ForbiddenTerms = isVideoPromptCharacter
+                ? new List<string> { "REUP", "TIKTOK", "FACEBOOK", "SANG FACEBOOK", "social reposting", "platform transfer" }
+                : request.PreserveFixedAssets
+                    ? new List<string> { "robot", "mascot", "character", "human" }
+                    : new List<string> { "small unreadable text", "random logo" },
             RequiredConcepts = isReupFlow
                 ? new List<string> { "TikTok source", "Facebook destination", "data arrows", "automation" }
+                : isVideoPromptCharacter
+                    ? new List<string> { "prompt", "nhân vật", "bối cảnh", "render video", "tự động" }
                 : new List<string> { analysis.ServiceName, "automation", "dashboard", "premium SaaS" },
             NegativePrompt = "No small unreadable text. No random logos. No clutter. No distorted brand asset."
         };
@@ -422,6 +467,64 @@ public sealed class MarketingImageRenderService
             ForbiddenTermsChecked = true,
             RequiredConceptsChecked = true,
             Result = warnings.Count == 0 ? "passed" : "warning"
+        };
+    }
+
+    private static MarketingQcResult CheckForbiddenTermsForService(
+        MarketingRenderPlan plan,
+        UniversalServiceImageRenderPlan universalPlan,
+        string compiledPrompt)
+    {
+        var forbidden = new List<string>();
+        if (!plan.ServiceType.Equals("ai_video_from_prompt_character", StringComparison.OrdinalIgnoreCase))
+        {
+            return new MarketingQcResult
+            {
+                Ok = true,
+                ForbiddenTermsChecked = true,
+                RequiredConceptsChecked = true,
+                Result = "passed"
+            };
+        }
+
+        var text = string.Join("\n", new[]
+        {
+            plan.Headline,
+            plan.Subheadline,
+            plan.Footer,
+            compiledPrompt,
+            universalPlan.CreativeBrief.MainMessage,
+            universalPlan.CreativeBrief.UserBenefit,
+            universalPlan.CreativeBrief.VisualMetaphor,
+            universalPlan.CreativeBrief.ViewerShouldUnderstandIn3Seconds,
+            universalPlan.MainVisual.VisualStory,
+            universalPlan.MainVisual.Composition,
+            universalPlan.MainVisual.BackgroundPrompt,
+            universalPlan.TextOverlay.Headline,
+            universalPlan.TextOverlay.Subheadline,
+            universalPlan.TextOverlay.Footer,
+            string.Join(" ", plan.VisualElements),
+            string.Join(" ", plan.RequiredConcepts),
+            string.Join(" ", universalPlan.MainVisual.Objects),
+            string.Join(" ", universalPlan.TextOverlay.MicroBullets)
+        }).ToLowerInvariant();
+
+        foreach (var term in new[] { "tiktok", "facebook", "reup", "sang facebook", "social reposting", "platform transfer" })
+        {
+            if (text.Contains(term))
+            {
+                forbidden.Add(term);
+            }
+        }
+
+        return new MarketingQcResult
+        {
+            Ok = forbidden.Count == 0,
+            ForbiddenTermsChecked = true,
+            ForbiddenTermsFound = forbidden.Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+            RequiredConceptsChecked = true,
+            Result = forbidden.Count == 0 ? "passed" : "failed_forbidden_terms",
+            Warnings = forbidden.Count == 0 ? new List<string>() : new List<string> { "forbidden_platform_terms_detected" }
         };
     }
 
@@ -488,11 +591,11 @@ public sealed class MarketingImageRenderService
                 case "FIXED_ASSET_LOADED":
                     add("11_FIXED_ASSET_LOADED", "Load fixed asset", item.Message, output: item.Data);
                     add("12_FIXED_ASSET_BACKGROUND_PROCESSING_STARTED", "Báº¯t Ä‘áº§u xá»­ lÃ½ ná»n robot", "Background processing for fixed asset started.",
-                        output: new { method = "preserve_original_asset", backgroundRemoved = false });
-                    add("13_FIXED_ASSET_BACKGROUND_PROCESSED", "ÄÃ£ xá»­ lÃ½ ná»n robot", "Fixed asset background processing completed.",
-                        output: new { hasAlphaBefore = (bool?)null, hasAlphaAfter = (bool?)null, backgroundRemoved = false, method = "none_v1", tolerance = 0 });
+                        output: new { method = "corner_color_alpha_mask", tolerance = 42 });
                     break;
                 case "FIXED_ASSET_COMPOSITED":
+                    add("13_FIXED_ASSET_BACKGROUND_PROCESSED", "Đã xử lý nền robot", "Fixed asset background processing completed.",
+                        output: item.Data);
                     add("14_FIXED_ASSET_COMPOSITED", "Composite robot", item.Message, output: item.Data);
                     break;
                 case "TEXT_OVERLAY_APPLIED":
@@ -514,6 +617,11 @@ public sealed class MarketingImageRenderService
     private static string DetectServiceType(string text, bool mentionsTikTok, bool mentionsFacebook, bool mentionsReup)
     {
         if (mentionsTikTok && mentionsFacebook && mentionsReup) return "tiktok_to_facebook_reup";
+        var mentionsVideoPromptCharacter = (text.Contains("tạo video") || text.Contains("tao video") || text.Contains("video"))
+            && text.Contains("prompt")
+            && (text.Contains("nhân vật") || text.Contains("nhan vat") || text.Contains("character"))
+            && (text.Contains("bối cảnh") || text.Contains("boi canh") || text.Contains("scene"));
+        if (mentionsVideoPromptCharacter) return "ai_video_from_prompt_character";
         if (text.Contains("video")) return "video_generation";
         if (text.Contains("avatar") || text.Contains("chibi")) return "avatar_generation";
         if (text.Contains("content") || text.Contains("bÃ i viáº¿t") || text.Contains("bai viet")) return "content_automation";
@@ -524,6 +632,7 @@ public sealed class MarketingImageRenderService
         => serviceType switch
         {
             "tiktok_to_facebook_reup" => "Brief contains TikTok, Facebook and reup/republish intent.",
+            "ai_video_from_prompt_character" => "Brief describes video generation from prompt, character, and scene/background selection.",
             "video_generation" => "Brief mentions video generation or video workflow.",
             "avatar_generation" => "Brief mentions avatar/chibi image generation.",
             "content_automation" => "Brief mentions content/post automation.",
@@ -531,7 +640,7 @@ public sealed class MarketingImageRenderService
         };
 
     private static List<string> BuildExcludedTypes(string selected)
-        => new[] { "tiktok_to_facebook_reup", "video_generation", "avatar_generation", "content_automation", "general_service" }
+        => new[] { "tiktok_to_facebook_reup", "ai_video_from_prompt_character", "video_generation", "avatar_generation", "content_automation", "general_service" }
             .Where(x => x != selected)
             .ToList();
 
@@ -540,6 +649,11 @@ public sealed class MarketingImageRenderService
         if (analysis.DetectedServiceType == "tiktok_to_facebook_reup")
         {
             return new List<string> { "Tá»± Ä‘á»™ng láº¥y video nguá»“n", "Äáº©y sang kÃªnh Ä‘Ã­ch", "Theo dÃµi tÄƒng trÆ°á»Ÿng" };
+        }
+
+        if (analysis.DetectedServiceType == "ai_video_from_prompt_character")
+        {
+            return new List<string> { "Nhập prompt", "Chọn nhân vật/bối cảnh", "Theo dõi job render" };
         }
 
         return new List<string>

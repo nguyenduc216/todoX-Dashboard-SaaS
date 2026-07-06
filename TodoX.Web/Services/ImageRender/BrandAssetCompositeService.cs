@@ -1,4 +1,4 @@
-using SixLabors.Fonts;
+﻿using SixLabors.Fonts;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Drawing;
 using SixLabors.ImageSharp.Drawing.Processing;
@@ -24,6 +24,11 @@ public sealed class BrandAssetCompositeRequest
     public string? Footer { get; set; }
     public BrandAssetCompositePlacement? Placement { get; set; }
     public int LoadedAssetByteLength { get; set; }
+    public bool AssetHasAlphaBefore { get; set; }
+    public bool AssetHasAlphaAfter { get; set; }
+    public bool AssetBackgroundRemoved { get; set; }
+    public string AssetBackgroundRemovalMethod { get; set; } = "none";
+    public int AssetBackgroundRemovalTolerance { get; set; }
 }
 
 public sealed class BrandAssetCompositePlacement
@@ -69,6 +74,7 @@ public sealed class BrandAssetCompositeService : IBrandAssetCompositeService
 
         using var assetStream = new MemoryStream(assetBytes);
         using var asset = await Image.LoadAsync<Rgba32>(assetStream, ct);
+        PrepareAssetTransparency(asset, request);
         var canvasWidth = background.Width;
         var canvasHeight = background.Height;
 
@@ -169,7 +175,141 @@ public sealed class BrandAssetCompositeService : IBrandAssetCompositeService
             Math.Max(0, (image.Width - targetWidth) / 2),
             Math.Max(0, (image.Height - targetHeight) / 2),
             targetWidth,
-            targetHeight)));
+                targetHeight)));
+    }
+
+    private static void PrepareAssetTransparency(Image<Rgba32> asset, BrandAssetCompositeRequest request)
+    {
+        const int tolerance = 42;
+        request.AssetBackgroundRemovalTolerance = tolerance;
+        request.AssetHasAlphaBefore = HasMeaningfulAlpha(asset);
+
+        if (request.AssetHasAlphaBefore)
+        {
+            request.AssetHasAlphaAfter = true;
+            request.AssetBackgroundRemoved = false;
+            request.AssetBackgroundRemovalMethod = "preserve_existing_alpha";
+            return;
+        }
+
+        var background = AverageCornerColor(asset);
+        if (!IsLightNeutral(background))
+        {
+            request.AssetHasAlphaAfter = false;
+            request.AssetBackgroundRemoved = false;
+            request.AssetBackgroundRemovalMethod = "none_non_light_corner_color";
+            return;
+        }
+
+        var removed = 0;
+        asset.ProcessPixelRows(accessor =>
+        {
+            for (var y = 0; y < accessor.Height; y++)
+            {
+                var row = accessor.GetRowSpan(y);
+                for (var x = 0; x < row.Length; x++)
+                {
+                    ref var pixel = ref row[x];
+                    var distance = ColorDistance(pixel, background);
+                    if (distance <= tolerance)
+                    {
+                        pixel.A = 0;
+                        removed++;
+                    }
+                    else if (distance <= tolerance + 18)
+                    {
+                        var alpha = (byte)Math.Clamp((distance - tolerance) / 18d * 255d, 80d, 255d);
+                        pixel.A = (byte)Math.Min(pixel.A, alpha);
+                    }
+                }
+            }
+        });
+
+        request.AssetHasAlphaAfter = HasMeaningfulAlpha(asset);
+        request.AssetBackgroundRemoved = removed > 0;
+        request.AssetBackgroundRemovalMethod = removed > 0 ? "corner_color_alpha_mask" : "none_no_matching_pixels";
+    }
+
+    private static bool HasMeaningfulAlpha(Image<Rgba32> image)
+    {
+        var hasAlpha = false;
+        image.ProcessPixelRows(accessor =>
+        {
+            for (var y = 0; y < accessor.Height && !hasAlpha; y++)
+            {
+                var row = accessor.GetRowSpan(y);
+                for (var x = 0; x < row.Length; x++)
+                {
+                    if (row[x].A < 250)
+                    {
+                        hasAlpha = true;
+                        break;
+                    }
+                }
+            }
+        });
+        return hasAlpha;
+    }
+
+    private static Rgba32 AverageCornerColor(Image<Rgba32> image)
+    {
+        var sample = Math.Clamp(Math.Min(image.Width, image.Height) / 18, 4, 16);
+        long r = 0;
+        long g = 0;
+        long b = 0;
+        long count = 0;
+
+        image.ProcessPixelRows(accessor =>
+        {
+            AddCorner(accessor, 0, 0, sample, ref r, ref g, ref b, ref count);
+            AddCorner(accessor, accessor.Width - sample, 0, sample, ref r, ref g, ref b, ref count);
+            AddCorner(accessor, 0, accessor.Height - sample, sample, ref r, ref g, ref b, ref count);
+            AddCorner(accessor, accessor.Width - sample, accessor.Height - sample, sample, ref r, ref g, ref b, ref count);
+        });
+
+        if (count == 0)
+        {
+            return new Rgba32(255, 255, 255);
+        }
+
+        return new Rgba32((byte)(r / count), (byte)(g / count), (byte)(b / count));
+    }
+
+    private static void AddCorner(PixelAccessor<Rgba32> accessor, int startX, int startY, int size,
+        ref long r, ref long g, ref long b, ref long count)
+    {
+        var x0 = Math.Clamp(startX, 0, Math.Max(0, accessor.Width - 1));
+        var y0 = Math.Clamp(startY, 0, Math.Max(0, accessor.Height - 1));
+        var x1 = Math.Min(accessor.Width, x0 + size);
+        var y1 = Math.Min(accessor.Height, y0 + size);
+
+        for (var y = y0; y < y1; y++)
+        {
+            var row = accessor.GetRowSpan(y);
+            for (var x = x0; x < x1; x++)
+            {
+                r += row[x].R;
+                g += row[x].G;
+                b += row[x].B;
+                count++;
+            }
+        }
+    }
+
+    private static bool IsLightNeutral(Rgba32 color)
+    {
+        var max = Math.Max(color.R, Math.Max(color.G, color.B));
+        var min = Math.Min(color.R, Math.Min(color.G, color.B));
+        var brightness = (color.R + color.G + color.B) / 3d;
+        return brightness >= 178 && max - min <= 38;
+    }
+
+    private static double ColorDistance(Rgba32 a, Rgba32 b)
+    {
+        var dr = a.R - b.R;
+        var dg = a.G - b.G;
+        var db = a.B - b.B;
+        return Math.Sqrt(dr * dr + dg * dg + db * db);
     }
 
     private static void DrawBrandGlow(Image<Rgba32> image, int x, int y, int width, int height)
@@ -191,9 +331,9 @@ public sealed class BrandAssetCompositeService : IBrandAssetCompositeService
 
     private static void DrawPosterText(Image<Rgba32> image, BrandAssetCompositeRequest request)
     {
-        var headline = string.IsNullOrWhiteSpace(request.Headline) ? "REUP VIDEO TIKTOK" : request.Headline.Trim();
-        var subheadline = string.IsNullOrWhiteSpace(request.Subheadline) ? "SANG FACEBOOK" : request.Subheadline.Trim();
-        var footer = string.IsNullOrWhiteSpace(request.Footer) ? "XÂY DỰNG KÊNH TỰ ĐỘNG" : request.Footer.Trim();
+        var headline = string.IsNullOrWhiteSpace(request.Headline) ? "TODOX AI" : request.Headline.Trim();
+        var subheadline = string.IsNullOrWhiteSpace(request.Subheadline) ? "Dá»ŠCH Vá»¤ Tá»° Äá»˜NG HÃ“A" : request.Subheadline.Trim();
+        var footer = string.IsNullOrWhiteSpace(request.Footer) ? "TodoX" : request.Footer.Trim();
 
         var fontFamily = ResolveFontFamily();
         var headlineFont = fontFamily.CreateFont(Math.Max(36, image.Width / 12), FontStyle.Bold);
@@ -245,3 +385,4 @@ public sealed class BrandAssetCompositeService : IBrandAssetCompositeService
         return SystemFonts.Collection.Families.First();
     }
 }
+
