@@ -66,6 +66,18 @@
                     }
 
                     <MudGrid Class="mt-2">
+                        <MudItem xs="12">
+                            <MudSelect T="string" Label="Công cụ render" @bind-Value="_renderEngineMode" Variant="Variant.Outlined" Margin="Margin.Dense">
+                                <MudSelectItem Value="@("legacy_chibi")">Hiện tại - Chibi Engine</MudSelectItem>
+                                <MudSelectItem Value="@("image_ai_creative")">Thử nghiệm - ImageAICreativeRender</MudSelectItem>
+                            </MudSelect>
+                            @if (_renderEngineMode == ChibiRenderEngineModes.ImageAiCreative)
+                            {
+                                <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2">
+                                    Bạn đang chạy bằng engine thử nghiệm. Hãy so sánh kết quả với engine hiện tại trước khi chuyển chính thức.
+                                </MudAlert>
+                            }
+                        </MudItem>
                         <MudItem xs="12" sm="4">
                             <MudSelect T="string" Label="Kieu nhan vat" Value="@_characterType" ValueChanged="OnCharacterTypeChanged" Variant="Variant.Outlined" Margin="Margin.Dense">
                                 <MudSelectItem Value="@("chibi")">Chibi</MudSelectItem>
@@ -127,6 +139,16 @@
                 <MudPaper Class="todox-card pa-5" Rounded="true">
                     <MudText Typo="Typo.h6">Kết quả</MudText>
                     <MudDivider Class="my-3" />
+                    @if (_result is not null)
+                    {
+                        <MudAlert Severity="@(_result.RenderEngineMode == ChibiRenderEngineModes.ImageAiCreative ? Severity.Warning : Severity.Info)" Dense="true" Class="mb-3">
+                            Engine: <b>@EngineLabel(_result.RenderEngineMode)</b>
+                            @if (!string.IsNullOrWhiteSpace(_result.LogCode))
+                            {
+                                <span> · Log: <b>@_result.LogCode</b></span>
+                            }
+                        </MudAlert>
+                    }
                     @if (!string.IsNullOrWhiteSpace(_lastError))
                     {
                         <MudAlert Severity="Severity.Error" Class="mb-3" ContentAlignment="HorizontalAlignment.Left"
@@ -199,6 +221,7 @@
                                             </MudStack>
                                             <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="mt-2">
                                                 <MudText Typo="Typo.caption">Log: @(img.LogCode ?? _result?.LogCode ?? "-")</MudText>
+                                                <MudText Typo="Typo.caption">Engine: @EngineLabel(img.RenderEngineMode ?? _result?.RenderEngineMode)</MudText>
                                                 @if (!string.IsNullOrWhiteSpace(img.LogCode ?? _result?.LogCode))
                                                 {
                                                     <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Info" OnClick="@(() => OpenLog(img.LogCode ?? _result!.LogCode!))">Xem chi tiet log</MudButton>
@@ -228,6 +251,7 @@
     private string? _characterType = "chibi";
     private string? _cameraAngle = "half_body";
     private string? _outfit = "vest";
+    private string _renderEngineMode = ChibiRenderEngineModes.LegacyChibi;
     private int _count = 3;
     private string _basePrompt = string.Empty;
     private string? _productImageUrl;
@@ -527,7 +551,7 @@
         {
             Step = "UI_RENDER_SUBMITTED",
             Message = "User submitted chibi render request.",
-            Data = new { count = Math.Clamp(_count, 1, 4), hasAvatar = _avatarMedia is not null, hasLogo = _logoMedia is not null, hasProduct = _productMedia is not null }
+            Data = new { renderEngineMode = _renderEngineMode, count = Math.Clamp(_count, 1, 4), hasAvatar = _avatarMedia is not null, hasLogo = _logoMedia is not null, hasProduct = _productMedia is not null }
         });
         await InvokeAsync(StateHasChanged);
         await Task.Yield();
@@ -549,7 +573,8 @@
                 ProductMediaId = _productMedia?.Id,
                 ProductImageUrl = _productImageUrl,
                 UniformMediaId = _uniformMedia?.Id,
-                SceneMediaId = _sceneMedia?.Id
+                SceneMediaId = _sceneMedia?.Id,
+                RenderEngineMode = _renderEngineMode
             });
             await RefreshBalance();
             if (!string.IsNullOrWhiteSpace(_result.Error))
@@ -667,4 +692,9 @@
         var data = entry.Data is null ? string.Empty : " " + JsonSerializer.Serialize(entry.Data);
         return $"[{entry.Timestamp:HH:mm:ss}] {entry.Level.ToUpperInvariant()} {entry.Step}: {entry.Message}{data}";
     }
+
+    private static string EngineLabel(string? engineMode)
+        => ChibiRenderEngineModes.Normalize(engineMode) == ChibiRenderEngineModes.ImageAiCreative
+            ? "ImageAICreativeRender"
+            : "Hiện tại - Chibi Engine";
 }

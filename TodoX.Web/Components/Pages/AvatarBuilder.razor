@@ -1,0 +1,320 @@
+@page "/avatar-builder"
+@using Microsoft.AspNetCore.Components.Forms
+@using TodoX.Web.Components.Avatar
+@using TodoX.Web.Services.AvatarTemplates
+@inject IAvatarTemplateService AvatarTemplates
+@inject ISnackbar Snackbar
+
+<PageTitle>Avatar Builder</PageTitle>
+
+<MudStack Spacing="4">
+    <div>
+        <MudText Typo="Typo.h3" Class="todox-page-title">Avatar Builder</MudText>
+        <MudText Typo="Typo.body1" Class="todox-page-subtitle">Tải ảnh lên, chọn mẫu avatar và render ngay bằng ImageAICreativeRender.</MudText>
+    </div>
+
+    <MudPaper Class="todox-card pa-5" Rounded="true">
+        <MudText Typo="Typo.h6">Ảnh tham chiếu</MudText>
+        <MudDivider Class="my-3" />
+        <AvatarEditorForm Model="_builderModel"
+                          ShowName="false"
+                          ShowDescription="false"
+                          ShowPublicFlags="false"
+                          ShowUploads="true"
+                          AvatarUrl="@Url("avatar")"
+                          LogoUrl="@Url("logo")"
+                          ProductUrl="@Url("product")"
+                          UniformUrl="@Url("uniform")"
+                          SceneUrl="@Url("scene")"
+                          OnUpload="Upload"
+                          OnClear="ClearMedia" />
+    </MudPaper>
+
+    <MudPaper Class="todox-card pa-5" Rounded="true">
+        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
+            <div>
+                <MudText Typo="Typo.h6">Avatar mẫu</MudText>
+                <MudText Typo="Typo.body2" Class="todox-page-subtitle">Chọn một mẫu, chỉnh prompt nếu cần rồi render lại.</MudText>
+            </div>
+            @if (_loading)
+            {
+                <MudProgressCircular Indeterminate="true" Size="Size.Small" Color="Color.Warning" />
+            }
+        </MudStack>
+        <MudDivider Class="my-3" />
+
+        @if (!_loading && _templates.Count == 0)
+        {
+            <MudAlert Severity="Severity.Info">Chưa có avatar mẫu công khai. Admin cần tạo mẫu ở trang quản lý avatar.</MudAlert>
+        }
+        else
+        {
+            <MudGrid Class="avatar-template-gallery">
+                @foreach (var template in _templates)
+                {
+                    <MudItem xs="12" sm="6" md="4" lg="3">
+                        <MudPaper Class='@($"todox-card avatar-template-card {(template.Id == _selected?.Id ? "is-selected" : string.Empty)}")' Rounded="true">
+                            <div class="avatar-template-card-media">
+                                @if (!string.IsNullOrWhiteSpace(template.PreviewMediaUrl))
+                                {
+                                    <img src="@template.PreviewMediaUrl" alt="@template.Name" />
+                                }
+                                else
+                                {
+                                    <MudIcon Icon="@Icons.Material.Filled.FaceRetouchingNatural" Size="Size.Large" />
+                                }
+                            </div>
+                            <div class="avatar-template-card-body">
+                                <MudText Typo="Typo.h6">@template.Name</MudText>
+                                <MudText Typo="Typo.body2" Class="todox-page-subtitle avatar-template-desc">@template.Description</MudText>
+                                <MudStack Row="true" Spacing="1" Class="mt-2 flex-wrap">
+                                    <span class="todox-badge">@template.CharacterTypeDisplayVi</span>
+                                    <span class="todox-badge">@template.GenderDisplayVi</span>
+                                </MudStack>
+                                <MudButton FullWidth="true" Class="todox-primary-btn mt-3" StartIcon="@Icons.Material.Filled.Check"
+                                           OnClick="@(() => SelectTemplate(template))">
+                                    Chọn mẫu
+                                </MudButton>
+                            </div>
+                        </MudPaper>
+                    </MudItem>
+                }
+            </MudGrid>
+        }
+    </MudPaper>
+
+    @if (_selected is not null)
+    {
+        <MudGrid>
+            <MudItem xs="12" md="6">
+                <MudPaper Class="todox-card pa-5" Rounded="true">
+                    <MudText Typo="Typo.h6">Chỉnh prompt và render</MudText>
+                    <MudDivider Class="my-3" />
+                    <MudTextField T="string" Label="Prompt" @bind-Value="_builderModel.PromptTemplate" Variant="Variant.Outlined" Lines="9" />
+                    <MudGrid Class="mt-2">
+                        <MudItem xs="12" sm="6">
+                            <MudSelect T="string" Label="Kiểu nhân vật" @bind-Value="_builderModel.CharacterTypeCode" Variant="Variant.Outlined" Margin="Margin.Dense">
+                                @foreach (var option in AvatarOptionCatalog.CharacterTypes)
+                                {
+                                    <MudSelectItem Value="@option.Code">@option.DisplayVi</MudSelectItem>
+                                }
+                            </MudSelect>
+                        </MudItem>
+                        <MudItem xs="12" sm="6">
+                            <MudSelect T="string" Label="Giới tính" @bind-Value="_builderModel.GenderCode" Variant="Variant.Outlined" Margin="Margin.Dense">
+                                @foreach (var option in AvatarOptionCatalog.Genders)
+                                {
+                                    <MudSelectItem Value="@option.Code">@option.DisplayVi</MudSelectItem>
+                                }
+                            </MudSelect>
+                        </MudItem>
+                        <MudItem xs="12" sm="6">
+                            <MudSelect T="string" Label="Góc máy" @bind-Value="_builderModel.CameraAngleCode" Variant="Variant.Outlined" Margin="Margin.Dense">
+                                @foreach (var option in AvatarOptionCatalog.CameraAngles)
+                                {
+                                    <MudSelectItem Value="@option.Code">@option.DisplayVi</MudSelectItem>
+                                }
+                            </MudSelect>
+                        </MudItem>
+                        <MudItem xs="12" sm="6">
+                            <MudSelect T="string" Label="Trang phục" @bind-Value="_builderModel.OutfitCode" Variant="Variant.Outlined" Margin="Margin.Dense">
+                                @foreach (var option in AvatarOptionCatalog.Outfits)
+                                {
+                                    <MudSelectItem Value="@option.Code">@option.DisplayVi</MudSelectItem>
+                                }
+                            </MudSelect>
+                        </MudItem>
+                    </MudGrid>
+                    <MudButton Class="todox-primary-btn mt-3" FullWidth="true" StartIcon="@Icons.Material.Filled.AutoAwesome"
+                               Disabled="@_busy" OnClick="Render">
+                        @(_busy ? "Đang render..." : "Render lại")
+                    </MudButton>
+                    @if (_busy)
+                    {
+                        <MudProgressLinear Indeterminate="true" Color="Color.Warning" Class="mt-2" />
+                    }
+                </MudPaper>
+            </MudItem>
+            <MudItem xs="12" md="6">
+                <MudPaper Class="todox-card pa-5" Rounded="true">
+                    <MudText Typo="Typo.h6">Ảnh kết quả</MudText>
+                    <MudDivider Class="my-3" />
+                    @if (_result?.ImageUrl is null)
+                    {
+                        <div class="avatar-builder-empty">
+                            <MudIcon Icon="@Icons.Material.Filled.Image" Size="Size.Large" />
+                            <MudText Class="todox-page-subtitle">Chưa có ảnh render trong phiên này.</MudText>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="avatar-builder-result">
+                            <img src="@_result.ImageUrl" alt="Ảnh avatar đã render" />
+                        </div>
+                        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="mt-3 flex-wrap gap-2">
+                            <MudText>LogCode: <b>@(_result.LogCode ?? "-")</b></MudText>
+                            <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Download"
+                                       Href="@_result.ImageUrl" Target="_blank" OnClick="TrackDownload">
+                                Tải xuống
+                            </MudButton>
+                        </MudStack>
+                    }
+
+                    @if (!string.IsNullOrWhiteSpace(_result?.Error))
+                    {
+                        <MudAlert Severity="Severity.Error" Class="mt-3">@_result.Error</MudAlert>
+                    }
+
+                    @if (_logs.Count > 0)
+                    {
+                        <MudExpansionPanels Class="mt-3" Elevation="0">
+                            <MudExpansionPanel Text="Nhật ký render">
+                                <pre class="avatar-builder-log">@string.Join(Environment.NewLine, _logs.Select(FormatLog))</pre>
+                            </MudExpansionPanel>
+                        </MudExpansionPanels>
+                    }
+                </MudPaper>
+            </MudItem>
+        </MudGrid>
+    }
+</MudStack>
+
+@code {
+    private bool _loading = true;
+    private bool _busy;
+    private List<AvatarTemplateDto> _templates = new();
+    private AvatarTemplateDto? _selected;
+    private AvatarTemplateEditModel _builderModel = new();
+    private PublicAvatarBuilderRenderResult? _result;
+    private readonly Dictionary<string, string?> _urls = new(StringComparer.OrdinalIgnoreCase);
+    private readonly List<RenderLogEntry> _logs = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _logs.Add(new RenderLogEntry { Step = "PUBLIC_AVATAR_BUILDER_OPENED", Message = "Public avatar builder opened." });
+        _templates = (await AvatarTemplates.ListAsync(publicOnly: true)).ToList();
+        _selected = _templates.FirstOrDefault();
+        if (_selected is not null)
+        {
+            ApplyTemplate(_selected);
+        }
+        _loading = false;
+    }
+
+    private void SelectTemplate(AvatarTemplateDto template)
+    {
+        _selected = template;
+        ApplyTemplate(template);
+        _result = null;
+        _logs.Add(new RenderLogEntry { Step = "PUBLIC_AVATAR_TEMPLATE_SELECTED", Message = "Public avatar template selected.", Data = new { template.Id, template.Name } });
+    }
+
+    private void ApplyTemplate(AvatarTemplateDto template)
+    {
+        _builderModel.Name = template.Name;
+        _builderModel.Description = template.Description;
+        _builderModel.PromptTemplate = template.PromptTemplate;
+        _builderModel.CharacterTypeCode = template.CharacterTypeCode ?? "chibi";
+        _builderModel.GenderCode = template.GenderCode ?? "neutral";
+        _builderModel.CameraAngleCode = template.CameraAngleCode ?? "half_body";
+        _builderModel.OutfitCode = template.OutfitCode ?? "suit";
+    }
+
+    private async Task Upload((string Slot, IBrowserFile File) args)
+    {
+        try
+        {
+            if (args.File.Size > 10 * 1024 * 1024)
+            {
+                Snackbar.Add("Ảnh vượt quá 10MB.", Severity.Error);
+                return;
+            }
+
+            using var ms = new MemoryStream();
+            await args.File.OpenReadStream(10 * 1024 * 1024).CopyToAsync(ms);
+            var media = await AvatarTemplates.SavePublicUploadAsync(ms.ToArray(), args.File.Name, args.File.ContentType);
+            SetMedia(args.Slot, media.Id, media.PublicUrl ?? media.FileUrl);
+            _logs.Add(new RenderLogEntry { Step = "PUBLIC_AVATAR_UPLOAD_COMPLETED", Message = "Public upload completed.", Data = new { args.Slot, media.Id, media.PublicUrl } });
+            Snackbar.Add("Đã tải ảnh.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Lỗi tải ảnh: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private Task ClearMedia(string slot)
+    {
+        SetMedia(slot, null, null);
+        return Task.CompletedTask;
+    }
+
+    private async Task Render()
+    {
+        if (_selected is null) return;
+        _busy = true;
+        _logs.Add(new RenderLogEntry { Step = "PUBLIC_AVATAR_RENDER_REQUESTED", Message = "Public avatar render requested.", Data = new { templateId = _selected.Id } });
+        try
+        {
+            _result = await AvatarTemplates.RenderPublicAsync(new PublicAvatarBuilderRenderRequest
+            {
+                TemplateId = _selected.Id,
+                PromptOverride = _builderModel.PromptTemplate,
+                CharacterTypeCode = _builderModel.CharacterTypeCode,
+                GenderCode = _builderModel.GenderCode,
+                CameraAngleCode = _builderModel.CameraAngleCode,
+                OutfitCode = _builderModel.OutfitCode,
+                AvatarMediaId = _builderModel.AvatarMediaId,
+                LogoMediaId = _builderModel.LogoMediaId,
+                ProductMediaId = _builderModel.ProductMediaId,
+                UniformMediaId = _builderModel.UniformMediaId,
+                SceneMediaId = _builderModel.SceneMediaId
+            });
+            _logs.AddRange(_result.Logs);
+            _logs.Add(new RenderLogEntry
+            {
+                Step = _result.Ok ? "PUBLIC_AVATAR_RENDER_COMPLETED" : "PUBLIC_AVATAR_RENDER_FAILED",
+                Message = _result.Ok ? "Public render completed." : _result.Error ?? "Public render failed.",
+                Level = _result.Ok ? "info" : "error",
+                Data = new { _result.LogCode, _result.MediaId, _result.ImageUrl }
+            });
+            Snackbar.Add(_result.Ok ? "Đã render avatar." : _result.Error ?? "Render thất bại.", _result.Ok ? Severity.Success : Severity.Error);
+        }
+        catch (Exception ex)
+        {
+            _result = new PublicAvatarBuilderRenderResult { Ok = false, Status = "failed", Error = ex.Message };
+            _logs.Add(new RenderLogEntry { Step = "PUBLIC_AVATAR_RENDER_FAILED", Message = ex.Message, Level = "error" });
+            Snackbar.Add($"Lỗi render: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void TrackDownload()
+    {
+        _logs.Add(new RenderLogEntry { Step = "PUBLIC_AVATAR_DOWNLOAD_TRIGGERED", Message = "User clicked download.", Data = new { _result?.ImageUrl } });
+    }
+
+    private void SetMedia(string slot, Guid? mediaId, string? url)
+    {
+        _urls[slot] = url;
+        switch (slot)
+        {
+            case "avatar": _builderModel.AvatarMediaId = mediaId; break;
+            case "logo": _builderModel.LogoMediaId = mediaId; break;
+            case "product": _builderModel.ProductMediaId = mediaId; break;
+            case "uniform": _builderModel.UniformMediaId = mediaId; break;
+            case "scene": _builderModel.SceneMediaId = mediaId; break;
+        }
+    }
+
+    private string? Url(string slot) => _urls.TryGetValue(slot, out var url) ? url : null;
+
+    private static string FormatLog(RenderLogEntry entry)
+    {
+        var level = string.IsNullOrWhiteSpace(entry.Level) ? "info" : entry.Level;
+        return $"[{entry.Timestamp:HH:mm:ss}] {level.ToUpperInvariant()} {entry.Step}: {entry.Message}";
+    }
+}

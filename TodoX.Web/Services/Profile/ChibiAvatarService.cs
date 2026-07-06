@@ -15,6 +15,7 @@ public sealed class ChibiImage
     public Guid MediaId { get; set; }
     public int Index { get; set; }
     public string? LogCode { get; set; }
+    public string? RenderEngineMode { get; set; }
     public string? Url { get; set; }
     public string? PromptInput { get; set; }
     public string? PromptUsed { get; set; }
@@ -27,6 +28,7 @@ public sealed class ChibiGenerationDto
     public Guid Id { get; set; }
     public Guid RenderJobId { get; set; }
     public string? LogCode { get; set; }
+    public string RenderEngineMode { get; set; } = ChibiRenderEngineModes.LegacyChibi;
     public string Status { get; set; } = string.Empty;
     public string? GeneratedPrompt { get; set; }
     public List<ChibiImage> Images { get; set; } = new();
@@ -57,6 +59,34 @@ public sealed class ChibiGenerateInput
     public string? ProductImageUrl { get; set; }
     public Guid? UniformMediaId { get; set; }
     public Guid? SceneMediaId { get; set; }
+    public string? RenderEngineMode { get; set; } = ChibiRenderEngineModes.LegacyChibi;
+}
+
+public static class ChibiRenderEngineModes
+{
+    public const string LegacyChibi = "legacy_chibi";
+    public const string ImageAiCreative = "image_ai_creative";
+
+    public static string Normalize(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return LegacyChibi;
+        }
+
+        var normalized = value.Trim().ToLowerInvariant();
+        return normalized switch
+        {
+            "current" => LegacyChibi,
+            "current_chibi" => LegacyChibi,
+            "legacy" => LegacyChibi,
+            "legacy_chibi" => LegacyChibi,
+            "image_ai_creative" => ImageAiCreative,
+            "image_ai_creative_endpoint" => ImageAiCreative,
+            "imageaicreativerender" => ImageAiCreative,
+            _ => LegacyChibi
+        };
+    }
 }
 
 public interface IChibiAvatarService
@@ -78,6 +108,7 @@ public sealed partial class ChibiAvatarService : IChibiAvatarService
     private readonly IMediaFileService _media;
     private readonly IPromptTemplateService _promptTemplates;
     private readonly IAvatarService _avatars;
+    private readonly IImageAICreativeRenderService _creativeRender;
     private readonly GeminiPromptService _gemini;
     private readonly AvatarRenderActivityLogService _activityLogs;
     private readonly WalletService _wallet;
@@ -88,7 +119,8 @@ public sealed partial class ChibiAvatarService : IChibiAvatarService
     private const string FallbackPromptTemplate = "Create exactly 3 premium 3D chibi avatar variations based on the user avatar reference if available. Gender: {{GENDER}}. Style: cute, professional, friendly, modern, premium Pixar-quality 3D collectible mascot, suitable for TodoX SaaS profile avatar. Preserve recognizable facial identity from the avatar reference without making it photorealistic. Use large expressive eyes, friendly smile, cute proportions about 3 heads tall, clean centered square avatar composition, soft global illumination, luxury golden lighting, high detail. If a logo reference is provided, integrate brand colors or a small tasteful logo badge naturally on clothing/accessory/background. If a product reference is provided, the final avatar image MUST clearly include the exact product inside the frame, preserving the product shape, color, packaging, logo, label, material, and distinctive details. If background reference is provided, use it only as inspiration and redesign into a simplified cinematic background, do not copy exactly. No text, no watermark, no extra fingers, no bad anatomy, no cropped face. Output PNG, square 1:1.";
 
     public ChibiAvatarService(TodoXConnectionFactory factory, IImageRenderService render,
-        IMediaFileService media, IPromptTemplateService promptTemplates, IAvatarService avatars, GeminiPromptService gemini,
+        IMediaFileService media, IPromptTemplateService promptTemplates, IAvatarService avatars,
+        IImageAICreativeRenderService creativeRender, GeminiPromptService gemini,
         AvatarRenderActivityLogService activityLogs, WalletService wallet,
         TokenSettingsService tokenSettings, TenantContext tenant, ILogger<ChibiAvatarService> logger)
     {
@@ -97,6 +129,7 @@ public sealed partial class ChibiAvatarService : IChibiAvatarService
         _media = media;
         _promptTemplates = promptTemplates;
         _avatars = avatars;
+        _creativeRender = creativeRender;
         _gemini = gemini;
         _activityLogs = activityLogs;
         _wallet = wallet;

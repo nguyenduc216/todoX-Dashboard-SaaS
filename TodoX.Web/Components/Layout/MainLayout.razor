@@ -120,6 +120,12 @@
                     Quản lý dịch vụ
                 </MudNavLink>
             }
+            @if (CanAdminAvatarManager)
+            {
+                <MudNavLink Href="/admin/avatar-manager" Icon="@Icons.Material.Filled.FaceRetouchingNatural">
+                    Quản lý avatar mẫu
+                </MudNavLink>
+            }
             @if (CanModule("render_jobs"))
             {
                 <MudNavLink Href="/render-jobs" Icon="@Icons.Material.Filled.Movie">
@@ -250,6 +256,7 @@
         return path is "/privacy"
             or "/terms"
             or "/data-deletion"
+            or "/avatar-builder"
             or "/auth/facebook/callback"
             or "/login"
             or "/register"
@@ -272,6 +279,12 @@
     private string AvatarText => string.IsNullOrWhiteSpace(UserDisplayName)
         ? "U"
         : UserDisplayName.Trim()[0].ToString().ToUpperInvariant();
+
+    private bool CanAdminAvatarManager
+        => AuthState.CurrentUser?.IsRoot == true
+           || AuthState.CurrentUser?.Role is TodoXUserRole.Admin or TodoXUserRole.SystemOperator
+           || CanModule("settings")
+           || CanModule("services");
 
     private void ToggleDrawer() => _drawerOpen = !_drawerOpen;
 

@@ -62,7 +62,9 @@ builder.Services.AddScoped<TodoX.Web.Services.ImageRender.MarketingImageRenderSe
 builder.Services.AddScoped<TodoX.Web.Services.Profile.IAvatarService, TodoX.Web.Services.Profile.AvatarService>();
 builder.Services.AddHttpClient<TodoX.Web.Services.Profile.GeminiPromptService>();
 builder.Services.AddScoped<TodoX.Web.Services.Profile.AvatarRenderActivityLogService>();
+builder.Services.AddScoped<TodoX.Web.Services.Profile.IImageAICreativeRenderService, TodoX.Web.Services.Profile.ImageAICreativeRenderService>();
 builder.Services.AddScoped<TodoX.Web.Services.Profile.IChibiAvatarService, TodoX.Web.Services.Profile.ChibiAvatarService>();
+builder.Services.AddScoped<TodoX.Web.Services.AvatarTemplates.IAvatarTemplateService, TodoX.Web.Services.AvatarTemplates.AvatarTemplateService>();
 builder.Services.AddScoped<AccountService>();
 builder.Services.AddScoped<AuthStateService>();
 builder.Services.AddScoped<StartupSeedFixer>();
@@ -86,6 +88,8 @@ using (var scope = app.Services.CreateScope())
     await tokenSettings.EnsureDefaultsAsync();
     var mrTodoX = scope.ServiceProvider.GetRequiredService<MrTodoXAvatarService>();
     await mrTodoX.EnsureDefaultsAsync();
+    var avatarTemplates = scope.ServiceProvider.GetRequiredService<TodoX.Web.Services.AvatarTemplates.IAvatarTemplateService>();
+    await avatarTemplates.EnsureSchemaAsync();
     var wallets = scope.ServiceProvider.GetRequiredService<WalletService>();
     await wallets.SeedCustomerWalletsAsync();
 }
@@ -227,6 +231,179 @@ extensionApi.MapGet("/download", async (
     var package = await packages.CreateForUserAsync(user.CustomerId.Value, user.UserId, ct);
     return Results.File(package.Bytes, package.ContentType, package.FileName);
 });
+
+static bool IsHttpAdmin(AuthStateService auth)
+    => auth.CurrentUser?.IsRoot == true
+       || auth.CurrentUser?.Role is TodoXUserRole.Admin or TodoXUserRole.SystemOperator;
+
+var adminAvatarApi = app.MapGroup("/api/admin/avatar-templates");
+
+adminAvatarApi.MapGet("/", async (
+    AuthStateService auth,
+    TodoX.Web.Services.AvatarTemplates.IAvatarTemplateService templates,
+    CancellationToken ct) =>
+{
+    if (!IsHttpAdmin(auth)) return UnauthorizedJson("Bạn cần quyền quản trị để xem avatar mẫu.");
+    return Results.Json(await templates.ListAsync(publicOnly: false, ct));
+});
+
+adminAvatarApi.MapGet("/{id:guid}", async (
+    Guid id,
+    AuthStateService auth,
+    TodoX.Web.Services.AvatarTemplates.IAvatarTemplateService templates,
+    CancellationToken ct) =>
+{
+    if (!IsHttpAdmin(auth)) return UnauthorizedJson("Bạn cần quyền quản trị để xem avatar mẫu.");
+    var item = await templates.GetAsync(id, ct);
+    return item is null ? Results.NotFound() : Results.Json(item);
+});
+
+adminAvatarApi.MapPost("/render-preview", async (
+    TodoX.Web.Services.AvatarTemplates.AvatarTemplateRenderPreviewRequest body,
+    AuthStateService auth,
+    TodoX.Web.Services.AvatarTemplates.IAvatarTemplateService templates,
+    CancellationToken ct) =>
+{
+    if (!IsHttpAdmin(auth) || auth.CurrentUser is null) return UnauthorizedJson("Bạn cần quyền quản trị để render avatar mẫu.");
+    var result = await templates.RenderPreviewAsync(body.Template, auth.CurrentUser.UserId, auth.CurrentUser.CustomerId, ct);
+    return Results.Json(result);
+}).DisableAntiforgery();
+
+adminAvatarApi.MapPost("/", async (
+    TodoX.Web.Services.AvatarTemplates.AvatarTemplateEditModel body,
+    AuthStateService auth,
+    TodoX.Web.Services.AvatarTemplates.IAvatarTemplateService templates,
+    CancellationToken ct) =>
+{
+    if (!IsHttpAdmin(auth)) return UnauthorizedJson("Bạn cần quyền quản trị để lưu avatar mẫu.");
+    var saved = await templates.SaveAsync(body, auth.CurrentUser?.UserId, ct);
+    return Results.Json(saved);
+}).DisableAntiforgery();
+
+adminAvatarApi.MapPut("/{id:guid}", async (
+    Guid id,
+    TodoX.Web.Services.AvatarTemplates.AvatarTemplateEditModel body,
+    AuthStateService auth,
+    TodoX.Web.Services.AvatarTemplates.IAvatarTemplateService templates,
+    CancellationToken ct) =>
+{
+    if (!IsHttpAdmin(auth)) return UnauthorizedJson("Bạn cần quyền quản trị để cập nhật avatar mẫu.");
+    body.Id = id;
+    var saved = await templates.SaveAsync(body, auth.CurrentUser?.UserId, ct);
+    return Results.Json(saved);
+}).DisableAntiforgery();
+
+adminAvatarApi.MapDelete("/{id:guid}", async (
+    Guid id,
+    AuthStateService auth,
+    TodoX.Web.Services.AvatarTemplates.IAvatarTemplateService templates,
+    CancellationToken ct) =>
+{
+    if (!IsHttpAdmin(auth)) return UnauthorizedJson("Bạn cần quyền quản trị để xóa avatar mẫu.");
+    await templates.DeleteAsync(id, auth.CurrentUser?.UserId, ct);
+    return Results.Json(new { success = true });
+});
+
+adminAvatarApi.MapPost("/{id:guid}/toggle-public", async (
+    Guid id,
+    AuthStateService auth,
+    TodoX.Web.Services.AvatarTemplates.IAvatarTemplateService templates,
+    CancellationToken ct) =>
+{
+    if (!IsHttpAdmin(auth)) return UnauthorizedJson("Bạn cần quyền quản trị để đổi trạng thái avatar mẫu.");
+    await templates.TogglePublicAsync(id, auth.CurrentUser?.UserId, ct);
+    return Results.Json(new { success = true });
+}).DisableAntiforgery();
+
+var publicAvatarApi = app.MapGroup("/api/public/avatar-builder");
+
+publicAvatarApi.MapGet("/templates", async (
+    TodoX.Web.Services.AvatarTemplates.IAvatarTemplateService templates,
+    CancellationToken ct) => Results.Json(await templates.ListAsync(publicOnly: true, ct)));
+
+publicAvatarApi.MapPost("/upload", async (
+    HttpRequest request,
+    TodoX.Web.Services.AvatarTemplates.IAvatarTemplateService templates,
+    CancellationToken ct) =>
+{
+    if (!request.HasFormContentType)
+    {
+        return Results.BadRequest(new { success = false, message = "Yêu cầu upload phải là multipart/form-data." });
+    }
+
+    var form = await request.ReadFormAsync(ct);
+    var file = form.Files.FirstOrDefault();
+    if (file is null || file.Length == 0)
+    {
+        return Results.BadRequest(new { success = false, message = "Thiếu file ảnh." });
+    }
+    if (file.Length > 10 * 1024 * 1024)
+    {
+        return Results.BadRequest(new { success = false, message = "Ảnh vượt quá 10MB." });
+    }
+
+    await using var stream = file.OpenReadStream();
+    using var ms = new MemoryStream();
+    await stream.CopyToAsync(ms, ct);
+    var media = await templates.SavePublicUploadAsync(ms.ToArray(), file.FileName, file.ContentType, ct);
+    return Results.Json(new
+    {
+        success = true,
+        mediaId = media.Id,
+        url = media.PublicUrl ?? media.FileUrl
+    });
+}).DisableAntiforgery();
+
+publicAvatarApi.MapPost("/render", async (
+    TodoX.Web.Services.AvatarTemplates.PublicAvatarBuilderRenderRequest body,
+    TodoX.Web.Services.AvatarTemplates.IAvatarTemplateService templates,
+    CancellationToken ct) =>
+{
+    var result = await templates.RenderPublicAsync(body, ct);
+    return Results.Json(result);
+}).DisableAntiforgery();
+
+app.MapPost("/api/image-ai-creative-render", async (
+    TodoX.Web.Services.Profile.ImageAICreativeRenderRequest body,
+    TodoX.Web.Services.Profile.IImageAICreativeRenderService creativeRender,
+    ILoggerFactory loggerFactory,
+    CancellationToken ct) =>
+{
+    var logger = loggerFactory.CreateLogger("ImageAICreativeRenderApi");
+    logger.LogInformation("API_IMAGE_AI_CREATIVE_RENDER_RECEIVED userId={UserId} customerId={CustomerId} scenario={Scenario} logCode={LogCode}",
+        body.UserId, body.CustomerId, body.Scenario, body.LogCode);
+
+    if (body.UserId == Guid.Empty)
+    {
+        logger.LogWarning("API_IMAGE_AI_CREATIVE_RENDER_FAILED missing user id scenario={Scenario}", body.Scenario);
+        return Results.BadRequest(new
+        {
+            success = false,
+            message = "Thieu UserId de render ImageAICreativeRender."
+        });
+    }
+
+    try
+    {
+        var result = await creativeRender.RenderAsync(body, ct);
+        logger.LogInformation("API_IMAGE_AI_CREATIVE_RENDER_COMPLETED userId={UserId} scenario={Scenario} logCode={LogCode} status={Status} imageCount={ImageCount}",
+            body.UserId, body.Scenario, result.LogCode, result.Status, result.Images.Count);
+        return Results.Json(result);
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "API_IMAGE_AI_CREATIVE_RENDER_FAILED userId={UserId} scenario={Scenario} logCode={LogCode}",
+            body.UserId, body.Scenario, body.LogCode);
+        return Results.Json(new
+        {
+            success = false,
+            status = "failed",
+            error = ex.Message
+        }, statusCode: StatusCodes.Status500InternalServerError);
+    }
+})
+.WithName("ImageAICreativeRender")
+.DisableAntiforgery();
 
 app.MapStaticAssets();
 app.MapRazorComponents<App>()

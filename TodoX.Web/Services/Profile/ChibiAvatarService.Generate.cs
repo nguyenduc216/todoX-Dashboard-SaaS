@@ -31,6 +31,21 @@ public sealed partial class ChibiAvatarService
 
         var generationId = Guid.NewGuid();
         AddLog("LOG_CODE_GENERATED", "Generated render log code.", new { logCode });
+        var engineMode = ChibiRenderEngineModes.Normalize(input.RenderEngineMode);
+        AddLog("CHIBI_RENDER_ENGINE_SELECTED", "Selected chibi render engine.", new
+        {
+            engineMode,
+            scenario = "avatar_chibi"
+        });
+
+        if (engineMode == ChibiRenderEngineModes.ImageAiCreative)
+        {
+            var request = MapToCreativeRequest(input, logCode);
+            var creativeResult = await _creativeRender.RenderAsync(request, ct);
+            creativeResult.Logs.InsertRange(0, logs);
+            return MapCreativeResultToChibiDto(creativeResult);
+        }
+
         if (!string.IsNullOrWhiteSpace(input.ProductImageUrl) && input.ProductMediaId is null)
         {
             try
@@ -58,6 +73,7 @@ public sealed partial class ChibiAvatarService
         AddLog("RENDER_REQUEST_RECEIVED", "Received chibi avatar render request.", new
         {
             renderJobId = generationId,
+            engineMode,
             requestedCount = input.Count,
             imageCount = count,
             input.Gender,
@@ -187,13 +203,13 @@ public sealed partial class ChibiAvatarService
             {
                 var d = result.Data[0];
                 var renderId = await InsertRenderAsync(generationId, input.UserId, d.MediaId, d.Url, finalPrompt, promptUsed, result.Model);
-                images.Add(new ChibiImage { Index = i, RenderId = renderId, MediaId = d.MediaId, Url = d.Url, PromptInput = finalPrompt, PromptUsed = promptUsed, LogCode = logCode });
+                images.Add(new ChibiImage { Index = i, RenderId = renderId, MediaId = d.MediaId, Url = d.Url, PromptInput = finalPrompt, PromptUsed = promptUsed, LogCode = logCode, RenderEngineMode = engineMode });
                 AddLog("RENDER_RESULT_STORED", $"Stored variation {i + 1}/{count}.", new { renderId, d.MediaId, d.Url, result.RequestId, result.Model });
             }
             else
             {
                 var renderId = await InsertRenderAsync(generationId, input.UserId, null, null, finalPrompt, promptUsed, result.Model, "failed", result.Error);
-                images.Add(new ChibiImage { Index = i, RenderId = renderId, Status = "failed", PromptInput = finalPrompt, PromptUsed = promptUsed, Error = result.Error, LogCode = logCode });
+                images.Add(new ChibiImage { Index = i, RenderId = renderId, Status = "failed", PromptInput = finalPrompt, PromptUsed = promptUsed, Error = result.Error, LogCode = logCode, RenderEngineMode = engineMode });
                 AddLog("GEMINI_IMAGE_RESPONSE", $"Variation {i + 1}/{count} failed.", new { renderId, result.RequestId, result.Error }, "error");
             }
         }
@@ -216,6 +232,7 @@ public sealed partial class ChibiAvatarService
             Id = generationId,
             RenderJobId = generationId,
             LogCode = logCode,
+            RenderEngineMode = engineMode,
             Status = status,
             GeneratedPrompt = finalPrompt,
             Images = images,
@@ -410,6 +427,7 @@ public sealed partial class ChibiAvatarService
         input.Gender,
         input.CameraAngle,
         input.Outfit,
+        renderEngineMode = ChibiRenderEngineModes.Normalize(input.RenderEngineMode),
         quantity = count,
         references = new
         {
@@ -422,6 +440,73 @@ public sealed partial class ChibiAvatarService
         },
         userEditedPrompt = !string.IsNullOrWhiteSpace(input.PromptOverride)
     };
+
+    private static ImageAICreativeRenderRequest MapToCreativeRequest(ChibiGenerateInput input, string logCode)
+    {
+        return new ImageAICreativeRenderRequest
+        {
+            UserId = input.UserId,
+            CustomerId = input.CustomerId,
+            IsCustomer = input.IsCustomer,
+            Scenario = "avatar_chibi",
+            CharacterType = input.CharacterType,
+            Gender = input.Gender,
+            CameraAngle = input.CameraAngle,
+            Outfit = input.Outfit,
+            Count = input.Count,
+            PromptTemplateKey = "avatar_chibi",
+            PromptLanguage = "vi",
+            BasePromptOverride = input.BasePromptOverride,
+            PromptOverride = input.PromptOverride,
+            AspectRatio = "1:1",
+            FileCategory = "chibi",
+            LogCode = logCode,
+            AvatarMediaId = input.AvatarMediaId,
+            LogoMediaId = input.LogoMediaId,
+            ProductMediaId = input.ProductMediaId,
+            ProductImageUrl = input.ProductImageUrl,
+            UniformMediaId = input.UniformMediaId,
+            SceneMediaId = input.SceneMediaId,
+            PreserveFixedAssets = false,
+            RequireReferenceImages = input.AvatarMediaId is not null
+                || input.LogoMediaId is not null
+                || input.ProductMediaId is not null
+                || input.UniformMediaId is not null
+                || input.SceneMediaId is not null
+        };
+    }
+
+    private static ChibiGenerationDto MapCreativeResultToChibiDto(ImageAICreativeRenderResult result)
+    {
+        return new ChibiGenerationDto
+        {
+            Id = result.RenderJobId,
+            RenderJobId = result.RenderJobId,
+            LogCode = result.LogCode,
+            RenderEngineMode = result.RenderEngineMode,
+            Status = result.Status,
+            GeneratedPrompt = result.GeneratedPrompt,
+            Images = result.Images.Select(x => new ChibiImage
+            {
+                Index = x.Index,
+                RenderId = x.RenderId ?? Guid.Empty,
+                MediaId = x.MediaId ?? Guid.Empty,
+                Url = x.Url,
+                PromptInput = x.PromptInput,
+                PromptUsed = x.PromptUsed,
+                Status = x.Status,
+                Error = x.Error,
+                LogCode = x.LogCode,
+                RenderEngineMode = result.RenderEngineMode
+            }).ToList(),
+            CreatedAt = result.CreatedAt,
+            UsedFallback = result.UsedFallback,
+            Error = result.Error,
+            Charged = result.Charged,
+            BalanceAfter = result.BalanceAfter,
+            Logs = result.Logs
+        };
+    }
 
     private static string EnsureRenderDirectives(string prompt, ChibiGenerateInput input, int count)
     {

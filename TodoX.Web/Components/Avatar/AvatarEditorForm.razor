@@ -1,0 +1,129 @@
+@using Microsoft.AspNetCore.Components.Forms
+@using TodoX.Web.Services.AvatarTemplates
+
+<MudStack Spacing="3">
+    @if (ShowName)
+    {
+        <MudTextField T="string" Label="Tên avatar" @bind-Value="Model.Name" Variant="Variant.Outlined" Margin="Margin.Dense" />
+    }
+
+    @if (ShowDescription)
+    {
+        <MudTextField T="string" Label="Mô tả" @bind-Value="Model.Description" Variant="Variant.Outlined" Margin="Margin.Dense" Lines="2" />
+    }
+
+    <MudTextField T="string" Label="Prompt" @bind-Value="Model.PromptTemplate" Variant="Variant.Outlined" Margin="Margin.Dense" Lines="7" />
+
+    <MudGrid>
+        <MudItem xs="12" sm="6">
+            <MudSelect T="string" Label="Kiểu nhân vật" @bind-Value="Model.CharacterTypeCode" Variant="Variant.Outlined" Margin="Margin.Dense">
+                @foreach (var option in AvatarOptionCatalog.CharacterTypes)
+                {
+                    <MudSelectItem Value="@option.Code">@option.DisplayVi</MudSelectItem>
+                }
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" sm="6">
+            <MudSelect T="string" Label="Giới tính" @bind-Value="Model.GenderCode" Variant="Variant.Outlined" Margin="Margin.Dense">
+                @foreach (var option in AvatarOptionCatalog.Genders)
+                {
+                    <MudSelectItem Value="@option.Code">@option.DisplayVi</MudSelectItem>
+                }
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" sm="6">
+            <MudSelect T="string" Label="Góc máy" @bind-Value="Model.CameraAngleCode" Variant="Variant.Outlined" Margin="Margin.Dense">
+                @foreach (var option in AvatarOptionCatalog.CameraAngles)
+                {
+                    <MudSelectItem Value="@option.Code">@option.DisplayVi</MudSelectItem>
+                }
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" sm="6">
+            <MudSelect T="string" Label="Trang phục" @bind-Value="Model.OutfitCode" Variant="Variant.Outlined" Margin="Margin.Dense">
+                @foreach (var option in AvatarOptionCatalog.Outfits)
+                {
+                    <MudSelectItem Value="@option.Code">@option.DisplayVi</MudSelectItem>
+                }
+            </MudSelect>
+        </MudItem>
+    </MudGrid>
+
+    @if (ShowUploads)
+    {
+        <MudGrid>
+            @UploadTile("avatar", "Ảnh avatar gốc", Model.AvatarMediaId, AvatarUrl)
+            @UploadTile("logo", "Logo", Model.LogoMediaId, LogoUrl)
+            @UploadTile("product", "Sản phẩm", Model.ProductMediaId, ProductUrl)
+            @UploadTile("uniform", "Đồng phục", Model.UniformMediaId, UniformUrl)
+            @UploadTile("scene", "Bối cảnh", Model.SceneMediaId, SceneUrl)
+        </MudGrid>
+    }
+
+    @if (ShowPublicFlags)
+    {
+        <MudGrid>
+            <MudItem xs="12" sm="4">
+                <MudSwitch T="bool" Label="Công khai" @bind-Value="Model.IsPublic" Color="Color.Warning" />
+            </MudItem>
+            <MudItem xs="12" sm="4">
+                <MudSwitch T="bool" Label="Đang hoạt động" @bind-Value="Model.IsActive" Color="Color.Success" />
+            </MudItem>
+            <MudItem xs="12" sm="4">
+                <MudNumericField T="int" Label="Thứ tự" @bind-Value="Model.SortOrder" Variant="Variant.Outlined" Margin="Margin.Dense" />
+            </MudItem>
+        </MudGrid>
+    }
+</MudStack>
+
+@code {
+    [Parameter, EditorRequired] public AvatarTemplateEditModel Model { get; set; } = new();
+    [Parameter] public bool ShowName { get; set; } = true;
+    [Parameter] public bool ShowDescription { get; set; } = true;
+    [Parameter] public bool ShowPublicFlags { get; set; }
+    [Parameter] public bool ShowUploads { get; set; } = true;
+    [Parameter] public string? AvatarUrl { get; set; }
+    [Parameter] public string? LogoUrl { get; set; }
+    [Parameter] public string? ProductUrl { get; set; }
+    [Parameter] public string? UniformUrl { get; set; }
+    [Parameter] public string? SceneUrl { get; set; }
+    [Parameter] public EventCallback<(string Slot, IBrowserFile File)> OnUpload { get; set; }
+    [Parameter] public EventCallback<string> OnClear { get; set; }
+
+    private RenderFragment UploadTile(string slot, string label, Guid? mediaId, string? url) => @<MudItem xs="12" sm="6" md="4">
+        <div class="avatar-template-upload">
+            <div class="avatar-template-thumb">
+                @if (!string.IsNullOrWhiteSpace(url))
+                {
+                    <img src="@url" alt="@label" />
+                }
+                else
+                {
+                    <MudIcon Icon="@Icons.Material.Filled.Image" />
+                }
+            </div>
+            <div class="avatar-template-upload-copy">
+                <MudText Typo="Typo.body2">@label</MudText>
+                <MudText Typo="Typo.caption" Class="todox-page-subtitle">@(mediaId is null ? "Chưa tải ảnh" : "Đã tải ảnh")</MudText>
+            </div>
+            <div class="avatar-template-upload-actions">
+                @if (mediaId is not null)
+                {
+                    <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" Color="Color.Error" OnClick="@(() => OnClear.InvokeAsync(slot))" />
+                }
+                <label class="avatar-upload-btn" title="Upload">
+                    <MudIcon Icon="@Icons.Material.Filled.Upload" Size="Size.Small" />
+                    <InputFile Class="avatar-hidden-file-input" OnChange="@(e => Upload(slot, e))" accept="image/png,image/jpeg,image/webp" />
+                </label>
+            </div>
+        </div>
+    </MudItem>;
+
+    private async Task Upload(string slot, InputFileChangeEventArgs args)
+    {
+        if (args.File is not null)
+        {
+            await OnUpload.InvokeAsync((slot, args.File));
+        }
+    }
+}
