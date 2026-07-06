@@ -29,6 +29,17 @@ public sealed class BrandAssetCompositeRequest
     public bool AssetBackgroundRemoved { get; set; }
     public string AssetBackgroundRemovalMethod { get; set; } = "none";
     public int AssetBackgroundRemovalTolerance { get; set; }
+    public bool AssetCroppedTransparentPadding { get; set; }
+    public int AssetOriginalWidth { get; set; }
+    public int AssetOriginalHeight { get; set; }
+    public int AssetProcessedWidth { get; set; }
+    public int AssetProcessedHeight { get; set; }
+    public double AssetOpaqueBrightPixelRatio { get; set; }
+    public double AssetAspectRatio { get; set; }
+    public double PlacementAspectRatio { get; set; }
+    public double AspectRatioDelta { get; set; }
+    public List<string> AssetWarnings { get; set; } = new();
+    public List<ServicePosterTextBoxResult> TextOverlayResults { get; set; } = new();
 }
 
 public sealed class BrandAssetCompositePlacement
@@ -39,6 +50,26 @@ public sealed class BrandAssetCompositePlacement
     public int AssetY { get; set; }
     public int AssetWidth { get; set; }
     public int AssetHeight { get; set; }
+}
+
+public sealed class ServicePosterRect
+{
+    public int X { get; set; }
+    public int Y { get; set; }
+    public int Width { get; set; }
+    public int Height { get; set; }
+}
+
+public sealed class ServicePosterTextBoxResult
+{
+    public string Name { get; set; } = string.Empty;
+    public bool Fit { get; set; }
+    public ServicePosterRect Box { get; set; } = new();
+    public ServicePosterRect UsedBounds { get; set; } = new();
+    public int FontSize { get; set; }
+    public int LineCount { get; set; }
+    public string RenderedText { get; set; } = string.Empty;
+    public string? Warning { get; set; }
 }
 
 public sealed class BrandAssetCompositeService : IBrandAssetCompositeService
@@ -74,11 +105,21 @@ public sealed class BrandAssetCompositeService : IBrandAssetCompositeService
 
         using var assetStream = new MemoryStream(assetBytes);
         using var asset = await Image.LoadAsync<Rgba32>(assetStream, ct);
+        request.AssetOriginalWidth = asset.Width;
+        request.AssetOriginalHeight = asset.Height;
         PrepareAssetTransparency(asset, request);
+        CropTransparentPadding(asset, request);
+        request.AssetProcessedWidth = asset.Width;
+        request.AssetProcessedHeight = asset.Height;
+        request.AssetOpaqueBrightPixelRatio = CalculateOpaqueBrightPixelRatio(asset);
+        if (request.AssetOpaqueBrightPixelRatio > 0.18)
+        {
+            request.AssetWarnings.Add("Robot/logo có thể còn nền trắng. Hãy upload PNG nền trong suốt.");
+        }
         var canvasWidth = background.Width;
         var canvasHeight = background.Height;
 
-        var targetHeight = (int)Math.Round(canvasHeight * 0.43);
+        var targetHeight = (int)Math.Round(canvasHeight * 0.35);
         var scale = targetHeight / (double)asset.Height;
         var targetWidth = (int)Math.Round(asset.Width * scale);
         var maxWidth = (int)Math.Round(canvasWidth * 0.72);
@@ -99,6 +140,15 @@ public sealed class BrandAssetCompositeService : IBrandAssetCompositeService
         var x = (canvasWidth - asset.Width) / 2;
         var y = (int)Math.Round(canvasHeight * 0.52) - asset.Height / 2;
         y = Math.Clamp(y, (int)Math.Round(canvasHeight * 0.25), canvasHeight - asset.Height - 90);
+        request.AssetAspectRatio = request.AssetProcessedHeight == 0 ? 0 : request.AssetProcessedWidth / (double)request.AssetProcessedHeight;
+        request.PlacementAspectRatio = asset.Height == 0 ? 0 : asset.Width / (double)asset.Height;
+        request.AspectRatioDelta = request.AssetAspectRatio <= 0
+            ? 0
+            : Math.Abs(request.PlacementAspectRatio - request.AssetAspectRatio) / request.AssetAspectRatio;
+        if (request.AspectRatioDelta > 0.10)
+        {
+            request.AssetWarnings.Add($"Robot/logo bị kéo dãn sai tỷ lệ: {request.AspectRatioDelta:P0}.");
+        }
 
         DrawBrandGlow(background, x, y, asset.Width, asset.Height);
         background.Mutate(ctx => ctx.DrawImage(asset, new Point(x, y), 1f));
@@ -230,6 +280,83 @@ public sealed class BrandAssetCompositeService : IBrandAssetCompositeService
         request.AssetBackgroundRemovalMethod = removed > 0 ? "corner_color_alpha_mask" : "none_no_matching_pixels";
     }
 
+    private static void CropTransparentPadding(Image<Rgba32> image, BrandAssetCompositeRequest request)
+    {
+        var bounds = FindNonTransparentBounds(image);
+        if (bounds == Rectangle.Empty)
+        {
+            return;
+        }
+
+        if (bounds.Width == image.Width && bounds.Height == image.Height)
+        {
+            return;
+        }
+
+        image.Mutate(x => x.Crop(bounds));
+        request.AssetCroppedTransparentPadding = true;
+    }
+
+    private static Rectangle FindNonTransparentBounds(Image<Rgba32> image, byte alphaThreshold = 12)
+    {
+        var minX = image.Width;
+        var minY = image.Height;
+        var maxX = -1;
+        var maxY = -1;
+
+        image.ProcessPixelRows(accessor =>
+        {
+            for (var y = 0; y < accessor.Height; y++)
+            {
+                var row = accessor.GetRowSpan(y);
+                for (var x = 0; x < row.Length; x++)
+                {
+                    if (row[x].A > alphaThreshold)
+                    {
+                        minX = Math.Min(minX, x);
+                        minY = Math.Min(minY, y);
+                        maxX = Math.Max(maxX, x);
+                        maxY = Math.Max(maxY, y);
+                    }
+                }
+            }
+        });
+
+        return maxX < minX || maxY < minY
+            ? Rectangle.Empty
+            : Rectangle.FromLTRB(minX, minY, maxX + 1, maxY + 1);
+    }
+
+    private static double CalculateOpaqueBrightPixelRatio(Image<Rgba32> image)
+    {
+        long totalOpaque = 0;
+        long brightOpaque = 0;
+
+        image.ProcessPixelRows(accessor =>
+        {
+            for (var y = 0; y < accessor.Height; y++)
+            {
+                var row = accessor.GetRowSpan(y);
+                for (var x = 0; x < row.Length; x++)
+                {
+                    var p = row[x];
+                    if (p.A <= 200)
+                    {
+                        continue;
+                    }
+
+                    totalOpaque++;
+                    if (p.R > 235 && p.G > 235 && p.B > 235)
+                    {
+                        brightOpaque++;
+                    }
+                }
+            }
+        });
+
+        return totalOpaque == 0 ? 0 : brightOpaque / (double)totalOpaque;
+    }
+
     private static bool HasMeaningfulAlpha(Image<Rgba32> image)
     {
         var hasAlpha = false;
@@ -332,45 +459,154 @@ public sealed class BrandAssetCompositeService : IBrandAssetCompositeService
     private static void DrawPosterText(Image<Rgba32> image, BrandAssetCompositeRequest request)
     {
         var headline = string.IsNullOrWhiteSpace(request.Headline) ? "TODOX AI" : request.Headline.Trim();
-        var subheadline = string.IsNullOrWhiteSpace(request.Subheadline) ? "Dá»ŠCH Vá»¤ Tá»° Äá»˜NG HÃ“A" : request.Subheadline.Trim();
+        var subheadline = string.IsNullOrWhiteSpace(request.Subheadline) ? "DỊCH VỤ TỰ ĐỘNG HÓA" : request.Subheadline.Trim();
         var footer = string.IsNullOrWhiteSpace(request.Footer) ? "TodoX" : request.Footer.Trim();
 
         var fontFamily = ResolveFontFamily();
-        var headlineFont = fontFamily.CreateFont(Math.Max(36, image.Width / 12), FontStyle.Bold);
-        var subFont = fontFamily.CreateFont(Math.Max(30, image.Width / 15), FontStyle.Bold);
-        var footerFont = fontFamily.CreateFont(Math.Max(18, image.Width / 32), FontStyle.Bold);
-
         var gold = Color.FromRgb(255, 190, 20);
         var white = Color.FromRgb(245, 248, 255);
         var black = Color.FromRgba(0, 0, 0, 165);
 
+        var margin = Math.Max(26, image.Width / 18);
+        var headlineBox = new Rectangle(margin, Math.Max(24, image.Height / 28), image.Width - margin * 2, (int)Math.Round(image.Height * 0.12));
+        var subBox = new Rectangle(margin, headlineBox.Bottom + Math.Max(8, image.Height / 150), image.Width - margin * 2, (int)Math.Round(image.Height * 0.08));
+        var footerBox = new Rectangle(margin, (int)Math.Round(image.Height * 0.90), image.Width - margin * 2, (int)Math.Round(image.Height * 0.065));
+
+        var results = new List<ServicePosterTextBoxResult>();
         image.Mutate(ctx =>
         {
-            DrawCenteredText(ctx, image.Width, headline, headlineFont, gold, black, image.Height * 0.055f);
-            DrawCenteredText(ctx, image.Width, subheadline, subFont, white, black, image.Height * 0.13f);
-            DrawCenteredText(ctx, image.Width, footer, footerFont, gold, black, image.Height * 0.915f);
+            results.Add(DrawTextBox(ctx, "headline", headline, headlineBox, fontFamily, Math.Max(36, image.Width / 11), 24, gold, black, true));
+            results.Add(DrawTextBox(ctx, "subheadline", subheadline, subBox, fontFamily, Math.Max(24, image.Width / 20), 16, white, black, true));
+            results.Add(DrawTextBox(ctx, "footer", footer, footerBox, fontFamily, Math.Max(18, image.Width / 32), 12, gold, black, true));
         });
+        request.TextOverlayResults = results;
     }
 
-    private static void DrawCenteredText(IImageProcessingContext ctx, int canvasWidth, string text, Font font, Color fill, Color shadow, float y)
+    private static ServicePosterTextBoxResult DrawTextBox(
+        IImageProcessingContext ctx,
+        string name,
+        string text,
+        Rectangle box,
+        FontFamily fontFamily,
+        int maxFontSize,
+        int minFontSize,
+        Color fill,
+        Color shadow,
+        bool bold)
     {
-        var options = new RichTextOptions(font)
-        {
-            Origin = new PointF(canvasWidth / 2f, y),
-            HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Top
-        };
+        var rendered = text;
+        var fit = false;
+        var warning = (string?)null;
+        var fontSize = maxFontSize;
+        List<string> lines = new();
 
-        var shadowOptions = new RichTextOptions(font)
+        for (var size = maxFontSize; size >= minFontSize; size -= 2)
         {
-            Origin = new PointF(canvasWidth / 2f + 2, y + 3),
-            HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Top
-        };
+            fontSize = size;
+            lines = WrapText(rendered, size, box.Width);
+            var lineHeight = (int)Math.Ceiling(size * 1.18);
+            if (lines.Count * lineHeight <= box.Height)
+            {
+                fit = true;
+                break;
+            }
+        }
 
-        ctx.DrawText(shadowOptions, text, shadow);
-        ctx.DrawText(options, text, fill);
+        if (!fit)
+        {
+            var maxLines = Math.Max(1, box.Height / Math.Max(1, (int)Math.Ceiling(fontSize * 1.18)));
+            lines = WrapText(rendered, fontSize, box.Width).Take(maxLines).ToList();
+            if (lines.Count > 0)
+            {
+                lines[^1] = TruncateToWidth(lines[^1], fontSize, box.Width);
+            }
+            rendered = string.Join(" ", lines);
+            warning = "text_truncated_or_shrunk";
+        }
+
+        var font = fontFamily.CreateFont(fontSize, bold ? FontStyle.Bold : FontStyle.Regular);
+        var lineStep = (int)Math.Ceiling(fontSize * 1.18);
+        var usedHeight = Math.Min(box.Height, lines.Count * lineStep);
+        var usedWidth = Math.Min(box.Width, lines.Count == 0 ? 0 : lines.Max(x => EstimateTextWidth(x, fontSize)));
+
+        for (var i = 0; i < lines.Count; i++)
+        {
+            var y = box.Y + i * lineStep;
+            var options = new RichTextOptions(font)
+            {
+                Origin = new PointF(box.X, y),
+                HorizontalAlignment = HorizontalAlignment.Left,
+                VerticalAlignment = VerticalAlignment.Top
+            };
+            var shadowOptions = new RichTextOptions(font)
+            {
+                Origin = new PointF(box.X + 2, y + 2),
+                HorizontalAlignment = HorizontalAlignment.Left,
+                VerticalAlignment = VerticalAlignment.Top
+            };
+            ctx.DrawText(shadowOptions, lines[i], shadow);
+            ctx.DrawText(options, lines[i], fill);
+        }
+
+        return new ServicePosterTextBoxResult
+        {
+            Name = name,
+            Fit = fit,
+            Box = ToPosterRect(box),
+            UsedBounds = new ServicePosterRect { X = box.X, Y = box.Y, Width = usedWidth, Height = usedHeight },
+            FontSize = fontSize,
+            LineCount = lines.Count,
+            RenderedText = rendered,
+            Warning = warning
+        };
     }
+
+    private static List<string> WrapText(string text, int fontSize, int maxWidth)
+    {
+        var words = text.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var lines = new List<string>();
+        var current = string.Empty;
+        foreach (var word in words)
+        {
+            var candidate = string.IsNullOrWhiteSpace(current) ? word : $"{current} {word}";
+            if (EstimateTextWidth(candidate, fontSize) <= maxWidth)
+            {
+                current = candidate;
+                continue;
+            }
+
+            if (!string.IsNullOrWhiteSpace(current))
+            {
+                lines.Add(current);
+            }
+            current = word;
+        }
+
+        if (!string.IsNullOrWhiteSpace(current))
+        {
+            lines.Add(current);
+        }
+
+        return lines.Count == 0 ? new List<string> { string.Empty } : lines;
+    }
+
+    private static string TruncateToWidth(string text, int fontSize, int maxWidth)
+    {
+        const string ellipsis = "...";
+        var value = text.Trim();
+        while (value.Length > 0 && EstimateTextWidth(value + ellipsis, fontSize) > maxWidth)
+        {
+            value = value[..^1].TrimEnd();
+        }
+
+        return string.IsNullOrWhiteSpace(value) ? ellipsis : value + ellipsis;
+    }
+
+    private static int EstimateTextWidth(string text, int fontSize)
+        => (int)Math.Ceiling(text.Length * fontSize * 0.58);
+
+    private static ServicePosterRect ToPosterRect(Rectangle rect)
+        => new() { X = rect.X, Y = rect.Y, Width = rect.Width, Height = rect.Height };
 
     private static FontFamily ResolveFontFamily()
     {

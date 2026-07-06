@@ -48,7 +48,7 @@ public sealed class MarketingImageRenderService
             var entry = new MarketingImageRenderLogEntry
             {
                 StepCode = code,
-                StepName = name,
+                StepName = ServiceImageRenderStepCatalog.GetName(code),
                 Message = message,
                 Input = input,
                 Output = output,
@@ -167,7 +167,7 @@ public sealed class MarketingImageRenderService
             }
 
             var classification = ClassifyReferences(request);
-            Add("07_REFERENCE_IMAGES_CLASSIFIED", "PhÃ¢n loáº¡i áº£nh tham chiáº¿u", "Reference images classified before render.",
+            Add("07_REFERENCE_IMAGES_CLASSIFIED", "Phân loại ảnh tham chiếu", "Reference images classified before render.",
                 input: new { request.BrandRobotImageUrl, request.ReferenceImageUrls },
                 output: classification);
 
@@ -261,7 +261,7 @@ public sealed class MarketingImageRenderService
 
             Add("17_QC_STARTED", "Bắt đầu QC", "Final render QC started.",
                 input: new { universalPlan.QcPolicy, universalPlan.CreativeBrief.RequiredConcepts });
-            var universalQc = _qcService.Check(universalPlan, thumb.ImageUrl, !string.IsNullOrWhiteSpace(request.BrandRobotImageUrl));
+            var universalQc = _qcService.Check(universalPlan, thumb.ImageUrl, !string.IsNullOrWhiteSpace(request.BrandRobotImageUrl), thumb.ImageRenderLogs);
             result.QcResult = universalQc;
             Add(universalQc.Passed ? "18_QC_PASSED" : "18_QC_FAILED", universalQc.Passed ? "QC đạt" : "QC lỗi",
                 universalQc.Passed ? "Final render QC passed." : "Final render QC failed.",
@@ -327,12 +327,12 @@ public sealed class MarketingImageRenderService
         var text = $"{request.ServiceName} {request.ServiceCategory} {request.ShortDescription} {request.Brief}".ToLowerInvariant();
         var mentionsTikTok = text.Contains("tiktok");
         var mentionsFacebook = text.Contains("facebook") || text.Contains("fb ");
-        var mentionsReup = text.Contains("reup") || text.Contains("Ä‘Äƒng láº¡i") || text.Contains("dang lai");
+        var mentionsReup = text.Contains("reup") || text.Contains("đăng lại") || text.Contains("dang lai");
         var serviceType = DetectServiceType(text, mentionsTikTok, mentionsFacebook, mentionsReup);
 
         return new MarketingBriefAnalysis
         {
-            ServiceName = string.IsNullOrWhiteSpace(request.ServiceName) ? "Dá»‹ch vá»¥ TodoX" : request.ServiceName.Trim(),
+            ServiceName = string.IsNullOrWhiteSpace(request.ServiceName) ? "Dịch vụ TodoX" : request.ServiceName.Trim(),
             ServiceCategory = string.IsNullOrWhiteSpace(request.ServiceCategory) ? "AI Marketing" : request.ServiceCategory.Trim(),
             DetectedServiceType = serviceType,
             Confidence = serviceType == "general_service" ? 0.68 : 0.86,
@@ -359,10 +359,10 @@ public sealed class MarketingImageRenderService
                 ? "VÀ NHÂN VẬT AI"
             : ToPosterSubheadline(request.ShortDescription ?? request.Brief);
         var footer = isReupFlow
-            ? "XÃ‚Y Dá»°NG KÃŠNH Tá»° Äá»˜NG"
+            ? "XÂY DỰNG KÊNH TỰ ĐỘNG"
             : isVideoPromptCharacter
                 ? "TodoX Video AI"
-            : "Tá»° Äá»˜NG HÃ“A CÃ™NG TODOX";
+            : "TỰ ĐỘNG HÓA CÙNG TODOX";
 
         var visualElements = isReupFlow
             ? new List<string>
@@ -590,7 +590,7 @@ public sealed class MarketingImageRenderService
             {
                 case "FIXED_ASSET_LOADED":
                     add("11_FIXED_ASSET_LOADED", "Load fixed asset", item.Message, output: item.Data);
-                    add("12_FIXED_ASSET_BACKGROUND_PROCESSING_STARTED", "Báº¯t Ä‘áº§u xá»­ lÃ½ ná»n robot", "Background processing for fixed asset started.",
+                    add("12_FIXED_ASSET_BACKGROUND_PROCESSING_STARTED", "Bắt đầu xử lý nền robot", "Background processing for fixed asset started.",
                         output: new { method = "corner_color_alpha_mask", tolerance = 42 });
                     break;
                 case "FIXED_ASSET_COMPOSITED":
@@ -648,7 +648,7 @@ public sealed class MarketingImageRenderService
     {
         if (analysis.DetectedServiceType == "tiktok_to_facebook_reup")
         {
-            return new List<string> { "Tá»± Ä‘á»™ng láº¥y video nguá»“n", "Äáº©y sang kÃªnh Ä‘Ã­ch", "Theo dÃµi tÄƒng trÆ°á»Ÿng" };
+            return new List<string> { "Tự động lấy video nguồn", "Đẩy sang kênh đích", "Theo dõi tăng trưởng" };
         }
 
         if (analysis.DetectedServiceType == "ai_video_from_prompt_character")
@@ -658,7 +658,7 @@ public sealed class MarketingImageRenderService
 
         return new List<string>
         {
-            "Tá»± Ä‘á»™ng hÃ³a quy trÃ¬nh",
+            "Tự động hóa quy trình",
             "Tiáº¿t kiá»‡m thá»i gian váº­n hÃ nh",
             "Theo dÃµi hiá»‡u quáº£ trÃªn dashboard"
         };
@@ -673,7 +673,7 @@ public sealed class MarketingImageRenderService
 
     private static string ToPosterSubheadline(string value)
     {
-        var text = string.IsNullOrWhiteSpace(value) ? "Tá»° Äá»˜NG HÃ“A Váº¬N HÃ€NH" : value.Trim();
+        var text = string.IsNullOrWhiteSpace(value) ? "TỰ ĐỘNG HÓA VẬN HÀNH" : value.Trim();
         text = text.Length > 30 ? text[..30].Trim() : text;
         return text.ToUpperInvariant();
     }

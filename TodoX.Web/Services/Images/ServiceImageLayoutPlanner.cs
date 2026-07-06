@@ -1,4 +1,4 @@
-using TodoX.Web.Models;
+﻿using TodoX.Web.Models;
 using TodoX.Web.Services.ImageRender;
 
 namespace TodoX.Web.Services.Images;
@@ -11,6 +11,7 @@ public sealed class ServiceImageLayoutPlanner
         MarketingRenderPlan aiPlan)
     {
         var creative = BuildCreativeBrief(request, analysis, aiPlan);
+        NormalizeCreativeBrief(creative);
         var template = DetectLayoutTemplate(creative);
         var layout = BuildLayout(template, request.AspectRatio);
 
@@ -45,7 +46,9 @@ public sealed class ServiceImageLayoutPlanner
                 "clutter",
                 "cropped text",
                 "distorted mascot",
-                "white rectangle behind mascot"
+                "white rectangle behind mascot",
+                "messy typography",
+                "overlapping text"
             }
         };
     }
@@ -117,6 +120,27 @@ public sealed class ServiceImageLayoutPlanner
         };
     }
 
+    private static void NormalizeCreativeBrief(CreativeBrief brief)
+    {
+        brief.MainMessage = CompactText(brief.MainMessage, 60);
+        brief.UserBenefit = CompactText(brief.UserBenefit, 160);
+        brief.VisualMetaphor = CompactText(brief.VisualMetaphor, 180);
+        brief.ViewerShouldUnderstandIn3Seconds = CompactText(brief.ViewerShouldUnderstandIn3Seconds, 120);
+        brief.Mood = CompactText(brief.Mood, 100);
+        brief.KeyObjects = brief.KeyObjects
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Select(x => CompactText(x, 80))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(5)
+            .ToList();
+        brief.RequiredConcepts = brief.RequiredConcepts
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Select(x => CompactText(x, 100))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(5)
+            .ToList();
+    }
+
     private static LayoutPlan BuildLayout(string template, string aspectRatio)
     {
         var layout = new LayoutPlan { Template = template, AspectRatio = aspectRatio };
@@ -182,18 +206,38 @@ public sealed class ServiceImageLayoutPlanner
             VisualStory = story,
             Objects = brief.KeyObjects.Count > 0 ? brief.KeyObjects : new List<string> { "input panel", "AI automation flow", "output preview" },
             Composition = "Keep top area clean for headline overlay, center the main visual, reserve brand asset zone, avoid clutter.",
-            BackgroundPrompt = aiPlan.NegativePrompt
+            BackgroundPrompt = BuildBackgroundPromptFromBrief(brief, template)
         };
     }
+
+    private static string BuildBackgroundPromptFromBrief(CreativeBrief brief, string template)
+        => template switch
+        {
+            "content_generation" =>
+                "A clean vertical SaaS workflow scene showing input assets on the left, AI processing in the center, and generated output preview on the right. Keep top area clean for headline overlay.",
+            "social_publishing" =>
+                "A clean social publishing automation scene with connected page cards, scheduling timeline, and output channels. Keep top area clean for headline overlay.",
+            "data_report" =>
+                "A premium analytics dashboard scene with charts and insights, black and gold theme, clean hierarchy. Keep top area clean for headline overlay.",
+            "customer_management" =>
+                "A clean CRM and customer management scene with customer cards, automation flow, and dashboard UI. Keep top area clean for headline overlay.",
+            _ =>
+                $"A premium TodoX SaaS automation background showing {CompactText(brief.VisualMetaphor, 120)}. Keep top area clean for headline overlay."
+        };
 
     private static TextOverlayPlan BuildTextOverlay(MarketingRenderPlan aiPlan, CreativeBrief brief)
     {
         return new TextOverlayPlan
         {
-            Headline = Shorten(string.IsNullOrWhiteSpace(aiPlan.Headline) ? brief.MainMessage : aiPlan.Headline, 44),
-            Subheadline = Shorten(string.IsNullOrWhiteSpace(aiPlan.Subheadline) ? brief.UserBenefit : aiPlan.Subheadline, 58),
-            Footer = Shorten(string.IsNullOrWhiteSpace(aiPlan.Footer) ? "TodoX AI" : aiPlan.Footer, 32),
-            MicroBullets = aiPlan.BenefitBullets.Take(2).Select(x => Shorten(x, 28)).ToList(),
+            Headline = CompactText(string.IsNullOrWhiteSpace(aiPlan.Headline) ? brief.MainMessage : aiPlan.Headline, 42),
+            Subheadline = CompactText(string.IsNullOrWhiteSpace(aiPlan.Subheadline) ? brief.UserBenefit : aiPlan.Subheadline, 54),
+            Footer = CompactText(string.IsNullOrWhiteSpace(aiPlan.Footer) ? "TodoX AI" : aiPlan.Footer, 42),
+            MicroBullets = aiPlan.BenefitBullets
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Select(x => CompactText(x, 36))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Take(2)
+                .ToList(),
             HeadlineMaxLines = 2,
             SubheadlineMaxLines = 2,
             AvoidTooMuchText = true
@@ -214,6 +258,19 @@ public sealed class ServiceImageLayoutPlanner
     {
         if (string.IsNullOrWhiteSpace(value)) return string.Empty;
         var text = value.Trim();
-        return text.Length <= max ? text : text[..Math.Max(0, max - 1)].Trim() + "…";
+        return text.Length <= max ? text : text[..Math.Max(0, max - 1)].Trim() + "...";
+    }
+    private static string CompactText(string? text, int maxChars)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return string.Empty;
+        }
+
+        var normalized = System.Text.RegularExpressions.Regex.Replace(text.Trim(), @"\s+", " ");
+        return normalized.Length <= maxChars
+            ? normalized
+            : normalized[..Math.Max(0, maxChars - 1)].TrimEnd() + "...";
     }
 }
+

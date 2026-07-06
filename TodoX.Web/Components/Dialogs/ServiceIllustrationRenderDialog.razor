@@ -2,6 +2,7 @@
 @using System.Text.Json
 @using TodoX.Web.Models
 @using TodoX.Web.Services
+@using TodoX.Web.Services.Images
 @using TodoX.Web.Services.ImageRender
 @inject AuthStateService AuthState
 @inject MarketingImageRenderService MarketingRender
@@ -198,7 +199,7 @@
                                 <MudExpansionPanels MultiExpansion="true">
                                     @foreach (var log in _result.Logs)
                                     {
-                                        <MudExpansionPanel Text="@($"{StatusIcon(log)} {log.StepCode} · {log.StepName}")">
+                                        <MudExpansionPanel Text="@($"{StatusIcon(log)} {log.StepCode} · {DisplayStepName(log)}")">
                                             <MudText Typo="Typo.body2">@log.Message</MudText>
                                             <MudText Typo="Typo.caption" Class="todox-page-subtitle">Duration: @(log.DurationMs?.ToString() ?? "-") ms</MudText>
                                             <pre class="activity-pre">@ToJson(log)</pre>
@@ -492,6 +493,11 @@
         => log.Level.Equals("error", StringComparison.OrdinalIgnoreCase) ? "✕"
             : log.Level.Equals("warning", StringComparison.OrdinalIgnoreCase) ? "!"
             : "✓";
+
+    private static string DisplayStepName(MarketingImageRenderLogEntry log)
+        => !string.IsNullOrWhiteSpace(log.StepCode)
+            ? ServiceImageRenderStepCatalog.GetName(log.StepCode)
+            : log.StepName;
 
     private static string ToJson(object? value) => JsonSerializer.Serialize(value, JsonOptions);
     private void Cancel() => MudDialog.Cancel();

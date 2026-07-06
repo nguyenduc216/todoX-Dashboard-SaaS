@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Text.Json;
 using Dapper;
 using TodoX.Web.Data;
@@ -166,7 +166,7 @@ public sealed class VertexImageRenderService : IImageRenderService
             result.UsedFallback = true;
             status = "mock";
             AddLog("MOCK_IMAGE_RESPONSE", "Mock mode generated placeholder images.", new { count = images.Count }, "warning");
-            _logger.LogWarning("ImageRender running in MockMode — returning placeholder images.");
+            _logger.LogWarning("ImageRender running in MockMode - returning placeholder images.");
         }
         else
         {
@@ -472,10 +472,24 @@ public sealed class VertexImageRenderService : IImageRenderService
                     compositeRequest.AssetHasAlphaAfter,
                     compositeRequest.AssetBackgroundRemoved,
                     compositeRequest.AssetBackgroundRemovalMethod,
-                    compositeRequest.AssetBackgroundRemovalTolerance
+                    compositeRequest.AssetBackgroundRemovalTolerance,
+                    compositeRequest.AssetCroppedTransparentPadding,
+                    compositeRequest.AssetOriginalWidth,
+                    compositeRequest.AssetOriginalHeight,
+                    compositeRequest.AssetProcessedWidth,
+                    compositeRequest.AssetProcessedHeight,
+                    compositeRequest.AssetOpaqueBrightPixelRatio,
+                    compositeRequest.AssetWarnings
+                },
+                aspect = new
+                {
+                    compositeRequest.AssetAspectRatio,
+                    compositeRequest.PlacementAspectRatio,
+                    compositeRequest.AspectRatioDelta
                 },
                 canvasWidth = compositeRequest.Placement?.CanvasWidth,
                 canvasHeight = compositeRequest.Placement?.CanvasHeight,
+                layoutRecomputedForActualCanvas = true,
                 robotPlacement = compositeRequest.Placement is null ? null : new
                 {
                     x = compositeRequest.Placement.AssetX,
@@ -489,10 +503,12 @@ public sealed class VertexImageRenderService : IImageRenderService
             {
                 headline = string.IsNullOrWhiteSpace(request.PosterTextHeadline) ? "TODOX AI" : request.PosterTextHeadline,
                 subheadline = string.IsNullOrWhiteSpace(request.PosterTextSubheadline) ? "DỊCH VỤ TỰ ĐỘNG HÓA" : request.PosterTextSubheadline,
-                footer = string.IsNullOrWhiteSpace(request.PosterTextFooter) ? "TodoX" : request.PosterTextFooter
+                footer = string.IsNullOrWhiteSpace(request.PosterTextFooter) ? "TodoX" : request.PosterTextFooter,
+                textBoxes = compositeRequest.TextOverlayResults
             }, "info");
         }
 
         return output;
     }
 }
+
