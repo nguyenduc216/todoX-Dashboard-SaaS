@@ -1,0 +1,500 @@
+@using System.Text
+@using System.Text.Json
+@using TodoX.Web.Models
+@using TodoX.Web.Services
+@using TodoX.Web.Services.ImageRender
+@inject AuthStateService AuthState
+@inject MarketingImageRenderService MarketingRender
+@inject SystemImageStorage SystemImageStorage
+@inject ISnackbar Snackbar
+@inject IJSRuntime JS
+
+<MudDialog Class="service-illustration-dialog">
+    <TitleContent>
+        <MudText Typo="Typo.h6">Tạo ảnh minh hoạ dịch vụ</MudText>
+    </TitleContent>
+
+    <DialogContent>
+        <MudGrid>
+            <MudItem xs="12" md="5">
+                <MudStack Spacing="3">
+                    <MudTextField T="string" Label="Tên dịch vụ" Variant="Variant.Outlined" FullWidth="true" @bind-Value="_serviceName" />
+                    <MudTextField T="string" Label="Nhóm dịch vụ" Variant="Variant.Outlined" FullWidth="true" @bind-Value="_serviceCategory" />
+                    <MudTextField T="string" Label="Mô tả ngắn" Variant="Variant.Outlined" FullWidth="true" @bind-Value="_shortDescription" />
+                    <MudTextField T="string"
+                                  Label="Mô tả chi tiết / brief"
+                                  Lines="7"
+                                  Variant="Variant.Outlined"
+                                  FullWidth="true"
+                                  @bind-Value="_brief" />
+
+                    <MudGrid>
+                        <MudItem xs="12" sm="6">
+                            <MudSelect T="string" Label="Tone màu" Variant="Variant.Outlined" @bind-Value="_tone">
+                                <MudSelectItem Value="@("yellow_black")">Vàng đen TodoX</MudSelectItem>
+                                <MudSelectItem Value="@("blue_white")">Xanh trắng</MudSelectItem>
+                                <MudSelectItem Value="@("premium_dark")">Tối cao cấp</MudSelectItem>
+                            </MudSelect>
+                        </MudItem>
+                        <MudItem xs="12" sm="6">
+                            <MudSelect T="string" Label="Khổ ảnh" Variant="Variant.Outlined" @bind-Value="_aspectRatio">
+                                <MudSelectItem Value="@("9:16")">9:16</MudSelectItem>
+                                <MudSelectItem Value="@("1:1")">1:1</MudSelectItem>
+                                <MudSelectItem Value="@("16:9")">16:9</MudSelectItem>
+                            </MudSelect>
+                        </MudItem>
+                    </MudGrid>
+
+                    <MudSwitch T="bool"
+                               Color="Color.Warning"
+                               Label="Giữ nguyên robot, không để AI vẽ lại"
+                               @bind-Value="_preserveFixedAssets" />
+
+                    <div>
+                        <MudText Typo="Typo.subtitle2">Robot thương hiệu</MudText>
+                        <MudText Typo="Typo.caption" Class="todox-page-subtitle">
+                            Robot được ghép vào ảnh cuối bằng code, không gửi cho AI để vẽ lại.
+                        </MudText>
+                        <label class="@($"profile-avatar-upload mt-2 {(_uploading || _rendering ? "is-disabled" : string.Empty)}")">
+                            <MudIcon Icon="@Icons.Material.Filled.SmartToy" Size="Size.Small" />
+                            <span>Upload robot</span>
+                            <InputFile OnChange="OnBrandRobotSelected"
+                                       accept="image/png,image/jpeg,image/webp"
+                                       disabled="@(_uploading || _rendering)" />
+                        </label>
+                    </div>
+
+                    @if (_brandRobotImage is not null)
+                    {
+                        <div class="todox-ref-image-grid">
+                            <div class="todox-ref-image-item">
+                                <img src="@_brandRobotImage.Url" alt="@_brandRobotImage.FileName" />
+                                <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" Color="Color.Error" OnClick="RemoveBrandRobot" />
+                            </div>
+                        </div>
+                    }
+
+                    <div>
+                        <MudText Typo="Typo.subtitle2">Ảnh tham chiếu khác</MudText>
+                        <label class="@($"profile-avatar-upload mt-2 {(_uploading || _rendering ? "is-disabled" : string.Empty)}")">
+                            <MudIcon Icon="@Icons.Material.Filled.Upload" Size="Size.Small" />
+                            <span>Upload ảnh tham chiếu</span>
+                            <InputFile OnChange="OnFilesSelected"
+                                       multiple
+                                       accept="image/png,image/jpeg,image/webp"
+                                       disabled="@(_uploading || _rendering)" />
+                        </label>
+                    </div>
+
+                    @if (_referenceImages.Count > 0)
+                    {
+                        <div class="todox-ref-image-grid">
+                            @foreach (var item in _referenceImages)
+                            {
+                                <div class="todox-ref-image-item">
+                                    <img src="@item.Url" alt="@item.FileName" />
+                                    <MudIconButton Icon="@Icons.Material.Filled.Close"
+                                                   Size="Size.Small"
+                                                   Color="Color.Error"
+                                                   OnClick="@(() => RemoveReference(item))" />
+                                </div>
+                            }
+                        </div>
+                    }
+
+                    <MudButton Variant="Variant.Filled"
+                               Color="Color.Warning"
+                               StartIcon="@Icons.Material.Filled.AutoAwesome"
+                               Disabled="@(_rendering || _uploading)"
+                               OnClick="@(() => RenderAsync(true))">
+                        @(_rendering ? "Đang render..." : "Render ảnh")
+                    </MudButton>
+
+                    @if (_rendering || _uploading)
+                    {
+                        <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+                    }
+                </MudStack>
+            </MudItem>
+
+            <MudItem xs="12" md="7">
+                <MudStack Spacing="3">
+                    <div class="todox-render-preview-box">
+                        @if (!string.IsNullOrWhiteSpace(_result?.ImageUrl))
+                        {
+                            <img src="@_result.ImageUrl" alt="Ảnh minh hoạ dịch vụ" />
+                        }
+                        else if (!string.IsNullOrWhiteSpace(CurrentThumbnailUrl))
+                        {
+                            <div class="todox-render-preview-placeholder">
+                                <MudText Typo="Typo.subtitle2">Thumbnail hiện tại</MudText>
+                                <img src="@CurrentThumbnailUrl" alt="Thumbnail hiện tại" />
+                            </div>
+                        }
+                        else
+                        {
+                            <MudStack AlignItems="AlignItems.Center" Spacing="2">
+                                <MudIcon Icon="@Icons.Material.Filled.Image" Size="Size.Large" Class="todox-gold" />
+                                <MudText Typo="Typo.body2">Chưa có ảnh kết quả.</MudText>
+                            </MudStack>
+                        }
+                    </div>
+
+                    @if (_result is not null)
+                    {
+                        <MudAlert Severity="@(_result.UsedAnalyzerFallback ? Severity.Warning : Severity.Success)"
+                                  Dense="true"
+                                  Class="py-1">
+                            Mã log: <b>@_result.LogCode</b> · Analyzer: @_result.AnalyzerProvider
+                            @if (_result.UsedAnalyzerFallback)
+                            {
+                                <span> · đã fallback về rule v1</span>
+                            }
+                        </MudAlert>
+
+                        @if (_result.QcResult is not null && (_result.QcResult.Warnings.Count > 0 || _result.QcResult.Errors.Count > 0))
+                        {
+                            <MudAlert Severity="@(_result.QcResult.Passed ? Severity.Warning : Severity.Error)" Dense="true" Class="py-1">
+                                QC: điểm @_result.QcResult.Score.
+                                @foreach (var warning in _result.QcResult.Warnings.Take(2))
+                                {
+                                    <span> @warning</span>
+                                }
+                                @foreach (var error in _result.QcResult.Errors.Take(2))
+                                {
+                                    <span> @error</span>
+                                }
+                            </MudAlert>
+                        }
+
+                        <MudExpansionPanels Dense="true">
+                            <MudExpansionPanel Text="Ảnh này chưa ổn ở điểm nào?">
+                                <MudGrid>
+                                    <MudItem xs="12" sm="6"><MudCheckBox T="bool" Label="Chữ bị cắt / thiếu nét" @bind-Value="_fbTextCropped" /></MudItem>
+                                    <MudItem xs="12" sm="6"><MudCheckBox T="bool" Label="Robot/logo méo hoặc còn nền trắng" @bind-Value="_fbAssetBad" /></MudItem>
+                                    <MudItem xs="12" sm="6"><MudCheckBox T="bool" Label="Nội dung chưa rõ dịch vụ" @bind-Value="_fbMeaningUnclear" /></MudItem>
+                                    <MudItem xs="12" sm="6"><MudCheckBox T="bool" Label="Bố cục rối" @bind-Value="_fbCluttered" /></MudItem>
+                                    <MudItem xs="12" sm="6"><MudCheckBox T="bool" Label="Quá nhiều chữ" @bind-Value="_fbTooMuchText" /></MudItem>
+                                    <MudItem xs="12" sm="6"><MudCheckBox T="bool" Label="Thiếu hình ảnh workflow" @bind-Value="_fbMissingWorkflow" /></MudItem>
+                                    <MudItem xs="12" sm="6"><MudCheckBox T="bool" Label="Màu sắc chưa đẹp" @bind-Value="_fbColorBad" /></MudItem>
+                                </MudGrid>
+                            </MudExpansionPanel>
+                        </MudExpansionPanels>
+
+                        <MudStack Row="true" Spacing="2" Class="flex-wrap">
+                            <MudButton Variant="Variant.Outlined" Color="Color.Warning" Disabled="@_rendering" OnClick="@(() => RenderAsync(false))">Render lại ảnh</MudButton>
+                            <MudButton Variant="Variant.Outlined" Color="Color.Info" Disabled="@_rendering" OnClick="@(() => RenderAsync(true))">Tạo lại kế hoạch và render lại</MudButton>
+                            <MudButton Variant="Variant.Outlined" Color="Color.Default" Disabled="@string.IsNullOrWhiteSpace(_result.ImageUrl)" Href="@_result.ImageUrl" Target="_blank">Tải ảnh</MudButton>
+                        </MudStack>
+
+                        <MudTabs Rounded="true" Class="todox-card">
+                            <MudTabPanel Text="Prompt đã dùng">
+                                <pre class="activity-pre">@_result.CompiledPrompt</pre>
+                            </MudTabPanel>
+                            <MudTabPanel Text="Render Plan">
+                                <pre class="activity-pre">@RenderPlanJson</pre>
+                            </MudTabPanel>
+                            <MudTabPanel Text="Nhật ký xử lý">
+                                <MudExpansionPanels MultiExpansion="true">
+                                    @foreach (var log in _result.Logs)
+                                    {
+                                        <MudExpansionPanel Text="@($"{StatusIcon(log)} {log.StepCode} · {log.StepName}")">
+                                            <MudText Typo="Typo.body2">@log.Message</MudText>
+                                            <MudText Typo="Typo.caption" Class="todox-page-subtitle">Duration: @(log.DurationMs?.ToString() ?? "-") ms</MudText>
+                                            <pre class="activity-pre">@ToJson(log)</pre>
+                                        </MudExpansionPanel>
+                                    }
+                                </MudExpansionPanels>
+                            </MudTabPanel>
+                            <MudTabPanel Text="JSON log">
+                                <MudStack Row="true" Spacing="2" Class="mb-2">
+                                    <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="CopyLogJson">Copy</MudButton>
+                                    <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(() => DownloadLogAsync("json"))">Download JSON</MudButton>
+                                    <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(() => DownloadLogAsync("txt"))">Download TXT</MudButton>
+                                </MudStack>
+                                <pre class="activity-json-pre">@LogJson</pre>
+                            </MudTabPanel>
+                        </MudTabs>
+                    }
+                </MudStack>
+            </MudItem>
+        </MudGrid>
+    </DialogContent>
+
+    <DialogActions>
+        <MudButton Variant="Variant.Text" Color="Color.Default" OnClick="Cancel">Đóng</MudButton>
+        <MudButton Variant="Variant.Filled"
+                   Color="Color.Warning"
+                   StartIcon="@Icons.Material.Filled.Check"
+                   Disabled="@string.IsNullOrWhiteSpace(_result?.ImageUrl)"
+                   OnClick="ChooseCurrentImage">
+            Chọn ảnh này
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter] public Guid? ServiceId { get; set; }
+    [Parameter] public string? ServiceCode { get; set; }
+    [Parameter] public string? ServiceName { get; set; }
+    [Parameter] public string? ServiceGroupName { get; set; }
+    [Parameter] public string? ServiceType { get; set; }
+    [Parameter] public string? ShortDescription { get; set; }
+    [Parameter] public string? Description { get; set; }
+    [Parameter] public string? CurrentThumbnailUrl { get; set; }
+
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web) { WriteIndented = true };
+
+    private readonly List<UploadedReferenceImageDto> _referenceImages = new();
+    private UploadedReferenceImageDto? _brandRobotImage;
+    private MarketingImageRenderResult? _result;
+    private string _serviceName = string.Empty;
+    private string _serviceCategory = string.Empty;
+    private string _shortDescription = string.Empty;
+    private string _brief = string.Empty;
+    private string _tone = "yellow_black";
+    private string _aspectRatio = "9:16";
+    private bool _rendering;
+    private bool _uploading;
+    private bool _preserveFixedAssets = true;
+    private bool _fbTextCropped;
+    private bool _fbAssetBad;
+    private bool _fbMeaningUnclear;
+    private bool _fbCluttered;
+    private bool _fbTooMuchText;
+    private bool _fbMissingWorkflow;
+    private bool _fbColorBad;
+
+    private string RenderPlanJson => ToJson(_result?.UniversalPlan ?? (object?)_result?.RenderPlan);
+    private string LogJson => ToJson(new
+    {
+        _result?.LogCode,
+        _result?.RenderJobId,
+        _result?.Status,
+        _result?.ImageUrl,
+        _result?.AnalyzerProvider,
+        _result?.UsedAnalyzerFallback,
+        _result?.RenderPlan,
+        _result?.UniversalPlan,
+        _result?.QcResult,
+        _result?.CompiledPrompt,
+        _result?.Logs,
+        _result?.Error
+    });
+
+    protected override void OnInitialized()
+    {
+        _serviceName = ServiceName ?? string.Empty;
+        _serviceCategory = ServiceGroupName ?? string.Empty;
+        _shortDescription = ShortDescription ?? string.Empty;
+        _brief = BuildDefaultBrief();
+    }
+
+    private async Task OnFilesSelected(InputFileChangeEventArgs e)
+    {
+        _uploading = true;
+        try
+        {
+            foreach (var file in e.GetMultipleFiles(10))
+            {
+                var url = await SystemImageStorage.SaveServiceReferenceImageAsync(file);
+                _referenceImages.Add(new UploadedReferenceImageDto(url, file.Name));
+            }
+
+            Snackbar.Add("Đã upload ảnh tham chiếu.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Upload ảnh tham chiếu lỗi: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _uploading = false;
+        }
+    }
+
+    private async Task OnBrandRobotSelected(InputFileChangeEventArgs e)
+    {
+        _uploading = true;
+        try
+        {
+            var file = e.File;
+            var url = await SystemImageStorage.SaveServiceReferenceImageAsync(file);
+            _brandRobotImage = new UploadedReferenceImageDto(url, file.Name);
+            _preserveFixedAssets = true;
+            Snackbar.Add("Đã upload robot thương hiệu.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Upload robot thương hiệu lỗi: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _uploading = false;
+        }
+    }
+
+    private async Task RenderAsync(bool recreatePlan)
+    {
+        if (_rendering)
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_brief))
+        {
+            Snackbar.Add("Vui lòng nhập brief.", Severity.Warning);
+            return;
+        }
+
+        _rendering = true;
+        try
+        {
+            _result = await MarketingRender.RenderAsync(new MarketingImageRenderRequest
+            {
+                ServiceName = _serviceName,
+                ServiceCategory = _serviceCategory,
+                ShortDescription = _shortDescription,
+                Brief = _brief.Trim(),
+                Tone = _tone,
+                AspectRatio = _aspectRatio,
+                BrandRobotImageUrl = _brandRobotImage?.Url,
+                ReferenceImageUrls = _referenceImages.Select(x => x.Url).ToList(),
+                PreserveFixedAssets = _preserveFixedAssets,
+                ExistingPlan = recreatePlan ? null : _result?.RenderPlan,
+                ExistingUniversalPlan = recreatePlan ? null : _result?.UniversalPlan,
+                Feedback = recreatePlan ? null : BuildFeedback(),
+                RecreatePlan = recreatePlan,
+                User = AuthState.CurrentUser
+            });
+
+            var severity = !_result.Ok
+                ? Severity.Error
+                : _result.UsedAnalyzerFallback ? Severity.Warning : Severity.Success;
+            var message = !_result.Ok
+                ? $"Không thể tạo ảnh: {_result.Error}"
+                : _result.UsedAnalyzerFallback
+                    ? $"Đã tạo ảnh, nhưng analyzer AI lỗi nên fallback rule v1. Mã log: {_result.LogCode}"
+                    : $"Đã tạo ảnh bằng analyzer AI. Mã log: {_result.LogCode}";
+            Snackbar.Add(message, severity);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Không thể tạo ảnh minh hoạ: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _rendering = false;
+        }
+    }
+
+    private void RemoveReference(UploadedReferenceImageDto item) => _referenceImages.Remove(item);
+    private void RemoveBrandRobot() => _brandRobotImage = null;
+
+    private UserImageFeedback? BuildFeedback()
+    {
+        if (!(_fbTextCropped || _fbAssetBad || _fbMeaningUnclear || _fbCluttered || _fbTooMuchText || _fbMissingWorkflow || _fbColorBad))
+        {
+            return null;
+        }
+
+        return new UserImageFeedback
+        {
+            TextCropped = _fbTextCropped,
+            AssetDistortedOrWhiteBackground = _fbAssetBad,
+            ServiceMeaningUnclear = _fbMeaningUnclear,
+            LayoutCluttered = _fbCluttered,
+            TooMuchText = _fbTooMuchText,
+            MissingWorkflowVisual = _fbMissingWorkflow,
+            ColorNotGood = _fbColorBad
+        };
+    }
+
+    private void ChooseCurrentImage()
+    {
+        if (string.IsNullOrWhiteSpace(_result?.ImageUrl))
+        {
+            return;
+        }
+
+        MudDialog.Close(DialogResult.Ok(new ServiceIllustrationDialogValue
+        {
+            SelectedImageUrl = _result.ImageUrl,
+            PromptUsed = _result.CompiledPrompt
+        }));
+    }
+
+    private async Task CopyLogJson()
+    {
+        await JS.InvokeVoidAsync("navigator.clipboard.writeText", LogJson);
+        Snackbar.Add("Đã copy log JSON.", Severity.Success);
+    }
+
+    private async Task DownloadLogAsync(string type)
+    {
+        var extension = type.Equals("txt", StringComparison.OrdinalIgnoreCase) ? "txt" : "json";
+        var content = extension == "txt" ? BuildTextLog() : LogJson;
+        var fileName = $"todox-render-log-{(_result?.LogCode ?? "unknown")}-{DateTime.Now:yyyyMMdd-HHmmss}.{extension}";
+        var script = "(() => {\n"
+            + $"  const content = {JsonSerializer.Serialize(content)};\n"
+            + $"  const fileName = {JsonSerializer.Serialize(fileName)};\n"
+            + $"  const mime = {JsonSerializer.Serialize(extension == "json" ? "application/json" : "text/plain")};\n"
+            + "  const blob = new Blob([content], { type: mime + ';charset=utf-8' });\n"
+            + "  const url = URL.createObjectURL(blob);\n"
+            + "  const a = document.createElement('a');\n"
+            + "  a.href = url;\n"
+            + "  a.download = fileName;\n"
+            + "  document.body.appendChild(a);\n"
+            + "  a.click();\n"
+            + "  a.remove();\n"
+            + "  URL.revokeObjectURL(url);\n"
+            + "})()";
+        await JS.InvokeVoidAsync("eval", script);
+    }
+
+    private string BuildTextLog()
+    {
+        if (_result is null)
+        {
+            return string.Empty;
+        }
+
+        var sb = new StringBuilder();
+        sb.AppendLine($"LogCode: {_result.LogCode}");
+        sb.AppendLine($"Status: {_result.Status}");
+        sb.AppendLine($"ImageUrl: {_result.ImageUrl}");
+        sb.AppendLine();
+        foreach (var log in _result.Logs)
+        {
+            sb.AppendLine($"{log.Timestamp:O} [{log.Level}] {log.StepCode} - {log.StepName}");
+            sb.AppendLine(log.Message);
+            if (log.DurationMs is not null) sb.AppendLine($"DurationMs: {log.DurationMs}");
+            if (!string.IsNullOrWhiteSpace(log.Error)) sb.AppendLine($"Error: {log.Error}");
+            sb.AppendLine();
+        }
+
+        return sb.ToString();
+    }
+
+    private string BuildDefaultBrief()
+    {
+        var parts = new List<string>();
+        if (!string.IsNullOrWhiteSpace(ServiceName)) parts.Add($"Tạo ảnh minh hoạ cho dịch vụ \"{ServiceName}\".");
+        if (!string.IsNullOrWhiteSpace(ServiceGroupName)) parts.Add($"Nhóm dịch vụ: {ServiceGroupName}.");
+        if (!string.IsNullOrWhiteSpace(ShortDescription)) parts.Add($"Mô tả ngắn: {ShortDescription}.");
+        if (!string.IsNullOrWhiteSpace(Description)) parts.Add($"Mô tả chi tiết: {Description}.");
+        return string.Join(" ", parts);
+    }
+
+    private static string StatusIcon(MarketingImageRenderLogEntry log)
+        => log.Level.Equals("error", StringComparison.OrdinalIgnoreCase) ? "✕"
+            : log.Level.Equals("warning", StringComparison.OrdinalIgnoreCase) ? "!"
+            : "✓";
+
+    private static string ToJson(object? value) => JsonSerializer.Serialize(value, JsonOptions);
+    private void Cancel() => MudDialog.Cancel();
+
+    private sealed record UploadedReferenceImageDto(string Url, string FileName);
+}

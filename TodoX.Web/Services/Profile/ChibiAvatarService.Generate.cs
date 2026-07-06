@@ -122,18 +122,27 @@ public sealed partial class ChibiAvatarService
 
         var images = new List<ChibiImage>();
         var prompts = new List<string> { finalPrompt };
+        var fixedAssetMode = IsFixedAssetMode(input, refs);
         if (count > 1)
         {
-            try
+            if (fixedAssetMode)
             {
-                AddLog("GEMINI_SCRIPT_REQUEST", "Requesting Gemini prompt variations.", new { model = _gemini.ModelCode, imageCount = count });
-                prompts = await _gemini.GenerateVariationsAsync(finalPrompt, count, ct);
-                AddLog("GEMINI_SCRIPT_RESPONSE", "Gemini returned prompt variations.", new { count = prompts.Count, lengths = prompts.Select(x => x.Length).ToArray() });
+                prompts = BuildFixedAssetVariations(finalPrompt, count);
+                AddLog("GEMINI_SCRIPT_SKIPPED", "Fixed asset/service poster mode uses deterministic prompt variations.", new { count = prompts.Count });
             }
-            catch (Exception ex)
+            else
             {
-                prompts = BuildFallbackVariations(finalPrompt, count);
-                AddLog("GEMINI_SCRIPT_FALLBACK", "Gemini variation generation failed; using deterministic prompt variations.", new { error = ex.Message, count = prompts.Count }, "warning");
+                try
+                {
+                    AddLog("GEMINI_SCRIPT_REQUEST", "Requesting Gemini prompt variations.", new { model = _gemini.ModelCode, imageCount = count });
+                    prompts = await _gemini.GenerateVariationsAsync(finalPrompt, count, ct);
+                    AddLog("GEMINI_SCRIPT_RESPONSE", "Gemini returned prompt variations.", new { count = prompts.Count, lengths = prompts.Select(x => x.Length).ToArray() });
+                }
+                catch (Exception ex)
+                {
+                    prompts = BuildFallbackVariations(finalPrompt, count);
+                    AddLog("GEMINI_SCRIPT_FALLBACK", "Gemini variation generation failed; using deterministic prompt variations.", new { error = ex.Message, count = prompts.Count }, "warning");
+                }
             }
         }
 
@@ -157,6 +166,11 @@ public sealed partial class ChibiAvatarService
                 VariationIndex = i + 1,
                 Gender = input.Gender,
                 CharacterType = input.CharacterType,
+                RenderPipeline = fixedAssetMode
+                    ? ImageRenderRequestModel.PipelineBackgroundThenComposite
+                    : ImageRenderRequestModel.PipelineModelGenerate,
+                PreserveFixedAssets = fixedAssetMode,
+                Theme = fixedAssetMode ? "yellow_black" : null,
                 Outfit = input.Outfit,
                 CameraAngle = input.CameraAngle,
                 AspectRatio = "1:1",
@@ -453,6 +467,28 @@ public sealed partial class ChibiAvatarService
         }
 
         return sb.ToString().Trim();
+    }
+
+    private static bool IsFixedAssetMode(ChibiGenerateInput input, IReadOnlyList<ReferenceImage> refs)
+    {
+        return input.CharacterType?.Equals("service_poster", StringComparison.OrdinalIgnoreCase) == true
+            || refs.Any(x => x.Role?.Equals("brand_robot", StringComparison.OrdinalIgnoreCase) == true
+                || x.Role?.Equals("fixed_overlay", StringComparison.OrdinalIgnoreCase) == true);
+    }
+
+    private static List<string> BuildFixedAssetVariations(string prompt, int count)
+    {
+        var styles = new[]
+        {
+            "Variation lighting: balanced gold rim light with clean high-contrast background.",
+            "Variation lighting: slightly brighter gold data flow and deeper black background.",
+            "Variation lighting: softer dashboard glow with the same fixed brand asset placement.",
+            "Variation lighting: more cinematic depth while preserving the fixed brand asset unchanged."
+        };
+
+        return Enumerable.Range(0, count)
+            .Select(i => prompt.Trim() + Environment.NewLine + styles[i % styles.Length])
+            .ToList();
     }
 
     private static List<string> BuildFallbackVariations(string prompt, int count)

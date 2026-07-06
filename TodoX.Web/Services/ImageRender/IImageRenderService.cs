@@ -22,10 +22,19 @@ public sealed class ReferenceImage
 
 public sealed class ImageRenderRequestModel
 {
+    public const string PipelineModelGenerate = "model_generate";
+    public const string PipelineBackgroundThenComposite = "background_then_composite";
+
     public Guid? CorrelationId { get; set; }
     public string? LogCode { get; set; }
     public string Prompt { get; set; } = string.Empty;
     public List<ReferenceImage> ReferenceImages { get; set; } = new();
+    public string RenderPipeline { get; set; } = PipelineModelGenerate;
+    public bool PreserveFixedAssets { get; set; }
+    public string? Theme { get; set; }
+    public string? PosterTextHeadline { get; set; }
+    public string? PosterTextSubheadline { get; set; }
+    public string? PosterTextFooter { get; set; }
     public int Count { get; set; } = 1;
     public string AspectRatio { get; set; } = "1:1";
     public string MimeType { get; set; } = "image/png";

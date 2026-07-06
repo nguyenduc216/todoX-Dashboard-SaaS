@@ -31,6 +31,12 @@ public sealed class ServiceDto
     public decimal? MinTokenCost { get; set; }
 }
 
+public sealed class ServiceIllustrationDialogValue
+{
+    public string SelectedImageUrl { get; set; } = string.Empty;
+    public string? PromptUsed { get; set; }
+}
+
 public sealed class ServicePricingTierDto
 {
     public Guid Id { get; set; }

@@ -1,8 +1,7 @@
 @using TodoX.Web.Services
 @inject AuthStateService AuthState
-@inject MrTodoXAvatarService MrTodoXAvatar
-@inject ServiceThumbnailRenderService ThumbnailRender
 @inject SystemImageStorage SystemImageStorage
+@inject IDialogService DialogService
 @inject ISnackbar Snackbar
 
 <MudDialog>
@@ -66,8 +65,8 @@
                                                Color="Color.Warning"
                                                StartIcon="@Icons.Material.Filled.AutoAwesome"
                                                Disabled="@_thumbnailBusy"
-                                               OnClick="RenderThumbnail">
-                                        Render theo mô tả
+                                               OnClick="OpenIllustrationDialog">
+                                        Tạo ảnh minh hoạ
                                     </MudButton>
                                 </MudStack>
                                 @if (_thumbnailBusy)
@@ -132,7 +131,10 @@
     private async Task UploadThumbnail(InputFileChangeEventArgs e)
     {
         var file = e.File;
-        if (file is null) return;
+        if (file is null)
+        {
+            return;
+        }
 
         _thumbnailBusy = true;
         try
@@ -151,51 +153,42 @@
         }
     }
 
-    private async Task RenderThumbnail()
+    private async Task OpenIllustrationDialog()
     {
-        if (string.IsNullOrWhiteSpace(_model.ServiceName) || string.IsNullOrWhiteSpace(_model.Description))
+        var parameters = new DialogParameters
         {
-            Snackbar.Add("Vui lòng nhập tên dịch vụ và mô tả chi tiết trước khi render.", Severity.Warning);
+            ["ServiceId"] = _model.Id == Guid.Empty ? null : _model.Id,
+            ["ServiceCode"] = _model.ServiceCode,
+            ["ServiceName"] = _model.ServiceName,
+            ["ServiceGroupName"] = SelectedCategoryName,
+            ["ServiceType"] = _model.ServiceType,
+            ["ShortDescription"] = _model.ShortDescription,
+            ["Description"] = _model.Description,
+            ["CurrentThumbnailUrl"] = _model.ThumbnailUrl
+        };
+
+        var options = new DialogOptions
+        {
+            MaxWidth = MaxWidth.ExtraLarge,
+            FullWidth = true,
+            CloseButton = true,
+            BackdropClick = false,
+            CloseOnEscapeKey = true
+        };
+
+        var dialog = await DialogService.ShowAsync<ServiceIllustrationRenderDialog>(
+            "Tạo ảnh minh hoạ dịch vụ",
+            parameters,
+            options);
+
+        var result = await dialog.Result;
+        if (result is null || result.Canceled || result.Data is not ServiceIllustrationDialogValue value)
+        {
             return;
         }
 
-        _thumbnailBusy = true;
-        try
-        {
-            var mrTodoX = await MrTodoXAvatar.GetAsync();
-            if (string.IsNullOrWhiteSpace(mrTodoX.AvatarUrl))
-            {
-                Snackbar.Add("Chưa cấu hình ảnh Mr. todoX. Hệ thống sẽ dùng mô tả nhân vật trong prompt.", Severity.Warning);
-            }
-
-            var result = await ThumbnailRender.RenderAsync(new ServiceThumbnailRenderRequest
-            {
-                ServiceCode = _model.ServiceCode,
-                ServiceName = _model.ServiceName,
-                GroupName = SelectedCategoryName,
-                ServiceType = _model.ServiceType,
-                ShortDescription = _model.ShortDescription,
-                DetailedDescription = _model.Description,
-                User = AuthState.CurrentUser
-            });
-
-            if (!result.Ok || string.IsNullOrWhiteSpace(result.ImageUrl))
-            {
-                Snackbar.Add($"Render thumbnail lỗi: {result.Error ?? "Không nhận được ảnh."}", Severity.Error);
-                return;
-            }
-
-            _model.ThumbnailUrl = result.ImageUrl;
-            Snackbar.Add("Đã render thumbnail dịch vụ có Mr. todoX.", Severity.Success);
-        }
-        catch (Exception ex)
-        {
-            Snackbar.Add($"Render thumbnail lỗi: {ex.Message}", Severity.Error);
-        }
-        finally
-        {
-            _thumbnailBusy = false;
-        }
+        _model.ThumbnailUrl = value.SelectedImageUrl;
+        StateHasChanged();
     }
 
     private string? SelectedCategoryName => Categories.FirstOrDefault(x => x.Id == _model.CategoryId)?.CategoryName ?? _model.CategoryName;
@@ -206,6 +199,7 @@
         {
             return;
         }
+
         MudDialog.Close(DialogResult.Ok(_model));
     }
 

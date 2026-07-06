@@ -50,12 +50,15 @@ public sealed class VertexClient
         LastModelUsed = null;
         LastRenderModeUsed = null;
 
-        foreach (var dropped in referenceImages.Where(x => x.Bytes?.Length is not > 0 && string.IsNullOrWhiteSpace(x.Base64)))
+        foreach (var dropped in referenceImages.Where(x => x.Bytes?.Length is not > 0
+                     && string.IsNullOrWhiteSpace(x.Base64)
+                     && string.IsNullOrWhiteSpace(x.Url)))
         {
             _logger.LogWarning("REFERENCE_IMAGE_DROPPED role={Role} mediaId={MediaId} reason=missing bytes/base64", dropped.Role, dropped.MediaId);
         }
 
-        var refs = NormalizeReferenceImages(referenceImages);
+        var hydratedReferences = await HydrateReferenceImagesAsync(referenceImages, ct);
+        var refs = NormalizeReferenceImages(hydratedReferences);
         var hasReferences = refs.Count > 0;
         var token = await GetAccessTokenAsync(ct);
 
@@ -421,6 +424,56 @@ public sealed class VertexClient
             })
             .OrderBy(x => x.Role is not null && order.TryGetValue(x.Role, out var n) ? n : 99)
             .ToList();
+    }
+
+    private async Task<List<ReferenceImage>> HydrateReferenceImagesAsync(IReadOnlyList<ReferenceImage> referenceImages, CancellationToken ct)
+    {
+        var hydrated = new List<ReferenceImage>(referenceImages.Count);
+        foreach (var image in referenceImages)
+        {
+            if (image.Bytes?.Length > 0 || !string.IsNullOrWhiteSpace(image.Base64))
+            {
+                hydrated.Add(image);
+                continue;
+            }
+
+            var url = image.Url ?? image.SourceUrl;
+            if (string.IsNullOrWhiteSpace(url))
+            {
+                hydrated.Add(image);
+                continue;
+            }
+
+            try
+            {
+                image.Bytes = await LoadReferenceBytesFromUrlAsync(url, ct);
+                image.SizeBytes ??= image.Bytes?.LongLength;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "REFERENCE_IMAGE_DROPPED role={Role} mediaId={MediaId} url={Url} reason=hydrate_failed",
+                    image.Role, image.MediaId, url);
+            }
+
+            hydrated.Add(image);
+        }
+
+        return hydrated;
+    }
+
+    private async Task<byte[]> LoadReferenceBytesFromUrlAsync(string url, CancellationToken ct)
+    {
+        if (Uri.TryCreate(url, UriKind.Absolute, out var absolute)
+            && (absolute.Scheme == Uri.UriSchemeHttp || absolute.Scheme == Uri.UriSchemeHttps))
+        {
+            return await _http.GetByteArrayAsync(absolute, ct);
+        }
+
+        var relativePath = url.Split('?', '#')[0].TrimStart('/', '\\')
+            .Replace('/', Path.DirectorySeparatorChar)
+            .Replace('\\', Path.DirectorySeparatorChar);
+        var filePath = Path.Combine(_env.WebRootPath, relativePath);
+        return await File.ReadAllBytesAsync(filePath, ct);
     }
 
     private static string NormalizeMimeType(string? mimeType)

@@ -29,6 +29,9 @@ public sealed class SystemImageStorage
     public Task<string> SaveServiceThumbnailAsync(IBrowserFile file, CancellationToken ct = default)
         => SaveImageAsync(file, "service-thumbnail", ct);
 
+    public Task<string> SaveServiceReferenceImageAsync(IBrowserFile file, CancellationToken ct = default)
+        => SaveImageAsync(file, "service-reference", ct);
+
     private async Task<string> SaveImageAsync(IBrowserFile file, string prefix, CancellationToken ct)
     {
         if (file is null)

@@ -1,4 +1,4 @@
-using TodoX.Web.Models;
+﻿using TodoX.Web.Models;
 using TodoX.Web.Services.ImageRender;
 
 namespace TodoX.Web.Services;
@@ -12,6 +12,15 @@ public sealed class ServiceThumbnailRenderRequest
     public string? ShortDescription { get; set; }
     public string? DetailedDescription { get; set; }
     public CurrentUserSession? User { get; set; }
+    public string? CustomPrompt { get; set; }
+    public IReadOnlyList<string> ReferenceImageUrls { get; set; } = Array.Empty<string>();
+    public string? BrandRobotImageUrl { get; set; }
+    public bool PreserveFixedAssets { get; set; }
+    public string? Theme { get; set; }
+    public string? PosterTextHeadline { get; set; }
+    public string? PosterTextSubheadline { get; set; }
+    public string? PosterTextFooter { get; set; }
+    public string AspectRatio { get; set; } = "9:16";
 }
 
 public sealed class ServiceThumbnailRenderResult
@@ -19,9 +28,13 @@ public sealed class ServiceThumbnailRenderResult
     public bool Ok { get; set; }
     public string Prompt { get; set; } = string.Empty;
     public string? ImageUrl { get; set; }
+    public Guid? ImageMediaId { get; set; }
+    public Guid? ImageRenderRequestId { get; set; }
+    public long? ImageFileSizeBytes { get; set; }
     public string? Error { get; set; }
     public bool UsedMrTodoXReference { get; set; }
     public bool MissingMrTodoXAvatar { get; set; }
+    public List<RenderLogEntry> ImageRenderLogs { get; set; } = new();
 }
 
 public sealed class ServiceThumbnailRenderService
@@ -38,9 +51,27 @@ public sealed class ServiceThumbnailRenderService
     public async Task<ServiceThumbnailRenderResult> RenderAsync(ServiceThumbnailRenderRequest request, CancellationToken ct = default)
     {
         var mrTodoX = await _mrTodoXAvatar.GetAsync(ct);
-        var prompt = BuildPrompt(request, mrTodoX);
+        var prompt = string.IsNullOrWhiteSpace(request.CustomPrompt)
+            ? BuildPrompt(request, mrTodoX)
+            : EnsureThumbnailDirectives(request.CustomPrompt.Trim());
         var references = new List<ReferenceImage>();
-        if (!string.IsNullOrWhiteSpace(mrTodoX.AvatarUrl))
+        var fixedRobotUrl = !string.IsNullOrWhiteSpace(request.BrandRobotImageUrl)
+            ? request.BrandRobotImageUrl
+            : request.PreserveFixedAssets ? mrTodoX.AvatarUrl : null;
+
+        if (!string.IsNullOrWhiteSpace(fixedRobotUrl))
+        {
+            references.Add(new ReferenceImage
+            {
+                Role = "brand_robot",
+                Url = fixedRobotUrl,
+                SourceType = "url",
+                SourceUrl = fixedRobotUrl,
+                DisplayName = "TodoX brand robot",
+                PromptRoleDescription = "Fixed TodoX brand robot asset. Do not send to model for redraw; composite by code."
+            });
+        }
+        else if (!string.IsNullOrWhiteSpace(mrTodoX.AvatarUrl))
         {
             references.Add(new ReferenceImage
             {
@@ -53,18 +84,39 @@ public sealed class ServiceThumbnailRenderService
             });
         }
 
+        foreach (var url in request.ReferenceImageUrls.Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            references.Add(new ReferenceImage
+            {
+                Role = "service_reference",
+                Url = url,
+                SourceType = "url",
+                SourceUrl = url,
+                DisplayName = "Service illustration reference",
+                PromptRoleDescription = "User uploaded visual reference for the service illustration"
+            });
+        }
+
         var render = await _imageRender.RenderAsync(new ImageRenderRequestModel
         {
             Prompt = prompt,
             ReferenceImages = references,
             Count = 1,
-            AspectRatio = "9:16",
+            AspectRatio = string.IsNullOrWhiteSpace(request.AspectRatio) ? "9:16" : request.AspectRatio,
             MimeType = "image/png",
             FileCategory = "service_thumbnail",
             UserId = request.User?.UserId,
             CustomerId = request.User?.CustomerId,
             RequireReferenceImages = false,
-            CharacterType = "Mr. todoX service presenter",
+            CharacterType = request.PreserveFixedAssets ? "service_poster" : "Mr. todoX service presenter",
+            RenderPipeline = request.PreserveFixedAssets
+                ? ImageRenderRequestModel.PipelineBackgroundThenComposite
+                : ImageRenderRequestModel.PipelineModelGenerate,
+            PreserveFixedAssets = request.PreserveFixedAssets,
+            Theme = request.PreserveFixedAssets ? request.Theme ?? "yellow_black" : request.Theme,
+            PosterTextHeadline = request.PreserveFixedAssets ? request.PosterTextHeadline : null,
+            PosterTextSubheadline = request.PreserveFixedAssets ? request.PosterTextSubheadline : null,
+            PosterTextFooter = request.PreserveFixedAssets ? request.PosterTextFooter : null,
             ImageCount = 1
         }, ct);
 
@@ -74,9 +126,12 @@ public sealed class ServiceThumbnailRenderService
             Ok = render.Ok && first?.Url is not null,
             Prompt = prompt,
             ImageUrl = first?.Url,
+            ImageMediaId = first?.MediaId,
+            ImageRenderRequestId = render.RequestId,
             Error = render.Error,
             UsedMrTodoXReference = references.Count > 0,
-            MissingMrTodoXAvatar = string.IsNullOrWhiteSpace(mrTodoX.AvatarUrl)
+            MissingMrTodoXAvatar = string.IsNullOrWhiteSpace(mrTodoX.AvatarUrl),
+            ImageRenderLogs = render.Logs
         };
     }
 
@@ -120,6 +175,20 @@ public sealed class ServiceThumbnailRenderService
         - Avoid adding random logos.
         - Do not distort the Mr. todoX character.
         - Make it visually clear that this service is about the described functionality.
+        """;
+    }
+
+    private static string EnsureThumbnailDirectives(string prompt)
+    {
+        return $"""
+        {prompt}
+
+        Output requirements:
+        - Create exactly one professional service illustration thumbnail.
+        - Vertical poster composition, clean and premium.
+        - Suitable for TodoX service catalog card thumbnail.
+        - Use uploaded reference images only as visual guidance; do not copy random text or unrelated logos.
+        - Avoid small unreadable text.
         """;
     }
 }
