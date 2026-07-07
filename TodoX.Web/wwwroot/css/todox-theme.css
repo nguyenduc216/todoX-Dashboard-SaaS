@@ -1193,6 +1193,19 @@ h4 {
     white-space: pre-wrap;
 }
 
+.avatar-public-hidden-input,
+.avatar-public-upload-button input[type="file"],
+.avatar-advanced-button input[type="file"] {
+    position: absolute !important;
+    width: 1px !important;
+    height: 1px !important;
+    overflow: hidden !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+    clip: rect(0 0 0 0) !important;
+    clip-path: inset(50%) !important;
+}
+
 .image-editor-toolbar {
     display: flex;
     align-items: center;

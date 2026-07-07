@@ -357,10 +357,25 @@ publicAvatarApi.MapPost("/upload", async (
 publicAvatarApi.MapPost("/render", async (
     TodoX.Web.Services.AvatarTemplates.PublicAvatarBuilderRenderRequest body,
     TodoX.Web.Services.AvatarTemplates.IAvatarTemplateService templates,
+    ILoggerFactory loggerFactory,
     CancellationToken ct) =>
 {
-    var result = await templates.RenderPublicAsync(body, ct);
-    return Results.Json(result);
+    var logger = loggerFactory.CreateLogger("PublicAvatarBuilderRender");
+    try
+    {
+        var result = await templates.RenderPublicAsync(body, ct);
+        return Results.Json(result);
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "PUBLIC_AVATAR_RENDER_FAILED templateId={TemplateId}", body.TemplateId);
+        return Results.Json(new TodoX.Web.Services.AvatarTemplates.PublicAvatarBuilderRenderResult
+        {
+            Ok = false,
+            Status = "failed",
+            Error = ex.Message
+        }, statusCode: StatusCodes.Status500InternalServerError);
+    }
 }).DisableAntiforgery();
 
 app.MapPost("/api/image-ai-creative-render", async (

@@ -308,13 +308,16 @@ public sealed class AvatarTemplateService : IAvatarTemplateService
         using var conn = await _factory.OpenAsync(ct);
         var userId = await conn.ExecuteScalarAsync<Guid?>(
             """
-            SELECT id
-              FROM auth.app_users
-             WHERE is_active = true
-             ORDER BY CASE WHEN role IN ('administrator_root','admin') THEN 0 ELSE 1 END, created_at
+            SELECT u.id
+              FROM auth.app_users u
+              LEFT JOIN auth.user_roles ur ON ur.user_id = u.id
+              LEFT JOIN auth.roles r ON r.id = ur.role_id
+             WHERE u.is_active = true
+             ORDER BY CASE WHEN COALESCE(u.is_root,false) OR r.code IN ('administrator_root','admin') THEN 0 ELSE 1 END,
+                      u.created_at
              LIMIT 1;
             """);
-        return userId ?? Guid.Empty;
+        return userId ?? throw new InvalidOperationException("Chưa cấu hình PublicAvatarBuilder:UserId và không tìm thấy user hệ thống để render public.");
     }
 
     private static PublicAvatarBuilderRenderResult ToPublicResult(ImageAICreativeRenderResult result)

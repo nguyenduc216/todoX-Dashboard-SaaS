@@ -1,0 +1,15 @@
+.avatar-public-shell {
+    min-height: 100vh;
+    color: #f8fafc;
+    background:
+        radial-gradient(circle at 18% 0%, rgba(246, 181, 0, 0.16), transparent 34%),
+        radial-gradient(circle at 84% 12%, rgba(255, 200, 61, 0.12), transparent 32%),
+        linear-gradient(180deg, #05070b 0%, #080d14 52%, #05070b 100%);
+}
+
+.avatar-public-footer {
+    padding: 28px 18px 36px;
+    text-align: center;
+    color: rgba(248, 250, 252, 0.58);
+    font-size: 0.92rem;
+}

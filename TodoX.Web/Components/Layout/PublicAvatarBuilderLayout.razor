@@ -1,0 +1,26 @@
+@inherits LayoutComponentBase
+
+<MudThemeProvider Theme="_theme" IsDarkMode="true" />
+<MudPopoverProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />
+
+<div class="avatar-public-shell">
+    @Body
+    <footer class="avatar-public-footer">Powered by TodoX AI</footer>
+</div>
+
+@code {
+    private readonly MudTheme _theme = new()
+    {
+        PaletteDark = new PaletteDark
+        {
+            Primary = "#f6b500",
+            Secondary = "#ffc83d",
+            Background = "#05070b",
+            Surface = "#0b111a",
+            TextPrimary = "#f8fafc",
+            TextSecondary = "#b9c2d0"
+        }
+    };
+}

@@ -1,0 +1,91 @@
+@using TodoX.Web.Services.AvatarTemplates
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">Sửa prompt · @TemplateName</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudStack Spacing="3">
+            <MudTextField T="string" Label="Prompt" @bind-Value="_prompt" Variant="Variant.Outlined" Lines="10" />
+            <MudGrid>
+                <MudItem xs="12" sm="6">
+                    <MudSelect T="string" Label="Kiểu nhân vật" @bind-Value="_characterType" Variant="Variant.Outlined" Margin="Margin.Dense">
+                        @foreach (var option in AvatarOptionCatalog.CharacterTypes)
+                        {
+                            <MudSelectItem Value="@option.Code">@option.DisplayVi</MudSelectItem>
+                        }
+                    </MudSelect>
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <MudSelect T="string" Label="Giới tính" @bind-Value="_gender" Variant="Variant.Outlined" Margin="Margin.Dense">
+                        @foreach (var option in AvatarOptionCatalog.Genders)
+                        {
+                            <MudSelectItem Value="@option.Code">@option.DisplayVi</MudSelectItem>
+                        }
+                    </MudSelect>
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <MudSelect T="string" Label="Góc máy" @bind-Value="_cameraAngle" Variant="Variant.Outlined" Margin="Margin.Dense">
+                        @foreach (var option in AvatarOptionCatalog.CameraAngles)
+                        {
+                            <MudSelectItem Value="@option.Code">@option.DisplayVi</MudSelectItem>
+                        }
+                    </MudSelect>
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <MudSelect T="string" Label="Trang phục" @bind-Value="_outfit" Variant="Variant.Outlined" Margin="Margin.Dense">
+                        @foreach (var option in AvatarOptionCatalog.Outfits)
+                        {
+                            <MudSelectItem Value="@option.Code">@option.DisplayVi</MudSelectItem>
+                        }
+                    </MudSelect>
+                </MudItem>
+            </MudGrid>
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Hủy</MudButton>
+        <MudButton Variant="Variant.Outlined" Color="Color.Warning" OnClick="SaveOnly">Lưu thay đổi tạm</MudButton>
+        <MudButton Class="todox-primary-btn" OnClick="RenderAgain">Render lại</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter] public string TemplateName { get; set; } = string.Empty;
+    [Parameter] public string Prompt { get; set; } = string.Empty;
+    [Parameter] public string CharacterTypeCode { get; set; } = "chibi";
+    [Parameter] public string GenderCode { get; set; } = "neutral";
+    [Parameter] public string CameraAngleCode { get; set; } = "half_body";
+    [Parameter] public string OutfitCode { get; set; } = "suit";
+
+    private string _prompt = string.Empty;
+    private string _characterType = "chibi";
+    private string _gender = "neutral";
+    private string _cameraAngle = "half_body";
+    private string _outfit = "suit";
+
+    protected override void OnInitialized()
+    {
+        _prompt = Prompt;
+        _characterType = CharacterTypeCode;
+        _gender = GenderCode;
+        _cameraAngle = CameraAngleCode;
+        _outfit = OutfitCode;
+    }
+
+    private void SaveOnly() => MudDialog.Close(DialogResult.Ok(BuildResult(renderNow: false)));
+    private void RenderAgain() => MudDialog.Close(DialogResult.Ok(BuildResult(renderNow: true)));
+    private void Cancel() => MudDialog.Cancel();
+
+    private PublicAvatarPromptEditResult BuildResult(bool renderNow) => new()
+    {
+        Prompt = _prompt,
+        CharacterTypeCode = _characterType,
+        GenderCode = _gender,
+        CameraAngleCode = _cameraAngle,
+        OutfitCode = _outfit,
+        RenderNow = renderNow
+    };
+}
