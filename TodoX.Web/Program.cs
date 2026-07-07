@@ -3,6 +3,7 @@ using TodoX.Web.Data;
 using TodoX.Web.Models;
 using TodoX.Web.Services;
 using TodoX.Web.Services.Render;
+using TodoX.Web.Services.Reup;
 using MudBlazor.Services;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -29,6 +30,7 @@ builder.Services.AddSingleton<PasswordHasher>();
 builder.Services.AddScoped<AccountRepository>();
 builder.Services.AddScoped<CustomerRepository>();
 builder.Services.AddScoped<PermissionRepository>();
+builder.Services.AddScoped<NavigationMenuRepository>();
 builder.Services.AddScoped<AuditRepository>();
 builder.Services.AddScoped<BillingRepository>();
 builder.Services.AddScoped<CatalogRepository>();
@@ -73,6 +75,16 @@ builder.Services.AddScoped<WalletService>();
 builder.Services.AddScoped<IRenderJobService, RenderJobService>();
 builder.Services.AddScoped<IRenderJobDispatcher, RenderJobDispatcher>();
 builder.Services.AddHostedService<RenderJobWorker>();
+builder.Services.Configure<ReupCampaignOptions>(builder.Configuration.GetSection("ReupCampaign"));
+builder.Services.AddHttpClient<TikwmVideoResolver>(client => client.Timeout = TimeSpan.FromSeconds(120));
+builder.Services.AddHttpClient<FacebookPageTokenChecker>(client => client.Timeout = TimeSpan.FromSeconds(60));
+builder.Services.AddHttpClient<FacebookPageVideoPublisher>(client => client.Timeout = TimeSpan.FromMinutes(10));
+builder.Services.AddHttpClient<ReupVideoCacheService>(client => client.Timeout = TimeSpan.FromMinutes(10));
+builder.Services.AddScoped<ReupCampaignRepository>();
+builder.Services.AddScoped<ReupLogService>();
+builder.Services.AddSingleton<ReupStorageService>();
+builder.Services.AddSingleton<ReupTaskPageGate>();
+builder.Services.AddHostedService<ReupCampaignWorker>();
 var app = builder.Build();
 
 // Load tenant and repair placeholder seed credentials (writes data only, never schema).
@@ -314,6 +326,160 @@ adminAvatarApi.MapPost("/{id:guid}/toggle-public", async (
     await templates.TogglePublicAsync(id, auth.CurrentUser?.UserId, ct);
     return Results.Json(new { success = true });
 }).DisableAntiforgery();
+
+static bool CanReup(AuthStateService auth, string action)
+    => auth.CurrentUser?.Can($"reup_campaigns.{action}") == true;
+
+static Guid RequireCustomer(AuthStateService auth)
+    => auth.CurrentUser?.CustomerId
+       ?? throw new InvalidOperationException("Tài khoản hiện tại chưa gắn customer_id.");
+
+var reupApi = app.MapGroup("/api/reup");
+
+reupApi.MapGet("/campaigns", async (
+    AuthStateService auth,
+    ReupCampaignRepository repo,
+    CancellationToken ct) =>
+{
+    if (!CanReup(auth, "view")) return UnauthorizedJson("Bạn chưa có quyền xem chiến dịch reup.");
+    var customerId = RequireCustomer(auth);
+    return Results.Json(await repo.ListCampaignsAsync(customerId, ct));
+});
+
+reupApi.MapPost("/campaigns", async (
+    CreateReupCampaignRequest body,
+    AuthStateService auth,
+    ReupCampaignRepository repo,
+    AuditRepository audit,
+    CancellationToken ct) =>
+{
+    if (!CanReup(auth, "create")) return UnauthorizedJson("Bạn chưa có quyền tạo chiến dịch reup.");
+    var customerId = RequireCustomer(auth);
+    var id = await repo.CreateCampaignAsync(customerId, auth.CurrentUser!.UserId, body, ct);
+    await audit.LogAsync(auth.CurrentUser, "reup_campaigns", "create", id.ToString(), message: body.Name, feature: "campaign");
+    return Results.Json(new { success = true, id });
+}).DisableAntiforgery();
+
+reupApi.MapGet("/campaigns/{id:guid}", async (
+    Guid id,
+    AuthStateService auth,
+    ReupCampaignRepository repo,
+    CancellationToken ct) =>
+{
+    if (!CanReup(auth, "view")) return UnauthorizedJson("Bạn chưa có quyền xem chiến dịch reup.");
+    var item = await repo.GetCampaignAsync(RequireCustomer(auth), id, ct);
+    return item is null ? Results.NotFound() : Results.Json(item);
+});
+
+reupApi.MapPut("/campaigns/{id:guid}", async (
+    Guid id,
+    UpdateReupCampaignRequest body,
+    AuthStateService auth,
+    ReupCampaignRepository repo,
+    CancellationToken ct) =>
+{
+    if (!CanReup(auth, "update")) return UnauthorizedJson("Bạn chưa có quyền sửa chiến dịch reup.");
+    await repo.UpdateCampaignAsync(RequireCustomer(auth), id, body, ct);
+    return Results.Json(new { success = true });
+}).DisableAntiforgery();
+
+reupApi.MapDelete("/campaigns/{id:guid}", async (
+    Guid id,
+    AuthStateService auth,
+    ReupCampaignRepository repo,
+    CancellationToken ct) =>
+{
+    if (!CanReup(auth, "delete")) return UnauthorizedJson("Bạn chưa có quyền xóa chiến dịch reup.");
+    await repo.DeleteCampaignAsync(RequireCustomer(auth), id, ct);
+    return Results.Json(new { success = true });
+});
+
+reupApi.MapPost("/campaigns/{id:guid}/run", async (
+    Guid id,
+    AuthStateService auth,
+    ReupCampaignRepository repo,
+    AuditRepository audit,
+    CancellationToken ct) =>
+{
+    if (!CanReup(auth, "run")) return UnauthorizedJson("Bạn chưa có quyền chạy chiến dịch reup.");
+    await repo.RunCampaignAsync(RequireCustomer(auth), id, ct);
+    await audit.LogAsync(auth.CurrentUser, "reup_campaigns", "run", id.ToString(), feature: "campaign");
+    return Results.Json(new { success = true });
+}).DisableAntiforgery();
+
+reupApi.MapPost("/campaigns/{id:guid}/stop", async (
+    Guid id,
+    AuthStateService auth,
+    ReupCampaignRepository repo,
+    AuditRepository audit,
+    CancellationToken ct) =>
+{
+    if (!CanReup(auth, "stop")) return UnauthorizedJson("Bạn chưa có quyền dừng chiến dịch reup.");
+    await repo.StopCampaignAsync(RequireCustomer(auth), id, ct);
+    await audit.LogAsync(auth.CurrentUser, "reup_campaigns", "stop", id.ToString(), feature: "campaign", severity: "warning");
+    return Results.Json(new { success = true });
+}).DisableAntiforgery();
+
+reupApi.MapGet("/campaigns/{id:guid}/tasks", async (
+    Guid id,
+    AuthStateService auth,
+    ReupCampaignRepository repo,
+    CancellationToken ct) =>
+{
+    if (!CanReup(auth, "view")) return UnauthorizedJson("Bạn chưa có quyền xem task reup.");
+    return Results.Json(await repo.GetTasksAsync(RequireCustomer(auth), id, ct));
+});
+
+reupApi.MapGet("/campaigns/{id:guid}/logs", async (
+    Guid id,
+    AuthStateService auth,
+    ReupCampaignRepository repo,
+    CancellationToken ct) =>
+{
+    if (!CanReup(auth, "view")) return UnauthorizedJson("Bạn chưa có quyền xem log reup.");
+    return Results.Json(await repo.GetLogsAsync(RequireCustomer(auth), id, ct));
+});
+
+reupApi.MapPost("/tasks/{taskId:guid}/retry", async (
+    Guid taskId,
+    AuthStateService auth,
+    ReupCampaignRepository repo,
+    AuditRepository audit,
+    CancellationToken ct) =>
+{
+    if (!CanReup(auth, "retry")) return UnauthorizedJson("Bạn chưa có quyền retry task reup.");
+    await repo.RetryTaskAsync(RequireCustomer(auth), taskId, ct);
+    await audit.LogAsync(auth.CurrentUser, "reup_campaigns", "retry", taskId.ToString(), feature: "task", severity: "warning");
+    return Results.Json(new { success = true });
+}).DisableAntiforgery();
+
+reupApi.MapPost("/duplicate-check", async (
+    ReupDuplicateCheckRequest body,
+    AuthStateService auth,
+    ReupCampaignRepository repo,
+    CancellationToken ct) =>
+{
+    if (!CanReup(auth, "view")) return UnauthorizedJson("Bạn chưa có quyền xem cảnh báo đăng lại.");
+    return Results.Json(await repo.CheckDuplicatesAsync(RequireCustomer(auth), body.ReferenceVideoIds, body.SocialPageIds, ct));
+}).DisableAntiforgery();
+
+reupApi.MapGet("/reference-videos", async (
+    AuthStateService auth,
+    ReupCampaignRepository repo,
+    CancellationToken ct) =>
+{
+    if (!CanReup(auth, "view")) return UnauthorizedJson("Bạn chưa có quyền xem video reup.");
+    return Results.Json(await repo.ListTikTokVideosAsync(RequireCustomer(auth), ct));
+});
+
+reupApi.MapGet("/facebook-pages", async (
+    AuthStateService auth,
+    ReupCampaignRepository repo,
+    CancellationToken ct) =>
+{
+    if (!CanReup(auth, "view")) return UnauthorizedJson("Bạn chưa có quyền xem Facebook Page.");
+    return Results.Json(await repo.ListFacebookPagesAsync(RequireCustomer(auth), ct));
+});
 
 var publicAvatarApi = app.MapGroup("/api/public/avatar-builder");
 

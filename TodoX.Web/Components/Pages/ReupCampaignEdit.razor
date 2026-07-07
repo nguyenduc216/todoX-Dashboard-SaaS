@@ -1,0 +1,311 @@
+@page "/reup-campaigns/new"
+@page "/reup-campaigns/{CampaignId:guid}/edit"
+@using TodoX.Web.Models
+@using TodoX.Web.Services.Reup
+@inject AuthStateService AuthState
+@inject ReupCampaignRepository Reup
+@inject NavigationManager Nav
+@inject ISnackbar Snackbar
+
+<PageTitle>@(IsEdit ? "Sửa chiến dịch Reup" : "Tạo chiến dịch Reup")</PageTitle>
+
+<MudStack Spacing="3">
+    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-3">
+        <div>
+            <MudText Typo="Typo.h4" Class="todox-page-title">@(IsEdit ? "Sửa chiến dịch Reup" : "Tạo chiến dịch Reup")</MudText>
+            <MudText Typo="Typo.body1" Class="todox-page-subtitle">Chọn video TikTok tham chiếu, chọn Facebook Page, nhập caption/hashtag và chạy thủ công.</MudText>
+        </div>
+        <MudButton Variant="Variant.Outlined" Color="Color.Warning" Href="/reup-campaigns">Quay lại</MudButton>
+    </MudStack>
+
+    @if (!AuthState.IsInitialized || _loading)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+    }
+    else if (!CanSave)
+    {
+        <MudAlert Severity="Severity.Warning">Bạn chưa có quyền tạo/sửa chiến dịch reup.</MudAlert>
+    }
+    else if (_customerId is null)
+    {
+        <MudAlert Severity="Severity.Warning">Trang này dành cho tài khoản khách hàng có customer_id.</MudAlert>
+    }
+    else
+    {
+        <MudPaper Class="todox-card pa-5" Rounded="true">
+            <MudText Typo="Typo.h6">Thông tin chiến dịch</MudText>
+            <MudDivider Class="my-3" />
+            <MudGrid>
+                <MudItem xs="12" md="6">
+                    <MudTextField T="string" Label="Tên chiến dịch" @bind-Value="_request.Name" Variant="Variant.Outlined" Required="true" />
+                </MudItem>
+                <MudItem xs="12" md="6">
+                    <MudTextField T="string" Label="Mô tả" @bind-Value="_request.Description" Variant="Variant.Outlined" />
+                </MudItem>
+                <MudItem xs="12" md="6">
+                    <MudTextField T="string" Label="Caption" @bind-Value="_request.Caption" Variant="Variant.Outlined" Lines="4" />
+                </MudItem>
+                <MudItem xs="12" md="6">
+                    <MudTextField T="string" Label="Hashtag" @bind-Value="_request.Hashtags" Variant="Variant.Outlined" Lines="4" Placeholder="#todoX #reup" />
+                </MudItem>
+            </MudGrid>
+        </MudPaper>
+
+        <MudPaper Class="todox-card pa-5" Rounded="true">
+            <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
+                <div>
+                    <MudText Typo="Typo.h6">Chọn link video tham chiếu TikTok</MudText>
+                    <MudText Typo="Typo.body2" Class="todox-page-subtitle">Nguồn từ bảng content.reference_videos.</MudText>
+                </div>
+                <MudChip T="string" Color="Color.Warning" Size="Size.Small">@_selectedVideos.Count video</MudChip>
+            </MudStack>
+            <MudDivider Class="my-3" />
+            <div class="reup-scroll-table">
+                <table class="reup-native-table">
+                    <thead>
+                        <tr>
+                            <th></th>
+                            <th>Video</th>
+                            <th>Kênh</th>
+                            <th>Đã đăng</th>
+                            <th>Ngày thêm</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var video in _videos)
+                    {
+                        <tr>
+                            <td><input type="checkbox" checked="@_selectedVideos.Contains(video.Id)" @onchange="e => Toggle(_selectedVideos, video.Id, e)" /></td>
+                            <td>
+                                <div class="reup-video-cell">
+                                    @if (!string.IsNullOrWhiteSpace(video.ThumbnailUrl))
+                                    {
+                                        <img src="@video.ThumbnailUrl" alt="@VideoTitle(video)" />
+                                    }
+                                    <div>
+                                        <b>@VideoTitle(video)</b>
+                                        <MudLink Href="@video.SourceUrl" Target="_blank" Typo="Typo.caption" Class="todox-gold">@video.SourceUrl</MudLink>
+                                    </div>
+                                </div>
+                            </td>
+                            <td>@(video.ChannelName ?? video.AuthorHandle ?? "-")</td>
+                            <td>@video.AlreadyPostedCount</td>
+                            <td>@video.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+        </MudPaper>
+
+        <MudPaper Class="todox-card pa-5" Rounded="true">
+            <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
+                <div>
+                    <MudText Typo="Typo.h6">Chọn Facebook Page</MudText>
+                    <MudText Typo="Typo.body2" Class="todox-page-subtitle">Token lấy từ social.page_access_tokens, worker sẽ check lại trước khi publish.</MudText>
+                </div>
+                <MudChip T="string" Color="Color.Warning" Size="Size.Small">@_selectedPages.Count page</MudChip>
+            </MudStack>
+            <MudDivider Class="my-3" />
+            <div class="reup-scroll-table">
+                <table class="reup-native-table">
+                    <thead>
+                        <tr>
+                            <th></th>
+                            <th>Page</th>
+                            <th>External ID</th>
+                            <th>Trạng thái</th>
+                            <th>Token</th>
+                            <th>Validated</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var pg in _pages)
+                    {
+                        <tr>
+                            <td><input type="checkbox" checked="@_selectedPages.Contains(pg.Id)" @onchange="e => Toggle(_selectedPages, pg.Id, e)" /></td>
+                            <td>@pg.PageName</td>
+                            <td>@(pg.ExternalPageId ?? "-")</td>
+                            <td>@pg.VerificationStatus</td>
+                            <td>@(pg.TokenHint ?? pg.TokenStatus ?? "Chưa có")</td>
+                            <td>@(pg.LastValidatedAt?.ToLocalTime().ToString("dd/MM/yyyy HH:mm") ?? "-")</td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+        </MudPaper>
+
+        <MudPaper Class="todox-card pa-5" Rounded="true">
+            <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
+                <div>
+                    <MudText Typo="Typo.h6">Cảnh báo đăng lại</MudText>
+                    <MudText Typo="Typo.body2" Class="todox-page-subtitle">Cảnh báo chỉ nhắc, không chặn chạy.</MudText>
+                </div>
+                <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Warning" OnClick="CheckDuplicates">
+                    Kiểm tra trùng
+                </MudButton>
+            </MudStack>
+            <MudDivider Class="my-3" />
+            @if (_duplicates.Count == 0)
+            {
+                <MudText Class="todox-page-subtitle">Chưa có cảnh báo đăng lại cho lựa chọn hiện tại.</MudText>
+            }
+            else
+            {
+                <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined">@_duplicates.Count video/page đã từng đăng. Hệ thống vẫn cho phép chạy lại.</MudAlert>
+                <MudTable Items="_duplicates" Dense="true" Hover="true" Class="todox-table mt-3">
+                    <HeaderContent>
+                        <MudTh>Video</MudTh>
+                        <MudTh>Page</MudTh>
+                        <MudTh>Facebook Video ID</MudTh>
+                        <MudTh>Đã đăng lúc</MudTh>
+                    </HeaderContent>
+                    <RowTemplate>
+                        <MudTd>@(context.Title ?? context.SourceUrl)</MudTd>
+                        <MudTd>@context.PageName</MudTd>
+                        <MudTd>@(context.FacebookVideoId ?? "-")</MudTd>
+                        <MudTd>@(context.CompletedAt?.ToLocalTime().ToString("dd/MM/yyyy HH:mm") ?? "-")</MudTd>
+                    </RowTemplate>
+                </MudTable>
+            }
+        </MudPaper>
+
+        <MudStack Row="true" Justify="Justify.FlexEnd" Class="flex-wrap gap-2">
+            <MudButton Variant="Variant.Outlined" Color="Color.Warning" Href="/reup-campaigns">Hủy</MudButton>
+            <MudButton Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.Save" Disabled="_busy" OnClick="SaveDraft">Lưu nháp</MudButton>
+            @if (CanRun)
+            {
+                <MudButton Color="Color.Success" Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.PlayArrow" Disabled="_busy" OnClick="SaveAndRun">Chạy chiến dịch</MudButton>
+            }
+        </MudStack>
+    }
+</MudStack>
+
+@code {
+    [Parameter] public Guid? CampaignId { get; set; }
+
+    private bool IsEdit => CampaignId is not null;
+    private bool _loading = true;
+    private bool _busy;
+    private Guid? _customerId;
+    private UpdateReupCampaignRequest _request = new();
+    private IReadOnlyList<ReupReferenceVideoOption> _videos = Array.Empty<ReupReferenceVideoOption>();
+    private IReadOnlyList<ReupFacebookPageOption> _pages = Array.Empty<ReupFacebookPageOption>();
+    private IReadOnlyList<ReupDuplicateWarningDto> _duplicates = Array.Empty<ReupDuplicateWarningDto>();
+    private readonly HashSet<Guid> _selectedVideos = new();
+    private readonly HashSet<Guid> _selectedPages = new();
+
+    private bool Can(string permission) => AuthState.CurrentUser?.Can(permission) == true;
+    private bool CanSave => IsEdit ? Can("reup_campaigns.update") : Can("reup_campaigns.create");
+    private bool CanRun => Can("reup_campaigns.run");
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _customerId = AuthState.CurrentUser?.CustomerId;
+            if (_customerId is null || !CanSave)
+            {
+                _loading = false;
+                return;
+            }
+
+            _videos = await Reup.ListTikTokVideosAsync(_customerId.Value);
+            _pages = await Reup.ListFacebookPagesAsync(_customerId.Value);
+
+            if (CampaignId is Guid id)
+            {
+                var campaign = await Reup.GetCampaignAsync(_customerId.Value, id);
+                if (campaign is null)
+                {
+                    Snackbar.Add("Không tìm thấy chiến dịch.", Severity.Error);
+                    Nav.NavigateTo("/reup-campaigns");
+                    return;
+                }
+                _request.Name = campaign.Name;
+                _request.Description = campaign.Description;
+                _request.Caption = campaign.Caption;
+                _request.Hashtags = campaign.Hashtags;
+                var selections = await Reup.GetCampaignSelectionsAsync(_customerId.Value, id);
+                foreach (var videoId in selections.VideoIds) _selectedVideos.Add(videoId);
+                foreach (var pageId in selections.PageIds) _selectedPages.Add(pageId);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Không tải được dữ liệu reup: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void Toggle(HashSet<Guid> set, Guid id, ChangeEventArgs e)
+    {
+        if (e.Value is bool b && b) set.Add(id);
+        else if (bool.TryParse(e.Value?.ToString(), out var parsed) && parsed) set.Add(id);
+        else set.Remove(id);
+    }
+
+    private async Task CheckDuplicates()
+    {
+        if (_customerId is null) return;
+        _duplicates = await Reup.CheckDuplicatesAsync(_customerId.Value, _selectedVideos, _selectedPages);
+    }
+
+    private async Task<Guid?> SaveCore()
+    {
+        if (_customerId is null) return null;
+        _busy = true;
+        try
+        {
+            _request.ReferenceVideoIds = _selectedVideos.ToList();
+            _request.SocialPageIds = _selectedPages.ToList();
+            if (CampaignId is Guid id)
+            {
+                await Reup.UpdateCampaignAsync(_customerId.Value, id, _request);
+                return id;
+            }
+
+            return await Reup.CreateCampaignAsync(_customerId.Value, AuthState.CurrentUser!.UserId, _request);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task SaveDraft()
+    {
+        try
+        {
+            var id = await SaveCore();
+            if (id is not null)
+            {
+                Snackbar.Add("Đã lưu chiến dịch.", Severity.Success);
+                Nav.NavigateTo($"/reup-campaigns/{id}");
+            }
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+    }
+
+    private async Task SaveAndRun()
+    {
+        try
+        {
+            var id = await SaveCore();
+            if (id is not null && _customerId is not null)
+            {
+                await Reup.RunCampaignAsync(_customerId.Value, id.Value);
+                Snackbar.Add("Đã chạy chiến dịch.", Severity.Success);
+                Nav.NavigateTo($"/reup-campaigns/{id}");
+            }
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+    }
+
+    private static string VideoTitle(ReupReferenceVideoOption video)
+        => string.IsNullOrWhiteSpace(video.Title) ? video.SourceUrl : video.Title;
+}

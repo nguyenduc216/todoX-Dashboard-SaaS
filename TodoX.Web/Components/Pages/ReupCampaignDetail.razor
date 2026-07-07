@@ -1,0 +1,291 @@
+@page "/reup-campaigns/{CampaignId:guid}"
+@implements IDisposable
+@using TodoX.Web.Models
+@using TodoX.Web.Services.Reup
+@inject AuthStateService AuthState
+@inject ReupCampaignRepository Reup
+@inject NavigationManager Nav
+@inject ISnackbar Snackbar
+
+<PageTitle>Chi tiết chiến dịch Reup</PageTitle>
+
+<MudStack Spacing="3">
+    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-3">
+        <div>
+            <MudText Typo="Typo.h4" Class="todox-page-title">@(_campaign?.Name ?? "Chi tiết chiến dịch Reup")</MudText>
+            <MudText Typo="Typo.body1" Class="todox-page-subtitle">@(_campaign?.Description ?? "Theo dõi kết quả từng video/page.")</MudText>
+        </div>
+        <MudStack Row="true" Class="flex-wrap gap-2">
+            <MudButton Variant="Variant.Outlined" Color="Color.Warning" Href="/reup-campaigns">Danh sách</MudButton>
+            @if (_campaign is not null && CanStop && _campaign.Status is "running" or "stopping")
+            {
+                <MudButton Color="Color.Warning" Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.StopCircle" OnClick="Stop">Dừng chiến dịch</MudButton>
+            }
+        </MudStack>
+    </MudStack>
+
+    @if (!AuthState.IsInitialized || _loading)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+    }
+    else if (!CanView)
+    {
+        <MudAlert Severity="Severity.Warning">Bạn chưa có quyền xem chiến dịch reup.</MudAlert>
+    }
+    else if (_campaign is null)
+    {
+        <MudAlert Severity="Severity.Error">Không tìm thấy chiến dịch.</MudAlert>
+    }
+    else
+    {
+        <MudGrid>
+            @Metric("Total", _campaign.TotalTasks)
+            @Metric("Pending", _campaign.PendingTasks)
+            @Metric("Running", _campaign.RunningTasks)
+            @Metric("Completed", _campaign.CompletedTasks)
+            @Metric("Failed", _campaign.FailedTasks)
+            @Metric("Cancelled", _campaign.CancelledTasks)
+            @Metric("Duplicate", _campaign.DuplicateWarningCount)
+        </MudGrid>
+
+        <MudPaper Class="todox-card pa-4" Rounded="true">
+            <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
+                <div>
+                    <MudText Typo="Typo.h6">Tiến độ</MudText>
+                    <MudText Typo="Typo.body2" Class="todox-page-subtitle">Trạng thái: <b>@StatusLabel(_campaign.Status)</b></MudText>
+                </div>
+                <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Refresh" OnClick="Reload">Làm mới</MudButton>
+            </MudStack>
+            <MudProgressLinear Value="@Progress" Color="Color.Success" Class="mt-3" />
+        </MudPaper>
+
+        <MudPaper Class="todox-table-card pa-0" Rounded="true">
+            <MudTable Items="_tasks" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Class="todox-table">
+                <HeaderContent>
+                    <MudTh>Video</MudTh>
+                    <MudTh>Page</MudTh>
+                    <MudTh>Status</MudTh>
+                    <MudTh>Facebook</MudTh>
+                    <MudTh>Attempt</MudTh>
+                    <MudTh>Error</MudTh>
+                    <MudTh>Started</MudTh>
+                    <MudTh>Completed</MudTh>
+                    <MudTh Style="text-align:right">Actions</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd DataLabel="Video">
+                        <div class="reup-detail-video">
+                            @if (!string.IsNullOrWhiteSpace(context.VideoThumbnailUrl))
+                            {
+                                <img src="@context.VideoThumbnailUrl" alt="@VideoTitle(context)" />
+                            }
+                            <div>
+                                <b>@VideoTitle(context)</b>
+                                <MudLink Href="@context.VideoSourceUrl" Target="_blank" Typo="Typo.caption" Class="todox-gold">@context.VideoSourceUrl</MudLink>
+                            </div>
+                        </div>
+                    </MudTd>
+                    <MudTd DataLabel="Page">@context.PageName</MudTd>
+                    <MudTd DataLabel="Status"><MudChip T="string" Size="Size.Small" Color="@TaskColor(context.Status)">@TaskLabel(context.Status)</MudChip></MudTd>
+                    <MudTd DataLabel="Facebook">
+                        @if (!string.IsNullOrWhiteSpace(context.FacebookPostUrl))
+                        {
+                            <MudLink Href="@context.FacebookPostUrl" Target="_blank" Class="todox-gold">@context.FacebookVideoId</MudLink>
+                        }
+                        else
+                        {
+                            @("-")
+                        }
+                    </MudTd>
+                    <MudTd DataLabel="Attempt">@context.AttemptCount/@context.MaxAttempts</MudTd>
+                    <MudTd DataLabel="Error">
+                        @if (!string.IsNullOrWhiteSpace(context.ErrorCode))
+                        {
+                            <div><b>@context.ErrorCode</b></div>
+                            <div class="todox-page-subtitle">@context.ErrorMessage</div>
+                        }
+                        else
+                        {
+                            @("-")
+                        }
+                    </MudTd>
+                    <MudTd DataLabel="Started">@(context.StartedAt?.ToLocalTime().ToString("dd/MM HH:mm") ?? "-")</MudTd>
+                    <MudTd DataLabel="Completed">@(context.CompletedAt?.ToLocalTime().ToString("dd/MM HH:mm") ?? "-")</MudTd>
+                    <MudTd DataLabel="Actions" Style="text-align:right">
+                        @if (CanRetry && context.Status == "failed")
+                        {
+                            <MudIconButton Icon="@Icons.Material.Filled.Replay" Color="Color.Warning" Size="Size.Small" OnClick="@(() => Retry(context.Id))" />
+                        }
+                        @if (!string.IsNullOrWhiteSpace(context.FacebookPostUrl))
+                        {
+                            <MudIconButton Icon="@Icons.Material.Filled.OpenInNew" Size="Size.Small" Href="@context.FacebookPostUrl" Target="_blank" />
+                        }
+                    </MudTd>
+                </RowTemplate>
+            </MudTable>
+        </MudPaper>
+
+        <MudPaper Class="todox-card pa-4" Rounded="true">
+            <MudText Typo="Typo.h6">Log chạy chiến dịch</MudText>
+            <MudDivider Class="my-3" />
+            @if (_logs.Count == 0)
+            {
+                <MudText Class="todox-page-subtitle">Chưa có log.</MudText>
+            }
+            else
+            {
+                <div class="reup-log-list">
+                    @foreach (var log in _logs.Take(120))
+                    {
+                        <div class="reup-log-line @log.Level">
+                            <span>@log.CreatedAt.ToLocalTime().ToString("HH:mm:ss")</span>
+                            <b>@log.Step</b>
+                            <span>@log.Message</span>
+                        </div>
+                    }
+                </div>
+            }
+        </MudPaper>
+    }
+</MudStack>
+
+@code {
+    [Parameter] public Guid CampaignId { get; set; }
+
+    private bool _loading = true;
+    private Guid? _customerId;
+    private ReupCampaignDto? _campaign;
+    private IReadOnlyList<ReupPublishTaskDto> _tasks = Array.Empty<ReupPublishTaskDto>();
+    private IReadOnlyList<ReupPublishLogDto> _logs = Array.Empty<ReupPublishLogDto>();
+    private PeriodicTimer? _timer;
+    private CancellationTokenSource _pollCts = new();
+
+    private bool Can(string permission) => AuthState.CurrentUser?.Can(permission) == true;
+    private bool CanView => Can("reup_campaigns.view");
+    private bool CanStop => Can("reup_campaigns.stop");
+    private bool CanRetry => Can("reup_campaigns.retry");
+    private double Progress => _campaign?.TotalTasks > 0 ? (double)_campaign.CompletedTasks / _campaign.TotalTasks * 100 : 0;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Reload();
+        StartPolling();
+    }
+
+    private async Task Reload()
+    {
+        _loading = true;
+        try
+        {
+            _customerId = AuthState.CurrentUser?.CustomerId;
+            if (!CanView || _customerId is null)
+            {
+                return;
+            }
+
+            _campaign = await Reup.GetCampaignAsync(_customerId.Value, CampaignId);
+            if (_campaign is not null)
+            {
+                _tasks = await Reup.GetTasksAsync(_customerId.Value, CampaignId);
+                _logs = await Reup.GetLogsAsync(_customerId.Value, CampaignId);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Không tải được chi tiết chiến dịch: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private void StartPolling()
+    {
+        _timer = new PeriodicTimer(TimeSpan.FromSeconds(5));
+        _ = Task.Run(async () =>
+        {
+            while (await _timer.WaitForNextTickAsync(_pollCts.Token))
+            {
+                if (_campaign?.Status is "running" or "stopping")
+                {
+                    await InvokeAsync(Reload);
+                }
+            }
+        }, _pollCts.Token);
+    }
+
+    private async Task Stop()
+    {
+        try
+        {
+            await Reup.StopCampaignAsync(_customerId!.Value, CampaignId);
+            Snackbar.Add("Đã yêu cầu dừng chiến dịch.", Severity.Warning);
+            await Reload();
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+    }
+
+    private async Task Retry(Guid taskId)
+    {
+        try
+        {
+            await Reup.RetryTaskAsync(_customerId!.Value, taskId);
+            Snackbar.Add("Đã đưa task lỗi vào hàng đợi retry.", Severity.Success);
+            await Reload();
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+    }
+
+    private RenderFragment Metric(string label, int value) => @<MudItem xs="6" sm="4" md="2">
+        <MudPaper Class="todox-card pa-4" Rounded="true">
+            <MudText Typo="Typo.caption" Class="todox-page-subtitle">@label</MudText>
+            <MudText Typo="Typo.h5" Class="todox-gold">@value</MudText>
+        </MudPaper>
+    </MudItem>;
+
+    private static string VideoTitle(ReupPublishTaskDto task)
+        => string.IsNullOrWhiteSpace(task.VideoTitle) ? task.VideoSourceUrl ?? "-" : task.VideoTitle;
+
+    private static Color TaskColor(string status) => status switch
+    {
+        "completed" => Color.Success,
+        "failed" => Color.Error,
+        "cancelled" => Color.Warning,
+        "checking_page" or "resolving_video" or "publishing" => Color.Info,
+        _ => Color.Default
+    };
+
+    private static string TaskLabel(string status) => status switch
+    {
+        "pending" => "Chờ chạy",
+        "checking_page" => "Check page",
+        "resolving_video" => "Cache video",
+        "publishing" => "Đăng Facebook",
+        "completed" => "Hoàn tất",
+        "failed" => "Lỗi",
+        "cancelled" => "Đã hủy",
+        "skipped" => "Bỏ qua",
+        _ => status
+    };
+
+    private static string StatusLabel(string status) => status switch
+    {
+        "draft" => "Nháp",
+        "ready" => "Sẵn sàng",
+        "running" => "Đang chạy",
+        "stopping" => "Đang dừng",
+        "stopped" => "Đã dừng",
+        "completed" => "Hoàn tất",
+        "failed" => "Có lỗi",
+        _ => status
+    };
+
+    public void Dispose()
+    {
+        _pollCts.Cancel();
+        _pollCts.Dispose();
+        _timer?.Dispose();
+    }
+}

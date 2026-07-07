@@ -202,6 +202,34 @@ body,
     font-weight: 650;
 }
 
+.todox-nav-loading {
+    padding: 18px 16px;
+}
+
+.todox-nav .mud-nav-group > .mud-nav-link {
+    min-height: 48px;
+    margin-top: 10px;
+    margin-bottom: 2px;
+    padding-left: 18px;
+    color: rgba(255, 255, 255, .9) !important;
+    font-weight: 850;
+    letter-spacing: 0;
+}
+
+.todox-nav .mud-nav-group .mud-collapse-container .mud-nav-link {
+    min-height: 44px;
+    margin-top: 3px;
+    margin-bottom: 3px;
+    padding-left: 42px;
+    font-size: .92rem;
+    font-weight: 650;
+    opacity: .94;
+}
+
+.todox-nav .mud-nav-group .mud-collapse-container .mud-nav-link .mud-icon-root {
+    margin-right: 10px;
+}
+
 .todox-nav .mud-nav-link .mud-icon-root {
     color: rgba(255, 255, 255, .76) !important;
     margin-right: 12px;

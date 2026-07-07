@@ -1,0 +1,206 @@
+@page "/reup-campaigns"
+@implements IDisposable
+@using TodoX.Web.Models
+@using TodoX.Web.Services.Reup
+@inject AuthStateService AuthState
+@inject ReupCampaignRepository Reup
+@inject NavigationManager Nav
+@inject ISnackbar Snackbar
+
+<PageTitle>Chiến dịch Reup</PageTitle>
+
+<MudStack Spacing="3">
+    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-3">
+        <div>
+            <MudText Typo="Typo.h4" Class="todox-page-title">Chiến dịch Reup</MudText>
+            <MudText Typo="Typo.body1" Class="todox-page-subtitle">Reup video TikTok đã lưu trong Link video tham chiếu lên Facebook Page.</MudText>
+        </div>
+        @if (CanCreate)
+        {
+            <MudButton Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.Add" Href="/reup-campaigns/new">Tạo chiến dịch</MudButton>
+        }
+    </MudStack>
+
+    @if (!AuthState.IsInitialized || _loading)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+    }
+    else if (!CanView)
+    {
+        <MudAlert Severity="Severity.Warning">Bạn chưa có quyền xem chiến dịch reup.</MudAlert>
+    }
+    else if (_customerId is null)
+    {
+        <MudAlert Severity="Severity.Warning">Trang này dành cho tài khoản khách hàng có customer_id.</MudAlert>
+    }
+    else if (_items.Count == 0)
+    {
+        <MudPaper Class="todox-card pa-8" Rounded="true">
+            <MudStack AlignItems="AlignItems.Center" Spacing="2">
+                <MudIcon Icon="@Icons.Material.Filled.Campaign" Size="Size.Large" Class="todox-gold" />
+                <MudText Class="todox-page-subtitle">Chưa có chiến dịch reup nào.</MudText>
+            </MudStack>
+        </MudPaper>
+    }
+    else
+    {
+        <MudPaper Class="todox-table-card pa-0" Rounded="true">
+            <MudTable Items="_items" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Class="todox-table">
+                <HeaderContent>
+                    <MudTh>Tên chiến dịch</MudTh>
+                    <MudTh>Trạng thái</MudTh>
+                    <MudTh>Video</MudTh>
+                    <MudTh>Page</MudTh>
+                    <MudTh>Total</MudTh>
+                    <MudTh>Completed</MudTh>
+                    <MudTh>Failed</MudTh>
+                    <MudTh>Duplicate</MudTh>
+                    <MudTh>Ngày tạo</MudTh>
+                    <MudTh Style="text-align:right">Thao tác</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd DataLabel="Tên chiến dịch">
+                        <MudLink Href="@($"/reup-campaigns/{context.Id}")" Class="todox-gold">@context.Name</MudLink>
+                        @if (!string.IsNullOrWhiteSpace(context.Description))
+                        {
+                            <div class="todox-page-subtitle">@context.Description</div>
+                        }
+                    </MudTd>
+                    <MudTd DataLabel="Trạng thái"><MudChip T="string" Size="Size.Small" Color="@StatusColor(context.Status)">@StatusLabel(context.Status)</MudChip></MudTd>
+                    <MudTd DataLabel="Video">@context.VideoCount</MudTd>
+                    <MudTd DataLabel="Page">@context.PageCount</MudTd>
+                    <MudTd DataLabel="Total">@context.TotalTasks</MudTd>
+                    <MudTd DataLabel="Completed">@context.CompletedTasks</MudTd>
+                    <MudTd DataLabel="Failed">@context.FailedTasks</MudTd>
+                    <MudTd DataLabel="Duplicate">@context.DuplicateWarningCount</MudTd>
+                    <MudTd DataLabel="Ngày tạo">@context.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</MudTd>
+                    <MudTd DataLabel="Thao tác" Style="text-align:right">
+                        <MudIconButton Icon="@Icons.Material.Filled.Visibility" Size="Size.Small" Href="@($"/reup-campaigns/{context.Id}")" />
+                        @if (CanUpdate && context.Status is "draft" or "stopped")
+                        {
+                            <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" Href="@($"/reup-campaigns/{context.Id}/edit")" />
+                        }
+                        @if (CanRun && context.Status is "draft" or "ready" or "stopped" or "failed")
+                        {
+                            <MudIconButton Icon="@Icons.Material.Filled.PlayArrow" Color="Color.Success" Size="Size.Small" OnClick="@(() => Run(context.Id))" />
+                        }
+                        @if (CanStop && context.Status is "running" or "stopping")
+                        {
+                            <MudIconButton Icon="@Icons.Material.Filled.StopCircle" Color="Color.Warning" Size="Size.Small" OnClick="@(() => Stop(context.Id))" />
+                        }
+                        @if (CanDelete && context.Status is not ("running" or "stopping"))
+                        {
+                            <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small" OnClick="@(() => Delete(context.Id))" />
+                        }
+                    </MudTd>
+                </RowTemplate>
+            </MudTable>
+        </MudPaper>
+    }
+</MudStack>
+
+@code {
+    private bool _loading = true;
+    private Guid? _customerId;
+    private IReadOnlyList<ReupCampaignDto> _items = Array.Empty<ReupCampaignDto>();
+
+    private bool Can(string permission) => AuthState.CurrentUser?.Can(permission) == true;
+    private bool CanView => Can("reup_campaigns.view");
+    private bool CanCreate => Can("reup_campaigns.create");
+    private bool CanUpdate => Can("reup_campaigns.update");
+    private bool CanDelete => Can("reup_campaigns.delete");
+    private bool CanRun => Can("reup_campaigns.run");
+    private bool CanStop => Can("reup_campaigns.stop");
+
+    protected override async Task OnInitializedAsync()
+    {
+        AuthState.OnChange += HandleAuthChanged;
+        if (AuthState.IsInitialized)
+        {
+            await Reload();
+        }
+        else
+        {
+            _loading = false;
+        }
+    }
+
+    private async void HandleAuthChanged() => await InvokeAsync(Reload);
+
+    private async Task Reload()
+    {
+        _loading = true;
+        try
+        {
+            _customerId = AuthState.CurrentUser?.CustomerId;
+            if (CanView && _customerId is Guid cid)
+            {
+                _items = await Reup.ListCampaignsAsync(cid);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Không tải được chiến dịch reup: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task Run(Guid id)
+    {
+        try
+        {
+            await Reup.RunCampaignAsync(_customerId!.Value, id);
+            Snackbar.Add("Đã đưa chiến dịch vào hàng đợi chạy.", Severity.Success);
+            Nav.NavigateTo($"/reup-campaigns/{id}");
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+    }
+
+    private async Task Stop(Guid id)
+    {
+        try
+        {
+            await Reup.StopCampaignAsync(_customerId!.Value, id);
+            Snackbar.Add("Đã yêu cầu dừng chiến dịch.", Severity.Warning);
+            await Reload();
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+    }
+
+    private async Task Delete(Guid id)
+    {
+        try
+        {
+            await Reup.DeleteCampaignAsync(_customerId!.Value, id);
+            Snackbar.Add("Đã xóa chiến dịch.", Severity.Success);
+            await Reload();
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+    }
+
+    private static Color StatusColor(string status) => status switch
+    {
+        "running" => Color.Info,
+        "completed" => Color.Success,
+        "failed" => Color.Error,
+        "stopping" or "stopped" => Color.Warning,
+        _ => Color.Default
+    };
+
+    private static string StatusLabel(string status) => status switch
+    {
+        "draft" => "Nháp",
+        "ready" => "Sẵn sàng",
+        "running" => "Đang chạy",
+        "stopping" => "Đang dừng",
+        "stopped" => "Đã dừng",
+        "completed" => "Hoàn tất",
+        "failed" => "Có lỗi",
+        _ => status
+    };
+
+    public void Dispose() => AuthState.OnChange -= HandleAuthChanged;
+}

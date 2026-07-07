@@ -2,6 +2,7 @@
 @implements IDisposable
 @inject AuthStateService AuthState
 @inject AccountService Accounts
+@inject NavigationMenuRepository NavigationMenus
 @inject NavigationManager Navigation
 @inject ISnackbar Snackbar
 
@@ -86,99 +87,41 @@
                Breakpoint="Breakpoint.Md">
 
         <MudNavMenu Class="todox-nav">
-            <MudNavLink Href="/" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Dashboard">
-                Dashboard
-            </MudNavLink>
-
-            @if (CanModule("admin_users"))
+            @if (!_menuLoaded)
             {
-                <MudNavLink Href="/admin-users" Icon="@Icons.Material.Filled.AdminPanelSettings">
-                    Quản trị viên
-                </MudNavLink>
+                <div class="todox-nav-loading">
+                    <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+                </div>
             }
-            @if (CanModule("customers"))
+            else
             {
-                <MudNavLink Href="/customers" Icon="@Icons.Material.Filled.Groups">
-                    Quản lý khách hàng
-                </MudNavLink>
-            }
-            @if (CanModule("customer_accounts"))
-            {
-                <MudNavLink Href="/customer-accounts" Icon="@Icons.Material.Filled.ManageAccounts">
-                    Quản lý tài khoản
-                </MudNavLink>
-            }
-            @if (CanModule("token_wallets"))
-            {
-                <MudNavLink Href="/wallets" Icon="@Icons.Material.Filled.AccountBalanceWallet">
-                    Quản lý điểm
-                </MudNavLink>
-            }
-            @if (CanModule("services"))
-            {
-                <MudNavLink Href="/services" Icon="@Icons.Material.Filled.Category">
-                    Quản lý dịch vụ
-                </MudNavLink>
-            }
-            @if (CanAdminAvatarManager)
-            {
-                <MudNavLink Href="/admin/avatar-manager" Icon="@Icons.Material.Filled.FaceRetouchingNatural">
-                    Quản lý avatar mẫu
-                </MudNavLink>
-            }
-            @if (CanModule("render_jobs"))
-            {
-                <MudNavLink Href="/render-jobs" Icon="@Icons.Material.Filled.Movie">
-                    Render Jobs
-                </MudNavLink>
-            }
-            @if (CanModule("customer_pages"))
-            {
-                <MudNavLink Href="/my-pages" Icon="@Icons.Material.Filled.Public">
-                    Trang mạng xã hội
-                </MudNavLink>
-            }
-            @if (CanModule("reference_videos"))
-            {
-                <MudNavLink Href="/reference-videos" Icon="@Icons.Material.Filled.VideoLibrary">
-                    Link video tham chiếu
-                </MudNavLink>
-            }
-            @if (CanModule("roles") || CanModule("permissions"))
-            {
-                <MudNavLink Href="/permissions" Icon="@Icons.Material.Filled.Security">
-                    Phân quyền
-                </MudNavLink>
-            }
-            @if (CanModule("settings") || CanModule("app_settings"))
-            {
-                <MudNavLink Href="/settings" Icon="@Icons.Material.Filled.Settings">
-                    Cài đặt hệ thống
-                </MudNavLink>
-            }
-            @if (CanModule("prompt_templates") || CanModule("settings") || CanModule("app_settings"))
-            {
-                <MudNavLink Href="/settings/prompt-templates" Icon="@Icons.Material.Filled.AutoFixHigh">
-                    Quản lý prompt
-                </MudNavLink>
-            }
-            @if (CanModule("api_providers"))
-            {
-                <MudNavLink Href="/api-settings" Icon="@Icons.Material.Filled.Api">
-                    Cài đặt API (todox)
-                </MudNavLink>
-                <MudNavLink Href="/settings/api-providers" Icon="@Icons.Material.Filled.Dns">
-                    Nhà cung cấp API
-                </MudNavLink>
-                <MudNavLink Href="/settings/api-endpoints" Icon="@Icons.Material.Filled.SettingsEthernet">
-                    API Endpoints
-                </MudNavLink>
-            }
-            @if (CanModule("audit_logs"))
-            {
-                <MudNavLink Href="/activity-logs" Icon="@Icons.Material.Filled.Article">
-                    Nhật ký hoạt động
-                </MudNavLink>
+                @foreach (var group in _menuGroups)
+                {
+                    if (group.Items.Count == 1 && group.Code == "overview")
+                    {
+                        var item = group.Items[0];
+                        <MudNavLink Href="@item.Href"
+                                    Match="@(item.MatchAll ? NavLinkMatch.All : NavLinkMatch.Prefix)"
+                                    Icon="@ResolveIcon(item.IconKey)">
+                            @item.Title
+                        </MudNavLink>
+                    }
+                    else
+                    {
+                        <MudNavGroup Title="@group.Title"
+                                     Icon="@ResolveIcon(group.IconKey)"
+                                     Expanded="@group.DefaultExpanded">
+                            @foreach (var item in group.Items)
+                            {
+                                <MudNavLink Href="@item.Href"
+                                            Match="@(item.MatchAll ? NavLinkMatch.All : NavLinkMatch.Prefix)"
+                                            Icon="@ResolveIcon(item.IconKey)">
+                                    @item.Title
+                                </MudNavLink>
+                            }
+                        </MudNavGroup>
+                    }
+                }
             }
         </MudNavMenu>
     </MudDrawer>
@@ -199,6 +142,8 @@
     private bool _drawerOpen = true;
     private bool _userMenuOpen;
     private bool _notifyOpen;
+    private IReadOnlyList<NavigationMenuGroupDto> _menuGroups = Array.Empty<NavigationMenuGroupDto>();
+    private bool _menuLoaded;
 
     private readonly MudTheme _theme = new()
     {
@@ -242,6 +187,8 @@
             {
                 Navigation.NavigateTo("/login", forceLoad: false);
             }
+
+            await LoadNavigationMenuAsync();
         }
     }
 
@@ -263,7 +210,12 @@
             or "/forgot-password";
     }
 
-    private void HandleAuthChange() => InvokeAsync(StateHasChanged);
+    private void HandleAuthChange() => InvokeAsync(async () =>
+    {
+        _menuLoaded = false;
+        await LoadNavigationMenuAsync();
+        StateHasChanged();
+    });
 
     public void Dispose() => AuthState.OnChange -= HandleAuthChange;
 
@@ -285,6 +237,167 @@
            || AuthState.CurrentUser?.Role is TodoXUserRole.Admin or TodoXUserRole.SystemOperator
            || CanModule("settings")
            || CanModule("services");
+
+    private async Task LoadNavigationMenuAsync()
+    {
+        if (!AuthState.IsAuthenticated && !IsPublicRoute())
+        {
+            _menuGroups = Array.Empty<NavigationMenuGroupDto>();
+            _menuLoaded = true;
+            return;
+        }
+
+        try
+        {
+            var groups = await NavigationMenus.GetActiveMenuAsync();
+            _menuGroups = ApplyMenuVisibility(groups).ToList();
+            if (_menuGroups.Count == 0)
+            {
+                _menuGroups = ApplyMenuVisibility(BuildFallbackMenu()).ToList();
+            }
+        }
+        catch
+        {
+            _menuGroups = ApplyMenuVisibility(BuildFallbackMenu()).ToList();
+        }
+
+        _menuLoaded = true;
+    }
+
+    private IEnumerable<NavigationMenuGroupDto> ApplyMenuVisibility(IEnumerable<NavigationMenuGroupDto> groups)
+    {
+        foreach (var group in groups.OrderBy(x => x.SortOrder))
+        {
+            var visibleItems = group.Items
+                .OrderBy(x => x.SortOrder)
+                .Where(IsMenuItemVisible)
+                .ToList();
+
+            if (visibleItems.Count == 0)
+            {
+                continue;
+            }
+
+            yield return new NavigationMenuGroupDto
+            {
+                Id = group.Id,
+                Code = group.Code,
+                Title = group.Title,
+                IconKey = group.IconKey,
+                SortOrder = group.SortOrder,
+                DefaultExpanded = group.DefaultExpanded,
+                Items = visibleItems
+            };
+        }
+    }
+
+    private bool IsMenuItemVisible(NavigationMenuItemDto item)
+    {
+        if (item.VisibilityPolicy.Equals("always", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (item.VisibilityPolicy.Equals("admin_avatar_manager", StringComparison.OrdinalIgnoreCase))
+        {
+            return CanAdminAvatarManager;
+        }
+
+        if (item.ModuleKeys.Length == 0)
+        {
+            return true;
+        }
+
+        return item.ModuleKeys.Any(CanModule);
+    }
+
+    private static string ResolveIcon(string? iconKey) => iconKey switch
+    {
+        "Dashboard" => Icons.Material.Filled.Dashboard,
+        "AdminPanelSettings" => Icons.Material.Filled.AdminPanelSettings,
+        "Groups" => Icons.Material.Filled.Groups,
+        "ManageAccounts" => Icons.Material.Filled.ManageAccounts,
+        "AccountBalanceWallet" => Icons.Material.Filled.AccountBalanceWallet,
+        "Category" => Icons.Material.Filled.Category,
+        "FaceRetouchingNatural" => Icons.Material.Filled.FaceRetouchingNatural,
+        "Movie" => Icons.Material.Filled.Movie,
+        "Public" => Icons.Material.Filled.Public,
+        "VideoLibrary" => Icons.Material.Filled.VideoLibrary,
+        "Campaign" => Icons.Material.Filled.Campaign,
+        "Security" => Icons.Material.Filled.Security,
+        "Settings" => Icons.Material.Filled.Settings,
+        "AutoFixHigh" => Icons.Material.Filled.AutoFixHigh,
+        "Api" => Icons.Material.Filled.Api,
+        "Dns" => Icons.Material.Filled.Dns,
+        "SettingsEthernet" => Icons.Material.Filled.SettingsEthernet,
+        "Article" => Icons.Material.Filled.Article,
+        _ => Icons.Material.Filled.Circle
+    };
+
+    private static IReadOnlyList<NavigationMenuGroupDto> BuildFallbackMenu()
+    {
+        NavigationMenuItemDto Item(string code, string title, string href, string icon, string[] modules, string policy = "any_module", bool matchAll = false, int sort = 10)
+            => new()
+            {
+                Id = Guid.NewGuid(),
+                Code = code,
+                Title = title,
+                Href = href,
+                IconKey = icon,
+                ModuleKeys = modules,
+                VisibilityPolicy = policy,
+                MatchAll = matchAll,
+                SortOrder = sort
+            };
+
+        NavigationMenuGroupDto Group(string code, string title, string icon, int sort, bool expanded, params NavigationMenuItemDto[] items)
+        {
+            var id = Guid.NewGuid();
+            foreach (var item in items)
+            {
+                item.GroupId = id;
+            }
+
+            return new NavigationMenuGroupDto
+            {
+                Id = id,
+                Code = code,
+                Title = title,
+                IconKey = icon,
+                SortOrder = sort,
+                DefaultExpanded = expanded,
+                Items = items.ToList()
+            };
+        }
+
+        return new[]
+        {
+            Group("overview", "Tổng quan", "Dashboard", 10, true,
+                Item("dashboard", "Dashboard", "/", "Dashboard", Array.Empty<string>(), "always", true, 10)),
+            Group("administration", "Quản trị hệ thống", "AdminPanelSettings", 20, true,
+                Item("admin_users", "Quản trị viên", "/admin-users", "AdminPanelSettings", new[] { "admin_users" }, sort: 10),
+                Item("customers", "Quản lý khách hàng", "/customers", "Groups", new[] { "customers" }, sort: 20),
+                Item("customer_accounts", "Quản lý tài khoản", "/customer-accounts", "ManageAccounts", new[] { "customer_accounts" }, sort: 30),
+                Item("permissions", "Phân quyền", "/permissions", "Security", new[] { "roles", "permissions" }, sort: 40),
+                Item("settings", "Cài đặt hệ thống", "/settings", "Settings", new[] { "settings", "app_settings" }, sort: 50),
+                Item("activity_logs", "Nhật ký hoạt động", "/activity-logs", "Article", new[] { "audit_logs" }, sort: 60)),
+            Group("billing_services", "Dịch vụ & điểm", "AccountBalanceWallet", 30, true,
+                Item("wallets", "Quản lý điểm", "/wallets", "AccountBalanceWallet", new[] { "token_wallets" }, sort: 10),
+                Item("services", "Quản lý dịch vụ", "/services", "Category", new[] { "services" }, sort: 20)),
+            Group("ai_studio", "AI Studio", "AutoFixHigh", 40, true,
+                Item("admin_avatar_manager", "Quản lý avatar mẫu", "/admin/avatar-manager", "FaceRetouchingNatural", new[] { "settings", "services" }, "admin_avatar_manager", sort: 10),
+                Item("render_jobs", "Render Jobs", "/render-jobs", "Movie", new[] { "render_jobs" }, sort: 20),
+                Item("prompt_templates", "Quản lý prompt", "/settings/prompt-templates", "AutoFixHigh", new[] { "prompt_templates", "settings", "app_settings" }, sort: 30)),
+            Group("social_marketing", "Kênh mạng xã hội", "Public", 50, true,
+                Item("customer_pages", "Trang mạng xã hội", "/my-pages", "Public", new[] { "customer_pages" }, sort: 10),
+                Item("reference_videos", "Link video tham chiếu", "/reference-videos", "VideoLibrary", new[] { "reference_videos" }, sort: 20),
+                Item("reup_campaigns", "Chiến dịch Reup", "/reup-campaigns", "Campaign", new[] { "reup_campaigns" }, sort: 30)),
+            Group("api_integration", "API & tích hợp", "Api", 60, false,
+                Item("api_settings", "Cài đặt API (todox)", "/api-settings", "Api", new[] { "api_providers" }, sort: 10),
+                Item("api_providers", "Nhà cung cấp API", "/settings/api-providers", "Dns", new[] { "api_providers" }, sort: 20),
+                Item("api_endpoints", "API Endpoints", "/settings/api-endpoints", "SettingsEthernet", new[] { "api_providers" }, sort: 30))
+        };
+    }
 
     private void ToggleDrawer() => _drawerOpen = !_drawerOpen;
 
