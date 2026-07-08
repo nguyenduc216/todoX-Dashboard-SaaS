@@ -1,4 +1,5 @@
 using System.Text.Json;
+using TodoX.Web.Data;
 using TodoX.Web.Models;
 
 namespace TodoX.Web.Services.AiProviders;
@@ -46,7 +47,15 @@ public sealed class AiProviderService : IAiProviderService
         }
         ValidateJson(request.ConfigJson, "config_json");
 
-        await _repo.UpdateProviderAsync(id, request, user.UserId.ToString(), ct);
+        try
+        {
+            await _repo.UpdateProviderAsync(id, request, user.UserId.ToString(), ct);
+        }
+        catch (Exception ex)
+        {
+            DbDiagnostics.LogPostgresException(_logger, ex, "provider_update");
+            throw;
+        }
         return await _repo.GetProviderAsync(id, ct)
                ?? throw new InvalidOperationException("Không đọc lại được provider vừa cập nhật.");
     }
@@ -70,12 +79,29 @@ public sealed class AiProviderService : IAiProviderService
         }
         ValidateJson(request.ConfigJson, "config_json");
 
-        await _repo.UpdateCapabilityAsync(id, request, user.UserId.ToString(), ct);
+        const string table = "todox_ai_provider_capability";
+        DbDiagnostics.LogFieldLengths(_logger, "capability_update",
+            ("display_name", request.DisplayName),
+            ("model_name", request.ModelName),
+            ("unit_type", request.UnitType));
+        request.DisplayName = DbDiagnostics.Clip(_logger, table, "display_name", request.DisplayName)!;
+        request.ModelName = DbDiagnostics.Clip(_logger, table, "model_name", request.ModelName);
+        request.UnitType = DbDiagnostics.Clip(_logger, table, "unit_type", request.UnitType)!;
 
-        // Setting is_default is a separate, guarded operation (one default per capability_code).
-        if (request.IsDefault)
+        try
         {
-            await _repo.SetDefaultCapabilityAsync(id, user.UserId.ToString(), ct);
+            await _repo.UpdateCapabilityAsync(id, request, user.UserId.ToString(), ct);
+
+            // Setting is_default is a separate, guarded operation (one default per capability_code).
+            if (request.IsDefault)
+            {
+                await _repo.SetDefaultCapabilityAsync(id, user.UserId.ToString(), ct);
+            }
+        }
+        catch (Exception ex)
+        {
+            DbDiagnostics.LogPostgresException(_logger, ex, "capability_update");
+            throw;
         }
 
         return await _repo.GetCapabilityAsync(id, ct)
@@ -117,15 +143,40 @@ public sealed class AiProviderService : IAiProviderService
 
     public async Task LogUsageAsync(AiProviderUsageLog log, CancellationToken ct = default)
     {
+        const string table = "todox_ai_provider_usage_log";
+
+        // Log field lengths so a length overflow can be pinpointed (no secrets are logged).
+        DbDiagnostics.LogFieldLengths(_logger, "usage_log_insert",
+            ("provider_code", log.ProviderCode),
+            ("capability_code", log.CapabilityCode),
+            ("feature_code", log.FeatureCode),
+            ("model_name", log.ModelName),
+            ("request_id", log.RequestId),
+            ("job_id", log.JobId),
+            ("status", log.Status));
+
+        // Defensively clip string fields to their column limits before writing.
+        log.ProviderCode = DbDiagnostics.Clip(_logger, table, "provider_code", log.ProviderCode);
+        log.CapabilityCode = DbDiagnostics.Clip(_logger, table, "capability_code", log.CapabilityCode);
+        log.FeatureCode = DbDiagnostics.Clip(_logger, table, "feature_code", log.FeatureCode);
+        log.ModelName = DbDiagnostics.Clip(_logger, table, "model_name", log.ModelName);
+        log.RequestId = DbDiagnostics.Clip(_logger, table, "request_id", log.RequestId);
+        log.JobId = DbDiagnostics.Clip(_logger, table, "job_id", log.JobId);
+        log.UnitType = DbDiagnostics.Clip(_logger, table, "unit_type", log.UnitType);
+        log.Status = DbDiagnostics.Clip(_logger, table, "status", log.Status);
+
         try
         {
             await _repo.InsertUsageLogAsync(log, ct);
         }
         catch (Exception ex)
         {
-            // Usage logging must never break a successful render.
-            _logger.LogWarning(ex, "AI_PROVIDER_USAGE_LOG_FAILED capability={CapabilityCode} feature={FeatureCode}",
-                log.CapabilityCode, log.FeatureCode);
+            // Usage logging must never break a successful render, but the failure must be diagnosable.
+            if (!DbDiagnostics.LogPostgresException(_logger, ex, "usage_log_insert"))
+            {
+                _logger.LogWarning(ex, "AI_PROVIDER_USAGE_LOG_FAILED capability={CapabilityCode} feature={FeatureCode}",
+                    log.CapabilityCode, log.FeatureCode);
+            }
         }
     }
 

@@ -164,7 +164,9 @@ public sealed class OpenRouterImageService : IOpenRouterImageService
             ["aspect_ratio"] = request.AspectRatio,
             ["output_format"] = request.OutputFormat,
             ["quality"] = request.Quality,
-            ["resolution"] = request.Resolution,
+            // Floor to >= 2K so the generated image meets the model's minimum pixel count
+            // (e.g. seedream requires >= 3,686,400 px = 1920x1920). Never send "1K".
+            ["resolution"] = NormalizeResolution(request.Resolution),
             ["n"] = Math.Clamp(request.Count, 1, 4)
         };
 
@@ -333,6 +335,23 @@ public sealed class OpenRouterImageService : IOpenRouterImageService
         if (string.IsNullOrWhiteSpace(endpointPath)) return "/images";
         var trimmed = endpointPath.Trim();
         return trimmed.StartsWith('/') ? trimmed : "/" + trimmed;
+    }
+
+    /// <summary>
+    /// Enforces a minimum resolution of 2K for OpenRouter image models. "1K", empty or unknown
+    /// values are raised to "2K"; "2K"/"4K" (and higher) are kept as-is. This guarantees the output
+    /// meets the model's minimum pixel requirement (e.g. seedream: >= 3,686,400 px).
+    /// </summary>
+    public static string NormalizeResolution(string? resolution)
+    {
+        var value = (resolution ?? string.Empty).Trim().ToUpperInvariant();
+        return value switch
+        {
+            "2K" => "2K",
+            "4K" => "4K",
+            "8K" => "8K",
+            _ => "2K"
+        };
     }
 
     private static string? ExtractError(JsonDocument? doc)

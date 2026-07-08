@@ -86,8 +86,16 @@ public sealed class AiImageRenderRouter : IAiImageRenderRouter
         var factoryKey = ProviderCodeMap.ToFactoryKey(option.ProviderCode);
         var provider = _imageProviders.GetProvider(factoryKey);
 
-        _logger.LogInformation("AI_IMAGE_ROUTER_RESOLVED capability={CapabilityCode} feature={FeatureCode} provider={ProviderCode} model={ModelName}",
-            request.CapabilityCode, request.FeatureCode, option.ProviderCode, option.ModelName);
+        // Image output settings may be overridden per capability via config_json:
+        // { "resolution": "2K", "quality": "high", "output_format": "png" }.
+        // Resolution defaults to 2K (and is floored to >= 2K downstream) to satisfy model minimums.
+        var (cfgResolution, cfgQuality, cfgFormat) = ParseImageConfig(capability?.ConfigJson);
+        var resolution = OpenRouterImageService.NormalizeResolution(cfgResolution ?? request.Resolution);
+        var quality = FirstNonBlank(cfgQuality, request.Quality) ?? "high";
+        var outputFormat = FirstNonBlank(cfgFormat, request.OutputFormat) ?? "png";
+
+        _logger.LogInformation("AI_IMAGE_ROUTER_RESOLVED capability={CapabilityCode} feature={FeatureCode} provider={ProviderCode} model={ModelName} resolution={Resolution}",
+            request.CapabilityCode, request.FeatureCode, option.ProviderCode, option.ModelName, resolution);
 
         var response = await provider.GenerateImageAsync(new OpenRouterImageRequest
         {
@@ -96,9 +104,9 @@ public sealed class AiImageRenderRouter : IAiImageRenderRouter
             Model = option.ModelName ?? string.Empty,
             Prompt = request.Prompt,
             AspectRatio = request.AspectRatio,
-            OutputFormat = request.OutputFormat,
-            Quality = request.Quality,
-            Resolution = request.Resolution,
+            OutputFormat = outputFormat,
+            Quality = quality,
+            Resolution = resolution,
             Seed = request.Seed,
             Count = 1,
             FileCategory = request.FileCategory,
@@ -167,4 +175,29 @@ public sealed class AiImageRenderRouter : IAiImageRenderRouter
             return null;
         }
     }
+
+    /// <summary>Reads optional image output overrides from a capability's config_json.</summary>
+    private static (string? Resolution, string? Quality, string? OutputFormat) ParseImageConfig(string? configJson)
+    {
+        if (string.IsNullOrWhiteSpace(configJson)) return (null, null, null);
+        try
+        {
+            using var doc = JsonDocument.Parse(configJson);
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object) return (null, null, null);
+            return (ReadString(root, "resolution"), ReadString(root, "quality"), ReadString(root, "output_format"));
+        }
+        catch
+        {
+            return (null, null, null);
+        }
+    }
+
+    private static string? ReadString(JsonElement root, string name)
+        => root.TryGetProperty(name, out var el) && el.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(el.GetString())
+            ? el.GetString()
+            : null;
+
+    private static string? FirstNonBlank(params string?[] values)
+        => values.FirstOrDefault(v => !string.IsNullOrWhiteSpace(v));
 }

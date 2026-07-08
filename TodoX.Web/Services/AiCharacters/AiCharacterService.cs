@@ -1,3 +1,4 @@
+using TodoX.Web.Data;
 using TodoX.Web.Models;
 using TodoX.Web.Services.AiProviders;
 using TodoX.Web.Services.Media;
@@ -69,25 +70,41 @@ public sealed class AiCharacterService : IAiCharacterService
         _logger.LogInformation("AI_CHARACTER_CREATE_START userId={UserId} customerId={CustomerId} provider={ProviderCode} model={ModelName}",
             user.UserId, user.CustomerId, providerCode, modelName);
 
-        var id = await _repo.InsertCharacterAsync(scope, new AiCharacter
+        const string charTable = "todox_ai_character";
+        DbDiagnostics.LogFieldLengths(_logger, "character_insert",
+            ("character_code", characterCode),
+            ("provider_code", providerCode),
+            ("model_name", modelName),
+            ("status", "active"));
+
+        long id;
+        try
         {
-            CustomerId = scope.CustomerId,
-            CharacterCode = characterCode,
-            CharacterName = request.CharacterName.Trim(),
-            Description = request.Description.Trim(),
-            StylePreset = style,
-            Gender = gender,
-            AspectRatio = request.AspectRatio,
-            MasterPrompt = string.IsNullOrWhiteSpace(request.RenderPrompt) ? request.Description.Trim() : request.RenderPrompt.Trim(),
-            NormalizedPrompt = normalized,
-            NegativePrompt = negative,
-            ProviderCode = providerCode,
-            ModelName = modelName,
-            Seed = request.Seed,
-            Status = "active",
-            CreatedBy = user.UserId.ToString(),
-            UpdatedBy = user.UserId.ToString()
-        }, ct);
+            id = await _repo.InsertCharacterAsync(scope, new AiCharacter
+            {
+                CustomerId = scope.CustomerId,
+                CharacterCode = DbDiagnostics.Clip(_logger, charTable, "character_code", characterCode)!,
+                CharacterName = request.CharacterName.Trim(),
+                Description = request.Description.Trim(),
+                StylePreset = style,
+                Gender = gender,
+                AspectRatio = request.AspectRatio,
+                MasterPrompt = string.IsNullOrWhiteSpace(request.RenderPrompt) ? request.Description.Trim() : request.RenderPrompt.Trim(),
+                NormalizedPrompt = normalized,
+                NegativePrompt = negative,
+                ProviderCode = DbDiagnostics.Clip(_logger, charTable, "provider_code", providerCode)!,
+                ModelName = DbDiagnostics.Clip(_logger, charTable, "model_name", modelName),
+                Seed = request.Seed,
+                Status = "active",
+                CreatedBy = user.UserId.ToString(),
+                UpdatedBy = user.UserId.ToString()
+            }, ct);
+        }
+        catch (Exception ex)
+        {
+            DbDiagnostics.LogPostgresException(_logger, ex, "character_insert");
+            throw;
+        }
 
         if (request.AutoGenerateImage)
         {
@@ -211,29 +228,50 @@ public sealed class AiCharacterService : IAiCharacterService
         var characterId = character?.Id ?? request.CharacterId;
         if (characterId is long cid)
         {
-            renderId = await _repo.InsertRenderAsync(scope, new AiCharacterRender
+            const string renderTable = "todox_ai_character_render";
+            var renderProviderCode = response.ProviderCode ?? providerCode;
+            var renderModelName = response.ModelName ?? modelName;
+
+            DbDiagnostics.LogFieldLengths(_logger, "character_render_insert",
+                ("render_code", renderCode),
+                ("provider_code", renderProviderCode),
+                ("model_name", renderModelName),
+                ("output_format", outputFormat),
+                ("quality", quality),
+                ("resolution", resolution),
+                ("status", status));
+
+            try
             {
-                CharacterId = cid,
-                CustomerId = scope.CustomerId,
-                RenderCode = renderCode,
-                ProviderCode = response.ProviderCode ?? providerCode,
-                ModelName = response.ModelName ?? modelName,
-                Prompt = prompt,
-                RequestJson = response.RawRequestJson,
-                ResponseJson = response.RawResponseJson,
-                OutputImageUrl = imageUrl,
-                OutputObjectKey = objectKey,
-                AspectRatio = aspect,
-                OutputFormat = outputFormat,
-                Quality = quality,
-                Resolution = resolution,
-                Seed = seed,
-                UsageCost = response.UsageCost,
-                UsageJson = response.UsageJson,
-                Status = status,
-                ErrorMessage = error,
-                CreatedBy = user.UserId.ToString()
-            }, ct);
+                renderId = await _repo.InsertRenderAsync(scope, new AiCharacterRender
+                {
+                    CharacterId = cid,
+                    CustomerId = scope.CustomerId,
+                    RenderCode = DbDiagnostics.Clip(_logger, renderTable, "render_code", renderCode)!,
+                    ProviderCode = DbDiagnostics.Clip(_logger, renderTable, "provider_code", renderProviderCode)!,
+                    ModelName = DbDiagnostics.Clip(_logger, renderTable, "model_name", renderModelName),
+                    Prompt = prompt,
+                    RequestJson = response.RawRequestJson,
+                    ResponseJson = response.RawResponseJson,
+                    OutputImageUrl = imageUrl,
+                    OutputObjectKey = objectKey,
+                    AspectRatio = aspect,
+                    OutputFormat = DbDiagnostics.Clip(_logger, renderTable, "output_format", outputFormat)!,
+                    Quality = DbDiagnostics.Clip(_logger, renderTable, "quality", quality),
+                    Resolution = DbDiagnostics.Clip(_logger, renderTable, "resolution", resolution),
+                    Seed = seed,
+                    UsageCost = response.UsageCost,
+                    UsageJson = response.UsageJson,
+                    Status = DbDiagnostics.Clip(_logger, renderTable, "status", status)!,
+                    ErrorMessage = error,
+                    CreatedBy = user.UserId.ToString()
+                }, ct);
+            }
+            catch (Exception ex)
+            {
+                DbDiagnostics.LogPostgresException(_logger, ex, "character_render_insert");
+                throw;
+            }
 
             if (response.Success && request.SaveAsMaster)
             {
