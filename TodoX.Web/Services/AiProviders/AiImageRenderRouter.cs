@@ -104,7 +104,8 @@ public sealed class AiImageRenderRouter : IAiImageRenderRouter
             FileCategory = request.FileCategory,
             ReferenceImageUrls = request.ReferenceImageUrls,
             BaseUrlOverride = detail?.BaseUrl,
-            EndpointPath = capability?.EndpointPath
+            EndpointPath = capability?.EndpointPath,
+            ApiKeyConfigName = detail?.ApiKeyConfigName
         }, cancellationToken);
 
         var quantity = 1m;

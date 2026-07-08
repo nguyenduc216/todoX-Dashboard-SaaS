@@ -25,6 +25,9 @@ public sealed class OpenRouterImageRequest
 
     /// <summary>Endpoint appended to the base URL (from capability.endpoint_path), e.g. "/images".</summary>
     public string? EndpointPath { get; set; }
+
+    /// <summary>Config key name for the API key (from provider.api_key_config_name), e.g. "OpenRouter__ApiKey".</summary>
+    public string? ApiKeyConfigName { get; set; }
 }
 
 public sealed class OpenRouterImageResponse
@@ -84,10 +87,10 @@ public sealed class OpenRouterImageService : IOpenRouterImageService
             return Fail("OpenRouter image provider is disabled.");
         }
 
-        var apiKey = _config["OpenRouter:ApiKey"];
+        var apiKey = ResolveApiKey(request.ApiKeyConfigName);
         if (string.IsNullOrWhiteSpace(apiKey))
         {
-            return Fail("Chua cau hinh OpenRouter API key.");
+            return Fail("Chưa cấu hình OpenRouter API key. Kiểm tra biến môi trường OpenRouter__ApiKey hoặc api_key_config_name của provider.");
         }
 
         var baseUrl = (FirstNonBlank(request.BaseUrlOverride, _config["OpenRouter:BaseUrl"]) ?? "https://openrouter.ai/api/v1").TrimEnd('/');
@@ -297,6 +300,33 @@ public sealed class OpenRouterImageService : IOpenRouterImageService
 
     private static string? FirstNonBlank(params string?[] values)
         => values.FirstOrDefault(v => !string.IsNullOrWhiteSpace(v));
+
+    /// <summary>
+    /// Resolves the OpenRouter API key. Prefers the provider's configured key name
+    /// (api_key_config_name), tolerating both "OpenRouter__ApiKey" (env style) and the
+    /// "OpenRouter:ApiKey" section form. Falls back to "OpenRouter:ApiKey". Never logs the key.
+    /// </summary>
+    private string? ResolveApiKey(string? apiKeyConfigName)
+    {
+        if (!string.IsNullOrWhiteSpace(apiKeyConfigName))
+        {
+            var configName = apiKeyConfigName.Trim();
+            // Direct lookup by the configured name (handles "OpenRouter__ApiKey" and any custom name).
+            var direct = _config[configName];
+            if (!string.IsNullOrWhiteSpace(direct)) return direct;
+
+            // Also try the ":" section form for the same name (e.g. "OpenRouter__ApiKey" -> "OpenRouter:ApiKey").
+            var sectionForm = configName.Replace("__", ":", StringComparison.Ordinal);
+            if (!sectionForm.Equals(configName, StringComparison.Ordinal))
+            {
+                var viaSection = _config[sectionForm];
+                if (!string.IsNullOrWhiteSpace(viaSection)) return viaSection;
+            }
+        }
+
+        // Fallback: the default OpenRouter section key.
+        return _config["OpenRouter:ApiKey"];
+    }
 
     private static string NormalizeEndpoint(string? endpointPath)
     {

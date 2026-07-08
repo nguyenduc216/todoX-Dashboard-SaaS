@@ -301,8 +301,49 @@
             list.Add(BuildAiAssetsGroup());
         }
 
+        // Ensure "AI Providers" is always reachable even if the DB menu has not been seeded with it.
+        if (!existingCodes.Contains("ai_providers"))
+        {
+            var aiProvidersItem = BuildAiProvidersItem();
+            var aiStudio = list.FirstOrDefault(g => g.Code.Equals("ai_studio", StringComparison.OrdinalIgnoreCase));
+            if (aiStudio is not null)
+            {
+                aiProvidersItem.GroupId = aiStudio.Id;
+                aiStudio.Items.Add(aiProvidersItem);
+            }
+            else
+            {
+                var groupId = Guid.NewGuid();
+                aiProvidersItem.GroupId = groupId;
+                list.Add(new NavigationMenuGroupDto
+                {
+                    Id = groupId,
+                    Code = "ai_studio",
+                    Title = "AI Studio",
+                    IconKey = "AutoFixHigh",
+                    SortOrder = 40,
+                    DefaultExpanded = true,
+                    Items = new List<NavigationMenuItemDto> { aiProvidersItem }
+                });
+            }
+        }
+
         return list;
     }
+
+    private static NavigationMenuItemDto BuildAiProvidersItem()
+        => new()
+        {
+            Id = Guid.NewGuid(),
+            Code = "ai_providers",
+            Title = "AI Providers",
+            Href = "/admin/ai-providers",
+            IconKey = "Api",
+            ModuleKeys = new[] { "settings", "services", "api_providers" },
+            VisibilityPolicy = "admin_avatar_manager",
+            MatchAll = false,
+            SortOrder = 35
+        };
 
     private static NavigationMenuGroupDto CloneGroup(NavigationMenuGroupDto group)
         => new()
@@ -413,7 +454,8 @@
             Group("ai_studio", "AI Studio", "AutoFixHigh", 40, true,
                 Item("admin_avatar_manager", "Quản lý avatar mẫu", "/admin/avatar-manager", "FaceRetouchingNatural", new[] { "settings", "services" }, "admin_avatar_manager", sort: 10),
                 Item("render_jobs", "Render Jobs", "/render-jobs", "Movie", new[] { "render_jobs" }, sort: 20),
-                Item("prompt_templates", "Quản lý prompt", "/settings/prompt-templates", "AutoFixHigh", new[] { "prompt_templates", "settings", "app_settings" }, sort: 30)),
+                Item("prompt_templates", "Quản lý prompt", "/settings/prompt-templates", "AutoFixHigh", new[] { "prompt_templates", "settings", "app_settings" }, sort: 30),
+                Item("ai_providers", "AI Providers", "/admin/ai-providers", "Api", new[] { "settings", "services", "api_providers" }, "admin_avatar_manager", sort: 35)),
             Group("social_marketing", "Kênh mạng xã hội", "Public", 50, true,
                 Item("customer_pages", "Trang mạng xã hội", "/my-pages", "Public", new[] { "customer_pages" }, sort: 10),
                 Item("reference_videos", "Link video tham chiếu", "/reference-videos", "VideoLibrary", new[] { "reference_videos" }, sort: 20),
