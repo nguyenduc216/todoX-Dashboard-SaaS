@@ -8,6 +8,7 @@ public static class AvatarOptionCatalog
 {
     public static IReadOnlyList<AvatarOption> CharacterTypes { get; } =
     [
+        new("not_specified", "Không chọn"),
         new("chibi", "Chibi"),
         new("cartoon_3d", "Hoạt hình 3D"),
         new("anime", "Anime"),
@@ -17,6 +18,7 @@ public static class AvatarOptionCatalog
 
     public static IReadOnlyList<AvatarOption> Genders { get; } =
     [
+        new("not_specified", "Không chọn"),
         new("male", "Nam"),
         new("female", "Nữ"),
         new("neutral", "Trung tính")
@@ -24,6 +26,7 @@ public static class AvatarOptionCatalog
 
     public static IReadOnlyList<AvatarOption> CameraAngles { get; } =
     [
+        new("not_specified", "Không chọn"),
         new("front", "Chính diện"),
         new("three_quarter", "Góc 3/4"),
         new("side", "Nghiêng"),
@@ -34,6 +37,7 @@ public static class AvatarOptionCatalog
 
     public static IReadOnlyList<AvatarOption> Outfits { get; } =
     [
+        new("not_specified", "Không chọn"),
         new("suit", "Vest công sở"),
         new("shirt", "Áo sơ mi"),
         new("tshirt", "Áo thun"),
@@ -57,13 +61,13 @@ public sealed class AvatarTemplateDto
     public string? Description { get; set; }
     public string Scenario { get; set; } = "avatar_chibi";
     public string PromptTemplate { get; set; } = string.Empty;
-    public string? CharacterTypeCode { get; set; } = "chibi";
+    public string? CharacterTypeCode { get; set; }
     public string? CharacterTypeDisplayVi { get; set; } = "Chibi";
-    public string? GenderCode { get; set; } = "neutral";
+    public string? GenderCode { get; set; }
     public string? GenderDisplayVi { get; set; } = "Trung tính";
-    public string? CameraAngleCode { get; set; } = "half_body";
+    public string? CameraAngleCode { get; set; }
     public string? CameraAngleDisplayVi { get; set; } = "Nửa người";
-    public string? OutfitCode { get; set; } = "suit";
+    public string? OutfitCode { get; set; }
     public string? OutfitDisplayVi { get; set; } = "Vest công sở";
     public Guid? AvatarMediaId { get; set; }
     public Guid? LogoMediaId { get; set; }
@@ -91,10 +95,10 @@ public sealed class AvatarTemplateEditModel
     public string? Description { get; set; }
     public string Scenario { get; set; } = "avatar_chibi";
     public string PromptTemplate { get; set; } = DefaultPrompt;
-    public string CharacterTypeCode { get; set; } = "chibi";
-    public string GenderCode { get; set; } = "neutral";
-    public string CameraAngleCode { get; set; } = "half_body";
-    public string OutfitCode { get; set; } = "suit";
+    public string? CharacterTypeCode { get; set; } = "not_specified";
+    public string? GenderCode { get; set; } = "not_specified";
+    public string? CameraAngleCode { get; set; } = "not_specified";
+    public string? OutfitCode { get; set; } = "not_specified";
     public Guid? AvatarMediaId { get; set; }
     public Guid? LogoMediaId { get; set; }
     public Guid? ProductMediaId { get; set; }
@@ -107,6 +111,9 @@ public sealed class AvatarTemplateEditModel
     public bool IsActive { get; set; } = true;
     public bool IsPublic { get; set; } = true;
     public int SortOrder { get; set; }
+
+    /// <summary>Optional AI provider selection (todox_ai_provider_capability.id). Null uses the default.</summary>
+    public long? ProviderCapabilityId { get; set; }
 
     public const string DefaultPrompt = "Tạo avatar chibi 3D cao cấp, thân thiện, chuyên nghiệp. Giữ nét nhận diện khuôn mặt từ ảnh tham chiếu nếu có. Bố cục vuông 1:1, ánh sáng mềm, chi tiết rõ, không chữ, không watermark.";
 }
@@ -129,6 +136,9 @@ public sealed class PublicAvatarBuilderRenderRequest
     public Guid? ProductMediaId { get; set; }
     public Guid? UniformMediaId { get; set; }
     public Guid? SceneMediaId { get; set; }
+
+    /// <summary>Optional AI provider selection (todox_ai_provider_capability.id). Null uses the default.</summary>
+    public long? ProviderCapabilityId { get; set; }
 }
 
 public sealed class PublicAvatarBuilderRenderResult

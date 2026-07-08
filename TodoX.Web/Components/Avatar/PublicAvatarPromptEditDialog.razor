@@ -55,16 +55,16 @@
 
     [Parameter] public string TemplateName { get; set; } = string.Empty;
     [Parameter] public string Prompt { get; set; } = string.Empty;
-    [Parameter] public string CharacterTypeCode { get; set; } = "chibi";
-    [Parameter] public string GenderCode { get; set; } = "neutral";
-    [Parameter] public string CameraAngleCode { get; set; } = "half_body";
-    [Parameter] public string OutfitCode { get; set; } = "suit";
+    [Parameter] public string CharacterTypeCode { get; set; } = "not_specified";
+    [Parameter] public string GenderCode { get; set; } = "not_specified";
+    [Parameter] public string CameraAngleCode { get; set; } = "not_specified";
+    [Parameter] public string OutfitCode { get; set; } = "not_specified";
 
     private string _prompt = string.Empty;
-    private string _characterType = "chibi";
-    private string _gender = "neutral";
-    private string _cameraAngle = "half_body";
-    private string _outfit = "suit";
+    private string _characterType = "not_specified";
+    private string _gender = "not_specified";
+    private string _cameraAngle = "not_specified";
+    private string _outfit = "not_specified";
 
     protected override void OnInitialized()
     {

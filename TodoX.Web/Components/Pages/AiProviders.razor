@@ -1,0 +1,258 @@
+@page "/admin/ai-providers"
+@using TodoX.Web.Models
+@using TodoX.Web.Services.AiProviders
+@inject AuthStateService AuthState
+@inject IAiProviderService Providers
+@inject ISnackbar Snackbar
+
+<PageTitle>AI Providers</PageTitle>
+
+<MudStack Spacing="3">
+    <div>
+        <MudText Typo="Typo.h4" Class="todox-page-title">AI Providers</MudText>
+        <MudText Typo="Typo.body1" Class="todox-page-subtitle">Quản lý nhà cung cấp AI, capability, model và điểm sử dụng theo đơn vị. Model do admin cấu hình, người dùng không tự chọn model.</MudText>
+    </div>
+
+    @if (!IsAdmin)
+    {
+        <MudAlert Severity="Severity.Error">Bạn cần quyền quản trị TodoX để mở trang này.</MudAlert>
+    }
+    else
+    {
+        <MudGrid>
+            <MudItem xs="12" md="5">
+                <MudPaper Class="todox-card pa-4" Rounded="true">
+                    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+                        <MudText Typo="Typo.h6">Danh sách provider</MudText>
+                        <MudIconButton Icon="@Icons.Material.Filled.Refresh" Disabled="@_loading" OnClick="ReloadProviders" />
+                    </MudStack>
+                    <MudDivider Class="my-3" />
+                    @if (_loading)
+                    {
+                        <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+                    }
+                    else if (_providers.Count == 0)
+                    {
+                        <MudText Class="todox-page-subtitle">Chưa có provider nào.</MudText>
+                    }
+                    else
+                    {
+                        <MudTable Items="_providers" Hover="true" Dense="true" T="AiProviderListItemDto"
+                                  OnRowClick="@(args => SelectProviderAsync(args.Item))" RowClass="cursor-pointer">
+                            <HeaderContent>
+                                <MudTh>Provider</MudTh>
+                                <MudTh>Loại</MudTh>
+                                <MudTh>Ưu tiên</MudTh>
+                                <MudTh>Bật</MudTh>
+                                <MudTh>Capabilities</MudTh>
+                            </HeaderContent>
+                            <RowTemplate Context="p">
+                                <MudTd DataLabel="Provider">
+                                    <MudText Typo="Typo.body2"><b>@p.ProviderName</b></MudText>
+                                    <MudText Typo="Typo.caption" Class="todox-page-subtitle">@p.ProviderCode @(p.IsSystem ? "· hệ thống" : "")</MudText>
+                                </MudTd>
+                                <MudTd DataLabel="Loại">@p.ProviderType</MudTd>
+                                <MudTd DataLabel="Ưu tiên">@p.Priority</MudTd>
+                                <MudTd DataLabel="Bật">
+                                    <MudIcon Icon="@(p.Enabled ? Icons.Material.Filled.CheckCircle : Icons.Material.Filled.Cancel)"
+                                             Color="@(p.Enabled ? Color.Success : Color.Default)" Size="Size.Small" />
+                                </MudTd>
+                                <MudTd DataLabel="Capabilities">@p.EnabledCapabilityCount / @p.CapabilityCount</MudTd>
+                            </RowTemplate>
+                        </MudTable>
+                    }
+                </MudPaper>
+            </MudItem>
+
+            <MudItem xs="12" md="7">
+                @if (_selected is null)
+                {
+                    <MudPaper Class="todox-card pa-5" Rounded="true">
+                        <MudText Class="todox-page-subtitle">Chọn một provider để xem và chỉnh sửa cấu hình.</MudText>
+                    </MudPaper>
+                }
+                else
+                {
+                    <MudPaper Class="todox-card pa-5" Rounded="true">
+                        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+                            <MudText Typo="Typo.h6">@_selected.ProviderName <MudChip T="string" Size="Size.Small" Color="Color.Default">@_selected.ProviderCode</MudChip></MudText>
+                            <MudButton Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.Save" Disabled="@_busy" OnClick="SaveProvider">Lưu provider</MudButton>
+                        </MudStack>
+                        <MudDivider Class="my-3" />
+                        <MudGrid>
+                            <MudItem xs="12" sm="6"><MudTextField @bind-Value="_providerEdit.ProviderName" Label="Tên provider" Variant="Variant.Outlined" /></MudItem>
+                            <MudItem xs="12" sm="6"><MudNumericField @bind-Value="_providerEdit.Priority" Label="Ưu tiên" Variant="Variant.Outlined" /></MudItem>
+                            <MudItem xs="12"><MudTextField @bind-Value="_providerEdit.BaseUrl" Label="Base URL" Variant="Variant.Outlined" /></MudItem>
+                            <MudItem xs="12" sm="6"><MudTextField @bind-Value="_providerEdit.ApiKeyConfigName" Label="API key config name" HelperText="Tên biến cấu hình (VD: OpenRouter__ApiKey). Không nhập API key thật." Variant="Variant.Outlined" /></MudItem>
+                            <MudItem xs="12" sm="6" Class="d-flex align-center"><MudSwitch @bind-Value="_providerEdit.Enabled" Color="Color.Success" Label="Bật provider" /></MudItem>
+                            <MudItem xs="12"><MudTextField @bind-Value="_providerEdit.Description" Label="Mô tả" Lines="2" Variant="Variant.Outlined" /></MudItem>
+                        </MudGrid>
+                    </MudPaper>
+
+                    <MudPaper Class="todox-card pa-5 mt-3" Rounded="true">
+                        <MudText Typo="Typo.h6">Capabilities</MudText>
+                        <MudDivider Class="my-3" />
+                        @if (_capabilities.Count == 0)
+                        {
+                            <MudText Class="todox-page-subtitle">Provider này chưa có capability.</MudText>
+                        }
+                        else
+                        {
+                            <MudStack Spacing="3">
+                                @foreach (var cap in _capabilities)
+                                {
+                                    <MudPaper Outlined="true" Class="pa-3" Rounded="true">
+                                        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+                                            <MudText Typo="Typo.subtitle1"><b>@cap.DisplayName</b>
+                                                <MudChip T="string" Size="Size.Small" Color="Color.Primary">@cap.CapabilityCode</MudChip>
+                                                @if (cap.IsDefault)
+                                                {
+                                                    <MudChip T="string" Size="Size.Small" Color="Color.Success">Mặc định</MudChip>
+                                                }
+                                            </MudText>
+                                            <MudStack Row="true" Spacing="1">
+                                                <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Success"
+                                                           StartIcon="@Icons.Material.Filled.Star" Disabled="@(_busy || cap.IsDefault || !cap.Enabled || !_providerEdit.Enabled)"
+                                                           OnClick="@(() => SetDefault(cap))">Đặt mặc định</MudButton>
+                                                <MudButton Size="Size.Small" Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.Save"
+                                                           Disabled="@_busy" OnClick="@(() => SaveCapability(cap))">Lưu</MudButton>
+                                            </MudStack>
+                                        </MudStack>
+                                        <MudGrid Class="mt-1">
+                                            <MudItem xs="12" sm="6"><MudTextField @bind-Value="cap.DisplayName" Label="Tên hiển thị" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+                                            <MudItem xs="12" sm="6"><MudTextField @bind-Value="cap.ModelName" Label="Model name" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+                                            <MudItem xs="12" sm="6"><MudTextField @bind-Value="cap.EndpointPath" Label="Endpoint path" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+                                            <MudItem xs="6" sm="3">
+                                                <MudSelect @bind-Value="cap.UnitType" Label="Đơn vị" Variant="Variant.Outlined" Margin="Margin.Dense">
+                                                    @foreach (var u in AiProviderCatalog.UnitTypes)
+                                                    {
+                                                        <MudSelectItem Value="u">@u</MudSelectItem>
+                                                    }
+                                                </MudSelect>
+                                            </MudItem>
+                                            <MudItem xs="6" sm="3"><MudNumericField @bind-Value="cap.UnitCostPoints" Label="Điểm/đơn vị" Variant="Variant.Outlined" Margin="Margin.Dense" Min="0" /></MudItem>
+                                            <MudItem xs="6" sm="6" Class="d-flex align-center"><MudSwitch @bind-Value="cap.Enabled" Color="Color.Success" Label="Bật capability" /></MudItem>
+                                            <MudItem xs="6" sm="6" Class="d-flex align-center"><MudSwitch @bind-Value="cap.AllowUserSelect" Color="Color.Primary" Label="Cho user chọn" /></MudItem>
+                                        </MudGrid>
+                                    </MudPaper>
+                                }
+                            </MudStack>
+                        }
+                    </MudPaper>
+                }
+            </MudItem>
+        </MudGrid>
+    }
+</MudStack>
+
+@code {
+    private bool _loading = true;
+    private bool _busy;
+    private List<AiProviderListItemDto> _providers = new();
+    private AiProviderDetailDto? _selected;
+    private UpdateAiProviderRequest _providerEdit = new();
+    private List<AiProviderCapabilityDto> _capabilities = new();
+
+    private bool IsAdmin => AuthState.CurrentUser?.Role is TodoXUserRole.Admin or TodoXUserRole.SystemOperator || AuthState.CurrentUser?.IsRoot == true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!IsAdmin) { _loading = false; return; }
+        await ReloadProviders();
+    }
+
+    private async Task ReloadProviders()
+    {
+        _loading = true;
+        _providers = (await Providers.GetProvidersAsync()).ToList();
+        _loading = false;
+    }
+
+    private async Task SelectProviderAsync(AiProviderListItemDto item)
+    {
+        _selected = await Providers.GetProviderAsync(item.Id);
+        if (_selected is null) return;
+        _providerEdit = new UpdateAiProviderRequest
+        {
+            ProviderName = _selected.ProviderName,
+            BaseUrl = _selected.BaseUrl,
+            ApiKeyConfigName = _selected.ApiKeyConfigName,
+            Enabled = _selected.Enabled,
+            Priority = _selected.Priority,
+            Description = _selected.Description,
+            ConfigJson = _selected.ConfigJson
+        };
+        _capabilities = _selected.Capabilities.ToList();
+    }
+
+    private async Task SaveProvider()
+    {
+        if (_selected is null || AuthState.CurrentUser is null) return;
+        _busy = true;
+        try
+        {
+            _selected = await Providers.UpdateProviderAsync(_selected.Id, _providerEdit, AuthState.CurrentUser);
+            _capabilities = _selected.Capabilities.ToList();
+            Snackbar.Add("Đã lưu provider.", Severity.Success);
+            await ReloadProviders();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task SaveCapability(AiProviderCapabilityDto cap)
+    {
+        if (AuthState.CurrentUser is null) return;
+        _busy = true;
+        try
+        {
+            await Providers.UpdateCapabilityAsync(cap.Id, new UpdateAiProviderCapabilityRequest
+            {
+                DisplayName = cap.DisplayName,
+                ModelName = cap.ModelName,
+                EndpointPath = cap.EndpointPath,
+                UnitType = cap.UnitType,
+                UnitCostPoints = cap.UnitCostPoints,
+                IsDefault = false, // default is a separate explicit action
+                Enabled = cap.Enabled,
+                AllowUserSelect = cap.AllowUserSelect,
+                ConfigJson = cap.ConfigJson
+            }, AuthState.CurrentUser);
+            Snackbar.Add("Đã lưu capability.", Severity.Success);
+            await RefreshSelected();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task SetDefault(AiProviderCapabilityDto cap)
+    {
+        if (AuthState.CurrentUser is null) return;
+        _busy = true;
+        try
+        {
+            await Providers.SetDefaultCapabilityAsync(cap.Id, AuthState.CurrentUser);
+            Snackbar.Add($"Đã đặt mặc định cho {cap.CapabilityCode}.", Severity.Success);
+            await RefreshSelected();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task RefreshSelected()
+    {
+        if (_selected is null) return;
+        _selected = await Providers.GetProviderAsync(_selected.Id);
+        _capabilities = _selected?.Capabilities.ToList() ?? new();
+        await ReloadProviders();
+    }
+}

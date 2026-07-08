@@ -4,6 +4,7 @@
 @using System.Text.Json
 @using Microsoft.AspNetCore.Components.Forms
 @using TodoX.Web.Components.Avatar
+@using TodoX.Web.Models
 @using TodoX.Web.Services.AvatarTemplates
 @inject IAvatarTemplateService AvatarTemplates
 @inject IHttpClientFactory HttpClientFactory
@@ -63,6 +64,18 @@
             <h2>Chọn phong cách avatar</h2>
             <p>Mỗi mẫu dùng ảnh default từ thư viện TodoX. Sau khi render, kết quả của bạn sẽ hiện ngay trong card.</p>
         </div>
+
+        @if (_providerOptions.Count > 0)
+        {
+            <div class="avatar-provider-picker">
+                <MudSelect T="long?" @bind-Value="_providerCapabilityId" Label="AI Provider" Variant="Variant.Outlined" Dense="true">
+                    @foreach (var opt in _providerOptions)
+                    {
+                        <MudSelectItem T="long?" Value="@opt.ProviderCapabilityId">@opt.OptionLabel</MudSelectItem>
+                    }
+                </MudSelect>
+            </div>
+        }
 
         @if (_loading)
         {
@@ -163,6 +176,8 @@
     private string? _uniformUrl;
     private Guid? _sceneMediaId;
     private string? _sceneUrl;
+    private long? _providerCapabilityId;
+    private List<ProviderOptionDto> _providerOptions = new();
     private readonly List<TemplateCardState> _cards = new();
 
     protected override async Task OnInitializedAsync()
@@ -170,7 +185,28 @@
         var templates = await AvatarTemplates.ListAsync(publicOnly: true);
         _cards.Clear();
         _cards.AddRange(templates.Select(x => new TemplateCardState(x)));
+        await LoadProviderOptions();
         _loading = false;
+    }
+
+    private async Task LoadProviderOptions()
+    {
+        try
+        {
+            var client = HttpClientFactory.CreateClient();
+            client.BaseAddress = new Uri(Nav.BaseUri);
+            var options = await client.GetFromJsonAsync<List<ProviderOptionDto>>("api/ai-providers/selectable?capabilityCode=avatar_generation");
+            _providerOptions = options ?? new();
+            if (_providerOptions.Count > 0)
+            {
+                _providerCapabilityId = (_providerOptions.FirstOrDefault(o => o.IsDefault) ?? _providerOptions[0]).ProviderCapabilityId;
+            }
+        }
+        catch
+        {
+            // Public/anonymous visitors may not be authorized; server-side default provider is used on render.
+            _providerOptions = new();
+        }
     }
 
     private async Task Upload(string slot, InputFileChangeEventArgs args)
@@ -251,7 +287,8 @@
                 LogoMediaId = _logoMediaId,
                 ProductMediaId = _productMediaId,
                 UniformMediaId = _uniformMediaId,
-                SceneMediaId = _sceneMediaId
+                SceneMediaId = _sceneMediaId,
+                ProviderCapabilityId = _providerCapabilityId
             });
 
             card.Result = result;
@@ -322,7 +359,8 @@
                 LogoMediaId = _logoMediaId,
                 ProductMediaId = _productMediaId,
                 UniformMediaId = _uniformMediaId,
-                SceneMediaId = _sceneMediaId
+                SceneMediaId = _sceneMediaId,
+                ProviderCapabilityId = _providerCapabilityId
             });
 
             card.Result = result;
@@ -458,18 +496,18 @@
         {
             Template = template;
             Prompt = template.PromptTemplate;
-            CharacterTypeCode = template.CharacterTypeCode ?? "chibi";
-            GenderCode = template.GenderCode ?? "neutral";
-            CameraAngleCode = template.CameraAngleCode ?? "half_body";
-            OutfitCode = template.OutfitCode ?? "suit";
+            CharacterTypeCode = template.CharacterTypeCode ?? "not_specified";
+            GenderCode = template.GenderCode ?? "not_specified";
+            CameraAngleCode = template.CameraAngleCode ?? "not_specified";
+            OutfitCode = template.OutfitCode ?? "not_specified";
         }
 
         public AvatarTemplateDto Template { get; }
         public string Prompt { get; set; }
-        public string CharacterTypeCode { get; set; }
-        public string GenderCode { get; set; }
-        public string CameraAngleCode { get; set; }
-        public string OutfitCode { get; set; }
+        public string CharacterTypeCode { get; set; } = "not_specified";
+        public string GenderCode { get; set; } = "not_specified";
+        public string CameraAngleCode { get; set; } = "not_specified";
+        public string OutfitCode { get; set; } = "not_specified";
         public bool Rendering { get; set; }
         public bool DownloadClicked { get; set; }
         public string? Error { get; set; }

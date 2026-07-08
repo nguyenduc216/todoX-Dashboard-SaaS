@@ -74,6 +74,9 @@ builder.Services.AddScoped<IAiImageProviderFactory, AiImageProviderFactory>();
 builder.Services.AddScoped<CharacterPromptBuilder>();
 builder.Services.AddScoped<AiCharacterRepository>();
 builder.Services.AddScoped<IAiCharacterService, AiCharacterService>();
+builder.Services.AddScoped<TodoX.Web.Services.AiProviders.AiProviderRepository>();
+builder.Services.AddScoped<TodoX.Web.Services.AiProviders.IAiProviderService, TodoX.Web.Services.AiProviders.AiProviderService>();
+builder.Services.AddScoped<TodoX.Web.Services.AiProviders.IAiImageRenderRouter, TodoX.Web.Services.AiProviders.AiImageRenderRouter>();
 builder.Services.AddScoped<AccountService>();
 builder.Services.AddScoped<AuthStateService>();
 builder.Services.AddScoped<StartupSeedFixer>();
@@ -633,8 +636,8 @@ characterApi.MapGet("/active", async (
     }
 });
 
-characterApi.MapGet("/{id:guid}", async (
-    Guid id,
+characterApi.MapGet("/{id:long}", async (
+    long id,
     AuthStateService auth,
     IAiCharacterService characters,
     CancellationToken ct) =>
@@ -668,8 +671,8 @@ characterApi.MapPost("/", async (
     }
 }).DisableAntiforgery();
 
-characterApi.MapPut("/{id:guid}", async (
-    Guid id,
+characterApi.MapPut("/{id:long}", async (
+    long id,
     UpdateCharacterRequest body,
     AuthStateService auth,
     IAiCharacterService characters,
@@ -681,8 +684,8 @@ characterApi.MapPut("/{id:guid}", async (
     return Results.Json(new { success = true });
 }).DisableAntiforgery();
 
-characterApi.MapPost("/{id:guid}/disable", async (
-    Guid id,
+characterApi.MapPost("/{id:long}/disable", async (
+    long id,
     AuthStateService auth,
     IAiCharacterService characters,
     CancellationToken ct) =>
@@ -705,8 +708,8 @@ characterApi.MapPost("/generate", async (
     return Results.Json(result, statusCode: result.Status == "completed" ? StatusCodes.Status200OK : StatusCodes.Status400BadRequest);
 }).DisableAntiforgery();
 
-characterApi.MapPost("/{id:guid}/render-variant", async (
-    Guid id,
+characterApi.MapPost("/{id:long}/render-variant", async (
+    long id,
     GenerateCharacterImageRequest body,
     AuthStateService auth,
     IAiCharacterService characters,
@@ -719,9 +722,9 @@ characterApi.MapPost("/{id:guid}/render-variant", async (
     return Results.Json(result, statusCode: result.Status == "completed" ? StatusCodes.Status200OK : StatusCodes.Status400BadRequest);
 }).DisableAntiforgery();
 
-characterApi.MapPost("/{id:guid}/set-master-image/{renderId:guid}", async (
-    Guid id,
-    Guid renderId,
+characterApi.MapPost("/{id:long}/set-master-image/{renderId:long}", async (
+    long id,
+    long renderId,
     AuthStateService auth,
     IAiCharacterService characters,
     CancellationToken ct) =>
@@ -731,6 +734,118 @@ characterApi.MapPost("/{id:guid}/set-master-image/{renderId:guid}", async (
     await characters.SetMasterImageAsync(id, renderId, user, ct);
     return Results.Json(new { success = true });
 }).DisableAntiforgery();
+
+// ---------------------------------------------------------------------------
+// AI Provider Manager — admin management + user-facing selectable providers.
+// ---------------------------------------------------------------------------
+var aiProviderAdminApi = app.MapGroup("/api/admin/ai-providers");
+
+aiProviderAdminApi.MapGet("/", async (
+    AuthStateService auth,
+    TodoX.Web.Services.AiProviders.IAiProviderService providers,
+    CancellationToken ct) =>
+{
+    if (!IsHttpAdmin(auth)) return UnauthorizedJson("Bạn cần quyền quản trị để xem AI Provider.");
+    return Results.Json(await providers.GetProvidersAsync(ct));
+});
+
+aiProviderAdminApi.MapGet("/{id:long}", async (
+    long id,
+    AuthStateService auth,
+    TodoX.Web.Services.AiProviders.IAiProviderService providers,
+    CancellationToken ct) =>
+{
+    if (!IsHttpAdmin(auth)) return UnauthorizedJson("Bạn cần quyền quản trị để xem AI Provider.");
+    var item = await providers.GetProviderAsync(id, ct);
+    return item is null ? Results.NotFound() : Results.Json(item);
+});
+
+aiProviderAdminApi.MapPut("/{id:long}", async (
+    long id,
+    UpdateAiProviderRequest body,
+    AuthStateService auth,
+    TodoX.Web.Services.AiProviders.IAiProviderService providers,
+    CancellationToken ct) =>
+{
+    if (!IsHttpAdmin(auth) || auth.CurrentUser is null) return UnauthorizedJson("Bạn cần quyền quản trị để sửa AI Provider.");
+    try
+    {
+        return Results.Json(await providers.UpdateProviderAsync(id, body, auth.CurrentUser, ct));
+    }
+    catch (Exception ex)
+    {
+        return Results.Json(new { success = false, message = ex.Message }, statusCode: StatusCodes.Status400BadRequest);
+    }
+}).DisableAntiforgery();
+
+aiProviderAdminApi.MapGet("/{id:long}/capabilities", async (
+    long id,
+    AuthStateService auth,
+    TodoX.Web.Services.AiProviders.IAiProviderService providers,
+    CancellationToken ct) =>
+{
+    if (!IsHttpAdmin(auth)) return UnauthorizedJson("Bạn cần quyền quản trị để xem capability.");
+    return Results.Json(await providers.GetCapabilitiesAsync(id, null, ct));
+});
+
+aiProviderAdminApi.MapGet("/capabilities", async (
+    long? providerId,
+    string? capabilityCode,
+    AuthStateService auth,
+    TodoX.Web.Services.AiProviders.IAiProviderService providers,
+    CancellationToken ct) =>
+{
+    if (!IsHttpAdmin(auth)) return UnauthorizedJson("Bạn cần quyền quản trị để xem capability.");
+    return Results.Json(await providers.GetCapabilitiesAsync(providerId, capabilityCode, ct));
+});
+
+aiProviderAdminApi.MapPut("/capabilities/{id:long}", async (
+    long id,
+    UpdateAiProviderCapabilityRequest body,
+    AuthStateService auth,
+    TodoX.Web.Services.AiProviders.IAiProviderService providers,
+    CancellationToken ct) =>
+{
+    if (!IsHttpAdmin(auth) || auth.CurrentUser is null) return UnauthorizedJson("Bạn cần quyền quản trị để sửa capability.");
+    try
+    {
+        return Results.Json(await providers.UpdateCapabilityAsync(id, body, auth.CurrentUser, ct));
+    }
+    catch (Exception ex)
+    {
+        return Results.Json(new { success = false, message = ex.Message }, statusCode: StatusCodes.Status400BadRequest);
+    }
+}).DisableAntiforgery();
+
+aiProviderAdminApi.MapPost("/capabilities/{id:long}/set-default", async (
+    long id,
+    AuthStateService auth,
+    TodoX.Web.Services.AiProviders.IAiProviderService providers,
+    CancellationToken ct) =>
+{
+    if (!IsHttpAdmin(auth) || auth.CurrentUser is null) return UnauthorizedJson("Bạn cần quyền quản trị để đặt provider mặc định.");
+    try
+    {
+        await providers.SetDefaultCapabilityAsync(id, auth.CurrentUser, ct);
+        return Results.Json(new { success = true });
+    }
+    catch (Exception ex)
+    {
+        return Results.Json(new { success = false, message = ex.Message }, statusCode: StatusCodes.Status400BadRequest);
+    }
+}).DisableAntiforgery();
+
+// User-facing: providers a signed-in user may choose for a capability (no secrets).
+app.MapGet("/api/ai-providers/selectable", async (
+    string capabilityCode,
+    AuthStateService auth,
+    TodoX.Web.Services.AiProviders.IAiProviderService providers,
+    CancellationToken ct) =>
+{
+    if (ApiUser(auth) is null) return UnauthorizedJson("Bạn cần đăng nhập để chọn AI Provider.");
+    if (string.IsNullOrWhiteSpace(capabilityCode)) return Results.Json(Array.Empty<ProviderOptionDto>());
+    return Results.Json(await providers.GetSelectableProvidersAsync(capabilityCode, ct));
+});
 
 app.MapStaticAssets();
 app.MapRazorComponents<App>()

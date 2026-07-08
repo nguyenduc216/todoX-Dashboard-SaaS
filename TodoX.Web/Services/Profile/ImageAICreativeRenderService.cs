@@ -118,6 +118,10 @@ public sealed class ImageAICreativeRenderService : IImageAICreativeRenderService
             LogCode = logCode,
             RenderEngineMode = ChibiRenderEngineModes.ImageAiCreative
         };
+        request.CharacterType = NormalizeOptionalPreset(request.CharacterType);
+        request.Gender = NormalizeOptionalPreset(request.Gender);
+        request.CameraAngle = NormalizeOptionalPreset(request.CameraAngle);
+        request.Outfit = NormalizeOptionalPreset(request.Outfit);
 
         void AddLog(string step, string message, object? data = null, string level = "info")
         {
@@ -430,15 +434,20 @@ public sealed class ImageAICreativeRenderService : IImageAICreativeRenderService
 
     private static string ResolvePromptTemplate(string template, ImageAICreativeRenderRequest request, int count)
     {
+        var characterType = NormalizeOptionalPreset(request.CharacterType);
+        var gender = NormalizeOptionalPreset(request.Gender);
+        var cameraAngle = NormalizeOptionalPreset(request.CameraAngle);
+        var outfit = NormalizeOptionalPreset(request.Outfit);
+
         var resolved = (string.IsNullOrWhiteSpace(template) ? FallbackPromptTemplate : template)
-            .Replace("{{CHARACTER_TYPE}}", request.CharacterType ?? "chibi", StringComparison.OrdinalIgnoreCase)
-            .Replace("{{CHARACTER_TYPE_TEXT}}", CharacterTypeText(request.CharacterType), StringComparison.OrdinalIgnoreCase)
-            .Replace("{{GENDER}}", request.Gender ?? "other", StringComparison.OrdinalIgnoreCase)
-            .Replace("{{GENDER_TEXT}}", request.Gender == "female" ? "nu" : "nam", StringComparison.OrdinalIgnoreCase)
-            .Replace("{{CAMERA_ANGLE}}", request.CameraAngle ?? "half_body", StringComparison.OrdinalIgnoreCase)
-            .Replace("{{CAMERA_SHOT_TEXT}}", CameraShotText(request.CameraAngle), StringComparison.OrdinalIgnoreCase)
-            .Replace("{{OUTFIT}}", request.Outfit ?? "vest", StringComparison.OrdinalIgnoreCase)
-            .Replace("{{OUTFIT_TEXT}}", OutfitText(request.Outfit), StringComparison.OrdinalIgnoreCase)
+            .Replace("{{CHARACTER_TYPE}}", characterType ?? string.Empty, StringComparison.OrdinalIgnoreCase)
+            .Replace("{{CHARACTER_TYPE_TEXT}}", CharacterTypeText(characterType), StringComparison.OrdinalIgnoreCase)
+            .Replace("{{GENDER}}", gender ?? string.Empty, StringComparison.OrdinalIgnoreCase)
+            .Replace("{{GENDER_TEXT}}", GenderText(gender), StringComparison.OrdinalIgnoreCase)
+            .Replace("{{CAMERA_ANGLE}}", cameraAngle ?? string.Empty, StringComparison.OrdinalIgnoreCase)
+            .Replace("{{CAMERA_SHOT_TEXT}}", CameraShotText(cameraAngle) ?? string.Empty, StringComparison.OrdinalIgnoreCase)
+            .Replace("{{OUTFIT}}", outfit ?? string.Empty, StringComparison.OrdinalIgnoreCase)
+            .Replace("{{OUTFIT_TEXT}}", OutfitText(outfit) ?? string.Empty, StringComparison.OrdinalIgnoreCase)
             .Replace("{{HAS_AVATAR}}", request.AvatarMediaId is null ? "no" : "yes", StringComparison.OrdinalIgnoreCase)
             .Replace("{{HAS_LOGO}}", request.LogoMediaId is null ? "no" : "yes", StringComparison.OrdinalIgnoreCase)
             .Replace("{{HAS_PRODUCT}}", request.ProductMediaId is null ? "no" : "yes", StringComparison.OrdinalIgnoreCase)
@@ -446,8 +455,16 @@ public sealed class ImageAICreativeRenderService : IImageAICreativeRenderService
             .Replace("{{HAS_SCENE}}", request.SceneMediaId is null ? "no" : "yes", StringComparison.OrdinalIgnoreCase);
 
         var sb = new StringBuilder();
-        sb.AppendLine($"Create {count} {CharacterTypeText(request.CharacterType)} avatar image{(count == 1 ? string.Empty : "s")}.");
-        sb.AppendLine($"Camera shot: {CameraShotText(request.CameraAngle)}. Main outfit: {OutfitText(request.Outfit)}.");
+        sb.AppendLine($"Create {count} {CharacterTypeText(characterType)} avatar image{(count == 1 ? string.Empty : "s")}.");
+        var optionalLines = new List<string>();
+        var cameraText = CameraShotText(cameraAngle);
+        var outfitText = OutfitText(outfit);
+        if (!string.IsNullOrWhiteSpace(cameraText)) optionalLines.Add($"Camera shot: {cameraText}.");
+        if (!string.IsNullOrWhiteSpace(outfitText)) optionalLines.Add($"Main outfit: {outfitText}.");
+        if (optionalLines.Count > 0)
+        {
+            sb.AppendLine(string.Join(" ", optionalLines));
+        }
         sb.AppendLine("Make the result sharp, premium, cinematic, friendly, and suitable for a TodoX profile or brand avatar.");
         sb.AppendLine();
         sb.AppendLine(resolved.Trim());
@@ -634,23 +651,56 @@ public sealed class ImageAICreativeRenderService : IImageAICreativeRenderService
         => prompt.Trim() + Environment.NewLine + Environment.NewLine
            + $"Variation #{index} of {count}: produce exactly one final PNG image for this variation. Keep the same identity and all reference constraints. If a product reference exists, keep the product clearly visible inside this variation's frame.";
 
-    private static string CharacterTypeText(string? characterType) => characterType?.Equals("cartoon", StringComparison.OrdinalIgnoreCase) == true
-        ? "modern semi-realistic cartoon character, friendly and expressive"
-        : "cute 3D chibi character with large head, small body, expressive friendly face";
+    private static string CharacterTypeText(string? characterType) => characterType switch
+    {
+        "cartoon" or "cartoon_3d" => "modern semi-realistic cartoon character, friendly and expressive",
+        "anime" => "polished anime-inspired avatar character",
+        "realistic" => "realistic professional AI avatar character",
+        "mascot" => "friendly brand mascot avatar character",
+        "chibi" => "cute 3D chibi character with large head, small body, expressive friendly face",
+        _ => "premium AI avatar character"
+    };
 
-    private static string CameraShotText(string? cameraShot) => cameraShot switch
+    private static string? CameraShotText(string? cameraShot) => cameraShot switch
     {
         "close_up" => "close-up portrait",
         "full_body" => "full-body view",
-        _ => "half-body view"
+        "half_body" => "half-body view",
+        "front" or "front_view" => "front-facing view",
+        "side" or "side_angle" => "side angle view",
+        "three_quarter" => "three-quarter angle view",
+        "portrait" => "portrait view",
+        _ => null
     };
 
-    private static string OutfitText(string? outfit) => outfit switch
+    private static string? OutfitText(string? outfit) => outfit switch
     {
         "dress" => "elegant dress suitable for a female character",
         "formal" => "professional formal office outfit",
+        "suit" or "office_suit" => "professional office suit",
+        "shirt" => "professional shirt",
         "tshirt" => "young dynamic T-shirt outfit",
+        "uniform" or "brand_uniform" => "brand uniform outfit",
+        "office_dress" => "office dress",
+        "business_casual" => "business casual outfit",
+        "sales_outfit" => "sales outfit",
+        "casual" => "natural casual outfit",
+        "premium" => "premium elegant outfit",
         "swimwear" => "context-appropriate tasteful swimwear, non-explicit",
-        _ => "professional elegant vest"
+        _ => null
     };
+
+    private static string GenderText(string? gender) => gender switch
+    {
+        "female" => "nu",
+        "male" => "nam",
+        "neutral" => "trung tinh",
+        _ => string.Empty
+    };
+
+    private static string? NormalizeOptionalPreset(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        return value.Trim().Equals("not_specified", StringComparison.OrdinalIgnoreCase) ? null : value.Trim();
+    }
 }

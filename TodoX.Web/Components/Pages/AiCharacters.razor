@@ -124,7 +124,7 @@ else
         }
     }
 
-    private async Task Disable(Guid id)
+    private async Task Disable(long id)
     {
         if (AuthState.CurrentUser is null) return;
         try
@@ -141,6 +141,8 @@ else
 
     private static string StyleLabel(string value) => value switch
     {
+        "" => "Không chọn",
+        "not_specified" => "Không chọn",
         "3d_chibi" => "3D chibi",
         "realistic" => "Chân thực",
         "anime" => "Anime",
@@ -152,10 +154,11 @@ else
 
     private static string GenderLabel(string value) => value switch
     {
+        "" => "Không chọn",
         "male" => "Nam",
         "female" => "Nữ",
         "neutral" => "Trung tính",
-        "not_specified" => "Không chỉ định",
+        "not_specified" => "Không chọn",
         _ => value
     };
 

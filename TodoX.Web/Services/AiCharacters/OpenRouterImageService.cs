@@ -19,6 +19,12 @@ public sealed class OpenRouterImageRequest
     public long? Seed { get; set; }
     public string FileCategory { get; set; } = "ai_character";
     public string[] ReferenceImageUrls { get; set; } = Array.Empty<string>();
+
+    /// <summary>Overrides OpenRouter:BaseUrl when the provider row supplies its own base_url.</summary>
+    public string? BaseUrlOverride { get; set; }
+
+    /// <summary>Endpoint appended to the base URL (from capability.endpoint_path), e.g. "/images".</summary>
+    public string? EndpointPath { get; set; }
 }
 
 public sealed class OpenRouterImageResponse
@@ -84,7 +90,12 @@ public sealed class OpenRouterImageService : IOpenRouterImageService
             return Fail("Chua cau hinh OpenRouter API key.");
         }
 
-        var baseUrl = (_config["OpenRouter:BaseUrl"] ?? "https://openrouter.ai/api/v1").TrimEnd('/');
+        var baseUrl = (FirstNonBlank(request.BaseUrlOverride, _config["OpenRouter:BaseUrl"]) ?? "https://openrouter.ai/api/v1").TrimEnd('/');
+        var endpointPath = NormalizeEndpoint(request.EndpointPath);
+        if (string.IsNullOrWhiteSpace(request.Model))
+        {
+            return Fail("Chua cau hinh model cho OpenRouter (provider capability model_name dang trong).");
+        }
         var timeoutSeconds = Math.Clamp(_config.GetValue("OpenRouter:Image:TimeoutSeconds", 180), 15, 600);
         var maxRetry = Math.Clamp(_config.GetValue("OpenRouter:Image:MaxRetry", 2), 0, 5);
         _http.Timeout = TimeSpan.FromSeconds(timeoutSeconds);
@@ -97,7 +108,7 @@ public sealed class OpenRouterImageService : IOpenRouterImageService
         {
             try
             {
-                using var message = new HttpRequestMessage(HttpMethod.Post, $"{baseUrl}/images");
+                using var message = new HttpRequestMessage(HttpMethod.Post, $"{baseUrl}{endpointPath}");
                 message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
                 AddOptionalHeader(message, "HTTP-Referer", _config["OpenRouter:HttpReferer"]);
                 AddOptionalHeader(message, "X-Title", _config["OpenRouter:AppTitle"] ?? "TodoX");
@@ -283,6 +294,16 @@ public sealed class OpenRouterImageService : IOpenRouterImageService
     }
 
     private static bool IsSuccess(HttpStatusCode code) => (int)code is >= 200 and <= 299;
+
+    private static string? FirstNonBlank(params string?[] values)
+        => values.FirstOrDefault(v => !string.IsNullOrWhiteSpace(v));
+
+    private static string NormalizeEndpoint(string? endpointPath)
+    {
+        if (string.IsNullOrWhiteSpace(endpointPath)) return "/images";
+        var trimmed = endpointPath.Trim();
+        return trimmed.StartsWith('/') ? trimmed : "/" + trimmed;
+    }
 
     private static string? ExtractError(JsonDocument? doc)
     {

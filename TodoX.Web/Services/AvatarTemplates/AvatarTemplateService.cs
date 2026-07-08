@@ -1,5 +1,7 @@
 using Dapper;
 using TodoX.Web.Data;
+using TodoX.Web.Models;
+using TodoX.Web.Services.AiProviders;
 using TodoX.Web.Services.Media;
 using TodoX.Web.Services.Profile;
 
@@ -24,17 +26,22 @@ public sealed class AvatarTemplateService : IAvatarTemplateService
     private readonly TenantContext _tenant;
     private readonly IMediaFileService _media;
     private readonly IImageAICreativeRenderService _creativeRender;
+    private readonly IAiProviderService _aiProviders;
+    private readonly IAiImageRenderRouter _imageRouter;
     private readonly IConfiguration _config;
     private readonly ILogger<AvatarTemplateService> _logger;
 
     public AvatarTemplateService(TodoXConnectionFactory factory, TenantContext tenant,
         IMediaFileService media, IImageAICreativeRenderService creativeRender,
+        IAiProviderService aiProviders, IAiImageRenderRouter imageRouter,
         IConfiguration config, ILogger<AvatarTemplateService> logger)
     {
         _factory = factory;
         _tenant = tenant;
         _media = media;
         _creativeRender = creativeRender;
+        _aiProviders = aiProviders;
+        _imageRouter = imageRouter;
         _config = config;
         _logger = logger;
     }
@@ -178,13 +185,13 @@ public sealed class AvatarTemplateService : IAvatarTemplateService
                 description = model.Description,
                 scenario = string.IsNullOrWhiteSpace(model.Scenario) ? "avatar_chibi" : model.Scenario.Trim(),
                 prompt = model.PromptTemplate.Trim(),
-                characterType = model.CharacterTypeCode,
+                characterType = NormalizeOptionalPreset(model.CharacterTypeCode),
                 characterTypeVi = AvatarOptionCatalog.Display(AvatarOptionCatalog.CharacterTypes, model.CharacterTypeCode),
-                gender = model.GenderCode,
+                gender = NormalizeOptionalPreset(model.GenderCode),
                 genderVi = AvatarOptionCatalog.Display(AvatarOptionCatalog.Genders, model.GenderCode),
-                camera = model.CameraAngleCode,
+                camera = NormalizeOptionalPreset(model.CameraAngleCode),
                 cameraVi = AvatarOptionCatalog.Display(AvatarOptionCatalog.CameraAngles, model.CameraAngleCode),
-                outfit = model.OutfitCode,
+                outfit = NormalizeOptionalPreset(model.OutfitCode),
                 outfitVi = AvatarOptionCatalog.Display(AvatarOptionCatalog.Outfits, model.OutfitCode),
                 avatar = model.AvatarMediaId,
                 logo = model.LogoMediaId,
@@ -227,16 +234,27 @@ public sealed class AvatarTemplateService : IAvatarTemplateService
     {
         Normalize(model);
         _logger.LogInformation("AVATAR_TEMPLATE_RENDER_REQUESTED name={Name} userId={UserId}", model.Name, userId);
+
+        var option = await ResolveAvatarOptionAsync(model.ProviderCapabilityId, ct);
+        var customerIdLong = ToBigIntCustomerId(customerId);
+
+        // OpenRouter-style providers render from reference URLs; route through the shared image router.
+        if (option is not null && ProviderCodeMap.ToFactoryKey(option.ProviderCode) == "openrouter_image")
+        {
+            return await RenderViaRouterAsync(option, model.PromptTemplate, "avatar_sample", "avatar_template",
+                userId, customerIdLong, model.AvatarMediaId, model.LogoMediaId, model.ProductMediaId, model.UniformMediaId, model.SceneMediaId, ct);
+        }
+
         var result = await _creativeRender.RenderAsync(new ImageAICreativeRenderRequest
         {
             UserId = userId,
             CustomerId = customerId,
             IsCustomer = customerId is not null,
             Scenario = string.IsNullOrWhiteSpace(model.Scenario) ? "avatar_chibi" : model.Scenario,
-            CharacterType = model.CharacterTypeCode,
-            Gender = model.GenderCode,
-            CameraAngle = model.CameraAngleCode,
-            Outfit = model.OutfitCode,
+            CharacterType = NormalizeOptionalPreset(model.CharacterTypeCode),
+            Gender = NormalizeOptionalPreset(model.GenderCode),
+            CameraAngle = NormalizeOptionalPreset(model.CameraAngleCode),
+            Outfit = NormalizeOptionalPreset(model.OutfitCode),
             Count = 1,
             PromptOverride = model.PromptTemplate,
             AspectRatio = "1:1",
@@ -249,7 +267,9 @@ public sealed class AvatarTemplateService : IAvatarTemplateService
             RequireReferenceImages = model.AvatarMediaId is not null,
             SkipReferenceOwnershipCheck = true
         }, ct);
-        return ToPublicResult(result);
+        var publicResult = ToPublicResult(result);
+        await LogCreativeUsageAsync(option, "avatar_sample", publicResult, customerIdLong, userId, ct);
+        return publicResult;
     }
 
     public async Task<MediaFileDto> SavePublicUploadAsync(byte[] content, string fileName, string contentType, CancellationToken ct = default)
@@ -275,29 +295,44 @@ public sealed class AvatarTemplateService : IAvatarTemplateService
             : template?.PromptTemplate ?? AvatarTemplateEditModel.DefaultPrompt;
         _logger.LogInformation("PUBLIC_AVATAR_RENDER_REQUESTED templateId={TemplateId} userId={UserId}", request.TemplateId, userId);
 
+        var option = await ResolveAvatarOptionAsync(request.ProviderCapabilityId, ct);
+        var avatarMediaId = request.AvatarMediaId ?? template?.AvatarMediaId;
+        var logoMediaId = request.LogoMediaId ?? template?.LogoMediaId;
+        var productMediaId = request.ProductMediaId ?? template?.ProductMediaId;
+        var uniformMediaId = request.UniformMediaId ?? template?.UniformMediaId;
+        var sceneMediaId = request.SceneMediaId ?? template?.SceneMediaId;
+
+        if (option is not null && ProviderCodeMap.ToFactoryKey(option.ProviderCode) == "openrouter_image")
+        {
+            return await RenderViaRouterAsync(option, prompt, "avatar_builder", "public_avatar_builder",
+                userId, null, avatarMediaId, logoMediaId, productMediaId, uniformMediaId, sceneMediaId, ct);
+        }
+
         var result = await _creativeRender.RenderAsync(new ImageAICreativeRenderRequest
         {
             UserId = userId,
             CustomerId = null,
             IsCustomer = false,
             Scenario = template?.Scenario ?? "avatar_chibi",
-            CharacterType = request.CharacterTypeCode ?? template?.CharacterTypeCode ?? "chibi",
-            Gender = request.GenderCode ?? template?.GenderCode ?? "neutral",
-            CameraAngle = request.CameraAngleCode ?? template?.CameraAngleCode ?? "half_body",
-            Outfit = request.OutfitCode ?? template?.OutfitCode ?? "suit",
+            CharacterType = NormalizeOptionalPreset(request.CharacterTypeCode ?? template?.CharacterTypeCode),
+            Gender = NormalizeOptionalPreset(request.GenderCode ?? template?.GenderCode),
+            CameraAngle = NormalizeOptionalPreset(request.CameraAngleCode ?? template?.CameraAngleCode),
+            Outfit = NormalizeOptionalPreset(request.OutfitCode ?? template?.OutfitCode),
             Count = 1,
             PromptOverride = prompt,
             AspectRatio = "1:1",
             FileCategory = "public_avatar_builder",
-            AvatarMediaId = request.AvatarMediaId ?? template?.AvatarMediaId,
-            LogoMediaId = request.LogoMediaId ?? template?.LogoMediaId,
-            ProductMediaId = request.ProductMediaId ?? template?.ProductMediaId,
-            UniformMediaId = request.UniformMediaId ?? template?.UniformMediaId,
-            SceneMediaId = request.SceneMediaId ?? template?.SceneMediaId,
+            AvatarMediaId = avatarMediaId,
+            LogoMediaId = logoMediaId,
+            ProductMediaId = productMediaId,
+            UniformMediaId = uniformMediaId,
+            SceneMediaId = sceneMediaId,
             RequireReferenceImages = request.AvatarMediaId is not null,
             SkipReferenceOwnershipCheck = true
         }, ct);
-        return ToPublicResult(result);
+        var publicResult = ToPublicResult(result);
+        await LogCreativeUsageAsync(option, "avatar_builder", publicResult, null, userId, ct);
+        return publicResult;
     }
 
     private async Task<Guid> ResolvePublicUserIdAsync(CancellationToken ct)
@@ -320,6 +355,114 @@ public sealed class AvatarTemplateService : IAvatarTemplateService
              LIMIT 1;
             """);
         return userId ?? throw new InvalidOperationException("Chưa cấu hình PublicAvatarBuilder:UserId và không tìm thấy user hệ thống để render public.");
+    }
+
+    private async Task<ProviderOptionDto?> ResolveAvatarOptionAsync(long? providerCapabilityId, CancellationToken ct)
+    {
+        try
+        {
+            return await _aiProviders.ResolveProviderForCapabilityAsync("avatar_generation", providerCapabilityId, fromUser: true, ct);
+        }
+        catch (Exception ex) when (providerCapabilityId is null)
+        {
+            // No provider configured for avatar_generation — keep the legacy ImageAICreativeRender path.
+            _logger.LogInformation("AVATAR_PROVIDER_FALLBACK reason={Reason}", ex.Message);
+            return null;
+        }
+    }
+
+    private async Task<PublicAvatarBuilderRenderResult> RenderViaRouterAsync(
+        ProviderOptionDto option, string prompt, string featureCode, string fileCategory,
+        Guid userId, long? customerId,
+        Guid? avatarMediaId, Guid? logoMediaId, Guid? productMediaId, Guid? uniformMediaId, Guid? sceneMediaId,
+        CancellationToken ct)
+    {
+        var references = new List<string>();
+        foreach (var refMediaId in new[] { avatarMediaId, logoMediaId, productMediaId, uniformMediaId, sceneMediaId })
+        {
+            var url = await MediaUrlAsync(refMediaId, ct);
+            if (!string.IsNullOrWhiteSpace(url)) references.Add(url!);
+        }
+
+        var render = await _imageRouter.RenderImageAsync(new AiImageRenderRequest
+        {
+            CustomerId = customerId,
+            UserId = userId,
+            FeatureCode = featureCode,
+            CapabilityCode = "avatar_generation",
+            ProviderCapabilityId = option.ProviderCapabilityId,
+            FromUser = true,
+            Prompt = prompt,
+            ReferenceImageUrls = references.ToArray(),
+            AspectRatio = "1:1",
+            FileCategory = fileCategory,
+            CreatedBy = userId.ToString()
+        }, ct);
+
+        if (!render.Success)
+        {
+            return new PublicAvatarBuilderRenderResult { Ok = false, Status = "failed", Error = render.ErrorMessage ?? "Render chưa thành công." };
+        }
+
+        var imageUrl = render.ImageUrl;
+        Guid? mediaId = null;
+        if (render.ImageBytes is { Length: > 0 })
+        {
+            await _tenant.EnsureLoadedAsync(ct);
+            var media = await _media.SaveAsync(render.ImageBytes, $"{featureCode}_{DateTime.UtcNow:yyyyMMddHHmmss}.png",
+                render.MimeType ?? "image/png", fileCategory, userId, null, _tenant.TenantId, ct);
+            imageUrl = media.PublicUrl ?? media.FileUrl;
+            mediaId = media.Id;
+        }
+
+        return new PublicAvatarBuilderRenderResult
+        {
+            Ok = !string.IsNullOrWhiteSpace(imageUrl),
+            Status = string.IsNullOrWhiteSpace(imageUrl) ? "failed" : "completed",
+            ImageUrl = imageUrl,
+            MediaId = mediaId,
+            PromptUsed = prompt,
+            Error = string.IsNullOrWhiteSpace(imageUrl) ? "Provider không trả về ảnh." : null
+        };
+    }
+
+    private async Task LogCreativeUsageAsync(ProviderOptionDto? option, string featureCode,
+        PublicAvatarBuilderRenderResult result, long? customerId, Guid userId, CancellationToken ct)
+    {
+        if (option is null) return; // no provider configured -> nothing to meter
+        await _aiProviders.LogUsageAsync(new AiProviderUsageLog
+        {
+            CustomerId = customerId,
+            ProviderId = option.ProviderId,
+            ProviderCapabilityId = option.ProviderCapabilityId,
+            ProviderCode = option.ProviderCode,
+            CapabilityCode = option.CapabilityCode,
+            FeatureCode = featureCode,
+            ModelName = option.ModelName,
+            RequestId = result.LogCode,
+            Quantity = 1,
+            UnitType = option.UnitType,
+            UnitCostPoints = option.UnitCostPoints,
+            TotalPoints = option.UnitCostPoints,
+            Status = result.Ok ? "success" : "failed",
+            ErrorMessage = result.Ok ? null : result.Error,
+            CreatedBy = userId.ToString()
+        }, ct);
+    }
+
+    private async Task<string?> MediaUrlAsync(Guid? mediaId, CancellationToken ct)
+    {
+        if (mediaId is null) return null;
+        var media = await _media.GetAsync(mediaId.Value, ct);
+        return media?.PublicUrl ?? media?.FileUrl;
+    }
+
+    private static long? ToBigIntCustomerId(Guid? id)
+    {
+        if (id is null) return null;
+        var bytes = id.Value.ToByteArray();
+        var value = BitConverter.ToInt64(bytes, 0);
+        return value == long.MinValue ? long.MaxValue : Math.Abs(value);
     }
 
     private static PublicAvatarBuilderRenderResult ToPublicResult(ImageAICreativeRenderResult result)
@@ -351,14 +494,20 @@ public sealed class AvatarTemplateService : IAvatarTemplateService
         }
 
         model.Scenario = string.IsNullOrWhiteSpace(model.Scenario) ? "avatar_chibi" : model.Scenario.Trim();
-        model.CharacterTypeCode = NormalizeCode(model.CharacterTypeCode, AvatarOptionCatalog.CharacterTypes, "chibi");
-        model.GenderCode = NormalizeCode(model.GenderCode, AvatarOptionCatalog.Genders, "neutral");
-        model.CameraAngleCode = NormalizeCode(model.CameraAngleCode, AvatarOptionCatalog.CameraAngles, "half_body");
-        model.OutfitCode = NormalizeCode(model.OutfitCode, AvatarOptionCatalog.Outfits, "suit");
+        model.CharacterTypeCode = NormalizeCode(model.CharacterTypeCode, AvatarOptionCatalog.CharacterTypes, "not_specified");
+        model.GenderCode = NormalizeCode(model.GenderCode, AvatarOptionCatalog.Genders, "not_specified");
+        model.CameraAngleCode = NormalizeCode(model.CameraAngleCode, AvatarOptionCatalog.CameraAngles, "not_specified");
+        model.OutfitCode = NormalizeCode(model.OutfitCode, AvatarOptionCatalog.Outfits, "not_specified");
     }
 
     private static string NormalizeCode(string? code, IReadOnlyList<AvatarOption> options, string fallback)
         => options.Any(x => x.Code.Equals(code, StringComparison.OrdinalIgnoreCase)) ? code!.Trim() : fallback;
+
+    private static string? NormalizeOptionalPreset(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        return value.Trim().Equals("not_specified", StringComparison.OrdinalIgnoreCase) ? null : value.Trim();
+    }
 
     private static string Slugify(string? value)
     {

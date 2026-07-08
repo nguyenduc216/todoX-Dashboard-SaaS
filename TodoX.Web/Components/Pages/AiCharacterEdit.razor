@@ -1,6 +1,9 @@
 @page "/ai-assets/characters/new"
-@page "/ai-assets/characters/{Id:guid}"
+@page "/ai-assets/characters/{Id:long}"
+@using TodoX.Web.Models
+@using TodoX.Web.Services.AiProviders
 @inject IAiCharacterService Characters
+@inject IAiProviderService AiProviders
 @inject AuthStateService AuthState
 @inject NavigationManager Nav
 @inject IJSRuntime Js
@@ -40,25 +43,25 @@ else
             <MudGrid>
                 <MudItem xs="12" sm="6">
                     <MudSelect T="string" Label="Phong cách" Variant="Variant.Outlined" @bind-Value="_model.StylePreset">
-                        @foreach (var item in StylePresets)
+                        @foreach (var item in CharacterPresetOptions.StylePresets)
                         {
-                            <MudSelectItem Value="@item">@StyleLabel(item)</MudSelectItem>
+                            <MudSelectItem Value="@item.Value">@item.Label</MudSelectItem>
                         }
                     </MudSelect>
                 </MudItem>
                 <MudItem xs="12" sm="6">
                     <MudSelect T="string" Label="Giới tính" Variant="Variant.Outlined" @bind-Value="_model.Gender">
-                        @foreach (var item in Genders)
+                        @foreach (var item in CharacterPresetOptions.GenderOptions)
                         {
-                            <MudSelectItem Value="@item">@GenderLabel(item)</MudSelectItem>
+                            <MudSelectItem Value="@item.Value">@item.Label</MudSelectItem>
                         }
                     </MudSelect>
                 </MudItem>
                 <MudItem xs="12" sm="6">
                     <MudSelect T="string" Label="Tỷ lệ khung hình" Variant="Variant.Outlined" @bind-Value="_model.AspectRatio">
-                        @foreach (var item in AspectRatios)
+                        @foreach (var item in CharacterPresetOptions.AspectRatios)
                         {
-                            <MudSelectItem Value="@item">@AspectLabel(item)</MudSelectItem>
+                            <MudSelectItem Value="@item.Value">@item.Label</MudSelectItem>
                         }
                     </MudSelect>
                 </MudItem>
@@ -69,7 +72,22 @@ else
                     </MudSelect>
                 </MudItem>
                 <MudItem xs="12" sm="6">
-                    <MudNumericField T="long?" Label="Mã seed" Variant="Variant.Outlined" @bind-Value="_seed" />
+                    <MudNumericField T="int?" Label="Mã seed" Variant="Variant.Outlined" @bind-Value="_seed" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    @if (_providerOptions.Count == 0)
+                    {
+                        <MudAlert Severity="Severity.Warning" Dense="true">Chưa cấu hình provider cho <b>character_generation</b>.</MudAlert>
+                    }
+                    else
+                    {
+                        <MudSelect T="long?" @bind-Value="_providerCapabilityId" Label="AI Provider" Variant="Variant.Outlined">
+                            @foreach (var opt in _providerOptions)
+                            {
+                                <MudSelectItem T="long?" Value="@opt.ProviderCapabilityId">@opt.OptionLabel</MudSelectItem>
+                            }
+                        </MudSelect>
+                    }
                 </MudItem>
                 <MudItem xs="12" sm="6">
                     <MudCheckBox T="bool" Label="Render ảnh sau khi lưu" Color="Color.Warning" @bind-Value="_autoGenerate" Disabled="@(!_isNew)" />
@@ -205,16 +223,12 @@ else
 }
 
 @code {
-    [Parameter] public Guid? Id { get; set; }
+    [Parameter] public long? Id { get; set; }
     [SupplyParameterFromQuery(Name = "render")] public string? RenderQuery { get; set; }
-
-    private static readonly string[] StylePresets = { "3d_chibi", "realistic", "anime", "cartoon", "corporate_mascot", "koc_ai" };
-    private static readonly string[] Genders = { "male", "female", "neutral", "not_specified" };
-    private static readonly string[] AspectRatios = { "1:1", "9:16", "16:9", "4:5", "3:4" };
 
     private readonly UpdateCharacterRequest _model = new()
     {
-        StylePreset = "3d_chibi",
+        StylePreset = CharacterPresetOptions.NotSpecified,
         Gender = "not_specified",
         AspectRatio = "1:1",
         Status = "active"
@@ -224,11 +238,13 @@ else
     private bool _loading = true;
     private bool _busy;
     private bool _autoGenerate = true;
-    private long? _seed;
+    private int? _seed;
     private string _referenceUrlsText = string.Empty;
     private string _renderPrompt = string.Empty;
     private string? _error;
     private bool _isNew => Id is null;
+    private long? _providerCapabilityId;
+    private List<ProviderOptionDto> _providerOptions = new();
 
     private string ProviderDisplay
     {
@@ -242,10 +258,27 @@ else
 
     protected override async Task OnInitializedAsync()
     {
+        await LoadProviderOptions();
         await Load();
         if (!_isNew && RenderQuery == "1")
         {
             await Generate();
+        }
+    }
+
+    private async Task LoadProviderOptions()
+    {
+        try
+        {
+            _providerOptions = (await AiProviders.GetSelectableProvidersAsync("character_generation")).ToList();
+            if (_providerOptions.Count > 0 && _providerCapabilityId is null)
+            {
+                _providerCapabilityId = (_providerOptions.FirstOrDefault(o => o.IsDefault) ?? _providerOptions[0]).ProviderCapabilityId;
+            }
+        }
+        catch
+        {
+            _providerOptions = new();
         }
     }
 
@@ -256,7 +289,7 @@ else
         _error = null;
         try
         {
-            if (!_isNew && Id is Guid id)
+            if (!_isNew && Id is long id)
             {
                 _detail = await Characters.GetCharacterAsync(AuthState.CurrentUser, id);
                 if (_detail is null)
@@ -267,8 +300,8 @@ else
                 _model.CharacterName = _detail.CharacterName;
                 _model.Description = _detail.Description;
                 _model.RenderPrompt = _detail.NormalizedPrompt;
-                _model.StylePreset = _detail.StylePreset;
-                _model.Gender = _detail.Gender;
+                _model.StylePreset = string.IsNullOrWhiteSpace(_detail.StylePreset) ? CharacterPresetOptions.NotSpecified : _detail.StylePreset;
+                _model.Gender = string.IsNullOrWhiteSpace(_detail.Gender) ? CharacterPresetOptions.NotSpecified : _detail.Gender;
                 _model.AspectRatio = _detail.AspectRatio;
                 _model.Status = _detail.Status;
                 _model.SortOrder = _detail.SortOrder;
@@ -338,7 +371,8 @@ else
                 Seed = _seed,
                 RenderPrompt = _renderPrompt,
                 ReferenceImageUrls = ParseReferenceUrls(),
-                SaveAsMaster = true
+                SaveAsMaster = true,
+                ProviderCapabilityId = _providerCapabilityId
             }, AuthState.CurrentUser);
 
             Snackbar.Add(_lastGenerate.Status == "completed" ? "Render ảnh nhân vật thành công." : _lastGenerate.ErrorMessage ?? "Render chưa thành công.",
@@ -379,7 +413,7 @@ else
         }
     }
 
-    private async Task SetMaster(Guid renderId)
+    private async Task SetMaster(long renderId)
     {
         if (AuthState.CurrentUser is null || Id is null) return;
         await Characters.SetMasterImageAsync(Id.Value, renderId, AuthState.CurrentUser);
@@ -412,7 +446,7 @@ else
         "male" => "Nam",
         "female" => "Nữ",
         "neutral" => "Trung tính",
-        "not_specified" => "Không chỉ định",
+        "not_specified" => "Không chọn",
         _ => value
     };
 

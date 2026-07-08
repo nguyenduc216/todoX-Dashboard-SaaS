@@ -3,8 +3,11 @@
 @using TodoX.Web.Components.Avatar
 @using TodoX.Web.Services.AvatarTemplates
 @using TodoX.Web.Services.Media
+@using TodoX.Web.Models
+@using TodoX.Web.Services.AiProviders
 @inject AuthStateService AuthState
 @inject IAvatarTemplateService AvatarTemplates
+@inject IAiProviderService AiProviders
 @inject IMediaFileService MediaFiles
 @inject TenantContext Tenant
 @inject ISnackbar Snackbar
@@ -88,6 +91,22 @@
                     </MudStack>
                     <MudDivider Class="my-3" />
 
+                    <MudDivider Class="my-3" />
+
+                    @if (_providerOptions.Count == 0)
+                    {
+                        <MudAlert Severity="Severity.Warning" Dense="true">Chưa cấu hình provider render ảnh cho <b>avatar_generation</b>. Vào <b>AI Providers</b> để bật provider.</MudAlert>
+                    }
+                    else
+                    {
+                        <MudSelect T="long?" @bind-Value="_model.ProviderCapabilityId" Label="AI Provider" Variant="Variant.Outlined" Margin="Margin.Dense">
+                            @foreach (var opt in _providerOptions)
+                            {
+                                <MudSelectItem T="long?" Value="@opt.ProviderCapabilityId">@opt.OptionLabel</MudSelectItem>
+                            }
+                        </MudSelect>
+                    }
+
                     <AvatarEditorForm Model="_model"
                                       ShowName="true"
                                       ShowDescription="true"
@@ -161,6 +180,7 @@
     private PublicAvatarBuilderRenderResult? _preview;
     private readonly Dictionary<string, string?> _urls = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<RenderLogEntry> _logs = new();
+    private List<ProviderOptionDto> _providerOptions = new();
 
     private bool IsAdmin => AuthState.CurrentUser?.Role is TodoXUserRole.Admin or TodoXUserRole.SystemOperator || AuthState.CurrentUser?.IsRoot == true;
 
@@ -173,7 +193,28 @@
         }
 
         _logs.Add(new RenderLogEntry { Step = "AVATAR_TEMPLATE_EDITOR_OPENED", Message = "Admin avatar manager opened." });
+        await LoadProviderOptions();
         await Reload();
+    }
+
+    private async Task LoadProviderOptions()
+    {
+        try
+        {
+            _providerOptions = (await AiProviders.GetSelectableProvidersAsync("avatar_generation")).ToList();
+            EnsureProviderDefault();
+        }
+        catch (Exception ex)
+        {
+            _logs.Add(new RenderLogEntry { Step = "AI_PROVIDER_LOAD_FAILED", Message = ex.Message, Level = "error" });
+        }
+    }
+
+    private void EnsureProviderDefault()
+    {
+        if (_providerOptions.Count == 0) { _model.ProviderCapabilityId = null; return; }
+        if (_model.ProviderCapabilityId is long id && _providerOptions.Any(o => o.ProviderCapabilityId == id)) return;
+        _model.ProviderCapabilityId = (_providerOptions.FirstOrDefault(o => o.IsDefault) ?? _providerOptions[0]).ProviderCapabilityId;
     }
 
     private async Task Reload()
@@ -188,6 +229,7 @@
         _model = new AvatarTemplateEditModel();
         _preview = null;
         _urls.Clear();
+        EnsureProviderDefault();
         _logs.Add(new RenderLogEntry { Step = "AVATAR_TEMPLATE_EDITOR_OPENED", Message = "New avatar template form opened." });
     }
 
@@ -201,6 +243,7 @@
         _urls["uniform"] = await MediaUrl(item.UniformMediaId);
         _urls["scene"] = await MediaUrl(item.SceneMediaId);
         _urls["preview"] = item.PreviewMediaUrl;
+        EnsureProviderDefault();
         _logs.Add(new RenderLogEntry { Step = "AVATAR_TEMPLATE_EDITOR_OPENED", Message = "Existing avatar template opened.", Data = new { item.Id, item.Name } });
     }
 
@@ -343,10 +386,10 @@
         Description = dto.Description,
         Scenario = dto.Scenario,
         PromptTemplate = dto.PromptTemplate,
-        CharacterTypeCode = dto.CharacterTypeCode ?? "chibi",
-        GenderCode = dto.GenderCode ?? "neutral",
-        CameraAngleCode = dto.CameraAngleCode ?? "half_body",
-        OutfitCode = dto.OutfitCode ?? "suit",
+        CharacterTypeCode = dto.CharacterTypeCode ?? "not_specified",
+        GenderCode = dto.GenderCode ?? "not_specified",
+        CameraAngleCode = dto.CameraAngleCode ?? "not_specified",
+        OutfitCode = dto.OutfitCode ?? "not_specified",
         AvatarMediaId = dto.AvatarMediaId,
         LogoMediaId = dto.LogoMediaId,
         ProductMediaId = dto.ProductMediaId,
