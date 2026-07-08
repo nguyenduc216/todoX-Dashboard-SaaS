@@ -34,6 +34,7 @@ public sealed class ImageAICreativeRenderRequest
     public Guid? SceneMediaId { get; set; }
     public bool PreserveFixedAssets { get; set; }
     public bool RequireReferenceImages { get; set; }
+    public bool SkipReferenceOwnershipCheck { get; set; }
 }
 
 public sealed class ImageAICreativeRenderImage
@@ -394,7 +395,12 @@ public sealed class ImageAICreativeRenderService : IImageAICreativeRenderService
                 return;
             }
 
-            var image = await _media.BuildReferenceImageAsync(mediaId.Value, role, request.UserId, ct);
+            var image = await _media.BuildReferenceImageAsync(
+                mediaId.Value,
+                role,
+                request.UserId,
+                enforceOwnership: !request.SkipReferenceOwnershipCheck,
+                ct: ct);
             if (image is null)
             {
                 throw new InvalidOperationException($"Da chon anh tham chieu {role} nhung he thong khong doc duoc noi dung anh.");

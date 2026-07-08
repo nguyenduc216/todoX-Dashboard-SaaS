@@ -189,6 +189,7 @@
             }
 
             await LoadNavigationMenuAsync();
+            StateHasChanged();
         }
     }
 
@@ -250,15 +251,15 @@
         try
         {
             var groups = await NavigationMenus.GetActiveMenuAsync();
-            _menuGroups = ApplyMenuVisibility(groups).ToList();
+            _menuGroups = ApplyMenuVisibility(MergeSupplementalMenu(groups)).ToList();
             if (_menuGroups.Count == 0)
             {
-                _menuGroups = ApplyMenuVisibility(BuildFallbackMenu()).ToList();
+                _menuGroups = ApplyMenuVisibility(MergeSupplementalMenu(BuildFallbackMenu())).ToList();
             }
         }
         catch
         {
-            _menuGroups = ApplyMenuVisibility(BuildFallbackMenu()).ToList();
+            _menuGroups = ApplyMenuVisibility(MergeSupplementalMenu(BuildFallbackMenu())).ToList();
         }
 
         _menuLoaded = true;
@@ -290,6 +291,30 @@
             };
         }
     }
+
+    private static IReadOnlyList<NavigationMenuGroupDto> MergeSupplementalMenu(IEnumerable<NavigationMenuGroupDto> groups)
+    {
+        var list = groups.Select(CloneGroup).ToList();
+        var existingCodes = list.SelectMany(x => x.Items).Select(x => x.Code).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (!existingCodes.Contains("ai_characters"))
+        {
+            list.Add(BuildAiAssetsGroup());
+        }
+
+        return list;
+    }
+
+    private static NavigationMenuGroupDto CloneGroup(NavigationMenuGroupDto group)
+        => new()
+        {
+            Id = group.Id,
+            Code = group.Code,
+            Title = group.Title,
+            IconKey = group.IconKey,
+            SortOrder = group.SortOrder,
+            DefaultExpanded = group.DefaultExpanded,
+            Items = group.Items.ToList()
+        };
 
     private bool IsMenuItemVisible(NavigationMenuItemDto item)
     {
@@ -327,6 +352,7 @@
         "Security" => Icons.Material.Filled.Security,
         "Settings" => Icons.Material.Filled.Settings,
         "AutoFixHigh" => Icons.Material.Filled.AutoFixHigh,
+        "PermMedia" => Icons.Material.Filled.PermMedia,
         "Api" => Icons.Material.Filled.Api,
         "Dns" => Icons.Material.Filled.Dns,
         "SettingsEthernet" => Icons.Material.Filled.SettingsEthernet,
@@ -396,6 +422,36 @@
                 Item("api_settings", "Cài đặt API (todox)", "/api-settings", "Api", new[] { "api_providers" }, sort: 10),
                 Item("api_providers", "Nhà cung cấp API", "/settings/api-providers", "Dns", new[] { "api_providers" }, sort: 20),
                 Item("api_endpoints", "API Endpoints", "/settings/api-endpoints", "SettingsEthernet", new[] { "api_providers" }, sort: 30))
+        };
+    }
+
+    private static NavigationMenuGroupDto BuildAiAssetsGroup()
+    {
+        var groupId = Guid.NewGuid();
+        return new NavigationMenuGroupDto
+        {
+            Id = groupId,
+            Code = "ai_assets",
+            Title = "AI Assets",
+            IconKey = "PermMedia",
+            SortOrder = 45,
+            DefaultExpanded = true,
+            Items = new List<NavigationMenuItemDto>
+            {
+                new()
+                {
+                    Id = Guid.NewGuid(),
+                    GroupId = groupId,
+                    Code = "ai_characters",
+                    Title = "Characters",
+                    Href = "/ai-assets/characters",
+                    IconKey = "FaceRetouchingNatural",
+                    ModuleKeys = Array.Empty<string>(),
+                    VisibilityPolicy = "always",
+                    MatchAll = false,
+                    SortOrder = 10
+                }
+            }
         };
     }
 

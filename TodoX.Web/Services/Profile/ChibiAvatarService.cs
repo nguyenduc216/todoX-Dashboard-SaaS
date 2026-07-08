@@ -268,7 +268,7 @@ Use reference images as visual guidance, not as exact copies. Prioritize face id
         async Task AddAsync(Guid? mediaId, string role)
         {
             if (mediaId is null) return;
-            var image = await _media.BuildReferenceImageAsync(mediaId.Value, role, input.UserId, ct);
+            var image = await _media.BuildReferenceImageAsync(mediaId.Value, role, input.UserId, ct: ct);
             if (image is null)
             {
                 throw new InvalidOperationException($"Da chon anh tham chieu {role} nhung he thong khong doc duoc noi dung anh.");

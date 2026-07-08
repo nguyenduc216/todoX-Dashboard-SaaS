@@ -1,0 +1,178 @@
+@page "/ai-assets/characters"
+@inject IAiCharacterService Characters
+@inject AuthStateService AuthState
+@inject NavigationManager Nav
+@inject ISnackbar Snackbar
+
+<PageTitle>Nhân vật AI</PageTitle>
+
+<section class="todox-page-head">
+    <div>
+        <MudText Typo="Typo.h3" Class="todox-page-title">Nhân vật AI</MudText>
+        <MudText Typo="Typo.body1" Class="todox-page-subtitle">Quản lý nhân vật AI cố định để dùng lại khi dựng video.</MudText>
+    </div>
+    <MudButton Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.Add" OnClick="@(() => Nav.NavigateTo("/ai-assets/characters/new"))">
+        Tạo nhân vật
+    </MudButton>
+</section>
+
+<MudPaper Class="todox-panel pa-4 mb-4" Rounded="true">
+    <div class="ai-character-toolbar">
+        <MudTextField T="string" Placeholder="Tìm theo tên, mã hoặc mô tả..." Variant="Variant.Outlined"
+                      Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                      @bind-Value="_keyword" Immediate="true" />
+        <MudSelect T="string" Label="Trạng thái" Variant="Variant.Outlined" @bind-Value="_status">
+            <MudSelectItem Value="@("all")">Tất cả</MudSelectItem>
+            <MudSelectItem Value="@("active")">Đang dùng</MudSelectItem>
+            <MudSelectItem Value="@("inactive")">Tạm tắt</MudSelectItem>
+        </MudSelect>
+        <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.FilterAlt" OnClick="Load">Lọc</MudButton>
+    </div>
+</MudPaper>
+
+@if (_loading)
+{
+    <div class="todox-flash-row"><span class="avatar-flash-dot"></span><span>Đang tải nhân vật...</span></div>
+}
+else if (!string.IsNullOrWhiteSpace(_error))
+{
+    <MudAlert Severity="Severity.Warning">@_error</MudAlert>
+}
+else if (_items.Count == 0)
+{
+    <MudAlert Severity="Severity.Info">Chưa có nhân vật AI nào.</MudAlert>
+}
+else
+{
+    <div class="ai-character-grid">
+        @foreach (var item in _items)
+        {
+            <article class="ai-character-card">
+                <div class="ai-character-image">
+                    @if (!string.IsNullOrWhiteSpace(item.MasterImageUrl))
+                    {
+                        <img src="@item.MasterImageUrl" alt="@item.CharacterName" />
+                    }
+                    else
+                    {
+                        <MudIcon Icon="@Icons.Material.Filled.Person" Size="Size.Large" />
+                    }
+                    <span class="ai-character-status @item.Status">@StatusLabel(item.Status)</span>
+                </div>
+                <div class="ai-character-body">
+                    <h3>@item.CharacterName</h3>
+                    <p>@item.Description</p>
+                    <div class="ai-character-tags">
+                        <span>@StyleLabel(item.StylePreset)</span>
+                        <span>@GenderLabel(item.Gender)</span>
+                        <span>@AspectLabel(item.AspectRatio)</span>
+                    </div>
+                    <div class="ai-character-meta">Nhà cung cấp: @item.ModelName - @item.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</div>
+                    <div class="ai-character-actions">
+                        <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning"
+                                   StartIcon="@Icons.Material.Filled.Edit"
+                                   OnClick="@(() => Nav.NavigateTo($"/ai-assets/characters/{item.Id}"))">
+                            Xem/Sửa
+                        </MudButton>
+                        <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Warning"
+                                   StartIcon="@Icons.Material.Filled.AutoAwesome"
+                                   OnClick="@(() => Nav.NavigateTo($"/ai-assets/characters/{item.Id}?render=1"))">
+                            Render lại
+                        </MudButton>
+                        @if (item.Status == "active")
+                        {
+                            <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Error"
+                                       StartIcon="@Icons.Material.Filled.Block"
+                                       OnClick="@(() => Disable(item.Id))">
+                                Tạm tắt
+                            </MudButton>
+                        }
+                    </div>
+                </div>
+            </article>
+        }
+    </div>
+}
+
+@code {
+    private readonly List<CharacterListItemDto> _items = new();
+    private bool _loading = true;
+    private string _keyword = string.Empty;
+    private string _status = "active";
+    private string? _error;
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private async Task Load()
+    {
+        if (AuthState.CurrentUser is null) return;
+        _loading = true;
+        _error = null;
+        try
+        {
+            var items = await Characters.GetCharactersAsync(AuthState.CurrentUser, _keyword, _status);
+            _items.Clear();
+            _items.AddRange(items);
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task Disable(Guid id)
+    {
+        if (AuthState.CurrentUser is null) return;
+        try
+        {
+            await Characters.DisableCharacterAsync(id, AuthState.CurrentUser);
+            Snackbar.Add("Đã tạm tắt nhân vật.", Severity.Success);
+            await Load();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+    }
+
+    private static string StyleLabel(string value) => value switch
+    {
+        "3d_chibi" => "3D chibi",
+        "realistic" => "Chân thực",
+        "anime" => "Anime",
+        "cartoon" => "Hoạt hình",
+        "corporate_mascot" => "Linh vật doanh nghiệp",
+        "koc_ai" => "KOC AI",
+        _ => value
+    };
+
+    private static string GenderLabel(string value) => value switch
+    {
+        "male" => "Nam",
+        "female" => "Nữ",
+        "neutral" => "Trung tính",
+        "not_specified" => "Không chỉ định",
+        _ => value
+    };
+
+    private static string AspectLabel(string value) => value switch
+    {
+        "1:1" => "Vuông 1:1",
+        "9:16" => "Dọc 9:16",
+        "16:9" => "Ngang 16:9",
+        "4:5" => "Dọc 4:5",
+        "3:4" => "Dọc 3:4",
+        _ => value
+    };
+
+    private static string StatusLabel(string value) => value switch
+    {
+        "active" => "Đang dùng",
+        "inactive" => "Tạm tắt",
+        _ => value
+    };
+}

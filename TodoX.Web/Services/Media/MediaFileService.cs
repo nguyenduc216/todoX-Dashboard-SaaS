@@ -41,7 +41,8 @@ public interface IMediaFileService
     /// <summary>Verify a media row belongs to the given user (ownership check).</summary>
     Task<bool> IsOwnedByAsync(Guid mediaId, Guid userId, CancellationToken ct = default);
 
-    Task<ReferenceImage?> BuildReferenceImageAsync(Guid mediaId, string role, Guid userId, CancellationToken ct = default);
+    Task<ReferenceImage?> BuildReferenceImageAsync(Guid mediaId, string role, Guid userId,
+        bool enforceOwnership = true, CancellationToken ct = default);
 
     Task<MediaFileDto> DownloadAndSaveImageAsync(string imageUrl, string fileCategory,
         Guid? userId, Guid? customerId, Guid tenantId, CancellationToken ct = default);
@@ -198,7 +199,8 @@ public sealed class MediaFileService : IMediaFileService
         return media;
     }
 
-    public async Task<ReferenceImage?> BuildReferenceImageAsync(Guid mediaId, string role, Guid userId, CancellationToken ct = default)
+    public async Task<ReferenceImage?> BuildReferenceImageAsync(Guid mediaId, string role, Guid userId,
+        bool enforceOwnership = true, CancellationToken ct = default)
     {
         var media = await GetAsync(mediaId, ct);
         if (media is null || !media.IsActive)
@@ -206,7 +208,7 @@ public sealed class MediaFileService : IMediaFileService
             throw new InvalidOperationException($"Khong tim thay anh tham chieu {role} hoac anh da bi vo hieu hoa.");
         }
 
-        if (media.UserId is Guid owner && owner != userId)
+        if (enforceOwnership && media.UserId is Guid owner && owner != userId)
         {
             throw new InvalidOperationException($"Anh tham chieu {role} khong thuoc ve nguoi dung hien tai.");
         }

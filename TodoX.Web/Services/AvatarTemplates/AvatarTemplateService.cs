@@ -246,7 +246,8 @@ public sealed class AvatarTemplateService : IAvatarTemplateService
             ProductMediaId = model.ProductMediaId,
             UniformMediaId = model.UniformMediaId,
             SceneMediaId = model.SceneMediaId,
-            RequireReferenceImages = model.AvatarMediaId is not null
+            RequireReferenceImages = model.AvatarMediaId is not null,
+            SkipReferenceOwnershipCheck = true
         }, ct);
         return ToPublicResult(result);
     }
@@ -293,7 +294,8 @@ public sealed class AvatarTemplateService : IAvatarTemplateService
             ProductMediaId = request.ProductMediaId ?? template?.ProductMediaId,
             UniformMediaId = request.UniformMediaId ?? template?.UniformMediaId,
             SceneMediaId = request.SceneMediaId ?? template?.SceneMediaId,
-            RequireReferenceImages = request.AvatarMediaId is not null
+            RequireReferenceImages = request.AvatarMediaId is not null,
+            SkipReferenceOwnershipCheck = true
         }, ct);
         return ToPublicResult(result);
     }

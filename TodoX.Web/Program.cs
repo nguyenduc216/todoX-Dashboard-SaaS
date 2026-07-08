@@ -4,6 +4,7 @@ using TodoX.Web.Models;
 using TodoX.Web.Services;
 using TodoX.Web.Services.Render;
 using TodoX.Web.Services.Reup;
+using TodoX.Web.Services.AiCharacters;
 using MudBlazor.Services;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -67,6 +68,12 @@ builder.Services.AddScoped<TodoX.Web.Services.Profile.AvatarRenderActivityLogSer
 builder.Services.AddScoped<TodoX.Web.Services.Profile.IImageAICreativeRenderService, TodoX.Web.Services.Profile.ImageAICreativeRenderService>();
 builder.Services.AddScoped<TodoX.Web.Services.Profile.IChibiAvatarService, TodoX.Web.Services.Profile.ChibiAvatarService>();
 builder.Services.AddScoped<TodoX.Web.Services.AvatarTemplates.IAvatarTemplateService, TodoX.Web.Services.AvatarTemplates.AvatarTemplateService>();
+builder.Services.AddScoped<ITodoXImageProviderService, TodoXImageProviderService>();
+builder.Services.AddHttpClient<IOpenRouterImageService, OpenRouterImageService>();
+builder.Services.AddScoped<IAiImageProviderFactory, AiImageProviderFactory>();
+builder.Services.AddScoped<CharacterPromptBuilder>();
+builder.Services.AddScoped<AiCharacterRepository>();
+builder.Services.AddScoped<IAiCharacterService, AiCharacterService>();
 builder.Services.AddScoped<AccountService>();
 builder.Services.AddScoped<AuthStateService>();
 builder.Services.AddScoped<StartupSeedFixer>();
@@ -585,6 +592,145 @@ app.MapPost("/api/image-ai-creative-render", async (
 })
 .WithName("ImageAICreativeRender")
 .DisableAntiforgery();
+
+static CurrentUserSession? ApiUser(AuthStateService auth) => auth.CurrentUser?.IsAuthenticated == true ? auth.CurrentUser : null;
+
+var characterApi = app.MapGroup("/api/characters");
+
+characterApi.MapGet("/", async (
+    string? keyword,
+    string? status,
+    AuthStateService auth,
+    IAiCharacterService characters,
+    CancellationToken ct) =>
+{
+    var user = ApiUser(auth);
+    if (user is null) return UnauthorizedJson("Ban can dang nhap de xem AI Characters.");
+    try
+    {
+        return Results.Json(await characters.GetCharactersAsync(user, keyword, status, ct));
+    }
+    catch (Exception ex)
+    {
+        return Results.Json(new { success = false, message = ex.Message }, statusCode: StatusCodes.Status400BadRequest);
+    }
+});
+
+characterApi.MapGet("/active", async (
+    AuthStateService auth,
+    IAiCharacterService characters,
+    CancellationToken ct) =>
+{
+    var user = ApiUser(auth);
+    if (user is null) return UnauthorizedJson("Ban can dang nhap de xem AI Characters.");
+    try
+    {
+        return Results.Json(await characters.GetActiveCharactersAsync(user, ct));
+    }
+    catch (Exception ex)
+    {
+        return Results.Json(new { success = false, message = ex.Message }, statusCode: StatusCodes.Status400BadRequest);
+    }
+});
+
+characterApi.MapGet("/{id:guid}", async (
+    Guid id,
+    AuthStateService auth,
+    IAiCharacterService characters,
+    CancellationToken ct) =>
+{
+    var user = ApiUser(auth);
+    if (user is null) return UnauthorizedJson("Ban can dang nhap de xem AI Character.");
+    var item = await characters.GetCharacterAsync(user, id, ct);
+    return item is null ? Results.NotFound() : Results.Json(item);
+});
+
+characterApi.MapPost("/", async (
+    CreateCharacterRequest body,
+    AuthStateService auth,
+    IAiCharacterService characters,
+    ILoggerFactory loggerFactory,
+    CancellationToken ct) =>
+{
+    var user = ApiUser(auth);
+    if (user is null) return UnauthorizedJson("Ban can dang nhap de tao AI Character.");
+    var logger = loggerFactory.CreateLogger("AiCharacterApi");
+    try
+    {
+        var created = await characters.CreateCharacterAsync(body, user, ct);
+        logger.LogInformation("API_AI_CHARACTER_CREATED id={Id} userId={UserId}", created.Id, user.UserId);
+        return Results.Json(created);
+    }
+    catch (Exception ex)
+    {
+        logger.LogWarning(ex, "API_AI_CHARACTER_CREATE_FAILED userId={UserId}", user.UserId);
+        return Results.Json(new { success = false, message = ex.Message }, statusCode: StatusCodes.Status400BadRequest);
+    }
+}).DisableAntiforgery();
+
+characterApi.MapPut("/{id:guid}", async (
+    Guid id,
+    UpdateCharacterRequest body,
+    AuthStateService auth,
+    IAiCharacterService characters,
+    CancellationToken ct) =>
+{
+    var user = ApiUser(auth);
+    if (user is null) return UnauthorizedJson("Ban can dang nhap de cap nhat AI Character.");
+    await characters.UpdateCharacterAsync(id, body, user, ct);
+    return Results.Json(new { success = true });
+}).DisableAntiforgery();
+
+characterApi.MapPost("/{id:guid}/disable", async (
+    Guid id,
+    AuthStateService auth,
+    IAiCharacterService characters,
+    CancellationToken ct) =>
+{
+    var user = ApiUser(auth);
+    if (user is null) return UnauthorizedJson("Ban can dang nhap de disable AI Character.");
+    await characters.DisableCharacterAsync(id, user, ct);
+    return Results.Json(new { success = true });
+}).DisableAntiforgery();
+
+characterApi.MapPost("/generate", async (
+    GenerateCharacterImageRequest body,
+    AuthStateService auth,
+    IAiCharacterService characters,
+    CancellationToken ct) =>
+{
+    var user = ApiUser(auth);
+    if (user is null) return UnauthorizedJson("Ban can dang nhap de render AI Character.");
+    var result = await characters.GenerateImageAsync(body, user, ct);
+    return Results.Json(result, statusCode: result.Status == "completed" ? StatusCodes.Status200OK : StatusCodes.Status400BadRequest);
+}).DisableAntiforgery();
+
+characterApi.MapPost("/{id:guid}/render-variant", async (
+    Guid id,
+    GenerateCharacterImageRequest body,
+    AuthStateService auth,
+    IAiCharacterService characters,
+    CancellationToken ct) =>
+{
+    var user = ApiUser(auth);
+    if (user is null) return UnauthorizedJson("Ban can dang nhap de render AI Character.");
+    body.CharacterId = id;
+    var result = await characters.GenerateImageAsync(body, user, ct);
+    return Results.Json(result, statusCode: result.Status == "completed" ? StatusCodes.Status200OK : StatusCodes.Status400BadRequest);
+}).DisableAntiforgery();
+
+characterApi.MapPost("/{id:guid}/set-master-image/{renderId:guid}", async (
+    Guid id,
+    Guid renderId,
+    AuthStateService auth,
+    IAiCharacterService characters,
+    CancellationToken ct) =>
+{
+    var user = ApiUser(auth);
+    if (user is null) return UnauthorizedJson("Ban can dang nhap de chon anh master.");
+    await characters.SetMasterImageAsync(id, renderId, user, ct);
+    return Results.Json(new { success = true });
+}).DisableAntiforgery();
 
 app.MapStaticAssets();
 app.MapRazorComponents<App>()
