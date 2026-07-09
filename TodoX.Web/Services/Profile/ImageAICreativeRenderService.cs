@@ -539,6 +539,18 @@ public sealed class ImageAICreativeRenderService : IImageAICreativeRenderService
     {
         using var conn = await _factory.OpenAsync(ct);
         var id = Guid.NewGuid();
+        const string table = "auth.user_avatar_renders";
+        promptInput = DbDiagnostics.Clip(_logger, table, "prompt_input", promptInput) ?? promptInput;
+        promptUsed = DbDiagnostics.Clip(_logger, table, "prompt_used", promptUsed) ?? promptUsed;
+        model = DbDiagnostics.Clip(_logger, table, "model", model) ?? model;
+        error = DbDiagnostics.Clip(_logger, table, "error_message", error) ?? error;
+        status = DbDiagnostics.Clip(_logger, table, "status", status) ?? status;
+        DbDiagnostics.LogFieldLengths(_logger, "user_avatar_render_insert",
+            ("prompt_input", promptInput),
+            ("prompt_used", promptUsed),
+            ("model", model),
+            ("status", status),
+            ("error_message", error));
         await conn.ExecuteAsync(
             """
             INSERT INTO auth.user_avatar_renders

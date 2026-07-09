@@ -132,6 +132,14 @@ public sealed class AvatarTemplateService : IAvatarTemplateService
         Normalize(model);
         var id = model.Id is Guid existing && existing != Guid.Empty ? existing : Guid.NewGuid();
         using var conn = await _factory.OpenAsync(ct);
+        DbDiagnostics.LogFieldLengths(_logger, "avatar_template_save",
+            ("name", model.Name),
+            ("slug", model.Slug),
+            ("description", model.Description),
+            ("scenario", model.Scenario),
+            ("prompt_template", model.PromptTemplate),
+            ("last_render_log_code", model.LastRenderLogCode),
+            ("last_generated_prompt", model.LastGeneratedPrompt));
         await conn.ExecuteAsync(
             """
             INSERT INTO marketing.avatar_templates
@@ -430,21 +438,37 @@ public sealed class AvatarTemplateService : IAvatarTemplateService
         PublicAvatarBuilderRenderResult result, long? customerId, Guid userId, CancellationToken ct)
     {
         if (option is null) return; // no provider configured -> nothing to meter
+        var requestId = DbDiagnostics.Clip(_logger, "todox_ai_provider_usage_log", "request_id", result.LogCode);
+        var jobId = DbDiagnostics.Clip(_logger, "todox_ai_provider_usage_log", "job_id", result.MediaId?.ToString());
+        var providerCode = DbDiagnostics.Clip(_logger, "todox_ai_provider_usage_log", "provider_code", option.ProviderCode) ?? option.ProviderCode;
+        var capabilityCode = DbDiagnostics.Clip(_logger, "todox_ai_provider_usage_log", "capability_code", option.CapabilityCode) ?? option.CapabilityCode;
+        var feature = DbDiagnostics.Clip(_logger, "todox_ai_provider_usage_log", "feature_code", featureCode) ?? featureCode;
+        var modelName = DbDiagnostics.Clip(_logger, "todox_ai_provider_usage_log", "model_name", option.ModelName) ?? option.ModelName;
+        var status = DbDiagnostics.Clip(_logger, "todox_ai_provider_usage_log", "status", result.Ok ? "success" : "failed") ?? (result.Ok ? "success" : "failed");
+        DbDiagnostics.LogFieldLengths(_logger, "avatar_usage_log",
+            ("provider_code", providerCode),
+            ("capability_code", capabilityCode),
+            ("feature_code", feature),
+            ("model_name", modelName),
+            ("request_id", requestId),
+            ("job_id", jobId),
+            ("status", status));
         await _aiProviders.LogUsageAsync(new AiProviderUsageLog
         {
             CustomerId = customerId,
             ProviderId = option.ProviderId,
             ProviderCapabilityId = option.ProviderCapabilityId,
-            ProviderCode = option.ProviderCode,
-            CapabilityCode = option.CapabilityCode,
-            FeatureCode = featureCode,
-            ModelName = option.ModelName,
-            RequestId = result.LogCode,
+            ProviderCode = providerCode,
+            CapabilityCode = capabilityCode,
+            FeatureCode = feature,
+            ModelName = modelName,
+            RequestId = requestId,
+            JobId = jobId,
             Quantity = 1,
             UnitType = option.UnitType,
             UnitCostPoints = option.UnitCostPoints,
             TotalPoints = option.UnitCostPoints,
-            Status = result.Ok ? "success" : "failed",
+            Status = status,
             ErrorMessage = result.Ok ? null : result.Error,
             CreatedBy = userId.ToString()
         }, ct);

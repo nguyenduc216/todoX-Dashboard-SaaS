@@ -13,6 +13,7 @@
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
 @inject NavigationManager Nav
+@inject IJSRuntime JS
 
 <PageTitle>Quản lý avatar mẫu</PageTitle>
 
@@ -161,14 +162,41 @@
                         </MudItem>
                     </MudGrid>
 
-                    @if (_logs.Count > 0)
-                    {
-                        <MudExpansionPanels Class="mt-3" Elevation="0">
-                            <MudExpansionPanel Text="Nhật ký render">
-                                <pre class="avatar-builder-log">@string.Join(Environment.NewLine, _logs.Select(FormatLog))</pre>
-                            </MudExpansionPanel>
-                        </MudExpansionPanels>
-                    }
+                    <MudPaper Class="pa-4 mt-4 render-log-box" Elevation="1">
+                        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
+                            <MudText Typo="Typo.h6">Nhật ký render</MudText>
+                            <MudStack Row="true" Spacing="1">
+                                <MudButton Variant="Variant.Outlined" Color="Color.Default" StartIcon="@Icons.Material.Filled.ClearAll" OnClick="ClearRenderLog">Xóa log</MudButton>
+                                <MudButton Variant="Variant.Outlined" Color="Color.Info" StartIcon="@Icons.Material.Filled.ContentCopy" OnClick="CopyRenderLogAsync">Sao chép log</MudButton>
+                            </MudStack>
+                        </MudStack>
+
+                        @if (_isRendering)
+                        {
+                            <MudProgressLinear Indeterminate="true" Color="Color.Warning" Class="mt-3" />
+                        }
+
+                        <div id="render-log-panel" class="render-log-panel mt-3">
+                            @if (_renderLogs.Count == 0)
+                            {
+                                <MudText Class="todox-page-subtitle">Chưa có log.</MudText>
+                            }
+                            else
+                            {
+                                @foreach (var item in _renderLogs)
+                                {
+                                    <div class="render-log-line @item.Level">
+                                        <span class="render-log-time">[@item.Time:HH:mm:ss]</span>
+                                        <span class="render-log-message">@item.Message</span>
+                                        @if (!string.IsNullOrWhiteSpace(item.Detail))
+                                        {
+                                            <div class="render-log-detail">@item.Detail</div>
+                                        }
+                                    </div>
+                                }
+                            }
+                        </div>
+                    </MudPaper>
                 </MudPaper>
             </MudItem>
         </MudGrid>
@@ -176,14 +204,24 @@
 </MudStack>
 
 @code {
+    public sealed class RenderLogItem
+    {
+        public DateTime Time { get; set; } = DateTime.Now;
+        public string Level { get; set; } = "info";
+        public string Message { get; set; } = string.Empty;
+        public string? Detail { get; set; }
+    }
+
     private bool _loading = true;
     private bool _busy;
     private bool _previewFlash;
+    private bool _isRendering;
     private List<AvatarTemplateDto> _templates = new();
     private AvatarTemplateEditModel _model = new();
     private PublicAvatarBuilderRenderResult? _preview;
     private readonly Dictionary<string, string?> _urls = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<RenderLogEntry> _logs = new();
+    private readonly List<RenderLogItem> _renderLogs = new();
     private List<ProviderOptionDto> _providerOptions = new();
 
     private bool IsAdmin => AuthState.CurrentUser?.Role is TodoXUserRole.Admin or TodoXUserRole.SystemOperator || AuthState.CurrentUser?.IsRoot == true;
@@ -202,6 +240,14 @@
         DefaultPreviewImagePath;
 
     private string PreviewClass => $"avatar-builder-result {(_previewFlash ? "is-flashing" : string.Empty)}";
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            await ScrollRenderLogToBottomAsync();
+        }
+    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -302,8 +348,14 @@
     private async Task RenderPreview()
     {
         if (AuthState.CurrentUser is null) return;
+        _isRendering = true;
         _busy = true;
         _previewFlash = true;
+        await AddRenderLogAsync("Bắt đầu yêu cầu render avatar.");
+        await AddRenderLogAsync("Đang kiểm tra prompt.");
+        await AddRenderLogAsync("Đang kiểm tra ảnh tham khảo.");
+        await AddRenderLogAsync("Đang chuẩn bị payload render.");
+        await AddRenderLogAsync("Đang gửi yêu cầu đến API render.");
         _logs.Add(new RenderLogEntry { Step = "AVATAR_TEMPLATE_RENDER_REQUESTED", Message = "Admin requested avatar template preview render.", Data = new { _model.Name } });
         await InvokeAsync(StateHasChanged);
         try
@@ -312,28 +364,40 @@
             _logs.AddRange(_preview.Logs);
             if (_preview.Ok)
             {
+                await AddRenderLogAsync($"API đã nhận job render. JobId: {_preview.MediaId ?? Guid.Empty}", "success");
+                await AddRenderLogAsync("Đang chờ kết quả render.");
+                await AddRenderLogAsync("Đã nhận ảnh kết quả.", "success");
+                await AddRenderLogAsync("Đang lưu kết quả vào thư viện avatar mẫu.");
                 _model.PreviewMediaId = _preview.MediaId;
                 _model.PreviewMediaUrl = _preview.ImageUrl;
                 _urls["preview"] = _preview.ImageUrl;
                 _model.LastRenderLogCode = _preview.LogCode;
                 _model.LastGeneratedPrompt = _preview.PromptUsed;
                 _logs.Add(new RenderLogEntry { Step = "AVATAR_TEMPLATE_RENDER_COMPLETED", Message = "Preview render completed.", Data = new { _preview.LogCode, _preview.MediaId } });
+                await AddRenderLogAsync("Hoàn tất render avatar.", "success");
                 Snackbar.Add("Đã render thử avatar.", Severity.Success);
             }
             else
             {
                 _logs.Add(new RenderLogEntry { Step = "AVATAR_TEMPLATE_RENDER_FAILED", Message = _preview.Error ?? "Render failed.", Level = "error" });
+                await AddRenderLogAsync("LỖI: Không thể lưu bản ghi avatar.", "error");
+                await AddRenderLogAsync(_preview.Error ?? "Render failed.", "error");
+                await AddRenderLogAsync("Gợi ý: Có trường dữ liệu dài hơn giới hạn database. Kiểm tra các cột varchar(50) liên quan đến avatar/render.", "warning");
                 Snackbar.Add(_preview.Error ?? "Render thử thất bại.", Severity.Error);
             }
         }
         catch (Exception ex)
         {
             _logs.Add(new RenderLogEntry { Step = "AVATAR_TEMPLATE_RENDER_FAILED", Message = ex.Message, Level = "error" });
+            await AddRenderLogAsync("LỖI: Không thể lưu bản ghi avatar.", "error", ex.Message);
+            await AddRenderLogAsync(ex.Message, "error");
+            await AddRenderLogAsync("Gợi ý: Có trường dữ liệu dài hơn giới hạn database. Kiểm tra các cột varchar(50) liên quan đến avatar/render.", "warning");
             Snackbar.Add($"Lỗi render thử: {ex.Message}", Severity.Error);
         }
         finally
         {
             _busy = false;
+            _isRendering = false;
             await Task.Delay(180);
             _previewFlash = false;
             await InvokeAsync(StateHasChanged);
@@ -361,9 +425,52 @@
         }
         catch (Exception ex)
         {
+            await AddRenderLogAsync("LỖI: Không thể lưu bản ghi avatar.", "error", ex.Message);
+            await AddRenderLogAsync(ex.Message, "error");
+            await AddRenderLogAsync("Gợi ý: Có trường dữ liệu dài hơn giới hạn database. Kiểm tra các cột varchar(50) liên quan đến avatar/render.", "warning");
             Snackbar.Add($"Lỗi lưu avatar: {ex.Message}", Severity.Error);
         }
         finally { _busy = false; }
+    }
+
+    private async Task AddRenderLogAsync(string message, string level = "info", string? detail = null)
+    {
+        _renderLogs.Add(new RenderLogItem
+        {
+            Time = DateTime.Now,
+            Level = level,
+            Message = message,
+            Detail = detail
+        });
+
+        await InvokeAsync(StateHasChanged);
+        await ScrollRenderLogToBottomAsync();
+    }
+
+    private void ClearRenderLog()
+    {
+        _renderLogs.Clear();
+    }
+
+    private async Task CopyRenderLogAsync()
+    {
+        var text = string.Join(Environment.NewLine, _renderLogs.Select(x =>
+            $"[{x.Time:HH:mm:ss}] {x.Level.ToUpperInvariant()}: {x.Message}" +
+            (string.IsNullOrWhiteSpace(x.Detail) ? string.Empty : $" | {x.Detail}")));
+
+        await JS.InvokeVoidAsync("todoXRenderLog.copyText", text);
+        await AddRenderLogAsync("Đã sao chép log vào clipboard.", "success");
+    }
+
+    private async Task ScrollRenderLogToBottomAsync()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("todoXRenderLog.scrollToBottom", "render-log-panel");
+        }
+        catch
+        {
+        }
     }
 
     private async Task TogglePublic()
