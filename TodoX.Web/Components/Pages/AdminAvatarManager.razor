@@ -1,4 +1,4 @@
-@page "/admin/avatar-manager"
+﻿@page "/admin/avatar-manager"
 @using Microsoft.AspNetCore.Components.Forms
 @using TodoX.Web.Components.Avatar
 @using TodoX.Web.Services.AvatarTemplates
@@ -27,7 +27,7 @@
 
     @if (!IsAdmin)
     {
-        <MudAlert Severity="Severity.Error">Bạn cần quyền quản trị TodoX để mở trang này.</MudAlert>
+        <MudAlert Severity="Severity.Error">Bạn cần quyền quản trị để mở trang này.</MudAlert>
     }
     else
     {
@@ -78,8 +78,6 @@
                     <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
                         <MudText Typo="Typo.h6">Thông tin avatar</MudText>
                         <MudStack Row="true" Spacing="1">
-                            <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.AutoAwesome"
-                                       Disabled="@_busy" OnClick="RenderPreview">Render thử</MudButton>
                             <MudButton Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.Save"
                                        Disabled="@_busy" OnClick="SaveTemplate">Lưu avatar</MudButton>
                             @if (_model.Id is Guid id && id != Guid.Empty)
@@ -119,28 +117,33 @@
                                       SceneUrl="@Url("scene")"
                                       OnUpload="Upload"
                                       OnClear="ClearMedia" />
+
+                    <MudDivider Class="my-4" />
+                    <MudStack Row="true" Justify="Justify.FlexEnd" Class="flex-wrap gap-2">
+                        <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.AutoAwesome"
+                                   Disabled="@_busy" OnClick="RenderPreview">Render thử</MudButton>
+                    </MudStack>
                 </MudPaper>
 
                 <MudPaper Class="todox-card pa-5 mt-3" Rounded="true">
                     <MudText Typo="Typo.h6">Ảnh kết quả</MudText>
                     <MudDivider Class="my-3" />
-                    @if (_preview is null)
-                    {
-                        <MudText Class="todox-page-subtitle">Chưa render thử. Bấm Render thử để tạo preview bằng ImageAICreativeRender.</MudText>
-                    }
-                    else
-                    {
-                        <MudGrid>
-                            <MudItem xs="12" sm="5">
-                                <div class="avatar-builder-result">
-                                    @if (!string.IsNullOrWhiteSpace(_preview.ImageUrl))
-                                    {
-                                        <img src="@_preview.ImageUrl" alt="Ảnh avatar preview" />
-                                    }
+                    <MudGrid>
+                        <MudItem xs="12" sm="5">
+                            <a class="avatar-builder-result-link" href="@CurrentPreviewUrl" target="_blank" rel="noopener noreferrer" title="Xem ảnh full size">
+                                <div class="@PreviewClass">
+                                    <img src="@CurrentPreviewUrl" alt="Ảnh avatar preview" />
                                 </div>
-                            </MudItem>
-                            <MudItem xs="12" sm="7">
-                                <MudStack Spacing="2">
+                            </a>
+                            @if (!HasPreviewSource)
+                            {
+                                <MudText Class="todox-page-subtitle mt-2">Chưa render thử. Bấm Render thử để tạo preview bằng ImageAICreativeRender.</MudText>
+                            }
+                        </MudItem>
+                        <MudItem xs="12" sm="7">
+                            <MudStack Spacing="2">
+                                @if (_preview is not null)
+                                {
                                     <MudText>Status: <b>@_preview.Status</b></MudText>
                                     <MudText>LogCode: <b>@(_preview.LogCode ?? "-")</b></MudText>
                                     @if (!string.IsNullOrWhiteSpace(_preview.ImageUrl))
@@ -153,10 +156,10 @@
                                         <MudText Typo="Typo.caption" Class="todox-page-subtitle">Prompt đã dùng</MudText>
                                         <pre class="avatar-builder-log">@_preview.PromptUsed</pre>
                                     }
-                                </MudStack>
-                            </MudItem>
-                        </MudGrid>
-                    }
+                                }
+                            </MudStack>
+                        </MudItem>
+                    </MudGrid>
 
                     @if (_logs.Count > 0)
                     {
@@ -175,6 +178,7 @@
 @code {
     private bool _loading = true;
     private bool _busy;
+    private bool _previewFlash;
     private List<AvatarTemplateDto> _templates = new();
     private AvatarTemplateEditModel _model = new();
     private PublicAvatarBuilderRenderResult? _preview;
@@ -183,6 +187,21 @@
     private List<ProviderOptionDto> _providerOptions = new();
 
     private bool IsAdmin => AuthState.CurrentUser?.Role is TodoXUserRole.Admin or TodoXUserRole.SystemOperator || AuthState.CurrentUser?.IsRoot == true;
+
+    private const string DefaultPreviewImagePath = "/uploads/chibi_ref_avatar/202607/d7617110ed664b2bb347d1247458db74.png";
+
+    private bool HasPreviewSource =>
+        !string.IsNullOrWhiteSpace(_preview?.ImageUrl) ||
+        !string.IsNullOrWhiteSpace(_model.PreviewMediaUrl) ||
+        !string.IsNullOrWhiteSpace(Url("preview"));
+
+    private string CurrentPreviewUrl =>
+        _preview?.ImageUrl ??
+        _model.PreviewMediaUrl ??
+        Url("preview") ??
+        DefaultPreviewImagePath;
+
+    private string PreviewClass => $"avatar-builder-result {(_previewFlash ? "is-flashing" : string.Empty)}";
 
     protected override async Task OnInitializedAsync()
     {
@@ -228,6 +247,7 @@
     {
         _model = new AvatarTemplateEditModel();
         _preview = null;
+        _previewFlash = false;
         _urls.Clear();
         EnsureProviderDefault();
         _logs.Add(new RenderLogEntry { Step = "AVATAR_TEMPLATE_EDITOR_OPENED", Message = "New avatar template form opened." });
@@ -237,12 +257,13 @@
     {
         _model = ToEditModel(item);
         _preview = null;
+        _previewFlash = false;
         _urls["avatar"] = await MediaUrl(item.AvatarMediaId);
         _urls["logo"] = await MediaUrl(item.LogoMediaId);
         _urls["product"] = await MediaUrl(item.ProductMediaId);
         _urls["uniform"] = await MediaUrl(item.UniformMediaId);
         _urls["scene"] = await MediaUrl(item.SceneMediaId);
-        _urls["preview"] = item.PreviewMediaUrl;
+        _urls["preview"] = item.PreviewMediaUrl ?? await MediaUrl(item.PreviewMediaId);
         EnsureProviderDefault();
         _logs.Add(new RenderLogEntry { Step = "AVATAR_TEMPLATE_EDITOR_OPENED", Message = "Existing avatar template opened.", Data = new { item.Id, item.Name } });
     }
@@ -282,7 +303,9 @@
     {
         if (AuthState.CurrentUser is null) return;
         _busy = true;
+        _previewFlash = true;
         _logs.Add(new RenderLogEntry { Step = "AVATAR_TEMPLATE_RENDER_REQUESTED", Message = "Admin requested avatar template preview render.", Data = new { _model.Name } });
+        await InvokeAsync(StateHasChanged);
         try
         {
             _preview = await AvatarTemplates.RenderPreviewAsync(_model, AuthState.CurrentUser.UserId, AuthState.CurrentUser.CustomerId);
@@ -291,6 +314,7 @@
             {
                 _model.PreviewMediaId = _preview.MediaId;
                 _model.PreviewMediaUrl = _preview.ImageUrl;
+                _urls["preview"] = _preview.ImageUrl;
                 _model.LastRenderLogCode = _preview.LogCode;
                 _model.LastGeneratedPrompt = _preview.PromptUsed;
                 _logs.Add(new RenderLogEntry { Step = "AVATAR_TEMPLATE_RENDER_COMPLETED", Message = "Preview render completed.", Data = new { _preview.LogCode, _preview.MediaId } });
@@ -310,6 +334,9 @@
         finally
         {
             _busy = false;
+            await Task.Delay(180);
+            _previewFlash = false;
+            await InvokeAsync(StateHasChanged);
         }
     }
 
@@ -320,8 +347,14 @@
         _logs.Add(new RenderLogEntry { Step = "AVATAR_TEMPLATE_SAVE_REQUESTED", Message = "Admin requested avatar template save.", Data = new { _model.Id, _model.Name } });
         try
         {
+            var retainedPreviewUrl = _preview?.ImageUrl ?? _model.PreviewMediaUrl;
             var saved = await AvatarTemplates.SaveAsync(_model, AuthState.CurrentUser.UserId);
             _model = ToEditModel(saved);
+            if (string.IsNullOrWhiteSpace(_model.PreviewMediaUrl) && !string.IsNullOrWhiteSpace(retainedPreviewUrl))
+            {
+                _model.PreviewMediaUrl = retainedPreviewUrl;
+                _urls["preview"] = retainedPreviewUrl;
+            }
             _logs.Add(new RenderLogEntry { Step = saved.CreatedAt == saved.UpdatedAt ? "AVATAR_TEMPLATE_SAVED" : "AVATAR_TEMPLATE_UPDATED", Message = "Avatar template saved.", Data = new { saved.Id, saved.Name } });
             Snackbar.Add("Đã lưu avatar mẫu.", Severity.Success);
             await Reload();

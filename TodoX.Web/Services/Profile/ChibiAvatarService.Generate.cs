@@ -1,6 +1,7 @@
-using System.Text;
+﻿using System.Text;
 using System.Text.Json;
 using Dapper;
+using TodoX.Web.Data;
 using TodoX.Web.Services.ImageRender;
 
 namespace TodoX.Web.Services.Profile;
@@ -41,6 +42,7 @@ public sealed partial class ChibiAvatarService
         if (engineMode == ChibiRenderEngineModes.ImageAiCreative)
         {
             var request = MapToCreativeRequest(input, logCode);
+            _logger.LogInformation("CHIBI_RENDER_CREATIVE_REQUEST model={Model} count={Count} gender={Gender} camera={CameraAngle} outfit={Outfit}", request.CharacterType, request.Count, request.Gender, request.CameraAngle, request.Outfit);
             var creativeResult = await _creativeRender.RenderAsync(request, ct);
             creativeResult.Logs.InsertRange(0, logs);
             return MapCreativeResultToChibiDto(creativeResult);
@@ -255,6 +257,7 @@ public sealed partial class ChibiAvatarService
             _logger.LogInformation("CHIBI_RERENDER {LogCode} {Step} {Message} {@Data}", logCode, step, message, data);
         }
         AddLog("LOG_CODE_GENERATED", "Generated rerender log code.", new { logCode, renderId });
+        const string modelCode = "imagen-3.0-generate-002";
 
         Guid generationId;
         GenerationReferenceRow? refMeta;
@@ -312,9 +315,11 @@ public sealed partial class ChibiAvatarService
         if (!charge.Ok)
         {
             AddLog("RERENDER_FAILED", charge.Error ?? "Point charge failed.", level: "error");
+            DbDiagnostics.LogFieldLengths(_logger, "user_avatar_render_insert", ("model", modelCode), ("status", "failed"));
+            _logger.LogInformation("CHIBI_RENDER_RERENDER_FAILED model={Model} status=failed logCode={LogCode}", "imagen-3.0-generate-002", logCode);
             await _activityLogs.WriteAsync(userId, customerId, logCode, "avatar-rerender", "failed",
                 new { renderId, generationId, input = BuildActivityInput(refInput, 1) }, rerenderPrompt, refs, new List<ChibiImage>(), logs, charge.Error, ct);
-            throw new InvalidOperationException(charge.Error ?? "Không đủ điểm.");
+            throw new InvalidOperationException(charge.Error ?? "KhÃ´ng Ä‘á»§ Ä‘iá»ƒm.");
         }
 
         AddLog("GEMINI_IMAGE_REQUEST", "Calling image render service for one rerender.", new { renderId, generationId, promptLength = rerenderPrompt.Length, referenceCount = refs.Count });
@@ -341,6 +346,8 @@ public sealed partial class ChibiAvatarService
         {
             await UpdateRenderAsync(renderId, null, null, prompt, rerenderPrompt, "failed", result.Error);
             AddLog("RERENDER_FAILED", result.Error ?? "Render failed.", level: "error");
+            DbDiagnostics.LogFieldLengths(_logger, "user_avatar_render_insert", ("model", modelCode), ("status", "failed"));
+            _logger.LogInformation("CHIBI_RENDER_RERENDER_FAILED model={Model} status=failed logCode={LogCode}", "imagen-3.0-generate-002", logCode);
             await _activityLogs.WriteAsync(userId, customerId, logCode, "avatar-rerender", "failed",
                 new { renderId, generationId, input = BuildActivityInput(refInput, 1) }, rerenderPrompt, refs, new List<ChibiImage>(), logs, result.Error, ct);
             throw new InvalidOperationException(result.Error ?? "Vertex render loi.");
@@ -350,6 +357,7 @@ public sealed partial class ChibiAvatarService
         await UpdateRenderAsync(renderId, d.MediaId, d.Url, prompt, rerenderPrompt, "completed", null);
         var image = new ChibiImage { RenderId = renderId, MediaId = d.MediaId, Url = d.Url, PromptInput = prompt, PromptUsed = rerenderPrompt, LogCode = logCode };
         AddLog("RERENDER_COMPLETED", "Single image rerender completed.", new { renderId, d.MediaId, d.Url });
+        _logger.LogInformation("CHIBI_RENDER_RERENDER_COMPLETED model={Model} status=completed logCode={LogCode}", "imagen-3.0-generate-002", logCode);
         await _activityLogs.WriteAsync(userId, customerId, logCode, "avatar-rerender", "completed",
             new { renderId, generationId, input = BuildActivityInput(refInput, 1) }, rerenderPrompt, refs, new List<ChibiImage> { image }, logs, null, ct);
         return image;
@@ -631,7 +639,7 @@ public sealed partial class ChibiAvatarService
             var owns = await conn.ExecuteScalarAsync<bool>(
                 "SELECT EXISTS(SELECT 1 FROM media.media_files WHERE id=@m AND user_id=@u);",
                 new { m = mediaId, u = userId });
-            if (!owns) throw new InvalidOperationException("Ảnh không thuộc về người dùng.");
+            if (!owns) throw new InvalidOperationException("áº¢nh khÃ´ng thuá»™c vá» ngÆ°á»i dÃ¹ng.");
 
             await conn.ExecuteAsync(
                 "UPDATE auth.user_chibi_generations SET status='selected', selected_media_id=@media, selected_at=now() WHERE id=@id AND user_id=@uid;",

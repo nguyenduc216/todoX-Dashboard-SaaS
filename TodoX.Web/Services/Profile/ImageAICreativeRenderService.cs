@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using System.Text.Json;
 using Dapper;
 using TodoX.Web.Data;
@@ -280,6 +280,7 @@ public sealed class ImageAICreativeRenderService : IImageAICreativeRenderService
                     fixedAssetMode
                 });
 
+                DbDiagnostics.LogFieldLengths(_logger, "user_avatar_render_insert", ("model", request.CharacterType), ("status", "completed"));
                 var render = await _render.RenderAsync(new ImageRenderRequestModel
                 {
                     CorrelationId = generationId,
@@ -310,6 +311,7 @@ public sealed class ImageAICreativeRenderService : IImageAICreativeRenderService
                 if (render.Ok && render.Data.Count > 0)
                 {
                     var data = render.Data[0];
+                    DbDiagnostics.LogFieldLengths(_logger, "user_avatar_render_insert", ("model", render.Model), ("status", "completed"));
                     var renderId = await InsertRenderAsync(generationId, request.UserId, data.MediaId, data.Url, finalPrompt, promptUsed, render.Model, ct);
                     var image = new ImageAICreativeRenderImage
                     {
@@ -326,6 +328,7 @@ public sealed class ImageAICreativeRenderService : IImageAICreativeRenderService
                 }
                 else
                 {
+                    DbDiagnostics.LogFieldLengths(_logger, "user_avatar_render_insert", ("model", render.Model), ("status", "failed"));
                     var renderId = await InsertRenderAsync(generationId, request.UserId, null, null, finalPrompt, promptUsed, render.Model, ct, "failed", render.Error);
                     result.Images.Add(new ImageAICreativeRenderImage
                     {

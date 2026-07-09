@@ -1,11 +1,11 @@
-using Microsoft.Extensions.Logging;
+﻿using Microsoft.Extensions.Logging;
 using Npgsql;
 
 namespace TodoX.Web.Data;
 
 /// <summary>
 /// Shared helpers for diagnosing PostgreSQL write failures and defensively clipping string values
-/// to their column limits. Never logs secrets (API keys, tokens) — only lengths and DB metadata.
+/// to their column limits. Never logs secrets (API keys, tokens) â€” only lengths and DB metadata.
 /// </summary>
 public static class DbDiagnostics
 {
@@ -39,6 +39,12 @@ public static class DbDiagnostics
         ["todox_ai_character.model_name"] = 255,
         ["todox_ai_character.status"] = 50,
 
+        // auth.user_avatar_renders
+        ["auth.user_avatar_renders.model"] = 50,
+        ["auth.user_avatar_renders.status"] = 50,
+        ["auth.user_avatar_renders.prompt_input"] = 255,
+        ["auth.user_avatar_renders.prompt_used"] = 255,
+
         // todox_ai_character_render
         ["todox_ai_character_render.render_code"] = 50,
         ["todox_ai_character_render.provider_code"] = 50,
@@ -65,7 +71,7 @@ public static class DbDiagnostics
         return value[..max];
     }
 
-    /// <summary>Logs the lengths of the given "field=value" pairs (values are never echoed in full — only lengths).</summary>
+    /// <summary>Logs the lengths of the given "field=value" pairs (values are never echoed in full â€” only lengths).</summary>
     public static void LogFieldLengths(ILogger logger, string operation, params (string Field, string? Value)[] fields)
     {
         var summary = string.Join(", ", fields.Select(f => $"{f.Field}={(f.Value?.Length ?? 0)}"));
