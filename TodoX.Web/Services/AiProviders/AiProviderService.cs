@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using TodoX.Web.Data;
 using TodoX.Web.Models;
 
@@ -43,7 +43,7 @@ public sealed class AiProviderService : IAiProviderService
     {
         if (string.IsNullOrWhiteSpace(request.ProviderName))
         {
-            throw new InvalidOperationException("Tên provider không được để trống.");
+            throw new InvalidOperationException("TÃªn provider khÃ´ng Ä‘Æ°á»£c Ä‘á»ƒ trá»‘ng.");
         }
         ValidateJson(request.ConfigJson, "config_json");
 
@@ -57,7 +57,7 @@ public sealed class AiProviderService : IAiProviderService
             throw;
         }
         return await _repo.GetProviderAsync(id, ct)
-               ?? throw new InvalidOperationException("Không đọc lại được provider vừa cập nhật.");
+               ?? throw new InvalidOperationException("KhÃ´ng Ä‘á»c láº¡i Ä‘Æ°á»£c provider vá»«a cáº­p nháº­t.");
     }
 
     public Task<IReadOnlyList<AiProviderCapabilityDto>> GetCapabilitiesAsync(long? providerId, string? capabilityCode, CancellationToken ct = default)
@@ -67,15 +67,15 @@ public sealed class AiProviderService : IAiProviderService
     {
         if (string.IsNullOrWhiteSpace(request.DisplayName))
         {
-            throw new InvalidOperationException("Tên hiển thị capability không được để trống.");
+            throw new InvalidOperationException("TÃªn hiá»ƒn thá»‹ capability khÃ´ng Ä‘Æ°á»£c Ä‘á»ƒ trá»‘ng.");
         }
         if (!AiProviderCatalog.UnitTypes.Contains(request.UnitType))
         {
-            throw new InvalidOperationException("Đơn vị tính (unit_type) không hợp lệ.");
+            throw new InvalidOperationException("ÄÆ¡n vá»‹ tÃ­nh (unit_type) khÃ´ng há»£p lá»‡.");
         }
         if (request.UnitCostPoints < 0)
         {
-            throw new InvalidOperationException("Điểm mỗi đơn vị không được âm.");
+            throw new InvalidOperationException("Äiá»ƒm má»—i Ä‘Æ¡n vá»‹ khÃ´ng Ä‘Æ°á»£c Ã¢m.");
         }
         ValidateJson(request.ConfigJson, "config_json");
 
@@ -105,7 +105,7 @@ public sealed class AiProviderService : IAiProviderService
         }
 
         return await _repo.GetCapabilityAsync(id, ct)
-               ?? throw new InvalidOperationException("Không đọc lại được capability vừa cập nhật.");
+               ?? throw new InvalidOperationException("KhÃ´ng Ä‘á»c láº¡i Ä‘Æ°á»£c capability vá»«a cáº­p nháº­t.");
     }
 
     public Task SetDefaultCapabilityAsync(long capabilityId, CurrentUserSession user, CancellationToken ct = default)
@@ -122,12 +122,12 @@ public sealed class AiProviderService : IAiProviderService
         if (providerCapabilityId is long id)
         {
             var chosen = await _repo.GetOptionByCapabilityIdAsync(id, ct)
-                ?? throw new InvalidOperationException("Provider này chưa được bật hoặc chưa được cấu hình cho chức năng hiện tại.");
+                ?? throw new InvalidOperationException("Provider nÃ y chÆ°a Ä‘Æ°á»£c báº­t hoáº·c chÆ°a Ä‘Æ°á»£c cáº¥u hÃ¬nh cho chá»©c nÄƒng hiá»‡n táº¡i.");
 
             if (!chosen.Enabled || !string.Equals(chosen.CapabilityCode, capabilityCode, StringComparison.OrdinalIgnoreCase)
                 || (fromUser && !chosen.AllowUserSelect))
             {
-                throw new InvalidOperationException("Provider này chưa được bật hoặc chưa được cấu hình cho chức năng hiện tại.");
+                throw new InvalidOperationException("Provider nÃ y chÆ°a Ä‘Æ°á»£c báº­t hoáº·c chÆ°a Ä‘Æ°á»£c cáº¥u hÃ¬nh cho chá»©c nÄƒng hiá»‡n táº¡i.");
             }
             return chosen;
         }
@@ -138,7 +138,7 @@ public sealed class AiProviderService : IAiProviderService
         var byPriority = await _repo.GetFirstByPriorityAsync(capabilityCode, ct);
         if (byPriority is not null) return byPriority;
 
-        throw new InvalidOperationException("Chưa cấu hình AI Provider cho chức năng này.");
+        throw new InvalidOperationException("ChÆ°a cáº¥u hÃ¬nh AI Provider cho chá»©c nÄƒng nÃ y.");
     }
 
     public async Task LogUsageAsync(AiProviderUsageLog log, CancellationToken ct = default)
@@ -164,6 +164,8 @@ public sealed class AiProviderService : IAiProviderService
         log.JobId = DbDiagnostics.Clip(_logger, table, "job_id", log.JobId);
         log.UnitType = DbDiagnostics.Clip(_logger, table, "unit_type", log.UnitType);
         log.Status = DbDiagnostics.Clip(_logger, table, "status", log.Status);
+        log.ErrorMessage = DbDiagnostics.Clip(_logger, table, "error_message", log.ErrorMessage);
+        log.CreatedBy = DbDiagnostics.Clip(_logger, table, "created_by", log.CreatedBy);
 
         try
         {
@@ -189,7 +191,8 @@ public sealed class AiProviderService : IAiProviderService
         }
         catch
         {
-            throw new InvalidOperationException($"{field} không phải JSON hợp lệ.");
+            throw new InvalidOperationException($"{field} khÃ´ng pháº£i JSON há»£p lá»‡.");
         }
     }
 }
+

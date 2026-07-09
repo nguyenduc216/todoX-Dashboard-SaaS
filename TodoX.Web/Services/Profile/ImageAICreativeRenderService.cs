@@ -130,6 +130,11 @@ public sealed class ImageAICreativeRenderService : IImageAICreativeRenderService
             _logger.LogInformation("IMAGE_AI_CREATIVE_RENDER {LogCode} {Step} {Message} {@Data}", logCode, step, message, data);
         }
 
+        _logger.LogInformation(
+            "IMAGE_AI_CREATIVE_RENDER_START logCode={LogCode} generationId={GenerationId} userId={UserId} customerId={CustomerId} scenario={Scenario} characterType={CharacterType} count={Count} aspect={AspectRatio} avatarMediaId={AvatarMediaId} logoMediaId={LogoMediaId} productMediaId={ProductMediaId} uniformMediaId={UniformMediaId} sceneMediaId={SceneMediaId}",
+            logCode, generationId, request.UserId, request.CustomerId, request.Scenario, request.CharacterType, request.Count, request.AspectRatio,
+            request.AvatarMediaId, request.LogoMediaId, request.ProductMediaId, request.UniformMediaId, request.SceneMediaId);
+
         try
         {
             var count = Math.Clamp(request.Count, 1, 4);
@@ -182,6 +187,7 @@ public sealed class ImageAICreativeRenderService : IImageAICreativeRenderService
                 request.PromptLanguage,
                 templateLength = template.Length
             });
+            _logger.LogInformation("IMAGE_AI_CREATIVE_RENDER_TEMPLATE_READY logCode={LogCode} templateLength={TemplateLength}", logCode, template.Length);
 
             var finalPrompt = !string.IsNullOrWhiteSpace(request.PromptOverride)
                 ? request.PromptOverride.Trim()
@@ -190,6 +196,7 @@ public sealed class ImageAICreativeRenderService : IImageAICreativeRenderService
                     : ResolvePromptTemplate(template, request, count);
             finalPrompt = EnsureRenderDirectives(finalPrompt, request, count);
             result.GeneratedPrompt = finalPrompt;
+            _logger.LogInformation("IMAGE_AI_CREATIVE_RENDER_PROMPT_READY logCode={LogCode} promptLength={PromptLength} prompt={Prompt}", logCode, finalPrompt.Length, finalPrompt);
 
             var refs = await BuildReferenceImagesAsync(request, ct);
             foreach (var reference in refs)
@@ -213,6 +220,7 @@ public sealed class ImageAICreativeRenderService : IImageAICreativeRenderService
                 count = refs.Count,
                 roles = refs.Select(x => x.Role).ToArray()
             });
+            _logger.LogInformation("IMAGE_AI_CREATIVE_RENDER_REFERENCES_READY logCode={LogCode} referenceCount={ReferenceCount} roles={Roles}", logCode, refs.Count, refs.Select(x => x.Role).ToArray());
             AddLog("PROMPT_BUILT", "Final creative render prompt prepared.", new
             {
                 promptLength = finalPrompt.Length,
@@ -233,6 +241,8 @@ public sealed class ImageAICreativeRenderService : IImageAICreativeRenderService
             {
                 result.Status = "failed";
                 result.Error = charge.Error;
+                _logger.LogWarning("IMAGE_AI_CREATIVE_RENDER_CHARGE_FAILED logCode={LogCode} generationId={GenerationId} error={Error} charged={Charged} balanceAfter={BalanceAfter}",
+                    logCode, generationId, charge.Error, charge.Charged, charge.BalanceAfter);
                 AddLog("CREATIVE_RENDER_FAILED", charge.Error ?? "Point charge failed.", level: "error");
                 await CompleteGenerationAsync(generationId, "failed", new List<ImageAICreativeRenderImage>(), charge.Error, ct);
                 await _activityLogs.WriteAsync(request.UserId, request.CustomerId, logCode, "avatar-render", "failed",
@@ -243,6 +253,8 @@ public sealed class ImageAICreativeRenderService : IImageAICreativeRenderService
 
             result.Charged = charge.Charged;
             result.BalanceAfter = charge.BalanceAfter;
+            _logger.LogInformation("IMAGE_AI_CREATIVE_RENDER_CHARGE_OK logCode={LogCode} generationId={GenerationId} charged={Charged} balanceAfter={BalanceAfter}",
+                logCode, generationId, charge.Charged, charge.BalanceAfter);
 
             var prompts = new List<string> { finalPrompt };
             var fixedAssetMode = IsFixedAssetMode(request, refs);
@@ -260,11 +272,13 @@ public sealed class ImageAICreativeRenderService : IImageAICreativeRenderService
                         AddLog("PROMPT_VARIATION_REQUEST", "Requesting Gemini prompt variations.", new { model = _gemini.ModelCode, imageCount = count });
                         prompts = await _gemini.GenerateVariationsAsync(finalPrompt, count, ct);
                         AddLog("PROMPT_VARIATION_RESPONSE", "Gemini returned prompt variations.", new { count = prompts.Count, lengths = prompts.Select(x => x.Length).ToArray() });
+                        _logger.LogInformation("IMAGE_AI_CREATIVE_RENDER_VARIATIONS_OK logCode={LogCode} count={Count} lengths={Lengths}", logCode, prompts.Count, prompts.Select(x => x.Length).ToArray());
                     }
                     catch (Exception ex)
                     {
                         prompts = BuildFallbackVariations(finalPrompt, count);
                         AddLog("PROMPT_VARIATION_FALLBACK", "Gemini variation generation failed; using deterministic prompt variations.", new { error = ex.Message, count = prompts.Count }, "warning");
+                        _logger.LogWarning(ex, "IMAGE_AI_CREATIVE_RENDER_VARIATIONS_FALLBACK logCode={LogCode} count={Count}", logCode, prompts.Count);
                     }
                 }
             }
@@ -272,6 +286,8 @@ public sealed class ImageAICreativeRenderService : IImageAICreativeRenderService
             for (var i = 0; i < count; i++)
             {
                 var promptUsed = EnsureVariationDirective(prompts[Math.Min(i, prompts.Count - 1)], i + 1, count);
+                _logger.LogInformation("IMAGE_AI_CREATIVE_RENDER_VARIATION_START logCode={LogCode} index={Index} promptLength={PromptLength} fixedAssetMode={FixedAssetMode} referenceCount={ReferenceCount}",
+                    logCode, i + 1, promptUsed.Length, fixedAssetMode, refs.Count);
                 AddLog("IMAGE_RENDER_REQUEST", $"Rendering creative variation {i + 1}/{count}.", new
                 {
                     variationIndex = i + 1,
@@ -307,6 +323,8 @@ public sealed class ImageAICreativeRenderService : IImageAICreativeRenderService
                     RequireReferenceImages = request.RequireReferenceImages || request.AvatarMediaId is not null || refs.Count > 0
                 }, ct);
                 logs.AddRange(render.Logs);
+                _logger.LogInformation("IMAGE_AI_CREATIVE_RENDER_VARIATION_RESULT logCode={LogCode} index={Index} ok={Ok} dataCount={DataCount} provider={Provider} model={Model} requestId={RequestId} error={Error} usedFallback={UsedFallback}",
+                    logCode, i + 1, render.Ok, render.Data.Count, render.Provider, render.Model, render.RequestId, render.Error, render.UsedFallback);
 
                 if (render.Ok && render.Data.Count > 0)
                 {
@@ -347,16 +365,18 @@ public sealed class ImageAICreativeRenderService : IImageAICreativeRenderService
             }
 
             var okImages = result.Images.Where(x => x.Status != "failed").ToList();
-            result.Status = okImages.Count > 0 ? "completed" : "failed";
+            result.Status = okImages.Count > 0 ? "success" : "failed";
             result.Error = result.Images.FirstOrDefault(x => !string.IsNullOrWhiteSpace(x.Error))?.Error;
+            _logger.LogInformation("IMAGE_AI_CREATIVE_RENDER_COMPLETE logCode={LogCode} generationId={GenerationId} status={Status} okCount={OkCount} failedCount={FailedCount} error={Error}",
+                logCode, generationId, result.Status, okImages.Count, result.Images.Count - okImages.Count, result.Error);
             await CompleteGenerationAsync(generationId, result.Status, okImages, result.Error, ct);
-            AddLog(result.Status == "completed" ? "CREATIVE_RENDER_COMPLETED" : "CREATIVE_RENDER_FAILED",
+            AddLog(result.Status == "success" ? "CREATIVE_RENDER_COMPLETED" : "CREATIVE_RENDER_FAILED",
                 $"ImageAICreativeRender job {result.Status}.", new
                 {
                     renderJobId = generationId,
                     okCount = okImages.Count,
                     failedCount = result.Images.Count - okImages.Count
-                }, result.Status == "completed" ? "info" : "error");
+                }, result.Status == "success" ? "info" : "error");
             await _activityLogs.WriteAsync(request.UserId, request.CustomerId, logCode, "avatar-render", result.Status,
                 BuildActivityInput(request, count), finalPrompt, refs, ToChibiImages(result.Images), logs, result.Error, ct);
             result.Logs = logs;
@@ -366,6 +386,7 @@ public sealed class ImageAICreativeRenderService : IImageAICreativeRenderService
         {
             result.Status = "failed";
             result.Error = ex.Message;
+            _logger.LogError(ex, "IMAGE_AI_CREATIVE_RENDER_EXCEPTION logCode={LogCode} generationId={GenerationId}", logCode, generationId);
             AddLog("CREATIVE_RENDER_FAILED", ex.Message, new { exception = ex.ToString() }, "error");
             await CompleteGenerationAsync(generationId, "failed", result.Images, ex.Message, ct);
             result.Logs = logs;

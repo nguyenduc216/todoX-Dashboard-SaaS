@@ -46,7 +46,7 @@ public sealed class AiCharacterRender
     public int? Seed { get; set; }
     public decimal? UsageCost { get; set; }
     public string? UsageJson { get; set; }
-    public string Status { get; set; } = "completed";
+    public string Status { get; set; } = "success";
     public string? ErrorMessage { get; set; }
     public string? CreatedBy { get; set; }
     public DateTime CreatedAt { get; set; }

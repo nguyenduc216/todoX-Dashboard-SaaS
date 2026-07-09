@@ -1,7 +1,9 @@
-@page "/ai-assets/characters/new"
+﻿@page "/ai-assets/characters/new"
 @page "/ai-assets/characters/{Id:long}"
 @using TodoX.Web.Models
 @using TodoX.Web.Services.AiProviders
+@using System.Text.Json
+@using Npgsql
 @inject IAiCharacterService Characters
 @inject IAiProviderService AiProviders
 @inject AuthStateService AuthState
@@ -67,8 +69,8 @@ else
                 </MudItem>
                 <MudItem xs="12" sm="6">
                     <MudSelect T="string" Label="Trạng thái" Variant="Variant.Outlined" Disabled="_isNew" @bind-Value="_model.Status">
-                        <MudSelectItem Value="@("active")">Đang dùng</MudSelectItem>
-                        <MudSelectItem Value="@("inactive")">Tạm tắt</MudSelectItem>
+                        <MudSelectItem T="string" Value="@("active")">Đang dùng</MudSelectItem>
+                        <MudSelectItem T="string" Value="@("inactive")">Tạm tắt</MudSelectItem>
                     </MudSelect>
                 </MudItem>
                 <MudItem xs="12" sm="6">
@@ -139,7 +141,7 @@ else
             </div>
             @if (_lastGenerate is not null)
             {
-                <MudAlert Class="mt-3" Severity="@(_lastGenerate.Status == "completed" ? Severity.Success : Severity.Error)" Dense="true">
+                <MudAlert Class="mt-3" Severity="@(_lastGenerate.Status == "success" ? Severity.Success : Severity.Error)" Dense="true">
                     @StatusLabel(_lastGenerate.Status)
                     @if (!string.IsNullOrWhiteSpace(_lastGenerate.ErrorMessage))
                     {
@@ -194,7 +196,7 @@ else
                                     <small class="ai-character-error">@render.ErrorMessage</small>
                                 }
                                 <div>
-                                    @if (render.Status == "completed")
+                                    @if (render.Status == "success")
                                     {
                                         <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Warning"
                                                    StartIcon="@Icons.Material.Filled.Star"
@@ -203,7 +205,7 @@ else
                                         </MudButton>
                                         <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Warning"
                                                    StartIcon="@Icons.Material.Filled.Link"
-                                                   OnClick="@(() => Copy(render.OutputImageUrl ?? string.Empty))">
+                                                    OnClick="@(() => Copy(render.OutputImageUrl ?? string.Empty))">
                                             Sao chép URL
                                         </MudButton>
                                     }
@@ -218,6 +220,62 @@ else
                     }
                 </div>
             }
+        </MudPaper>
+        <MudPaper Class="todox-panel pa-4 mt-4 ai-character-render-log-panel" Rounded="true">
+            <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
+                <div>
+                    <MudText Typo="Typo.h6">Nhật ký render</MudText>
+                    <MudText Typo="Typo.caption" Class="todox-page-subtitle">Log chạy trực tiếp trên trang này. Tải được file ngay cả khi backend lỗi.</MudText>
+                </div>
+                <MudStack Row="true" Spacing="1" Class="flex-wrap gap-1">
+                    <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.ContentCopy" OnClick="CopyRenderLogs" Disabled="@(_renderLogs.Count == 0)">Sao chép log</MudButton>
+                    <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Download" OnClick="DownloadRenderLogTxt" Disabled="@(_renderLogs.Count == 0)">Tải .txt</MudButton>
+                    <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.DataObject" OnClick="DownloadRenderLogJson" Disabled="@(_renderLogs.Count == 0)">Tải .json</MudButton>
+                    <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Warning" OnClick="ClearRenderLogs" Disabled="@_busy">Xóa log</MudButton>
+                </MudStack>
+            </MudStack>
+
+            @if (_busy)
+            {
+                <MudProgressLinear Indeterminate="true" Color="Color.Warning" Class="mt-3" />
+            }
+
+            @if (!string.IsNullOrWhiteSpace(_lastRenderError))
+            {
+                <MudAlert Severity="Severity.Error" Dense="true" Class="mt-3">
+                    <MudText Typo="Typo.subtitle2">Lỗi gần nhất</MudText>
+                    <pre class="ai-character-render-log-error">@_lastRenderError</pre>
+                </MudAlert>
+            }
+
+            <div id="ai-character-render-log-panel" class="ai-character-render-log-list mt-3">
+                @if (_renderLogs.Count == 0)
+                {
+                    <div class="ai-character-render-log-empty">Chưa có log.</div>
+                }
+                else
+                {
+                    @foreach (var log in _renderLogs)
+                    {
+                        <div class="@($"ai-character-render-log-line log-{NormalizeLevel(log.Level)}")">
+                            <div class="ai-character-render-log-head">
+                                <span class="ai-character-render-log-time">[@log.Time:HH:mm:ss]</span>
+                                <span class="ai-character-render-log-level">@NormalizeLevel(log.Level).ToUpperInvariant()</span>
+                                <span class="ai-character-render-log-step">@log.Step</span>
+                                <span class="ai-character-render-log-message">@log.Message</span>
+                            </div>
+                            @if (log.Data is not null)
+                            {
+                                <pre class="ai-character-render-log-data">@PrettyData(log.Data)</pre>
+                            }
+                            @if (!string.IsNullOrWhiteSpace(log.RawError))
+                            {
+                                <pre class="ai-character-render-log-error">@log.RawError</pre>
+                            }
+                        </div>
+                    }
+                }
+            </div>
         </MudPaper>
     }
 }
@@ -245,6 +303,8 @@ else
     private bool _isNew => Id is null;
     private long? _providerCapabilityId;
     private List<ProviderOptionDto> _providerOptions = new();
+    private readonly List<AiCharacterRenderLogItem> _renderLogs = new();
+    private string? _lastRenderError;
 
     private string ProviderDisplay
     {
@@ -297,6 +357,7 @@ else
                     _error = "Không tìm thấy nhân vật.";
                     return;
                 }
+
                 _model.CharacterName = _detail.CharacterName;
                 _model.Description = _detail.Description;
                 _model.RenderPrompt = _detail.NormalizedPrompt;
@@ -360,32 +421,78 @@ else
 
     private async Task Generate()
     {
-        if (AuthState.CurrentUser is null || Id is null) return;
+        _lastRenderError = null;
+        _renderLogs.Clear();
+        await AddRenderLogAsync("ui_started", "Bắt đầu render character.", "info");
+        await AddRenderLogAsync("ui_validate_input", "Đang kiểm tra input và prompt.", "info", new
+        {
+            CharacterId = Id,
+            _model.CharacterName,
+            _model.AspectRatio,
+            _model.StylePreset,
+            _model.Gender,
+            Seed = _seed,
+            ProviderCapabilityId = _providerCapabilityId
+        });
+
+        if (AuthState.CurrentUser is null || Id is null)
+        {
+            await AddRenderLogAsync("ui_abort", "Thiếu user hoặc character id.", "warn");
+            return;
+        }
+
         _busy = true;
         _lastGenerate = null;
         try
         {
+            var referenceUrls = ParseReferenceUrls();
+            await AddRenderLogAsync("service_call", "Gọi backend render character.", "info", new
+            {
+                CharacterId = Id,
+                Seed = _seed,
+                SaveAsMaster = true,
+                ProviderCapabilityId = _providerCapabilityId,
+                ReferenceCount = referenceUrls.Length
+            });
+
             _lastGenerate = await Characters.GenerateImageAsync(new GenerateCharacterImageRequest
             {
                 CharacterId = Id,
                 Seed = _seed,
                 RenderPrompt = _renderPrompt,
-                ReferenceImageUrls = ParseReferenceUrls(),
+                ReferenceImageUrls = referenceUrls,
                 SaveAsMaster = true,
                 ProviderCapabilityId = _providerCapabilityId
             }, AuthState.CurrentUser);
 
-            Snackbar.Add(_lastGenerate.Status == "completed" ? "Render ảnh nhân vật thành công." : _lastGenerate.ErrorMessage ?? "Render chưa thành công.",
-                _lastGenerate.Status == "completed" ? Severity.Success : Severity.Error);
+            await AddRenderLogAsync(
+                "service_result",
+                _lastGenerate.Status == "success" ? "Render ảnh nhân vật thành công." : _lastGenerate.ErrorMessage ?? "Render chưa thành công.",
+                _lastGenerate.Status == "success" ? "success" : "error",
+                new { _lastGenerate.Status, _lastGenerate.RenderId, _lastGenerate.ImageUrl, _lastGenerate.ErrorMessage });
+
+            Snackbar.Add(_lastGenerate.Status == "success" ? "Render ảnh nhân vật thành công." : _lastGenerate.ErrorMessage ?? "Render chưa thành công.",
+                _lastGenerate.Status == "success" ? Severity.Success : Severity.Error);
             await Load();
+        }
+        catch (Npgsql.PostgresException ex)
+        {
+            _lastRenderError = ex.ToString();
+            await AddRenderLogAsync("postgres_exception", ex.MessageText, "error", new { ex.SqlState, ex.Detail, ex.Hint }, ex.ToString());
+            Snackbar.Add($"Render thất bại: {ex.Message}", Severity.Error);
         }
         catch (Exception ex)
         {
+            _lastRenderError = ex.ToString();
+            await AddRenderLogAsync("unhandled_exception", ex.Message, "error", null, ex.ToString());
             Snackbar.Add(ex.Message, Severity.Error);
         }
         finally
         {
             _busy = false;
+            await AddRenderLogAsync("ui_finished", "Hoàn tất render.", "info", new { _lastGenerate?.Status, _lastGenerate?.RenderId });
+            await InvokeAsync(StateHasChanged);
+            await ScrollRenderLogsAsync();
         }
     }
 
@@ -423,6 +530,84 @@ else
 
     private string[] ParseReferenceUrls()
         => _referenceUrlsText.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+    private Task AddRenderLogAsync(string step, string message, string level = "info", object? data = null, string? rawError = null)
+    {
+        _renderLogs.Add(new AiCharacterRenderLogItem
+        {
+            Time = DateTimeOffset.Now,
+            Step = step,
+            Level = level,
+            Message = message,
+            Data = data,
+            RawError = rawError
+        });
+
+        return InvokeAsync(StateHasChanged);
+    }
+
+    private async Task ClearRenderLogs()
+    {
+        _renderLogs.Clear();
+        _lastRenderError = null;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task CopyRenderLogs()
+    {
+        var text = string.Join(Environment.NewLine, _renderLogs.Select(log => $"[{log.Time:HH:mm:ss}] {log.Level.ToUpperInvariant()} {log.Step} - {log.Message}{FormatLogTail(log.Data, log.RawError)}"));
+        await Js.InvokeVoidAsync("todoXRenderLog.copyText", text);
+        Snackbar.Add("Đã sao chép log.", Severity.Success);
+    }
+
+    private async Task DownloadRenderLogTxt()
+    {
+        var text = string.Join(Environment.NewLine, _renderLogs.Select(log => $"[{log.Time:HH:mm:ss}] {log.Level.ToUpperInvariant()} {log.Step} - {log.Message}{FormatLogTail(log.Data, log.RawError)}"));
+        await Js.InvokeVoidAsync("todoxDownload.saveTextFile", $"character-render-log-{DateTime.Now:yyyyMMdd-HHmmss}.txt", text);
+    }
+
+    private async Task DownloadRenderLogJson()
+    {
+        var json = JsonSerializer.Serialize(_renderLogs, new JsonSerializerOptions { WriteIndented = true });
+        await Js.InvokeVoidAsync("todoxDownload.saveTextFile", $"character-render-log-{DateTime.Now:yyyyMMdd-HHmmss}.json", json);
+    }
+
+    private async Task ScrollRenderLogsAsync()
+    {
+        await Js.InvokeVoidAsync("todoXRenderLog.scrollToBottom", "ai-character-render-log-panel");
+    }
+
+    private static string FormatLogTail(object? data, string? rawError)
+    {
+        var parts = new List<string>();
+        if (data is not null)
+        {
+            parts.Add(JsonSerializer.Serialize(data, new JsonSerializerOptions { WriteIndented = true }));
+        }
+
+        if (!string.IsNullOrWhiteSpace(rawError))
+        {
+            parts.Add(rawError);
+        }
+
+        return parts.Count == 0 ? string.Empty : $"{Environment.NewLine}{string.Join(Environment.NewLine, parts)}";
+    }
+
+    private static string NormalizeLevel(string? level)
+        => string.IsNullOrWhiteSpace(level) ? "info" : level.Trim().ToLowerInvariant();
+
+    private static string PrettyData(object? data)
+        => data is null ? string.Empty : JsonSerializer.Serialize(data, new JsonSerializerOptions { WriteIndented = true });
+
+    private sealed class AiCharacterRenderLogItem
+    {
+        public DateTimeOffset Time { get; set; } = DateTimeOffset.Now;
+        public string Level { get; set; } = "info";
+        public string Step { get; set; } = string.Empty;
+        public string Message { get; set; } = string.Empty;
+        public object? Data { get; set; }
+        public string? RawError { get; set; }
+    }
 
     private async Task Copy(string value)
     {
@@ -464,9 +649,10 @@ else
     {
         "active" => "Đang dùng",
         "inactive" => "Tạm tắt",
-        "completed" => "Thành công",
+        "success" => "Thành công",
         "failed" => "Thất bại",
-        "pending" => "Đang chờ",
+        "processing" => "Đang xử lý",
+        "completed" => "Thành công",
         _ => value
     };
 
@@ -478,3 +664,6 @@ else
         _ => value
     };
 }
+
+
+

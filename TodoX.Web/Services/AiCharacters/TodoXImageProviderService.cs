@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using TodoX.Web.Services.Media;
 using TodoX.Web.Services.Profile;
 
@@ -38,6 +38,10 @@ public sealed class TodoXImageProviderService : ITodoXImageProviderService
 
         try
         {
+            _logger.LogInformation(
+                "TODOX_IMAGE_PROVIDER_REQUEST model={Model} aspect={Aspect} outputFormat={OutputFormat} quality={Quality} resolution={Resolution} seed={Seed} fileCategory={FileCategory} referenceCount={ReferenceCount}",
+                request.Model, request.AspectRatio, request.OutputFormat, request.Quality, request.Resolution, request.Seed, request.FileCategory, request.ReferenceImageUrls?.Length ?? 0);
+
             var render = await _creativeRender.RenderAsync(new ImageAICreativeRenderRequest
             {
                 UserId = request.UserId ?? Guid.Empty,
@@ -59,9 +63,22 @@ public sealed class TodoXImageProviderService : ITodoXImageProviderService
                 SkipReferenceOwnershipCheck = true
             }, cancellationToken);
 
-            var first = render.Images.FirstOrDefault(x => x.Status != "failed" && !string.IsNullOrWhiteSpace(x.Url));
-            if (render.Status != "completed" || first is null)
+            _logger.LogInformation(
+                "TODOX_IMAGE_PROVIDER_RENDER_RESULT status={Status} imageCount={ImageCount} usedFallback={UsedFallback} error={Error} model={Model} logCode={LogCode}",
+                render.Status, render.Images.Count, render.UsedFallback, render.Error, render.RenderEngineMode, render.LogCode);
+
+            if (render.Logs.Count > 0)
             {
+                _logger.LogInformation("TODOX_IMAGE_PROVIDER_RENDER_LOGS {@Logs}", render.Logs);
+            }
+
+            var first = render.Images.FirstOrDefault(x => x.Status != "failed" && !string.IsNullOrWhiteSpace(x.Url));
+            var renderCompleted = IsSuccessfulRenderStatus(render.Status);
+            if (!renderCompleted || first is null)
+            {
+                _logger.LogWarning(
+                    "TODOX_IMAGE_PROVIDER_NO_IMAGE status={Status} ok={Ok} imageCount={ImageCount} usedFallback={UsedFallback} error={Error}",
+                    render.Status, render.Images.Count > 0, render.Images.Count, render.UsedFallback, render.Error);
                 return new OpenRouterImageResponse
                 {
                     Success = false,
@@ -114,8 +131,15 @@ public sealed class TodoXImageProviderService : ITodoXImageProviderService
                 ProviderCode = "todox_image",
                 ModelName = request.Model,
                 RawRequestJson = requestJson,
-                ErrorMessage = ex.Message
+                ErrorMessage = TruncateError(ex.Message)
             };
         }
     }
+
+    private static bool IsSuccessfulRenderStatus(string? status)
+        => string.Equals(status, "success", StringComparison.OrdinalIgnoreCase)
+           || string.Equals(status, "completed", StringComparison.OrdinalIgnoreCase);
+
+    private static string TruncateError(string? value)
+        => string.IsNullOrWhiteSpace(value) ? string.Empty : value.Length <= 180 ? value : value[..180];
 }

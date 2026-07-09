@@ -298,7 +298,7 @@ public sealed class AiCharacterRepository
              WHERE c.id = @characterId
                AND r.id = @renderId
                AND r.character_id = c.id
-               AND r.status = 'completed'
+               AND r.status = 'success'
                AND c.customer_id = @customerId
                AND r.customer_id = @customerId;
             """, new

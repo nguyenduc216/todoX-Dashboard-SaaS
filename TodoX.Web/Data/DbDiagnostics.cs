@@ -44,6 +44,10 @@ public static class DbDiagnostics
         ["auth.user_avatar_renders.status"] = 50,
         ["auth.user_avatar_renders.prompt_input"] = 255,
         ["auth.user_avatar_renders.prompt_used"] = 255,
+        // todox_ai_provider_usage_log
+        ["todox_ai_provider_usage_log.error_message"] = 255,
+        ["todox_ai_provider_usage_log.created_by"] = 100,
+
 
         // todox_ai_character_render
         ["todox_ai_character_render.render_code"] = 50,

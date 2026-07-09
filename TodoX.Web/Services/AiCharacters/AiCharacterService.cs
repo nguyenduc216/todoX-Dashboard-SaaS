@@ -1,4 +1,4 @@
-using TodoX.Web.Data;
+﻿using TodoX.Web.Data;
 using TodoX.Web.Models;
 using TodoX.Web.Services.AiProviders;
 using TodoX.Web.Services.Media;
@@ -201,7 +201,7 @@ public sealed class AiCharacterService : IAiCharacterService
 
         string? imageUrl = null;
         string? objectKey = null;
-        var status = response.Success ? "completed" : "failed";
+        var status = response.Success ? "success" : "failed";
         var error = response.Success ? null : FriendlyError(response.ErrorMessage);
         if (response.Success && response.ImageBytes is { Length: > 0 })
         {
@@ -240,6 +240,15 @@ public sealed class AiCharacterService : IAiCharacterService
                 ("quality", quality),
                 ("resolution", resolution),
                 ("status", status));
+            DbDiagnostics.LogFieldLengths(_logger, "character_render_insert_detail",
+                ("prompt", prompt),
+                ("aspect_ratio", aspect),
+                ("created_by", user.UserId.ToString()),
+                ("error_message", error));
+
+            var clippedPrompt = DbDiagnostics.Clip(_logger, renderTable, "prompt", prompt);
+            var clippedError = DbDiagnostics.Clip(_logger, renderTable, "error_message", error);
+            var clippedCreatedBy = DbDiagnostics.Clip(_logger, renderTable, "created_by", user.UserId.ToString());
 
             try
             {
@@ -250,7 +259,7 @@ public sealed class AiCharacterService : IAiCharacterService
                     RenderCode = DbDiagnostics.Clip(_logger, renderTable, "render_code", renderCode)!,
                     ProviderCode = DbDiagnostics.Clip(_logger, renderTable, "provider_code", renderProviderCode)!,
                     ModelName = DbDiagnostics.Clip(_logger, renderTable, "model_name", renderModelName),
-                    Prompt = prompt,
+                    Prompt = clippedPrompt!,
                     RequestJson = response.RawRequestJson,
                     ResponseJson = response.RawResponseJson,
                     OutputImageUrl = imageUrl,
@@ -263,8 +272,8 @@ public sealed class AiCharacterService : IAiCharacterService
                     UsageCost = response.UsageCost,
                     UsageJson = response.UsageJson,
                     Status = DbDiagnostics.Clip(_logger, renderTable, "status", status)!,
-                    ErrorMessage = error,
-                    CreatedBy = user.UserId.ToString()
+                    ErrorMessage = clippedError,
+                    CreatedBy = clippedCreatedBy
                 }, ct);
             }
             catch (Exception ex)
@@ -302,7 +311,7 @@ public sealed class AiCharacterService : IAiCharacterService
                 UnitCostPoints = providerOption.UnitCostPoints,
                 TotalPoints = providerOption.UnitCostPoints,
                 ProviderRawCost = response.UsageCost,
-                Status = status == "completed" ? "success" : "failed",
+                Status = status == "success" ? "success" : "failed",
                 ErrorMessage = error,
                 CreatedBy = user.UserId.ToString()
             }, ct);
@@ -362,7 +371,7 @@ public sealed class AiCharacterService : IAiCharacterService
             Quality = "original",
             Resolution = "original",
             Seed = character.Seed,
-            Status = "completed",
+            Status = "success",
             CreatedBy = user.UserId.ToString()
         }, ct);
 
@@ -378,7 +387,7 @@ public sealed class AiCharacterService : IAiCharacterService
             Prompt = "Upload anh master thu cong",
             ProviderCode = "manual_upload",
             ModelName = "upload_file",
-            Status = "completed"
+            Status = "success"
         };
     }
 
@@ -460,3 +469,5 @@ public sealed class AiCharacterService : IAiCharacterService
     private static string? FriendlyError(string? error)
         => string.IsNullOrWhiteSpace(error) ? "Provider render chua tao duoc anh. Vui long thu lai." : error;
 }
+
+

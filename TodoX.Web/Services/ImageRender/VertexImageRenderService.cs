@@ -64,6 +64,9 @@ public sealed class VertexImageRenderService : IImageRenderService
             _logger.LogInformation("IMAGE_RENDER correlationId={CorrelationId} requestId={RequestId} step={Step} message={Message} data={@Data}",
                 correlationId, requestId, step, message, data);
         }
+        _logger.LogInformation(
+            "IMAGE_RENDER_START correlationId={CorrelationId} requestId={RequestId} providerCode={ProviderCode} modelCode={ModelCode} count={Count} aspect={AspectRatio} pipeline={Pipeline} preserveFixedAssets={PreserveFixedAssets} requireReferences={RequireReferences} referenceCount={ReferenceCount} promptLength={PromptLength}",
+            correlationId, requestId, providerCode, modelCode, count, request.AspectRatio, request.RenderPipeline, request.PreserveFixedAssets, request.RequireReferenceImages, request.ReferenceImages.Count, request.Prompt.Length);
         AddLog("RENDER_REQUEST_RECEIVED", "Image render request received.", new
         {
             correlationId,
@@ -115,6 +118,7 @@ public sealed class VertexImageRenderService : IImageRenderService
 
         // Insert the render request row (status=processing).
         await InsertRequestAsync(requestId, request, providerCode, modelCode, count);
+        _logger.LogInformation("IMAGE_RENDER_REQUEST_INSERTED correlationId={CorrelationId} requestId={RequestId} status=processing", correlationId, requestId);
 
         if (request.RequireReferenceImages && !request.ReferenceImages.Any(HasReferencePayload))
         {
@@ -122,6 +126,7 @@ public sealed class VertexImageRenderService : IImageRenderService
             result.Ok = false;
             result.Error = message;
             AddLog("RENDER_FAILED", message, level: "error");
+            _logger.LogWarning("IMAGE_RENDER_FAILED_MISSING_REFERENCES correlationId={CorrelationId} requestId={RequestId} error={Error}", correlationId, requestId, message);
             await CompleteRequestAsync(requestId, "failed", new List<Guid>(), message);
             await _settings.LogCallAsync(_tenant.TenantId, request.UserId, EndpointCode, providerCode, modelCode,
                 requestId, "failed", message, (int)sw.ElapsedMilliseconds);
@@ -167,6 +172,7 @@ public sealed class VertexImageRenderService : IImageRenderService
             status = "mock";
             AddLog("MOCK_IMAGE_RESPONSE", "Mock mode generated placeholder images.", new { count = images.Count }, "warning");
             _logger.LogWarning("ImageRender running in MockMode - returning placeholder images.");
+            _logger.LogInformation("IMAGE_RENDER_MOCK_RESULT correlationId={CorrelationId} requestId={RequestId} imageCount={ImageCount}", correlationId, requestId, images.Count);
         }
         else
         {
@@ -204,6 +210,8 @@ public sealed class VertexImageRenderService : IImageRenderService
                         referenceCount = modelReferences.Count,
                         orderedRoles = modelReferences.Where(HasReferencePayload).Select(x => x.Role ?? "reference").ToArray()
                     });
+                    _logger.LogInformation("IMAGE_RENDER_BACKGROUND_REQUEST correlationId={CorrelationId} requestId={RequestId} model={Model} count={Count} aspect={Aspect} referenceCount={ReferenceCount} roles={Roles}",
+                        correlationId, requestId, modelCode, count, request.AspectRatio, modelReferences.Count, modelReferences.Where(HasReferencePayload).Select(x => x.Role ?? "reference").ToArray());
 
                     var backgroundImages = await _vertex.GenerateImagesAsync(backgroundPrompt, modelReferences, count, request.AspectRatio, ct);
                     result.Model = _vertex.LastModelUsed ?? modelCode;
@@ -216,6 +224,8 @@ public sealed class VertexImageRenderService : IImageRenderService
                         byteLengths = backgroundImages.Select(x => x.Length).ToArray(),
                         mode = _vertex.LastRenderModeUsed
                     });
+                    _logger.LogInformation("IMAGE_RENDER_BACKGROUND_RESPONSE correlationId={CorrelationId} requestId={RequestId} model={Model} imageCount={ImageCount} byteLengths={ByteLengths} mode={Mode}",
+                        correlationId, requestId, modelCode, backgroundImages.Count, backgroundImages.Select(x => x.Length).ToArray(), _vertex.LastRenderModeUsed);
 
                     images = await CompositeFixedAssetsAsync(backgroundImages, fixedAsset, request, AddLog, ct);
                     status = "success";
@@ -238,6 +248,8 @@ public sealed class VertexImageRenderService : IImageRenderService
                         referenceCount = orderedRoles.Length,
                         orderedRoles
                     });
+                    _logger.LogInformation("IMAGE_RENDER_MODE_SELECTED correlationId={CorrelationId} requestId={RequestId} configuredMode={ConfiguredMode} fallbackMode={FallbackMode} referenceCount={ReferenceCount} orderedRoles={OrderedRoles}",
+                        correlationId, requestId, configuredMode, fallbackMode, orderedRoles.Length, orderedRoles);
                     if (hasReferences && (configuredMode.Equals("gemini_generate_content", StringComparison.OrdinalIgnoreCase)
                         || configuredMode.Equals("auto", StringComparison.OrdinalIgnoreCase)))
                     {
@@ -264,6 +276,8 @@ public sealed class VertexImageRenderService : IImageRenderService
                         });
                     }
                     AddLog("GEMINI_IMAGE_REQUEST", "Calling Vertex image render.", new { model = modelCode, count, request.AspectRatio, referenceCount = modelReferences.Count, mode = configuredMode });
+                    _logger.LogInformation("IMAGE_RENDER_VERTEX_REQUEST correlationId={CorrelationId} requestId={RequestId} model={Model} count={Count} aspect={Aspect} referenceCount={ReferenceCount} mode={Mode}",
+                        correlationId, requestId, modelCode, count, request.AspectRatio, modelReferences.Count, configuredMode);
                     images = await _vertex.GenerateImagesAsync(request.Prompt, modelReferences, count, request.AspectRatio, ct);
                     result.Model = _vertex.LastModelUsed ?? modelCode;
                     modelCode = result.Model;
@@ -275,6 +289,8 @@ public sealed class VertexImageRenderService : IImageRenderService
                         AddLog("GEMINI_GENERATE_CONTENT_RESPONSE", "Gemini generateContent returned images.", new { model = modelCode, count = images.Count, byteLengths = images.Select(x => x.Length).ToArray(), mode = actualMode });
                     }
                     AddLog("GEMINI_IMAGE_RESPONSE", "Vertex image render returned images.", new { model = modelCode, count = images.Count, byteLengths = images.Select(x => x.Length).ToArray(), mode = actualMode });
+                    _logger.LogInformation("IMAGE_RENDER_VERTEX_RESPONSE correlationId={CorrelationId} requestId={RequestId} model={Model} imageCount={ImageCount} byteLengths={ByteLengths} mode={Mode} usedFallback={UsedFallback}",
+                        correlationId, requestId, modelCode, images.Count, images.Select(x => x.Length).ToArray(), actualMode, result.UsedFallback);
                 }
             }
             catch (Exception ex)
@@ -284,6 +300,7 @@ public sealed class VertexImageRenderService : IImageRenderService
                 sw.Stop();
                 result.Ok = false;
                 result.Error = ex.Message;
+                _logger.LogError(ex, "IMAGE_RENDER_EXCEPTION correlationId={CorrelationId} requestId={RequestId} status=failed", correlationId, requestId);
                 if (ex.Message.Contains("generateContent", StringComparison.OrdinalIgnoreCase)
                     && ex.Message.Contains("khong tra ve anh", StringComparison.OrdinalIgnoreCase))
                 {
@@ -316,6 +333,8 @@ public sealed class VertexImageRenderService : IImageRenderService
         await _settings.LogCallAsync(_tenant.TenantId, request.UserId, EndpointCode, providerCode, modelCode,
             requestId, status, error, (int)sw.ElapsedMilliseconds);
         AddLog("RENDER_COMPLETED", "Image render request completed.", new { status, elapsedMs = sw.ElapsedMilliseconds, mediaIds });
+        _logger.LogInformation("IMAGE_RENDER_COMPLETE correlationId={CorrelationId} requestId={RequestId} status={Status} ok={Ok} imageCount={ImageCount} usedFallback={UsedFallback} error={Error} elapsedMs={ElapsedMs}",
+            correlationId, requestId, status, result.Ok, mediaIds.Count, result.UsedFallback, error, sw.ElapsedMilliseconds);
 
         return result;
     }
@@ -344,6 +363,7 @@ public sealed class VertexImageRenderService : IImageRenderService
             x.DisplayName,
             x.PromptRoleDescription
         }));
+        var safetyLevel = NormalizeSafetyLevel(r.SafetyLevel);
         await conn.ExecuteAsync(
             """
             INSERT INTO render.image_render_requests
@@ -355,10 +375,19 @@ public sealed class VertexImageRenderService : IImageRenderService
             """,
             new
             {
-                id, tenant = _tenant.TenantId, user = r.UserId, customer = r.CustomerId,
-                endpoint = EndpointCode, provider = providerCode, model = modelCode,
-                prompt = r.Prompt, refs = refJson, count, aspect = r.AspectRatio,
-                mime = r.MimeType, safety = r.SafetyLevel
+                id,
+                tenant = _tenant.TenantId,
+                user = r.UserId,
+                customer = r.CustomerId,
+                endpoint = EndpointCode,
+                provider = providerCode,
+                model = modelCode,
+                prompt = r.Prompt,
+                refs = refJson,
+                count,
+                aspect = r.AspectRatio,
+                mime = r.MimeType,
+                safety = safetyLevel
             });
     }
 
@@ -371,9 +400,20 @@ public sealed class VertexImageRenderService : IImageRenderService
                SET status=@status, result_media_ids=@ids::jsonb, error_message=@err, completed_at=now()
              WHERE id=@id;
             """,
-            new { id, status = status == "success" ? "completed" : status,
-                  ids = JsonSerializer.Serialize(mediaIds), err = error });
+            new
+            {
+                id,
+                status = status == "success" ? "completed" : status,
+                ids = JsonSerializer.Serialize(mediaIds),
+                err = error
+            });
     }
+
+    private static string NormalizeSafetyLevel(string? value)
+        => string.IsNullOrWhiteSpace(value) ? "block_low_and_above" : TruncateDbText(value.Trim());
+
+    private static string TruncateDbText(string value)
+        => value.Length <= 50 ? value : value[..50];
 
     private static bool HasReferencePayload(ReferenceImage image)
     {
@@ -387,7 +427,6 @@ public sealed class VertexImageRenderService : IImageRenderService
         return image.Role?.Equals("brand_robot", StringComparison.OrdinalIgnoreCase) == true
             || image.Role?.Equals("fixed_overlay", StringComparison.OrdinalIgnoreCase) == true;
     }
-
     private static string BuildBackgroundOnlyPrompt(ImageRenderRequestModel request)
     {
         var theme = request.Theme?.Equals("yellow_black", StringComparison.OrdinalIgnoreCase) == true
@@ -511,4 +550,7 @@ public sealed class VertexImageRenderService : IImageRenderService
         return output;
     }
 }
+
+
+
 

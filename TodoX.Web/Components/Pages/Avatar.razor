@@ -1,9 +1,12 @@
 @page "/profile/avatar"
 @using System.Text.Json
 @using Microsoft.AspNetCore.Components.Forms
+@using Npgsql
 @using TodoX.Web.Services.Profile
 @using TodoX.Web.Services.Media
 @using TodoX.Web.Services.ImageRender
+@using System.Text
+@using System.Text.Json.Serialization
 @inject AuthStateService AuthState
 @inject IAvatarService Avatars
 @inject IChibiAvatarService Chibi
@@ -14,6 +17,7 @@
 @inject IDialogService DialogService
 @inject ISnackbar Snackbar
 @inject NavigationManager Nav
+@inject IJSRuntime JS
 
 <PageTitle>Tạo ảnh chibi</PageTitle>
 
@@ -132,6 +136,66 @@
                     {
                         <MudProgressLinear Indeterminate="true" Color="Color.Warning" Class="mt-2" />
                     }
+
+                    @if (false)
+                    {
+                    <MudPaper Class="todox-card pa-4 mt-3 render-debug-panel" Rounded="true">
+                        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
+                            <div>
+                                <MudText Typo="Typo.h6">Nhật ký render</MudText>
+                                <MudText Typo="Typo.caption" Class="todox-page-subtitle">Log chạy trực tiếp trên giao diện. Có thể tải file ngay cả khi backend lỗi.</MudText>
+                            </div>
+                            <MudStack Row="true" Spacing="1" Class="flex-wrap gap-1">
+                                <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.ContentCopy"
+                                           OnClick="CopyRenderLogs" Disabled="@(RenderLogs.Count == 0)">Sao chép log</MudButton>
+                                <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Download"
+                                           OnClick="DownloadRenderLogTxt" Disabled="@(RenderLogs.Count == 0)">Tải .txt</MudButton>
+                                <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.DataObject"
+                                           OnClick="DownloadRenderLogJson" Disabled="@(RenderLogs.Count == 0)">Tải .json</MudButton>
+                                <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Warning"
+                                           OnClick="ClearRenderLogs" Disabled="@_busy">Xóa log</MudButton>
+                            </MudStack>
+                        </MudStack>
+
+                        @if (_busy)
+                        {
+                            <MudProgressLinear Indeterminate="true" Color="Color.Warning" Class="mt-3" />
+                        }
+
+                        @if (!string.IsNullOrWhiteSpace(_lastError))
+                        {
+                            <MudAlert Severity="Severity.Error" Dense="true" Class="mt-3">
+                                <MudText Typo="Typo.subtitle2">Lỗi gần nhất</MudText>
+                                <pre class="todox-error-pre">@_lastError</pre>
+                            </MudAlert>
+                        }
+
+                        <div id="render-log-panel" class="avatar-render-log-panel mt-3">
+                            @if (RenderLogs.Count == 0)
+                            {
+                                <div class="avatar-render-log-empty">Chưa có log.</div>
+                            }
+                            else
+                            {
+                                @foreach (var entry in RenderLogs)
+                                {
+                                    <div class='@($"avatar-render-log-line log-{NormalizeLevel(entry.Level)}")'>
+                                        <div>
+                                            <span class="avatar-render-log-time">[@entry.Timestamp:HH:mm:ss]</span>
+                                            <span class="avatar-render-log-level">@NormalizeLevel(entry.Level).ToUpperInvariant()</span>
+                                            <span class="avatar-render-log-step">@entry.Step</span>
+                                            <span class="avatar-render-log-message">@entry.Message</span>
+                                        </div>
+                                        @if (entry.Data is not null)
+                                        {
+                                            <div class="avatar-render-log-data">@PrettyData(entry.Data)</div>
+                                        }
+                                    </div>
+                                }
+                            }
+                        </div>
+                    </MudPaper>
+                    }
                 </MudPaper>
             </MudItem>
 
@@ -247,6 +311,16 @@
 </MudStack>
 
 @code {
+    public sealed class UiRenderLogItem
+    {
+        public DateTime Time { get; set; } = DateTime.Now;
+        public string Level { get; set; } = "info";
+        public string Step { get; set; } = string.Empty;
+        public string Message { get; set; } = string.Empty;
+        public object? Data { get; set; }
+        public string? RawError { get; set; }
+    }
+
     private string? _gender = "male";
     private string? _characterType = "chibi";
     private string? _cameraAngle = "half_body";
@@ -264,6 +338,7 @@
     private decimal _imageCost = 10;
     private ChibiGenerationDto? _result;
     private readonly List<RenderLogEntry> _uiLogs = new();
+    private readonly List<UiRenderLogItem> _renderLogs = new();
     private MediaFileDto? _avatarMedia;
     private MediaFileDto? _logoMedia;
     private MediaFileDto? _productMedia;
@@ -273,6 +348,14 @@
     private bool IsCustomer => AuthState.CurrentUser?.IsCustomer == true;
     private IReadOnlyList<RenderLogEntry> RenderLogs => _result?.Logs.Count > 0 ? _result.Logs : _uiLogs;
     private string? PreviewFrameUrl => _avatarMedia?.PublicUrl ?? _avatarMedia?.FileUrl;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            await ScrollRenderLogsAsync();
+        }
+    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -547,6 +630,12 @@
         _lastError = null;
         _result = null;
         _uiLogs.Clear();
+        _renderLogs.Clear();
+        await AddRenderLogAsync("Bắt đầu yêu cầu render avatar.");
+        await AddRenderLogAsync("Đang kiểm tra prompt.");
+        await AddRenderLogAsync("Đang kiểm tra ảnh tham khảo.");
+        await AddRenderLogAsync("Đang chuẩn bị payload render.");
+        await AddRenderLogAsync("Đang gửi yêu cầu đến API render.");
         _uiLogs.Add(new RenderLogEntry
         {
             Step = "UI_RENDER_SUBMITTED",
@@ -557,6 +646,7 @@
         await Task.Yield();
         try
         {
+            _renderLogs.Add(new UiRenderLogItem { Step = "SERVICE_RENDER_CALL", Message = "Gọi service render chibi." });
             _result = await Chibi.GenerateAsync(new ChibiGenerateInput
             {
                 UserId = AuthState.CurrentUser!.UserId,
@@ -577,12 +667,21 @@
                 RenderEngineMode = _renderEngineMode
             });
             await RefreshBalance();
+            _renderLogs.Add(new UiRenderLogItem
+            {
+                Step = "SERVICE_RENDER_RETURNED",
+                Message = "Service render đã trả kết quả.",
+                Data = new { _result.RenderEngineMode, _result.Status, _result.LogCode, imageCount = _result.Images.Count, _result.Charged, _result.BalanceAfter }
+            });
             if (!string.IsNullOrWhiteSpace(_result.Error))
             {
                 _lastError = _result.Error;
+                await AddRenderLogAsync("LỖI: Không thể lưu bản ghi avatar.", "error", _result.Error);
             }
             if (_result.Status == "failed" && _result.Images.Count == 0)
             {
+                await AddRenderLogAsync("LỖI: Không thể lưu bản ghi avatar.", "error", _result.Error ?? "Render failed.");
+                await AddRenderLogAsync("Gợi ý: Có trường dữ liệu dài hơn giới hạn database. Kiểm tra các cột varchar(50) liên quan đến avatar/render.", "warning");
                 Snackbar.Add("Không tạo được ảnh. Xem chi tiết lỗi trên trang.", Severity.Error);
             }
             else
@@ -590,15 +689,104 @@
                 var msg = IsCustomer
                     ? $"Đã tạo {_result.Images.Count(x => x.Status != "failed")} ảnh. Đã trừ {_result.Charged:#,0} điểm, còn {_result.BalanceAfter:#,0}."
                     : $"Đã tạo {_result.Images.Count(x => x.Status != "failed")} ảnh chibi.";
+                await AddRenderLogAsync("Đã nhận ảnh kết quả.", "success");
+                await AddRenderLogAsync("Đang lưu kết quả vào thư viện avatar mẫu.");
+                await AddRenderLogAsync("Hoàn tất render avatar.", "success");
                 Snackbar.Add(msg, Severity.Success);
             }
+        }
+        catch (PostgresException ex)
+        {
+            _lastError = ex.ToString();
+            await AddRenderLogAsync("LỖI: Không thể lưu bản ghi avatar.", "error", ex.MessageText);
+            await AddRenderLogAsync($"Chi tiết: {ex.MessageText}", "error");
+            await AddRenderLogAsync("Gợi ý: Có trường dữ liệu dài hơn giới hạn database. Kiểm tra các cột varchar(50) liên quan đến avatar/render.", "warning");
+            Snackbar.Add($"Lỗi tạo chibi: {ex.Message}", Severity.Error);
         }
         catch (Exception ex)
         {
             _lastError = ex.ToString();
+            await AddRenderLogAsync("LỖI: Không thể lưu bản ghi avatar.", "error", ex.Message);
+            await AddRenderLogAsync(ex.Message, "error");
+            await AddRenderLogAsync("Gợi ý: Có trường dữ liệu dài hơn giới hạn database. Kiểm tra các cột varchar(50) liên quan đến avatar/render.", "warning");
             Snackbar.Add($"Lỗi tạo chibi: {ex.Message}", Severity.Error);
         }
-        finally { _busy = false; }
+        finally
+        {
+            await AddRenderLogAsync("UI_RENDER_FINISHED", "success", new { _result?.LogCode, _result?.Status });
+            _busy = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task AddRenderLogAsync(string message, string level = "info", object? data = null)
+    {
+        _renderLogs.Add(new UiRenderLogItem
+        {
+            Time = DateTime.Now,
+            Level = level,
+            Step = "UI",
+            Message = message,
+            Data = data
+        });
+
+        await InvokeAsync(StateHasChanged);
+        await ScrollRenderLogsAsync();
+    }
+
+    private void ClearRenderLogs() => _renderLogs.Clear();
+
+    private async Task CopyRenderLogs()
+    {
+        await JS.InvokeVoidAsync("todoXRenderLog.copyText", BuildRenderLogText());
+        await AddRenderLogAsync("Đã sao chép log vào clipboard.", "success");
+    }
+
+    private async Task DownloadRenderLogTxt()
+    {
+        var fileName = $"avatar-render-log-{DateTime.Now:yyyyMMdd-HHmmss}.txt";
+        await JS.InvokeVoidAsync("todoxDownload.saveTextFile", fileName, BuildRenderLogText());
+        await AddRenderLogAsync("Đã tải log .txt.", "success");
+    }
+
+    private async Task DownloadRenderLogJson()
+    {
+        var fileName = $"avatar-render-log-{DateTime.Now:yyyyMMdd-HHmmss}.json";
+        var json = JsonSerializer.Serialize(_renderLogs, new JsonSerializerOptions { WriteIndented = true });
+        await JS.InvokeVoidAsync("todoxDownload.saveTextFile", fileName, json);
+        await AddRenderLogAsync("Đã tải log .json.", "success");
+    }
+
+    private string BuildRenderLogText()
+        => string.Join(Environment.NewLine, _renderLogs.Select(x =>
+            $"[{x.Time:HH:mm:ss}] {x.Level.ToUpperInvariant()} {x.Step}: {x.Message}" +
+            (x.Data is null ? string.Empty : $" | {PrettyData(x.Data)}") +
+            (string.IsNullOrWhiteSpace(x.RawError) ? string.Empty : $" | error={x.RawError}")));
+
+    private string PrettyData(object data)
+    {
+        try
+        {
+            return JsonSerializer.Serialize(data, new JsonSerializerOptions { WriteIndented = false });
+        }
+        catch
+        {
+            return data.ToString() ?? string.Empty;
+        }
+    }
+
+    private static string NormalizeLevel(string? level)
+        => string.IsNullOrWhiteSpace(level) ? "info" : level.Trim().ToLowerInvariant();
+
+    private async Task ScrollRenderLogsAsync()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("todoXRenderLog.scrollToBottom", "render-log-panel");
+        }
+        catch
+        {
+        }
     }
 
     private async Task EditAndRerender(ChibiImage img)

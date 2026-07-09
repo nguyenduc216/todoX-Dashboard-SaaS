@@ -165,7 +165,7 @@
                 }
             }
 
-            if (root.TryGetProperty("timeline", out var timeline) && timeline.ValueKind == JsonValueKind.Array)
+            if (TryGetArray(root, "timeline", out var timeline) || TryGetArray(root, "logs", out timeline) || TryGetArray(root, "Timeline", out timeline) || TryGetArray(root, "Logs", out timeline))
             {
                 foreach (var item in timeline.EnumerateArray())
                 {
@@ -208,6 +208,17 @@
     private async Task CopyRaw()
     {
         await JS.InvokeVoidAsync("navigator.clipboard.writeText", _prettyRaw);
+    }
+
+    private static bool TryGetArray(JsonElement root, string name, out JsonElement value)
+    {
+        if (root.TryGetProperty(name, out value) && value.ValueKind == JsonValueKind.Array)
+        {
+            return true;
+        }
+
+        value = default;
+        return false;
     }
 
     private static string PrettyJson(string? text)

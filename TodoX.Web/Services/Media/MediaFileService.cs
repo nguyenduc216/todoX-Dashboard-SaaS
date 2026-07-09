@@ -78,6 +78,7 @@ public sealed class MediaFileService : IMediaFileService
         string fileCategory, Guid? userId, Guid? customerId, Guid tenantId, CancellationToken ct = default)
     {
         mimeType = NormalizeMimeType(mimeType, originalFileName);
+        fileCategory = NormalizeDbText(fileCategory, "media");
         if (content.Length == 0) throw new InvalidOperationException("Tệp rỗng.");
         if (content.Length > MaxBytes) throw new InvalidOperationException("Tệp vượt quá 10MB.");
         if (!AllowedMime.Contains(mimeType)) throw new InvalidOperationException("Chỉ chấp nhận ảnh PNG, JPEG, WEBP.");
@@ -104,6 +105,7 @@ public sealed class MediaFileService : IMediaFileService
         var publicUrl = $"{publicBase}/{relDir.Replace('\\', '/')}/{safeName}";
         var objectKey = $"{relDir.Replace('\\', '/')}/{safeName}";
         var metadata = ReadImageMetadata(content, mimeType);
+        var storageProvider = NormalizeDbText(_config["Storage:Provider"] ?? "local", "local");
 
         using var conn = await _factory.OpenAsync(ct);
         await conn.ExecuteAsync(
@@ -113,12 +115,12 @@ public sealed class MediaFileService : IMediaFileService
                  file_size_bytes, storage_provider, object_key, file_url, public_url, is_active, created_at, created_by)
             VALUES
                 (@id, @tenant, @customer, @user, @cat, @name, @ext, @mime,
-                 @size, 'local', @key, @url, @url, true, now(), @user);
+                 @size, @storage, @key, @url, @url, true, now(), @user);
             """,
             new
             {
                 id, tenant = tenantId, customer = customerId, user = userId, cat = fileCategory,
-                name = safeName, ext, mime = mimeType, size = (long)content.Length, key = objectKey, url = publicUrl
+                name = safeName, ext, mime = mimeType, size = (long)content.Length, key = objectKey, url = publicUrl, storage = storageProvider
             });
 
         _logger.LogInformation(
@@ -129,7 +131,7 @@ public sealed class MediaFileService : IMediaFileService
         {
             Id = id, UserId = userId, CustomerId = customerId, FileCategory = fileCategory,
             FileName = safeName, MimeType = mimeType, FileSizeBytes = content.Length,
-            StorageProvider = "local", ObjectKey = objectKey, FileUrl = publicUrl, PublicUrl = publicUrl,
+            StorageProvider = storageProvider, ObjectKey = objectKey, FileUrl = publicUrl, PublicUrl = publicUrl,
             IsActive = true, CreatedAt = DateTime.UtcNow
         };
     }
@@ -333,6 +335,12 @@ public sealed class MediaFileService : IMediaFileService
         "image/webp" => ".webp",
         _ => ".img"
     };
+
+    private static string NormalizeDbText(string? value, string fallback)
+    {
+        var text = string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();
+        return text.Length <= 50 ? text : text[..50];
+    }
 
     private static Uri ValidatePublicImageUri(string imageUrl)
     {
