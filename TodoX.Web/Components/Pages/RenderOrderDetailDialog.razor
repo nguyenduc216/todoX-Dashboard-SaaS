@@ -1,0 +1,65 @@
+@using System.Text.Json
+
+<MudDialog>
+    <DialogContent>
+        @if (Order is null)
+        {
+            <MudAlert Severity="Severity.Warning">Không có dữ liệu đơn render.</MudAlert>
+        }
+        else
+        {
+            <MudStack Spacing="3">
+                <MudGrid>
+                    <MudItem xs="12" md="6"><MudText Typo="Typo.subtitle2">Mã đơn</MudText><MudText>@Order.OrderCode</MudText></MudItem>
+                    <MudItem xs="12" md="6"><MudText Typo="Typo.subtitle2">Khách hàng</MudText><MudText>@Order.CustomerName</MudText></MudItem>
+                    <MudItem xs="12" md="6"><MudText Typo="Typo.subtitle2">Loại dịch vụ</MudText><MudText>@Order.ServiceType</MudText></MudItem>
+                    <MudItem xs="12" md="6"><MudText Typo="Typo.subtitle2">Trạng thái</MudText><MudChip T="string" Color="@StatusColor(Order.Status)">@Order.Status</MudChip></MudItem>
+                    <MudItem xs="12" md="6"><MudText Typo="Typo.subtitle2">Video seconds</MudText><MudText>@Order.VideoSeconds</MudText></MudItem>
+                    <MudItem xs="12" md="6"><MudText Typo="Typo.subtitle2">Điểm ước tính</MudText><MudText>@Order.EstimatedTokens.ToString("#,0")</MudText></MudItem>
+                    <MudItem xs="12" md="6"><MudText Typo="Typo.subtitle2">Điểm thực tế</MudText><MudText>@Order.ActualTokens.ToString("#,0")</MudText></MudItem>
+                    <MudItem xs="12" md="6"><MudText Typo="Typo.subtitle2">Ngày tạo</MudText><MudText>@Order.CreatedAt.ToString("dd/MM/yyyy HH:mm")</MudText></MudItem>
+                </MudGrid>
+
+                <MudDivider />
+
+                <MudAlert Severity="Severity.Info">Đơn render này chưa có log live riêng trong schema hiện tại.</MudAlert>
+
+                <MudDivider />
+
+                <MudText Typo="Typo.subtitle2">Kết quả</MudText>
+                @if (!string.IsNullOrWhiteSpace(Order.ResultUrl))
+                {
+                    <MudLink Href="@Order.ResultUrl" Target="_blank">@Order.ResultUrl</MudLink>
+                }
+                else
+                {
+                    <MudText>Chưa có link kết quả.</MudText>
+                }
+
+                <MudText Typo="Typo.subtitle2">JSON dữ liệu</MudText>
+                <MudPaper Class="pa-3" Rounded="true">
+                    <pre style="white-space:pre-wrap; margin:0;">@JsonSerializer.Serialize(Order, new JsonSerializerOptions { WriteIndented = true })</pre>
+                </MudPaper>
+            </MudStack>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Close">Đóng</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter] public RenderOrderView? Order { get; set; }
+
+    private void Close() => MudDialog.Cancel();
+
+    private static Color StatusColor(string status) => status switch
+    {
+        "Completed" or "Done" or "Success" => Color.Success,
+        "Processing" or "Rendering" or "Running" => Color.Info,
+        "Failed" or "Error" => Color.Error,
+        _ => Color.Warning
+    };
+}

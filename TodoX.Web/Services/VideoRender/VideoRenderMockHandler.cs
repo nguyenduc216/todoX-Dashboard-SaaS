@@ -1,0 +1,141 @@
+using System.Diagnostics;
+using System.Text;
+using System.Text.Json;
+using Microsoft.Extensions.Options;
+using TodoX.Web.Models;
+using TodoX.Web.Services.Media;
+using TodoX.Web.Services.Render;
+
+namespace TodoX.Web.Services.VideoRender;
+
+public sealed class VideoRenderMockHandler : IRenderJobHandler
+{
+    public const string JobTypeName = "render_video_job";
+    public string JobType => JobTypeName;
+
+    private readonly ILogger<VideoRenderMockHandler> _logger;
+    private readonly IWebHostEnvironment _env;
+    private readonly IOptionsMonitor<VideoRenderOptions> _options;
+    private readonly VideoRenderRepository _repo;
+    private readonly IMediaFileService _media;
+    private readonly TenantContext _tenant;
+
+    public VideoRenderMockHandler(ILogger<VideoRenderMockHandler> logger, IWebHostEnvironment env, IOptionsMonitor<VideoRenderOptions> options, VideoRenderRepository repo, IMediaFileService media, TenantContext tenant)
+    {
+        _logger = logger;
+        _env = env;
+        _options = options;
+        _repo = repo;
+        _media = media;
+        _tenant = tenant;
+    }
+
+    public async Task HandleAsync(RenderJobDto job, CancellationToken ct)
+    {
+        var input = JsonSerializer.Deserialize<VideoProjectCreateRequest>(job.InputJson, new JsonSerializerOptions(JsonSerializerDefaults.Web))
+            ?? throw new InvalidOperationException("Video job input invalid.");
+
+        var projectId = TryReadLong(job.InputJson, "projectId") ?? TryReadLong(job.PromptJson, "projectId") ?? 0;
+        if (projectId <= 0)
+        {
+            throw new InvalidOperationException("Thieu projectId trong job input.");
+        }
+        var options = _options.CurrentValue;
+        var storageRoot = ResolveRoot(options.StorageRoot);
+        var publicBase = options.PublicBase.TrimEnd('/');
+        var projectFolder = projectId <= 0 ? job.Id.ToString("N") : projectId.ToString();
+        var projectRoot = Path.Combine(storageRoot, projectFolder);
+        Directory.CreateDirectory(projectRoot);
+
+        var mockSource = ResolvePath(options.MockSceneVideoPath);
+        if (string.IsNullOrWhiteSpace(mockSource) || !File.Exists(mockSource))
+        {
+            throw new FileNotFoundException("MockSceneVideoPath khong ton tai. Hay cau hinh file video mau.", mockSource);
+        }
+
+        var project = await _repo.GetProjectAsync(projectId, ct)
+            ?? throw new InvalidOperationException("Khong tim thay project video.");
+
+        var scenes = project.Scenes.OrderBy(x => x.SceneIndex).ToList();
+        if (scenes.Count == 0)
+        {
+            throw new InvalidOperationException("Project chua co scene nao.");
+        }
+
+        await _repo.AddProjectEventAsync(projectId, "JOB_STARTED", "info", "Video job mock started.", new { job.Id, job.JobType, job.Status }, ct);
+        await _repo.UpdateProjectAsync(projectId, VideoProjectStatuses.Rendering, errorMessage: null, ct: ct);
+
+        foreach (var scene in scenes)
+        {
+            await RenderSceneMockAsync(project, scene, mockSource, projectRoot, publicBase, ct);
+        }
+
+        await MergeAsync(project, scenes, projectRoot, publicBase, ct);
+    }
+
+    private async Task RenderSceneMockAsync(VideoProjectDto project, VideoProjectSceneDto scene, string mockSource, string projectRoot, string publicBase, CancellationToken ct)
+    {
+        var sceneFolder = Path.Combine(projectRoot, $"scene_{scene.SceneIndex:00}");
+        Directory.CreateDirectory(sceneFolder);
+        var targetVideo = Path.Combine(sceneFolder, "scene.mp4");
+        File.Copy(mockSource, targetVideo, true);
+        var relative = Path.GetRelativePath(ResolveRoot(_options.CurrentValue.StorageRoot), targetVideo).Replace(Path.DirectorySeparatorChar, '/');
+        var url = $"{publicBase}/{relative}";
+        await _repo.UpdateSceneAsync(scene.Id, VideoSceneStatuses.VideoReady, videoUrl: url, videoPath: targetVideo, errorMessage: null, ct: ct);
+        await _repo.AddProjectEventAsync(project.Id, "SCENE_VIDEO_READY", "info", $"Scene {scene.SceneIndex} ready.", new { scene.Id, scene.SceneIndex, url }, ct);
+    }
+
+    private async Task MergeAsync(VideoProjectDto project, List<VideoProjectSceneDto> scenes, string projectRoot, string publicBase, CancellationToken ct)
+    {
+        var finalDir = Path.Combine(projectRoot, "final");
+        Directory.CreateDirectory(finalDir);
+        var finalPath = Path.Combine(finalDir, "final.mp4");
+        var concat = Path.Combine(finalDir, "concat.txt");
+        var lines = scenes.Select(scene => $"file '{Path.GetFullPath(scene.SceneVideoPath ?? string.Empty).Replace("'", "''")}'").ToArray();
+        await File.WriteAllLinesAsync(concat, lines, Encoding.UTF8, ct);
+
+        var ffmpeg = _options.CurrentValue.FfmpegPath;
+        var psi = new ProcessStartInfo
+        {
+            FileName = ffmpeg,
+            Arguments = $"-y -f concat -safe 0 -i \"{concat}\" -c copy \"{finalPath}\"",
+            WorkingDirectory = finalDir,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+
+        using var process = Process.Start(psi) ?? throw new InvalidOperationException("Khong khoi dong duoc FFmpeg.");
+        var stdout = await process.StandardOutput.ReadToEndAsync(ct);
+        var stderr = await process.StandardError.ReadToEndAsync(ct);
+        await process.WaitForExitAsync(ct);
+        await File.WriteAllTextAsync(Path.Combine(finalDir, "ffmpeg.log"), stdout + Environment.NewLine + stderr, ct);
+
+        if (process.ExitCode != 0)
+        {
+            throw new InvalidOperationException($"FFmpeg merge failed. ExitCode={process.ExitCode}");
+        }
+
+        var relative = Path.GetRelativePath(ResolveRoot(_options.CurrentValue.StorageRoot), finalPath).Replace(Path.DirectorySeparatorChar, '/');
+        var url = $"{publicBase}/{relative}";
+        await _repo.UpdateProjectAsync(project.Id, VideoProjectStatuses.Completed, url, finalPath, null, ct);
+        await _repo.AddProjectEventAsync(project.Id, "PROJECT_MERGED", "info", "Final video merged.", new { finalPath, url }, ct);
+    }
+
+    private string ResolveRoot(string? path)
+        => Path.IsPathRooted(path) ? path! : Path.Combine(_env.ContentRootPath, path ?? string.Empty);
+
+    private string? ResolvePath(string? path)
+        => string.IsNullOrWhiteSpace(path) ? null : (Path.IsPathRooted(path) ? path : Path.Combine(_env.ContentRootPath, path));
+
+    private static long? TryReadLong(string json, string key)
+    {
+        using var doc = JsonDocument.Parse(string.IsNullOrWhiteSpace(json) ? "{}" : json);
+        return doc.RootElement.TryGetProperty(key, out var value) &&
+               (value.ValueKind == JsonValueKind.Number && value.TryGetInt64(out var parsedId)
+                || value.ValueKind == JsonValueKind.String && long.TryParse(value.GetString(), out parsedId))
+            ? parsedId
+            : null;
+    }
+}

@@ -9,6 +9,7 @@ public static class RenderJobStatuses
     public const string Completed = "completed";
     public const string Failed = "failed";
     public const string Cancelled = "cancelled";
+    public const string Processing = "processing";
 }
 
 public static class RenderPointStatuses

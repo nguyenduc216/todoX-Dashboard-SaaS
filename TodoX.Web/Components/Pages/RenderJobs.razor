@@ -1,14 +1,24 @@
 @page "/render-jobs"
 @inject CatalogRepository Catalog
 @inject AuthStateService AuthState
+@inject IDialogService DialogService
+@inject NavigationManager Navigation
 
 <PageTitle>Render Jobs</PageTitle>
 
 <MudStack Spacing="3">
-    <div>
-        <MudText Typo="Typo.h4" Class="todox-page-title">Render Jobs</MudText>
-        <MudText Typo="Typo.body1" Class="todox-page-subtitle">Theo dõi đơn render video/hình ảnh AI của khách hàng.</MudText>
-    </div>
+    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-3">
+        <div>
+            <MudText Typo="Typo.h4" Class="todox-page-title">Render Jobs</MudText>
+            <MudText Typo="Typo.body1" Class="todox-page-subtitle">Theo dõi đơn render video/hình ảnh AI của khách hàng.</MudText>
+        </div>
+
+        <MudStack Row="true" Spacing="2" Class="flex-wrap gap-2">
+            <MudButton Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.Add" OnClick="CreateNewAsync">Tạo mới</MudButton>
+            <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Movie" Href="/render-job">Mở job video</MudButton>
+            <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Refresh" OnClick="ReloadAsync">Refresh</MudButton>
+        </MudStack>
+    </MudStack>
 
     <MudGrid>
         <MudItem xs="6" sm="6" md="3">
@@ -38,8 +48,12 @@
     </MudGrid>
 
     <MudPaper Class="todox-table-card pa-4" Rounded="true">
-        <MudText Typo="Typo.h6" Class="mb-2">Danh sách đơn render</MudText>
+        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="mb-2 flex-wrap gap-2">
+            <MudText Typo="Typo.h6">Danh sách đơn render</MudText>
+            <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Add" OnClick="CreateNewAsync">Tạo mới</MudButton>
+        </MudStack>
         <MudDivider Class="mb-3" />
+
         <MudTable Items="@_orders" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Class="todox-table">
             <HeaderContent>
                 <MudTh>Mã đơn</MudTh>
@@ -48,7 +62,8 @@
                 <MudTh Style="text-align:right">Thời lượng</MudTh>
                 <MudTh Style="text-align:right">Điểm ước tính</MudTh>
                 <MudTh>Trạng thái</MudTh>
-                <MudTh>Tạo lúc</MudTh>
+                <MudTh>Hành động</MudTh>
+                <MudTh>Ngày tạo</MudTh>
             </HeaderContent>
             <RowTemplate>
                 <MudTd DataLabel="Mã đơn">@context.OrderCode</MudTd>
@@ -57,7 +72,10 @@
                 <MudTd DataLabel="Thời lượng" Style="text-align:right">@(context.VideoSeconds > 0 ? context.VideoSeconds + "s" : "-")</MudTd>
                 <MudTd DataLabel="Điểm ước tính" Style="text-align:right">@context.EstimatedTokens.ToString("#,0")</MudTd>
                 <MudTd DataLabel="Trạng thái"><MudChip T="string" Size="Size.Small" Color="@StatusColor(context.Status)">@context.Status</MudChip></MudTd>
-                <MudTd DataLabel="Tạo lúc">@context.CreatedAt.ToString("dd/MM/yyyy HH:mm")</MudTd>
+                <MudTd DataLabel="Hành động">
+                    <MudIconButton Icon="@Icons.Material.Filled.Visibility" Color="Color.Warning" Size="Size.Small" OnClick="@(() => OpenDetailAsync(context))" />
+                </MudTd>
+                <MudTd DataLabel="Ngày tạo">@context.CreatedAt.ToString("dd/MM/yyyy HH:mm")</MudTd>
             </RowTemplate>
             <NoRecordsContent>
                 <MudStack AlignItems="AlignItems.Center" Class="pa-6" Spacing="2">
@@ -75,9 +93,38 @@
 
     protected override async Task OnInitializedAsync()
     {
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
         var cid = AuthState.CurrentUser?.IsCustomer == true ? AuthState.CurrentUser.CustomerId : null;
         _stats = await Catalog.GetRenderStatsAsync(cid);
         _orders = await Catalog.GetRenderOrdersAsync(customerId: cid);
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private Task CreateNewAsync()
+    {
+        Navigation.NavigateTo("/render-job");
+        return Task.CompletedTask;
+    }
+
+    private async Task OpenDetailAsync(RenderOrderView order)
+    {
+        var parameters = new DialogParameters
+        {
+            [nameof(RenderOrderDetailDialog.Order)] = order
+        };
+
+        var options = new DialogOptions
+        {
+            CloseButton = true,
+            MaxWidth = MaxWidth.Medium,
+            FullWidth = true
+        };
+
+        await DialogService.ShowAsync<RenderOrderDetailDialog>($"Chi tiết đơn {order.OrderCode}", parameters, options);
     }
 
     private static Color StatusColor(string status) => status switch

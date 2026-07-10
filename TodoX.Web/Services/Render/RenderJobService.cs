@@ -8,7 +8,10 @@ public interface IRenderJobService
 {
     Task<RenderJobDto> EnqueueAsync(RenderJobCreateModel model, CancellationToken ct = default);
     Task<RenderJobDto?> GetAsync(Guid jobId, CancellationToken ct = default);
+    Task<RenderJobDto?> GetByLogCodeAsync(string logCode, CancellationToken ct = default);
+    Task<IReadOnlyList<RenderJobDto>> ListByLogCodeAsync(string logCode, CancellationToken ct = default);
     Task<IReadOnlyList<RenderJobEventDto>> GetEventsAsync(Guid jobId, CancellationToken ct = default);
+    Task<IReadOnlyList<RenderJobEventDto>> GetEventsByLogCodeAsync(string logCode, CancellationToken ct = default);
     Task AddEventAsync(Guid jobId, string eventType, string message, object? data = null, string level = "info", CancellationToken ct = default);
     Task<bool> CancelAsync(Guid jobId, string reason, Guid? userId = null, CancellationToken ct = default);
     Task<RenderJobDto?> RetryAsync(Guid jobId, Guid? userId = null, CancellationToken ct = default);
@@ -102,6 +105,19 @@ public sealed class RenderJobService : IRenderJobService
         return await conn.QuerySingleOrDefaultAsync<RenderJobDto>(SelectJobSql + " WHERE id=@id;", new { id = jobId });
     }
 
+    public async Task<RenderJobDto?> GetByLogCodeAsync(string logCode, CancellationToken ct = default)
+    {
+        using var conn = await _factory.OpenAsync(ct);
+        return await conn.QuerySingleOrDefaultAsync<RenderJobDto>(SelectJobSql + " WHERE log_code=@logCode ORDER BY queued_at DESC, created_at DESC LIMIT 1;", new { logCode });
+    }
+
+    public async Task<IReadOnlyList<RenderJobDto>> ListByLogCodeAsync(string logCode, CancellationToken ct = default)
+    {
+        using var conn = await _factory.OpenAsync(ct);
+        var rows = await conn.QueryAsync<RenderJobDto>(SelectJobSql + " WHERE log_code=@logCode ORDER BY queued_at DESC, created_at DESC LIMIT 20;", new { logCode });
+        return rows.ToList();
+    }
+
     public async Task<IReadOnlyList<RenderJobEventDto>> GetEventsAsync(Guid jobId, CancellationToken ct = default)
     {
         using var conn = await _factory.OpenAsync(ct);
@@ -115,6 +131,17 @@ public sealed class RenderJobService : IRenderJobService
              ORDER BY created_at, id;
             """, new { jobId });
         return rows.ToList();
+    }
+
+    public async Task<IReadOnlyList<RenderJobEventDto>> GetEventsByLogCodeAsync(string logCode, CancellationToken ct = default)
+    {
+        var job = await GetByLogCodeAsync(logCode, ct);
+        if (job is null)
+        {
+            return Array.Empty<RenderJobEventDto>();
+        }
+
+        return await GetEventsAsync(job.Id, ct);
     }
 
     public async Task AddEventAsync(Guid jobId, string eventType, string message, object? data = null, string level = "info", CancellationToken ct = default)
@@ -243,6 +270,7 @@ public sealed class RenderJobService : IRenderJobService
 
     public async Task MarkStatusAsync(Guid jobId, string status, object? output = null, string? errorCode = null, string? errorMessage = null, CancellationToken ct = default)
     {
+        var dbStatus = NormalizeStatus(status);
         using var conn = await _factory.OpenAsync(ct);
         await conn.ExecuteAsync(
             """
@@ -256,12 +284,15 @@ public sealed class RenderJobService : IRenderJobService
                    updated_at=now()
              WHERE id=@jobId;
             """,
-            new { jobId, status, output = output is null ? null : ToJson(output), errorCode, errorMessage });
+            new { jobId, status = dbStatus, output = output is null ? null : ToJson(output), errorCode, errorMessage });
 
-        var level = status == RenderJobStatuses.Failed ? "error" : status == RenderJobStatuses.Cancelled ? "warning" : "info";
-        await AddEventAsync(jobId, "JOB_STATUS_CHANGED", $"Render job status changed to {status}.",
-            new { status, errorCode, errorMessage }, level, ct);
+        var level = dbStatus == RenderJobStatuses.Failed ? "error" : dbStatus == RenderJobStatuses.Cancelled ? "warning" : "info";
+        await AddEventAsync(jobId, "JOB_STATUS_CHANGED", $"Render job status changed to {dbStatus}.",
+            new { status = dbStatus, errorCode, errorMessage }, level, ct);
     }
+
+    private static string NormalizeStatus(string status)
+        => status.Equals(RenderJobStatuses.Processing, StringComparison.OrdinalIgnoreCase) ? RenderJobStatuses.Rendering : status;
 
     public async Task ScheduleRetryAsync(Guid jobId, TimeSpan delay, string errorCode, string errorMessage, CancellationToken ct = default)
     {
