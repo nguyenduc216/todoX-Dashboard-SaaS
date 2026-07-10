@@ -19,15 +19,22 @@ public sealed class VideoRenderRepository
 
     public async Task<VideoProjectDto> CreateProjectAsync(VideoProjectCreateRequest request, Guid? userId, Guid? customerId, string storageRoot, string publicBase, string jobFolder, CancellationToken ct = default)
     {
+        await _tenant.EnsureLoadedAsync(ct);
         using var conn = await _factory.OpenAsync(ct);
-        return await conn.QuerySingleAsync<VideoProjectDto>(
+        using var tx = conn.BeginTransaction();
+
+        var sceneSeconds = Math.Max(1, request.SceneSeconds);
+        var totalSeconds = Math.Max(sceneSeconds, request.TotalSeconds);
+        var sceneCount = Math.Max(1, (int)Math.Ceiling(totalSeconds / (double)sceneSeconds));
+
+        var project = await conn.QuerySingleAsync<VideoProjectDto>(
             """
             INSERT INTO video_render.video_projects
                 (tenant_id, user_id, customer_id, title, original_prompt, total_seconds, scene_seconds, scene_count,
                  think_scenes, character_id, uploaded_character_url, storage_root, public_base, job_folder, status, created_at, updated_at)
             VALUES
                 (@tenant, @user, @customer, @title, @prompt, @total, @sceneSeconds, @sceneCount,
-                 @think, @character, @uploaded, @storageRoot, @publicBase, @jobFolder, 'draft', now(), now())
+                 @think, @character, @uploaded, @storageRoot, @publicBase, @jobFolder, @status, now(), now())
             RETURNING id AS Id, tenant_id AS TenantId, user_id AS UserId, customer_id AS CustomerId, title AS Title,
                       original_prompt AS OriginalPrompt, total_seconds AS TotalSeconds, scene_seconds AS SceneSeconds,
                       scene_count AS SceneCount, think_scenes AS ThinkScenes, character_id AS CharacterId,
@@ -43,16 +50,64 @@ public sealed class VideoRenderRepository
                 customer = customerId,
                 title = request.Title,
                 prompt = request.Prompt,
-                total = request.TotalSeconds,
-                sceneSeconds = request.SceneSeconds,
-                sceneCount = (int)Math.Ceiling(request.TotalSeconds / (double)request.SceneSeconds),
+                total = totalSeconds,
+                sceneSeconds,
+                sceneCount,
                 think = request.ThinkScenes,
                 character = request.CharacterId,
                 uploaded = request.UploadedCharacterUrl,
                 storageRoot,
                 publicBase,
-                jobFolder
-            });
+                jobFolder,
+                status = VideoProjectStatuses.SceneReady
+            }, tx);
+
+        for (var index = 1; index <= sceneCount; index++)
+        {
+            var duration = index == sceneCount
+                ? Math.Max(1, totalSeconds - sceneSeconds * (sceneCount - 1))
+                : sceneSeconds;
+            var scenePrompt = BuildScenePrompt(request.Prompt, index, sceneCount, duration, request.ThinkScenes);
+
+            await conn.ExecuteAsync(
+                """
+                INSERT INTO video_render.video_project_scenes
+                    (project_id, tenant_id, scene_index, title, duration_seconds, scene_prompt, image_prompt, video_prompt,
+                     static_image_path, static_image_url, scene_video_path, scene_video_url, status, error_message, created_at, updated_at)
+                VALUES
+                    (@projectId, @tenant, @sceneIndex, @title, @duration, @scenePrompt, @imagePrompt, @videoPrompt,
+                     NULL, NULL, NULL, NULL, @status, NULL, now(), now());
+                """,
+                new
+                {
+                    projectId = project.Id,
+                    tenant = _tenant.TenantId,
+                    sceneIndex = index,
+                    title = $"Scene {index:00}",
+                    duration,
+                    scenePrompt,
+                    imagePrompt = $"Static preview for scene {index}. {scenePrompt}",
+                    videoPrompt = $"Vertical 9:16 video, {duration} seconds. {scenePrompt}",
+                    status = VideoSceneStatuses.Draft
+                }, tx);
+        }
+
+        await conn.ExecuteAsync(
+            """
+            INSERT INTO video_render.video_project_events
+                (project_id, tenant_id, event_type, level, message, data_json, created_at)
+            VALUES
+                (@projectId, @tenant, 'PROJECT_CREATED', 'info', 'Video project and mock scene plan created.', CAST(@data AS jsonb), now());
+            """,
+            new
+            {
+                projectId = project.Id,
+                tenant = _tenant.TenantId,
+                data = JsonSerializer.Serialize(new { project.Id, sceneCount, totalSeconds, sceneSeconds }, JsonOptions)
+            }, tx);
+
+        tx.Commit();
+        return project;
     }
 
     public async Task<VideoProjectDto?> GetProjectAsync(long projectId, CancellationToken ct = default)
@@ -90,10 +145,10 @@ public sealed class VideoRenderRepository
         project.Events = (await conn.QueryAsync<VideoProjectEventDto>(
             """
             SELECT id AS Id, project_id AS ProjectId, tenant_id AS TenantId, event_type AS EventType,
-                   level AS Level, message AS Message, data_json AS DataJson, created_at AS CreatedAt
+                   level AS Level, message AS Message, data_json::text AS DataJson, created_at AS CreatedAt
               FROM video_render.video_project_events
              WHERE project_id=@projectId AND tenant_id=@tenant
-             ORDER BY created_at DESC;
+             ORDER BY created_at DESC, id DESC;
             """,
             new { projectId, tenant = _tenant.TenantId })).ToList();
 
@@ -124,7 +179,7 @@ public sealed class VideoRenderRepository
             INSERT INTO video_render.video_project_events
                 (project_id, tenant_id, event_type, level, message, data_json, created_at)
             VALUES
-                (@projectId, @tenant, @eventType, @level, @message, @data::jsonb, now());
+                (@projectId, @tenant, @eventType, @level, @message, CAST(@data AS jsonb), now());
             """,
             new
             {
@@ -133,7 +188,7 @@ public sealed class VideoRenderRepository
                 eventType,
                 level,
                 message,
-                data = JsonSerializer.Serialize(data, JsonOptions)
+                data = JsonSerializer.Serialize(data ?? new { }, JsonOptions)
             });
     }
 
@@ -143,7 +198,11 @@ public sealed class VideoRenderRepository
         await conn.ExecuteAsync(
             """
             UPDATE video_render.video_projects
-               SET status=@status, final_video_url=@url, final_video_path=@path, error_message=@err, updated_at=now()
+               SET status=@status,
+                   final_video_url=COALESCE(@url, final_video_url),
+                   final_video_path=COALESCE(@path, final_video_path),
+                   error_message=@err,
+                   updated_at=now()
              WHERE id=@projectId AND tenant_id=@tenant;
             """,
             new { projectId, tenant = _tenant.TenantId, status, url = finalVideoUrl, path = finalVideoPath, err = errorMessage });
@@ -209,5 +268,16 @@ public sealed class VideoRenderRepository
 
         tx.Commit();
         return list;
+    }
+
+    private static string BuildScenePrompt(string originalPrompt, int sceneIndex, int sceneCount, int durationSeconds, bool thinkScenes)
+    {
+        var text = string.IsNullOrWhiteSpace(originalPrompt) ? "TodoX AI video" : originalPrompt.Trim();
+        if (!thinkScenes)
+        {
+            return text;
+        }
+
+        return $"Scene {sceneIndex}/{sceneCount}, duration {durationSeconds}s. Based on: {text}. Make the scene clear, visual, vertical 9:16, with distinct action and camera movement.";
     }
 }
