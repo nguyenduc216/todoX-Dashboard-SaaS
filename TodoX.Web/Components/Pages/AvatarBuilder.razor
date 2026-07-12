@@ -97,7 +97,7 @@
                         <div class="avatar-card-image">
                             @if (!string.IsNullOrWhiteSpace(card.DisplayImageUrl))
                             {
-                                <img src="@card.DisplayImageUrl" alt="@card.Template.Name" />
+                                <img src="@card.DisplayImageUrl" alt="@card.Template.Name" @onclick="@(() => OpenPreview(card))" style="cursor:pointer" />
                             }
                             else
                             {
@@ -228,7 +228,7 @@
             using var ms = new MemoryStream();
             await file.OpenReadStream(10 * 1024 * 1024).CopyToAsync(ms);
             var media = await AvatarTemplates.SavePublicUploadAsync(ms.ToArray(), file.Name, file.ContentType);
-            SetMedia(slot, media.Id, media.PublicUrl ?? media.FileUrl);
+            SetMedia(slot, media.Id, NormalizePublicUrl(media.PublicUrl ?? media.FileUrl));
             Snackbar.Add(slot == "avatar" ? "Đã tải ảnh chân dung." : "Đã tải ảnh tùy chọn.", Severity.Success);
             if (slot == "avatar")
             {
@@ -458,6 +458,33 @@
         }
     }
 
+    private async Task OpenPreview(TemplateCardState card)
+    {
+        var imageUrl = card.Result?.ImageUrl ?? card.Template.PreviewMediaUrl;
+        if (string.IsNullOrWhiteSpace(imageUrl))
+        {
+            return;
+        }
+
+        var parameters = new DialogParameters<Components.Dialogs.ReferenceImageLightboxDialog>
+        {
+            { x => x.Title, card.Template.Name },
+            { x => x.ImageUrl, imageUrl },
+            { x => x.FileName, card.Template.Name },
+            { x => x.MimeType, "image/png" }
+        };
+
+        var options = new DialogOptions
+        {
+            MaxWidth = MaxWidth.ExtraLarge,
+            FullWidth = true,
+            CloseOnEscapeKey = true,
+            FullScreen = true,
+            BackdropClick = true
+        };
+
+        await DialogService.ShowAsync<Components.Dialogs.ReferenceImageLightboxDialog>(card.Template.Name, parameters, options);
+    }
     private void TrackDownload(TemplateCardState card)
     {
         card.DownloadClicked = true;
@@ -465,6 +492,7 @@
 
     private void SetMedia(string slot, Guid mediaId, string? url)
     {
+        url = NormalizePublicUrl(url);
         switch (slot)
         {
             case "avatar":
@@ -488,6 +516,18 @@
                 _sceneUrl = url;
                 break;
         }
+    }
+
+    private static string? NormalizePublicUrl(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url)) return null;
+        if (Uri.TryCreate(url, UriKind.Absolute, out var absolute) &&
+            (absolute.Scheme == Uri.UriSchemeHttp || absolute.Scheme == Uri.UriSchemeHttps))
+        {
+            return url;
+        }
+
+        return url.StartsWith("/", StringComparison.Ordinal) ? url : null;
     }
 
     private sealed class TemplateCardState

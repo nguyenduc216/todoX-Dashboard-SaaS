@@ -389,7 +389,15 @@ public sealed class AvatarTemplateService : IAvatarTemplateService
         foreach (var refMediaId in new[] { avatarMediaId, logoMediaId, productMediaId, uniformMediaId, sceneMediaId })
         {
             var url = await MediaUrlAsync(refMediaId, ct);
-            if (!string.IsNullOrWhiteSpace(url)) references.Add(url!);
+            if (!string.IsNullOrWhiteSpace(url))
+            {
+                references.Add(url!);
+                _logger.LogInformation("AVATAR_PUBLIC_REFERENCE_URL mediaId={MediaId} url={Url}", refMediaId, url);
+            }
+            else
+            {
+                _logger.LogWarning("AVATAR_PUBLIC_REFERENCE_URL_DROPPED mediaId={MediaId}", refMediaId);
+            }
         }
 
         var render = await _imageRouter.RenderImageAsync(new AiImageRenderRequest
@@ -478,7 +486,30 @@ public sealed class AvatarTemplateService : IAvatarTemplateService
     {
         if (mediaId is null) return null;
         var media = await _media.GetAsync(mediaId.Value, ct);
-        return media?.PublicUrl ?? media?.FileUrl;
+        return NormalizeRenderableUrl(media?.PublicUrl ?? media?.FileUrl);
+    }
+
+    private string? NormalizeRenderableUrl(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url)) return null;
+        if (Uri.TryCreate(url, UriKind.Absolute, out var absolute) &&
+            (absolute.Scheme == Uri.UriSchemeHttp || absolute.Scheme == Uri.UriSchemeHttps))
+        {
+            return url;
+        }
+
+        if (!url.StartsWith("/", StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        var publicBase = (_config["TodoX:PublicBaseUrl"] ?? _config["Storage:PublicBaseUrl"] ?? string.Empty).TrimEnd('/');
+        if (string.IsNullOrWhiteSpace(publicBase))
+        {
+            return null;
+        }
+
+        return $"{publicBase}{url}";
     }
 
     private static long? ToBigIntCustomerId(Guid? id)

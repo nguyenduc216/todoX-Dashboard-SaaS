@@ -6,6 +6,7 @@
 @inject TodoX.Web.Services.Render.IRenderJobService RenderJobs
 @inject IOptionsMonitor<TodoX.Web.Services.VideoRender.VideoRenderOptions> VideoOptions
 @inject ISnackbar Snackbar
+@inject ILogger<RenderVideoJobs> Logger
 @inject IJSRuntime JS
 
 <PageTitle>Render Video Job</PageTitle>
@@ -259,6 +260,7 @@
                 Title = "Render video job"
             }, AuthState.CurrentUser.UserId, AuthState.CurrentUser.CustomerId, storageRoot, publicBase, jobFolder);
             _projectId = result.Id;
+            Logger.LogInformation("VIDEO_RENDER_CREATE_PROJECT_OK projectId={ProjectId} sceneCount={SceneCount} status={Status}", result.Id, result.SceneCount, result.Status);
             await ReloadAsync();
             Snackbar.Add("Đã tạo project video.", Severity.Success);
             _tabIndex = 1;
@@ -266,6 +268,7 @@
         }
         catch (Exception ex)
         {
+            Logger.LogError(ex, "VIDEO_RENDER_CREATE_PROJECT_FAILED");
             Snackbar.Add(ex.Message, Severity.Error);
         }
         finally { _busy = false; }
@@ -287,7 +290,15 @@
     private async Task ReloadAsync()
     {
         if (_projectId is null) return;
-        _project = await VideoRepo.GetProjectAsync(_projectId.Value);
+        try
+        {
+            _project = await VideoRepo.GetProjectAsync(_projectId.Value);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "VIDEO_RENDER_RELOAD_PROJECT_FAILED projectId={ProjectId}", _projectId);
+            throw;
+        }
         if (_project is not null)
         {
             await ReloadJobsAsync();

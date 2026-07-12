@@ -177,13 +177,16 @@ public sealed class OpenRouterImageService : IOpenRouterImageService
 
         if (includeReferences)
         {
-            payload["input_references"] = request.ReferenceImageUrls
+            var references = request.ReferenceImageUrls
+                .Where(IsRenderableReferenceUrl)
                 .Select(url => new
                 {
                     type = "image_url",
                     image_url = new { url }
                 })
                 .ToArray();
+
+            payload["input_references"] = references;
         }
 
         return payload;
@@ -302,6 +305,16 @@ public sealed class OpenRouterImageService : IOpenRouterImageService
 
     private static string? FirstNonBlank(params string?[] values)
         => values.FirstOrDefault(v => !string.IsNullOrWhiteSpace(v));
+    private static bool IsRenderableReferenceUrl(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            return false;
+        }
+
+        return Uri.TryCreate(url, UriKind.Absolute, out var absolute)
+            && (absolute.Scheme == Uri.UriSchemeHttp || absolute.Scheme == Uri.UriSchemeHttps);
+    }
 
     /// <summary>
     /// Resolves the OpenRouter API key. Prefers the provider's configured key name
