@@ -9,13 +9,13 @@
     <link rel="stylesheet" href="@Assets["lib/bootstrap/dist/css/bootstrap.min.css"]" />
     <link rel="stylesheet" href="@Assets["app.css"]" />
     <link rel="stylesheet" href="@Assets["TodoX.Web.styles.css"]" />
-    <link href="_content/MudBlazor/MudBlazor.min.css" rel="stylesheet" />
-    <link rel="stylesheet" href="css/todox-theme.css" />
+    <link rel="stylesheet" href="@Assets["_content/MudBlazor/MudBlazor.min.css"]" />
+    <link rel="stylesheet" href="@Assets["css/todox-theme.css"]" />
     <ImportMap />
-    <link rel="icon" type="image/svg+xml" href="img/favicon.svg" />
-    <link rel="icon" type="image/x-icon" href="img/favicon.ico" />
-    <link rel="icon" type="image/png" href="img/favicon.png" />
-    <link rel="apple-touch-icon" href="img/favicon.png" />
+    <link rel="icon" type="image/svg+xml" href="@Assets["img/favicon.svg"]" />
+    <link rel="icon" type="image/x-icon" href="@Assets["img/favicon.ico"]" />
+    <link rel="icon" type="image/png" href="@Assets["img/favicon.png"]" />
+    <link rel="apple-touch-icon" href="@Assets["img/favicon.png"]" />
     <HeadOutlet @rendermode="InteractiveServer" />
 </head>
 
@@ -23,10 +23,10 @@
     <Routes @rendermode="InteractiveServer" />
     <ReconnectModal />
     <script src="@Assets["_framework/blazor.web.js"]"></script>
-    <script src="_content/MudBlazor/MudBlazor.min.js"></script>
-    <script src="js/image-editor.js"></script>
-    <script src="js/todox-download.js"></script>
-    <script src="js/todox-render-log.js"></script>
+    <script src="@Assets["_content/MudBlazor/MudBlazor.min.js"]"></script>
+    <script src="@Assets["js/image-editor.js"]"></script>
+    <script src="@Assets["js/todox-download.js"]"></script>
+    <script src="@Assets["js/todox-render-log.js"]"></script>
 </body>
 
 </html>
