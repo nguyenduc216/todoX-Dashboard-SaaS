@@ -52,7 +52,7 @@
                                 <div class="todox-perm-module-check">
                                     <MudCheckBox T="bool"
                                                  Value="@IsAllChecked()"
-                                                 Indeterminate="@IsAllPartial()"
+                                                 indeterminate="@IsAllPartial()"
                                                  ValueChanged="SetAll"
                                                  Dense="true"
                                                  Color="Color.Warning"
@@ -66,7 +66,7 @@
                                     <div class="todox-perm-action-check">
                                         <MudCheckBox T="bool"
                                                      Value="@IsActionAll(act)"
-                                                     Indeterminate="@IsActionPartial(act)"
+                                                     indeterminate="@IsActionPartial(act)"
                                                      ValueChanged="@(v => SetAction(act, v))"
                                                      Dense="true"
                                                      Color="Color.Warning"
@@ -85,7 +85,7 @@
                                     <div class="todox-perm-module-check">
                                         <MudCheckBox T="bool"
                                                      Value="@IsModuleAll(module)"
-                                                     Indeterminate="@IsModulePartial(module)"
+                                                     indeterminate="@IsModulePartial(module)"
                                                      ValueChanged="@(v => SetModule(module, v))"
                                                      Dense="true"
                                                      Color="Color.Warning"
@@ -302,3 +302,4 @@
         _ => m
     };
 }
+

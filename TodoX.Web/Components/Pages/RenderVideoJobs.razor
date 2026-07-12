@@ -264,7 +264,7 @@
             await ReloadAsync();
             Snackbar.Add("Đã tạo project video.", Severity.Success);
             _tabIndex = 1;
-            LogProjectEvent("PROJECT_CREATED", "info", "Đã tạo project và sinh scene plan mock.", new { result.Id, result.SceneCount, result.Status });
+            await LogProjectEvent("PROJECT_CREATED", "info", "�� t?o project v� sinh scene plan mock.", new { result.Id, result.SceneCount, result.Status });
         }
         catch (Exception ex)
         {
@@ -349,7 +349,7 @@
         if (_projectId is null) return;
         await VideoRepo.UpdateSceneAsync(scene.Id, scene.Status, scene.StaticImageUrl, scene.StaticImagePath, scene.SceneVideoUrl, scene.SceneVideoPath, scene.ErrorMessage, scene.Title, scene.ScenePrompt, scene.ImagePrompt, scene.VideoPrompt);
         Snackbar.Add("Đã lưu scene.", Severity.Success);
-        LogProjectEvent("SCENE_SAVED", "info", $"Đã lưu scene {scene.SceneIndex}.", new { scene.Id, scene.SceneIndex, scene.Status });
+        await LogProjectEvent("SCENE_SAVED", "info", $"�� luu scene {scene.SceneIndex}.", new { scene.Id, scene.SceneIndex, scene.Status });
         await ReloadAsync();
     }
 
@@ -365,7 +365,7 @@
         var url = "/" + relative;
         await VideoRepo.UpdateSceneAsync(scene.Id, VideoSceneStatuses.ImageReady, imageUrl: url, imagePath: imagePath, errorMessage: null, title: scene.Title, scenePrompt: scene.ScenePrompt, imagePrompt: scene.ImagePrompt, videoPrompt: scene.VideoPrompt);
         await VideoRepo.AddProjectEventAsync(_project.Id, "SCENE_IMAGE_READY", "info", $"Scene {scene.SceneIndex} image ready.", new { scene.Id, url });
-        LogProjectEvent("SCENE_IMAGE_RENDERED", "info", $"Tạo ảnh tĩnh mock cho scene {scene.SceneIndex}.", new { scene.Id, url, imagePath });
+        await LogProjectEvent("SCENE_IMAGE_RENDERED", "info", $"T?o ?nh tinh mock cho scene {scene.SceneIndex}.", new { scene.Id, url, imagePath });
         await ReloadAsync();
     }
 
@@ -430,7 +430,7 @@
             PointStatus = RenderPointStatuses.NotRequired
         });
         Snackbar.Add($"Đã tạo job video: {job.Id}", Severity.Success);
-        LogProjectEvent("JOB_ENQUEUED", "info", $"Đã enqueue job {jobType}.", new { job.Id, job.JobType, job.Status });
+        await LogProjectEvent("JOB_ENQUEUED", "info", $"�� enqueue job {jobType}.", new { job.Id, job.JobType, job.Status });
         _tabIndex = 2;
         await ReloadAsync();
     }
@@ -498,3 +498,4 @@
         _ => Color.Info
     };
 }
+

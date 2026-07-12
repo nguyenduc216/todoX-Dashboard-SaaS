@@ -158,6 +158,8 @@ if (!string.IsNullOrWhiteSpace(videoStorageRoot) && !string.IsNullOrWhiteSpace(v
 
 app.UseAntiforgery();
 
+app.MapStaticAssets();
+
 static IResult UnauthorizedJson(string message) => Results.Json(new
 {
     success = false,
@@ -282,4 +284,6 @@ extensionApi.MapGet("/download", async (
 
 
 app.MapRazorComponents<App>()
-    .AddInteractiveServerRenderMode();app.Run();
+    .AddInteractiveServerRenderMode();
+
+app.Run();
