@@ -32,6 +32,8 @@ public sealed class VideoRenderRepository
             var totalSeconds = Math.Max(sceneSeconds, request.TotalSeconds);
             var sceneCount = Math.Max(1, (int)Math.Ceiling(totalSeconds / (double)sceneSeconds));
 
+            DbDiagnostics.LogFieldLengths(_logger, "video_render_create_project", ("title", request.Title), ("prompt", request.Prompt), ("storageRoot", storageRoot), ("publicBase", publicBase), ("jobFolder", jobFolder));
+
             var project = await conn.QuerySingleAsync<VideoProjectDto>(
                 """
                 INSERT INTO video_render.video_projects

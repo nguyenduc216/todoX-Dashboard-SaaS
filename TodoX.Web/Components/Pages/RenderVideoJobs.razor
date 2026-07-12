@@ -1,4 +1,4 @@
-@page "/render-job"
+﻿@page "/render-job"
 @using System.Text.Json
 @inject AuthStateService AuthState
 @inject NavigationManager Navigation
@@ -54,6 +54,45 @@
                                 <MudButton Color="Color.Warning" Variant="Variant.Filled" OnClick="CreateProjectAsync" Disabled="@_busy">Tạo / phân tách scene</MudButton>
                                 <MudButton Color="Color.Primary" Variant="Variant.Outlined" OnClick="ReloadAsync" Disabled="@(_projectId is null || _busy)">Refresh</MudButton>
                             </MudStack>
+                        </MudItem>
+                        <MudItem xs="12">
+                            <MudPaper Class="todox-card pa-4 mt-3" rounded="true">
+                                <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
+                                    <MudText Typo="Typo.h6">Nhật ký phân tách scene</MudText>
+                                    <MudStack Row="true" Spacing="1" Class="flex-wrap gap-2">
+                                        <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="ClearDebugLogAsync">Xóa log</MudButton>
+                                        <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="CopyDebugLogAsync">Sao chép log</MudButton>
+                                        <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="DownloadDebugLogAsync">Tải log .txt</MudButton>
+                                    </MudStack>
+                                </MudStack>
+                                <MudDivider Class="my-2" />
+                                <div id="render-job-debug-log" style="max-height:260px;overflow:auto;display:flex;flex-direction:column-reverse;gap:8px;">
+                                    @if (_debugEntries.Count == 0)
+                                    {
+                                        <MudText Typo="Typo.body2" Color="Color.Secondary">Chưa có log.</MudText>
+                                    }
+                                    else
+                                    {
+                                        @foreach (var entry in _debugEntries.OrderByDescending(x => x.StepNumber).ThenByDescending(x => x.Timestamp))
+                                        {
+                                            <MudPaper Class="pa-3" Outlined="true">
+                                                <MudStack Spacing="1">
+                                                    <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center" Class="flex-wrap gap-2">
+                                                        <MudText Typo="Typo.subtitle2">Bước @entry.StepNumber - @entry.StepName</MudText>
+                                                        <MudChip T="string" Color="@LogColor(entry.Status)">@entry.Status</MudChip>
+                                                    </MudStack>
+                                                    <MudText Typo="Typo.caption">@entry.Timestamp.ToLocalTime().ToString("dd/MM/yyyy HH:mm:ss.fff") • @entry.StepCode • @entry.DurationMs ms</MudText>
+                                                    <MudText Typo="Typo.body2">@entry.Message</MudText>
+                                                    @if (!string.IsNullOrWhiteSpace(entry.Details))
+                                                    {
+                                                        <pre style="white-space:pre-wrap;margin:0">@entry.Details</pre>
+                                                    }
+                                                </MudStack>
+                                            </MudPaper>
+                                        }
+                                    }
+                                </div>
+                            </MudPaper>
                         </MudItem>
                     </MudGrid>
                 </MudPaper>
@@ -217,8 +256,14 @@
     private bool _thinkScenes = true;
     private PeriodicTimer? _pollTimer;
     private CancellationTokenSource? _pollCts;
+    private readonly List<DebugEntry> _debugEntries = new();
+    private int _debugStep;
 
     private bool CanMerge => _project is not null && _project.Scenes.Count > 0 && _project.Scenes.All(x => x.Status == VideoSceneStatuses.VideoReady);
+
+    private string BuildLogCode() => _projectId is null ? string.Empty : $"video-{_projectId.Value}";
+
+    private sealed record DebugEntry(DateTimeOffset Timestamp, int StepNumber, string StepCode, string StepName, string Status, long DurationMs, string Message, string? Details = null);
 
     protected override async Task OnInitializedAsync()
     {
@@ -248,9 +293,14 @@
         _busy = true;
         try
         {
+            await AddDebugAsync("ui_started", "Bắt đầu xử lý", "STARTED", "Người dùng bấm nút Tạo / phân tách scene.");
+            await AddDebugAsync("ui_auth", "Kiểm tra đăng nhập", "INFO", $"User={MaskGuid(AuthState.CurrentUser.UserId)}, Customer={MaskGuid(AuthState.CurrentUser.CustomerId)}");
+            await AddDebugAsync("ui_input", "Kiểm tra prompt", "INFO", $"PromptLength={_prompt.Length}, TotalSeconds={_totalSeconds}, SceneSeconds={_sceneSeconds}, ThinkScenes={_thinkScenes}");
+
             var storageRoot = VideoOptions.CurrentValue.StorageRoot;
             var publicBase = VideoOptions.CurrentValue.PublicBase;
             var jobFolder = DateTime.UtcNow.ToString("yyyyMMdd-HHmmss");
+            await AddDebugAsync("repo_call", "Gọi repository", "INFO", $"storageRoot={storageRoot}, publicBase={publicBase}, jobFolder={jobFolder}");
             var result = await VideoRepo.CreateProjectAsync(new VideoProjectCreateRequest
             {
                 Prompt = _prompt,
@@ -264,15 +314,49 @@
             await ReloadAsync();
             Snackbar.Add("Đã tạo project video.", Severity.Success);
             _tabIndex = 1;
-            await LogProjectEvent("PROJECT_CREATED", "info", "�� t?o project v� sinh scene plan mock.", new { result.Id, result.SceneCount, result.Status });
+            await LogProjectEvent("PROJECT_CREATED", "info", "Đã tạo project và sinh scene plan mock.", new { result.Id, result.SceneCount, result.Status });
+            await AddDebugAsync("ui_done", "Hoàn tất", "SUCCESS", $"Tạo project thành công: {result.Id}", $"SceneCount={result.SceneCount}, Status={result.Status}");
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "VIDEO_RENDER_CREATE_PROJECT_FAILED");
             Snackbar.Add(ex.Message, Severity.Error);
+            await AddDebugAsync("ui_failed", "Thất bại", "FAILED", ex.Message, ex.ToString());
         }
         finally { _busy = false; }
     }
+
+    private Task AddDebugAsync(string stepCode, string stepName, string status, string message, string? details = null)
+    {
+        _debugEntries.Add(new DebugEntry(DateTimeOffset.Now, ++_debugStep, stepCode, stepName, status, 0, message, details));
+        if (_debugEntries.Count > 200)
+        {
+            _debugEntries.RemoveRange(0, _debugEntries.Count - 200);
+        }
+
+        return InvokeAsync(StateHasChanged);
+    }
+
+    private Task ClearDebugLogAsync()
+    {
+        _debugEntries.Clear();
+        _debugStep = 0;
+        return InvokeAsync(StateHasChanged);
+    }
+
+    private Task CopyDebugLogAsync()
+    {
+        var text = string.Join(Environment.NewLine, _debugEntries.OrderBy(x => x.StepNumber).Select(x => $"[{x.Timestamp:dd/MM/yyyy HH:mm:ss.fff}] {x.Status} {x.StepCode} {x.Message}"));
+        return JS.InvokeVoidAsync("todoXRenderLog.copyText", text).AsTask();
+    }
+
+    private Task DownloadDebugLogAsync()
+    {
+        var text = string.Join(Environment.NewLine, _debugEntries.OrderBy(x => x.StepNumber).Select(x => $"[{x.Timestamp:dd/MM/yyyy HH:mm:ss.fff}] {x.Status} {x.StepCode} {x.Message}"));
+        return JS.InvokeVoidAsync("todoxDownload.saveTextFile", $"render-job-{DateTimeOffset.Now:yyyyMMdd-HHmmss}.txt", text).AsTask();
+    }
+
+    private static string MaskGuid(Guid? value) => value.HasValue ? $"{value.Value.ToString()[..8]}****" : "null";
 
     private async Task NewProjectAsync()
     {
@@ -308,8 +392,20 @@
     private async Task ReloadJobsAsync()
     {
         if (_projectId is null) return;
-        var logCode = $"video-{_projectId.Value}";
-        _jobs = (await RenderJobs.ListByLogCodeAsync(logCode)).ToList();
+        var logCode = BuildLogCode();
+        if (string.IsNullOrWhiteSpace(logCode)) return;
+
+        try
+        {
+            _jobs = (await RenderJobs.ListByLogCodeAsync(logCode)).ToList();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "VIDEO_RENDER_LOAD_JOBS_FAILED logCode={LogCode}", logCode);
+            await AddDebugAsync("jobs_failed", "Tải job thất bại", "FAILED", ex.Message, ex.ToString());
+            return;
+        }
+
         await InvokeAsync(StateHasChanged);
     }
 
@@ -349,7 +445,7 @@
         if (_projectId is null) return;
         await VideoRepo.UpdateSceneAsync(scene.Id, scene.Status, scene.StaticImageUrl, scene.StaticImagePath, scene.SceneVideoUrl, scene.SceneVideoPath, scene.ErrorMessage, scene.Title, scene.ScenePrompt, scene.ImagePrompt, scene.VideoPrompt);
         Snackbar.Add("Đã lưu scene.", Severity.Success);
-        await LogProjectEvent("SCENE_SAVED", "info", $"�� luu scene {scene.SceneIndex}.", new { scene.Id, scene.SceneIndex, scene.Status });
+        await LogProjectEvent("SCENE_SAVED", "info", $"�� luu scene {scene.SceneIndex}.", new { scene.Id, scene.SceneIndex, scene.Status });
         await ReloadAsync();
     }
 
@@ -415,6 +511,7 @@
     {
         if (_project is null || AuthState.CurrentUser is null) return;
         var input = new { projectId = _project.Id, mockMode = true };
+        var logCode = BuildLogCode();
         var job = await RenderJobs.EnqueueAsync(new RenderJobCreateModel
         {
             JobType = jobType,
@@ -422,7 +519,7 @@
             CustomerId = AuthState.CurrentUser.CustomerId,
             Input = input,
             Prompt = new { projectId = _project.Id },
-            LogCode = $"video-{_project.Id:N}",
+            LogCode = logCode,
             ProviderCode = "todox_video_mock",
             ModelCode = "mock_scene_video",
             MaxAttempts = 1,
@@ -430,7 +527,7 @@
             PointStatus = RenderPointStatuses.NotRequired
         });
         Snackbar.Add($"Đã tạo job video: {job.Id}", Severity.Success);
-        await LogProjectEvent("JOB_ENQUEUED", "info", $"�� enqueue job {jobType}.", new { job.Id, job.JobType, job.Status });
+        await LogProjectEvent("JOB_ENQUEUED", "info", $"�� enqueue job {jobType}.", new { job.Id, job.JobType, job.Status });
         _tabIndex = 2;
         await ReloadAsync();
     }
@@ -498,4 +595,5 @@
         _ => Color.Info
     };
 }
+
 
