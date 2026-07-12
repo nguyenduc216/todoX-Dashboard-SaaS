@@ -4,6 +4,8 @@
 @inject NavigationManager Navigation
 @inject TodoX.Web.Services.VideoRender.VideoRenderRepository VideoRepo
 @inject TodoX.Web.Services.Render.IRenderJobService RenderJobs
+@inject TodoX.Web.Services.AiCharacters.IAiCharacterService Characters
+@inject TodoX.Web.Services.VideoRender.ITodoXVideoPromptParser PromptParser
 @inject IOptionsMonitor<TodoX.Web.Services.VideoRender.VideoRenderOptions> VideoOptions
 @inject ISnackbar Snackbar
 @inject ILogger<RenderVideoJobs> Logger
@@ -15,7 +17,7 @@
     <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-3">
         <div>
             <MudText Typo="Typo.h4" Class="todox-page-title">Render Video Job</MudText>
-            <MudText Typo="Typo.body1" Class="todox-page-subtitle">Phase 1 mockup: tạo project, tách scene, render mock và ghép video cuối.</MudText>
+            <MudText Typo="Typo.body1" Class="todox-page-subtitle">Phase 1: chọn nhân vật chuẩn, tạo project rỗng hoặc tách scene, rồi render từng scene.</MudText>
         </div>
         <MudStack Row="true" Spacing="2" Class="flex-wrap gap-2">
             <MudButton Color="Color.Warning" Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.Add" OnClick="NewProjectAsync">Tạo mới</MudButton>
@@ -37,8 +39,90 @@
             <MudTabPanel Text="Thông tin">
                 <MudPaper Class="todox-card pa-4" rounded="true">
                     <MudGrid>
-                        <MudItem xs="12">
-                            <MudTextField T="string" Label="Prompt video" @bind-Value="_prompt" Variant="Variant.Outlined" Lines="6" Immediate="true" />
+                        <MudItem xs="12" md="4">
+                            <MudPaper Class="pa-4 d-flex flex-column h-100" Outlined="true" rounded="true">
+                                <MudStack Spacing="2" Class="h-100">
+                                    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
+                                        <MudText Typo="Typo.h6">Nhân vật</MudText>
+                                        <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="ClearSelectedCharacterAsync" Disabled="@(_busy || _selectedCharacter is null)">Không sử dụng Character</MudButton>
+                                    </MudStack>
+                                    <MudAlert Severity="Severity.Info" Dense="true">Chọn một Character hoạt động hoặc để trống để tạo project không dùng Character.</MudAlert>
+                                    <MudSelect T="long?" Label="Chọn Character" Value="@(_selectedCharacter?.Id)" ValueChanged="OnCharacterChangedAsync" Variant="Variant.Outlined" Dense="true">
+                                        <MudSelectItem T="long?" Value="null">Không sử dụng Character</MudSelectItem>
+                                        @foreach (var character in _characters)
+                                        {
+                                            <MudSelectItem T="long?" Value="@character.Id">@character.CharacterName</MudSelectItem>
+                                        }
+                                    </MudSelect>
+                                    <MudDivider />
+                                    <div style="max-height:420px;overflow:auto;display:flex;flex-direction:column;gap:12px;">
+                                        @foreach (var character in _characters)
+                                        {
+                                            <MudPaper Class="@GetCharacterCardClass(character.Id)" Outlined="true" rounded="true" @onclick="@(() => OnCharacterChangedAsync(character.Id))" style="cursor:pointer">
+                                                <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Start">
+                                                    <div style="width:64px;flex:0 0 64px;">
+                                                        @if (!string.IsNullOrWhiteSpace(character.MasterImageUrl))
+                                                        {
+                                                            <img src="@character.MasterImageUrl" style="width:64px;height:64px;object-fit:cover;border-radius:10px;" />
+                                                        }
+                                                        else
+                                                        {
+                                                            <MudPaper Class="pa-2 text-center" rounded="true" Outlined="true">No img</MudPaper>
+                                                        }
+                                                    </div>
+                                                    <MudStack Spacing="1">
+                                                        <MudText Typo="Typo.subtitle2">@character.CharacterName</MudText>
+                                                        @if (!string.IsNullOrWhiteSpace(character.Description))
+                                                        {
+                                                            <MudText Typo="Typo.caption">@character.Description</MudText>
+                                                        }
+                                                    </MudStack>
+                                                </MudStack>
+                                            </MudPaper>
+                                        }
+                                    </div>
+                                </MudStack>
+                            </MudPaper>
+                        </MudItem>
+                        <MudItem xs="12" md="8">
+                            <MudPaper Class="pa-4 h-100" Outlined="true" rounded="true">
+                                <MudStack Spacing="2" Class="h-100">
+                                    <MudTextField T="string" Label="Prompt video" @bind-Value="_prompt" Variant="Variant.Outlined" Lines="10" Immediate="true" />
+                                    <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="CheckPromptAsync">Kiểm tra cấu trúc</MudButton>
+                                    <MudAlert Severity="@( _promptParseResult.IsJsonValid ? (_promptParseResult.IsTodoXPrompt ? Severity.Success : Severity.Info) : Severity.Warning )" Dense="true">
+                                        @(_promptParseResult.IsJsonValid ? (_promptParseResult.IsTodoXPrompt ? "Prompt TodoX hợp lệ." : "Prompt thường.") : "JSON không hợp lệ hoặc chưa parse được.")
+                                    </MudAlert>
+                                    @if (!string.IsNullOrWhiteSpace(_promptParseResult.ErrorMessage))
+                                    {
+                                        <MudAlert Severity="Severity.Warning" Dense="true">@_promptParseResult.ErrorMessage</MudAlert>
+                                    }
+                                    @if (_promptParseResult.Model is not null)
+                                    {
+                                        <MudGrid>
+                                            <MudItem xs="12" md="6"><MudText><b>Tiêu đề video:</b> @_promptParseResult.Summary.VideoTitle</MudText></MudItem>
+                                            <MudItem xs="12" md="6"><MudText><b>Mục tiêu video:</b> @_promptParseResult.Summary.VideoObjective</MudText></MudItem>
+                                            <MudItem xs="12" md="6"><MudText><b>Phong cách:</b> @_promptParseResult.Summary.Style</MudText></MudItem>
+                                            <MudItem xs="12" md="6"><MudText><b>CTA:</b> @_promptParseResult.Summary.Cta</MudText></MudItem>
+                                            <MudItem xs="12" md="6"><MudText><b>DeclaredDuration:</b> @_promptParseResult.Summary.DeclaredDurationSeconds</MudText></MudItem>
+                                            <MudItem xs="12" md="6"><MudText><b>SceneCount:</b> @_promptParseResult.Summary.SceneCount</MudText></MudItem>
+                                        </MudGrid>
+                                        @if (_promptParseResult.Summary.HasDurationMismatch)
+                                        {
+                                            <MudAlert Severity="Severity.Warning" Dense="true">@_promptParseResult.Summary.DurationMismatchMessage</MudAlert>
+                                        }
+                                    }
+                                    <MudGrid>
+                                        <MudItem xs="12" md="4"><MudNumericField T="int" Label="Tổng số giây" @bind-Value="_totalSeconds" Min="1" Variant="Variant.Outlined" /></MudItem>
+                                        <MudItem xs="12" md="4"><MudNumericField T="int" Label="Giây mỗi scene" @bind-Value="_sceneSeconds" Min="1" Variant="Variant.Outlined" /></MudItem>
+                                        <MudItem xs="12" md="4"><MudCheckBox @bind-Value="_thinkScenes" Label="Suy nghĩ kịch bản" /></MudItem>
+                                    </MudGrid>
+                                    <MudStack Row="true" Spacing="2" Class="flex-wrap gap-2">
+                                        <MudButton Color="Color.Warning" Variant="Variant.Filled" OnClick="CreateProjectAsync" Disabled="@_busy">Tạo / phân tách scene</MudButton>
+                                        <MudButton Color="Color.Primary" Variant="Variant.Outlined" OnClick="CreateEmptyProjectAsync" Disabled="@_busy">Tạo project rỗng</MudButton>
+                                        <MudButton Color="Color.Primary" Variant="Variant.Outlined" OnClick="ReloadAsync" Disabled="@(_projectId is null || _busy)">Refresh</MudButton>
+                                    </MudStack>
+                                </MudStack>
+                            </MudPaper>
                         </MudItem>
                         <MudItem xs="12" md="4">
                             <MudNumericField T="int" Label="Tổng số giây" @bind-Value="_totalSeconds" Min="8" Variant="Variant.Outlined" />
@@ -124,25 +208,27 @@
                                             <MudChip T="string" Color="@SceneColor(scene.Status)">@SceneLabel(scene.Status)</MudChip>
                                         </MudStack>
                                         <MudText Typo="Typo.caption">Scene @scene.SceneIndex - @scene.DurationSeconds giây</MudText>
+                                        <MudText Typo="Typo.body2"><b>Purpose:</b> @ExtractScenePurpose(scene.ScenePrompt)</MudText>
+                                        <MudText Typo="Typo.body2"><b>Duration:</b> @scene.DurationSeconds s</MudText>
+                                        <MudText Typo="Typo.body2"><b>ImagePrompt:</b> @scene.ImagePrompt</MudText>
+                                        <MudText Typo="Typo.body2"><b>MotionPrompt:</b> @scene.VideoPrompt</MudText>
+                                        <MudText Typo="Typo.body2"><b>Voice:</b> @ExtractValue(scene.ScenePrompt, "voice")</MudText>
+                                        <MudText Typo="Typo.body2"><b>VoiceInstruction:</b> @ExtractValue(scene.ScenePrompt, "voice_instruction")</MudText>
+                                        <MudStack Row="true" Spacing="1" Class="flex-wrap gap-1">
+                                            <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" OnClick="@(() => SaveSceneAsync(scene))">Lưu</MudButton>
+                                            <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning" OnClick="@(() => RenderSceneImageAsync(scene))">Tạo ảnh</MudButton>
+                                            <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning" OnClick="@(() => RenderSceneImageAsync(scene))">Render lại ảnh</MudButton>
+                                            <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(() => MoveSceneUpAsync(scene))" Disabled="@(_busy || scene.SceneIndex <= 1)">Lên</MudButton>
+                                            <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(() => MoveSceneDownAsync(scene))" Disabled="@(_busy || _project is null || scene.SceneIndex >= _project.Scenes.Count)">Xuống</MudButton>
+                                            <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error" OnClick="@(() => DeleteSceneAsync(scene))" Disabled="@_busy">Xóa</MudButton>
+                                        </MudStack>
                                         @if (!string.IsNullOrWhiteSpace(scene.StaticImageUrl))
                                         {
                                             <img src="@scene.StaticImageUrl" style="width:100%;border-radius:12px;cursor:pointer" @onclick="@(() => OpenUrl(scene.StaticImageUrl))" />
                                         }
                                         else
                                         {
-                                            <MudPaper Class="pa-6 text-center" rounded="true">Chưa có ảnh preview</MudPaper>
-                                        }
-                                        <MudTextField T="string" Label="Scene prompt" @bind-Value="scene.ScenePrompt" Lines="4" Variant="Variant.Outlined" />
-                                        <MudTextField T="string" Label="Image prompt" @bind-Value="scene.ImagePrompt" Lines="3" Variant="Variant.Outlined" />
-                                        <MudTextField T="string" Label="Video prompt" @bind-Value="scene.VideoPrompt" Lines="3" Variant="Variant.Outlined" />
-                                        <MudStack Row="true" Spacing="1" Class="flex-wrap gap-1">
-                                            <MudButton Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined" OnClick="@(() => SaveSceneAsync(scene))">Lưu scene</MudButton>
-                                            <MudButton Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined" OnClick="@(() => RenderSceneImageAsync(scene))">Tạo ảnh tĩnh mock</MudButton>
-                                            <MudButton Size="Size.Small" Color="Color.Warning" Variant="Variant.Filled" OnClick="@(() => RenderSceneVideoAsync(scene))">Render video scene</MudButton>
-                                        </MudStack>
-                                        @if (!string.IsNullOrWhiteSpace(scene.SceneVideoUrl))
-                                        {
-                                            <video src="@scene.SceneVideoUrl" controls style="width:100%;border-radius:12px"></video>
+                                            <MudPaper Class="pa-6 text-center" rounded="true">Chưa render thử</MudPaper>
                                         }
                                         @if (!string.IsNullOrWhiteSpace(scene.ErrorMessage))
                                         {
@@ -250,10 +336,14 @@
     private long? _projectId;
     private VideoProjectDto? _project;
     private List<RenderJobDto> _jobs = new();
+    private readonly List<ActiveCharacterDto> _characters = new();
+    private ActiveCharacterDto? _selectedCharacter;
     private string _prompt = string.Empty;
+    private string _characterPrompt = string.Empty;
+    private TodoXVideoPromptParseResult _promptParseResult = new();
     private int _totalSeconds = 16;
     private int _sceneSeconds = 8;
-    private bool _thinkScenes = true;
+    private bool _thinkScenes = false;
     private PeriodicTimer? _pollTimer;
     private CancellationTokenSource? _pollCts;
     private readonly List<DebugEntry> _debugEntries = new();
@@ -267,6 +357,10 @@
 
     protected override async Task OnInitializedAsync()
     {
+        if (AuthState.CurrentUser is not null)
+        {
+            await LoadCharactersAsync();
+        }
         if (AuthState.CurrentUser is not null && _projectId is not null)
         {
             await ReloadAsync();
@@ -284,18 +378,17 @@
     private async Task CreateProjectAsync()
     {
         if (AuthState.CurrentUser is null) return;
-        if (string.IsNullOrWhiteSpace(_prompt))
-        {
-            Snackbar.Add("Prompt video không được rỗng.", Severity.Warning);
-            return;
-        }
-
         _busy = true;
         try
         {
+            if (!_promptParseResult.IsJsonValid)
+            {
+                _promptParseResult = PromptParser.Parse(_prompt);
+            }
             await AddDebugAsync("ui_started", "Bắt đầu xử lý", "STARTED", "Người dùng bấm nút Tạo / phân tách scene.");
             await AddDebugAsync("ui_auth", "Kiểm tra đăng nhập", "INFO", $"User={MaskGuid(AuthState.CurrentUser.UserId)}, Customer={MaskGuid(AuthState.CurrentUser.CustomerId)}");
-            await AddDebugAsync("ui_input", "Kiểm tra prompt", "INFO", $"PromptLength={_prompt.Length}, TotalSeconds={_totalSeconds}, SceneSeconds={_sceneSeconds}, ThinkScenes={_thinkScenes}");
+            var inputDebug = BuildInputDebugMessage();
+            await AddDebugAsync("ui_input", "Kiểm tra prompt", "INFO", inputDebug);
 
             var storageRoot = VideoOptions.CurrentValue.StorageRoot;
             var publicBase = VideoOptions.CurrentValue.PublicBase;
@@ -304,10 +397,13 @@
             var result = await VideoRepo.CreateProjectAsync(new VideoProjectCreateRequest
             {
                 Prompt = _prompt,
+                CharacterId = _selectedCharacter?.Id,
                 TotalSeconds = _totalSeconds,
                 SceneSeconds = Math.Max(1, _sceneSeconds),
                 ThinkScenes = _thinkScenes,
-                Title = "Render video job"
+                Title = _promptParseResult.Model.VideoTitle ?? "Render video job",
+                CreateEmptyProject = false,
+                Scenes = BuildSceneRequests()
             }, AuthState.CurrentUser.UserId, AuthState.CurrentUser.CustomerId, storageRoot, publicBase, jobFolder);
             _projectId = result.Id;
             Logger.LogInformation("VIDEO_RENDER_CREATE_PROJECT_OK projectId={ProjectId} sceneCount={SceneCount} status={Status}", result.Id, result.SceneCount, result.Status);
@@ -324,6 +420,100 @@
             await AddDebugAsync("ui_failed", "Thất bại", "FAILED", ex.Message, ex.ToString());
         }
         finally { _busy = false; }
+    }
+
+    private async Task CreateEmptyProjectAsync()
+    {
+        if (AuthState.CurrentUser is null) return;
+        _promptParseResult = PromptParser.Parse(_prompt);
+        _busy = true;
+        try
+        {
+            var storageRoot = VideoOptions.CurrentValue.StorageRoot;
+            var publicBase = VideoOptions.CurrentValue.PublicBase;
+            var jobFolder = DateTime.UtcNow.ToString("yyyyMMdd-HHmmss");
+            var result = await VideoRepo.CreateProjectAsync(new VideoProjectCreateRequest
+            {
+                Prompt = string.Empty,
+                CharacterId = _selectedCharacter?.Id,
+                TotalSeconds = _totalSeconds,
+                SceneSeconds = Math.Max(1, _sceneSeconds),
+                ThinkScenes = false,
+                Title = _promptParseResult.Model.VideoTitle ?? "Video project rỗng",
+                CreateEmptyProject = true
+            }, AuthState.CurrentUser.UserId, AuthState.CurrentUser.CustomerId, storageRoot, publicBase, jobFolder);
+            _projectId = result.Id;
+            await ReloadAsync();
+            _tabIndex = 1;
+            Snackbar.Add("Đã tạo project rỗng.", Severity.Success);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private List<VideoProjectSceneCreateRequest> BuildSceneRequests()
+    {
+        if (_promptParseResult.HasScenes)
+        {
+            return _promptParseResult.Model.Scenes
+                .OrderBy(x => x.Scene ?? int.MaxValue)
+                .Select((scene, index) => new VideoProjectSceneCreateRequest
+                {
+                    SceneIndex = scene.Scene ?? index + 1,
+                    Title = $"Scene {scene.Scene ?? index + 1}",
+                    DurationSeconds = scene.DurationSeconds ?? _sceneSeconds,
+                    ScenePrompt = BuildSceneMetadata(scene),
+                    ImagePrompt = scene.ImagePrompt,
+                    VideoPrompt = scene.MotionPrompt
+                })
+                .ToList();
+        }
+
+        var fallbackCount = Math.Max(1, (int)Math.Ceiling(Math.Max(1, _totalSeconds) / (double)Math.Max(1, _sceneSeconds)));
+        return Enumerable.Range(1, fallbackCount)
+            .Select(index => new VideoProjectSceneCreateRequest
+            {
+                SceneIndex = index,
+                Title = $"Scene {index}",
+                DurationSeconds = index == fallbackCount ? Math.Max(1, _totalSeconds - _sceneSeconds * (fallbackCount - 1)) : _sceneSeconds,
+                ScenePrompt = $"scene_purpose: main_content | image_prompt: Scene {index} image prompt | motion_prompt: Scene {index} motion prompt | voice: Scene {index} voice | voice_instruction: Scene {index} voice instruction",
+                ImagePrompt = $"Scene {index} image prompt",
+                VideoPrompt = $"Scene {index} motion prompt"
+            })
+            .ToList();
+    }
+
+    private static string BuildSceneMetadata(TodoXVideoScenePromptModel scene)
+        => string.Join(" | ", new[]
+        {
+            scene.ScenePurpose is null ? null : $"scene_purpose: {scene.ScenePurpose}",
+            scene.ImagePrompt is null ? null : $"image_prompt: {scene.ImagePrompt}",
+            scene.MotionPrompt is null ? null : $"motion_prompt: {scene.MotionPrompt}",
+            scene.Voice is null ? null : $"voice: {scene.Voice}",
+            scene.VoiceInstruction is null ? null : $"voice_instruction: {scene.VoiceInstruction}"
+        }.Where(x => !string.IsNullOrWhiteSpace(x)));
+
+    private string GetCharacterCardClass(long characterId)
+        => $"pa-2 {(IsCharacterSelected(characterId) ? "todox-card-selected" : string.Empty)}".Trim();
+
+    private static string ExtractScenePurpose(string? scenePrompt)
+        => ExtractValue(scenePrompt, "scene_purpose") ?? ExtractValue(scenePrompt, "purpose") ?? string.Empty;
+
+    private string BuildInputDebugMessage()
+        => $"PromptLength={_prompt.Length}, CharacterId={(_selectedCharacter?.Id.ToString() ?? "null")}, TotalSeconds={_totalSeconds}, SceneSeconds={_sceneSeconds}, ThinkScenes={_thinkScenes}, IsTodoX={_promptParseResult.IsTodoXPrompt}, Scenes={_promptParseResult.Model.Scenes.Count}";
+
+    private static string? ExtractValue(string? source, string key)
+    {
+        if (string.IsNullOrWhiteSpace(source)) return null;
+        var marker = $"{key}:";
+        var index = source.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+        if (index < 0) return null;
+        var value = source[(index + marker.Length)..].Trim();
+        var separator = value.IndexOf('|');
+        if (separator >= 0) value = value[..separator].Trim();
+        return string.IsNullOrWhiteSpace(value) ? null : value;
     }
 
     private Task AddDebugAsync(string stepCode, string stepName, string status, string message, string? details = null)
@@ -363,9 +553,10 @@
         _projectId = null;
         _project = null;
         _prompt = string.Empty;
+        _characterPrompt = string.Empty;
         _totalSeconds = 16;
         _sceneSeconds = 8;
-        _thinkScenes = true;
+        _thinkScenes = false;
         _tabIndex = 0;
         Snackbar.Add("Đã reset form tạo project mới.", Severity.Info);
         await InvokeAsync(StateHasChanged);
@@ -385,8 +576,63 @@
         }
         if (_project is not null)
         {
+            _thinkScenes = _project.ThinkScenes;
+            _prompt = _project.OriginalPrompt;
+            if (_project.CharacterId is not null && _selectedCharacter is null)
+            {
+                _selectedCharacter = _characters.FirstOrDefault(x => x.Id == _project.CharacterId.Value);
+            }
             await ReloadJobsAsync();
         }
+    }
+
+    private async Task LoadCharactersAsync()
+    {
+        if (AuthState.CurrentUser is null) return;
+        try
+        {
+            _characters.Clear();
+            var items = await Characters.GetActiveCharactersAsync(AuthState.CurrentUser);
+            _characters.AddRange(items);
+            if (_selectedCharacter is null)
+            {
+                _selectedCharacter = _characters.FirstOrDefault(x => _project is not null && x.Id == _project.CharacterId) is { } existing ? existing : null;
+            }
+            if (_selectedCharacter is not null)
+            {
+                _characterPrompt = _selectedCharacter.NormalizedPrompt;
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "VIDEO_RENDER_LOAD_CHARACTERS_FAILED");
+            await AddDebugAsync("character_failed", "Tải nhân vật thất bại", "FAILED", ex.Message, ex.ToString());
+        }
+    }
+
+    private Task SelectCharacterAsync()
+    {
+        return InvokeAsync(StateHasChanged);
+    }
+
+    private Task OnCharacterChangedAsync(long? characterId)
+    {
+        _selectedCharacter = characterId is null ? null : _characters.FirstOrDefault(x => x.Id == characterId.Value);
+        return InvokeAsync(StateHasChanged);
+    }
+
+    private bool IsCharacterSelected(long characterId) => _selectedCharacter?.Id == characterId;
+
+    private Task ClearSelectedCharacterAsync()
+    {
+        _selectedCharacter = null;
+        return InvokeAsync(StateHasChanged);
+    }
+
+    private Task CheckPromptAsync()
+    {
+        _promptParseResult = PromptParser.Parse(_prompt);
+        return InvokeAsync(StateHasChanged);
     }
 
     private async Task ReloadJobsAsync()
@@ -472,6 +718,38 @@
         {
             await RenderSceneImageAsync(scene);
         }
+    }
+
+    private async Task MoveSceneUpAsync(VideoProjectSceneDto scene)
+    {
+        if (_project is null || scene.SceneIndex <= 1) return;
+        var previous = _project.Scenes.FirstOrDefault(x => x.SceneIndex == scene.SceneIndex - 1);
+        if (previous is null) return;
+        (scene.SceneIndex, previous.SceneIndex) = (previous.SceneIndex, scene.SceneIndex);
+        await VideoRepo.ReplaceScenesAsync(_project.Id, _project.Scenes.OrderBy(x => x.SceneIndex).ToList(), default);
+        await ReloadAsync();
+    }
+
+    private async Task MoveSceneDownAsync(VideoProjectSceneDto scene)
+    {
+        if (_project is null || scene.SceneIndex >= _project.Scenes.Count) return;
+        var next = _project.Scenes.FirstOrDefault(x => x.SceneIndex == scene.SceneIndex + 1);
+        if (next is null) return;
+        (scene.SceneIndex, next.SceneIndex) = (next.SceneIndex, scene.SceneIndex);
+        await VideoRepo.ReplaceScenesAsync(_project.Id, _project.Scenes.OrderBy(x => x.SceneIndex).ToList(), default);
+        await ReloadAsync();
+    }
+
+    private async Task DeleteSceneAsync(VideoProjectSceneDto scene)
+    {
+        if (_project is null) return;
+        var remaining = _project.Scenes.Where(x => x.Id != scene.Id).OrderBy(x => x.SceneIndex).ToList();
+        for (var index = 0; index < remaining.Count; index++)
+        {
+            remaining[index].SceneIndex = index + 1;
+        }
+        await VideoRepo.ReplaceScenesAsync(_project.Id, remaining, default);
+        await ReloadAsync();
     }
 
     private async Task RenderSceneVideoAsync(VideoProjectSceneDto scene)

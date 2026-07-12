@@ -90,6 +90,18 @@ public sealed class VideoProjectCreateRequest
     public int TotalSeconds { get; set; } = 16;
     public int SceneSeconds { get; set; } = 8;
     public string? Title { get; set; }
+    public bool CreateEmptyProject { get; set; }
+    public List<VideoProjectSceneCreateRequest> Scenes { get; set; } = new();
+}
+
+public sealed class VideoProjectSceneCreateRequest
+{
+    public int SceneIndex { get; set; }
+    public string? Title { get; set; }
+    public int DurationSeconds { get; set; }
+    public string ScenePrompt { get; set; } = string.Empty;
+    public string? ImagePrompt { get; set; }
+    public string? VideoPrompt { get; set; }
 }
 
 public sealed class VideoProjectSaveSceneRequest

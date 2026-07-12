@@ -29,8 +29,10 @@ public sealed class VideoRenderRepository
             using var tx = conn.BeginTransaction();
 
             var sceneSeconds = Math.Max(1, request.SceneSeconds);
+            var customScenes = request.Scenes?.OrderBy(x => x.SceneIndex).ToList() ?? new List<VideoProjectSceneCreateRequest>();
+            var useCustomScenes = customScenes.Count > 0;
+            var sceneCount = request.CreateEmptyProject ? 0 : useCustomScenes ? customScenes.Count : Math.Max(1, (int)Math.Ceiling(Math.Max(sceneSeconds, request.TotalSeconds) / (double)sceneSeconds));
             var totalSeconds = Math.Max(sceneSeconds, request.TotalSeconds);
-            var sceneCount = Math.Max(1, (int)Math.Ceiling(totalSeconds / (double)sceneSeconds));
 
             DbDiagnostics.LogFieldLengths(_logger, "video_render_create_project", ("title", request.Title), ("prompt", request.Prompt), ("storageRoot", storageRoot), ("publicBase", publicBase), ("jobFolder", jobFolder));
 
@@ -71,10 +73,13 @@ public sealed class VideoRenderRepository
 
             for (var index = 1; index <= sceneCount; index++)
             {
-                var duration = index == sceneCount
-                    ? Math.Max(1, totalSeconds - sceneSeconds * (sceneCount - 1))
-                    : sceneSeconds;
-                var scenePrompt = BuildScenePrompt(request.Prompt, index, sceneCount, duration, request.ThinkScenes);
+                var sceneData = useCustomScenes ? customScenes[index - 1] : null;
+                var duration = sceneData?.DurationSeconds > 0
+                    ? sceneData.DurationSeconds
+                    : index == sceneCount
+                        ? Math.Max(1, totalSeconds - sceneSeconds * (sceneCount - 1))
+                        : sceneSeconds;
+                var scenePrompt = sceneData?.ScenePrompt ?? BuildScenePrompt(request.Prompt, index, sceneCount, duration, request.ThinkScenes);
 
                 await conn.ExecuteAsync(
                     """
@@ -90,11 +95,11 @@ public sealed class VideoRenderRepository
                         projectId = project.Id,
                         tenant = _tenant.TenantId,
                         sceneIndex = index,
-                        title = $"Scene {index:00}",
+                        title = sceneData?.Title ?? $"Scene {index:00}",
                         duration,
                         scenePrompt,
-                        imagePrompt = $"Static preview for scene {index}. {scenePrompt}",
-                        videoPrompt = $"Vertical 9:16 video, {duration} seconds. {scenePrompt}",
+                        imagePrompt = sceneData?.ImagePrompt ?? $"Static preview for scene {index}. {scenePrompt}",
+                        videoPrompt = sceneData?.VideoPrompt ?? $"Vertical 9:16 video, {duration} seconds. {scenePrompt}",
                         status = VideoSceneStatuses.Draft
                     }, tx);
             }
