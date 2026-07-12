@@ -37,7 +37,7 @@
                 }
 
                 <MudText Typo="Typo.subtitle2">JSON dữ liệu</MudText>
-                <MudPaper Class="pa-3" Rounded="true">
+                <MudPaper Class="pa-3" rounded="true">
                     <pre style="white-space:pre-wrap; margin:0;">@JsonSerializer.Serialize(Order, new JsonSerializerOptions { WriteIndented = true })</pre>
                 </MudPaper>
             </MudStack>

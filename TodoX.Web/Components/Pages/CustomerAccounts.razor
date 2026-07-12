@@ -25,7 +25,7 @@
         <MudAlert Severity="Severity.Warning">Chưa có khách hàng nào. Vui lòng thêm khách hàng trước khi tạo tài khoản đăng nhập.</MudAlert>
     }
 
-    <MudPaper Class="todox-table-card pa-4" Rounded="true">
+    <MudPaper Class="todox-table-card pa-4" rounded="true">
         <MudTextField T="string" @bind-Value="_search" Placeholder="Tìm theo tên, email, khách hàng..."
                       Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
                       Immediate="true" Class="mb-3" Variant="Variant.Outlined" Margin="Margin.Dense" />
@@ -61,7 +61,7 @@
                         </MudButton>
                     }
                     <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="@(() => OpenEdit(context))" />
-                    <MudIconButton Icon="@Icons.Material.Filled.LockReset" Size="Size.Small" Title="Đặt lại mật khẩu" OnClick="@(() => ResetPassword(context))" />
+                    <MudIconButton Icon="@Icons.Material.Filled.LockReset" Size="Size.Small" title="Đặt lại mật khẩu" OnClick="@(() => ResetPassword(context))" />
                     @if (context.Status == TodoXAccountStatus.Locked)
                     {
                         <MudIconButton Icon="@Icons.Material.Filled.LockOpen" Color="Color.Success" Size="Size.Small" OnClick="@(() => SetStatus(context, TodoXAccountStatus.Active))" />

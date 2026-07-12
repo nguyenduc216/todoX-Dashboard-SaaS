@@ -30,7 +30,7 @@
     {
         <MudGrid>
             <MudItem xs="12" lg="5">
-                <MudPaper Class="todox-card pa-5" Rounded="true">
+                <MudPaper Class="todox-card pa-5" rounded="true">
                     <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="mb-2">
                         <MudText Typo="Typo.h6">Prompt templates</MudText>
                         <MudTextField T="string" @bind-Value="_filter" Placeholder="Lọc prompt..." Variant="Variant.Outlined"
@@ -71,7 +71,7 @@
             </MudItem>
 
             <MudItem xs="12" lg="7">
-                <MudPaper Class="todox-card pa-5" Rounded="true">
+                <MudPaper Class="todox-card pa-5" rounded="true">
                     <MudText Typo="Typo.h6">@(_edit.Id is null ? "Tạo prompt" : "Chỉnh prompt")</MudText>
                     <MudDivider Class="my-3" />
 

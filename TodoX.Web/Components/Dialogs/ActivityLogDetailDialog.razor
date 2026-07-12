@@ -13,7 +13,7 @@
     </TitleContent>
     <DialogContent>
         <MudStack Spacing="3">
-            <MudPaper Class="activity-detail-section pa-3" Rounded="true">
+            <MudPaper Class="activity-detail-section pa-3" rounded="true">
                 <MudText Typo="Typo.subtitle2">Tổng quan</MudText>
                 <MudGrid Class="mt-1">
                     <MudItem xs="12" sm="6">
@@ -28,7 +28,7 @@
                     @if (!string.IsNullOrWhiteSpace(ImpersonationReason))
                     {
                         <MudItem xs="12">
-                            <MudAlert Severity="Severity.Info" Dense="true" Class="activity-detail-reason">
+                            <MudAlert Severity="Severity.Info" dense="true" Class="activity-detail-reason">
                                 <b>Lý do đăng nhập hộ:</b> @ImpersonationReason
                             </MudAlert>
                         </MudItem>
@@ -40,7 +40,7 @@
             {
                 @if (!string.IsNullOrWhiteSpace(_finalPrompt))
                 {
-                    <MudPaper Class="activity-detail-section pa-3" Rounded="true">
+                    <MudPaper Class="activity-detail-section pa-3" rounded="true">
                         <MudText Typo="Typo.subtitle2">Prompt cuối cùng</MudText>
                         <pre class="activity-pre">@_finalPrompt</pre>
                     </MudPaper>
@@ -48,7 +48,7 @@
 
                 @if (_references.Count > 0)
                 {
-                    <MudPaper Class="activity-detail-section pa-3" Rounded="true">
+                    <MudPaper Class="activity-detail-section pa-3" rounded="true">
                         <MudText Typo="Typo.subtitle2">Ảnh tham chiếu</MudText>
                         <div class="activity-image-strip">
                             @foreach (var item in _references)
@@ -64,7 +64,7 @@
 
                 @if (_outputs.Count > 0)
                 {
-                    <MudPaper Class="activity-detail-section pa-3" Rounded="true">
+                    <MudPaper Class="activity-detail-section pa-3" rounded="true">
                         <MudText Typo="Typo.subtitle2">Ảnh kết quả</MudText>
                         <div class="activity-image-strip">
                             @foreach (var item in _outputs)
@@ -80,9 +80,9 @@
 
                 @if (_timeline.Count > 0)
                 {
-                    <MudPaper Class="activity-detail-section pa-3" Rounded="true">
+                    <MudPaper Class="activity-detail-section pa-3" rounded="true">
                         <MudText Typo="Typo.subtitle2">Timeline</MudText>
-                        <MudTimeline Dense="true" Class="mt-2">
+                        <MudTimeline dense="true" Class="mt-2">
                             @foreach (var step in _timeline)
                             {
                                 <MudTimelineItem Color="@(step.Level == "error" ? Color.Error : step.Level == "warning" ? Color.Warning : Color.Success)">
@@ -95,7 +95,7 @@
                 }
             }
 
-            <MudPaper Class="activity-detail-section pa-3" Rounded="true">
+            <MudPaper Class="activity-detail-section pa-3" rounded="true">
                 <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
                     <MudText Typo="Typo.subtitle2">Raw detail</MudText>
                     <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.ContentCopy" OnClick="CopyRaw">Copy</MudButton>

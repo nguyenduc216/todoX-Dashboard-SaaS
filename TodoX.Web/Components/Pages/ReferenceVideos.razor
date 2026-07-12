@@ -49,7 +49,7 @@
     }
     else
     {
-        <MudPaper Class="todox-card pa-4" Rounded="true">
+        <MudPaper Class="todox-card pa-4" rounded="true">
             <MudGrid>
                 <MudItem xs="12" sm="3">
                     <MudSelect T="string" Label="Nền tảng" @bind-Value="_platform" Variant="Variant.Outlined" Clearable="true">
@@ -83,7 +83,7 @@
         }
         else if (_items.Count == 0)
         {
-            <MudPaper Class="todox-card pa-8" Rounded="true">
+            <MudPaper Class="todox-card pa-8" rounded="true">
                 <MudStack AlignItems="AlignItems.Center" Spacing="2">
                     <MudIcon Icon="@Icons.Material.Filled.VideoLibrary" Size="Size.Large" Class="todox-gold" />
                     <MudText Class="todox-page-subtitle">Chưa có link video tham chiếu nào.</MudText>
@@ -92,7 +92,7 @@
         }
         else
         {
-            <MudPaper Class="todox-table-card pa-0" Rounded="true">
+            <MudPaper Class="todox-table-card pa-0" rounded="true">
                 <MudTable Items="@_items" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Class="todox-table">
                     <HeaderContent>
                         <MudTh>Nền tảng</MudTh>
@@ -129,7 +129,7 @@
                                     <MudIconButton Icon="@Icons.Material.Filled.PlayCircle"
                                                    Color="Color.Warning"
                                                    Size="Size.Small"
-                                                   Title="Xem video"
+                                                   title="Xem video"
                                                    OnClick="@(() => OpenPreview(context))" />
                                 }
                                 <div>
@@ -166,7 +166,7 @@
                                 <MudIconButton Icon="@Icons.Material.Filled.Delete"
                                                Color="Color.Error"
                                                Size="Size.Small"
-                                               Title="Xóa"
+                                               title="Xóa"
                                                OnClick="@(() => Delete(context))" />
                             }
                         </MudTd>

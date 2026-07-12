@@ -21,7 +21,7 @@
     {
         <MudGrid>
             <MudItem xs="12" md="5">
-                <MudPaper Class="todox-card pa-4" Rounded="true">
+                <MudPaper Class="todox-card pa-4" rounded="true">
                     <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
                         <MudText Typo="Typo.h6">Danh sách provider</MudText>
                         <MudIconButton Icon="@Icons.Material.Filled.Refresh" Disabled="@_loading" OnClick="ReloadProviders" />
@@ -38,7 +38,7 @@
                     else
                     {
                         <MudTable Items="_providers" Hover="true" Dense="true" T="AiProviderListItemDto"
-                                  OnRowClick="@(args => SelectProviderAsync(args.Item))" RowClass="cursor-pointer">
+                                  OnRowClick="@(args => args.Item is not null ? SelectProviderAsync(args.Item) : Task.CompletedTask)" RowClass="cursor-pointer">
                             <HeaderContent>
                                 <MudTh>Provider</MudTh>
                                 <MudTh>Loại</MudTh>
@@ -67,13 +67,13 @@
             <MudItem xs="12" md="7">
                 @if (_selected is null)
                 {
-                    <MudPaper Class="todox-card pa-5" Rounded="true">
+                    <MudPaper Class="todox-card pa-5" rounded="true">
                         <MudText Class="todox-page-subtitle">Chọn một provider để xem và chỉnh sửa cấu hình.</MudText>
                     </MudPaper>
                 }
                 else
                 {
-                    <MudPaper Class="todox-card pa-5" Rounded="true">
+                    <MudPaper Class="todox-card pa-5" rounded="true">
                         <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
                             <MudText Typo="Typo.h6">@_selected.ProviderName <MudChip T="string" Size="Size.Small" Color="Color.Default">@_selected.ProviderCode</MudChip></MudText>
                             <MudButton Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.Save" Disabled="@_busy" OnClick="SaveProvider">Lưu provider</MudButton>
@@ -89,7 +89,7 @@
                         </MudGrid>
                     </MudPaper>
 
-                    <MudPaper Class="todox-card pa-5 mt-3" Rounded="true">
+                    <MudPaper Class="todox-card pa-5 mt-3" rounded="true">
                         <MudText Typo="Typo.h6">Capabilities</MudText>
                         <MudDivider Class="my-3" />
                         @if (_capabilities.Count == 0)
@@ -101,7 +101,7 @@
                             <MudStack Spacing="3">
                                 @foreach (var cap in _capabilities)
                                 {
-                                    <MudPaper Outlined="true" Class="pa-3" Rounded="true">
+                                    <MudPaper Outlined="true" Class="pa-3" rounded="true">
                                         <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
                                             <MudText Typo="Typo.subtitle1"><b>@cap.DisplayName</b>
                                                 <MudChip T="string" Size="Size.Small" Color="Color.Primary">@cap.CapabilityCode</MudChip>

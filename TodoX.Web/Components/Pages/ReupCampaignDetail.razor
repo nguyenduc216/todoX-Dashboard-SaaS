@@ -48,7 +48,7 @@
             @Metric("Duplicate", _campaign.DuplicateWarningCount)
         </MudGrid>
 
-        <MudPaper Class="todox-card pa-4" Rounded="true">
+        <MudPaper Class="todox-card pa-4" rounded="true">
             <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
                 <div>
                     <MudText Typo="Typo.h6">Tiến độ</MudText>
@@ -59,7 +59,7 @@
             <MudProgressLinear Value="@Progress" Color="Color.Success" Class="mt-3" />
         </MudPaper>
 
-        <MudPaper Class="todox-table-card pa-0" Rounded="true">
+        <MudPaper Class="todox-table-card pa-0" rounded="true">
             <MudTable Items="_tasks" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Class="todox-table">
                 <HeaderContent>
                     <MudTh>Video</MudTh>
@@ -125,7 +125,7 @@
             </MudTable>
         </MudPaper>
 
-        <MudPaper Class="todox-card pa-4" Rounded="true">
+        <MudPaper Class="todox-card pa-4" rounded="true">
             <MudText Typo="Typo.h6">Log chạy chiến dịch</MudText>
             <MudDivider Class="my-3" />
             @if (_logs.Count == 0)
@@ -239,7 +239,7 @@
     }
 
     private RenderFragment Metric(string label, int value) => @<MudItem xs="6" sm="4" md="2">
-        <MudPaper Class="todox-card pa-4" Rounded="true">
+        <MudPaper Class="todox-card pa-4" rounded="true">
             <MudText Typo="Typo.caption" Class="todox-page-subtitle">@label</MudText>
             <MudText Typo="Typo.h5" Class="todox-gold">@value</MudText>
         </MudPaper>

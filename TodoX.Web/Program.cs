@@ -280,4 +280,6 @@ extensionApi.MapGet("/download", async (
     return Results.File(package.Bytes, package.ContentType, package.FileName);
 });
 
-app.Run();
+
+app.MapRazorComponents<App>()
+    .AddInteractiveServerRenderMode();app.Run();

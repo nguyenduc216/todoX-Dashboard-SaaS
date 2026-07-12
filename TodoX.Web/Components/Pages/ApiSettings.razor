@@ -17,7 +17,7 @@
         Giá trị bí mật (API key/secret) được ẩn để bảo mật. Bạn có thể nhập giá trị mới để cập nhật.
     </MudAlert>
 
-    <MudPaper Class="todox-card pa-5" Rounded="true">
+    <MudPaper Class="todox-card pa-5" rounded="true">
         <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="mb-1">
             <MudIcon Icon="@Icons.Custom.Brands.Facebook" Class="todox-gold" />
             <MudText Typo="Typo.h6">Facebook App Configuration URLs</MudText>
@@ -45,7 +45,7 @@
     {
         @foreach (var group in _groups)
         {
-            <MudPaper Class="todox-card pa-5" Rounded="true">
+            <MudPaper Class="todox-card pa-5" rounded="true">
                 <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="mb-1">
                     <MudIcon Icon="@CategoryIcon(group.Name)" Class="todox-gold" />
                     <MudText Typo="Typo.h6">@CategoryLabel(group.Name)</MudText>

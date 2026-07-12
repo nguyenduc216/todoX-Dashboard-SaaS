@@ -45,7 +45,7 @@
     }
     else if (_pages.Count == 0)
     {
-        <MudPaper Class="todox-card pa-8" Rounded="true">
+        <MudPaper Class="todox-card pa-8" rounded="true">
             <MudStack AlignItems="AlignItems.Center" Spacing="2">
                 <MudIcon Icon="@Icons.Custom.Brands.Facebook" Size="Size.Large" Class="todox-gold" />
                 <MudText Class="todox-page-subtitle">Chưa có Page nào. Bấm "Thêm Page" để kết nối.</MudText>
@@ -58,7 +58,7 @@
             @foreach (var pg in _pages)
             {
                 <MudItem xs="12" sm="6" md="4">
-                    <MudPaper Class="todox-card pa-4" Rounded="true">
+                    <MudPaper Class="todox-card pa-4" rounded="true">
                         <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
                             <MudIcon Icon="@PlatformIcon(pg.Platform)" Class="todox-gold" Size="Size.Large" />
                             <div style="flex:1;min-width:0">
@@ -84,7 +84,7 @@
                         <MudStack Row="true" Justify="Justify.FlexEnd" Class="mt-3">
                             @if (CanActivatePage)
                             {
-                                <MudIconButton Icon="@Icons.Material.Filled.VerifiedUser" Size="Size.Small" Title="Xác thực token" OnClick="@(() => OpenConnect(pg))" />
+                                <MudIconButton Icon="@Icons.Material.Filled.VerifiedUser" Size="Size.Small" title="Xác thực token" OnClick="@(() => OpenConnect(pg))" />
                             }
                             @if (CanUpdatePage)
                             {

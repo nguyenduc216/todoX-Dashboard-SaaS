@@ -23,7 +23,7 @@
     }
     else if (_services.Count == 0)
     {
-        <MudPaper Class="todox-card pa-8" Rounded="true">
+        <MudPaper Class="todox-card pa-8" rounded="true">
             <MudStack AlignItems="AlignItems.Center" Spacing="2">
                 <MudIcon Icon="@Icons.Material.Filled.Category" Size="Size.Large" Class="todox-gold" />
                 <MudText Class="todox-page-subtitle">Chưa có dịch vụ nào. Bấm "Thêm dịch vụ" để tạo.</MudText>
@@ -36,7 +36,7 @@
             @foreach (var svc in _services)
             {
                 <MudItem xs="12" sm="6" md="4" lg="3" xl="3">
-                    <MudPaper Class="todox-card todox-service-card" Rounded="true">
+                    <MudPaper Class="todox-card todox-service-card" rounded="true">
                         <div class="todox-service-media">
                             @if (!string.IsNullOrWhiteSpace(ImageUrl(svc)))
                             {
@@ -81,9 +81,9 @@
                                     <span class="todox-service-price-unit">điểm @(svc.TierCount > 0 ? $"· {svc.TierCount} gói" : "")</span>
                                 </div>
                                 <div class="todox-service-actions">
-                                    <MudIconButton Icon="@Icons.Material.Filled.Sell" Size="Size.Small" Title="Bảng giá" OnClick="@(() => OpenTiers(svc))" />
-                                    <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" Title="Sửa" OnClick="@(() => OpenEdit(svc))" />
-                                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small" Title="Xóa" OnClick="@(() => Delete(svc))" />
+                                    <MudIconButton Icon="@Icons.Material.Filled.Sell" Size="Size.Small" title="Bảng giá" OnClick="@(() => OpenTiers(svc))" />
+                                    <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" title="Sửa" OnClick="@(() => OpenEdit(svc))" />
+                                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small" title="Xóa" OnClick="@(() => Delete(svc))" />
                                 </div>
                             </MudStack>
                         </div>

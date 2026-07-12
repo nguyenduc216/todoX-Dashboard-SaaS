@@ -12,7 +12,7 @@
         <MudText Typo="Typo.body1" Class="todox-page-subtitle">Chọn nhóm quyền và tick quyền theo chức năng, thao tác. Người dùng cần đăng nhập lại để nhận quyền mới.</MudText>
     </div>
 
-    <MudPaper Class="todox-card pa-4" Rounded="true">
+    <MudPaper Class="todox-card pa-4" rounded="true">
         <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="3" Class="flex-wrap">
             <MudSelect T="Guid" Label="Nhóm quyền" @bind-Value="_roleId" @bind-Value:after="OnRoleChanged" Variant="Variant.Outlined" Style="max-width:340px">
                 @foreach (var r in _roles)
@@ -43,7 +43,7 @@
     }
     else if (_selectedRole is not null)
     {
-        <MudPaper Class="todox-table-card pa-0" Rounded="true">
+        <MudPaper Class="todox-table-card pa-0" rounded="true">
             <div class="todox-perm-scroll">
                 <table class="todox-perm-table">
                     <thead>

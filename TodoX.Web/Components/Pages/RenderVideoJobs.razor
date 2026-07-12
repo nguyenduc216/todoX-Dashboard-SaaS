@@ -33,9 +33,9 @@
     }
     else
     {
-        <MudTabs Rounded="true" ApplyEffectsToContainer="true" PanelClass="pt-4" @bind-ActivePanelIndex="_tabIndex">
+        <MudTabs rounded="true" ApplyEffectsToContainer="true" panelClass="pt-4" @bind-ActivePanelIndex="_tabIndex">
             <MudTabPanel Text="Thông tin">
-                <MudPaper Class="todox-card pa-4" Rounded="true">
+                <MudPaper Class="todox-card pa-4" rounded="true">
                     <MudGrid>
                         <MudItem xs="12">
                             <MudTextField T="string" Label="Prompt video" @bind-Value="_prompt" Variant="Variant.Outlined" Lines="6" Immediate="true" />
@@ -78,7 +78,7 @@
                         @foreach (var scene in _project.Scenes.OrderBy(x => x.SceneIndex))
                         {
                             <MudItem xs="12" lg="6">
-                                <MudPaper Class="todox-card pa-4" Rounded="true">
+                                <MudPaper Class="todox-card pa-4" rounded="true">
                                     <MudStack Spacing="2">
                                         <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center">
                                             <MudText Typo="Typo.h6">@scene.Title</MudText>
@@ -91,7 +91,7 @@
                                         }
                                         else
                                         {
-                                            <MudPaper Class="pa-6 text-center" Rounded="true">Chưa có ảnh preview</MudPaper>
+                                            <MudPaper Class="pa-6 text-center" rounded="true">Chưa có ảnh preview</MudPaper>
                                         }
                                         <MudTextField T="string" Label="Scene prompt" @bind-Value="scene.ScenePrompt" Lines="4" Variant="Variant.Outlined" />
                                         <MudTextField T="string" Label="Image prompt" @bind-Value="scene.ImagePrompt" Lines="3" Variant="Variant.Outlined" />
@@ -124,7 +124,7 @@
                 }
                 else
                 {
-                    <MudPaper Class="todox-card pa-4" Rounded="true">
+                    <MudPaper Class="todox-card pa-4" rounded="true">
                         <MudStack Spacing="2">
                             <MudText Typo="Typo.h6">@(_project.Title ?? "Video project")</MudText>
                             <MudText>Trạng thái: @_project.Status</MudText>
@@ -140,7 +140,7 @@
                         </MudStack>
                     </MudPaper>
 
-                    <MudPaper Class="todox-card pa-4 mt-4" Rounded="true">
+                    <MudPaper Class="todox-card pa-4 mt-4" rounded="true">
                         <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
                             <MudText Typo="Typo.h6">Log thao tác</MudText>
                             <MudStack Row="true" Spacing="1" Class="flex-wrap gap-1">
@@ -151,7 +151,7 @@
                         <div class="video-render-log-panel" style="max-height:320px;overflow:auto;">
                             @foreach (var log in _project.Events.Take(50))
                             {
-                                <MudPaper Class="pa-3 mb-2" Rounded="true" Outlined="true">
+                                <MudPaper Class="pa-3 mb-2" rounded="true" Outlined="true">
                                     <MudStack Spacing="1">
                                         <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1" Class="flex-wrap gap-1">
                                             <MudChip T="string" Size="Size.Small" Color="@LogColor(log.Level)">@log.Level</MudChip>
@@ -169,7 +169,7 @@
                         </div>
                     </MudPaper>
 
-                    <MudPaper Class="todox-card pa-4 mt-4" Rounded="true">
+                    <MudPaper Class="todox-card pa-4 mt-4" rounded="true">
                         <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
                             <MudText Typo="Typo.h6">Danh sách job render</MudText>
                             <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="ReloadJobsAsync">Refresh jobs</MudButton>
@@ -226,7 +226,7 @@
         {
             await ReloadAsync();
         }
-        StartPolling();
+        await StartPolling();
     }
 
     public void Dispose()
@@ -313,7 +313,7 @@
         await InvokeAsync(StateHasChanged);
     }
 
-    private void StartPolling()
+    private async Task StartPolling()
     {
         _pollCts?.Cancel();
         _pollCts = new CancellationTokenSource();
@@ -395,7 +395,7 @@
         var url = "/" + relative;
         await VideoRepo.UpdateSceneAsync(scene.Id, VideoSceneStatuses.VideoReady, videoUrl: url, videoPath: mockPath, errorMessage: null, title: scene.Title, scenePrompt: scene.ScenePrompt, imagePrompt: scene.ImagePrompt, videoPrompt: scene.VideoPrompt);
         await VideoRepo.AddProjectEventAsync(_project.Id, "SCENE_VIDEO_READY", "info", $"Scene {scene.SceneIndex} video ready.", new { scene.Id, url });
-        LogProjectEvent("SCENE_VIDEO_RENDERED", "info", $"Render video mock cho scene {scene.SceneIndex}.", new { scene.Id, url, mockPath });
+        await LogProjectEvent("SCENE_VIDEO_RENDERED", "info", $"Render video mock cho scene {scene.SceneIndex}.", new { scene.Id, url, mockPath });
         await ReloadAsync();
     }
 

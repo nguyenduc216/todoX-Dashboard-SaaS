@@ -1,4 +1,4 @@
-﻿@page "/ai-assets/characters/new"
+@page "/ai-assets/characters/new"
 @page "/ai-assets/characters/{Id:long}"
 @using TodoX.Web.Models
 @using TodoX.Web.Services.AiProviders
@@ -12,22 +12,22 @@
 @inject ISnackbar Snackbar
 @inject IConfiguration Config
 
-<PageTitle>@(_isNew ? "Tạo nhân vật AI" : "Nhân vật AI")</PageTitle>
+<PageTitle>@(_isNew ? "T?o nh�n v?t AI" : "Nh�n v?t AI")</PageTitle>
 
 <section class="todox-page-head">
     <div>
-        <MudText Typo="Typo.h3" Class="todox-page-title">@(_isNew ? "Tạo nhân vật AI" : _model.CharacterName)</MudText>
-        <MudText Typo="Typo.body1" Class="todox-page-subtitle">Thiết kế nhân vật AI nhất quán để dùng lại trong video TodoX.</MudText>
+        <MudText Typo="Typo.h3" Class="todox-page-title">@(_isNew ? "T?o nh�n v?t AI" : _model.CharacterName)</MudText>
+        <MudText Typo="Typo.body1" Class="todox-page-subtitle">Thi?t k? nh�n v?t AI nh?t qu�n d? d�ng l?i trong video TodoX.</MudText>
     </div>
     <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.ArrowBack"
                OnClick="@(() => Nav.NavigateTo("/ai-assets/characters"))">
-        Quay lại
+        Quay l?i
     </MudButton>
 </section>
 
 @if (_loading)
 {
-    <div class="todox-flash-row"><span class="avatar-flash-dot"></span><span>Đang tải nhân vật...</span></div>
+    <div class="todox-flash-row"><span class="avatar-flash-dot"></span><span>�ang t?i nh�n v?t...</span></div>
 }
 else if (!string.IsNullOrWhiteSpace(_error))
 {
@@ -36,15 +36,15 @@ else if (!string.IsNullOrWhiteSpace(_error))
 else
 {
     <div class="ai-character-detail-grid">
-        <MudPaper Class="todox-panel pa-5" Rounded="true">
-            <MudText Typo="Typo.h5" Class="mb-4">Thông tin nhân vật</MudText>
-            <MudTextField T="string" Label="Tên nhân vật" Variant="Variant.Outlined" @bind-Value="_model.CharacterName" Class="mb-3" />
-            <MudTextField T="string" Label="Mô tả nhân vật" Variant="Variant.Outlined" Lines="5" @bind-Value="_model.Description" Class="mb-3" />
-            <MudTextField T="string" Label="Prompt render hình ảnh" HelperText="Có thể để trống để TodoX tự tạo prompt từ mô tả. Prompt này sẽ được gửi trực tiếp đến provider render."
+        <MudPaper Class="todox-panel pa-5" rounded="true">
+            <MudText Typo="Typo.h5" Class="mb-4">Th�ng tin nh�n v?t</MudText>
+            <MudTextField T="string" Label="T�n nh�n v?t" Variant="Variant.Outlined" @bind-Value="_model.CharacterName" Class="mb-3" />
+            <MudTextField T="string" Label="M� t? nh�n v?t" Variant="Variant.Outlined" Lines="5" @bind-Value="_model.Description" Class="mb-3" />
+            <MudTextField T="string" Label="Prompt render h�nh ?nh" HelperText="C� th? d? tr?ng d? TodoX t? t?o prompt t? m� t?. Prompt n�y s? du?c g?i tr?c ti?p d?n provider render."
                           Variant="Variant.Outlined" Lines="5" @bind-Value="_renderPrompt" Class="mb-3" />
             <MudGrid>
                 <MudItem xs="12" sm="6">
-                    <MudSelect T="string" Label="Phong cách" Variant="Variant.Outlined" @bind-Value="_model.StylePreset">
+                    <MudSelect T="string" Label="Phong c�ch" Variant="Variant.Outlined" @bind-Value="_model.StylePreset">
                         @foreach (var item in CharacterPresetOptions.StylePresets)
                         {
                             <MudSelectItem Value="@item.Value">@item.Label</MudSelectItem>
@@ -52,7 +52,7 @@ else
                     </MudSelect>
                 </MudItem>
                 <MudItem xs="12" sm="6">
-                    <MudSelect T="string" Label="Giới tính" Variant="Variant.Outlined" @bind-Value="_model.Gender">
+                    <MudSelect T="string" Label="Gi?i t�nh" Variant="Variant.Outlined" @bind-Value="_model.Gender">
                         @foreach (var item in CharacterPresetOptions.GenderOptions)
                         {
                             <MudSelectItem Value="@item.Value">@item.Label</MudSelectItem>
@@ -60,7 +60,7 @@ else
                     </MudSelect>
                 </MudItem>
                 <MudItem xs="12" sm="6">
-                    <MudSelect T="string" Label="Tỷ lệ khung hình" Variant="Variant.Outlined" @bind-Value="_model.AspectRatio">
+                    <MudSelect T="string" Label="T? l? khung h�nh" Variant="Variant.Outlined" @bind-Value="_model.AspectRatio">
                         @foreach (var item in CharacterPresetOptions.AspectRatios)
                         {
                             <MudSelectItem Value="@item.Value">@item.Label</MudSelectItem>
@@ -68,18 +68,18 @@ else
                     </MudSelect>
                 </MudItem>
                 <MudItem xs="12" sm="6">
-                    <MudSelect T="string" Label="Trạng thái" Variant="Variant.Outlined" Disabled="_isNew" @bind-Value="_model.Status">
-                        <MudSelectItem T="string" Value="@("active")">Đang dùng</MudSelectItem>
-                        <MudSelectItem T="string" Value="@("inactive")">Tạm tắt</MudSelectItem>
+                    <MudSelect T="string" Label="Tr?ng th�i" Variant="Variant.Outlined" Disabled="_isNew" @bind-Value="_model.Status">
+                        <MudSelectItem T="string" Value="@("active")">�ang d�ng</MudSelectItem>
+                        <MudSelectItem T="string" Value="@("inactive")">T?m t?t</MudSelectItem>
                     </MudSelect>
                 </MudItem>
                 <MudItem xs="12" sm="6">
-                    <MudNumericField T="int?" Label="Mã seed" Variant="Variant.Outlined" @bind-Value="_seed" />
+                    <MudNumericField T="int?" Label="M� seed" Variant="Variant.Outlined" @bind-Value="_seed" />
                 </MudItem>
                 <MudItem xs="12" sm="6">
                     @if (_providerOptions.Count == 0)
                     {
-                        <MudAlert Severity="Severity.Warning" Dense="true">Chưa cấu hình provider cho <b>character_generation</b>.</MudAlert>
+                        <MudAlert Severity="Severity.Warning" Dense="true">Chua c?u h�nh provider cho <b>character_generation</b>.</MudAlert>
                     }
                     else
                     {
@@ -92,25 +92,25 @@ else
                     }
                 </MudItem>
                 <MudItem xs="12" sm="6">
-                    <MudCheckBox T="bool" Label="Render ảnh sau khi lưu" Color="Color.Warning" @bind-Value="_autoGenerate" Disabled="@(!_isNew)" />
+                    <MudCheckBox T="bool" Label="Render ?nh sau khi luu" Color="Color.Warning" @bind-Value="_autoGenerate" Disabled="@(!_isNew)" />
                 </MudItem>
             </MudGrid>
-            <MudTextField T="string" Label="URL ảnh tham chiếu" HelperText="Mỗi dòng là một URL http/https."
+            <MudTextField T="string" Label="URL ?nh tham chi?u" HelperText="M?i d�ng l� m?t URL http/https."
                           Variant="Variant.Outlined" Lines="3" @bind-Value="_referenceUrlsText" Class="mt-3" />
             <div class="ai-character-form-actions">
                 <MudButton Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.Save" Disabled="_busy" OnClick="Save">
-                    Lưu
+                    Luu
                 </MudButton>
                 <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.AutoAwesome"
                            Disabled="@(_busy || _isNew)" OnClick="Generate">
-                    Render ảnh nhân vật
+                    Render ?nh nh�n v?t
                 </MudButton>
             </div>
         </MudPaper>
 
-        <MudPaper Class="todox-panel ai-character-master pa-5" Rounded="true">
+        <MudPaper Class="todox-panel ai-character-master pa-5" rounded="true">
             <div class="ai-character-section-title mb-3">
-                <MudText Typo="Typo.h5">Ảnh master</MudText>
+                <MudText Typo="Typo.h5">?nh master</MudText>
                 <span class="ai-character-provider-chip">@ProviderDisplay</span>
             </div>
             <div class='@($"ai-character-master-image {(_busy ? "is-rendering" : string.Empty)}")'>
@@ -124,19 +124,19 @@ else
                 }
                 @if (_busy)
                 {
-                    <div class="ai-character-flash-overlay"><span>Đang xử lý...</span></div>
+                    <div class="ai-character-flash-overlay"><span>�ang x? l�...</span></div>
                 }
             </div>
             <div class="ai-character-upload-box">
-                <MudText Typo="Typo.subtitle2">Không render? Upload ảnh master tại đây</MudText>
+                <MudText Typo="Typo.subtitle2">Kh�ng render? Upload ?nh master t?i d�y</MudText>
                 <label class="ai-character-upload-button">
                     <MudIcon Icon="@Icons.Material.Filled.Upload" Size="Size.Small" />
-                    <span>Chọn ảnh upload</span>
+                    <span>Ch?n ?nh upload</span>
                     <InputFile class="ai-character-upload-input" OnChange="UploadMasterImage" accept="image/*" disabled="@(_busy || _isNew)" />
                 </label>
                 @if (_isNew)
                 {
-                    <small>Lưu nhân vật trước khi upload ảnh master.</small>
+                    <small>Luu nh�n v?t tru?c khi upload ?nh master.</small>
                 }
             </div>
             @if (_lastGenerate is not null)
@@ -154,20 +154,20 @@ else
 
     @if (!_isNew && _detail is not null)
     {
-        <MudPaper Class="todox-panel pa-5 mt-4" Rounded="true">
+        <MudPaper Class="todox-panel pa-5 mt-4" rounded="true">
             <div class="ai-character-section-title">
-                <MudText Typo="Typo.h5">Prompt đang lưu</MudText>
+                <MudText Typo="Typo.h5">Prompt dang luu</MudText>
                 <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Warning" StartIcon="@Icons.Material.Filled.ContentCopy"
-                           OnClick="@(() => Copy(_detail.NormalizedPrompt))">Sao chép</MudButton>
+                           OnClick="@(() => Copy(_detail.NormalizedPrompt))">Sao ch�p</MudButton>
             </div>
             <pre class="ai-character-prompt">@_detail.NormalizedPrompt</pre>
         </MudPaper>
 
-        <MudPaper Class="todox-panel pa-5 mt-4" Rounded="true">
-            <MudText Typo="Typo.h5" Class="mb-4">Lịch sử render</MudText>
+        <MudPaper Class="todox-panel pa-5 mt-4" rounded="true">
+            <MudText Typo="Typo.h5" Class="mb-4">L?ch s? render</MudText>
             @if (_detail.Renders.Count == 0)
             {
-                <MudAlert Severity="Severity.Info">Chưa có lịch sử render.</MudAlert>
+                <MudAlert Severity="Severity.Info">Chua c� l?ch s? render.</MudAlert>
             }
             else
             {
@@ -188,9 +188,9 @@ else
                             </div>
                             <div class="ai-character-render-body">
                                 <b>@render.RenderCode</b>
-                                <span>Nhà cung cấp: @ProviderLabel(render.ProviderCode) / @render.ModelName</span>
+                                <span>Nh� cung c?p: @ProviderLabel(render.ProviderCode) / @render.ModelName</span>
                                 <span>@render.AspectRatio - @render.Quality - @render.Resolution</span>
-                                <span>@(render.UsageCost?.ToString("0.####") ?? "0") điểm - @render.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</span>
+                                <span>@(render.UsageCost?.ToString("0.####") ?? "0") di?m - @render.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</span>
                                 @if (!string.IsNullOrWhiteSpace(render.ErrorMessage))
                                 {
                                     <small class="ai-character-error">@render.ErrorMessage</small>
@@ -201,18 +201,18 @@ else
                                         <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Warning"
                                                    StartIcon="@Icons.Material.Filled.Star"
                                                    OnClick="@(() => SetMaster(render.Id))">
-                                            Chọn làm master
+                                            Ch?n l�m master
                                         </MudButton>
                                         <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Warning"
                                                    StartIcon="@Icons.Material.Filled.Link"
                                                     OnClick="@(() => Copy(render.OutputImageUrl ?? string.Empty))">
-                                            Sao chép URL
+                                            Sao ch�p URL
                                         </MudButton>
                                     }
                                     <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Warning"
                                                StartIcon="@Icons.Material.Filled.Article"
                                                OnClick="@(() => Copy(render.Prompt))">
-                                        Sao chép prompt
+                                        Sao ch�p prompt
                                     </MudButton>
                                 </div>
                             </div>
@@ -221,17 +221,17 @@ else
                 </div>
             }
         </MudPaper>
-        <MudPaper Class="todox-panel pa-4 mt-4 ai-character-render-log-panel" Rounded="true">
+        <MudPaper Class="todox-panel pa-4 mt-4 ai-character-render-log-panel" rounded="true">
             <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
                 <div>
-                    <MudText Typo="Typo.h6">Nhật ký render</MudText>
-                    <MudText Typo="Typo.caption" Class="todox-page-subtitle">Log chạy trực tiếp trên trang này. Tải được file ngay cả khi backend lỗi.</MudText>
+                    <MudText Typo="Typo.h6">Nh?t k� render</MudText>
+                    <MudText Typo="Typo.caption" Class="todox-page-subtitle">Log ch?y tr?c ti?p tr�n trang n�y. T?i du?c file ngay c? khi backend l?i.</MudText>
                 </div>
                 <MudStack Row="true" Spacing="1" Class="flex-wrap gap-1">
-                    <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.ContentCopy" OnClick="CopyRenderLogs" Disabled="@(_renderLogs.Count == 0)">Sao chép log</MudButton>
-                    <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Download" OnClick="DownloadRenderLogTxt" Disabled="@(_renderLogs.Count == 0)">Tải .txt</MudButton>
-                    <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.DataObject" OnClick="DownloadRenderLogJson" Disabled="@(_renderLogs.Count == 0)">Tải .json</MudButton>
-                    <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Warning" OnClick="ClearRenderLogs" Disabled="@_busy">Xóa log</MudButton>
+                    <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.ContentCopy" OnClick="CopyRenderLogs" Disabled="@(_renderLogs.Count == 0)">Sao ch�p log</MudButton>
+                    <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Download" OnClick="DownloadRenderLogTxt" Disabled="@(_renderLogs.Count == 0)">T?i .txt</MudButton>
+                    <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.DataObject" OnClick="DownloadRenderLogJson" Disabled="@(_renderLogs.Count == 0)">T?i .json</MudButton>
+                    <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Warning" OnClick="ClearRenderLogs" Disabled="@_busy">X�a log</MudButton>
                 </MudStack>
             </MudStack>
 
@@ -243,7 +243,7 @@ else
             @if (!string.IsNullOrWhiteSpace(_lastRenderError))
             {
                 <MudAlert Severity="Severity.Error" Dense="true" Class="mt-3">
-                    <MudText Typo="Typo.subtitle2">Lỗi gần nhất</MudText>
+                    <MudText Typo="Typo.subtitle2">L?i g?n nh?t</MudText>
                     <pre class="ai-character-render-log-error">@_lastRenderError</pre>
                 </MudAlert>
             }
@@ -251,7 +251,7 @@ else
             <div id="ai-character-render-log-panel" class="ai-character-render-log-list mt-3">
                 @if (_renderLogs.Count == 0)
                 {
-                    <div class="ai-character-render-log-empty">Chưa có log.</div>
+                    <div class="ai-character-render-log-empty">Chua c� log.</div>
                 }
                 else
                 {
@@ -312,7 +312,7 @@ else
         {
             var provider = _detail?.ProviderCode ?? Config["AiCharacters:DefaultImageProviderCode"] ?? Config["OpenRouter:DefaultImageProviderCode"] ?? "todox_image";
             var model = _detail?.ModelName ?? Config["AiCharacters:DefaultImageModel"] ?? Config["OpenRouter:DefaultImageModel"] ?? "ImageAICreativeRender";
-            return $"Nhà cung cấp: {ProviderLabel(provider)} / {model}";
+            return $"Nh� cung c?p: {ProviderLabel(provider)} / {model}";
         }
     }
 
@@ -354,7 +354,7 @@ else
                 _detail = await Characters.GetCharacterAsync(AuthState.CurrentUser, id);
                 if (_detail is null)
                 {
-                    _error = "Không tìm thấy nhân vật.";
+                    _error = "Kh�ng t�m th?y nh�n v?t.";
                     return;
                 }
 
@@ -399,14 +399,14 @@ else
                     Seed = _seed,
                     AutoGenerateImage = _autoGenerate
                 }, AuthState.CurrentUser);
-                Snackbar.Add("Đã tạo nhân vật AI.", Severity.Success);
+                Snackbar.Add("�� t?o nh�n v?t AI.", Severity.Success);
                 Nav.NavigateTo($"/ai-assets/characters/{created.Id}");
                 return;
             }
 
             _model.RenderPrompt = _renderPrompt;
             await Characters.UpdateCharacterAsync(Id!.Value, _model, AuthState.CurrentUser);
-            Snackbar.Add("Đã lưu nhân vật AI.", Severity.Success);
+            Snackbar.Add("�� luu nh�n v?t AI.", Severity.Success);
             await Load();
         }
         catch (Exception ex)
@@ -423,8 +423,8 @@ else
     {
         _lastRenderError = null;
         _renderLogs.Clear();
-        await AddRenderLogAsync("ui_started", "Bắt đầu render character.", "info");
-        await AddRenderLogAsync("ui_validate_input", "Đang kiểm tra input và prompt.", "info", new
+        await AddRenderLogAsync("ui_started", "B?t d?u render character.", "info");
+        await AddRenderLogAsync("ui_validate_input", "�ang ki?m tra input v� prompt.", "info", new
         {
             CharacterId = Id,
             _model.CharacterName,
@@ -437,7 +437,7 @@ else
 
         if (AuthState.CurrentUser is null || Id is null)
         {
-            await AddRenderLogAsync("ui_abort", "Thiếu user hoặc character id.", "warn");
+            await AddRenderLogAsync("ui_abort", "Thi?u user ho?c character id.", "warn");
             return;
         }
 
@@ -446,7 +446,7 @@ else
         try
         {
             var referenceUrls = ParseReferenceUrls();
-            await AddRenderLogAsync("service_call", "Gọi backend render character.", "info", new
+            await AddRenderLogAsync("service_call", "G?i backend render character.", "info", new
             {
                 CharacterId = Id,
                 Seed = _seed,
@@ -467,11 +467,11 @@ else
 
             await AddRenderLogAsync(
                 "service_result",
-                _lastGenerate.Status == "success" ? "Render ảnh nhân vật thành công." : _lastGenerate.ErrorMessage ?? "Render chưa thành công.",
+                _lastGenerate.Status == "success" ? "Render ?nh nh�n v?t th�nh c�ng." : _lastGenerate.ErrorMessage ?? "Render chua th�nh c�ng.",
                 _lastGenerate.Status == "success" ? "success" : "error",
                 new { _lastGenerate.Status, _lastGenerate.RenderId, _lastGenerate.ImageUrl, _lastGenerate.ErrorMessage });
 
-            Snackbar.Add(_lastGenerate.Status == "success" ? "Render ảnh nhân vật thành công." : _lastGenerate.ErrorMessage ?? "Render chưa thành công.",
+            Snackbar.Add(_lastGenerate.Status == "success" ? "Render ?nh nh�n v?t th�nh c�ng." : _lastGenerate.ErrorMessage ?? "Render chua th�nh c�ng.",
                 _lastGenerate.Status == "success" ? Severity.Success : Severity.Error);
             await Load();
         }
@@ -479,7 +479,7 @@ else
         {
             _lastRenderError = ex.ToString();
             await AddRenderLogAsync("postgres_exception", ex.MessageText, "error", new { ex.SqlState, ex.Detail, ex.Hint }, ex.ToString());
-            Snackbar.Add($"Render thất bại: {ex.Message}", Severity.Error);
+            Snackbar.Add($"Render th?t b?i: {ex.Message}", Severity.Error);
         }
         catch (Exception ex)
         {
@@ -490,7 +490,7 @@ else
         finally
         {
             _busy = false;
-            await AddRenderLogAsync("ui_finished", "Hoàn tất render.", "info", new { _lastGenerate?.Status, _lastGenerate?.RenderId });
+            await AddRenderLogAsync("ui_finished", "Ho�n t?t render.", "info", new { _lastGenerate?.Status, _lastGenerate?.RenderId });
             await InvokeAsync(StateHasChanged);
             await ScrollRenderLogsAsync();
         }
@@ -507,7 +507,7 @@ else
             using var ms = new MemoryStream();
             await stream.CopyToAsync(ms);
             _lastGenerate = await Characters.UploadMasterImageAsync(Id.Value, ms.ToArray(), file.Name, file.ContentType, AuthState.CurrentUser);
-            Snackbar.Add("Đã upload ảnh master.", Severity.Success);
+            Snackbar.Add("�� upload ?nh master.", Severity.Success);
             await Load();
         }
         catch (Exception ex)
@@ -524,7 +524,7 @@ else
     {
         if (AuthState.CurrentUser is null || Id is null) return;
         await Characters.SetMasterImageAsync(Id.Value, renderId, AuthState.CurrentUser);
-        Snackbar.Add("Đã chọn ảnh master.", Severity.Success);
+        Snackbar.Add("�� ch?n ?nh master.", Severity.Success);
         await Load();
     }
 
@@ -557,7 +557,7 @@ else
     {
         var text = string.Join(Environment.NewLine, _renderLogs.Select(log => $"[{log.Time:HH:mm:ss}] {log.Level.ToUpperInvariant()} {log.Step} - {log.Message}{FormatLogTail(log.Data, log.RawError)}"));
         await Js.InvokeVoidAsync("todoXRenderLog.copyText", text);
-        Snackbar.Add("Đã sao chép log.", Severity.Success);
+        Snackbar.Add("�� sao ch�p log.", Severity.Success);
     }
 
     private async Task DownloadRenderLogTxt()
@@ -612,16 +612,16 @@ else
     private async Task Copy(string value)
     {
         await Js.InvokeVoidAsync("navigator.clipboard.writeText", value);
-        Snackbar.Add("Đã copy.", Severity.Success);
+        Snackbar.Add("�� copy.", Severity.Success);
     }
 
     private static string StyleLabel(string value) => value switch
     {
         "3d_chibi" => "3D chibi",
-        "realistic" => "Chân thực",
+        "realistic" => "Ch�n th?c",
         "anime" => "Anime",
-        "cartoon" => "Hoạt hình",
-        "corporate_mascot" => "Linh vật doanh nghiệp",
+        "cartoon" => "Ho?t h�nh",
+        "corporate_mascot" => "Linh v?t doanh nghi?p",
         "koc_ai" => "KOC AI",
         _ => value
     };
@@ -629,30 +629,30 @@ else
     private static string GenderLabel(string value) => value switch
     {
         "male" => "Nam",
-        "female" => "Nữ",
-        "neutral" => "Trung tính",
-        "not_specified" => "Không chọn",
+        "female" => "N?",
+        "neutral" => "Trung t�nh",
+        "not_specified" => "Kh�ng ch?n",
         _ => value
     };
 
     private static string AspectLabel(string value) => value switch
     {
-        "1:1" => "Vuông 1:1",
-        "9:16" => "Dọc 9:16",
+        "1:1" => "Vu�ng 1:1",
+        "9:16" => "D?c 9:16",
         "16:9" => "Ngang 16:9",
-        "4:5" => "Dọc 4:5",
-        "3:4" => "Dọc 3:4",
+        "4:5" => "D?c 4:5",
+        "3:4" => "D?c 3:4",
         _ => value
     };
 
     private static string StatusLabel(string value) => value switch
     {
-        "active" => "Đang dùng",
-        "inactive" => "Tạm tắt",
-        "success" => "Thành công",
-        "failed" => "Thất bại",
-        "processing" => "Đang xử lý",
-        "completed" => "Thành công",
+        "active" => "�ang d�ng",
+        "inactive" => "T?m t?t",
+        "success" => "Th�nh c�ng",
+        "failed" => "Th?t b?i",
+        "processing" => "�ang x? l�",
+        "completed" => "Th�nh c�ng",
         _ => value
     };
 
@@ -660,7 +660,7 @@ else
     {
         "todox_image" => "TodoX ImageAICreativeRender",
         "openrouter_image" => "OpenRouter",
-        "manual_upload" => "Upload thủ công",
+        "manual_upload" => "Upload th? c�ng",
         _ => value
     };
 }

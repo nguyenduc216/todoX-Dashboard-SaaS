@@ -1,4 +1,4 @@
-﻿@page "/admin/avatar-manager"
+@page "/admin/avatar-manager"
 @using Microsoft.AspNetCore.Components.Forms
 @using TodoX.Web.Components.Avatar
 @using TodoX.Web.Services.AvatarTemplates
@@ -15,27 +15,27 @@
 @inject NavigationManager Nav
 @inject IJSRuntime JS
 
-<PageTitle>Quản lý avatar mẫu</PageTitle>
+<PageTitle>Qu?n l� avatar m?u</PageTitle>
 
 <MudStack Spacing="3">
     <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-3">
         <div>
-            <MudText Typo="Typo.h4" Class="todox-page-title">Quản lý avatar mẫu</MudText>
-            <MudText Typo="Typo.body1" Class="todox-page-subtitle">Tạo avatar mẫu, render thử bằng ImageAICreativeRender và lưu vào thư viện dùng lại.</MudText>
+            <MudText Typo="Typo.h4" Class="todox-page-title">Qu?n l� avatar m?u</MudText>
+            <MudText Typo="Typo.body1" Class="todox-page-subtitle">T?o avatar m?u, render th? b?ng ImageAICreativeRender v� luu v�o thu vi?n d�ng l?i.</MudText>
         </div>
-        <MudButton Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.Add" OnClick="NewTemplate">Làm mới form</MudButton>
+        <MudButton Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.Add" OnClick="NewTemplate">L�m m?i form</MudButton>
     </MudStack>
 
     @if (!IsAdmin)
     {
-        <MudAlert Severity="Severity.Error">Bạn cần quyền quản trị để mở trang này.</MudAlert>
+        <MudAlert Severity="Severity.Error">B?n c?n quy?n qu?n tr? d? m? trang n�y.</MudAlert>
     }
     else
     {
         <MudGrid>
             <MudItem xs="12" md="4">
-                <MudPaper Class="todox-card pa-4" Rounded="true">
-                    <MudText Typo="Typo.h6">Danh sách avatar</MudText>
+                <MudPaper Class="todox-card pa-4" rounded="true">
+                    <MudText Typo="Typo.h6">Danh s�ch avatar</MudText>
                     <MudDivider Class="my-3" />
                     @if (_loading)
                     {
@@ -43,7 +43,7 @@
                     }
                     else if (_templates.Count == 0)
                     {
-                        <MudText Class="todox-page-subtitle">Chưa có avatar mẫu.</MudText>
+                        <MudText Class="todox-page-subtitle">Chua c� avatar m?u.</MudText>
                     }
                     else
                     {
@@ -64,7 +64,7 @@
                                     <div class="avatar-template-list-copy">
                                         <MudText Typo="Typo.body2">@item.Name</MudText>
                                         <MudText Typo="Typo.caption" Class="todox-page-subtitle">
-                                            @(item.IsPublic ? "Công khai" : "Riêng tư") · @(item.IsActive ? "Đang hoạt động" : "Đã ẩn")
+                                            @(item.IsPublic ? "C�ng khai" : "Ri�ng tu") � @(item.IsActive ? "�ang ho?t d?ng" : "�� ?n")
                                         </MudText>
                                     </div>
                                 </div>
@@ -75,12 +75,12 @@
             </MudItem>
 
             <MudItem xs="12" md="8">
-                <MudPaper Class="todox-card pa-5" Rounded="true">
+                <MudPaper Class="todox-card pa-5" rounded="true">
                     <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
-                        <MudText Typo="Typo.h6">Thông tin avatar</MudText>
+                        <MudText Typo="Typo.h6">Th�ng tin avatar</MudText>
                         <MudStack Row="true" Spacing="1">
                             <MudButton Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.Save"
-                                       Disabled="@_busy" OnClick="SaveTemplate">Lưu avatar</MudButton>
+                                       Disabled="@_busy" OnClick="SaveTemplate">Luu avatar</MudButton>
                             @if (_model.Id is Guid id && id != Guid.Empty)
                             {
                                 <MudIconButton Icon="@Icons.Material.Filled.Public" Color="Color.Warning" Disabled="@_busy" OnClick="TogglePublic" />
@@ -94,7 +94,7 @@
 
                     @if (_providerOptions.Count == 0)
                     {
-                        <MudAlert Severity="Severity.Warning" Dense="true">Chưa cấu hình provider render ảnh cho <b>avatar_generation</b>. Vào <b>AI Providers</b> để bật provider.</MudAlert>
+                        <MudAlert Severity="Severity.Warning" Dense="true">Chua c?u h�nh provider render ?nh cho <b>avatar_generation</b>. V�o <b>AI Providers</b> d? b?t provider.</MudAlert>
                     }
                     else
                     {
@@ -122,23 +122,23 @@
                     <MudDivider Class="my-4" />
                     <MudStack Row="true" Justify="Justify.FlexEnd" Class="flex-wrap gap-2">
                         <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.AutoAwesome"
-                                   Disabled="@_busy" OnClick="RenderPreview">Render thử</MudButton>
+                                   Disabled="@_busy" OnClick="RenderPreview">Render th?</MudButton>
                     </MudStack>
                 </MudPaper>
 
-                <MudPaper Class="todox-card pa-5 mt-3" Rounded="true">
-                    <MudText Typo="Typo.h6">Ảnh kết quả</MudText>
+                <MudPaper Class="todox-card pa-5 mt-3" rounded="true">
+                    <MudText Typo="Typo.h6">?nh k?t qu?</MudText>
                     <MudDivider Class="my-3" />
                     <MudGrid>
                         <MudItem xs="12" sm="5">
-                            <a class="avatar-builder-result-link" href="@CurrentPreviewUrl" target="_blank" rel="noopener noreferrer" title="Xem ảnh full size">
+                            <a class="avatar-builder-result-link" href="@CurrentPreviewUrl" target="_blank" rel="noopener noreferrer" title="Xem ?nh full size">
                                 <div class="@PreviewClass">
-                                    <img src="@CurrentPreviewUrl" alt="Ảnh avatar preview" />
+                                    <img src="@CurrentPreviewUrl" alt="?nh avatar preview" />
                                 </div>
                             </a>
                             @if (!HasPreviewSource)
                             {
-                                <MudText Class="todox-page-subtitle mt-2">Chưa render thử. Bấm Render thử để tạo preview bằng ImageAICreativeRender.</MudText>
+                                <MudText Class="todox-page-subtitle mt-2">Chua render th?. B?m Render th? d? t?o preview b?ng ImageAICreativeRender.</MudText>
                             }
                         </MudItem>
                         <MudItem xs="12" sm="7">
@@ -150,11 +150,11 @@
                                     @if (!string.IsNullOrWhiteSpace(_preview.ImageUrl))
                                     {
                                         <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Download"
-                                                   Href="@_preview.ImageUrl" Target="_blank">Tải ảnh preview</MudButton>
+                                                   Href="@_preview.ImageUrl" Target="_blank">T?i ?nh preview</MudButton>
                                     }
                                     @if (!string.IsNullOrWhiteSpace(_preview.PromptUsed))
                                     {
-                                        <MudText Typo="Typo.caption" Class="todox-page-subtitle">Prompt đã dùng</MudText>
+                                        <MudText Typo="Typo.caption" Class="todox-page-subtitle">Prompt d� d�ng</MudText>
                                         <pre class="avatar-builder-log">@_preview.PromptUsed</pre>
                                     }
                                 }
@@ -164,10 +164,10 @@
 
                     <MudPaper Class="pa-4 mt-4 render-log-box" Elevation="1">
                         <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
-                            <MudText Typo="Typo.h6">Nhật ký render</MudText>
+                            <MudText Typo="Typo.h6">Nh?t k� render</MudText>
                             <MudStack Row="true" Spacing="1">
-                                <MudButton Variant="Variant.Outlined" Color="Color.Default" StartIcon="@Icons.Material.Filled.ClearAll" OnClick="ClearRenderLog">Xóa log</MudButton>
-                                <MudButton Variant="Variant.Outlined" Color="Color.Info" StartIcon="@Icons.Material.Filled.ContentCopy" OnClick="CopyRenderLogAsync">Sao chép log</MudButton>
+                                <MudButton Variant="Variant.Outlined" Color="Color.Default" StartIcon="@Icons.Material.Filled.ClearAll" OnClick="ClearRenderLog">X�a log</MudButton>
+                                <MudButton Variant="Variant.Outlined" Color="Color.Info" StartIcon="@Icons.Material.Filled.ContentCopy" OnClick="CopyRenderLogAsync">Sao ch�p log</MudButton>
                             </MudStack>
                         </MudStack>
 
@@ -179,7 +179,7 @@
                         <div id="render-log-panel" class="render-log-panel mt-3">
                             @if (_renderLogs.Count == 0)
                             {
-                                <MudText Class="todox-page-subtitle">Chưa có log.</MudText>
+                                <MudText Class="todox-page-subtitle">Chua c� log.</MudText>
                             }
                             else
                             {
@@ -321,7 +321,7 @@
         {
             if (args.File.Size > 10 * 1024 * 1024)
             {
-                Snackbar.Add("Ảnh vượt quá 10MB.", Severity.Error);
+                Snackbar.Add("?nh vu?t qu� 10MB.", Severity.Error);
                 return;
             }
 
@@ -331,11 +331,11 @@
             var media = await MediaFiles.SaveAsync(ms.ToArray(), args.File.Name, args.File.ContentType,
                 $"avatar_template_{args.Slot}", AuthState.CurrentUser.UserId, null, Tenant.TenantId);
             SetMedia(args.Slot, media.Id, media.PublicUrl ?? media.FileUrl);
-            Snackbar.Add("Đã tải ảnh.", Severity.Success);
+            Snackbar.Add("�� t?i ?nh.", Severity.Success);
         }
         catch (Exception ex)
         {
-            Snackbar.Add($"Lỗi tải ảnh: {ex.Message}", Severity.Error);
+            Snackbar.Add($"L?i t?i ?nh: {ex.Message}", Severity.Error);
         }
     }
 
@@ -351,11 +351,11 @@
         _isRendering = true;
         _busy = true;
         _previewFlash = true;
-        await AddRenderLogAsync("Bắt đầu yêu cầu render avatar.");
-        await AddRenderLogAsync("Đang kiểm tra prompt.");
-        await AddRenderLogAsync("Đang kiểm tra ảnh tham khảo.");
-        await AddRenderLogAsync("Đang chuẩn bị payload render.");
-        await AddRenderLogAsync("Đang gửi yêu cầu đến API render.");
+        await AddRenderLogAsync("B?t d?u y�u c?u render avatar.");
+        await AddRenderLogAsync("�ang ki?m tra prompt.");
+        await AddRenderLogAsync("�ang ki?m tra ?nh tham kh?o.");
+        await AddRenderLogAsync("�ang chu?n b? payload render.");
+        await AddRenderLogAsync("�ang g?i y�u c?u d?n API render.");
         _logs.Add(new RenderLogEntry { Step = "AVATAR_TEMPLATE_RENDER_REQUESTED", Message = "Admin requested avatar template preview render.", Data = new { _model.Name } });
         await InvokeAsync(StateHasChanged);
         try
@@ -364,35 +364,35 @@
             _logs.AddRange(_preview.Logs);
             if (_preview.Ok)
             {
-                await AddRenderLogAsync($"API đã nhận job render. JobId: {_preview.MediaId ?? Guid.Empty}", "success");
-                await AddRenderLogAsync("Đang chờ kết quả render.");
-                await AddRenderLogAsync("Đã nhận ảnh kết quả.", "success");
-                await AddRenderLogAsync("Đang lưu kết quả vào thư viện avatar mẫu.");
+                await AddRenderLogAsync($"API d� nh?n job render. JobId: {_preview.MediaId ?? Guid.Empty}", "success");
+                await AddRenderLogAsync("�ang ch? k?t qu? render.");
+                await AddRenderLogAsync("�� nh?n ?nh k?t qu?.", "success");
+                await AddRenderLogAsync("�ang luu k?t qu? v�o thu vi?n avatar m?u.");
                 _model.PreviewMediaId = _preview.MediaId;
                 _model.PreviewMediaUrl = _preview.ImageUrl;
                 _urls["preview"] = _preview.ImageUrl;
                 _model.LastRenderLogCode = _preview.LogCode;
                 _model.LastGeneratedPrompt = _preview.PromptUsed;
                 _logs.Add(new RenderLogEntry { Step = "AVATAR_TEMPLATE_RENDER_COMPLETED", Message = "Preview render completed.", Data = new { _preview.LogCode, _preview.MediaId } });
-                await AddRenderLogAsync("Hoàn tất render avatar.", "success");
-                Snackbar.Add("Đã render thử avatar.", Severity.Success);
+                await AddRenderLogAsync("Ho�n t?t render avatar.", "success");
+                Snackbar.Add("�� render th? avatar.", Severity.Success);
             }
             else
             {
                 _logs.Add(new RenderLogEntry { Step = "AVATAR_TEMPLATE_RENDER_FAILED", Message = _preview.Error ?? "Render failed.", Level = "error" });
-                await AddRenderLogAsync("LỖI: Không thể lưu bản ghi avatar.", "error");
+                await AddRenderLogAsync("L?I: Kh�ng th? luu b?n ghi avatar.", "error");
                 await AddRenderLogAsync(_preview.Error ?? "Render failed.", "error");
-                await AddRenderLogAsync("Gợi ý: Có trường dữ liệu dài hơn giới hạn database. Kiểm tra các cột varchar(50) liên quan đến avatar/render.", "warning");
-                Snackbar.Add(_preview.Error ?? "Render thử thất bại.", Severity.Error);
+                await AddRenderLogAsync("G?i �: C� tru?ng d? li?u d�i hon gi?i h?n database. Ki?m tra c�c c?t varchar(50) li�n quan d?n avatar/render.", "warning");
+                Snackbar.Add(_preview.Error ?? "Render th? th?t b?i.", Severity.Error);
             }
         }
         catch (Exception ex)
         {
             _logs.Add(new RenderLogEntry { Step = "AVATAR_TEMPLATE_RENDER_FAILED", Message = ex.Message, Level = "error" });
-            await AddRenderLogAsync("LỖI: Không thể lưu bản ghi avatar.", "error", ex.Message);
+            await AddRenderLogAsync("L?I: Kh�ng th? luu b?n ghi avatar.", "error", ex.Message);
             await AddRenderLogAsync(ex.Message, "error");
-            await AddRenderLogAsync("Gợi ý: Có trường dữ liệu dài hơn giới hạn database. Kiểm tra các cột varchar(50) liên quan đến avatar/render.", "warning");
-            Snackbar.Add($"Lỗi render thử: {ex.Message}", Severity.Error);
+            await AddRenderLogAsync("G?i �: C� tru?ng d? li?u d�i hon gi?i h?n database. Ki?m tra c�c c?t varchar(50) li�n quan d?n avatar/render.", "warning");
+            Snackbar.Add($"L?i render th?: {ex.Message}", Severity.Error);
         }
         finally
         {
@@ -420,15 +420,15 @@
                 _urls["preview"] = retainedPreviewUrl;
             }
             _logs.Add(new RenderLogEntry { Step = saved.CreatedAt == saved.UpdatedAt ? "AVATAR_TEMPLATE_SAVED" : "AVATAR_TEMPLATE_UPDATED", Message = "Avatar template saved.", Data = new { saved.Id, saved.Name } });
-            Snackbar.Add("Đã lưu avatar mẫu.", Severity.Success);
+            Snackbar.Add("�� luu avatar m?u.", Severity.Success);
             await Reload();
         }
         catch (Exception ex)
         {
-            await AddRenderLogAsync("LỖI: Không thể lưu bản ghi avatar.", "error", ex.Message);
+            await AddRenderLogAsync("L?I: Kh�ng th? luu b?n ghi avatar.", "error", ex.Message);
             await AddRenderLogAsync(ex.Message, "error");
-            await AddRenderLogAsync("Gợi ý: Có trường dữ liệu dài hơn giới hạn database. Kiểm tra các cột varchar(50) liên quan đến avatar/render.", "warning");
-            Snackbar.Add($"Lỗi lưu avatar: {ex.Message}", Severity.Error);
+            await AddRenderLogAsync("G?i �: C� tru?ng d? li?u d�i hon gi?i h?n database. Ki?m tra c�c c?t varchar(50) li�n quan d?n avatar/render.", "warning");
+            Snackbar.Add($"L?i luu avatar: {ex.Message}", Severity.Error);
         }
         finally { _busy = false; }
     }
@@ -459,7 +459,7 @@
             (string.IsNullOrWhiteSpace(x.Detail) ? string.Empty : $" | {x.Detail}")));
 
         await JS.InvokeVoidAsync("todoXRenderLog.copyText", text);
-        await AddRenderLogAsync("Đã sao chép log vào clipboard.", "success");
+        await AddRenderLogAsync("�� sao ch�p log v�o clipboard.", "success");
     }
 
     private async Task ScrollRenderLogToBottomAsync()
@@ -477,24 +477,24 @@
     {
         if (_model.Id is not Guid id || id == Guid.Empty || AuthState.CurrentUser is null) return;
         await AvatarTemplates.TogglePublicAsync(id, AuthState.CurrentUser.UserId);
-        Snackbar.Add("Đã đổi trạng thái công khai.", Severity.Success);
+        Snackbar.Add("�� d?i tr?ng th�i c�ng khai.", Severity.Success);
         await Reload();
     }
 
     private async Task DeleteTemplate()
     {
         if (_model.Id is not Guid id || id == Guid.Empty || AuthState.CurrentUser is null) return;
-        var ok = await DialogConfirm("Xóa avatar mẫu", $"Ẩn avatar mẫu \"{_model.Name}\"?");
+        var ok = await DialogConfirm("X�a avatar m?u", $"?n avatar m?u \"{_model.Name}\"?");
         if (ok != true) return;
         await AvatarTemplates.DeleteAsync(id, AuthState.CurrentUser.UserId);
         _logs.Add(new RenderLogEntry { Step = "AVATAR_TEMPLATE_DELETED", Message = "Avatar template disabled.", Data = new { id } });
-        Snackbar.Add("Đã ẩn avatar mẫu.", Severity.Success);
+        Snackbar.Add("�� ?n avatar m?u.", Severity.Success);
         NewTemplate();
         await Reload();
     }
 
     private Task<bool?> DialogConfirm(string title, string message)
-        => DialogService.ShowMessageBoxAsync(title, message, yesText: "Xóa", cancelText: "Hủy");
+        => DialogService.ShowMessageBoxAsync(title, message, yesText: "X�a", cancelText: "H?y");
 
     private void SetMedia(string slot, Guid? mediaId, string? url)
     {
