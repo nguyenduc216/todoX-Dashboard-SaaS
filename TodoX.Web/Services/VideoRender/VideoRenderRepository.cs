@@ -217,6 +217,29 @@ public sealed class VideoRenderRepository
                     data = JsonSerializer.Serialize(data ?? new { }, JsonOptions)
                 });
         }
+        catch (Exception ex) when (DbDiagnostics.LogPostgresException(_logger, ex, "add_project_event"))
+        {
+            throw;
+        }
+        {
+            using var conn = await _factory.OpenAsync(ct);
+            await conn.ExecuteAsync(
+                """
+                INSERT INTO video_render.video_project_events
+                    (project_id, tenant_id, event_type, level, message, data_json, created_at)
+                VALUES
+                    (@projectId, @tenant, @eventType, @level, @message, CAST(@data AS jsonb), now());
+                """,
+                new
+                {
+                    projectId,
+                    tenant = _tenant.TenantId,
+                    eventType,
+                    level,
+                    message,
+                    data = JsonSerializer.Serialize(data ?? new { }, JsonOptions)
+                });
+        }
         catch (Exception ex) when (DbDiagnostics.LogPostgresException(_logger, ex, "video_render_add_event"))
         {
             throw;
@@ -320,6 +343,17 @@ public sealed class VideoRenderRepository
         {
             throw;
         }
+    }
+
+    private static string BuildScenePrompt(string originalPrompt, int sceneIndex, int sceneCount, int durationSeconds, bool thinkScenes)
+    {
+        var text = string.IsNullOrWhiteSpace(originalPrompt) ? "TodoX AI video" : originalPrompt.Trim();
+        if (!thinkScenes)
+        {
+            return text;
+        }
+
+        return $"Scene {sceneIndex}/{sceneCount}, duration {durationSeconds}s. Based on: {text}. Make the scene clear, visual, vertical 9:16, with distinct action and camera movement.";
     }
 
     private static string BuildScenePrompt(string originalPrompt, int sceneIndex, int sceneCount, int durationSeconds, bool thinkScenes)
