@@ -1,0 +1,18 @@
+﻿<MudDialog>
+    <TitleContent>
+        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+            <MudText Typo="Typo.h6">@Title</MudText>
+            <MudIconButton Icon="@Icons.Material.Filled.Close" OnClick="Close" />
+        </MudStack>
+    </TitleContent>
+    <DialogContent>
+        <MudTextField T="string" Value="@Text" ReadOnly="true" Lines="18" Variant="Variant.Outlined" FullWidth="true" />
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [Parameter] public string Title { get; set; } = "Nội dung";
+    [Parameter] public string Text { get; set; } = string.Empty;
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    private void Close() => MudDialog.Close();
+}
