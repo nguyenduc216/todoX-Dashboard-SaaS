@@ -445,7 +445,7 @@
         if (_projectId is null) return;
         await VideoRepo.UpdateSceneAsync(scene.Id, scene.Status, scene.StaticImageUrl, scene.StaticImagePath, scene.SceneVideoUrl, scene.SceneVideoPath, scene.ErrorMessage, scene.Title, scene.ScenePrompt, scene.ImagePrompt, scene.VideoPrompt);
         Snackbar.Add("Đã lưu scene.", Severity.Success);
-        await LogProjectEvent("SCENE_SAVED", "info", $"�� luu scene {scene.SceneIndex}.", new { scene.Id, scene.SceneIndex, scene.Status });
+        await LogProjectEvent("SCENE_SAVED", "info", $"Đã lưu scene {scene.SceneIndex}.", new { scene.Id, scene.SceneIndex, scene.Status });
         await ReloadAsync();
     }
 
@@ -453,7 +453,7 @@
     {
         if (_projectId is null || _project is null) return;
         var base64 = await LoadMockImageBase64Async();
-            var uploadsRoot = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "uploads", "video-render", _project.Id.ToString(), $"scene_{scene.SceneIndex:00}");
+        var uploadsRoot = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "uploads", "video-render", _project.Id.ToString(), $"scene_{scene.SceneIndex:00}");
         Directory.CreateDirectory(uploadsRoot);
         var imagePath = Path.Combine(uploadsRoot, "preview.png");
         await File.WriteAllBytesAsync(imagePath, Convert.FromBase64String(base64));
@@ -461,7 +461,7 @@
         var url = "/" + relative;
         await VideoRepo.UpdateSceneAsync(scene.Id, VideoSceneStatuses.ImageReady, imageUrl: url, imagePath: imagePath, errorMessage: null, title: scene.Title, scenePrompt: scene.ScenePrompt, imagePrompt: scene.ImagePrompt, videoPrompt: scene.VideoPrompt);
         await VideoRepo.AddProjectEventAsync(_project.Id, "SCENE_IMAGE_READY", "info", $"Scene {scene.SceneIndex} image ready.", new { scene.Id, url });
-        await LogProjectEvent("SCENE_IMAGE_RENDERED", "info", $"T?o ?nh tinh mock cho scene {scene.SceneIndex}.", new { scene.Id, url, imagePath });
+        await LogProjectEvent("SCENE_IMAGE_RENDERED", "info", $"Tạo ảnh tĩnh mock cho scene {scene.SceneIndex}.", new { scene.Id, url, imagePath });
         await ReloadAsync();
     }
 
@@ -527,18 +527,9 @@
             PointStatus = RenderPointStatuses.NotRequired
         });
         Snackbar.Add($"Đã tạo job video: {job.Id}", Severity.Success);
-        await LogProjectEvent("JOB_ENQUEUED", "info", $"�� enqueue job {jobType}.", new { job.Id, job.JobType, job.Status });
+        await LogProjectEvent("JOB_ENQUEUED", "info", $"Đã enqueue job {jobType}.", new { job.Id, job.JobType, job.Status });
         _tabIndex = 2;
         await ReloadAsync();
-    }
-
-    private async Task RenderAllScenesAsync()
-    {
-        if (_project is null) return;
-        foreach (var scene in _project.Scenes.OrderBy(x => x.SceneIndex))
-        {
-            await RenderSceneVideoAsync(scene);
-        }
     }
 
     private async Task<string> LoadMockImageBase64Async()
