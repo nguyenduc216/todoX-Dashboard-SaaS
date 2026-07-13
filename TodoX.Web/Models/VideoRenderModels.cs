@@ -21,6 +21,13 @@ public static class VideoSceneStatuses
     public const string Failed = "failed";
 }
 
+public enum ScenePromptKind
+{
+    Image,
+    Motion,
+    Voice
+}
+
 public sealed class VideoProjectDto
 {
     public long Id { get; set; }

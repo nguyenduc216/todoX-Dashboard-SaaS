@@ -48,8 +48,8 @@
                                         <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="ClearSelectedCharacterAsync" Disabled="@(_busy || _selectedCharacter is null)">Không sử dụng Character</MudButton>
                                     </MudStack>
                                     <MudAlert Severity="Severity.Info" Dense="true">Chọn một Character hoạt động hoặc để trống để tạo project không dùng Character.</MudAlert>
-                                    <MudSelect T="long?" Label="Chọn nhÃ¢n váº­t" Value="@(_selectedCharacterId)" ValueChanged="OnCharacterChangedAsync" Variant="Variant.Outlined" Dense="true" ToStringFunc="ResolveCharacterName">
-                                        <MudSelectItem T="long?" Value="@((long?)null)">Không sử dụng nhÃ¢n váº­t</MudSelectItem>
+                                    <MudSelect T="long?" Label="Chọn nhân vật" Value="@(_selectedCharacterId)" ValueChanged="OnCharacterChangedAsync" Variant="Variant.Outlined" Dense="true" ToStringFunc="ResolveCharacterName">
+                                        <MudSelectItem T="long?" Value="@((long?)null)">Không sử dụng nhân vật</MudSelectItem>
                                         @foreach (var character in _characters)
                                         {
                                             <MudSelectItem T="long?" Value="@character.Id">@character.CharacterName</MudSelectItem>
@@ -199,7 +199,7 @@
                                 <div class="scene-thumb-cell">
                                     @if (!string.IsNullOrWhiteSpace(context.StaticImageUrl))
                                     {
-                                        <img src="@context.StaticImageUrl" class="scene-thumb" @onclick="@(() => OpenScenePreview(context))" />
+                                        <img src="@SceneImageUrl(context)" class="scene-thumb" @onclick="@(() => OpenScenePreview(context))" />
                                     }
                                     else
                                     {
@@ -215,27 +215,32 @@
                             </MudTd>
                             <MudTd DataLabel="Thời lượng">@context.DurationSeconds giây</MudTd>
                             <MudTd DataLabel="Prompt">
-                                <MudStack Row="true" Spacing="1" Class="flex-wrap gap-1">
-                                    <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(() => OpenScenePrompt(context, ScenePromptKind.Image))">Xem prompt ảnh</MudButton>
-                                    <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(() => OpenScenePrompt(context, ScenePromptKind.Motion))">Xem prompt chuyển động</MudButton>
-                                    <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(() => OpenScenePrompt(context, ScenePromptKind.Voice))">Xem lời thoại</MudButton>
-                                </MudStack>
+                                <MudMenu Dense="true" Variant="Variant.Outlined" AnchorOrigin="Origin.BottomCenter" TransformOrigin="Origin.TopCenter">
+                                    <ActivatorContent Context="promptMenu">
+                                        <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Visibility">Xem prompt</MudButton>
+                                    </ActivatorContent>
+                                    <ChildContent>
+                                        <MudMenuItem OnClick="@(() => OpenScenePrompt(context, ScenePromptKind.Image))">Prompt ảnh</MudMenuItem>
+                                        <MudMenuItem OnClick="@(() => OpenScenePrompt(context, ScenePromptKind.Motion))">Chuyển động</MudMenuItem>
+                                        <MudMenuItem OnClick="@(() => OpenScenePrompt(context, ScenePromptKind.Voice))">Lời thoại</MudMenuItem>
+                                    </ChildContent>
+                                </MudMenu>
                             </MudTd>
                             <MudTd DataLabel="Trạng thái"><MudChip T="string" Color="@SceneColor(context.Status)">@SceneLabel(context.Status)</MudChip></MudTd>
                             <MudTd DataLabel="Thao tác">
-                                <MudStack Row="true" Spacing="1" Class="flex-wrap gap-1">
-                                    @if (string.IsNullOrWhiteSpace(context.StaticImageUrl))
-                                    {
-                                        <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Warning" OnClick="@(() => RenderSceneImageAsync(context))" Disabled="@_busy">Tạo ảnh</MudButton>
-                                    }
-                                    else
-                                    {
-                                        <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning" OnClick="@(() => RenderSceneImageAsync(context))" Disabled="@_busy">Render lại ảnh</MudButton>
-                                    }
-                                    <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(() => SaveSceneAsync(context))" Disabled="@_busy">Lưu</MudButton>
-                                    <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(() => MoveSceneUpAsync(context))" Disabled="@(_busy || context.SceneIndex <= 1)">Lên</MudButton>
-                                    <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(() => MoveSceneDownAsync(context))" Disabled="@(_busy || _project is null || context.SceneIndex >= _project.Scenes.Count)">Xuống</MudButton>
-                                    <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error" OnClick="@(() => DeleteSceneAsync(context))" Disabled="@_busy">Xóa</MudButton>
+                                <MudStack Spacing="1">
+                                    <MudStack Row="true" Spacing="0" Class="flex-wrap gap-1 scene-action-icons">
+                                        <MudTooltip Text="Xem prompt"><MudIconButton Icon="@Icons.Material.Filled.SavedSearch" Size="Size.Small" Color="Color.Primary" OnClick="@(() => OpenScenePrompt(context, ScenePromptKind.Image))" /></MudTooltip>
+                                        <MudTooltip Text="Render ảnh"><MudIconButton Icon="@Icons.Material.Filled.Image" Size="Size.Small" Color="Color.Warning" OnClick="@(() => RenderSceneImageAsync(context))" Disabled="@_busy" /></MudTooltip>
+                                        <MudTooltip Text="Lưu scene"><MudIconButton Icon="@Icons.Material.Filled.Save" Size="Size.Small" Color="Color.Success" OnClick="@(() => SaveSceneAsync(context))" Disabled="@_busy" /></MudTooltip>
+                                        <MudTooltip Text="Lên"><MudIconButton Icon="@Icons.Material.Filled.KeyboardArrowUp" Size="Size.Small" Color="Color.Default" OnClick="@(() => MoveSceneUpAsync(context))" Disabled="@(_busy || context.SceneIndex <= 1)" /></MudTooltip>
+                                        <MudTooltip Text="Xuống"><MudIconButton Icon="@Icons.Material.Filled.KeyboardArrowDown" Size="Size.Small" Color="Color.Default" OnClick="@(() => MoveSceneDownAsync(context))" Disabled="@(_busy || _project is null || context.SceneIndex >= _project.Scenes.Count)" /></MudTooltip>
+                                        <MudTooltip Text="Xóa"><MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="@(() => DeleteSceneAsync(context))" Disabled="@_busy" /></MudTooltip>
+                                    </MudStack>
+                                    <MudStack Row="true" Spacing="1" Class="flex-wrap gap-1">
+                                        <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning" OnClick="@(() => RenderSceneImageAsync(context))" Disabled="@_busy">@(string.IsNullOrWhiteSpace(context.StaticImageUrl) ? "Tạo ảnh" : "Render lại ảnh")</MudButton>
+                                        <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(() => SaveSceneAsync(context))" Disabled="@_busy">Lưu</MudButton>
+                                    </MudStack>
                                 </MudStack>
                             </MudTd>
                         </RowTemplate>
@@ -647,12 +652,7 @@
         return Task.CompletedTask;
     }
 
-    private enum ScenePromptKind
-    {
-        Image,
-        Motion,
-        Voice
-    }
+
 
     private Task OpenScenePreview(VideoProjectSceneDto scene)
     {
@@ -667,6 +667,9 @@
         _ = DialogService.ShowAsync<Components.Dialogs.ReferenceImageLightboxDialog>(scene.Title ?? $"Scene {scene.SceneIndex}", parameters, options);
         return Task.CompletedTask;
     }
+
+    private string SceneImageUrl(VideoProjectSceneDto scene)
+        => string.IsNullOrWhiteSpace(scene.StaticImageUrl) ? string.Empty : $"{scene.StaticImageUrl}{(scene.StaticImageUrl.Contains('?') ? '&' : '?')}v={scene.UpdatedAt.Ticks}";
 
     private Task OpenScenePrompt(VideoProjectSceneDto scene, ScenePromptKind kind)
     {
@@ -687,7 +690,8 @@
         var parameters = new DialogParameters
         {
             ["Text"] = prompt,
-            ["Title"] = title
+            ["Title"] = title,
+            ["OnRenderAgain"] = EventCallback.Factory.Create(this, () => RenderSceneImageAsync(scene))
         };
         var options = new DialogOptions { CloseButton = true, FullWidth = true, MaxWidth = MaxWidth.Medium };
         _ = DialogService.ShowAsync<Components.Dialogs.TextViewerDialog>(title, parameters, options);

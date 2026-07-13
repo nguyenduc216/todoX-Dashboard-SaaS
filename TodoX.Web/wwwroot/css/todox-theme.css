@@ -1543,3 +1543,125 @@ h4 {
         min-width: 180px !important;
     }
 }
+
+.character-thumb-wrap {
+    width: 100%;
+    max-width: 320px;
+    min-height: 320px;
+    max-height: 420px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.character-thumb {
+    width: 100%;
+    height: 100%;
+    max-height: 420px;
+    object-fit: contain;
+    cursor: zoom-in;
+}
+
+.scene-thumb-cell {
+    width: 160px;
+    min-height: 240px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.scene-thumb {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    cursor: zoom-in;
+}
+
+.scene-thumb-placeholder {
+    padding: 16px;
+    text-align: center;
+    color: var(--mud-palette-text-secondary);
+}
+
+.ai-character-detail-grid {
+    display: grid;
+    grid-template-columns: minmax(320px, 3fr) minmax(0, 7fr);
+    gap: 16px;
+    align-items: start;
+}
+
+.ai-character-master-image {
+    width: 100%;
+    min-height: 320px;
+    max-height: 420px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    border: 1px solid rgba(255, 183, 0, .18);
+    border-radius: 16px;
+    background: rgba(255, 255, 255, .03);
+}
+
+.ai-character-master-image img {
+    width: 100%;
+    height: 100%;
+    max-height: 420px;
+    object-fit: contain;
+    cursor: zoom-in;
+}
+
+.ai-character-render-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 16px;
+}
+
+.ai-character-render-card {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.ai-character-render-image {
+    min-height: 240px;
+    max-height: 320px;
+    overflow: hidden;
+    border-radius: 14px;
+    border: 1px solid rgba(255, 183, 0, .18);
+    background: rgba(255, 255, 255, .03);
+}
+
+.ai-character-render-image img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    cursor: zoom-in;
+}
+
+.ai-character-section-title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.ai-character-form-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
+@media (max-width: 960px) {
+    .ai-character-detail-grid {
+        grid-template-columns: 1fr;
+    }
+}
