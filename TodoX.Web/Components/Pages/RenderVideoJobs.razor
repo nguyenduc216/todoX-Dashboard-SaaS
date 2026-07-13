@@ -802,7 +802,7 @@
                     sceneId = scene.Id,
                     sceneIndex = scene.SceneIndex,
                     characterId = character?.Id,
-                    providerCode = "ImageAICreativeRender"
+                    
                 },
                 CreatedBy = AuthState.CurrentUser.Email ?? AuthState.CurrentUser.UserId.ToString()
             });
@@ -810,7 +810,7 @@
             if (!render.Success)
             {
                 await VideoRepo.UpdateSceneAsync(scene.Id, VideoSceneStatuses.Failed, errorMessage: render.ErrorMessage, title: scene.Title, scenePrompt: scene.ScenePrompt, imagePrompt: scene.ImagePrompt, videoPrompt: scene.VideoPrompt);
-                await LogProjectEvent("SCENE_IMAGE_RENDER_FAILED", "error", $"Render ảnh scene {scene.SceneIndex} thất b���i.", new { projectId = _project.Id, sceneId = scene.Id, sceneIndex = scene.SceneIndex, error = render.ErrorMessage, characterId = character?.Id, render.ProviderCode, render.ModelName });
+                await LogProjectEvent("SCENE_IMAGE_RENDER_FAILED", "error", $"Render ảnh scene {scene.SceneIndex} thất bại.", new { projectId = _project.Id, sceneId = scene.Id, sceneIndex = scene.SceneIndex, error = render.ErrorMessage, characterId = character?.Id, render.ProviderCode, render.ModelName });
                 await AddDebugAsync("scene_image_render_failed", $"Render ảnh scene {scene.SceneIndex} lỗi", "FAILED", render.ErrorMessage ?? "Render không thành công");
                 return;
             }
@@ -1026,5 +1026,6 @@
         _ => Color.Info
     };
 }
+
 
 

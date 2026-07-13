@@ -119,28 +119,42 @@ public sealed class AiProviderService : IAiProviderService
 
     public async Task<ProviderOptionDto> ResolveProviderForCapabilityAsync(string capabilityCode, long? providerCapabilityId, bool fromUser, CancellationToken ct = default)
     {
+        _logger.LogInformation(
+            "Resolving AI provider for capability {CapabilityCode}, providerCapabilityId={ProviderCapabilityId}, fromUser={FromUser}",
+            capabilityCode, providerCapabilityId, fromUser);
+
         if (providerCapabilityId is long id)
         {
             var chosen = await _repo.GetOptionByCapabilityIdAsync(id, ct)
-                ?? throw new InvalidOperationException("Provider nÃ y chÆ°a Ä‘Æ°á»£c báº­t hoáº·c chÆ°a Ä‘Æ°á»£c cáº¥u hÃ¬nh cho chá»©c nÄƒng hiá»‡n táº¡i.");
+                ?? throw new InvalidOperationException("Provider này chưa được bật hoặc chưa được cấu hình cho chức năng hiện tại.");
 
             if (!chosen.Enabled || !string.Equals(chosen.CapabilityCode, capabilityCode, StringComparison.OrdinalIgnoreCase)
                 || (fromUser && !chosen.AllowUserSelect))
             {
-                throw new InvalidOperationException("Provider nÃ y chÆ°a Ä‘Æ°á»£c báº­t hoáº·c chÆ°a Ä‘Æ°á»£c cáº¥u hÃ¬nh cho chá»©c nÄƒng hiá»‡n táº¡i.");
+                throw new InvalidOperationException("Provider này chưa được bật hoặc chưa được cấu hình cho chức năng hiện tại.");
             }
             return chosen;
         }
 
         var byDefault = await _repo.GetDefaultAsync(capabilityCode, ct);
+        _logger.LogInformation(
+            "Default provider lookup for {CapabilityCode}: {Found}",
+            capabilityCode,
+            byDefault is not null ? $"ProviderId={byDefault.ProviderId}, ProviderCode={byDefault.ProviderCode}, CapabilityId={byDefault.ProviderCapabilityId}" : "not found");
         if (byDefault is not null) return byDefault;
 
         var byPriority = await _repo.GetFirstByPriorityAsync(capabilityCode, ct);
+        _logger.LogInformation(
+            "Priority provider lookup for {CapabilityCode}: {Found}",
+            capabilityCode,
+            byPriority is not null ? $"ProviderId={byPriority.ProviderId}, ProviderCode={byPriority.ProviderCode}, CapabilityId={byPriority.ProviderCapabilityId}" : "not found");
         if (byPriority is not null) return byPriority;
 
-        throw new InvalidOperationException("ChÆ°a cáº¥u hÃ¬nh AI Provider cho chá»©c nÄƒng nÃ y.");
+        _logger.LogWarning(
+            "No AI provider configured for capability {CapabilityCode}. providerCapabilityId={ProviderCapabilityId}, fromUser={FromUser}",
+            capabilityCode, providerCapabilityId, fromUser);
+        throw new InvalidOperationException("Chưa cấu hình AI Provider cho chức năng này.");
     }
-
     public async Task LogUsageAsync(AiProviderUsageLog log, CancellationToken ct = default)
     {
         const string table = "todox_ai_provider_usage_log";
