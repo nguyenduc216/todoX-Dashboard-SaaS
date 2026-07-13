@@ -1,11 +1,14 @@
 ﻿@page "/render-job"
 @using System.Text.Json
+@using TodoX.Web.Services.AiProviders
 @inject AuthStateService AuthState
 @inject NavigationManager Navigation
 @inject TodoX.Web.Services.VideoRender.VideoRenderRepository VideoRepo
 @inject TodoX.Web.Services.Render.IRenderJobService RenderJobs
 @inject TodoX.Web.Services.AiCharacters.IAiCharacterService Characters
 @inject TodoX.Web.Services.VideoRender.ITodoXVideoPromptParser PromptParser
+@inject TodoX.Web.Services.AiProviders.IAiImageRenderRouter ImageRenderRouter
+@inject TodoX.Web.Services.Media.IMediaFileService MediaFiles
 @inject IOptionsMonitor<TodoX.Web.Services.VideoRender.VideoRenderOptions> VideoOptions
 @inject IDialogService DialogService
 @inject ISnackbar Snackbar
@@ -763,21 +766,81 @@
         await LogProjectEvent("SCENE_SAVED", "info", $"Đã lưu scene {scene.SceneIndex}.", new { scene.Id, scene.SceneIndex, scene.Status });
         await ReloadAsync();
     }
-
     private async Task RenderSceneImageAsync(VideoProjectSceneDto scene)
     {
-        if (_projectId is null || _project is null) return;
-        var base64 = await LoadMockImageBase64Async();
-        var uploadsRoot = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "uploads", "video-render", _project.Id.ToString(), $"scene_{scene.SceneIndex:00}");
-        Directory.CreateDirectory(uploadsRoot);
-        var imagePath = Path.Combine(uploadsRoot, "preview.png");
-        await File.WriteAllBytesAsync(imagePath, Convert.FromBase64String(base64));
-        var relative = Path.GetRelativePath(Path.Combine(Directory.GetCurrentDirectory(), "wwwroot"), imagePath).Replace(Path.DirectorySeparatorChar, '/');
-        var url = "/" + relative;
-        await VideoRepo.UpdateSceneAsync(scene.Id, VideoSceneStatuses.ImageReady, imageUrl: url, imagePath: imagePath, errorMessage: null, title: scene.Title, scenePrompt: scene.ScenePrompt, imagePrompt: scene.ImagePrompt, videoPrompt: scene.VideoPrompt);
-        await VideoRepo.AddProjectEventAsync(_project.Id, "SCENE_IMAGE_READY", "info", $"Scene {scene.SceneIndex} image ready.", new { scene.Id, url });
-        await LogProjectEvent("SCENE_IMAGE_RENDERED", "info", $"Tạo ảnh tĩnh mock cho scene {scene.SceneIndex}.", new { scene.Id, url, imagePath });
-        await ReloadAsync();
+        if (_project is null || AuthState.CurrentUser is null) return;
+
+        _busy = true;
+        var character = ResolveCurrentCharacter();
+        try
+        {
+            var prompt = BuildSceneRenderPrompt(scene, character);
+            var referenceImageUrls = !string.IsNullOrWhiteSpace(character?.MasterImageUrl)
+                ? new[] { character!.MasterImageUrl! }
+                : Array.Empty<string>();
+
+            await AddDebugAsync("scene_image_render_start", $"Render ảnh scene {scene.SceneIndex}", "INFO", $"Bắt đầu render ảnh cho scene {scene.SceneIndex}.");
+            await LogProjectEvent("SCENE_IMAGE_RENDER_START", "info", $"Bắt đầu render ảnh scene {scene.SceneIndex}.", new { projectId = _project.Id, sceneId = scene.Id, sceneIndex = scene.SceneIndex, characterId = character?.Id, referenceCount = referenceImageUrls.Length });
+
+            var render = await ImageRenderRouter.RenderImageAsync(new AiImageRenderRequest
+            {
+                CustomerId = null,
+                UserId = AuthState.CurrentUser.UserId,
+                FeatureCode = "render_job_scene_image",
+                CapabilityCode = "image_generation",
+                FromUser = false,
+                Prompt = prompt,
+                ReferenceImageUrls = referenceImageUrls,
+                AspectRatio = "9:16",
+                OutputFormat = "png",
+                Quality = "high",
+                Resolution = "2K",
+                FileCategory = "video_scene_image",
+                Metadata = new
+                {
+                    projectId = _project.Id,
+                    sceneId = scene.Id,
+                    sceneIndex = scene.SceneIndex,
+                    characterId = character?.Id,
+                    providerCode = "ImageAICreativeRender"
+                },
+                CreatedBy = AuthState.CurrentUser.Email ?? AuthState.CurrentUser.UserId.ToString()
+            });
+
+            if (!render.Success)
+            {
+                await VideoRepo.UpdateSceneAsync(scene.Id, VideoSceneStatuses.Failed, errorMessage: render.ErrorMessage, title: scene.Title, scenePrompt: scene.ScenePrompt, imagePrompt: scene.ImagePrompt, videoPrompt: scene.VideoPrompt);
+                await LogProjectEvent("SCENE_IMAGE_RENDER_FAILED", "error", $"Render ảnh scene {scene.SceneIndex} thất b���i.", new { projectId = _project.Id, sceneId = scene.Id, sceneIndex = scene.SceneIndex, error = render.ErrorMessage, characterId = character?.Id, render.ProviderCode, render.ModelName });
+                await AddDebugAsync("scene_image_render_failed", $"Render ảnh scene {scene.SceneIndex} lỗi", "FAILED", render.ErrorMessage ?? "Render không thành công");
+                return;
+            }
+
+            var saved = await PersistRenderedSceneImageAsync(scene, render);
+            await VideoRepo.UpdateSceneAsync(scene.Id, VideoSceneStatuses.ImageReady, imageUrl: saved.ImageUrl, imagePath: saved.ImagePath, errorMessage: null, title: scene.Title, scenePrompt: scene.ScenePrompt, imagePrompt: scene.ImagePrompt, videoPrompt: scene.VideoPrompt);
+            if (_project.Scenes.FirstOrDefault(x => x.Id == scene.Id) is { } current)
+            {
+                current.StaticImageUrl = saved.ImageUrl;
+                current.StaticImagePath = saved.ImagePath;
+                current.Status = VideoSceneStatuses.ImageReady;
+                current.ErrorMessage = null;
+                current.UpdatedAt = DateTime.UtcNow;
+            }
+
+            await LogProjectEvent("SCENE_IMAGE_READY", "info", $"Scene {scene.SceneIndex} image ready.", new { projectId = _project.Id, sceneId = scene.Id, sceneIndex = scene.SceneIndex, characterId = character?.Id, imageUrl = saved.ImageUrl, providerCode = render.ProviderCode, modelName = render.ModelName });
+            await AddDebugAsync("scene_image_rendered", $"Render ảnh scene {scene.SceneIndex} thành công", "SUCCESS", $"ImageUrl={saved.ImageUrl}");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "VIDEO_RENDER_SCENE_IMAGE_FAILED projectId={ProjectId} sceneId={SceneId}", _project.Id, scene.Id);
+            await VideoRepo.UpdateSceneAsync(scene.Id, VideoSceneStatuses.Failed, errorMessage: ex.Message, title: scene.Title, scenePrompt: scene.ScenePrompt, imagePrompt: scene.ImagePrompt, videoPrompt: scene.VideoPrompt);
+            await LogProjectEvent("SCENE_IMAGE_RENDER_FAILED", "error", $"Render ảnh scene {scene.SceneIndex} thất bại.", new { projectId = _project.Id, sceneId = scene.Id, sceneIndex = scene.SceneIndex, error = ex.Message, characterId = character?.Id });
+            await AddDebugAsync("scene_image_render_failed", $"Render ảnh scene {scene.SceneIndex} lỗi", "FAILED", ex.Message, ex.ToString());
+        }
+        finally
+        {
+            _busy = false;
+            await ReloadAsync();
+        }
     }
 
     private async Task RenderAllSceneImagesAsync()
@@ -787,6 +850,36 @@
         {
             await RenderSceneImageAsync(scene);
         }
+    }
+
+    private ActiveCharacterDto? ResolveCurrentCharacter()
+        => _selectedCharacter ?? (_project?.CharacterId is long characterId ? _characters.FirstOrDefault(x => x.Id == characterId) : null);
+
+    private async Task<(string ImageUrl, string? ImagePath)> PersistRenderedSceneImageAsync(VideoProjectSceneDto scene, AiImageRenderResult result)
+    {
+        if (result.ImageBytes is null || result.ImageBytes.Length == 0)
+        {
+            throw new InvalidOperationException("AI render không trả về bytes ảnh.");
+        }
+
+        var projectFolder = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "uploads", "video-render", _project!.Id.ToString(), $"scene_{scene.SceneIndex:00}");
+        Directory.CreateDirectory(projectFolder);
+        var fileName = $"scene_{scene.SceneIndex:00}_{DateTime.UtcNow:yyyyMMddHHmmss}.png";
+        var imagePath = Path.Combine(projectFolder, fileName);
+        await File.WriteAllBytesAsync(imagePath, result.ImageBytes);
+        var relative = Path.GetRelativePath(Path.Combine(Directory.GetCurrentDirectory(), "wwwroot"), imagePath).Replace(Path.DirectorySeparatorChar, '/');
+        return ($"/{relative}", imagePath);
+    }
+
+    private static string BuildSceneRenderPrompt(VideoProjectSceneDto scene, ActiveCharacterDto? character)
+    {
+        var basePrompt = string.IsNullOrWhiteSpace(scene.ImagePrompt) ? scene.ScenePrompt : scene.ImagePrompt;
+        if (character is null || string.IsNullOrWhiteSpace(character.NormalizedPrompt))
+        {
+            return basePrompt;
+        }
+
+        return $"Render a static image for this scene. Scene description: {basePrompt}. Keep the character identity consistent with this character description: {character.NormalizedPrompt}.";
     }
 
     private async Task MoveSceneUpAsync(VideoProjectSceneDto scene)
@@ -863,7 +956,7 @@
         {
             JobType = jobType,
             UserId = AuthState.CurrentUser.UserId,
-            CustomerId = AuthState.CurrentUser.CustomerId,
+            CustomerId = null,
             Input = input,
             Prompt = new { projectId = _project.Id },
             LogCode = logCode,
