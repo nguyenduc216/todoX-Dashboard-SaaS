@@ -1,4 +1,4 @@
-using TodoX.Web.Data;
+﻿using TodoX.Web.Data;
 using TodoX.Web.Models;
 using TodoX.Web.Services.AiProviders;
 using TodoX.Web.Services.Media;
@@ -127,7 +127,6 @@ public sealed class AiCharacterService : IAiCharacterService
         var scope = Scope(user);
         var current = await _repo.GetAsync(scope, id, ct)
             ?? throw new InvalidOperationException("Không cập nhật được Character do sai ID hoặc customer scope.");
-        var normalizedStatus = NormalizeCharacterStatus(request.Status, current.Status);
         var style = CharacterPresetOptions.NormalizeOptionalPreset(request.StylePreset);
         var gender = CharacterPresetOptions.NormalizeOptionalPreset(request.Gender);
         var normalized = BuildRenderPrompt(request.RenderPrompt, request.CharacterName, request.Description, style, gender, request.AspectRatio);

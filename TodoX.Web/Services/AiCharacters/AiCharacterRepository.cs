@@ -219,7 +219,7 @@ public sealed class AiCharacterRepository
             id, scope.CustomerId, currentStatus, request.Status, status, affected, false);
         if (affected == 0)
         {
-            throw new InvalidOperationException("KhÃ´ng cáº­p nháº­t Ä‘Æ°á»£c Character do sai ID hoáº·c customer scope.");
+            throw new InvalidOperationException("Không cập nhật được Character do sai ID hoặc customer scope.");
         }
     }
 
