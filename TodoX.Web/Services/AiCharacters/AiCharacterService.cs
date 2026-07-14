@@ -1,4 +1,4 @@
-﻿using TodoX.Web.Data;
+using TodoX.Web.Data;
 using TodoX.Web.Models;
 using TodoX.Web.Services.AiProviders;
 using TodoX.Web.Services.Media;
@@ -124,11 +124,15 @@ public sealed class AiCharacterService : IAiCharacterService
     public async Task UpdateCharacterAsync(long id, UpdateCharacterRequest request, CurrentUserSession user, CancellationToken ct = default)
     {
         ValidateUpdate(request);
+        var scope = Scope(user);
+        var current = await _repo.GetAsync(scope, id, ct)
+            ?? throw new InvalidOperationException("Không cập nhật được Character do sai ID hoặc customer scope.");
+        var normalizedStatus = NormalizeCharacterStatus(request.Status, current.Status);
         var style = CharacterPresetOptions.NormalizeOptionalPreset(request.StylePreset);
         var gender = CharacterPresetOptions.NormalizeOptionalPreset(request.Gender);
         var normalized = BuildRenderPrompt(request.RenderPrompt, request.CharacterName, request.Description, style, gender, request.AspectRatio);
         var negative = _promptBuilder.BuildNegativePrompt();
-        await _repo.UpdateCharacterAsync(Scope(user), id, request, normalized, negative, user.UserId.ToString(), ct);
+        await _repo.UpdateCharacterAsync(scope, id, request, normalized, negative, normalizedStatus, current.Status, user.UserId.ToString(), ct);
     }
 
     public Task DisableCharacterAsync(long id, CurrentUserSession user, CancellationToken ct = default)
@@ -445,7 +449,12 @@ public sealed class AiCharacterService : IAiCharacterService
     private static void ValidateUpdate(UpdateCharacterRequest request)
     {
         ValidateGenerate(request.CharacterName, request.Description, request.StylePreset, request.Gender, request.AspectRatio, null);
-        if (!Statuses.Contains(request.Status)) throw new InvalidOperationException("Status khong hop le.");
+    }
+
+    private static string NormalizeCharacterStatus(string? status, string fallback)
+    {
+        var normalized = status?.Trim().ToLowerInvariant();
+        return normalized is "active" or "inactive" ? normalized : fallback.Trim().ToLowerInvariant();
     }
 
     private static void ValidateGenerate(string? name, string? description, string? style, string? gender, string? aspect, string[]? references)
@@ -469,5 +478,7 @@ public sealed class AiCharacterService : IAiCharacterService
     private static string? FriendlyError(string? error)
         => string.IsNullOrWhiteSpace(error) ? "Provider render chua tao duoc anh. Vui long thu lai." : error;
 }
+
+
 
 

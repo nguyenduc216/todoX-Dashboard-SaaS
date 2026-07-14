@@ -1,4 +1,4 @@
-﻿@page "/render-job"
+@page "/render-job"
 @using System.Text.Json
 @using TodoX.Web.Services.AiProviders
 @inject AuthStateService AuthState
@@ -24,7 +24,8 @@
             <MudText Typo="Typo.body1" Class="todox-page-subtitle">Phase 1: chọn nhân vật chuẩn, tạo project rỗng hoặc tách scene, rồi render từng scene.</MudText>
         </div>
         <MudStack Row="true" Spacing="2" Class="flex-wrap gap-2">
-            <MudButton Color="Color.Warning" Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.Add" OnClick="NewProjectAsync">Tạo mới</MudButton>\r\n            <MudButton Color="Color.Success" Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveJobAsync" Disabled="@(_projectId is null || _busy)">Lưu job</MudButton>
+            <MudButton Color="Color.Warning" Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.Add" OnClick="NewProjectAsync">Tạo mới</MudButton>
+            <MudButton Color="Color.Success" Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveJobAsync" Disabled="@(_projectId is null || _busy)">Lưu job</MudButton>
             <MudButton Color="Color.Primary" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh" OnClick="ReloadAsync" Disabled="@(_projectId is null)">Refresh</MudButton>
         </MudStack>
     </MudStack>
@@ -621,12 +622,37 @@
         return InvokeAsync(StateHasChanged);
     }
 
-    private Task OnCharacterChangedAsync(long? characterId)
+    private async Task OnCharacterChangedAsync(long? characterId)
     {
         _selectedCharacterId = characterId;
         _selectedCharacter = characterId is null ? null : _characters.FirstOrDefault(x => x.Id == characterId.Value);
+        if (_selectedCharacter is null && characterId is long id && AuthState.CurrentUser is not null)
+        {
+            try
+            {
+                var detail = await Characters.GetCharacterAsync(AuthState.CurrentUser, id);
+                if (detail is not null)
+                {
+                    _selectedCharacter = new ActiveCharacterDto
+                    {
+                        Id = detail.Id,
+                        CharacterName = detail.CharacterName,
+                        Description = detail.Description,
+                        StylePreset = detail.StylePreset,
+                        Gender = detail.Gender,
+                        MasterImageUrl = detail.MasterImageUrl,
+                        MasterImageObjectKey = detail.MasterImageObjectKey,
+                        NormalizedPrompt = detail.NormalizedPrompt
+                    };
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "VIDEO_RENDER_RESOLVE_CHARACTER_FAILED characterId={CharacterId}", id);
+            }
+        }
         _characterPrompt = _selectedCharacter?.NormalizedPrompt ?? string.Empty;
-        return InvokeAsync(StateHasChanged);
+        await InvokeAsync(StateHasChanged);
     }
 
     private bool IsCharacterSelected(long characterId) => _selectedCharacter?.Id == characterId;
@@ -1135,6 +1161,9 @@
         _ => Color.Info
     };
 }
+
+
+
 
 
 

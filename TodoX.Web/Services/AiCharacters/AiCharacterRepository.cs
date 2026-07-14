@@ -1,4 +1,5 @@
-using Dapper;
+﻿using Dapper;
+using Microsoft.Extensions.Logging;
 using TodoX.Web.Data;
 using TodoX.Web.Models;
 
@@ -7,10 +8,12 @@ namespace TodoX.Web.Services.AiCharacters;
 public sealed class AiCharacterRepository
 {
     private readonly TodoXConnectionFactory _factory;
+    private readonly ILogger<AiCharacterRepository> _logger;
 
-    public AiCharacterRepository(TodoXConnectionFactory factory)
+    public AiCharacterRepository(TodoXConnectionFactory factory, ILogger<AiCharacterRepository> logger)
     {
         _factory = factory;
+        _logger = logger;
     }
 
     public async Task<IReadOnlyList<CharacterListItemDto>> ListAsync(CharacterScope scope, string? keyword, string? status, CancellationToken ct = default)
@@ -179,10 +182,10 @@ public sealed class AiCharacterRepository
     }
 
     public async Task UpdateCharacterAsync(CharacterScope scope, long id, UpdateCharacterRequest request,
-        string normalizedPrompt, string negativePrompt, string userId, CancellationToken ct = default)
+        string normalizedPrompt, string negativePrompt, string status, string currentStatus, string userId, CancellationToken ct = default)
     {
         using var conn = await _factory.OpenAsync(ct);
-        await conn.ExecuteAsync(
+        var affected = await conn.ExecuteAsync(
             """
             UPDATE public.todox_ai_character
                SET character_name=@name,
@@ -208,10 +211,16 @@ public sealed class AiCharacterRepository
                 aspect = request.AspectRatio,
                 normalized = normalizedPrompt,
                 negative = negativePrompt,
-                status = request.Status,
+                status,
                 sortOrder = request.SortOrder,
                 userId
             }));
+        _logger.LogInformation("AI_CHARACTER_UPDATE characterId={CharacterId} customerId={CustomerId} statusBefore={StatusBefore} statusRequest={StatusRequest} statusNormalized={StatusNormalized} affectedRows={AffectedRows} masterImageExists={MasterImageExists}",
+            id, scope.CustomerId, currentStatus, request.Status, status, affected, false);
+        if (affected == 0)
+        {
+            throw new InvalidOperationException("KhÃ´ng cáº­p nháº­t Ä‘Æ°á»£c Character do sai ID hoáº·c customer scope.");
+        }
     }
 
     public async Task UpdateMasterImageAsync(CharacterScope scope, long characterId, string? imageUrl, string? objectKey, string userId, CancellationToken ct = default)
