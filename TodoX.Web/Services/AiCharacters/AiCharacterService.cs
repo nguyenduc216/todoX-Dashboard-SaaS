@@ -1,4 +1,4 @@
-﻿using TodoX.Web.Data;
+using TodoX.Web.Data;
 using TodoX.Web.Models;
 using TodoX.Web.Services.AiProviders;
 using TodoX.Web.Services.Media;
@@ -11,7 +11,7 @@ public interface IAiCharacterService
     Task<IReadOnlyList<ActiveCharacterDto>> GetActiveCharactersAsync(CurrentUserSession user, CancellationToken ct = default);
     Task<CharacterDetailDto?> GetCharacterAsync(CurrentUserSession user, long id, CancellationToken ct = default);
     Task<CharacterDetailDto> CreateCharacterAsync(CreateCharacterRequest request, CurrentUserSession user, CancellationToken ct = default);
-    Task UpdateCharacterAsync(long id, UpdateCharacterRequest request, CurrentUserSession user, CancellationToken ct = default);
+    Task<CharacterDetailDto> UpdateCharacterAsync(long id, UpdateCharacterRequest request, CurrentUserSession user, CancellationToken ct = default);
     Task DisableCharacterAsync(long id, CurrentUserSession user, CancellationToken ct = default);
     Task<GenerateCharacterImageResponse> GenerateImageAsync(GenerateCharacterImageRequest request, CurrentUserSession user, CancellationToken ct = default);
     Task<GenerateCharacterImageResponse> UploadMasterImageAsync(long characterId, byte[] content, string fileName, string contentType, CurrentUserSession user, CancellationToken ct = default);
@@ -113,7 +113,7 @@ public sealed class AiCharacterService : IAiCharacterService
                ?? throw new InvalidOperationException("Đã tạo Character nhưng không đọc lại được dữ liệu.");
     }
 
-    public async Task UpdateCharacterAsync(long id, UpdateCharacterRequest request, CurrentUserSession user, CancellationToken ct = default)
+    public async Task<CharacterDetailDto> UpdateCharacterAsync(long id, UpdateCharacterRequest request, CurrentUserSession user, CancellationToken ct = default)
     {
         ValidateUpdate(request);
         var scope = Scope(user);
@@ -126,14 +126,16 @@ public sealed class AiCharacterService : IAiCharacterService
         var negative = _promptBuilder.BuildNegativePrompt();
         var masterImageExists = !string.IsNullOrWhiteSpace(current.MasterImageUrl);
 
-        // Repository chỉ cập nhật các field an toàn; id/customer scope/master image/provider/model được giữ nguyên.
-        await _repo.UpdateCharacterAsync(scope, id, request, normalized, negative, normalizedStatus, current.Status, masterImageExists, user.UserId.ToString(), ct);
+        var updated = await _repo.UpdateCharacterAsync(scope, id, request, normalized, negative, normalizedStatus, current.Status, masterImageExists, user.UserId.ToString(), ct);
 
-        var updated = await _repo.GetAsync(scope, id, ct)
-            ?? throw new InvalidOperationException("Đã cập nhật Character nhưng không đọc lại được dữ liệu.");
+        if (!string.Equals(updated.Status, normalizedStatus, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException($"Lưu trạng thái Character không thành công. Yêu cầu={normalizedStatus}, thực tế={updated.Status}");
+        }
 
         _logger.LogInformation("AI_CHARACTER_UPDATE_DONE characterId={CharacterId} statusBefore={StatusBefore} statusAfter={StatusAfter} masterImageExists={MasterImageExists}",
             id, current.Status, updated.Status, !string.IsNullOrWhiteSpace(updated.MasterImageUrl));
+        return updated;
     }
 
     public Task DisableCharacterAsync(long id, CurrentUserSession user, CancellationToken ct = default)

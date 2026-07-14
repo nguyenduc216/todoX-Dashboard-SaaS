@@ -1,4 +1,4 @@
-﻿@page "/ai-assets/characters/new"
+@page "/ai-assets/characters/new"
 @page "/ai-assets/characters/{Id:long}"
 @using TodoX.Web.Models
 @using TodoX.Web.Services.AiProviders
@@ -10,7 +10,9 @@
 @inject NavigationManager Nav
 @inject IJSRuntime Js
 @inject ISnackbar Snackbar
+@inject ILogger<AiCharacterEdit> Logger
 @inject IConfiguration Config
+@implements IDisposable
 
 <PageTitle>@(_isNew ? "Tạo nhân vật AI" : "Nhân vật AI")</PageTitle>
 
@@ -20,7 +22,7 @@
         <MudText Typo="Typo.body1" Class="todox-page-subtitle">Thiết kế nhân vật AI nhất quán để dùng lại trong video TodoX.</MudText>
     </div>
     <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.ArrowBack"
-               OnClick="@(() => Nav.NavigateTo("/ai-assets/characters"))">
+               OnClick="@(() => Nav.NavigateTo(_isNew ? "/ai-assets/characters" : "/ai-assets/characters?status=all"))">
         Quay lại
     </MudButton>
 </section>
@@ -68,9 +70,9 @@ else
                     </MudSelect>
                 </MudItem>
                 <MudItem xs="12" sm="6">
-                    <MudSelect T="string" Label="Trạng thái" Variant="Variant.Outlined" Disabled="_isNew" @bind-Value="_model.Status">
-                        <MudSelectItem T="string" Value="@("active")">Đang dùng</MudSelectItem>
-                        <MudSelectItem T="string" Value="@("inactive")">Tạm tắt</MudSelectItem>
+                    <MudSelect T="string" Label="Trạng thái" Variant="Variant.Outlined" Disabled="@_isNew" Value="@_model.Status" ValueChanged="OnStatusChanged">
+                        <MudSelectItem T="string" Value="@ActiveStatus">Đang dùng</MudSelectItem>
+                        <MudSelectItem T="string" Value="@InactiveStatus">Tạm tắt</MudSelectItem>
                     </MudSelect>
                 </MudItem>
                 <MudItem xs="12" sm="6">
@@ -281,6 +283,9 @@ else
 }
 
 @code {
+    private const string ActiveStatus = "active";
+    private const string InactiveStatus = "inactive";
+
     [Parameter] public long? Id { get; set; }
     [SupplyParameterFromQuery(Name = "render")] public string? RenderQuery { get; set; }
 
@@ -294,6 +299,7 @@ else
     private CharacterDetailDto? _detail;
     private GenerateCharacterImageResponse? _lastGenerate;
     private bool _loading = true;
+    private bool _isLoadingPage;
     private bool _busy;
     private bool _autoGenerate = true;
     private int? _seed;
@@ -305,6 +311,7 @@ else
     private List<ProviderOptionDto> _providerOptions = new();
     private readonly List<AiCharacterRenderLogItem> _renderLogs = new();
     private string? _lastRenderError;
+    private long? _loadedCharacterId;
 
     private string ProviderDisplay
     {
@@ -318,56 +325,115 @@ else
 
     protected override async Task OnInitializedAsync()
     {
-        await LoadProviderOptions();
-        await Load();
-        if (!_isNew && RenderQuery == "1")
-        {
-            await Generate();
-        }
-    }
+        AuthState.OnChange += HandleAuthStateChanged;
 
-    private async Task LoadProviderOptions()
-    {
-        try
+        if (AuthState.IsInitialized)
         {
-            _providerOptions = (await AiProviders.GetSelectableProvidersAsync("character_generation")).ToList();
-            if (_providerOptions.Count > 0 && _providerCapabilityId is null)
+            await LoadPageAsync();
+            if (!_isNew && RenderQuery == "1")
             {
-                _providerCapabilityId = (_providerOptions.FirstOrDefault(o => o.IsDefault) ?? _providerOptions[0]).ProviderCapabilityId;
+                await Generate();
             }
         }
-        catch
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!AuthState.IsInitialized)
         {
-            _providerOptions = new();
+            return;
+        }
+
+        if (_loadedCharacterId != Id)
+        {
+            await LoadPageAsync();
+            if (!_isNew && RenderQuery == "1")
+            {
+                await Generate();
+            }
         }
     }
 
-    private async Task Load()
+    private void HandleAuthStateChanged()
     {
-        if (AuthState.CurrentUser is null) return;
+        _ = InvokeAsync(async () =>
+        {
+            if (!AuthState.IsInitialized)
+                return;
+
+            if (AuthState.CurrentUser is null)
+            {
+                _loading = false;
+                _error = "Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.";
+                StateHasChanged();
+                return;
+            }
+
+            await LoadPageAsync();
+            StateHasChanged();
+        });
+    }
+
+    public void Dispose()
+    {
+        AuthState.OnChange -= HandleAuthStateChanged;
+    }
+
+    private async Task LoadPageAsync()
+    {
+        if (_isLoadingPage)
+        {
+            return;
+        }
+
+        _isLoadingPage = true;
         _loading = true;
         _error = null;
+
         try
         {
+            if (!AuthState.IsInitialized)
+            {
+                return;
+            }
+
+            var user = AuthState.CurrentUser;
+            if (user is null)
+            {
+                _error = "Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.";
+                return;
+            }
+
+            try
+            {
+                _providerOptions = (await AiProviders.GetSelectableProvidersAsync("character_generation")).ToList();
+                if (_providerOptions.Count > 0 && _providerCapabilityId is null)
+                {
+                    _providerCapabilityId = (_providerOptions.FirstOrDefault(o => o.IsDefault) ?? _providerOptions[0]).ProviderCapabilityId;
+                }
+            }
+            catch
+            {
+                _providerOptions = new();
+            }
+
             if (!_isNew && Id is long id)
             {
-                _detail = await Characters.GetCharacterAsync(AuthState.CurrentUser, id);
+                _detail = await Characters.GetCharacterAsync(user, id);
                 if (_detail is null)
                 {
                     _error = "Không tìm thấy nhân vật.";
                     return;
                 }
 
-                _model.CharacterName = _detail.CharacterName;
-                _model.Description = _detail.Description;
-                _model.RenderPrompt = _detail.MasterPrompt;
-                _model.StylePreset = string.IsNullOrWhiteSpace(_detail.StylePreset) ? CharacterPresetOptions.NotSpecified : _detail.StylePreset;
-                _model.Gender = string.IsNullOrWhiteSpace(_detail.Gender) ? CharacterPresetOptions.NotSpecified : _detail.Gender;
-                _model.AspectRatio = _detail.AspectRatio;
-                _model.Status = _detail.Status;
-                _model.SortOrder = _detail.SortOrder;
-                _renderPrompt = _detail.MasterPrompt;
-                _seed = _detail.Seed;
+                ApplyDetailToForm(_detail);
+                _loadedCharacterId = _detail.Id;
+            }
+            else
+            {
+                _detail = null;
+                _loadedCharacterId = null;
+                _model.Status = ActiveStatus;
             }
         }
         catch (Exception ex)
@@ -376,10 +442,44 @@ else
         }
         finally
         {
-            _loading = false;
+            if (AuthState.IsInitialized)
+            {
+                _loading = false;
+            }
+
+            _isLoadingPage = false;
         }
     }
 
+    private void ApplyDetailToForm(CharacterDetailDto detail)
+    {
+        _detail = detail;
+        _model.CharacterName = detail.CharacterName;
+        _model.Description = detail.Description;
+        _model.RenderPrompt = detail.MasterPrompt;
+        _model.StylePreset = string.IsNullOrWhiteSpace(detail.StylePreset)
+            ? CharacterPresetOptions.NotSpecified
+            : detail.StylePreset;
+        _model.Gender = string.IsNullOrWhiteSpace(detail.Gender)
+            ? CharacterPresetOptions.NotSpecified
+            : detail.Gender;
+        _model.AspectRatio = detail.AspectRatio;
+        _model.Status = NormalizeUiStatus(detail.Status);
+        _model.SortOrder = detail.SortOrder;
+        _renderPrompt = detail.MasterPrompt;
+        _seed = detail.Seed;
+    }
+
+    private static string NormalizeUiStatus(string? status)
+        => string.Equals(status, InactiveStatus, StringComparison.OrdinalIgnoreCase)
+            ? InactiveStatus
+            : ActiveStatus;
+
+    private Task OnStatusChanged(string? value)
+    {
+        _model.Status = NormalizeUiStatus(value);
+        return InvokeAsync(StateHasChanged);
+    }
     private async Task Save()
     {
         if (AuthState.CurrentUser is null) return;
@@ -401,7 +501,6 @@ else
                     AutoGenerateImage = false
                 }, AuthState.CurrentUser);
                 Snackbar.Add("Đã tạo nhân vật AI.", Severity.Success);
-                // Character đã được lưu trước; render (nếu chọn) do trang chi tiết tự gọi Generate() qua ?render=1.
                 Nav.NavigateTo(shouldRender
                     ? $"/ai-assets/characters/{created.Id}?render=1"
                     : $"/ai-assets/characters/{created.Id}");
@@ -409,9 +508,19 @@ else
             }
 
             _model.RenderPrompt = _renderPrompt;
-            await Characters.UpdateCharacterAsync(Id!.Value, _model, AuthState.CurrentUser);
-            Snackbar.Add("Đã lưu nhân vật AI.", Severity.Success);
-            await Load();
+            var requestedStatus = NormalizeUiStatus(_model.Status);
+            _model.Status = requestedStatus;
+            Logger.LogInformation("AI_CHARACTER_SAVE_UI characterId={CharacterId} currentStatus={CurrentStatus} requestedStatus={RequestedStatus} beforeUpdateStatus={BeforeUpdateStatus}",
+                Id, _detail?.Status, requestedStatus, _model.Status);
+
+            var updated = await Characters.UpdateCharacterAsync(Id!.Value, _model, AuthState.CurrentUser);
+            _detail = updated;
+            ApplyDetailToForm(updated);
+
+            Snackbar.Add(updated.Status == InactiveStatus
+                    ? "Đã lưu Character ở trạng thái Tạm tắt. Character sẽ không xuất hiện trong danh sách đang hoạt động."
+                    : "Đã lưu Character ở trạng thái Đang dùng.",
+                Severity.Success);
         }
         catch (Exception ex)
         {
@@ -422,7 +531,6 @@ else
             _busy = false;
         }
     }
-
     private async Task Generate()
     {
         _lastRenderError = null;
@@ -477,7 +585,7 @@ else
 
             Snackbar.Add(_lastGenerate.Status == "success" ? "Render ảnh nhân vật thành công." : _lastGenerate.ErrorMessage ?? "Render chưa thành công.",
                 _lastGenerate.Status == "success" ? Severity.Success : Severity.Error);
-            await Load();
+            await LoadPageAsync();
         }
         catch (Npgsql.PostgresException ex)
         {
@@ -512,7 +620,7 @@ else
             await stream.CopyToAsync(ms);
             _lastGenerate = await Characters.UploadMasterImageAsync(Id.Value, ms.ToArray(), file.Name, file.ContentType, AuthState.CurrentUser);
             Snackbar.Add("Đã upload ảnh master.", Severity.Success);
-            await Load();
+            await LoadPageAsync();
         }
         catch (Exception ex)
         {
@@ -529,7 +637,7 @@ else
         if (AuthState.CurrentUser is null || Id is null) return;
         await Characters.SetMasterImageAsync(Id.Value, renderId, AuthState.CurrentUser);
         Snackbar.Add("Đã chọn ảnh master.", Severity.Success);
-        await Load();
+        await LoadPageAsync();
     }
 
     private string[] ParseReferenceUrls()

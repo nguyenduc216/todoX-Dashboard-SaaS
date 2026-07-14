@@ -1,4 +1,4 @@
-﻿using Dapper;
+using Dapper;
 using Microsoft.Extensions.Logging;
 using TodoX.Web.Data;
 using TodoX.Web.Models;
@@ -181,10 +181,11 @@ public sealed class AiCharacterRepository
             });
     }
 
-    public async Task UpdateCharacterAsync(CharacterScope scope, long id, UpdateCharacterRequest request,
+    public async Task<CharacterDetailDto> UpdateCharacterAsync(CharacterScope scope, long id, UpdateCharacterRequest request,
         string normalizedPrompt, string negativePrompt, string status, string currentStatus, bool masterImageExists, string userId, CancellationToken ct = default)
     {
         using var conn = await _factory.OpenAsync(ct);
+        var normalizedStatus = CharacterPresetOptions.NormalizeOptionalPreset(status);
         var affected = await conn.ExecuteAsync(
             """
             UPDATE public.todox_ai_character
@@ -211,18 +212,23 @@ public sealed class AiCharacterRepository
                 aspect = request.AspectRatio,
                 normalized = normalizedPrompt,
                 negative = negativePrompt,
-                status,
+                status = normalizedStatus,
                 sortOrder = request.SortOrder,
                 userId
             }));
+
         _logger.LogInformation("AI_CHARACTER_UPDATE characterId={CharacterId} customerId={CustomerId} statusBefore={StatusBefore} statusRequest={StatusRequest} statusNormalized={StatusNormalized} affectedRows={AffectedRows} masterImageExists={MasterImageExists}",
-            id, scope.CustomerId, currentStatus, request.Status, status, affected, masterImageExists);
+            id, scope.CustomerId, currentStatus, request.Status, normalizedStatus, affected, masterImageExists);
         if (affected == 0)
         {
             throw new InvalidOperationException("Không cập nhật được Character do sai ID hoặc customer scope.");
         }
-    }
 
+        var updated = await GetAsync(scope, id, ct)
+            ?? throw new InvalidOperationException("Đã cập nhật Character nhưng không đọc lại được dữ liệu.");
+
+        return updated;
+    }
     public async Task UpdateMasterImageAsync(CharacterScope scope, long characterId, string? imageUrl, string? objectKey, string userId, CancellationToken ct = default)
     {
         using var conn = await _factory.OpenAsync(ct);
