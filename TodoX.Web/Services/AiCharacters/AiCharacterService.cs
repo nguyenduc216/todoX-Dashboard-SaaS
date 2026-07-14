@@ -106,19 +106,11 @@ public sealed class AiCharacterService : IAiCharacterService
             throw;
         }
 
-        if (request.AutoGenerateImage)
-        {
-            await GenerateImageAsync(new GenerateCharacterImageRequest
-            {
-                CharacterId = id,
-                SaveAsMaster = true,
-                Seed = request.Seed,
-                RenderPrompt = request.RenderPrompt
-            }, user, ct);
-        }
-
+        // Lưu Character phải độc lập với render ảnh. Việc render (nếu người dùng chọn) được
+        // thực hiện ở trang chi tiết sau khi Character đã được lưu, nên ở đây không gọi
+        // GenerateImageAsync/provider AI/media storage.
         return await _repo.GetAsync(scope, id, ct)
-               ?? throw new InvalidOperationException("Khong doc lai duoc AI character vua tao.");
+               ?? throw new InvalidOperationException("Đã tạo Character nhưng không đọc lại được dữ liệu.");
     }
 
     public async Task UpdateCharacterAsync(long id, UpdateCharacterRequest request, CurrentUserSession user, CancellationToken ct = default)
@@ -132,7 +124,16 @@ public sealed class AiCharacterService : IAiCharacterService
         var gender = CharacterPresetOptions.NormalizeOptionalPreset(request.Gender);
         var normalized = BuildRenderPrompt(request.RenderPrompt, request.CharacterName, request.Description, style, gender, request.AspectRatio);
         var negative = _promptBuilder.BuildNegativePrompt();
-        await _repo.UpdateCharacterAsync(scope, id, request, normalized, negative, normalizedStatus, current.Status, user.UserId.ToString(), ct);
+        var masterImageExists = !string.IsNullOrWhiteSpace(current.MasterImageUrl);
+
+        // Repository chỉ cập nhật các field an toàn; id/customer scope/master image/provider/model được giữ nguyên.
+        await _repo.UpdateCharacterAsync(scope, id, request, normalized, negative, normalizedStatus, current.Status, masterImageExists, user.UserId.ToString(), ct);
+
+        var updated = await _repo.GetAsync(scope, id, ct)
+            ?? throw new InvalidOperationException("Đã cập nhật Character nhưng không đọc lại được dữ liệu.");
+
+        _logger.LogInformation("AI_CHARACTER_UPDATE_DONE characterId={CharacterId} statusBefore={StatusBefore} statusAfter={StatusAfter} masterImageExists={MasterImageExists}",
+            id, current.Status, updated.Status, !string.IsNullOrWhiteSpace(updated.MasterImageUrl));
     }
 
     public Task DisableCharacterAsync(long id, CurrentUserSession user, CancellationToken ct = default)
@@ -146,7 +147,7 @@ public sealed class AiCharacterService : IAiCharacterService
         if (request.CharacterId is long id)
         {
             character = await _repo.GetAsync(scope, id, ct)
-                ?? throw new InvalidOperationException("Khong tim thay AI character hoac ban khong co quyen truy cap.");
+                ?? throw new InvalidOperationException("Không tìm thấy Character hoặc bạn không có quyền truy cập.");
         }
 
         var characterName = request.CharacterName ?? character?.CharacterName ?? string.Empty;
@@ -344,13 +345,13 @@ public sealed class AiCharacterService : IAiCharacterService
         await _tenant.EnsureLoadedAsync(ct);
         var scope = Scope(user);
         var character = await _repo.GetAsync(scope, characterId, ct)
-            ?? throw new InvalidOperationException("Khong tim thay AI character hoac ban khong co quyen truy cap.");
+            ?? throw new InvalidOperationException("Không tìm thấy Character hoặc bạn không có quyền truy cập.");
 
-        if (content.Length == 0) throw new InvalidOperationException("File anh dang rong.");
-        if (content.Length > 12 * 1024 * 1024) throw new InvalidOperationException("File anh toi da 12MB.");
+        if (content.Length == 0) throw new InvalidOperationException("File ảnh đang rỗng.");
+        if (content.Length > 12 * 1024 * 1024) throw new InvalidOperationException("File ảnh tối đa 12MB.");
         if (string.IsNullOrWhiteSpace(contentType) || !contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
         {
-            throw new InvalidOperationException("Chi ho tro upload file hinh anh.");
+            throw new InvalidOperationException("Chỉ hỗ trợ upload file hình ảnh.");
         }
 
         var category = BuildStorageCategory(scope, character.CharacterCode);

@@ -37,7 +37,7 @@ else
 {
     <div class="ai-character-detail-grid">
         <MudPaper Class="todox-panel pa-5" rounded="true">
-            <MudText Typo="Typo.h5" Class="mb-4">Thông tin nhân v?t</MudText>
+            <MudText Typo="Typo.h5" Class="mb-4">Thông tin nhân vật</MudText>
             <MudTextField T="string" Label="Tên nhân vật" Variant="Variant.Outlined" @bind-Value="_model.CharacterName" Class="mb-3" />
             <MudTextField T="string" Label="Mô tả nhân vật" Variant="Variant.Outlined" Lines="5" @bind-Value="_model.Description" Class="mb-3" />
             <MudTextField T="string" Label="Prompt render hình ảnh" HelperText="Có thể để trống để TodoX tự tạo prompt từ mô tả. Prompt này sẽ được gửi trực tiếp đến provider render."
@@ -95,22 +95,22 @@ else
                     <MudCheckBox T="bool" Label="Render ảnh sau khi lưu" Color="Color.Warning" @bind-Value="_autoGenerate" Disabled="@(!_isNew)" />
                 </MudItem>
             </MudGrid>
-            <MudTextField T="string" Label="URL ảnh tham chiếu" HelperText="M?i dòng là m?t URL http/https."
+            <MudTextField T="string" Label="URL ảnh tham chiếu" HelperText="Mỗi dòng là một URL http/https."
                           Variant="Variant.Outlined" Lines="3" @bind-Value="_referenceUrlsText" Class="mt-3" />
             <div class="ai-character-form-actions">
                 <MudButton Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.Save" Disabled="_busy" OnClick="Save">
-                    Luu
+                    Lưu
                 </MudButton>
                 <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.AutoAwesome"
                            Disabled="@(_busy || _isNew)" OnClick="Generate">
-                    Render ?nh nhân v?t
+                    Render ảnh nhân vật
                 </MudButton>
             </div>
         </MudPaper>
 
         <MudPaper Class="todox-panel ai-character-master pa-5" rounded="true">
             <div class="ai-character-section-title mb-3">
-                <MudText Typo="Typo.h5">?nh master</MudText>
+                <MudText Typo="Typo.h5">Ảnh master</MudText>
                 <span class="ai-character-provider-chip">@ProviderDisplay</span>
             </div>
             <div class='@($"ai-character-master-image {(_busy ? "is-rendering" : string.Empty)}")'>
@@ -131,12 +131,12 @@ else
                 <MudText Typo="Typo.subtitle2">Không render? Upload ảnh master tại đây</MudText>
                 <label class="ai-character-upload-button">
                     <MudIcon Icon="@Icons.Material.Filled.Upload" Size="Size.Small" />
-                    <span>Ch?n ?nh upload</span>
+                    <span>Chọn ảnh upload</span>
                     <InputFile class="ai-character-upload-input" OnChange="UploadMasterImage" accept="image/*" disabled="@(_busy || _isNew)" />
                 </label>
                 @if (_isNew)
                 {
-                    <small>Luu nhân v?t tru?c khi upload ?nh master.</small>
+                    <small>Lưu nhân vật trước khi upload ảnh master.</small>
                 }
             </div>
             @if (_lastGenerate is not null)
@@ -156,7 +156,7 @@ else
     {
         <MudPaper Class="todox-panel pa-5 mt-4" rounded="true">
             <div class="ai-character-section-title">
-                <MudText Typo="Typo.h5">Prompt dang luu</MudText>
+                <MudText Typo="Typo.h5">Prompt đang lưu</MudText>
                 <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Warning" StartIcon="@Icons.Material.Filled.ContentCopy"
                            OnClick="@(() => Copy(_detail.NormalizedPrompt))">Sao chép</MudButton>
             </div>
@@ -164,10 +164,10 @@ else
         </MudPaper>
 
         <MudPaper Class="todox-panel pa-5 mt-4" rounded="true">
-            <MudText Typo="Typo.h5" Class="mb-4">L?ch s? render</MudText>
+            <MudText Typo="Typo.h5" Class="mb-4">Lịch sử render</MudText>
             @if (_detail.Renders.Count == 0)
             {
-                <MudAlert Severity="Severity.Info">Chua có l?ch s? render.</MudAlert>
+                <MudAlert Severity="Severity.Info">Chưa có lịch sử render.</MudAlert>
             }
             else
             {
@@ -188,7 +188,7 @@ else
                             </div>
                             <div class="ai-character-render-body">
                                 <b>@render.RenderCode</b>
-                                <span>Nhà cung c?p: @ProviderLabel(render.ProviderCode) / @render.ModelName</span>
+                                <span>Nhà cung cấp: @ProviderLabel(render.ProviderCode) / @render.ModelName</span>
                                 <span>@render.AspectRatio - @render.Quality - @render.Resolution</span>
                                 <span>@(render.UsageCost?.ToString("0.####") ?? "0") điểm - @render.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</span>
                                 @if (!string.IsNullOrWhiteSpace(render.ErrorMessage))
@@ -312,7 +312,7 @@ else
         {
             var provider = _detail?.ProviderCode ?? Config["AiCharacters:DefaultImageProviderCode"] ?? Config["OpenRouter:DefaultImageProviderCode"] ?? "todox_image";
             var model = _detail?.ModelName ?? Config["AiCharacters:DefaultImageModel"] ?? Config["OpenRouter:DefaultImageModel"] ?? "ImageAICreativeRender";
-            return $"Nhà cung c?p: {ProviderLabel(provider)} / {model}";
+            return $"Nhà cung cấp: {ProviderLabel(provider)} / {model}";
         }
     }
 
@@ -354,19 +354,19 @@ else
                 _detail = await Characters.GetCharacterAsync(AuthState.CurrentUser, id);
                 if (_detail is null)
                 {
-                    _error = "Không tìm th?y nhân v?t.";
+                    _error = "Không tìm thấy nhân vật.";
                     return;
                 }
 
                 _model.CharacterName = _detail.CharacterName;
                 _model.Description = _detail.Description;
-                _model.RenderPrompt = _detail.NormalizedPrompt;
+                _model.RenderPrompt = _detail.MasterPrompt;
                 _model.StylePreset = string.IsNullOrWhiteSpace(_detail.StylePreset) ? CharacterPresetOptions.NotSpecified : _detail.StylePreset;
                 _model.Gender = string.IsNullOrWhiteSpace(_detail.Gender) ? CharacterPresetOptions.NotSpecified : _detail.Gender;
                 _model.AspectRatio = _detail.AspectRatio;
                 _model.Status = _detail.Status;
                 _model.SortOrder = _detail.SortOrder;
-                _renderPrompt = _detail.NormalizedPrompt;
+                _renderPrompt = _detail.MasterPrompt;
                 _seed = _detail.Seed;
             }
         }
@@ -388,6 +388,7 @@ else
         {
             if (_isNew)
             {
+                var shouldRender = _autoGenerate;
                 var created = await Characters.CreateCharacterAsync(new CreateCharacterRequest
                 {
                     CharacterName = _model.CharacterName,
@@ -397,16 +398,19 @@ else
                     Gender = _model.Gender,
                     AspectRatio = _model.AspectRatio,
                     Seed = _seed,
-                    AutoGenerateImage = _autoGenerate
+                    AutoGenerateImage = false
                 }, AuthState.CurrentUser);
-                Snackbar.Add("Ðã t?o nhân v?t AI.", Severity.Success);
-                Nav.NavigateTo($"/ai-assets/characters/{created.Id}");
+                Snackbar.Add("Đã tạo nhân vật AI.", Severity.Success);
+                // Character đã được lưu trước; render (nếu chọn) do trang chi tiết tự gọi Generate() qua ?render=1.
+                Nav.NavigateTo(shouldRender
+                    ? $"/ai-assets/characters/{created.Id}?render=1"
+                    : $"/ai-assets/characters/{created.Id}");
                 return;
             }
 
             _model.RenderPrompt = _renderPrompt;
             await Characters.UpdateCharacterAsync(Id!.Value, _model, AuthState.CurrentUser);
-            Snackbar.Add("Ðã luu nhân v?t AI.", Severity.Success);
+            Snackbar.Add("Đã lưu nhân vật AI.", Severity.Success);
             await Load();
         }
         catch (Exception ex)
@@ -423,8 +427,8 @@ else
     {
         _lastRenderError = null;
         _renderLogs.Clear();
-        await AddRenderLogAsync("ui_started", "B?t d?u render character.", "info");
-        await AddRenderLogAsync("ui_validate_input", "Ðang ki?m tra input và prompt.", "info", new
+        await AddRenderLogAsync("ui_started", "Bắt đầu render Character.", "info");
+        await AddRenderLogAsync("ui_validate_input", "Đang kiểm tra dữ liệu đầu vào và prompt.", "info", new
         {
             CharacterId = Id,
             _model.CharacterName,
@@ -437,7 +441,7 @@ else
 
         if (AuthState.CurrentUser is null || Id is null)
         {
-            await AddRenderLogAsync("ui_abort", "Thi?u user ho?c character id.", "warn");
+            await AddRenderLogAsync("ui_abort", "Thiếu user hoặc character id.", "warn");
             return;
         }
 
@@ -446,7 +450,7 @@ else
         try
         {
             var referenceUrls = ParseReferenceUrls();
-            await AddRenderLogAsync("service_call", "G?i backend render character.", "info", new
+            await AddRenderLogAsync("service_call", "Gọi backend render character.", "info", new
             {
                 CharacterId = Id,
                 Seed = _seed,
@@ -467,11 +471,11 @@ else
 
             await AddRenderLogAsync(
                 "service_result",
-                _lastGenerate.Status == "success" ? "Render ?nh nhân v?t thành công." : _lastGenerate.ErrorMessage ?? "Render chua thành công.",
+                _lastGenerate.Status == "success" ? "Render ảnh nhân vật thành công." : _lastGenerate.ErrorMessage ?? "Render chưa thành công.",
                 _lastGenerate.Status == "success" ? "success" : "error",
                 new { _lastGenerate.Status, _lastGenerate.RenderId, _lastGenerate.ImageUrl, _lastGenerate.ErrorMessage });
 
-            Snackbar.Add(_lastGenerate.Status == "success" ? "Render ?nh nhân v?t thành công." : _lastGenerate.ErrorMessage ?? "Render chua thành công.",
+            Snackbar.Add(_lastGenerate.Status == "success" ? "Render ảnh nhân vật thành công." : _lastGenerate.ErrorMessage ?? "Render chưa thành công.",
                 _lastGenerate.Status == "success" ? Severity.Success : Severity.Error);
             await Load();
         }
@@ -479,7 +483,7 @@ else
         {
             _lastRenderError = ex.ToString();
             await AddRenderLogAsync("postgres_exception", ex.MessageText, "error", new { ex.SqlState, ex.Detail, ex.Hint }, ex.ToString());
-            Snackbar.Add($"Render th?t b?i: {ex.Message}", Severity.Error);
+            Snackbar.Add($"Render thất bại: {ex.Message}", Severity.Error);
         }
         catch (Exception ex)
         {
@@ -490,7 +494,7 @@ else
         finally
         {
             _busy = false;
-            await AddRenderLogAsync("ui_finished", "Hoàn t?t render.", "info", new { _lastGenerate?.Status, _lastGenerate?.RenderId });
+            await AddRenderLogAsync("ui_finished", "Hoàn tất render.", "info", new { _lastGenerate?.Status, _lastGenerate?.RenderId });
             await InvokeAsync(StateHasChanged);
             await ScrollRenderLogsAsync();
         }
@@ -507,7 +511,7 @@ else
             using var ms = new MemoryStream();
             await stream.CopyToAsync(ms);
             _lastGenerate = await Characters.UploadMasterImageAsync(Id.Value, ms.ToArray(), file.Name, file.ContentType, AuthState.CurrentUser);
-            Snackbar.Add("Ðã upload ?nh master.", Severity.Success);
+            Snackbar.Add("Đã upload ảnh master.", Severity.Success);
             await Load();
         }
         catch (Exception ex)
@@ -524,7 +528,7 @@ else
     {
         if (AuthState.CurrentUser is null || Id is null) return;
         await Characters.SetMasterImageAsync(Id.Value, renderId, AuthState.CurrentUser);
-        Snackbar.Add("Ðã ch?n ?nh master.", Severity.Success);
+        Snackbar.Add("Đã chọn ảnh master.", Severity.Success);
         await Load();
     }
 
@@ -557,7 +561,7 @@ else
     {
         var text = string.Join(Environment.NewLine, _renderLogs.Select(log => $"[{log.Time:HH:mm:ss}] {log.Level.ToUpperInvariant()} {log.Step} - {log.Message}{FormatLogTail(log.Data, log.RawError)}"));
         await Js.InvokeVoidAsync("todoXRenderLog.copyText", text);
-        Snackbar.Add("Ðã sao chép log.", Severity.Success);
+        Snackbar.Add("Đã sao chép log.", Severity.Success);
     }
 
     private async Task DownloadRenderLogTxt()
@@ -612,16 +616,16 @@ else
     private async Task Copy(string value)
     {
         await Js.InvokeVoidAsync("navigator.clipboard.writeText", value);
-        Snackbar.Add("Ðã copy.", Severity.Success);
+        Snackbar.Add("Đã copy.", Severity.Success);
     }
 
     private static string StyleLabel(string value) => value switch
     {
         "3d_chibi" => "3D chibi",
-        "realistic" => "Chân th?c",
+        "realistic" => "Chân thực",
         "anime" => "Anime",
-        "cartoon" => "Ho?t hình",
-        "corporate_mascot" => "Linh v?t doanh nghi?p",
+        "cartoon" => "Hoạt hình",
+        "corporate_mascot" => "Linh vật doanh nghiệp",
         "koc_ai" => "KOC AI",
         _ => value
     };
@@ -629,19 +633,19 @@ else
     private static string GenderLabel(string value) => value switch
     {
         "male" => "Nam",
-        "female" => "N?",
+        "female" => "Nữ",
         "neutral" => "Trung tính",
-        "not_specified" => "Không ch?n",
+        "not_specified" => "Không chọn",
         _ => value
     };
 
     private static string AspectLabel(string value) => value switch
     {
         "1:1" => "Vuông 1:1",
-        "9:16" => "D?c 9:16",
+        "9:16" => "Dọc 9:16",
         "16:9" => "Ngang 16:9",
-        "4:5" => "D?c 4:5",
-        "3:4" => "D?c 3:4",
+        "4:5" => "Dọc 4:5",
+        "3:4" => "Dọc 3:4",
         _ => value
     };
 
@@ -650,8 +654,8 @@ else
         "active" => "Đang dùng",
         "inactive" => "Tạm tắt",
         "success" => "Thành công",
-        "failed" => "Th?t b?i",
-        "processing" => "Ðang x? lý",
+        "failed" => "Thất bại",
+        "processing" => "Đang xử lý",
         "completed" => "Thành công",
         _ => value
     };
@@ -660,7 +664,7 @@ else
     {
         "todox_image" => "TodoX ImageAICreativeRender",
         "openrouter_image" => "OpenRouter",
-        "manual_upload" => "Upload th? công",
+        "manual_upload" => "Upload thủ công",
         _ => value
     };
 }

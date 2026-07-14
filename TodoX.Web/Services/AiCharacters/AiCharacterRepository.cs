@@ -182,7 +182,7 @@ public sealed class AiCharacterRepository
     }
 
     public async Task UpdateCharacterAsync(CharacterScope scope, long id, UpdateCharacterRequest request,
-        string normalizedPrompt, string negativePrompt, string status, string currentStatus, string userId, CancellationToken ct = default)
+        string normalizedPrompt, string negativePrompt, string status, string currentStatus, bool masterImageExists, string userId, CancellationToken ct = default)
     {
         using var conn = await _factory.OpenAsync(ct);
         var affected = await conn.ExecuteAsync(
@@ -216,7 +216,7 @@ public sealed class AiCharacterRepository
                 userId
             }));
         _logger.LogInformation("AI_CHARACTER_UPDATE characterId={CharacterId} customerId={CustomerId} statusBefore={StatusBefore} statusRequest={StatusRequest} statusNormalized={StatusNormalized} affectedRows={AffectedRows} masterImageExists={MasterImageExists}",
-            id, scope.CustomerId, currentStatus, request.Status, status, affected, false);
+            id, scope.CustomerId, currentStatus, request.Status, status, affected, masterImageExists);
         if (affected == 0)
         {
             throw new InvalidOperationException("Không cập nhật được Character do sai ID hoặc customer scope.");
