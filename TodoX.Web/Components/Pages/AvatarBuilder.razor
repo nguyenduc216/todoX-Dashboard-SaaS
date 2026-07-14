@@ -1,25 +1,23 @@
 @page "/avatar-builder"
 @layout PublicAvatarBuilderLayout
-@using System.Net.Http.Json
 @using System.Text.Json
 @using Microsoft.AspNetCore.Components.Forms
 @using TodoX.Web.Components.Avatar
 @using TodoX.Web.Models
+@using TodoX.Web.Services.AiProviders
 @using TodoX.Web.Services.AvatarTemplates
 @inject IAvatarTemplateService AvatarTemplates
-@inject IHttpClientFactory HttpClientFactory
-@inject NavigationManager Nav
+@inject IAiProviderService AiProviders
 @inject IDialogService DialogService
 @inject ISnackbar Snackbar
 
-<PageTitle>Tạo avatar AI của bạn</PageTitle>
 
 <main class="avatar-public-page">
     <section class="avatar-hero">
         <div class="avatar-hero-brand">Todo<span>X</span> AI</div>
         <div class="avatar-hero-copy">
-            <h1>Tạo avatar AI của bạn</h1>
-            <p>Tải ảnh chân dung, chọn mẫu avatar và tạo ảnh chỉ trong vài giây.</p>
+            <h1>Táº¡o avatar AI cá»§a báº¡n</h1>
+            <p>Táº£i áº£nh chÃ¢n dung, chá»n máº«u avatar vÃ  táº¡o áº£nh chá»‰ trong vÃ i giÃ¢y.</p>
         </div>
     </section>
 
@@ -28,7 +26,7 @@
             <div class="avatar-portrait-preview">
                 @if (!string.IsNullOrWhiteSpace(_portraitUrl))
                 {
-                    <img src="@_portraitUrl" alt="Ảnh chân dung đã tải" />
+                    <img src="@_portraitUrl" alt="áº¢nh chÃ¢n dung Ä‘Ã£ táº£i" />
                 }
                 else
                 {
@@ -36,24 +34,24 @@
                 }
             </div>
             <div class="avatar-upload-copy">
-                <h2>Tải ảnh chân dung</h2>
-                <p>Ảnh rõ mặt sẽ cho kết quả tốt hơn. Đây là ảnh bắt buộc trước khi render.</p>
+                <h2>Táº£i áº£nh chÃ¢n dung</h2>
+                <p>áº¢nh rÃµ máº·t sáº½ cho káº¿t quáº£ tá»‘t hÆ¡n. ÄÃ¢y lÃ  áº£nh báº¯t buá»™c trÆ°á»›c khi render.</p>
                 <label class="avatar-public-upload-button">
                     <MudIcon Icon="@Icons.Material.Filled.Upload" Size="Size.Small" />
-                    <span>Chọn ảnh chân dung</span>
+                    <span>Chá»n áº£nh chÃ¢n dung</span>
                     <InputFile Class="avatar-public-hidden-input" OnChange="@(e => Upload("avatar", e))" accept="image/png,image/jpeg,image/webp" />
                 </label>
             </div>
         </div>
 
         <MudExpansionPanels Class="avatar-advanced-panel" Elevation="0">
-            <MudExpansionPanel Text="Tùy chọn nâng cao">
-                <p class="avatar-advanced-hint">Thêm logo, sản phẩm, đồng phục hoặc bối cảnh nếu bạn muốn avatar bám theo thương hiệu hơn.</p>
+            <MudExpansionPanel Text="TÃ¹y chá»n nÃ¢ng cao">
+                <p class="avatar-advanced-hint">ThÃªm logo, sáº£n pháº©m, Ä‘á»“ng phá»¥c hoáº·c bá»‘i cáº£nh náº¿u báº¡n muá»‘n avatar bÃ¡m theo thÆ°Æ¡ng hiá»‡u hÆ¡n.</p>
                 <div class="avatar-advanced-grid">
                     @AdvancedUpload("logo", "Logo", _logoUrl)
-                    @AdvancedUpload("product", "Sản phẩm", _productUrl)
-                    @AdvancedUpload("uniform", "Đồng phục", _uniformUrl)
-                    @AdvancedUpload("scene", "Bối cảnh", _sceneUrl)
+                    @AdvancedUpload("product", "Sáº£n pháº©m", _productUrl)
+                    @AdvancedUpload("uniform", "Äá»“ng phá»¥c", _uniformUrl)
+                    @AdvancedUpload("scene", "Bá»‘i cáº£nh", _sceneUrl)
                 </div>
             </MudExpansionPanel>
         </MudExpansionPanels>
@@ -61,8 +59,8 @@
 
     <section class="avatar-gallery-section">
         <div class="avatar-section-head">
-            <h2>Chọn phong cách avatar</h2>
-            <p>Mỗi mẫu dùng ảnh default từ thư viện TodoX. Sau khi render, kết quả của bạn sẽ hiện ngay trong card.</p>
+            <h2>Chá»n phong cÃ¡ch avatar</h2>
+            <p>Má»—i máº«u dÃ¹ng áº£nh default tá»« thÆ° viá»‡n TodoX. Sau khi render, káº¿t quáº£ cá»§a báº¡n sáº½ hiá»‡n ngay trong card.</p>
         </div>
 
         @if (_providerOptions.Count > 0)
@@ -81,12 +79,12 @@
         {
             <div class="avatar-loading-row">
                 <span class="avatar-flash-dot"></span>
-                <span>Đang tải avatar mẫu...</span>
+                <span>Äang táº£i avatar máº«u...</span>
             </div>
         }
         else if (_cards.Count == 0)
         {
-            <MudAlert Severity="Severity.Info">Chưa có avatar mẫu công khai. Vui lòng quay lại sau.</MudAlert>
+            <MudAlert Severity="Severity.Info">ChÆ°a cÃ³ avatar máº«u cÃ´ng khai. Vui lÃ²ng quay láº¡i sau.</MudAlert>
         }
         else
         {
@@ -107,7 +105,7 @@
                             @if (card.Rendering)
                             {
                                 <div class="avatar-card-rendering">
-                                    <span>Đang render...</span>
+                                    <span>Äang render...</span>
                                 </div>
                             }
                         </div>
@@ -119,14 +117,14 @@
                             </div>
                             <p>@card.Template.Description</p>
                             <div class="avatar-card-tags">
-                                <span>@(card.Template.GenderDisplayVi ?? "Trung tính")</span>
-                                <span>@(card.Template.CameraAngleDisplayVi ?? "Nửa người")</span>
+                                <span>@(card.Template.GenderDisplayVi ?? "Trung tÃ­nh")</span>
+                                <span>@(card.Template.CameraAngleDisplayVi ?? "Ná»­a ngÆ°á»i")</span>
                             </div>
 
                             @if (card.Result is not null)
                             {
                                 <div class="avatar-card-result-meta">
-                                    <span>Trạng thái: <b>@card.Result.Status</b></span>
+                                    <span>Tráº¡ng thÃ¡i: <b>@card.Result.Status</b></span>
                                     <span>Log: <b>@(card.Result.LogCode ?? "-")</b></span>
                                 </div>
                             }
@@ -139,11 +137,11 @@
                             <div class="avatar-card-actions">
                                 <MudButton Class="avatar-card-primary" StartIcon="@Icons.Material.Filled.AutoAwesome"
                                            Disabled="@card.Rendering" OnClick="@(() => RenderCard(card))">
-                                    @(card.Result is null ? "Render" : "Render lại")
+                                    @(card.Result is null ? "Render" : "Render láº¡i")
                                 </MudButton>
                                 <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Edit"
                                            Disabled="@card.Rendering" OnClick="@(() => EditPrompt(card))">
-                                    Sửa prompt
+                                    Sá»­a prompt
                                 </MudButton>
                             </div>
 
@@ -153,7 +151,7 @@
                                            StartIcon="@Icons.Material.Filled.Download"
                                            Href="@card.Result.ImageUrl" Target="_blank"
                                            OnClick="@(() => TrackDownload(card))">
-                                    Tải xuống
+                                    Táº£i xuá»‘ng
                                 </MudButton>
                             }
                         </div>
@@ -193,10 +191,7 @@
     {
         try
         {
-            var client = HttpClientFactory.CreateClient();
-            client.BaseAddress = new Uri(Nav.BaseUri);
-            var options = await client.GetFromJsonAsync<List<ProviderOptionDto>>("api/ai-providers/selectable?capabilityCode=avatar_generation");
-            _providerOptions = options ?? new();
+            _providerOptions = (await AiProviders.GetSelectableProvidersAsync("avatar_generation")).ToList();
             if (_providerOptions.Count > 0)
             {
                 _providerCapabilityId = (_providerOptions.FirstOrDefault(o => o.IsDefault) ?? _providerOptions[0]).ProviderCapabilityId;
@@ -208,7 +203,6 @@
             _providerOptions = new();
         }
     }
-
     private async Task Upload(string slot, InputFileChangeEventArgs args)
     {
         var file = args.File;
@@ -221,7 +215,7 @@
         {
             if (file.Size > 10 * 1024 * 1024)
             {
-                Snackbar.Add("Ảnh vượt quá 10MB.", Severity.Error);
+                Snackbar.Add("áº¢nh vÆ°á»£t quÃ¡ 10MB.", Severity.Error);
                 return;
             }
 
@@ -229,7 +223,7 @@
             await file.OpenReadStream(10 * 1024 * 1024).CopyToAsync(ms);
             var media = await AvatarTemplates.SavePublicUploadAsync(ms.ToArray(), file.Name, file.ContentType);
             SetMedia(slot, media.Id, NormalizePublicUrl(media.PublicUrl ?? media.FileUrl));
-            Snackbar.Add(slot == "avatar" ? "Đã tải ảnh chân dung." : "Đã tải ảnh tùy chọn.", Severity.Success);
+            Snackbar.Add(slot == "avatar" ? "ÄÃ£ táº£i áº£nh chÃ¢n dung." : "ÄÃ£ táº£i áº£nh tÃ¹y chá»n.", Severity.Success);
             if (slot == "avatar")
             {
                 await RenderAllCards();
@@ -237,7 +231,7 @@
         }
         catch (Exception ex)
         {
-            Snackbar.Add($"Lỗi tải ảnh: {ex.Message}", Severity.Error);
+            Snackbar.Add($"Lá»—i táº£i áº£nh: {ex.Message}", Severity.Error);
         }
     }
 
@@ -254,7 +248,7 @@
         </div>
         <div>
             <strong>@label</strong>
-            <small>@(string.IsNullOrWhiteSpace(url) ? "Tùy chọn" : "Đã tải")</small>
+            <small>@(string.IsNullOrWhiteSpace(url) ? "TÃ¹y chá»n" : "ÄÃ£ táº£i")</small>
         </div>
         <label class="avatar-advanced-button">
             <MudIcon Icon="@Icons.Material.Filled.Upload" Size="Size.Small" />
@@ -266,7 +260,7 @@
     {
         if (_portraitMediaId is null)
         {
-            Snackbar.Add("Vui lòng tải ảnh chân dung trước khi render.", Severity.Warning);
+            Snackbar.Add("Vui lÃ²ng táº£i áº£nh chÃ¢n dung trÆ°á»›c khi render.", Severity.Warning);
             return;
         }
 
@@ -275,7 +269,7 @@
         await InvokeAsync(StateHasChanged);
         try
         {
-            var result = await RenderViaEndpointAsync(new PublicAvatarBuilderRenderRequest
+            var result = await RenderAvatarAsync(new PublicAvatarBuilderRenderRequest
             {
                 TemplateId = card.Template.Id,
                 PromptOverride = card.Prompt,
@@ -299,7 +293,7 @@
         }
         catch (Exception ex)
         {
-            card.Error = $"Render chưa thành công: {ex.Message}";
+            card.Error = $"Render chÆ°a thÃ nh cÃ´ng: {ex.Message}";
             card.Result = new PublicAvatarBuilderRenderResult
             {
                 Ok = false,
@@ -347,7 +341,7 @@
     {
         try
         {
-            var result = await RenderViaEndpointAsync(new PublicAvatarBuilderRenderRequest
+            var result = await RenderAvatarAsync(new PublicAvatarBuilderRenderRequest
             {
                 TemplateId = card.Template.Id,
                 PromptOverride = card.Prompt,
@@ -371,7 +365,7 @@
         }
         catch (Exception ex)
         {
-            card.Error = $"Render chưa thành công: {ex.Message}";
+            card.Error = $"Render chÆ°a thÃ nh cÃ´ng: {ex.Message}";
             card.Result = new PublicAvatarBuilderRenderResult
             {
                 Ok = false,
@@ -386,45 +380,22 @@
         }
     }
 
-    private async Task<PublicAvatarBuilderRenderResult> RenderViaEndpointAsync(PublicAvatarBuilderRenderRequest request)
-    {
-        var client = HttpClientFactory.CreateClient();
-        client.BaseAddress = new Uri(Nav.BaseUri);
-        using var response = await client.PostAsJsonAsync("api/public/avatar-builder/render", request);
-        var body = await response.Content.ReadAsStringAsync();
-        var result = string.IsNullOrWhiteSpace(body)
-            ? null
-            : JsonSerializer.Deserialize<PublicAvatarBuilderRenderResult>(body, new JsonSerializerOptions(JsonSerializerDefaults.Web));
-        if (result is not null)
-        {
-            if (!response.IsSuccessStatusCode && string.IsNullOrWhiteSpace(result.Error))
-            {
-                result.Error = $"Render endpoint HTTP {(int)response.StatusCode}.";
-            }
-            return result;
-        }
-
-        return new PublicAvatarBuilderRenderResult
-        {
-            Ok = false,
-            Status = "failed",
-            Error = string.IsNullOrWhiteSpace(body) ? $"Render endpoint HTTP {(int)response.StatusCode}." : body
-        };
-    }
+    private Task<PublicAvatarBuilderRenderResult> RenderAvatarAsync(PublicAvatarBuilderRenderRequest request)
+        => AvatarTemplates.RenderPublicAsync(request);
 
     private static string RenderFailureMessage(PublicAvatarBuilderRenderResult result)
     {
         if (!string.IsNullOrWhiteSpace(result.Error))
         {
-            return $"Render chưa thành công: {result.Error}";
+            return $"Render chÆ°a thÃ nh cÃ´ng: {result.Error}";
         }
 
         if (!string.IsNullOrWhiteSpace(result.LogCode))
         {
-            return $"Render chưa thành công. Mã log: {result.LogCode}";
+            return $"Render chÆ°a thÃ nh cÃ´ng. MÃ£ log: {result.LogCode}";
         }
 
-        return "Render chưa thành công, vui lòng thử lại.";
+        return "Render chÆ°a thÃ nh cÃ´ng, vui lÃ²ng thá»­ láº¡i.";
     }
 
     private async Task EditPrompt(TemplateCardState card)
@@ -439,7 +410,7 @@
             { x => x.OutfitCode, card.OutfitCode }
         };
         var options = new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, CloseOnEscapeKey = true };
-        var dialog = await DialogService.ShowAsync<PublicAvatarPromptEditDialog>("Sửa prompt", parameters, options);
+        var dialog = await DialogService.ShowAsync<PublicAvatarPromptEditDialog>("Sá»­a prompt", parameters, options);
         var response = await dialog.Result;
         if (response is null || response.Canceled || response.Data is not PublicAvatarPromptEditResult edit)
         {

@@ -185,7 +185,7 @@ public sealed class AiCharacterRepository
         string normalizedPrompt, string negativePrompt, string status, string currentStatus, bool masterImageExists, string userId, CancellationToken ct = default)
     {
         using var conn = await _factory.OpenAsync(ct);
-        var normalizedStatus = CharacterPresetOptions.NormalizeOptionalPreset(status);
+        var normalizedStatus = string.Equals(status, "inactive", StringComparison.OrdinalIgnoreCase) ? "inactive" : "active";
         var affected = await conn.ExecuteAsync(
             """
             UPDATE public.todox_ai_character

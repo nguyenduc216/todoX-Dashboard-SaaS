@@ -12,6 +12,7 @@
 @inject ISnackbar Snackbar
 @inject ILogger<AiCharacterEdit> Logger
 @inject IConfiguration Config
+@inject ILogger<AiCharacterEdit> Logger
 @implements IDisposable
 
 <PageTitle>@(_isNew ? "Tạo nhân vật AI" : "Nhân vật AI")</PageTitle>
@@ -312,6 +313,7 @@ else
     private readonly List<AiCharacterRenderLogItem> _renderLogs = new();
     private string? _lastRenderError;
     private long? _loadedCharacterId;
+    private bool _autoRenderHandled;
 
     private string ProviderDisplay
     {
@@ -332,7 +334,7 @@ else
             await LoadPageAsync();
             if (!_isNew && RenderQuery == "1")
             {
-                await Generate();
+                await TryAutoRenderAsync();
             }
         }
     }
@@ -349,7 +351,7 @@ else
             await LoadPageAsync();
             if (!_isNew && RenderQuery == "1")
             {
-                await Generate();
+                await TryAutoRenderAsync();
             }
         }
     }
@@ -379,6 +381,16 @@ else
         AuthState.OnChange -= HandleAuthStateChanged;
     }
 
+    private async Task TryAutoRenderAsync()
+    {
+        if (_autoRenderHandled || _isNew || RenderQuery != "1" || _detail is null)
+        {
+            return;
+        }
+
+        _autoRenderHandled = true;
+        await TryAutoRenderAsync();
+    }
     private async Task LoadPageAsync()
     {
         if (_isLoadingPage)

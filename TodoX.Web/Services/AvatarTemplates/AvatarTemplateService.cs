@@ -386,7 +386,18 @@ public sealed class AvatarTemplateService : IAvatarTemplateService
         CancellationToken ct)
     {
         var references = new List<string>();
-        foreach (var refMediaId in new[] { avatarMediaId, logoMediaId, productMediaId, uniformMediaId, sceneMediaId })
+        var avatarUrl = await MediaUrlAsync(avatarMediaId, ct);
+        if (avatarMediaId is not null && string.IsNullOrWhiteSpace(avatarUrl))
+        {
+            throw new InvalidOperationException("Không tạo được URL public cho ảnh chân dung.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(avatarUrl))
+        {
+            references.Add(avatarUrl!);
+        }
+
+        foreach (var refMediaId in new[] { logoMediaId, productMediaId, uniformMediaId, sceneMediaId })
         {
             var url = await MediaUrlAsync(refMediaId, ct);
             if (!string.IsNullOrWhiteSpace(url))
@@ -441,7 +452,6 @@ public sealed class AvatarTemplateService : IAvatarTemplateService
             Error = string.IsNullOrWhiteSpace(imageUrl) ? "Provider không trả về ảnh." : null
         };
     }
-
     private async Task LogCreativeUsageAsync(ProviderOptionDto? option, string featureCode,
         PublicAvatarBuilderRenderResult result, long? customerId, Guid userId, CancellationToken ct)
     {
