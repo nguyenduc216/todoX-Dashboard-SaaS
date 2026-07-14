@@ -12,7 +12,6 @@
 @inject ISnackbar Snackbar
 @inject ILogger<AiCharacterEdit> Logger
 @inject IConfiguration Config
-@inject ILogger<AiCharacterEdit> Logger
 @implements IDisposable
 
 <PageTitle>@(_isNew ? "Tạo nhân vật AI" : "Nhân vật AI")</PageTitle>
@@ -389,7 +388,7 @@ else
         }
 
         _autoRenderHandled = true;
-        await TryAutoRenderAsync();
+        await Generate();
     }
     private async Task LoadPageAsync()
     {

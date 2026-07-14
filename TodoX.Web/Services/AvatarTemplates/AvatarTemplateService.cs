@@ -399,6 +399,11 @@ public sealed class AvatarTemplateService : IAvatarTemplateService
 
         foreach (var refMediaId in new[] { logoMediaId, productMediaId, uniformMediaId, sceneMediaId })
         {
+            if (refMediaId is null)
+            {
+                continue;
+            }
+
             var url = await MediaUrlAsync(refMediaId, ct);
             if (!string.IsNullOrWhiteSpace(url))
             {
