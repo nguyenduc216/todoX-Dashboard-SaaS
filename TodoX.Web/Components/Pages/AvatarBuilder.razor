@@ -10,6 +10,7 @@
 @inject IAiProviderService AiProviders
 @inject IDialogService DialogService
 @inject ISnackbar Snackbar
+@inject IConfiguration Config
 
 <PageTitle>Tạo avatar AI của bạn</PageTitle>
 
@@ -177,14 +178,25 @@
     private string? _sceneUrl;
     private long? _providerCapabilityId;
     private List<ProviderOptionDto> _providerOptions = new();
+    private bool _useImageRouter;
     private readonly List<TemplateCardState> _cards = new();
 
     protected override async Task OnInitializedAsync()
     {
+        _useImageRouter = Config.GetValue<bool>("Features:AvatarBuilderUseImageRouter");
         var templates = await AvatarTemplates.ListAsync(publicOnly: true);
         _cards.Clear();
         _cards.AddRange(templates.Select(x => new TemplateCardState(x)));
-        await LoadProviderOptions();
+        if (_useImageRouter)
+        {
+            await LoadProviderOptions();
+        }
+        else
+        {
+            // Backward-compat: Builder chạy luồng legacy ImageAICreativeRenderService, không chọn provider.
+            _providerOptions = new();
+            _providerCapabilityId = null;
+        }
         _loading = false;
     }
 
@@ -225,11 +237,9 @@
             await file.OpenReadStream(10 * 1024 * 1024).CopyToAsync(ms);
             var media = await AvatarTemplates.SavePublicUploadAsync(ms.ToArray(), file.Name, file.ContentType);
             SetMedia(slot, media.Id, NormalizePublicUrl(media.PublicUrl ?? media.FileUrl));
-            Snackbar.Add(slot == "avatar" ? "Đã tải ảnh chân dung." : "Đã tải ảnh tùy chọn.", Severity.Success);
-            if (slot == "avatar")
-            {
-                await RenderAllCards();
-            }
+            Snackbar.Add(slot == "avatar"
+                ? "Đã tải ảnh chân dung. Hãy chọn mẫu và bấm Render."
+                : "Đã tải ảnh tùy chọn.", Severity.Success);
         }
         catch (Exception ex)
         {

@@ -301,7 +301,6 @@ public sealed class AvatarTemplateService : IAvatarTemplateService
         var prompt = !string.IsNullOrWhiteSpace(request.PromptOverride)
             ? request.PromptOverride.Trim()
             : template?.PromptTemplate ?? AvatarTemplateEditModel.DefaultPrompt;
-        _logger.LogInformation("PUBLIC_AVATAR_RENDER_REQUESTED templateId={TemplateId} userId={UserId}", request.TemplateId, userId);
 
         var option = await ResolveAvatarOptionAsync(request.ProviderCapabilityId, ct);
         var avatarMediaId = request.AvatarMediaId ?? template?.AvatarMediaId;
@@ -309,36 +308,55 @@ public sealed class AvatarTemplateService : IAvatarTemplateService
         var productMediaId = request.ProductMediaId ?? template?.ProductMediaId;
         var uniformMediaId = request.UniformMediaId ?? template?.UniformMediaId;
         var sceneMediaId = request.SceneMediaId ?? template?.SceneMediaId;
+        var scenario = template?.Scenario ?? "avatar_chibi";
 
-        if (option is not null && ProviderCodeMap.ToFactoryKey(option.ProviderCode) == "openrouter_image")
+        // Backward-compat: Builder public tạm thời chạy luồng legacy ImageAICreativeRenderService.
+        // Chỉ đi qua shared image router khi feature flag bật VÀ provider là openrouter_image.
+        var useRouter = _config.GetValue<bool>("Features:AvatarBuilderUseImageRouter")
+            && option is not null
+            && ProviderCodeMap.ToFactoryKey(option.ProviderCode) == "openrouter_image";
+
+        _logger.LogInformation("PUBLIC_AVATAR_RENDER_START templateId={TemplateId} useRouter={UseRouter} providerCapabilityId={ProviderCapabilityId} avatarMediaId={AvatarMediaId} scenario={Scenario} promptLength={PromptLength}",
+            request.TemplateId, useRouter, request.ProviderCapabilityId, avatarMediaId, scenario, prompt.Length);
+
+        PublicAvatarBuilderRenderResult publicResult;
+        if (useRouter)
         {
-            return await RenderViaRouterAsync(option, prompt, "avatar_builder", "public_avatar_builder",
+            // TODO(builder-router): AiImageRenderRouter hiện truyền CustomerId = null thay vì request.CustomerId.
+            // Không sửa trong task backward-compat này để tránh regression; xử lý riêng khi bật router cho Builder.
+            publicResult = await RenderViaRouterAsync(option!, prompt, "avatar_builder", "public_avatar_builder",
                 userId, null, avatarMediaId, logoMediaId, productMediaId, uniformMediaId, sceneMediaId, ct);
         }
-
-        var result = await _creativeRender.RenderAsync(new ImageAICreativeRenderRequest
+        else
         {
-            UserId = userId,
-            CustomerId = null,
-            IsCustomer = false,
-            Scenario = template?.Scenario ?? "avatar_chibi",
-            CharacterType = NormalizeOptionalPreset(request.CharacterTypeCode ?? template?.CharacterTypeCode),
-            Gender = NormalizeOptionalPreset(request.GenderCode ?? template?.GenderCode),
-            CameraAngle = NormalizeOptionalPreset(request.CameraAngleCode ?? template?.CameraAngleCode),
-            Outfit = NormalizeOptionalPreset(request.OutfitCode ?? template?.OutfitCode),
-            Count = 1,
-            PromptOverride = prompt,
-            AspectRatio = "1:1",
-            FileCategory = "public_avatar_builder",
-            AvatarMediaId = avatarMediaId,
-            LogoMediaId = logoMediaId,
-            ProductMediaId = productMediaId,
-            UniformMediaId = uniformMediaId,
-            SceneMediaId = sceneMediaId,
-            RequireReferenceImages = request.AvatarMediaId is not null,
-            SkipReferenceOwnershipCheck = true
-        }, ct);
-        var publicResult = ToPublicResult(result);
+            var result = await _creativeRender.RenderAsync(new ImageAICreativeRenderRequest
+            {
+                UserId = userId,
+                CustomerId = null,
+                IsCustomer = false,
+                Scenario = scenario,
+                CharacterType = NormalizeOptionalPreset(request.CharacterTypeCode ?? template?.CharacterTypeCode),
+                Gender = NormalizeOptionalPreset(request.GenderCode ?? template?.GenderCode),
+                CameraAngle = NormalizeOptionalPreset(request.CameraAngleCode ?? template?.CameraAngleCode),
+                Outfit = NormalizeOptionalPreset(request.OutfitCode ?? template?.OutfitCode),
+                Count = 1,
+                PromptOverride = prompt,
+                AspectRatio = "1:1",
+                FileCategory = "public_avatar_builder",
+                AvatarMediaId = avatarMediaId,
+                LogoMediaId = logoMediaId,
+                ProductMediaId = productMediaId,
+                UniformMediaId = uniformMediaId,
+                SceneMediaId = sceneMediaId,
+                RequireReferenceImages = avatarMediaId is not null,
+                SkipReferenceOwnershipCheck = true
+            }, ct);
+            publicResult = ToPublicResult(result);
+        }
+
+        _logger.LogInformation("PUBLIC_AVATAR_RENDER_DONE templateId={TemplateId} ok={Ok} status={Status} mediaId={MediaId} logCode={LogCode} error={Error}",
+            request.TemplateId, publicResult.Ok, publicResult.Status, publicResult.MediaId, publicResult.LogCode, publicResult.Error);
+
         await LogCreativeUsageAsync(option, "avatar_builder", publicResult, null, userId, ct);
         return publicResult;
     }
