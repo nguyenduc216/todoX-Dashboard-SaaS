@@ -1,4 +1,4 @@
-@page "/ai-assets/characters/new"
+Ôªø@page "/ai-assets/characters/new"
 @page "/ai-assets/characters/{Id:long}"
 @using TodoX.Web.Models
 @using TodoX.Web.Services.AiProviders
@@ -12,22 +12,22 @@
 @inject ISnackbar Snackbar
 @inject IConfiguration Config
 
-<PageTitle>@(_isNew ? "T?o nh‚n v?t AI" : "Nh‚n v?t AI")</PageTitle>
+<PageTitle>@(_isNew ? "T·∫°o nh√¢n v·∫≠t AI" : "Nh√¢n v·∫≠t AI")</PageTitle>
 
 <section class="todox-page-head">
     <div>
-        <MudText Typo="Typo.h3" Class="todox-page-title">@(_isNew ? "T?o nh‚n v?t AI" : _model.CharacterName)</MudText>
-        <MudText Typo="Typo.body1" Class="todox-page-subtitle">Thi?t k? nh‚n v?t AI nh?t qu·n d? d˘ng l?i trong video TodoX.</MudText>
+        <MudText Typo="Typo.h3" Class="todox-page-title">@(_isNew ? "T·∫°o nh√¢n v·∫≠t AI" : _model.CharacterName)</MudText>
+        <MudText Typo="Typo.body1" Class="todox-page-subtitle">Thi·∫øt k·∫ø nh√¢n v·∫≠t AI nh·∫•t qu√°n ƒë·ªÉ d√πng l·∫°i trong video TodoX.</MudText>
     </div>
     <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.ArrowBack"
                OnClick="@(() => Nav.NavigateTo("/ai-assets/characters"))">
-        Quay l?i
+        Quay l·∫°i
     </MudButton>
 </section>
 
 @if (_loading)
 {
-    <div class="todox-flash-row"><span class="avatar-flash-dot"></span><span>–ang t?i nh‚n v?t...</span></div>
+    <div class="todox-flash-row"><span class="avatar-flash-dot"></span><span>ƒêang t·∫£i nh√¢n v·∫≠t...</span></div>
 }
 else if (!string.IsNullOrWhiteSpace(_error))
 {
@@ -37,14 +37,14 @@ else
 {
     <div class="ai-character-detail-grid">
         <MudPaper Class="todox-panel pa-5" rounded="true">
-            <MudText Typo="Typo.h5" Class="mb-4">ThÙng tin nh‚n v?t</MudText>
-            <MudTextField T="string" Label="TÍn nh‚n v?t" Variant="Variant.Outlined" @bind-Value="_model.CharacterName" Class="mb-3" />
-            <MudTextField T="string" Label="MÙ t? nh‚n v?t" Variant="Variant.Outlined" Lines="5" @bind-Value="_model.Description" Class="mb-3" />
-            <MudTextField T="string" Label="Prompt render hÏnh ?nh" HelperText="CÛ th? d? tr?ng d? TodoX t? t?o prompt t? mÙ t?. Prompt n‡y s? du?c g?i tr?c ti?p d?n provider render."
+            <MudText Typo="Typo.h5" Class="mb-4">Th√¥ng tin nh√¢n v?t</MudText>
+            <MudTextField T="string" Label="T√™n nh√¢n v·∫≠t" Variant="Variant.Outlined" @bind-Value="_model.CharacterName" Class="mb-3" />
+            <MudTextField T="string" Label="M√¥ t·∫£ nh√¢n v·∫≠t" Variant="Variant.Outlined" Lines="5" @bind-Value="_model.Description" Class="mb-3" />
+            <MudTextField T="string" Label="Prompt render h√¨nh ·∫£nh" HelperText="C√≥ th·ªÉ ƒë·ªÉ tr·ªëng ƒë·ªÉ TodoX t·ª± t·∫°o prompt t·ª´ m√¥ t·∫£. Prompt n√†y s·∫Ω ƒë∆∞·ª£c g·ª≠i tr·ª±c ti·∫øp ƒë·∫øn provider render."
                           Variant="Variant.Outlined" Lines="5" @bind-Value="_renderPrompt" Class="mb-3" />
             <MudGrid>
                 <MudItem xs="12" sm="6">
-                    <MudSelect T="string" Label="Phong c·ch" Variant="Variant.Outlined" @bind-Value="_model.StylePreset">
+                    <MudSelect T="string" Label="Phong c√°ch" Variant="Variant.Outlined" @bind-Value="_model.StylePreset">
                         @foreach (var item in CharacterPresetOptions.StylePresets)
                         {
                             <MudSelectItem Value="@item.Value">@item.Label</MudSelectItem>
@@ -52,7 +52,7 @@ else
                     </MudSelect>
                 </MudItem>
                 <MudItem xs="12" sm="6">
-                    <MudSelect T="string" Label="Gi?i tÌnh" Variant="Variant.Outlined" @bind-Value="_model.Gender">
+                    <MudSelect T="string" Label="Gi·ªõi t√≠nh" Variant="Variant.Outlined" @bind-Value="_model.Gender">
                         @foreach (var item in CharacterPresetOptions.GenderOptions)
                         {
                             <MudSelectItem Value="@item.Value">@item.Label</MudSelectItem>
@@ -60,7 +60,7 @@ else
                     </MudSelect>
                 </MudItem>
                 <MudItem xs="12" sm="6">
-                    <MudSelect T="string" Label="T? l? khung hÏnh" Variant="Variant.Outlined" @bind-Value="_model.AspectRatio">
+                    <MudSelect T="string" Label="T·ª∑ l·ªá khung h√¨nh" Variant="Variant.Outlined" @bind-Value="_model.AspectRatio">
                         @foreach (var item in CharacterPresetOptions.AspectRatios)
                         {
                             <MudSelectItem Value="@item.Value">@item.Label</MudSelectItem>
@@ -68,18 +68,18 @@ else
                     </MudSelect>
                 </MudItem>
                 <MudItem xs="12" sm="6">
-                    <MudSelect T="string" Label="Tr?ng th·i" Variant="Variant.Outlined" Disabled="_isNew" @bind-Value="_model.Status">
-                        <MudSelectItem T="string" Value="@("active")">–ang d˘ng</MudSelectItem>
-                        <MudSelectItem T="string" Value="@("inactive")">T?m t?t</MudSelectItem>
+                    <MudSelect T="string" Label="Tr·∫°ng th√°i" Variant="Variant.Outlined" Disabled="_isNew" @bind-Value="_model.Status">
+                        <MudSelectItem T="string" Value="@("active")">ƒêang d√πng</MudSelectItem>
+                        <MudSelectItem T="string" Value="@("inactive")">T·∫°m t·∫Øt</MudSelectItem>
                     </MudSelect>
                 </MudItem>
                 <MudItem xs="12" sm="6">
-                    <MudNumericField T="int?" Label="M„ seed" Variant="Variant.Outlined" @bind-Value="_seed" />
+                    <MudNumericField T="int?" Label="M√£ seed" Variant="Variant.Outlined" @bind-Value="_seed" />
                 </MudItem>
                 <MudItem xs="12" sm="6">
                     @if (_providerOptions.Count == 0)
                     {
-                        <MudAlert Severity="Severity.Warning" Dense="true">Chua c?u hÏnh provider cho <b>character_generation</b>.</MudAlert>
+                        <MudAlert Severity="Severity.Warning" Dense="true">Ch∆∞a c·∫•u h√¨nh provider cho <b>character_generation</b>.</MudAlert>
                     }
                     else
                     {
@@ -92,10 +92,10 @@ else
                     }
                 </MudItem>
                 <MudItem xs="12" sm="6">
-                    <MudCheckBox T="bool" Label="Render ?nh sau khi luu" Color="Color.Warning" @bind-Value="_autoGenerate" Disabled="@(!_isNew)" />
+                    <MudCheckBox T="bool" Label="Render ·∫£nh sau khi l∆∞u" Color="Color.Warning" @bind-Value="_autoGenerate" Disabled="@(!_isNew)" />
                 </MudItem>
             </MudGrid>
-            <MudTextField T="string" Label="URL ?nh tham chi?u" HelperText="M?i dÚng l‡ m?t URL http/https."
+            <MudTextField T="string" Label="URL ·∫£nh tham chi·∫øu" HelperText="M?i d√≤ng l√† m?t URL http/https."
                           Variant="Variant.Outlined" Lines="3" @bind-Value="_referenceUrlsText" Class="mt-3" />
             <div class="ai-character-form-actions">
                 <MudButton Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.Save" Disabled="_busy" OnClick="Save">
@@ -103,7 +103,7 @@ else
                 </MudButton>
                 <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.AutoAwesome"
                            Disabled="@(_busy || _isNew)" OnClick="Generate">
-                    Render ?nh nh‚n v?t
+                    Render ?nh nh√¢n v?t
                 </MudButton>
             </div>
         </MudPaper>
@@ -124,11 +124,11 @@ else
                 }
                 @if (_busy)
                 {
-                    <div class="ai-character-flash-overlay"><span>–ang x? l˝...</span></div>
+                    <div class="ai-character-flash-overlay"><span>ƒêang x·ª≠ l√Ω...</span></div>
                 }
             </div>
             <div class="ai-character-upload-box">
-                <MudText Typo="Typo.subtitle2">KhÙng render? Upload ?nh master t?i d‚y</MudText>
+                <MudText Typo="Typo.subtitle2">Kh√¥ng render? Upload ·∫£nh master t·∫°i ƒë√¢y</MudText>
                 <label class="ai-character-upload-button">
                     <MudIcon Icon="@Icons.Material.Filled.Upload" Size="Size.Small" />
                     <span>Ch?n ?nh upload</span>
@@ -136,7 +136,7 @@ else
                 </label>
                 @if (_isNew)
                 {
-                    <small>Luu nh‚n v?t tru?c khi upload ?nh master.</small>
+                    <small>Luu nh√¢n v?t tru?c khi upload ?nh master.</small>
                 }
             </div>
             @if (_lastGenerate is not null)
@@ -158,7 +158,7 @@ else
             <div class="ai-character-section-title">
                 <MudText Typo="Typo.h5">Prompt dang luu</MudText>
                 <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Warning" StartIcon="@Icons.Material.Filled.ContentCopy"
-                           OnClick="@(() => Copy(_detail.NormalizedPrompt))">Sao chÈp</MudButton>
+                           OnClick="@(() => Copy(_detail.NormalizedPrompt))">Sao ch√©p</MudButton>
             </div>
             <pre class="ai-character-prompt">@_detail.NormalizedPrompt</pre>
         </MudPaper>
@@ -167,7 +167,7 @@ else
             <MudText Typo="Typo.h5" Class="mb-4">L?ch s? render</MudText>
             @if (_detail.Renders.Count == 0)
             {
-                <MudAlert Severity="Severity.Info">Chua cÛ l?ch s? render.</MudAlert>
+                <MudAlert Severity="Severity.Info">Chua c√≥ l?ch s? render.</MudAlert>
             }
             else
             {
@@ -188,9 +188,9 @@ else
                             </div>
                             <div class="ai-character-render-body">
                                 <b>@render.RenderCode</b>
-                                <span>Nh‡ cung c?p: @ProviderLabel(render.ProviderCode) / @render.ModelName</span>
+                                <span>Nh√† cung c?p: @ProviderLabel(render.ProviderCode) / @render.ModelName</span>
                                 <span>@render.AspectRatio - @render.Quality - @render.Resolution</span>
-                                <span>@(render.UsageCost?.ToString("0.####") ?? "0") di?m - @render.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</span>
+                                <span>@(render.UsageCost?.ToString("0.####") ?? "0") ƒëi·ªÉm - @render.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</span>
                                 @if (!string.IsNullOrWhiteSpace(render.ErrorMessage))
                                 {
                                     <small class="ai-character-error">@render.ErrorMessage</small>
@@ -201,18 +201,18 @@ else
                                         <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Warning"
                                                    StartIcon="@Icons.Material.Filled.Star"
                                                    OnClick="@(() => SetMaster(render.Id))">
-                                            Ch?n l‡m master
+                                            Ch·ªçn l√†m master
                                         </MudButton>
                                         <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Warning"
                                                    StartIcon="@Icons.Material.Filled.Link"
                                                     OnClick="@(() => Copy(render.OutputImageUrl ?? string.Empty))">
-                                            Sao chÈp URL
+                                            Sao ch√©p URL
                                         </MudButton>
                                     }
                                     <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Warning"
                                                StartIcon="@Icons.Material.Filled.Article"
                                                OnClick="@(() => Copy(render.Prompt))">
-                                        Sao chÈp prompt
+                                        Sao ch√©p prompt
                                     </MudButton>
                                 </div>
                             </div>
@@ -224,14 +224,14 @@ else
         <MudPaper Class="todox-panel pa-4 mt-4 ai-character-render-log-panel" rounded="true">
             <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
                 <div>
-                    <MudText Typo="Typo.h6">Nh?t k˝ render</MudText>
-                    <MudText Typo="Typo.caption" Class="todox-page-subtitle">Log ch?y tr?c ti?p trÍn trang n‡y. T?i du?c file ngay c? khi backend l?i.</MudText>
+                    <MudText Typo="Typo.h6">Nh·∫≠t k√Ω render</MudText>
+                    <MudText Typo="Typo.caption" Class="todox-page-subtitle">Log ch·∫°y tr·ª±c ti·∫øp tr√™n trang n√†y. T·∫£i ƒë∆∞·ª£c file ngay c·∫£ khi backend l·ªói.</MudText>
                 </div>
                 <MudStack Row="true" Spacing="1" Class="flex-wrap gap-1">
-                    <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.ContentCopy" OnClick="CopyRenderLogs" Disabled="@(_renderLogs.Count == 0)">Sao chÈp log</MudButton>
-                    <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Download" OnClick="DownloadRenderLogTxt" Disabled="@(_renderLogs.Count == 0)">T?i .txt</MudButton>
-                    <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.DataObject" OnClick="DownloadRenderLogJson" Disabled="@(_renderLogs.Count == 0)">T?i .json</MudButton>
-                    <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Warning" OnClick="ClearRenderLogs" Disabled="@_busy">XÛa log</MudButton>
+                    <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.ContentCopy" OnClick="CopyRenderLogs" Disabled="@(_renderLogs.Count == 0)">Sao ch√©p log</MudButton>
+                    <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Download" OnClick="DownloadRenderLogTxt" Disabled="@(_renderLogs.Count == 0)">T·∫£i .txt</MudButton>
+                    <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.DataObject" OnClick="DownloadRenderLogJson" Disabled="@(_renderLogs.Count == 0)">T·∫£i .json</MudButton>
+                    <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Warning" OnClick="ClearRenderLogs" Disabled="@_busy">X√≥a log</MudButton>
                 </MudStack>
             </MudStack>
 
@@ -243,7 +243,7 @@ else
             @if (!string.IsNullOrWhiteSpace(_lastRenderError))
             {
                 <MudAlert Severity="Severity.Error" Dense="true" Class="mt-3">
-                    <MudText Typo="Typo.subtitle2">L?i g?n nh?t</MudText>
+                    <MudText Typo="Typo.subtitle2">L·ªói g·∫ßn nh·∫•t</MudText>
                     <pre class="ai-character-render-log-error">@_lastRenderError</pre>
                 </MudAlert>
             }
@@ -251,7 +251,7 @@ else
             <div id="ai-character-render-log-panel" class="ai-character-render-log-list mt-3">
                 @if (_renderLogs.Count == 0)
                 {
-                    <div class="ai-character-render-log-empty">Chua cÛ log.</div>
+                    <div class="ai-character-render-log-empty">Ch∆∞a c√≥ log.</div>
                 }
                 else
                 {
@@ -312,7 +312,7 @@ else
         {
             var provider = _detail?.ProviderCode ?? Config["AiCharacters:DefaultImageProviderCode"] ?? Config["OpenRouter:DefaultImageProviderCode"] ?? "todox_image";
             var model = _detail?.ModelName ?? Config["AiCharacters:DefaultImageModel"] ?? Config["OpenRouter:DefaultImageModel"] ?? "ImageAICreativeRender";
-            return $"Nh‡ cung c?p: {ProviderLabel(provider)} / {model}";
+            return $"Nh√† cung c?p: {ProviderLabel(provider)} / {model}";
         }
     }
 
@@ -354,7 +354,7 @@ else
                 _detail = await Characters.GetCharacterAsync(AuthState.CurrentUser, id);
                 if (_detail is null)
                 {
-                    _error = "KhÙng tÏm th?y nh‚n v?t.";
+                    _error = "Kh√¥ng t√¨m th?y nh√¢n v?t.";
                     return;
                 }
 
@@ -399,14 +399,14 @@ else
                     Seed = _seed,
                     AutoGenerateImage = _autoGenerate
                 }, AuthState.CurrentUser);
-                Snackbar.Add("–„ t?o nh‚n v?t AI.", Severity.Success);
+                Snackbar.Add("√ê√£ t?o nh√¢n v?t AI.", Severity.Success);
                 Nav.NavigateTo($"/ai-assets/characters/{created.Id}");
                 return;
             }
 
             _model.RenderPrompt = _renderPrompt;
             await Characters.UpdateCharacterAsync(Id!.Value, _model, AuthState.CurrentUser);
-            Snackbar.Add("–„ luu nh‚n v?t AI.", Severity.Success);
+            Snackbar.Add("√ê√£ luu nh√¢n v?t AI.", Severity.Success);
             await Load();
         }
         catch (Exception ex)
@@ -424,7 +424,7 @@ else
         _lastRenderError = null;
         _renderLogs.Clear();
         await AddRenderLogAsync("ui_started", "B?t d?u render character.", "info");
-        await AddRenderLogAsync("ui_validate_input", "–ang ki?m tra input v‡ prompt.", "info", new
+        await AddRenderLogAsync("ui_validate_input", "√êang ki?m tra input v√† prompt.", "info", new
         {
             CharacterId = Id,
             _model.CharacterName,
@@ -467,11 +467,11 @@ else
 
             await AddRenderLogAsync(
                 "service_result",
-                _lastGenerate.Status == "success" ? "Render ?nh nh‚n v?t th‡nh cÙng." : _lastGenerate.ErrorMessage ?? "Render chua th‡nh cÙng.",
+                _lastGenerate.Status == "success" ? "Render ?nh nh√¢n v?t th√†nh c√¥ng." : _lastGenerate.ErrorMessage ?? "Render chua th√†nh c√¥ng.",
                 _lastGenerate.Status == "success" ? "success" : "error",
                 new { _lastGenerate.Status, _lastGenerate.RenderId, _lastGenerate.ImageUrl, _lastGenerate.ErrorMessage });
 
-            Snackbar.Add(_lastGenerate.Status == "success" ? "Render ?nh nh‚n v?t th‡nh cÙng." : _lastGenerate.ErrorMessage ?? "Render chua th‡nh cÙng.",
+            Snackbar.Add(_lastGenerate.Status == "success" ? "Render ?nh nh√¢n v?t th√†nh c√¥ng." : _lastGenerate.ErrorMessage ?? "Render chua th√†nh c√¥ng.",
                 _lastGenerate.Status == "success" ? Severity.Success : Severity.Error);
             await Load();
         }
@@ -490,7 +490,7 @@ else
         finally
         {
             _busy = false;
-            await AddRenderLogAsync("ui_finished", "Ho‡n t?t render.", "info", new { _lastGenerate?.Status, _lastGenerate?.RenderId });
+            await AddRenderLogAsync("ui_finished", "Ho√†n t?t render.", "info", new { _lastGenerate?.Status, _lastGenerate?.RenderId });
             await InvokeAsync(StateHasChanged);
             await ScrollRenderLogsAsync();
         }
@@ -507,7 +507,7 @@ else
             using var ms = new MemoryStream();
             await stream.CopyToAsync(ms);
             _lastGenerate = await Characters.UploadMasterImageAsync(Id.Value, ms.ToArray(), file.Name, file.ContentType, AuthState.CurrentUser);
-            Snackbar.Add("–„ upload ?nh master.", Severity.Success);
+            Snackbar.Add("√ê√£ upload ?nh master.", Severity.Success);
             await Load();
         }
         catch (Exception ex)
@@ -524,7 +524,7 @@ else
     {
         if (AuthState.CurrentUser is null || Id is null) return;
         await Characters.SetMasterImageAsync(Id.Value, renderId, AuthState.CurrentUser);
-        Snackbar.Add("–„ ch?n ?nh master.", Severity.Success);
+        Snackbar.Add("√ê√£ ch?n ?nh master.", Severity.Success);
         await Load();
     }
 
@@ -557,7 +557,7 @@ else
     {
         var text = string.Join(Environment.NewLine, _renderLogs.Select(log => $"[{log.Time:HH:mm:ss}] {log.Level.ToUpperInvariant()} {log.Step} - {log.Message}{FormatLogTail(log.Data, log.RawError)}"));
         await Js.InvokeVoidAsync("todoXRenderLog.copyText", text);
-        Snackbar.Add("–„ sao chÈp log.", Severity.Success);
+        Snackbar.Add("√ê√£ sao ch√©p log.", Severity.Success);
     }
 
     private async Task DownloadRenderLogTxt()
@@ -612,15 +612,15 @@ else
     private async Task Copy(string value)
     {
         await Js.InvokeVoidAsync("navigator.clipboard.writeText", value);
-        Snackbar.Add("–„ copy.", Severity.Success);
+        Snackbar.Add("√ê√£ copy.", Severity.Success);
     }
 
     private static string StyleLabel(string value) => value switch
     {
         "3d_chibi" => "3D chibi",
-        "realistic" => "Ch‚n th?c",
+        "realistic" => "Ch√¢n th?c",
         "anime" => "Anime",
-        "cartoon" => "Ho?t hÏnh",
+        "cartoon" => "Ho?t h√¨nh",
         "corporate_mascot" => "Linh v?t doanh nghi?p",
         "koc_ai" => "KOC AI",
         _ => value
@@ -630,14 +630,14 @@ else
     {
         "male" => "Nam",
         "female" => "N?",
-        "neutral" => "Trung tÌnh",
-        "not_specified" => "KhÙng ch?n",
+        "neutral" => "Trung t√≠nh",
+        "not_specified" => "Kh√¥ng ch?n",
         _ => value
     };
 
     private static string AspectLabel(string value) => value switch
     {
-        "1:1" => "VuÙng 1:1",
+        "1:1" => "Vu√¥ng 1:1",
         "9:16" => "D?c 9:16",
         "16:9" => "Ngang 16:9",
         "4:5" => "D?c 4:5",
@@ -647,12 +647,12 @@ else
 
     private static string StatusLabel(string value) => value switch
     {
-        "active" => "–ang d˘ng",
-        "inactive" => "T?m t?t",
-        "success" => "Th‡nh cÙng",
+        "active" => "ƒêang d√πng",
+        "inactive" => "T·∫°m t·∫Øt",
+        "success" => "Th√†nh c√¥ng",
         "failed" => "Th?t b?i",
-        "processing" => "–ang x? l˝",
-        "completed" => "Th‡nh cÙng",
+        "processing" => "√êang x? l√Ω",
+        "completed" => "Th√†nh c√¥ng",
         _ => value
     };
 
@@ -660,10 +660,11 @@ else
     {
         "todox_image" => "TodoX ImageAICreativeRender",
         "openrouter_image" => "OpenRouter",
-        "manual_upload" => "Upload th? cÙng",
+        "manual_upload" => "Upload th? c√¥ng",
         _ => value
     };
 }
+
 
 
 

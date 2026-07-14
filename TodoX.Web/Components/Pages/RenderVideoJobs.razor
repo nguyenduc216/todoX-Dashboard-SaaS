@@ -24,7 +24,7 @@
             <MudText Typo="Typo.body1" Class="todox-page-subtitle">Phase 1: chọn nhân vật chuẩn, tạo project rỗng hoặc tách scene, rồi render từng scene.</MudText>
         </div>
         <MudStack Row="true" Spacing="2" Class="flex-wrap gap-2">
-            <MudButton Color="Color.Warning" Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.Add" OnClick="NewProjectAsync">Tạo mới</MudButton>
+            <MudButton Color="Color.Warning" Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.Add" OnClick="NewProjectAsync">Tạo mới</MudButton>\r\n            <MudButton Color="Color.Success" Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveJobAsync" Disabled="@(_projectId is null || _busy)">Lưu job</MudButton>
             <MudButton Color="Color.Primary" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh" OnClick="ReloadAsync" Disabled="@(_projectId is null)">Refresh</MudButton>
         </MudStack>
     </MudStack>
@@ -766,6 +766,76 @@
         await LogProjectEvent("SCENE_SAVED", "info", $"Đã lưu scene {scene.SceneIndex}.", new { scene.Id, scene.SceneIndex, scene.Status });
         await ReloadAsync();
     }
+
+    private async Task SaveJobAsync()
+    {
+        if (_project is null || AuthState.CurrentUser is null) return;
+
+        _busy = true;
+        try
+        {
+            var snapshot = BuildJobSnapshot();
+            await LogProjectEvent("JOB_SAVED", "info", "Lưu job render-job.", snapshot);
+            Snackbar.Add("Đã lưu job.", Severity.Success);
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "VIDEO_RENDER_SAVE_JOB_FAILED projectId={ProjectId}", _project.Id);
+            Snackbar.Add(ex.Message, Severity.Error);
+            await AddDebugAsync("job_save_failed", "Lưu job thất bại", "FAILED", ex.Message, ex.ToString());
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private object BuildJobSnapshot()
+    {
+        var scenes = _project?.Scenes
+            .OrderBy(x => x.SceneIndex)
+            .Select(scene => new
+            {
+                scene.Id,
+                scene.SceneIndex,
+                scene.Title,
+                scene.DurationSeconds,
+                scene.ScenePrompt,
+                scene.ImagePrompt,
+                scene.VideoPrompt,
+                Voice = ExtractValue(scene.ScenePrompt, "voice"),
+                VoiceInstruction = ExtractValue(scene.ScenePrompt, "voice_instruction"),
+                scene.StaticImageUrl,
+                scene.StaticImagePath,
+                scene.SceneVideoUrl,
+                scene.SceneVideoPath,
+                scene.Status,
+                scene.ErrorMessage,
+                scene.UpdatedAt
+            })
+            .ToList();
+
+        return new
+        {
+            ProjectId = _project!.Id,
+            _project.Title,
+            _project.OriginalPrompt,
+            _project.CharacterId,
+            CharacterName = _selectedCharacter?.CharacterName ?? ResolveCurrentCharacter()?.CharacterName,
+            CharacterPrompt = _selectedCharacter?.NormalizedPrompt ?? ResolveCurrentCharacter()?.NormalizedPrompt,
+            _project.TotalSeconds,
+            _project.SceneSeconds,
+            _project.ThinkScenes,
+            _project.Status,
+            _project.UpdatedAt,
+            _project.StorageRoot,
+            _project.PublicBase,
+            _project.JobFolder,
+            Scenes = scenes
+        };
+    }
+
     private async Task RenderSceneImageAsync(VideoProjectSceneDto scene)
     {
         if (_project is null || AuthState.CurrentUser is null) return;
@@ -1065,6 +1135,14 @@
         _ => Color.Info
     };
 }
+
+
+
+
+
+
+
+
 
 
 

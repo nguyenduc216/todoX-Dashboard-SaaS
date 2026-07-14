@@ -1,4 +1,4 @@
-@page "/admin/avatar-manager"
+ï»¿@page "/admin/avatar-manager"
 @using Microsoft.AspNetCore.Components.Forms
 @using TodoX.Web.Components.Avatar
 @using TodoX.Web.Services.AvatarTemplates
@@ -15,27 +15,27 @@
 @inject NavigationManager Nav
 @inject IJSRuntime JS
 
-<PageTitle>Qu?n lý avatar m?u</PageTitle>
+<PageTitle>Qu?n lï¿½ avatar m?u</PageTitle>
 
 <MudStack Spacing="3">
     <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-3">
         <div>
-            <MudText Typo="Typo.h4" Class="todox-page-title">Qu?n lý avatar m?u</MudText>
-            <MudText Typo="Typo.body1" Class="todox-page-subtitle">T?o avatar m?u, render th? b?ng ImageAICreativeRender và luu vào thu vi?n dùng l?i.</MudText>
+            <MudText Typo="Typo.h4" Class="todox-page-title">Qu?n lï¿½ avatar m?u</MudText>
+            <MudText Typo="Typo.body1" Class="todox-page-subtitle">T?o avatar m?u, render th? b?ng ImageAICreativeRender vï¿½ luu vï¿½o thu vi?n dï¿½ng l?i.</MudText>
         </div>
-        <MudButton Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.Add" OnClick="NewTemplate">Làm m?i form</MudButton>
+        <MudButton Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.Add" OnClick="NewTemplate">Lï¿½m m?i form</MudButton>
     </MudStack>
 
     @if (!IsAdmin)
     {
-        <MudAlert Severity="Severity.Error">B?n c?n quy?n qu?n tr? d? m? trang này.</MudAlert>
+        <MudAlert Severity="Severity.Error">B?n c?n quy?n qu?n tr? d? m? trang nï¿½y.</MudAlert>
     }
     else
     {
         <MudGrid>
             <MudItem xs="12" md="4">
                 <MudPaper Class="todox-card pa-4" rounded="true">
-                    <MudText Typo="Typo.h6">Danh sách avatar</MudText>
+                    <MudText Typo="Typo.h6">Danh sï¿½ch avatar</MudText>
                     <MudDivider Class="my-3" />
                     @if (_loading)
                     {
@@ -43,7 +43,7 @@
                     }
                     else if (_templates.Count == 0)
                     {
-                        <MudText Class="todox-page-subtitle">Chua có avatar m?u.</MudText>
+                        <MudText Class="todox-page-subtitle">Chua cï¿½ avatar m?u.</MudText>
                     }
                     else
                     {
@@ -64,7 +64,7 @@
                                     <div class="avatar-template-list-copy">
                                         <MudText Typo="Typo.body2">@item.Name</MudText>
                                         <MudText Typo="Typo.caption" Class="todox-page-subtitle">
-                                            @(item.IsPublic ? "Công khai" : "Riêng tu") · @(item.IsActive ? "Ðang ho?t d?ng" : "Ðã ?n")
+                                            @(item.IsPublic ? "Cï¿½ng khai" : "Riï¿½ng tu") ï¿½ @(item.IsActive ? "ï¿½ang ho?t d?ng" : "ï¿½ï¿½ ?n")
                                         </MudText>
                                     </div>
                                 </div>
@@ -77,10 +77,10 @@
             <MudItem xs="12" md="8">
                 <MudPaper Class="todox-card pa-5" rounded="true">
                     <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
-                        <MudText Typo="Typo.h6">Thông tin avatar</MudText>
+                        <MudText Typo="Typo.h6">ThÃ´ng tin avatar</MudText>
                         <MudStack Row="true" Spacing="1">
                             <MudButton Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.Save"
-                                       Disabled="@_busy" OnClick="SaveTemplate">Luu avatar</MudButton>
+                                       Disabled="@_busy" OnClick="SaveTemplate">LÆ°u avatar</MudButton>
                             @if (_model.Id is Guid id && id != Guid.Empty)
                             {
                                 <MudIconButton Icon="@Icons.Material.Filled.Public" Color="Color.Warning" Disabled="@_busy" OnClick="TogglePublic" />
@@ -94,7 +94,7 @@
 
                     @if (_providerOptions.Count == 0)
                     {
-                        <MudAlert Severity="Severity.Warning" Dense="true">Chua c?u hình provider render ?nh cho <b>avatar_generation</b>. Vào <b>AI Providers</b> d? b?t provider.</MudAlert>
+                        <MudAlert Severity="Severity.Warning" Dense="true">Chua c?u hï¿½nh provider render ?nh cho <b>avatar_generation</b>. Vï¿½o <b>AI Providers</b> d? b?t provider.</MudAlert>
                     }
                     else
                     {
@@ -138,7 +138,7 @@
                             </a>
                             @if (!HasPreviewSource)
                             {
-                                <MudText Class="todox-page-subtitle mt-2">Chua render th?. B?m Render th? d? t?o preview b?ng ImageAICreativeRender.</MudText>
+                                <MudText Class="todox-page-subtitle mt-2">ChÆ°a render thá»­. Báº¥m Render thá»­ Ä‘á»ƒ táº¡o preview báº±ng ImageAICreativeRender.</MudText>
                             }
                         </MudItem>
                         <MudItem xs="12" sm="7">
@@ -154,7 +154,7 @@
                                     }
                                     @if (!string.IsNullOrWhiteSpace(_preview.PromptUsed))
                                     {
-                                        <MudText Typo="Typo.caption" Class="todox-page-subtitle">Prompt dã dùng</MudText>
+                                        <MudText Typo="Typo.caption" Class="todox-page-subtitle">Prompt dï¿½ dï¿½ng</MudText>
                                         <pre class="avatar-builder-log">@_preview.PromptUsed</pre>
                                     }
                                 }
@@ -164,10 +164,10 @@
 
                     <MudPaper Class="pa-4 mt-4 render-log-box" Elevation="1">
                         <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
-                            <MudText Typo="Typo.h6">Nh?t ký render</MudText>
+                            <MudText Typo="Typo.h6">Nh?t kï¿½ render</MudText>
                             <MudStack Row="true" Spacing="1">
-                                <MudButton Variant="Variant.Outlined" Color="Color.Default" StartIcon="@Icons.Material.Filled.ClearAll" OnClick="ClearRenderLog">Xóa log</MudButton>
-                                <MudButton Variant="Variant.Outlined" Color="Color.Info" StartIcon="@Icons.Material.Filled.ContentCopy" OnClick="CopyRenderLogAsync">Sao chép log</MudButton>
+                                <MudButton Variant="Variant.Outlined" Color="Color.Default" StartIcon="@Icons.Material.Filled.ClearAll" OnClick="ClearRenderLog">Xï¿½a log</MudButton>
+                                <MudButton Variant="Variant.Outlined" Color="Color.Info" StartIcon="@Icons.Material.Filled.ContentCopy" OnClick="CopyRenderLogAsync">Sao chï¿½p log</MudButton>
                             </MudStack>
                         </MudStack>
 
@@ -179,7 +179,7 @@
                         <div id="render-log-panel" class="render-log-panel mt-3">
                             @if (_renderLogs.Count == 0)
                             {
-                                <MudText Class="todox-page-subtitle">Chua có log.</MudText>
+                                <MudText Class="todox-page-subtitle">ChÆ°a cÃ³ log.</MudText>
                             }
                             else
                             {
@@ -321,7 +321,7 @@
         {
             if (args.File.Size > 10 * 1024 * 1024)
             {
-                Snackbar.Add("?nh vu?t quá 10MB.", Severity.Error);
+                Snackbar.Add("?nh vu?t quï¿½ 10MB.", Severity.Error);
                 return;
             }
 
@@ -331,7 +331,7 @@
             var media = await MediaFiles.SaveAsync(ms.ToArray(), args.File.Name, args.File.ContentType,
                 $"avatar_template_{args.Slot}", AuthState.CurrentUser.UserId, null, Tenant.TenantId);
             SetMedia(args.Slot, media.Id, media.PublicUrl ?? media.FileUrl);
-            Snackbar.Add("Ðã t?i ?nh.", Severity.Success);
+            Snackbar.Add("ï¿½ï¿½ t?i ?nh.", Severity.Success);
         }
         catch (Exception ex)
         {
@@ -351,11 +351,11 @@
         _isRendering = true;
         _busy = true;
         _previewFlash = true;
-        await AddRenderLogAsync("B?t d?u yêu c?u render avatar.");
-        await AddRenderLogAsync("Ðang ki?m tra prompt.");
-        await AddRenderLogAsync("Ðang ki?m tra ?nh tham kh?o.");
-        await AddRenderLogAsync("Ðang chu?n b? payload render.");
-        await AddRenderLogAsync("Ðang g?i yêu c?u d?n API render.");
+        await AddRenderLogAsync("B?t d?u yï¿½u c?u render avatar.");
+        await AddRenderLogAsync("ï¿½ang ki?m tra prompt.");
+        await AddRenderLogAsync("ï¿½ang ki?m tra ?nh tham kh?o.");
+        await AddRenderLogAsync("ï¿½ang chu?n b? payload render.");
+        await AddRenderLogAsync("ï¿½ang g?i yï¿½u c?u d?n API render.");
         _logs.Add(new RenderLogEntry { Step = "AVATAR_TEMPLATE_RENDER_REQUESTED", Message = "Admin requested avatar template preview render.", Data = new { _model.Name } });
         await InvokeAsync(StateHasChanged);
         try
@@ -364,34 +364,34 @@
             _logs.AddRange(_preview.Logs);
             if (_preview.Ok)
             {
-                await AddRenderLogAsync($"API dã nh?n job render. JobId: {_preview.MediaId ?? Guid.Empty}", "success");
-                await AddRenderLogAsync("Ðang ch? k?t qu? render.");
-                await AddRenderLogAsync("Ðã nh?n ?nh k?t qu?.", "success");
-                await AddRenderLogAsync("Ðang luu k?t qu? vào thu vi?n avatar m?u.");
+                await AddRenderLogAsync($"API dï¿½ nh?n job render. JobId: {_preview.MediaId ?? Guid.Empty}", "success");
+                await AddRenderLogAsync("ï¿½ang ch? k?t qu? render.");
+                await AddRenderLogAsync("ï¿½ï¿½ nh?n ?nh k?t qu?.", "success");
+                await AddRenderLogAsync("ï¿½ang luu k?t qu? vï¿½o thu vi?n avatar m?u.");
                 _model.PreviewMediaId = _preview.MediaId;
                 _model.PreviewMediaUrl = _preview.ImageUrl;
                 _urls["preview"] = _preview.ImageUrl;
                 _model.LastRenderLogCode = _preview.LogCode;
                 _model.LastGeneratedPrompt = _preview.PromptUsed;
                 _logs.Add(new RenderLogEntry { Step = "AVATAR_TEMPLATE_RENDER_COMPLETED", Message = "Preview render completed.", Data = new { _preview.LogCode, _preview.MediaId } });
-                await AddRenderLogAsync("Hoàn t?t render avatar.", "success");
-                Snackbar.Add("Ðã render th? avatar.", Severity.Success);
+                await AddRenderLogAsync("Hoï¿½n t?t render avatar.", "success");
+                Snackbar.Add("ï¿½ï¿½ render th? avatar.", Severity.Success);
             }
             else
             {
                 _logs.Add(new RenderLogEntry { Step = "AVATAR_TEMPLATE_RENDER_FAILED", Message = _preview.Error ?? "Render failed.", Level = "error" });
-                await AddRenderLogAsync("L?I: Không th? luu b?n ghi avatar.", "error");
+                await AddRenderLogAsync("L?I: Khï¿½ng th? luu b?n ghi avatar.", "error");
                 await AddRenderLogAsync(_preview.Error ?? "Render failed.", "error");
-                await AddRenderLogAsync("G?i ý: Có tru?ng d? li?u dài hon gi?i h?n database. Ki?m tra các c?t varchar(50) liên quan d?n avatar/render.", "warning");
+                await AddRenderLogAsync("G?i ï¿½: Cï¿½ tru?ng d? li?u dï¿½i hon gi?i h?n database. Ki?m tra cï¿½c c?t varchar(50) liï¿½n quan d?n avatar/render.", "warning");
                 Snackbar.Add(_preview.Error ?? "Render th? th?t b?i.", Severity.Error);
             }
         }
         catch (Exception ex)
         {
             _logs.Add(new RenderLogEntry { Step = "AVATAR_TEMPLATE_RENDER_FAILED", Message = ex.Message, Level = "error" });
-            await AddRenderLogAsync("L?I: Không th? luu b?n ghi avatar.", "error", ex.Message);
+            await AddRenderLogAsync("L?I: Khï¿½ng th? luu b?n ghi avatar.", "error", ex.Message);
             await AddRenderLogAsync(ex.Message, "error");
-            await AddRenderLogAsync("G?i ý: Có tru?ng d? li?u dài hon gi?i h?n database. Ki?m tra các c?t varchar(50) liên quan d?n avatar/render.", "warning");
+            await AddRenderLogAsync("G?i ï¿½: Cï¿½ tru?ng d? li?u dï¿½i hon gi?i h?n database. Ki?m tra cï¿½c c?t varchar(50) liï¿½n quan d?n avatar/render.", "warning");
             Snackbar.Add($"L?i render th?: {ex.Message}", Severity.Error);
         }
         finally
@@ -420,14 +420,14 @@
                 _urls["preview"] = retainedPreviewUrl;
             }
             _logs.Add(new RenderLogEntry { Step = saved.CreatedAt == saved.UpdatedAt ? "AVATAR_TEMPLATE_SAVED" : "AVATAR_TEMPLATE_UPDATED", Message = "Avatar template saved.", Data = new { saved.Id, saved.Name } });
-            Snackbar.Add("Ðã luu avatar m?u.", Severity.Success);
+            Snackbar.Add("ï¿½ï¿½ luu avatar m?u.", Severity.Success);
             await Reload();
         }
         catch (Exception ex)
         {
-            await AddRenderLogAsync("L?I: Không th? luu b?n ghi avatar.", "error", ex.Message);
+            await AddRenderLogAsync("L?I: Khï¿½ng th? luu b?n ghi avatar.", "error", ex.Message);
             await AddRenderLogAsync(ex.Message, "error");
-            await AddRenderLogAsync("G?i ý: Có tru?ng d? li?u dài hon gi?i h?n database. Ki?m tra các c?t varchar(50) liên quan d?n avatar/render.", "warning");
+            await AddRenderLogAsync("G?i ï¿½: Cï¿½ tru?ng d? li?u dï¿½i hon gi?i h?n database. Ki?m tra cï¿½c c?t varchar(50) liï¿½n quan d?n avatar/render.", "warning");
             Snackbar.Add($"L?i luu avatar: {ex.Message}", Severity.Error);
         }
         finally { _busy = false; }
@@ -459,7 +459,7 @@
             (string.IsNullOrWhiteSpace(x.Detail) ? string.Empty : $" | {x.Detail}")));
 
         await JS.InvokeVoidAsync("todoXRenderLog.copyText", text);
-        await AddRenderLogAsync("Ðã sao chép log vào clipboard.", "success");
+        await AddRenderLogAsync("ï¿½ï¿½ sao chï¿½p log vï¿½o clipboard.", "success");
     }
 
     private async Task ScrollRenderLogToBottomAsync()
@@ -477,24 +477,24 @@
     {
         if (_model.Id is not Guid id || id == Guid.Empty || AuthState.CurrentUser is null) return;
         await AvatarTemplates.TogglePublicAsync(id, AuthState.CurrentUser.UserId);
-        Snackbar.Add("Ðã d?i tr?ng thái công khai.", Severity.Success);
+        Snackbar.Add("ï¿½ï¿½ d?i tr?ng thï¿½i cï¿½ng khai.", Severity.Success);
         await Reload();
     }
 
     private async Task DeleteTemplate()
     {
         if (_model.Id is not Guid id || id == Guid.Empty || AuthState.CurrentUser is null) return;
-        var ok = await DialogConfirm("Xóa avatar m?u", $"?n avatar m?u \"{_model.Name}\"?");
+        var ok = await DialogConfirm("Xï¿½a avatar m?u", $"?n avatar m?u \"{_model.Name}\"?");
         if (ok != true) return;
         await AvatarTemplates.DeleteAsync(id, AuthState.CurrentUser.UserId);
         _logs.Add(new RenderLogEntry { Step = "AVATAR_TEMPLATE_DELETED", Message = "Avatar template disabled.", Data = new { id } });
-        Snackbar.Add("Ðã ?n avatar m?u.", Severity.Success);
+        Snackbar.Add("ï¿½ï¿½ ?n avatar m?u.", Severity.Success);
         NewTemplate();
         await Reload();
     }
 
     private Task<bool?> DialogConfirm(string title, string message)
-        => DialogService.ShowMessageBoxAsync(title, message, yesText: "Xóa", cancelText: "H?y");
+        => DialogService.ShowMessageBoxAsync(title, message, yesText: "Xï¿½a", cancelText: "H?y");
 
     private void SetMedia(string slot, Guid? mediaId, string? url)
     {

@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using Dapper;
 using TodoX.Web.Data;
 
@@ -97,6 +97,30 @@ public sealed class RenderJobService : IRenderJobService
         }, ct: ct);
 
         return job;
+    }
+
+    public async Task UpsertSnapshotAsync(Guid jobId, object projectSnapshot, object sceneSnapshots, CancellationToken ct = default)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        await conn.ExecuteAsync(
+            """
+            INSERT INTO render.render_job_snapshots
+                (job_id, tenant_id, project_snapshot, scene_snapshots, created_at, updated_at)
+            VALUES
+                (@jobId, @tenant, CAST(@projectSnapshot AS jsonb), CAST(@sceneSnapshots AS jsonb), now(), now())
+            ON CONFLICT (job_id)
+            DO UPDATE SET project_snapshot = EXCLUDED.project_snapshot,
+                          scene_snapshots = EXCLUDED.scene_snapshots,
+                          updated_at = now();
+            """,
+            new
+            {
+                jobId,
+                tenant = _tenant.TenantId,
+                projectSnapshot = ToJson(projectSnapshot),
+                sceneSnapshots = ToJson(sceneSnapshots)
+            });
     }
 
     public async Task<RenderJobDto?> GetAsync(Guid jobId, CancellationToken ct = default)
