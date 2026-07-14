@@ -76,7 +76,7 @@ public class CharacterListItemDto
     public string Gender { get; set; } = string.Empty;
     public string AspectRatio { get; set; } = string.Empty;
     public string? MasterImageUrl { get; set; }
-    public string Status { get; set; } = string.Empty;
+    public string Status { get; set; } = "active";
     public string ModelName { get; set; } = string.Empty;
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }

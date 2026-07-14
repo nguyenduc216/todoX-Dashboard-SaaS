@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cd /tmp/chardiag && dotnet run:*)",
+      "Bash(dotnet run:*)"
+    ]
+  }
+}

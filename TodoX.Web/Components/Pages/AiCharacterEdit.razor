@@ -464,6 +464,12 @@ else
 
     private void ApplyDetailToForm(CharacterDetailDto detail)
     {
+        Logger.LogInformation("AI_CHARACTER_DETAIL_LOADED characterId={CharacterId} rawStatus={RawStatus}", detail.Id, detail.Status);
+        if (string.IsNullOrWhiteSpace(detail.Status))
+        {
+            Logger.LogWarning("AI_CHARACTER_DETAIL_STATUS_EMPTY characterId={CharacterId} — dùng active làm UI fallback; kiểm tra mapping repository.", detail.Id);
+        }
+
         _detail = detail;
         _model.CharacterName = detail.CharacterName;
         _model.Description = detail.Description;
@@ -525,6 +531,10 @@ else
                 Id, _detail?.Status, requestedStatus, _model.Status);
 
             var updated = await Characters.UpdateCharacterAsync(Id!.Value, _model, AuthState.CurrentUser);
+            if (string.IsNullOrWhiteSpace(updated.Status))
+            {
+                throw new InvalidOperationException("Repository trả về Character có Status rỗng sau khi lưu.");
+            }
             _detail = updated;
             ApplyDetailToForm(updated);
 

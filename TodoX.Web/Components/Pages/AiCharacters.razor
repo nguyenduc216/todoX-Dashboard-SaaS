@@ -21,10 +21,10 @@
         <MudTextField T="string" Placeholder="Tìm theo tên, mã hoặc mô tả..." Variant="Variant.Outlined"
                       Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
                       @bind-Value="_keyword" Immediate="true" />
-        <MudSelect T="string" Label="Trạng thái" Variant="Variant.Outlined" @bind-Value="_status">
-            <MudSelectItem Value="@("all")">Tất cả</MudSelectItem>
-            <MudSelectItem Value="@("active")">Đang dùng</MudSelectItem>
-            <MudSelectItem Value="@("inactive")">Tạm tắt</MudSelectItem>
+        <MudSelect T="string" Label="Trạng thái" Variant="Variant.Outlined" Value="_status" ValueChanged="OnStatusFilterChanged">
+            <MudSelectItem T="string" Value="@ActiveStatus">Đang dùng</MudSelectItem>
+            <MudSelectItem T="string" Value="@InactiveStatus">Tạm tắt</MudSelectItem>
+            <MudSelectItem T="string" Value="@AllStatus">Tất cả</MudSelectItem>
         </MudSelect>
         <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.FilterAlt" OnClick="Load">Lọc</MudButton>
     </div>
@@ -66,6 +66,9 @@ else
                         <span>@StyleLabel(item.StylePreset)</span>
                         <span>@GenderLabel(item.Gender)</span>
                         <span>@AspectLabel(item.AspectRatio)</span>
+                        <MudChip T="string" Size="Size.Small" Color="@(IsActive(item.Status) ? Color.Success : Color.Default)">
+                            @StatusLabel(item.Status)
+                        </MudChip>
                     </div>
                     <div class="ai-character-meta">Nhà cung cấp: @item.ModelName - @item.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</div>
                     <div class="ai-character-actions">
@@ -79,7 +82,7 @@ else
                                    OnClick="@(() => Nav.NavigateTo($"/ai-assets/characters/{item.Id}?render=1"))">
                             Render lại
                         </MudButton>
-                        @if (item.Status == "active")
+                        @if (IsActive(item.Status))
                         {
                             <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Error"
                                        StartIcon="@Icons.Material.Filled.Block"
@@ -95,10 +98,14 @@ else
 }
 
 @code {
+    private const string ActiveStatus = "active";
+    private const string InactiveStatus = "inactive";
+    private const string AllStatus = "all";
+
     private readonly List<CharacterListItemDto> _items = new();
     private bool _loading = true;
     private string _keyword = string.Empty;
-    private string _status = "active";
+    private string _status = ActiveStatus;
     private string? _error;
 
     protected override async Task OnInitializedAsync() => await Load();
@@ -124,6 +131,18 @@ else
         }
     }
 
+    private async Task OnStatusFilterChanged(string? value)
+    {
+        _status = NormalizeFilterStatus(value);
+        await Load();
+    }
+
+    private static string NormalizeFilterStatus(string? value)
+    {
+        var v = value?.Trim().ToLowerInvariant();
+        return v is InactiveStatus or AllStatus ? v : ActiveStatus;
+    }
+
     private async Task Disable(long id)
     {
         if (AuthState.CurrentUser is null) return;
@@ -138,6 +157,9 @@ else
             Snackbar.Add(ex.Message, Severity.Error);
         }
     }
+
+    private static bool IsActive(string? status)
+        => string.Equals(status?.Trim(), ActiveStatus, StringComparison.OrdinalIgnoreCase);
 
     private static string StyleLabel(string value) => value switch
     {
@@ -172,10 +194,13 @@ else
         _ => value
     };
 
-    private static string StatusLabel(string value) => value switch
+    private static string StatusLabel(string? status)
     {
-        "active" => "Đang dùng",
-        "inactive" => "Tạm tắt",
-        _ => value
-    };
+        if (string.IsNullOrWhiteSpace(status))
+        {
+            return "Chưa xác định";
+        }
+
+        return IsActive(status) ? "Đang dùng" : "Tạm tắt";
+    }
 }

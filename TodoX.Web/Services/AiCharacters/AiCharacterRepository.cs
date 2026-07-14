@@ -19,15 +19,17 @@ public sealed class AiCharacterRepository
     public async Task<IReadOnlyList<CharacterListItemDto>> ListAsync(CharacterScope scope, string? keyword, string? status, CancellationToken ct = default)
     {
         using var conn = await _factory.OpenAsync(ct);
+        // Cho phép đúng ba giá trị: active / inactive / all; khác thì fallback active.
+        var normalizedStatus = string.IsNullOrWhiteSpace(status) ? "active" : status.Trim().ToLowerInvariant();
+        if (normalizedStatus is not ("active" or "inactive" or "all")) normalizedStatus = "active";
+
         var where = "WHERE customer_id=@customerId";
         if (!string.IsNullOrWhiteSpace(keyword))
         {
             where += " AND (character_name ILIKE @kw OR character_code ILIKE @kw OR description ILIKE @kw)";
         }
-        if (!string.IsNullOrWhiteSpace(status) && !status.Equals("all", StringComparison.OrdinalIgnoreCase))
-        {
-            where += " AND status = @status";
-        }
+        // Normalize status trong SQL để chịu được dữ liệu cũ (NULL, khoảng trắng, hoa/thường).
+        where += " AND (@status = 'all' OR lower(trim(coalesce(status, 'active'))) = @status)";
 
         var rows = await conn.QueryAsync<CharacterListItemDto>(
             $"""
@@ -47,7 +49,7 @@ public sealed class AiCharacterRepository
               FROM public.todox_ai_character
               {where}
              ORDER BY sort_order, created_at DESC;
-            """, BuildParams(scope, keyword, status));
+            """, BuildParams(scope, keyword, normalizedStatus));
         return rows.ToList();
     }
 
@@ -65,7 +67,7 @@ public sealed class AiCharacterRepository
                    master_image_object_key AS MasterImageObjectKey,
                    COALESCE(normalized_prompt, '') AS NormalizedPrompt
               FROM public.todox_ai_character
-             WHERE customer_id=@customerId AND status = 'active'
+             WHERE customer_id=@customerId AND lower(trim(coalesce(status, 'active'))) = 'active'
              ORDER BY sort_order, created_at DESC;
             """, BuildParams(scope));
         return rows.ToList();
@@ -100,7 +102,16 @@ public sealed class AiCharacterRepository
              WHERE id=@id AND customer_id=@customerId
              LIMIT 1;
             """, BuildParams(scope, id: id));
-        if (item is null) return null;
+        if (item is null)
+        {
+            _logger.LogInformation("AI_CHARACTER_GET characterId={CharacterId} found={Found}", id, false);
+            return null;
+        }
+
+        var rawStatus = item.Status;
+        item.Status = NormalizeStoredStatus(item.Status);
+        _logger.LogInformation("AI_CHARACTER_GET characterId={CharacterId} rawStatus={RawStatus} normalizedStatus={NormalizedStatus} found={Found}",
+            id, rawStatus, item.Status, true);
 
         item.Renders = (await conn.QueryAsync<AiCharacterRenderDto>(
             """
@@ -185,7 +196,7 @@ public sealed class AiCharacterRepository
         string normalizedPrompt, string negativePrompt, string status, string currentStatus, bool masterImageExists, string userId, CancellationToken ct = default)
     {
         using var conn = await _factory.OpenAsync(ct);
-        var normalizedStatus = string.Equals(status, "inactive", StringComparison.OrdinalIgnoreCase) ? "inactive" : "active";
+        var normalizedStatus = NormalizeCharacterStatus(status);
         var affected = await conn.ExecuteAsync(
             """
             UPDATE public.todox_ai_character
@@ -226,6 +237,12 @@ public sealed class AiCharacterRepository
 
         var updated = await GetAsync(scope, id, ct)
             ?? throw new InvalidOperationException("Đã cập nhật Character nhưng không đọc lại được dữ liệu.");
+
+        if (string.IsNullOrWhiteSpace(updated.Status))
+        {
+            throw new InvalidOperationException(
+                "Đã cập nhật Character nhưng query GetAsync không trả về cột Status. Kiểm tra SELECT/Dapper mapping.");
+        }
 
         return updated;
     }
@@ -343,13 +360,27 @@ public sealed class AiCharacterRepository
         }
     }
 
+    // Chỉ để bảo vệ dữ liệu cũ (status NULL/rỗng/hoa-thường/khoảng trắng). Không thay thế việc map đúng cột.
+    private static string NormalizeStoredStatus(string? status)
+        => string.Equals(status?.Trim(), "inactive", StringComparison.OrdinalIgnoreCase)
+            ? "inactive"
+            : "active";
+
+    private static string NormalizeCharacterStatus(string? status)
+        => string.Equals(status?.Trim(), "inactive", StringComparison.OrdinalIgnoreCase)
+            ? "inactive"
+            : "active";
+
     private static object BuildParams(CharacterScope scope, string? keyword = null, string? status = null, long? id = null, object? extra = null)
     {
         var p = new DynamicParameters(extra);
-        p.Add("customerId", scope.CustomerId);
-        p.Add("kw", string.IsNullOrWhiteSpace(keyword) ? null : $"%{keyword.Trim()}%");
-        p.Add("status", status);
-        p.Add("id", id);
+        // Không ghi đè các tham số đã được cung cấp qua extra (ví dụ UPDATE truyền status/id thật).
+        // Trước đây p.Add("status", null) đè mất status từ extra -> UPDATE ghi NULL vào cột status.
+        var existing = new HashSet<string>(p.ParameterNames, StringComparer.OrdinalIgnoreCase);
+        if (!existing.Contains("customerId")) p.Add("customerId", scope.CustomerId);
+        if (!existing.Contains("kw")) p.Add("kw", string.IsNullOrWhiteSpace(keyword) ? null : $"%{keyword.Trim()}%");
+        if (!existing.Contains("status")) p.Add("status", status);
+        if (!existing.Contains("id")) p.Add("id", id);
         return p;
     }
 }
