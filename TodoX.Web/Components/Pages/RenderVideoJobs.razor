@@ -794,7 +794,7 @@
                 AspectRatio = "9:16",
                 OutputFormat = "png",
                 Quality = "high",
-                Resolution = "2K",
+                Resolution = "4K",
                 FileCategory = "video_scene_image",
                 Metadata = new
                 {
@@ -854,21 +854,60 @@
 
     private ActiveCharacterDto? ResolveCurrentCharacter()
         => _selectedCharacter ?? (_project?.CharacterId is long characterId ? _characters.FirstOrDefault(x => x.Id == characterId) : null);
-
     private async Task<(string ImageUrl, string? ImagePath)> PersistRenderedSceneImageAsync(VideoProjectSceneDto scene, AiImageRenderResult result)
     {
-        if (result.ImageBytes is null || result.ImageBytes.Length == 0)
+        // ImageAICreativeRender/TodoXImageProviderService trả về URL đã lưu
+        // trong media storage. Không cần ghi lại file local.
+        if (!string.IsNullOrWhiteSpace(result.ImageUrl))
         {
-            throw new InvalidOperationException("AI render không trả về bytes ảnh.");
+            return (result.ImageUrl, result.ObjectKey);
         }
 
-        var projectFolder = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "uploads", "video-render", _project!.Id.ToString(), $"scene_{scene.SceneIndex:00}");
-        Directory.CreateDirectory(projectFolder);
-        var fileName = $"scene_{scene.SceneIndex:00}_{DateTime.UtcNow:yyyyMMddHHmmss}.png";
-        var imagePath = Path.Combine(projectFolder, fileName);
-        await File.WriteAllBytesAsync(imagePath, result.ImageBytes);
-        var relative = Path.GetRelativePath(Path.Combine(Directory.GetCurrentDirectory(), "wwwroot"), imagePath).Replace(Path.DirectorySeparatorChar, '/');
-        return ($"/{relative}", imagePath);
+        // Một số provider khác có thể trả bytes, vẫn giữ fallback này.
+        if (result.ImageBytes is { Length: > 0 })
+        {
+            var projectFolder = Path.Combine(
+                Directory.GetCurrentDirectory(),
+                "wwwroot",
+                "uploads",
+                "video-render",
+                _project!.Id.ToString(),
+                $"scene_{scene.SceneIndex:00}");
+
+            Directory.CreateDirectory(projectFolder);
+
+            var extension =
+                result.MimeType?.Contains(
+                    "jpeg",
+                    StringComparison.OrdinalIgnoreCase) == true
+                    ? ".jpg"
+                    : ".png";
+
+            var fileName =
+                $"scene_{scene.SceneIndex:00}_{DateTime.UtcNow:yyyyMMddHHmmss}{extension}";
+
+            var imagePath = Path.Combine(projectFolder, fileName);
+
+            await File.WriteAllBytesAsync(
+                imagePath,
+                result.ImageBytes);
+
+            var relative = Path.GetRelativePath(
+                    Path.Combine(
+                        Directory.GetCurrentDirectory(),
+                        "wwwroot"),
+                    imagePath)
+                .Replace(Path.DirectorySeparatorChar, '/');
+
+            return ($"/{relative}", imagePath);
+        }
+
+        throw new InvalidOperationException(
+            $"AI render thành công nhưng không trả về ImageUrl hoặc ImageBytes. " +
+            $"Provider={result.ProviderCode}, " +
+            $"Model={result.ModelName}, " +
+            $"ObjectKey={result.ObjectKey}, " +
+            $"Error={result.ErrorMessage}");
     }
 
     private static string BuildSceneRenderPrompt(VideoProjectSceneDto scene, ActiveCharacterDto? character)
@@ -879,7 +918,7 @@
             return basePrompt;
         }
 
-        return $"Render a static image for this scene. Scene description: {basePrompt}. Keep the character identity consistent with this character description: {character.NormalizedPrompt}.";
+        return $"Render a static image for this scene. Scene description: {basePrompt}. Keep the character identity consistent with this character description: {character.NormalizedPrompt}. Maintain the same character across all scenes: face, hairstyle, outfit, body proportions, and visual identity must stay consistent with the selected character and previously rendered scenes.";
     }
 
     private async Task MoveSceneUpAsync(VideoProjectSceneDto scene)
@@ -1026,6 +1065,9 @@
         _ => Color.Info
     };
 }
+
+
+
 
 
 

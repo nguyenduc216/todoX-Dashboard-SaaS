@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using TodoX.Web.Models;
 using TodoX.Web.Services.AiCharacters;
 
@@ -55,7 +55,7 @@ public interface IAiImageRenderRouter
 /// <summary>
 /// Resolves the provider/model/cost for an image capability from the database, delegates the actual
 /// render to the existing image-provider factory (OpenRouter or ImageAICreativeRender), and records a
-/// usage-log row. Model, endpoint and unit cost always come from todox_ai_provider_capability — never
+/// usage-log row. Model, endpoint and unit cost always come from todox_ai_provider_capability â€” never
 /// hard-coded here.
 /// </summary>
 public sealed class AiImageRenderRouter : IAiImageRenderRouter
@@ -90,7 +90,7 @@ public sealed class AiImageRenderRouter : IAiImageRenderRouter
         // { "resolution": "2K", "quality": "high", "output_format": "png" }.
         // Resolution defaults to 2K (and is floored to >= 2K downstream) to satisfy model minimums.
         var (cfgResolution, cfgQuality, cfgFormat) = ParseImageConfig(capability?.ConfigJson);
-        var resolution = OpenRouterImageService.NormalizeResolution(cfgResolution ?? request.Resolution);
+        var resolution = HighestResolution(cfgResolution, request.Resolution);
         var quality = FirstNonBlank(cfgQuality, request.Quality) ?? "high";
         var outputFormat = FirstNonBlank(cfgFormat, request.OutputFormat) ?? "png";
 
@@ -200,4 +200,30 @@ public sealed class AiImageRenderRouter : IAiImageRenderRouter
 
     private static string? FirstNonBlank(params string?[] values)
         => values.FirstOrDefault(v => !string.IsNullOrWhiteSpace(v));
+
+    private static string HighestResolution(params string?[] values)
+    {
+        var best = "2K";
+        foreach (var value in values)
+        {
+            var normalized = OpenRouterImageService.NormalizeResolution(value);
+            if (ResolutionRank(normalized) > ResolutionRank(best))
+            {
+                best = normalized;
+            }
+        }
+
+        return best;
+    }
+
+    private static int ResolutionRank(string resolution)
+        => resolution.Trim().ToUpperInvariant() switch
+        {
+            "1K" => 1,
+            "2K" => 2,
+            "4K" => 4,
+            "8K" => 8,
+            _ => 2
+        };
 }
+
