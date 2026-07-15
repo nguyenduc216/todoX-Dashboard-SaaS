@@ -31,4 +31,27 @@ public class SceneImageBatchRenderHandlerTests
             Status = VideoSceneStatuses.Failed
         }, onlyMissingOrFailed: true));
     }
+
+    [Fact]
+    public void SceneImageLogicalRequest_ForBatch_IsStableForSameJobAndScene()
+    {
+        var jobId = Guid.NewGuid();
+
+        var first = SceneImageRenderService.BuildLogicalRequestId("render_job_scene_image", 42, jobId);
+        var second = SceneImageRenderService.BuildLogicalRequestId("render_job_scene_image", 42, jobId);
+
+        Assert.Equal(first, second);
+        Assert.Contains(jobId.ToString("N"), first);
+        Assert.Contains("scene-42", first);
+    }
+
+    [Fact]
+    public void SceneImageLogicalRequest_ForUserRerender_IsNewOperation()
+    {
+        var first = SceneImageRenderService.BuildLogicalRequestId("render_job_scene_image_rerender", 42, null);
+        var second = SceneImageRenderService.BuildLogicalRequestId("render_job_scene_image_rerender", 42, null);
+
+        Assert.NotEqual(first, second);
+        Assert.StartsWith("render_job_scene_image_rerender-scene-42-", first);
+    }
 }

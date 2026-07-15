@@ -167,6 +167,7 @@ public sealed class ServiceThumbnailRenderService
         var render = await _imageRouter.RenderImageAsync(new TodoX.Web.Services.AiProviders.AiImageRenderRequest
         {
             CustomerId = ToBigIntCustomerId(request.User?.CustomerId),
+            CustomerGuid = request.User?.CustomerId,
             UserId = request.User?.UserId,
             FeatureCode = "service_thumbnail",
             CapabilityCode = "thumbnail_generation",
@@ -183,6 +184,8 @@ public sealed class ServiceThumbnailRenderService
             Resolution = "1K",
             FileCategory = "service_thumbnail",
             RequestId = $"service-thumbnail-{Guid.NewGuid():N}",
+            BillingExempt = request.User?.CustomerId is null,
+            ExemptionReason = request.User?.CustomerId is null ? "system_service_thumbnail" : null,
             Metadata = new
             {
                 request.ServiceCode,

@@ -80,6 +80,8 @@ builder.Services.AddScoped<AiCharacterRepository>();
 builder.Services.AddScoped<IAiCharacterService, AiCharacterService>();
 builder.Services.AddScoped<TodoX.Web.Services.AiProviders.AiProviderRepository>();
 builder.Services.AddScoped<TodoX.Web.Services.AiProviders.IAiProviderService, TodoX.Web.Services.AiProviders.AiProviderService>();
+builder.Services.AddScoped<TodoX.Web.Services.AiProviders.IAiImageBillingService, TodoX.Web.Services.AiProviders.AiImageBillingService>();
+builder.Services.AddSingleton<TodoX.Web.Services.AiProviders.IYEScaleAccountService, TodoX.Web.Services.AiProviders.YEScaleAccountService>();
 builder.Services.AddScoped<TodoX.Web.Services.AiProviders.IAiImageRenderRouter, TodoX.Web.Services.AiProviders.AiImageRenderRouter>();
 builder.Services.Configure<TodoX.Web.Services.VideoRender.VideoRenderOptions>(builder.Configuration.GetSection("VideoRender"));
 builder.Services.AddSingleton<TodoX.Web.Services.VideoRender.ITodoXVideoPromptParser, TodoX.Web.Services.VideoRender.TodoXVideoPromptParser>();

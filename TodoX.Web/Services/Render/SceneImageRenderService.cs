@@ -29,6 +29,7 @@ public sealed class SceneImageRenderContext
     public Guid UserId { get; init; }
     public Guid? CustomerId { get; init; }
     public string? CreatedBy { get; init; }
+    public Guid? RenderJobId { get; init; }
 
     /// <summary>Media id of the character reference (Vertex path passes references by media id).</summary>
     public Guid? CharacterReferenceMediaId { get; init; }
@@ -207,12 +208,15 @@ public sealed class SceneImageRenderService : ISceneImageRenderService
             context.ProjectId, context.SceneId, context.SceneIndex, context.CharacterId,
             option.ProviderCapabilityId, option.ProviderCode, option.ModelName, references.Length > 0);
 
+        var requestId = BuildLogicalRequestId(featureCode, context.SceneId, context.RenderJobId);
+
         var render = await _imageRouter.RenderImageAsync(new AiImageRenderRequest
         {
             // Preserve the real customer scope for usage logging (Codex intent). AiImageRenderRequest.CustomerId
             // is the bigint customer convention used across the router, so convert from the Guid customer id
             // exactly like AvatarTemplateService does — never hard-code null or a fake customer.
             CustomerId = ToBigIntCustomerId(context.CustomerId),
+            CustomerGuid = context.CustomerId,
             UserId = context.UserId,
             FeatureCode = featureCode,
             CapabilityCode = CapabilityCode,
@@ -225,13 +229,18 @@ public sealed class SceneImageRenderService : ISceneImageRenderService
             Quality = "high",
             Resolution = "4K",
             FileCategory = "video_scene_image",
-            RequestId = $"{featureCode}-scene-{context.SceneId}",
+            RequestId = requestId,
+            LogicalRequestId = requestId,
+            RenderJobId = context.RenderJobId?.ToString("N"),
+            BillingExempt = context.CustomerId is null,
+            ExemptionReason = context.CustomerId is null ? "system_scene_image_render" : null,
             Metadata = new
             {
                 projectId = context.ProjectId,
                 sceneId = context.SceneId,
                 sceneIndex = context.SceneIndex,
-                characterId = context.CharacterId
+                characterId = context.CharacterId,
+                renderJobId = context.RenderJobId
             },
             CreatedBy = context.CreatedBy ?? context.UserId.ToString()
         }, ct);
@@ -277,6 +286,11 @@ public sealed class SceneImageRenderService : ISceneImageRenderService
     private static bool IsSucceededStatus(string? status)
         => string.Equals(status, "success", StringComparison.OrdinalIgnoreCase)
            || string.Equals(status, "completed", StringComparison.OrdinalIgnoreCase);
+
+    public static string BuildLogicalRequestId(string featureCode, long sceneId, Guid? renderJobId)
+        => string.Equals(featureCode, "render_job_scene_image_rerender", StringComparison.OrdinalIgnoreCase)
+            ? $"{featureCode}-scene-{sceneId}-{Guid.NewGuid():N}"
+            : $"{featureCode}-job-{renderJobId?.ToString("N") ?? "direct"}-scene-{sceneId}";
 
     /// <summary>
     /// Converts a customer Guid into the non-negative bigint the AI provider router/usage-log uses,

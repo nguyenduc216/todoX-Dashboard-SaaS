@@ -162,6 +162,7 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
             UserId = input.UserId,
             CustomerId = input.CustomerId,
             CreatedBy = input.CreatedBy,
+            RenderJobId = jobId,
             CharacterReferenceMediaId = referenceMediaId,
             CharacterReferenceUrl = referenceUrl
         };

@@ -244,13 +244,11 @@ public sealed class AvatarTemplateService : IAvatarTemplateService
         _logger.LogInformation("AVATAR_TEMPLATE_RENDER_REQUESTED name={Name} userId={UserId}", model.Name, userId);
 
         var option = await ResolveAvatarOptionAsync(model.ProviderCapabilityId, ct);
-        var customerIdLong = ToBigIntCustomerId(customerId);
-
         // Routed providers render from reference URLs; route through the shared image router.
         if (option is not null && ProviderCodeMap.IsRoutedImageProvider(option.ProviderCode))
         {
             return await RenderViaRouterAsync(option, model.PromptTemplate, "avatar_sample", "avatar_template",
-                userId, customerIdLong, model.AvatarMediaId, model.LogoMediaId, model.ProductMediaId, model.UniformMediaId, model.SceneMediaId, ct);
+                userId, customerId, model.AvatarMediaId, model.LogoMediaId, model.ProductMediaId, model.UniformMediaId, model.SceneMediaId, ct);
         }
 
         var result = await _creativeRender.RenderAsync(new ImageAICreativeRenderRequest
@@ -276,6 +274,7 @@ public sealed class AvatarTemplateService : IAvatarTemplateService
             SkipReferenceOwnershipCheck = true
         }, ct);
         var publicResult = ToPublicResult(result);
+        var customerIdLong = ToBigIntCustomerId(customerId);
         await LogCreativeUsageAsync(option, "avatar_sample", publicResult, customerIdLong, userId, ct);
         return publicResult;
     }
@@ -357,7 +356,10 @@ public sealed class AvatarTemplateService : IAvatarTemplateService
         _logger.LogInformation("PUBLIC_AVATAR_RENDER_DONE templateId={TemplateId} ok={Ok} status={Status} mediaId={MediaId} logCode={LogCode} error={Error}",
             request.TemplateId, publicResult.Ok, publicResult.Status, publicResult.MediaId, publicResult.LogCode, publicResult.Error);
 
-        await LogCreativeUsageAsync(option, "avatar_builder", publicResult, null, userId, ct);
+        if (!useRouter)
+        {
+            await LogCreativeUsageAsync(option, "avatar_builder", publicResult, null, userId, ct);
+        }
         return publicResult;
     }
 
@@ -399,7 +401,7 @@ public sealed class AvatarTemplateService : IAvatarTemplateService
 
     private async Task<PublicAvatarBuilderRenderResult> RenderViaRouterAsync(
         ProviderOptionDto option, string prompt, string featureCode, string fileCategory,
-        Guid userId, long? customerId,
+        Guid userId, Guid? customerGuid,
         Guid? avatarMediaId, Guid? logoMediaId, Guid? productMediaId, Guid? uniformMediaId, Guid? sceneMediaId,
         CancellationToken ct)
     {
@@ -436,7 +438,8 @@ public sealed class AvatarTemplateService : IAvatarTemplateService
 
         var render = await _imageRouter.RenderImageAsync(new AiImageRenderRequest
         {
-            CustomerId = customerId,
+            CustomerId = ToBigIntCustomerId(customerGuid),
+            CustomerGuid = customerGuid,
             UserId = userId,
             FeatureCode = featureCode,
             CapabilityCode = "avatar_generation",
@@ -446,6 +449,9 @@ public sealed class AvatarTemplateService : IAvatarTemplateService
             ReferenceImageUrls = references.ToArray(),
             AspectRatio = "1:1",
             FileCategory = fileCategory,
+            RequestId = $"{featureCode}-{Guid.NewGuid():N}",
+            BillingExempt = customerGuid is null,
+            ExemptionReason = customerGuid is null ? "public_or_admin_avatar_builder_system_user" : null,
             CreatedBy = userId.ToString()
         }, ct);
 
