@@ -1,5 +1,6 @@
 ﻿using System.Text.Json;
 using Dapper;
+using Npgsql;
 using TodoX.Web.Data;
 
 namespace TodoX.Web.Services.Render;
@@ -7,6 +8,15 @@ namespace TodoX.Web.Services.Render;
 public interface IRenderJobService
 {
     Task<RenderJobDto> EnqueueAsync(RenderJobCreateModel model, CancellationToken ct = default);
+
+    /// <summary>
+    /// Enqueues a job only when no active job of the same type already exists for the given project.
+    /// Serialised by a PostgreSQL transaction-level advisory lock keyed on (jobType, projectId) so two
+    /// concurrent requests cannot both create a batch. Returns the existing active job (AlreadyActive=true)
+    /// instead of creating a duplicate.
+    /// </summary>
+    Task<(RenderJobDto Job, bool AlreadyActive)> EnqueueForProjectIfNoneActiveAsync(RenderJobCreateModel model, long projectId, CancellationToken ct = default);
+
     Task<RenderJobDto?> GetAsync(Guid jobId, CancellationToken ct = default);
     Task<RenderJobDto?> GetByLogCodeAsync(string logCode, CancellationToken ct = default);
     Task<IReadOnlyList<RenderJobDto>> ListByLogCodeAsync(string logCode, CancellationToken ct = default);
@@ -26,11 +36,13 @@ public sealed class RenderJobService : IRenderJobService
 
     private readonly TodoXConnectionFactory _factory;
     private readonly TenantContext _tenant;
+    private readonly ILogger<RenderJobService> _logger;
 
-    public RenderJobService(TodoXConnectionFactory factory, TenantContext tenant)
+    public RenderJobService(TodoXConnectionFactory factory, TenantContext tenant, ILogger<RenderJobService> logger)
     {
         _factory = factory;
         _tenant = tenant;
+        _logger = logger;
     }
 
     public async Task<RenderJobDto> EnqueueAsync(RenderJobCreateModel model, CancellationToken ct = default)
@@ -46,30 +58,15 @@ public sealed class RenderJobService : IRenderJobService
         var referenceJson = ToJson(model.References ?? Array.Empty<object>());
 
         using var conn = await _factory.OpenAsync(ct);
-        var job = await conn.QuerySingleAsync<RenderJobDto>(
-            """
-            INSERT INTO render.render_jobs
-                (tenant_id, user_id, customer_id, job_type, status, priority,
-                 input_json, prompt_json, reference_json, log_code,
-                 point_cost_estimate, point_status, provider_code, model_code, max_attempts,
-                 queued_at, created_at)
-            VALUES
-                (@tenant, @user, @customer, @type, 'queued', @priority,
-                 CAST(@input AS jsonb), CAST(@prompt AS jsonb), CAST(@refs AS jsonb), @logCode,
-                 @pointCost, @pointStatus, @provider, @model, @maxAttempts,
-                 now(), now())
-            RETURNING id AS Id, tenant_id AS TenantId, user_id AS UserId, customer_id AS CustomerId,
-                      job_type AS JobType, status AS Status, priority AS Priority, worker_key AS WorkerKey,
-                      input_json::text AS InputJson, prompt_json::text AS PromptJson,
-                      reference_json::text AS ReferenceJson, output_json::text AS OutputJson,
-                      log_code AS LogCode, error_code AS ErrorCode, error_message AS ErrorMessage,
-                      cancel_reason AS CancelReason, retry_of_job_id AS RetryOfJobId,
-                      attempt_count AS AttemptCount, max_attempts AS MaxAttempts, retry_after AS RetryAfter,
-                      point_cost_estimate AS PointCostEstimate, point_cost_charged AS PointCostCharged,
-                      point_status AS PointStatus, provider_code AS ProviderCode, model_code AS ModelCode,
-                      queued_at AS QueuedAt, started_at AS StartedAt, completed_at AS CompletedAt,
-                      cancelled_at AS CancelledAt, created_at AS CreatedAt, updated_at AS UpdatedAt;
-            """,
+        // customer_id must stay nullable for system/admin jobs (CurrentUser.CustomerId == null). We never
+        // substitute a tenant/fake/Guid.Empty customer. If the deployed schema still has customer_id NOT NULL,
+        // translate the raw 23502 into an actionable message telling the admin to run the DB sync script.
+        var customerScope = model.CustomerId is null ? "system" : "customer";
+        RenderJobDto job;
+        try
+        {
+            job = await conn.QuerySingleAsync<RenderJobDto>(
+            InsertJobSql,
             new
             {
                 tenant = _tenant.TenantId,
@@ -87,6 +84,20 @@ public sealed class RenderJobService : IRenderJobService
                 model = model.ModelCode,
                 maxAttempts = Math.Max(1, model.MaxAttempts)
             });
+        }
+        catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.NotNullViolation
+                                           && string.Equals(ex.ColumnName, "customer_id", StringComparison.OrdinalIgnoreCase)
+                                           && ex.TableName is not null
+                                           && ex.TableName.Contains("render_jobs", StringComparison.OrdinalIgnoreCase))
+        {
+            // Safe log only — no connection string, credentials, or customer identifiers.
+            _logger.LogError(ex,
+                "RENDER_JOB_ENQUEUE_SCHEMA_MISMATCH jobType={JobType} userId={UserId} tenantId={TenantId} customerScope={CustomerScope} sqlState={SqlState} table={Table} column={Column}",
+                model.JobType, model.UserId, _tenant.TenantId, customerScope, ex.SqlState, ex.TableName, ex.ColumnName);
+            throw new InvalidOperationException(
+                "Database render_jobs chưa đồng bộ: customer_id đang NOT NULL trong khi system/admin job không có customer. "
+                + "Vui lòng chạy file SQL đồng bộ database do quản trị viên cung cấp.", ex);
+        }
 
         await AddEventAsync(job.Id, "JOB_QUEUED", "Render job queued.", new
         {
@@ -97,6 +108,96 @@ public sealed class RenderJobService : IRenderJobService
         }, ct: ct);
 
         return job;
+    }
+
+    public async Task<(RenderJobDto Job, bool AlreadyActive)> EnqueueForProjectIfNoneActiveAsync(RenderJobCreateModel model, long projectId, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(model.JobType))
+        {
+            throw new ArgumentException("Job type is required.", nameof(model));
+        }
+
+        await _tenant.EnsureLoadedAsync(ct);
+        var jobType = model.JobType.Trim();
+
+        using var conn = await _factory.OpenAsync(ct);
+        using var tx = conn.BeginTransaction();
+
+        // Serialise concurrent enqueue attempts for the same (jobType, projectId). The advisory lock is
+        // transaction-scoped, so it is released automatically on commit/rollback — no leak on error.
+        var lockKey = unchecked((long)(((ulong)(uint)jobType.GetHashCode() << 32) | (uint)projectId.GetHashCode()));
+        await conn.ExecuteAsync("SELECT pg_advisory_xact_lock(@key);", new { key = lockKey }, tx);
+
+        var active = await conn.QuerySingleOrDefaultAsync<RenderJobDto>(
+            SelectJobSql +
+            """
+             WHERE job_type = @jobType
+               AND status IN ('queued', 'preparing', 'rendering', 'post_processing')
+               AND (input_json->>'projectId') = @projectId
+             ORDER BY queued_at DESC, created_at DESC
+             LIMIT 1;
+            """,
+            new { jobType, projectId = projectId.ToString() }, tx);
+
+        if (active is not null)
+        {
+            tx.Commit();
+            return (active, true);
+        }
+
+        var inputJson = ToJson(model.Input ?? new { });
+        var promptJson = ToJson(model.Prompt ?? new { });
+        var referenceJson = ToJson(model.References ?? Array.Empty<object>());
+        var customerScope = model.CustomerId is null ? "system" : "customer";
+
+        RenderJobDto job;
+        try
+        {
+            job = await conn.QuerySingleAsync<RenderJobDto>(
+                InsertJobSql,
+                new
+                {
+                    tenant = _tenant.TenantId,
+                    user = model.UserId,
+                    customer = model.CustomerId,
+                    type = jobType,
+                    priority = model.Priority,
+                    input = inputJson,
+                    prompt = promptJson,
+                    refs = referenceJson,
+                    logCode = model.LogCode,
+                    pointCost = model.PointCostEstimate,
+                    pointStatus = model.PointStatus,
+                    provider = model.ProviderCode,
+                    model = model.ModelCode,
+                    maxAttempts = Math.Max(1, model.MaxAttempts)
+                }, tx);
+        }
+        catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.NotNullViolation
+                                           && string.Equals(ex.ColumnName, "customer_id", StringComparison.OrdinalIgnoreCase)
+                                           && ex.TableName is not null
+                                           && ex.TableName.Contains("render_jobs", StringComparison.OrdinalIgnoreCase))
+        {
+            tx.Rollback();
+            _logger.LogError(ex,
+                "RENDER_JOB_ENQUEUE_SCHEMA_MISMATCH jobType={JobType} userId={UserId} tenantId={TenantId} customerScope={CustomerScope} sqlState={SqlState} table={Table} column={Column}",
+                jobType, model.UserId, _tenant.TenantId, customerScope, ex.SqlState, ex.TableName, ex.ColumnName);
+            throw new InvalidOperationException(
+                "Database render_jobs chưa đồng bộ: customer_id đang NOT NULL trong khi system/admin job không có customer. "
+                + "Vui lòng chạy file SQL đồng bộ database do quản trị viên cung cấp.", ex);
+        }
+
+        tx.Commit();
+
+        await AddEventAsync(job.Id, "JOB_QUEUED", "Render job queued.", new
+        {
+            job.JobType,
+            job.Priority,
+            job.PointCostEstimate,
+            job.PointStatus
+        }, ct: ct);
+
+        return (job, false);
     }
 
     public async Task UpsertSnapshotAsync(Guid jobId, object projectSnapshot, object sceneSnapshots, CancellationToken ct = default)
@@ -355,6 +456,31 @@ public sealed class RenderJobService : IRenderJobService
                queued_at AS QueuedAt, started_at AS StartedAt, completed_at AS CompletedAt,
                cancelled_at AS CancelledAt, created_at AS CreatedAt, updated_at AS UpdatedAt
           FROM render.render_jobs
+        """;
+
+    private const string InsertJobSql =
+        """
+        INSERT INTO render.render_jobs
+            (tenant_id, user_id, customer_id, job_type, status, priority,
+             input_json, prompt_json, reference_json, log_code,
+             point_cost_estimate, point_status, provider_code, model_code, max_attempts,
+             queued_at, created_at)
+        VALUES
+            (@tenant, @user, @customer, @type, 'queued', @priority,
+             CAST(@input AS jsonb), CAST(@prompt AS jsonb), CAST(@refs AS jsonb), @logCode,
+             @pointCost, @pointStatus, @provider, @model, @maxAttempts,
+             now(), now())
+        RETURNING id AS Id, tenant_id AS TenantId, user_id AS UserId, customer_id AS CustomerId,
+                  job_type AS JobType, status AS Status, priority AS Priority, worker_key AS WorkerKey,
+                  input_json::text AS InputJson, prompt_json::text AS PromptJson,
+                  reference_json::text AS ReferenceJson, output_json::text AS OutputJson,
+                  log_code AS LogCode, error_code AS ErrorCode, error_message AS ErrorMessage,
+                  cancel_reason AS CancelReason, retry_of_job_id AS RetryOfJobId,
+                  attempt_count AS AttemptCount, max_attempts AS MaxAttempts, retry_after AS RetryAfter,
+                  point_cost_estimate AS PointCostEstimate, point_cost_charged AS PointCostCharged,
+                  point_status AS PointStatus, provider_code AS ProviderCode, model_code AS ModelCode,
+                  queued_at AS QueuedAt, started_at AS StartedAt, completed_at AS CompletedAt,
+                  cancelled_at AS CancelledAt, created_at AS CreatedAt, updated_at AS UpdatedAt;
         """;
 
     private static string ToJson(object value) => JsonSerializer.Serialize(value, JsonOptions);

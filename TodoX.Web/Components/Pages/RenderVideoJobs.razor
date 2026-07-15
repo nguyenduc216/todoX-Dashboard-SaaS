@@ -399,6 +399,10 @@
     private readonly HashSet<long> _sceneRerendering = new();
     // Per-scene re-render error messages (kept so a failed rerender does not wipe the old image).
     private readonly Dictionary<long, string> _sceneRerenderErrors = new();
+    // Transient per-scene render state derived from project events (survives page refresh).
+    private readonly Dictionary<long, SceneImageVisualState> _sceneEventState = new();
+    // Polling guard: prevents overlapping ReloadAsync calls.
+    private readonly SemaphoreSlim _reloadLock = new(1, 1);
     // True while a background Google Cloud batch job for this project is queued/rendering.
     private bool _batchActive;
 
@@ -428,6 +432,7 @@
         _pollCts?.Cancel();
         _pollCts?.Dispose();
         _pollTimer?.Dispose();
+        _reloadLock.Dispose();
     }
 
     private async Task CreateProjectAsync()
@@ -623,24 +628,39 @@
     private async Task ReloadAsync()
     {
         if (_projectId is null) return;
+
+        // Guard against overlapping ReloadAsync calls from concurrent polling/UI refresh. Non-blocking: if
+        // already reloading, skip this call instead of queueing (the next poll will catch the new state).
+        if (!await _reloadLock.WaitAsync(0))
+        {
+            return;
+        }
         try
         {
-            _project = await VideoRepo.GetProjectAsync(_projectId.Value);
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "VIDEO_RENDER_RELOAD_PROJECT_FAILED projectId={ProjectId}", _projectId);
-            throw;
-        }
-        if (_project is not null)
-        {
-            _thinkScenes = _project.ThinkScenes;
-            _prompt = _project.OriginalPrompt;
-            if (_project.CharacterId is not null)
+            try
             {
-                await OnCharacterChangedAsync(_project.CharacterId);
+                _project = await VideoRepo.GetProjectAsync(_projectId.Value);
             }
-            await ReloadJobsAsync();
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "VIDEO_RENDER_RELOAD_PROJECT_FAILED projectId={ProjectId}", _projectId);
+                throw;
+            }
+            if (_project is not null)
+            {
+                _thinkScenes = _project.ThinkScenes;
+                _prompt = _project.OriginalPrompt;
+                if (_project.CharacterId is not null)
+                {
+                    await OnCharacterChangedAsync(_project.CharacterId);
+                }
+                RebuildSceneEventState();
+                await ReloadJobsAsync();
+            }
+        }
+        finally
+        {
+            _reloadLock.Release();
         }
     }
 
@@ -824,9 +844,10 @@
                 if (!await _pollTimer.WaitForNextTickAsync(ct)) break;
                 if (_project is null) continue;
 
-                // Keep polling while a Google Cloud batch is active, scenes are still pending an image,
-                // or the video pipeline is mid-flight. Stop once everything has settled to avoid churn.
-                var scenesPending = _batchActive || HasPendingSceneImages();
+                // Keep polling while a Google Cloud batch is active, scenes are actively rendering/retrying,
+                // scenes are still pending an image, or the video pipeline is mid-flight. Stop once everything
+                // has settled to avoid churn.
+                var scenesPending = _batchActive || HasActiveSceneRenders() || HasPendingSceneImages();
                 var videoActive = _project.Status is VideoProjectStatuses.Rendering or VideoProjectStatuses.Merging or VideoProjectStatuses.SceneReady or VideoProjectStatuses.ReadyToMerge;
                 if (scenesPending || videoActive)
                 {
@@ -941,7 +962,7 @@
             OnlyMissingOrFailed = onlyMissingOrFailed
         };
 
-        var job = await RenderJobs.EnqueueAsync(new RenderJobCreateModel
+        var (job, alreadyActive) = await RenderJobs.EnqueueForProjectIfNoneActiveAsync(new RenderJobCreateModel
         {
             JobType = TodoX.Web.Services.Render.SceneImageBatchRenderHandler.JobTypeName,
             UserId = AuthState.CurrentUser.UserId,
@@ -954,9 +975,17 @@
             MaxAttempts = 1,
             PointCostEstimate = 0,
             PointStatus = RenderPointStatuses.NotRequired
-        });
+        }, _project.Id);
 
         _batchActive = true;
+        if (alreadyActive)
+        {
+            Logger.LogInformation("VIDEO_RENDER_SCENE_IMAGE_BATCH_ALREADY_ACTIVE projectId={ProjectId} jobId={JobId}", _project.Id, job.Id);
+            Snackbar.Add("Project này đang có batch tạo ảnh tĩnh.", Severity.Info);
+            await StartPolling();
+            return;
+        }
+
         Logger.LogInformation("VIDEO_RENDER_SCENE_IMAGE_BATCH_ENQUEUED projectId={ProjectId} jobId={JobId} onlyMissing={OnlyMissing} characterId={CharacterId}",
             _project.Id, job.Id, onlyMissingOrFailed, input.CharacterId);
         await LogProjectEvent("SCENE_IMAGE_BATCH_ENQUEUED", "info", "Đã enqueue batch render ảnh tĩnh Google Cloud.",
@@ -1059,16 +1088,36 @@
                string.IsNullOrWhiteSpace(s.StaticImageUrl)
                && !string.Equals(s.Status, VideoSceneStatuses.Failed, StringComparison.OrdinalIgnoreCase));
 
+    // True when any scene is actively being processed (queued, rendering, or retrying) per events or UI state.
+    private bool HasActiveSceneRenders()
+        => _sceneEventState.Values.Any(state => state is SceneImageVisualState.Queued or SceneImageVisualState.Rendering or SceneImageVisualState.Retrying)
+           || _sceneRerendering.Count > 0;
+
     private SceneImageVisualState ResolveSceneImageState(VideoProjectSceneDto scene)
     {
+        // A locally-running OpenRouter re-render always wins for its own scene.
         if (_sceneRerendering.Contains(scene.Id))
         {
             return SceneImageVisualState.Rendering;
         }
 
+        // A scene that already has a valid image is Ready regardless of stale events.
         if (!string.IsNullOrWhiteSpace(scene.StaticImageUrl) && scene.Status != VideoSceneStatuses.Failed)
         {
             return SceneImageVisualState.Ready;
+        }
+
+        // Otherwise derive the transient state from the latest batch event for this scene. This is what
+        // makes the per-scene state survive a page refresh (state is reconstructed from project events).
+        if (_sceneEventState.TryGetValue(scene.Id, out var evState) && evState != SceneImageVisualState.None)
+        {
+            // A terminal DB status still overrides a stale non-terminal event.
+            if (string.Equals(scene.Status, VideoSceneStatuses.Failed, StringComparison.OrdinalIgnoreCase)
+                && evState is not SceneImageVisualState.Rendering and not SceneImageVisualState.Retrying and not SceneImageVisualState.Queued)
+            {
+                return SceneImageVisualState.Failed;
+            }
+            return evState;
         }
 
         if (string.Equals(scene.Status, VideoSceneStatuses.Failed, StringComparison.OrdinalIgnoreCase))
@@ -1076,13 +1125,64 @@
             return SceneImageVisualState.Failed;
         }
 
-        // While a background batch is active, draft scenes without an image are queued/rendering.
+        // Fallback while a batch is active but no per-scene event has arrived yet.
         if (_batchActive && string.IsNullOrWhiteSpace(scene.StaticImageUrl))
         {
             return SceneImageVisualState.Queued;
         }
 
         return SceneImageVisualState.None;
+    }
+
+    // Rebuilds the per-scene transient render state from project events (latest event per scene wins).
+    // Called on every reload so the UI reflects queued/rendering/retrying/ready/failed accurately and
+    // restores correctly after a refresh.
+    private void RebuildSceneEventState()
+    {
+        _sceneEventState.Clear();
+        if (_project is null) return;
+
+        // Events are returned newest-first; walk oldest→newest so the last write wins per scene.
+        foreach (var ev in _project.Events.OrderBy(x => x.CreatedAt).ThenBy(x => x.Id))
+        {
+            var sceneId = ExtractSceneId(ev.DataJson);
+            if (sceneId is not long id) continue;
+
+            var state = ev.EventType switch
+            {
+                "SCENE_IMAGE_QUEUED" => SceneImageVisualState.Queued,
+                "SCENE_IMAGE_RENDER_START" => SceneImageVisualState.Rendering,
+                "SCENE_IMAGE_RETRY_START" => SceneImageVisualState.Rendering,
+                "SCENE_IMAGE_QUOTA_WAIT" => SceneImageVisualState.Retrying,
+                "SCENE_IMAGE_READY" => SceneImageVisualState.Ready,
+                "SCENE_IMAGE_RENDER_FAILED" => SceneImageVisualState.Failed,
+                _ => (SceneImageVisualState?)null
+            };
+            if (state is SceneImageVisualState resolved)
+            {
+                _sceneEventState[id] = resolved;
+            }
+        }
+    }
+
+    private static long? ExtractSceneId(string? dataJson)
+    {
+        if (string.IsNullOrWhiteSpace(dataJson)) return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(dataJson);
+            if (doc.RootElement.ValueKind == JsonValueKind.Object
+                && doc.RootElement.TryGetProperty("sceneId", out var el))
+            {
+                if (el.ValueKind == JsonValueKind.Number && el.TryGetInt64(out var n)) return n;
+                if (el.ValueKind == JsonValueKind.String && long.TryParse(el.GetString(), out var s)) return s;
+            }
+        }
+        catch (JsonException)
+        {
+            // Ignore malformed event payloads.
+        }
+        return null;
     }
 
     private static string SceneStateCss(SceneImageVisualState state) => state switch

@@ -87,6 +87,15 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
         // Resolve the character master image once and turn it into a Vertex reference media id.
         var (referenceMediaId, referenceUrl, characterPrompt) = await ResolveCharacterReferenceAsync(input, ct);
 
+        // Emit a QUEUED event for every scene up-front so the UI can render "Đang chờ" per scene
+        // (and restore that state after a refresh) before any slot opens.
+        foreach (var scene in scenes)
+        {
+            await _repo.AddProjectEventAsync(input.ProjectId, "SCENE_IMAGE_QUEUED", "info",
+                $"Scene {scene.SceneIndex} đang chờ render ảnh.",
+                new { jobId = job.Id, projectId = input.ProjectId, sceneId = scene.Id, sceneIndex = scene.SceneIndex, characterId = input.CharacterId }, ct);
+        }
+
         var maxParallel = Math.Clamp(_config.GetValue("RenderQueue:VertexMaxConcurrency", 3), 1, 8);
         using var throttle = new SemaphoreSlim(maxParallel, maxParallel);
         var failures = 0;
@@ -162,15 +171,26 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
 
         try
         {
+            // We already hold a concurrency slot here (acquired by the caller). Announce the render start
+            // so the UI shows "Đang tạo ảnh..." for exactly this scene.
+            await _repo.AddProjectEventAsync(input.ProjectId, "SCENE_IMAGE_RENDER_START", "info",
+                $"Scene {scene.SceneIndex} bắt đầu render trên Google Cloud.",
+                new { jobId, projectId = input.ProjectId, sceneId = scene.Id, sceneIndex = scene.SceneIndex, attempt = 1, provider = "todox_image", startedAt = DateTime.UtcNow }, ct);
+
             var startedAt = DateTime.UtcNow;
             var outcome = await _rateLimiter.ExecuteAsync(
                 renderAsync: attempt => _sceneImages.RenderSceneImageWithVertexAsync(context, attempt, ct),
                 isQuotaError: r => !r.Success && r.QuotaError,
                 onQuotaWait: async (attempt, wait) =>
                 {
+                    // 429 → the scene is retrying, NOT failed. Emit QUOTA_WAIT then RETRY_START so the UI
+                    // shows "Đang chờ quota..." and can restore it after a refresh.
                     await _repo.AddProjectEventAsync(input.ProjectId, "SCENE_IMAGE_QUOTA_WAIT", "warning",
                         $"Scene {scene.SceneIndex} chờ quota Google Cloud {wait.TotalSeconds:0}s (lần {attempt}).",
-                        new { jobId, sceneId = scene.Id, sceneIndex = scene.SceneIndex, attempt, waitSeconds = wait.TotalSeconds, provider = "todox_image" }, ct);
+                        new { jobId, sceneId = scene.Id, sceneIndex = scene.SceneIndex, attempt, waitSeconds = wait.TotalSeconds, provider = "todox_image", model = "vertex_scene_image" }, ct);
+                    await _repo.AddProjectEventAsync(input.ProjectId, "SCENE_IMAGE_RETRY_START", "info",
+                        $"Scene {scene.SceneIndex} thử lại render (lần {attempt + 1}).",
+                        new { jobId, sceneId = scene.Id, sceneIndex = scene.SceneIndex, attempt = attempt + 1, provider = "todox_image", timestamp = DateTime.UtcNow }, ct);
                 },
                 context: $"project={input.ProjectId} scene={scene.SceneIndex}",
                 ct: ct);
@@ -206,6 +226,14 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
                     error = outcome.Error, quota = outcome.QuotaError, queuedAt, completedAt
                 }, ct);
             return false;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Shutdown/cancellation is not a scene failure — do not mark the scene Failed. Let the worker
+            // reclaim the job later; propagate so Task.WhenAll and the worker see the cancellation.
+            _logger.LogInformation("SCENE_IMAGE_BATCH_SCENE_CANCELLED projectId={ProjectId} sceneId={SceneId} sceneIndex={SceneIndex}",
+                input.ProjectId, scene.Id, scene.SceneIndex);
+            throw;
         }
         catch (Exception ex)
         {

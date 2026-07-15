@@ -139,7 +139,10 @@ public sealed class SceneImageRenderService : ISceneImageRenderService
             FileCategory = "video_scene_image",
             AvatarMediaId = context.CharacterReferenceMediaId,
             RequireReferenceImages = context.CharacterReferenceMediaId is not null,
-            SkipReferenceOwnershipCheck = true
+            SkipReferenceOwnershipCheck = true,
+            // Charge only on the first attempt. Attempts 2+ are technical 429 backoff retries of the SAME
+            // logical scene render and must not re-charge points.
+            SkipPointCharge = attempt > 1
         }, ct);
 
         var image = result.Images.FirstOrDefault(x =>
@@ -198,7 +201,10 @@ public sealed class SceneImageRenderService : ISceneImageRenderService
 
         var render = await _imageRouter.RenderImageAsync(new AiImageRenderRequest
         {
-            CustomerId = context.CustomerId,
+            // Preserve the real customer scope for usage logging (Codex intent). AiImageRenderRequest.CustomerId
+            // is the bigint customer convention used across the router, so convert from the Guid customer id
+            // exactly like AvatarTemplateService does — never hard-code null or a fake customer.
+            CustomerId = ToBigIntCustomerId(context.CustomerId),
             UserId = context.UserId,
             FeatureCode = "render_job_scene_image_rerender",
             CapabilityCode = CapabilityCode,
@@ -263,4 +269,16 @@ public sealed class SceneImageRenderService : ISceneImageRenderService
     private static bool IsSucceededStatus(string? status)
         => string.Equals(status, "success", StringComparison.OrdinalIgnoreCase)
            || string.Equals(status, "completed", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Converts a customer Guid into the non-negative bigint the AI provider router/usage-log uses,
+    /// matching <c>AvatarTemplateService.ToBigIntCustomerId</c>. Returns null for system/admin (no customer).
+    /// </summary>
+    private static long? ToBigIntCustomerId(Guid? id)
+    {
+        if (id is null) return null;
+        var bytes = id.Value.ToByteArray();
+        var value = BitConverter.ToInt64(bytes, 0);
+        return value == long.MinValue ? long.MaxValue : Math.Abs(value);
+    }
 }

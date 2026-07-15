@@ -35,6 +35,13 @@ public sealed class ImageAICreativeRenderRequest
     public bool PreserveFixedAssets { get; set; }
     public bool RequireReferenceImages { get; set; }
     public bool SkipReferenceOwnershipCheck { get; set; }
+
+    /// <summary>
+    /// When true, the point charge is skipped for this call. Used only by technical retries of a single
+    /// logical render (e.g. a Vertex 429 backoff retry) so one logical scene render is charged at most once.
+    /// Never set by Avatar Builder / Chibi flows, which always charge on their single call.
+    /// </summary>
+    public bool SkipPointCharge { get; set; }
 }
 
 public sealed class ImageAICreativeRenderImage
@@ -232,10 +239,21 @@ public sealed class ImageAICreativeRenderService : IImageAICreativeRenderService
 
             var imageCost = await _tokenSettings.GetChibiImageCostAsync();
             var total = imageCost * count;
-            var charge = await _wallet.ChargeAsync(
-                request.IsCustomer ? request.CustomerId : null, request.UserId, total, count,
-                "chibi_image", "google-vertex-ai", "imagen-3.0-generate-002", EndpointName,
-                unit: "image", referenceId: generationId, referenceType: "image_ai_creative_render");
+
+            // A technical retry of one logical render (e.g. a Vertex 429 backoff) passes SkipPointCharge=true
+            // so the same logical scene render is charged at most once. The first attempt charges normally.
+            var charge = request.SkipPointCharge
+                ? new ChargeResult(true, 0, 0, null)
+                : await _wallet.ChargeAsync(
+                    request.IsCustomer ? request.CustomerId : null, request.UserId, total, count,
+                    "chibi_image", "google-vertex-ai", "imagen-3.0-generate-002", EndpointName,
+                    unit: "image", referenceId: generationId, referenceType: "image_ai_creative_render");
+
+            if (request.SkipPointCharge)
+            {
+                _logger.LogInformation("IMAGE_AI_CREATIVE_RENDER_CHARGE_SKIPPED logCode={LogCode} generationId={GenerationId} reason=retry_no_recharge",
+                    logCode, generationId);
+            }
 
             if (!charge.Ok)
             {
