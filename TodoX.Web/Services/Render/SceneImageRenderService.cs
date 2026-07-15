@@ -198,7 +198,7 @@ public sealed class SceneImageRenderService : ISceneImageRenderService
 
         var render = await _imageRouter.RenderImageAsync(new AiImageRenderRequest
         {
-            CustomerId = null,
+            CustomerId = context.CustomerId,
             UserId = context.UserId,
             FeatureCode = "render_job_scene_image_rerender",
             CapabilityCode = CapabilityCode,
