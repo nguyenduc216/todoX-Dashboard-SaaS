@@ -28,6 +28,12 @@ public sealed class OpenRouterImageRequest
 
     /// <summary>Config key name for the API key (from provider.api_key_config_name), e.g. "OpenRouter__ApiKey".</summary>
     public string? ApiKeyConfigName { get; set; }
+
+    /// <summary>Raw provider config JSON from todox_ai_provider.config_json. Never contains secrets.</summary>
+    public string? ProviderConfigJson { get; set; }
+
+    /// <summary>Raw capability config JSON from todox_ai_provider_capability.config_json.</summary>
+    public string? CapabilityConfigJson { get; set; }
 }
 
 public sealed class OpenRouterImageResponse

@@ -49,4 +49,18 @@ Before declaring completion:
 - After validation succeeds, build and publish the application using the repository's documented workflow.
 - Do not deploy to a server or restart production services unless explicitly requested.
 - Report the publish command, output directory, and result.
--
+
+## YEScale provider workflow
+
+- YEScale MCP is the authoritative live source for YEScale model IDs, capabilities, modalities, API compatibility, parameters, pricing, limits, deprecation status, and provider documentation.
+- Before adding or modifying a YEScale model/provider, query the YEScale MCP tools first.
+- Do not invent or guess YEScale model IDs, endpoints, request parameters, pricing, rate limits, or supported modalities.
+- Do not rely solely on model information remembered by the AI.
+- If YEScale MCP is unavailable, stop the provider-specific implementation and report the blocker.
+- Never put YESCALE_ACCESS_KEY or any YEScale credential in source code, AGENTS.md, prompts, logs, tests, screenshots, appsettings.json, or Git.
+- Read credentials only from environment variables, user secrets, or the production secret store.
+- Treat model IDs as configuration/data, not hard-coded constants.
+- Map every model to an existing TodoX capability based on verified input/output modalities.
+- Before completion, report which YEScale MCP tools were called and which model metadata was verified.
+- Run tests, build, and publish according to this AGENTS.md.
+- Do not create or run migrations. If a database change is necessary, provide a standalone SQL file for manual execution.

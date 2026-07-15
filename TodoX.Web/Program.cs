@@ -71,6 +71,9 @@ builder.Services.AddScoped<TodoX.Web.Services.Profile.IChibiAvatarService, TodoX
 builder.Services.AddScoped<TodoX.Web.Services.AvatarTemplates.IAvatarTemplateService, TodoX.Web.Services.AvatarTemplates.AvatarTemplateService>();
 builder.Services.AddScoped<ITodoXImageProviderService, TodoXImageProviderService>();
 builder.Services.AddHttpClient<IOpenRouterImageService, OpenRouterImageService>();
+builder.Services.Configure<TodoX.Web.Services.AiProviders.YEScaleOptions>(builder.Configuration.GetSection("AiProviders:YEScale"));
+builder.Services.AddHttpClient<TodoX.Web.Services.AiProviders.IYEScaleTaskClient, TodoX.Web.Services.AiProviders.YEScaleTaskClient>();
+builder.Services.AddScoped<TodoX.Web.Services.AiProviders.IYEScaleImageService, TodoX.Web.Services.AiProviders.YEScaleImageService>();
 builder.Services.AddScoped<IAiImageProviderFactory, AiImageProviderFactory>();
 builder.Services.AddScoped<CharacterPromptBuilder>();
 builder.Services.AddScoped<AiCharacterRepository>();

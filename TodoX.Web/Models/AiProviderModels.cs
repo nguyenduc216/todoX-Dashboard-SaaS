@@ -226,6 +226,7 @@ public static class ProviderCodeMap
         return providerCode.Trim().ToLowerInvariant() switch
         {
             "openrouter" or "openrouter_image" => "openrouter_image",
+            "yescale" or "yescale_task" or "yescale_task_image" => "yescale_task_image",
             "image_ai_creative_render" or "todox_image" or "todox" => "todox_image",
             _ => providerCode.Trim()
         };

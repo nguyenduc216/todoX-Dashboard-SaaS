@@ -55,7 +55,7 @@ public interface IAiImageRenderRouter
 /// <summary>
 /// Resolves the provider/model/cost for an image capability from the database, delegates the actual
 /// render to the existing image-provider factory (OpenRouter or ImageAICreativeRender), and records a
-/// usage-log row. Model, endpoint and unit cost always come from todox_ai_provider_capability â€” never
+/// usage-log row. Model, endpoint and unit cost always come from todox_ai_provider_capability, never
 /// hard-coded here.
 /// </summary>
 public sealed class AiImageRenderRouter : IAiImageRenderRouter
@@ -113,7 +113,9 @@ public sealed class AiImageRenderRouter : IAiImageRenderRouter
             ReferenceImageUrls = request.ReferenceImageUrls,
             BaseUrlOverride = detail?.BaseUrl,
             EndpointPath = capability?.EndpointPath,
-            ApiKeyConfigName = detail?.ApiKeyConfigName
+            ApiKeyConfigName = detail?.ApiKeyConfigName,
+            ProviderConfigJson = detail?.ConfigJson,
+            CapabilityConfigJson = capability?.ConfigJson
         }, cancellationToken);
 
         var quantity = 1m;
