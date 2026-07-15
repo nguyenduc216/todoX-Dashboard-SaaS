@@ -49,3 +49,4 @@ Before declaring completion:
 - After validation succeeds, build and publish the application using the repository's documented workflow.
 - Do not deploy to a server or restart production services unless explicitly requested.
 - Report the publish command, output directory, and result.
+-
