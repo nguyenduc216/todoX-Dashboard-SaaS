@@ -19,12 +19,9 @@ public sealed class SceneImageBatchInput
 }
 
 /// <summary>
-/// Background handler that renders every scene's static image for a video project on Google Cloud
-/// (Vertex) via <see cref="ISceneImageRenderService"/>. Fans scenes out with a bounded degree of
-/// parallelism (max 3, enforced globally by <see cref="GoogleVertexRateLimiter"/>) so at most three
-/// scenes hit Vertex at once; the rest wait. HTTP 429 / quota errors are retried with backoff by the
-/// limiter and do NOT immediately mark a scene failed. This runs entirely server-side, so the browser
-/// can refresh or navigate away while the batch continues.
+/// Background handler that renders every scene's static image through the configured image provider
+/// router. Concurrency is bounded by configuration so the browser can refresh or navigate away while
+/// the batch continues server-side.
 /// </summary>
 public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
 {
@@ -36,7 +33,6 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
     private readonly VideoRenderRepository _repo;
     private readonly ISceneImageRenderService _sceneImages;
     private readonly IAiCharacterService _characters;
-    private readonly GoogleVertexRateLimiter _rateLimiter;
     private readonly IConfiguration _config;
     private readonly ILogger<SceneImageBatchRenderHandler> _logger;
 
@@ -44,14 +40,12 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
         VideoRenderRepository repo,
         ISceneImageRenderService sceneImages,
         IAiCharacterService characters,
-        GoogleVertexRateLimiter rateLimiter,
         IConfiguration config,
         ILogger<SceneImageBatchRenderHandler> logger)
     {
         _repo = repo;
         _sceneImages = sceneImages;
         _characters = characters;
-        _rateLimiter = rateLimiter;
         _config = config;
         _logger = logger;
     }
@@ -74,15 +68,15 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
             .ToList();
 
         await _repo.AddProjectEventAsync(input.ProjectId, "SCENE_IMAGE_BATCH_STARTED", "info",
-            $"Bắt đầu render {scenes.Count} ảnh tĩnh scene trên Google Cloud.",
-            new { jobId = job.Id, sceneCount = scenes.Count, input.OnlyMissingOrFailed, input.CharacterId }, ct);
+            $"Bắt đầu render {scenes.Count} ảnh tĩnh scene qua AI provider.",
+            new { jobId = job.Id, sceneCount = scenes.Count, input.OnlyMissingOrFailed, input.CharacterId, capability = SceneImageRenderService.CapabilityCode }, ct);
 
         if (scenes.Count == 0)
         {
             return;
         }
 
-        // Resolve the character master image once and turn it into a Vertex reference media id.
+        // Resolve the character master image once for both router URL references and legacy media references.
         var (referenceMediaId, referenceUrl, characterPrompt) = await ResolveCharacterReferenceAsync(input, ct);
 
         // Emit a QUEUED event for every scene up-front so the UI can render "Đang chờ" per scene
@@ -95,11 +89,21 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
         }
 
         var failures = 0;
+        var maxConcurrency = Math.Clamp(_config.GetValue("RenderQueue:SceneImageMaxConcurrency", 3), 1, 8);
+        using var concurrency = new SemaphoreSlim(maxConcurrency, maxConcurrency);
 
         var tasks = scenes.Select(async scene =>
         {
-            var ok = await RenderOneAsync(input, project, scene, referenceMediaId, referenceUrl, characterPrompt, job.Id, ct);
-            if (!ok) Interlocked.Increment(ref failures);
+            await concurrency.WaitAsync(ct);
+            try
+            {
+                var ok = await RenderOneAsync(input, project, scene, referenceMediaId, referenceUrl, characterPrompt, job.Id, ct);
+                if (!ok) Interlocked.Increment(ref failures);
+            }
+            finally
+            {
+                concurrency.Release();
+            }
         }).ToList();
 
         await Task.WhenAll(tasks);
@@ -167,42 +171,11 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
             // We already hold a concurrency slot here (acquired by the caller). Announce the render start
             // so the UI shows "Đang tạo ảnh..." for exactly this scene.
             await _repo.AddProjectEventAsync(input.ProjectId, "SCENE_IMAGE_RENDER_START", "info",
-                $"Scene {scene.SceneIndex} bắt đầu render trên Google Cloud.",
-                new { jobId, projectId = input.ProjectId, sceneId = scene.Id, sceneIndex = scene.SceneIndex, attempt = 1, provider = "todox_image", startedAt = DateTime.UtcNow }, ct);
+                $"Scene {scene.SceneIndex} bắt đầu render qua AI provider.",
+                new { jobId, projectId = input.ProjectId, sceneId = scene.Id, sceneIndex = scene.SceneIndex, capability = SceneImageRenderService.CapabilityCode, startedAt = DateTime.UtcNow }, ct);
 
             var startedAt = DateTime.UtcNow;
-            var outcome = await _rateLimiter.ExecuteAsync(
-                renderAsync: async attempt =>
-                {
-                    if (attempt == 1)
-                    {
-                        await _repo.AddProjectEventAsync(input.ProjectId, "SCENE_IMAGE_RENDER_START", "info",
-                            $"Scene {scene.SceneIndex} bat dau render tren Google Cloud.",
-                            new { jobId, projectId = input.ProjectId, sceneId = scene.Id, sceneIndex = scene.SceneIndex, attempt, provider = "todox_image", startedAt = DateTime.UtcNow }, ct);
-                    }
-
-                    return await _sceneImages.RenderSceneImageWithVertexAsync(context, attempt, ct);
-                },
-                isQuotaError: r => !r.Success && r.QuotaError,
-                onQuotaWait: async (attempt, wait) =>
-                {
-                    // 429 → the scene is retrying, NOT failed. Emit QUOTA_WAIT then RETRY_START so the UI
-                    // shows "Đang chờ quota..." and can restore it after a refresh.
-                    await _repo.AddProjectEventAsync(input.ProjectId, "SCENE_IMAGE_QUOTA_WAIT", "warning",
-                        $"Scene {scene.SceneIndex} chờ quota Google Cloud {wait.TotalSeconds:0}s (lần {attempt}).",
-                        new { jobId, sceneId = scene.Id, sceneIndex = scene.SceneIndex, attempt, waitSeconds = wait.TotalSeconds, provider = "todox_image", model = "vertex_scene_image" }, ct);
-                    await _repo.AddProjectEventAsync(input.ProjectId, "SCENE_IMAGE_RETRY_SCHEDULED", "info",
-                        $"Scene {scene.SceneIndex} thử lại render (lần {attempt + 1}).",
-                        new { jobId, sceneId = scene.Id, sceneIndex = scene.SceneIndex, attempt = attempt + 1, provider = "todox_image", timestamp = DateTime.UtcNow }, ct);
-                },
-                onRetryStart: async attempt =>
-                {
-                    await _repo.AddProjectEventAsync(input.ProjectId, "SCENE_IMAGE_RETRY_START", "info",
-                        $"Scene {scene.SceneIndex} thu lai render (lan {attempt}).",
-                        new { jobId, sceneId = scene.Id, sceneIndex = scene.SceneIndex, attempt, provider = "todox_image", timestamp = DateTime.UtcNow }, ct);
-                },
-                context: $"project={input.ProjectId} scene={scene.SceneIndex}",
-                ct: ct);
+            var outcome = await _sceneImages.RenderSceneImageAsync(context, ct);
 
             var completedAt = DateTime.UtcNow;
 
@@ -215,9 +188,17 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
                     $"Scene {scene.SceneIndex} image ready.",
                     new
                     {
-                        jobId, projectId = input.ProjectId, sceneId = scene.Id, sceneIndex = scene.SceneIndex,
-                        characterId = input.CharacterId, provider = outcome.ProviderCode, model = outcome.ModelName,
-                        imageUrl = outcome.ImageUrl, queuedAt, startedAt, completedAt,
+                        jobId,
+                        projectId = input.ProjectId,
+                        sceneId = scene.Id,
+                        sceneIndex = scene.SceneIndex,
+                        characterId = input.CharacterId,
+                        provider = outcome.ProviderCode,
+                        model = outcome.ModelName,
+                        imageUrl = outcome.ImageUrl,
+                        queuedAt,
+                        startedAt,
+                        completedAt,
                         durationMs = (completedAt - startedAt).TotalMilliseconds
                     }, ct);
                 return true;
@@ -230,9 +211,17 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
                 $"Render ảnh scene {scene.SceneIndex} thất bại.",
                 new
                 {
-                    jobId, projectId = input.ProjectId, sceneId = scene.Id, sceneIndex = scene.SceneIndex,
-                    characterId = input.CharacterId, provider = outcome.ProviderCode, model = outcome.ModelName,
-                    error = outcome.Error, quota = outcome.QuotaError, queuedAt, completedAt
+                    jobId,
+                    projectId = input.ProjectId,
+                    sceneId = scene.Id,
+                    sceneIndex = scene.SceneIndex,
+                    characterId = input.CharacterId,
+                    provider = outcome.ProviderCode,
+                    model = outcome.ModelName,
+                    error = outcome.Error,
+                    quota = outcome.QuotaError,
+                    queuedAt,
+                    completedAt
                 }, ct);
             return false;
         }

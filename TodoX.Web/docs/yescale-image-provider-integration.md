@@ -28,15 +28,16 @@ Pricing and limits must remain DB/config data. MCP returned request pricing/thro
 | --- | --- | --- | --- |
 | `avatar_generation` admin preview | `AvatarTemplateService` now routes `openrouter_image` and `yescale_task_image` through `AiImageRenderRouter` | Ready when provider capability is enabled/configured | Yes, manual seed row required |
 | `avatar_generation` public builder | Router only when `Features:AvatarBuilderUseImageRouter=true`; now supports `yescale_task_image` | Staging-ready behind existing feature flag | Yes, manual seed row required |
-| `avatar_generation` scene manual rerender | `SceneImageRenderService` now accepts routed image providers, including YEScale | Ready for manual rerender path | Uses existing `avatar_generation` capability |
-| Scene batch auto render | `SceneImageRenderService.RenderSceneImageWithVertexAsync` legacy creative/Vertex path | Not switched; prevents changing retry/point semantics in batch jobs | No |
+| `scene_image_generation` scene manual rerender | `SceneImageRenderService` routes through `AiImageRenderRouter` and accepts YEScale | Ready when provider capability is enabled/configured | Yes, manual seed row required |
+| `scene_image_generation` scene batch auto render | `SceneImageBatchRenderHandler` calls `RenderSceneImageAsync` through the shared router | Ready when provider capability is enabled/configured | Yes, manual seed row required |
 | `character_generation` | `AiCharacterService` direct provider call now passes provider/capability JSON to YEScale | Ready when provider capability is enabled/configured | Yes, manual seed row required |
 | `image_generation` generic router | `AiImageRenderRouter` | Already supported | Yes, manual seed row exists |
-| `poster_generation` / `thumbnail_generation` marketing thumbnail | `ServiceThumbnailRenderService` -> `IImageRenderService` Vertex/composite pipeline | Not complete; needs a separate router-compatible background/composite design | Yes only after code path is migrated |
+| `thumbnail_generation` marketing thumbnail without fixed-asset composite | `ServiceThumbnailRenderService` routes through `AiImageRenderRouter` | Ready when provider capability is enabled/configured | Yes, manual seed row required |
+| `poster_generation` / fixed-asset composite thumbnail | `ServiceThumbnailRenderService` -> `IImageRenderService` for `background_then_composite` | Intentional legacy path: model background plus code composite/text overlay requires a separate router-compatible composite design | Not enabled as full YEScale default yet |
 
 Capability duplication to consolidate:
 
-- Scene image rerender currently reuses `avatar_generation`; add a dedicated `scene_image_generation` capability only after UI, router, and SQL are updated together.
+- Scene image rendering now uses `scene_image_generation`; keep old `avatar_generation` rows only for avatar/avatar-builder use.
 - `avatar_generation` and `chibi_avatar_generation` overlap; keep `avatar_generation` as the routed canonical capability unless product needs separate pricing.
 - `poster_generation`, `thumbnail_generation`, and generic `image_generation` overlap in model needs but differ in business metering. Keep separate capability rows for pricing, but use the same YEScale provider adapter.
 
@@ -48,6 +49,6 @@ Capability duplication to consolidate:
 4. Enable one non-production capability row at a time, starting with `image_generation` or admin `avatar_generation`.
 5. Validate render success, usage log, point charge, and fallback metadata.
 6. Promote `avatar_generation` public builder only with `Features:AvatarBuilderUseImageRouter=true`.
-7. Defer thumbnail/poster default until the composite pipeline is migrated.
+7. Defer fixed-asset composite poster default until the composite pipeline is migrated.
 
 Rollback is data-only while code remains compatible: disable `yescale_task_image` capabilities and unset `is_default`.

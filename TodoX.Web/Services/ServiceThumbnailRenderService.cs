@@ -40,12 +40,22 @@ public sealed class ServiceThumbnailRenderResult
 public sealed class ServiceThumbnailRenderService
 {
     private readonly IImageRenderService _imageRender;
+    private readonly TodoX.Web.Services.AiProviders.IAiImageRenderRouter _imageRouter;
     private readonly MrTodoXAvatarService _mrTodoXAvatar;
+    private readonly TodoX.Web.Services.Media.IMediaFileService _media;
+    private readonly TenantContext _tenant;
 
-    public ServiceThumbnailRenderService(IImageRenderService imageRender, MrTodoXAvatarService mrTodoXAvatar)
+    public ServiceThumbnailRenderService(IImageRenderService imageRender,
+        TodoX.Web.Services.AiProviders.IAiImageRenderRouter imageRouter,
+        MrTodoXAvatarService mrTodoXAvatar,
+        TodoX.Web.Services.Media.IMediaFileService media,
+        TenantContext tenant)
     {
         _imageRender = imageRender;
+        _imageRouter = imageRouter;
         _mrTodoXAvatar = mrTodoXAvatar;
+        _media = media;
+        _tenant = tenant;
     }
 
     public async Task<ServiceThumbnailRenderResult> RenderAsync(ServiceThumbnailRenderRequest request, CancellationToken ct = default)
@@ -97,6 +107,11 @@ public sealed class ServiceThumbnailRenderService
             });
         }
 
+        if (!request.PreserveFixedAssets)
+        {
+            return await RenderViaRouterAsync(request, prompt, references, mrTodoX, ct);
+        }
+
         var render = await _imageRender.RenderAsync(new ImageRenderRequestModel
         {
             Prompt = prompt,
@@ -140,6 +155,74 @@ public sealed class ServiceThumbnailRenderService
     {
         var mrTodoX = await _mrTodoXAvatar.GetAsync(ct);
         return BuildPrompt(request, mrTodoX);
+    }
+
+    private async Task<ServiceThumbnailRenderResult> RenderViaRouterAsync(
+        ServiceThumbnailRenderRequest request,
+        string prompt,
+        IReadOnlyList<ReferenceImage> references,
+        MrTodoXAvatarOptions mrTodoX,
+        CancellationToken ct)
+    {
+        var render = await _imageRouter.RenderImageAsync(new TodoX.Web.Services.AiProviders.AiImageRenderRequest
+        {
+            CustomerId = ToBigIntCustomerId(request.User?.CustomerId),
+            UserId = request.User?.UserId,
+            FeatureCode = "service_thumbnail",
+            CapabilityCode = "thumbnail_generation",
+            FromUser = false,
+            Prompt = prompt,
+            ReferenceImageUrls = references
+                .Select(x => x.Url ?? x.SourceUrl)
+                .Where(IsHttpUrl)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray()!,
+            AspectRatio = string.IsNullOrWhiteSpace(request.AspectRatio) ? "9:16" : request.AspectRatio,
+            OutputFormat = "png",
+            Quality = "high",
+            Resolution = "1K",
+            FileCategory = "service_thumbnail",
+            RequestId = $"service-thumbnail-{Guid.NewGuid():N}",
+            Metadata = new
+            {
+                request.ServiceCode,
+                request.ServiceName,
+                request.ServiceType,
+                request.GroupName
+            },
+            CreatedBy = request.User?.UserId.ToString()
+        }, ct);
+
+        var imageUrl = render.ImageUrl;
+        Guid? mediaId = null;
+        if (render.Success && render.ImageBytes is { Length: > 0 })
+        {
+            await _tenant.EnsureLoadedAsync(ct);
+            var media = await _media.SaveAsync(render.ImageBytes, $"service_thumbnail_{DateTime.UtcNow:yyyyMMddHHmmss}.png",
+                render.MimeType ?? "image/png", "service_thumbnail", request.User?.UserId, request.User?.CustomerId, _tenant.TenantId, ct);
+            imageUrl = media.PublicUrl ?? media.FileUrl;
+            mediaId = media.Id;
+        }
+
+        return new ServiceThumbnailRenderResult
+        {
+            Ok = render.Success && !string.IsNullOrWhiteSpace(imageUrl),
+            Prompt = prompt,
+            ImageUrl = imageUrl,
+            ImageMediaId = mediaId,
+            Error = render.Success ? null : render.ErrorMessage,
+            UsedMrTodoXReference = references.Count > 0,
+            MissingMrTodoXAvatar = string.IsNullOrWhiteSpace(mrTodoX.AvatarUrl),
+            ImageRenderLogs = new List<RenderLogEntry>
+            {
+                new()
+                {
+                    Step = "AI_PROVIDER_ROUTER_RENDER",
+                    Message = "Service thumbnail rendered through AI provider router.",
+                    Data = new { render.ProviderCode, render.ModelName, render.ProviderCapabilityId }
+                }
+            }
+        };
     }
 
     private static string BuildPrompt(ServiceThumbnailRenderRequest request, MrTodoXAvatarOptions mrTodoX)
@@ -191,5 +274,17 @@ public sealed class ServiceThumbnailRenderService
         - Use uploaded reference images only as visual guidance; do not copy random text or unrelated logos.
         - Avoid small unreadable text.
         """;
+    }
+
+    private static bool IsHttpUrl(string? value)
+        => Uri.TryCreate(value, UriKind.Absolute, out var uri)
+           && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
+
+    private static long? ToBigIntCustomerId(Guid? id)
+    {
+        if (id is null) return null;
+        var bytes = id.Value.ToByteArray();
+        var value = BitConverter.ToInt64(bytes, 0);
+        return value == long.MinValue ? long.MaxValue : Math.Abs(value);
     }
 }

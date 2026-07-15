@@ -199,6 +199,7 @@ public static class AiProviderCatalog
         "chibi_avatar_generation",
         "character_generation",
         "image_generation",
+        "scene_image_generation",
         "poster_generation",
         "thumbnail_generation",
         "text_to_video",

@@ -48,6 +48,8 @@ public interface ISceneImageRenderService
     /// <summary>Bulk / auto path: renders one scene image on Google Cloud (Vertex) via the legacy creative engine.</summary>
     Task<SceneImageRenderOutcome> RenderSceneImageWithVertexAsync(SceneImageRenderContext context, int attempt, CancellationToken ct = default);
 
+    Task<SceneImageRenderOutcome> RenderSceneImageAsync(SceneImageRenderContext context, CancellationToken ct = default);
+
     /// <summary>Manual per-scene "Render lại ảnh": renders one scene image through the configured routed provider (never falls back to Google).</summary>
     Task<SceneImageRenderOutcome> RerenderSceneImageWithOpenRouterAsync(SceneImageRenderContext context, CancellationToken ct = default);
 }
@@ -64,7 +66,7 @@ public interface ISceneImageRenderService
 public sealed class SceneImageRenderService : ISceneImageRenderService
 {
     // Capability used to resolve the image provider (matches the existing scene image render call site).
-    public const string CapabilityCode = "avatar_generation";
+    public const string CapabilityCode = "scene_image_generation";
 
     private readonly IImageAICreativeRenderService _creativeRender;
     private readonly IAiProviderService _providers;
@@ -170,7 +172,13 @@ public sealed class SceneImageRenderService : ISceneImageRenderService
             result.RenderEngineMode, null, result.LogCode, error ?? "Render ảnh scene thất bại.", quota);
     }
 
-    public async Task<SceneImageRenderOutcome> RerenderSceneImageWithOpenRouterAsync(SceneImageRenderContext context, CancellationToken ct = default)
+    public Task<SceneImageRenderOutcome> RenderSceneImageAsync(SceneImageRenderContext context, CancellationToken ct = default)
+        => RenderViaRouterAsync(context, "render_job_scene_image", ct);
+
+    public Task<SceneImageRenderOutcome> RerenderSceneImageWithOpenRouterAsync(SceneImageRenderContext context, CancellationToken ct = default)
+        => RenderViaRouterAsync(context, "render_job_scene_image_rerender", ct);
+
+    private async Task<SceneImageRenderOutcome> RenderViaRouterAsync(SceneImageRenderContext context, string featureCode, CancellationToken ct)
     {
         // Resolve the default provider for this capability and REQUIRE a routed image provider.
         // No silent fallback to Google Cloud when the routed provider is missing or disabled.
@@ -206,7 +214,7 @@ public sealed class SceneImageRenderService : ISceneImageRenderService
             // exactly like AvatarTemplateService does — never hard-code null or a fake customer.
             CustomerId = ToBigIntCustomerId(context.CustomerId),
             UserId = context.UserId,
-            FeatureCode = "render_job_scene_image_rerender",
+            FeatureCode = featureCode,
             CapabilityCode = CapabilityCode,
             ProviderCapabilityId = option.ProviderCapabilityId,
             FromUser = false,
@@ -217,7 +225,7 @@ public sealed class SceneImageRenderService : ISceneImageRenderService
             Quality = "high",
             Resolution = "4K",
             FileCategory = "video_scene_image",
-            RequestId = $"scene-{context.SceneId}-{DateTime.UtcNow:yyyyMMddHHmmss}",
+            RequestId = $"{featureCode}-scene-{context.SceneId}",
             Metadata = new
             {
                 projectId = context.ProjectId,
