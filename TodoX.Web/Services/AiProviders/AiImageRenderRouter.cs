@@ -26,8 +26,6 @@ public sealed class AiImageRenderRequest
     public string? JobId { get; set; }
     public string? LogicalRequestId { get; set; }
     public string? RenderJobId { get; set; }
-    public bool BillingExempt { get; set; }
-    public string? ExemptionReason { get; set; }
     public object? Metadata { get; set; }
     public string? CreatedBy { get; set; }
 }
@@ -48,7 +46,9 @@ public sealed class AiImageRenderResult
     public decimal Quantity { get; set; } = 1;
     public decimal TotalPoints { get; set; }
     public decimal? ProviderRawCost { get; set; }
+    public string? RawRequestJson { get; set; }
     public string? RawResponseJson { get; set; }
+    public string? UsageJson { get; set; }
     public string? ErrorMessage { get; set; }
 }
 
@@ -124,8 +124,6 @@ public sealed class AiImageRenderRouter : IAiImageRenderRouter
             FeatureCode = request.FeatureCode,
             RequestedModel = option.ModelName,
             Cost = billingCost,
-            BillingExempt = request.BillingExempt,
-            ExemptionReason = request.ExemptionReason,
             Metadata = request.Metadata,
             CreatedBy = request.CreatedBy
         }, cancellationToken);
@@ -151,8 +149,22 @@ public sealed class AiImageRenderRouter : IAiImageRenderRouter
         }
 
         OpenRouterImageResponse response;
+        var providerSubmitted = false;
         try
         {
+            if (cancellationToken.IsCancellationRequested)
+            {
+                await _billing.CompleteAsync(new AiImageBillingCompleteRequest
+                {
+                    LogicalRequestId = logicalRequestId,
+                    Success = false,
+                    ActualModel = option.ModelName,
+                    ErrorMessage = "Image render was canceled before provider submit."
+                }, CancellationToken.None);
+                cancellationToken.ThrowIfCancellationRequested();
+            }
+
+            providerSubmitted = true;
             response = await provider.GenerateImageAsync(new OpenRouterImageRequest
             {
                 UserId = request.UserId,
@@ -185,6 +197,30 @@ public sealed class AiImageRenderRouter : IAiImageRenderRouter
             }, cancellationToken);
             throw;
         }
+        catch (OperationCanceledException ex)
+        {
+            if (providerSubmitted)
+            {
+                await _billing.MarkPendingReconciliationAsync(new AiImageBillingPendingReconciliationRequest
+                {
+                    LogicalRequestId = logicalRequestId,
+                    ActualModel = option.ModelName,
+                    ErrorMessage = ex.Message
+                }, CancellationToken.None);
+            }
+            else
+            {
+                await _billing.CompleteAsync(new AiImageBillingCompleteRequest
+                {
+                    LogicalRequestId = logicalRequestId,
+                    Success = false,
+                    ActualModel = option.ModelName,
+                    ErrorMessage = ex.Message
+                }, CancellationToken.None);
+            }
+
+            throw;
+        }
 
         var finalModel = string.IsNullOrWhiteSpace(response.ModelName) ? option.ModelName : response.ModelName;
         var providerTaskId = TryReadTaskId(response.UsageJson);
@@ -213,9 +249,11 @@ public sealed class AiImageRenderRouter : IAiImageRenderRouter
                 UnitType = option.UnitType,
                 UnitCostPoints = unitCost,
                 Quantity = quantity,
-                TotalPoints = reservation.CustomerChargedPoints,
+                TotalPoints = reservation.ChargedPoints,
                 ProviderRawCost = response.UsageCost,
+                RawRequestJson = response.RawRequestJson,
                 RawResponseJson = response.RawResponseJson,
+                UsageJson = response.UsageJson,
                 ErrorMessage = billingCompletion.ErrorMessage ?? "Image billing completion failed."
             };
         }
@@ -234,9 +272,11 @@ public sealed class AiImageRenderRouter : IAiImageRenderRouter
             UnitType = option.UnitType,
             UnitCostPoints = unitCost,
             Quantity = quantity,
-            TotalPoints = reservation.CustomerChargedPoints,
+            TotalPoints = reservation.ChargedPoints,
             ProviderRawCost = response.UsageCost,
+            RawRequestJson = response.RawRequestJson,
             RawResponseJson = response.RawResponseJson,
+            UsageJson = response.UsageJson,
             ErrorMessage = response.Success ? null : response.ErrorMessage
         };
 
@@ -254,7 +294,7 @@ public sealed class AiImageRenderRouter : IAiImageRenderRouter
             Quantity = quantity,
             UnitType = option.UnitType,
             UnitCostPoints = unitCost,
-            TotalPoints = reservation.CustomerChargedPoints,
+            TotalPoints = reservation.ChargedPoints,
             ProviderRawCost = response.UsageCost,
             Status = response.Success ? "success" : "failed",
             ErrorMessage = response.Success ? null : response.ErrorMessage,
@@ -266,15 +306,14 @@ public sealed class AiImageRenderRouter : IAiImageRenderRouter
                     logicalRequestId,
                     reservation.Status,
                     completionStatus = billingCompletion.Status,
-                    reservation.BillingExempt,
-                    request.ExemptionReason,
+                    reservation.PayerType,
                     billingCost.ProviderEstimatedCostUsd,
                     billingCost.ProviderActualCostUsd,
                     billingCost.ProviderCostSource,
                     billingCost.ExchangeRateVndPerUsd,
                     billingCost.TodoXVndPerPoint,
                     billingCost.ProviderCostPoints,
-                    reservation.CustomerChargedPoints,
+                    reservation.ChargedPoints,
                     billingCompletion.WalletTransactionId,
                     providerTaskId
                 }

@@ -14,10 +14,10 @@ BEGIN
     SELECT count(*) INTO snapshot_count
       FROM billing.yescale_image_default_snapshot
      WHERE snapshot_key = 'yescale_image_production_before'
-       AND capability_code IN ('avatar_generation','chibi_avatar_generation','image_generation','scene_image_generation','thumbnail_generation');
+       AND capability_code IN ('avatar_generation','chibi_avatar_generation','character_generation','image_generation','scene_image_generation','thumbnail_generation');
 
-    IF snapshot_count <> 5 THEN
-        RAISE EXCEPTION 'Expected 5 snapshot rows, found %. Cannot rollback safely.', snapshot_count;
+    IF snapshot_count <> 6 THEN
+        RAISE EXCEPTION 'Expected 6 snapshot rows, found %. Cannot rollback safely.', snapshot_count;
     END IF;
 END $$;
 
@@ -77,7 +77,7 @@ BEGIN
       FROM (
         SELECT capability_code, count(*) FILTER (WHERE is_default) AS defaults
           FROM public.todox_ai_provider_capability
-         WHERE capability_code IN ('avatar_generation','chibi_avatar_generation','image_generation','scene_image_generation','thumbnail_generation')
+         WHERE capability_code IN ('avatar_generation','chibi_avatar_generation','character_generation','image_generation','scene_image_generation','thumbnail_generation')
          GROUP BY capability_code
         HAVING count(*) FILTER (WHERE is_default) <> 1
       ) x;

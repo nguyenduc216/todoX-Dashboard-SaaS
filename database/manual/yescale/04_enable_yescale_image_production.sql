@@ -35,7 +35,7 @@ BEGIN
         RAISE EXCEPTION 'Run 02_add_yescale_billing_support.sql before production enable.';
     END IF;
 
-    FOREACH cap IN ARRAY ARRAY['avatar_generation','chibi_avatar_generation','image_generation','scene_image_generation','thumbnail_generation']
+    FOREACH cap IN ARRAY ARRAY['avatar_generation','chibi_avatar_generation','character_generation','image_generation','scene_image_generation','thumbnail_generation']
     LOOP
         SELECT count(*) INTO row_count
           FROM public.todox_ai_provider_capability
@@ -51,7 +51,7 @@ BEGIN
     SELECT count(*) INTO bad_count
       FROM public.todox_ai_provider_capability
      WHERE provider_code = 'yescale_task_image'
-       AND capability_code IN ('avatar_generation','chibi_avatar_generation','image_generation','scene_image_generation','thumbnail_generation')
+       AND capability_code IN ('avatar_generation','chibi_avatar_generation','character_generation','image_generation','scene_image_generation','thumbnail_generation')
        AND unit_cost_points <= 0;
 
     IF bad_count > 0 THEN
@@ -61,11 +61,11 @@ BEGIN
     SELECT count(*) INTO default_count
       FROM public.todox_ai_provider_capability
      WHERE provider_code = 'yescale_task_image'
-       AND capability_code IN ('avatar_generation','chibi_avatar_generation','image_generation','scene_image_generation','thumbnail_generation')
+       AND capability_code IN ('avatar_generation','chibi_avatar_generation','character_generation','image_generation','scene_image_generation','thumbnail_generation')
        AND model_name = 'nano-banana-2';
 
-    IF default_count <> 5 THEN
-        RAISE EXCEPTION 'Refusing production enable: expected 5 nano-banana-2 billed routed default candidate rows, found %.', default_count;
+    IF default_count <> 6 THEN
+        RAISE EXCEPTION 'Refusing production enable: expected 6 nano-banana-2 billed routed default candidate rows, found %.', default_count;
     END IF;
 END $$;
 
@@ -79,7 +79,7 @@ SELECT 'yescale_image_production_before',
        c.enabled,
        c.is_default,
        'manual_sql_production'
-  FROM (SELECT unnest(ARRAY['avatar_generation','chibi_avatar_generation','image_generation','scene_image_generation','thumbnail_generation']) AS capability_code) caps
+  FROM (SELECT unnest(ARRAY['avatar_generation','chibi_avatar_generation','character_generation','image_generation','scene_image_generation','thumbnail_generation']) AS capability_code) caps
   LEFT JOIN LATERAL (
       SELECT id, provider_code, model_name, enabled, is_default
         FROM public.todox_ai_provider_capability
@@ -95,7 +95,7 @@ UPDATE public.todox_ai_provider
  WHERE provider_code = 'yescale_task_image';
 
 WITH caps AS (
-    SELECT unnest(ARRAY['avatar_generation','chibi_avatar_generation','image_generation','scene_image_generation','thumbnail_generation']) AS capability_code
+    SELECT unnest(ARRAY['avatar_generation','chibi_avatar_generation','character_generation','image_generation','scene_image_generation','thumbnail_generation']) AS capability_code
 )
 UPDATE public.todox_ai_provider_capability c
    SET is_default = false, updated_by = 'manual_sql_production', updated_at = now()
@@ -110,7 +110,7 @@ UPDATE public.todox_ai_provider_capability
        updated_by = 'manual_sql_production',
        updated_at = now()
  WHERE provider_code = 'yescale_task_image'
-   AND capability_code IN ('avatar_generation','chibi_avatar_generation','image_generation','scene_image_generation','thumbnail_generation');
+   AND capability_code IN ('avatar_generation','chibi_avatar_generation','character_generation','image_generation','scene_image_generation','thumbnail_generation');
 
 UPDATE public.todox_ai_provider_capability
    SET enabled = false,
@@ -118,7 +118,7 @@ UPDATE public.todox_ai_provider_capability
        updated_by = 'manual_sql_production',
        updated_at = now()
  WHERE provider_code = 'yescale_task_image'
-   AND capability_code IN ('character_generation','poster_generation');
+   AND capability_code = 'poster_generation';
 
 DO $$
 DECLARE
@@ -130,7 +130,7 @@ BEGIN
       FROM (
         SELECT capability_code, count(*) FILTER (WHERE is_default) AS defaults
           FROM public.todox_ai_provider_capability
-         WHERE capability_code IN ('avatar_generation','chibi_avatar_generation','image_generation','scene_image_generation','thumbnail_generation')
+         WHERE capability_code IN ('avatar_generation','chibi_avatar_generation','character_generation','image_generation','scene_image_generation','thumbnail_generation')
          GROUP BY capability_code
         HAVING count(*) FILTER (WHERE is_default) <> 1
       ) x;
@@ -141,7 +141,7 @@ BEGIN
 
     SELECT count(*) INTO bad_default_model
       FROM public.todox_ai_provider_capability
-     WHERE capability_code IN ('avatar_generation','chibi_avatar_generation','image_generation','scene_image_generation','thumbnail_generation')
+     WHERE capability_code IN ('avatar_generation','chibi_avatar_generation','character_generation','image_generation','scene_image_generation','thumbnail_generation')
        AND is_default = true
        AND NOT (provider_code = 'yescale_task_image' AND model_name = 'nano-banana-2');
 

@@ -184,8 +184,6 @@ public sealed class ServiceThumbnailRenderService
             Resolution = "1K",
             FileCategory = "service_thumbnail",
             RequestId = $"service-thumbnail-{Guid.NewGuid():N}",
-            BillingExempt = request.User?.CustomerId is null,
-            ExemptionReason = request.User?.CustomerId is null ? "system_service_thumbnail" : null,
             Metadata = new
             {
                 request.ServiceCode,

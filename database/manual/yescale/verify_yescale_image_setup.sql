@@ -1,4 +1,4 @@
--- Fail-fast verification for YEScale image provider setup.
+-- Fail-fast verification for YEScale image provider, billing, wallet, and reconciliation setup.
 
 DO $$
 DECLARE
@@ -8,8 +8,13 @@ DECLARE
     bad_defaults int;
     bad_default_model int;
     missing_billing int;
+    missing_columns int;
+    missing_indexes int;
+    missing_system_wallet int;
     bad_backup_selectable int;
     poster_enabled int;
+    stale_pending int;
+    bad_scale int;
 BEGIN
     SELECT count(*) INTO missing_provider
       FROM public.todox_ai_provider
@@ -46,7 +51,7 @@ BEGIN
       FROM (
         SELECT capability_code, count(*) FILTER (WHERE is_default) AS defaults
           FROM public.todox_ai_provider_capability
-         WHERE capability_code IN ('avatar_generation','chibi_avatar_generation','image_generation','scene_image_generation','thumbnail_generation')
+         WHERE capability_code IN ('avatar_generation','chibi_avatar_generation','character_generation','image_generation','scene_image_generation','thumbnail_generation')
          GROUP BY capability_code
         HAVING count(*) FILTER (WHERE is_default) > 1
       ) x;
@@ -58,7 +63,7 @@ BEGIN
     SELECT count(*) INTO bad_default_model
       FROM public.todox_ai_provider_capability
      WHERE provider_code = 'yescale_task_image'
-       AND capability_code IN ('avatar_generation','chibi_avatar_generation','image_generation','scene_image_generation','thumbnail_generation')
+       AND capability_code IN ('avatar_generation','chibi_avatar_generation','character_generation','image_generation','scene_image_generation','thumbnail_generation')
        AND enabled = true
        AND is_default = true
        AND model_name <> 'nano-banana-2';
@@ -80,11 +85,11 @@ BEGIN
     SELECT count(*) INTO poster_enabled
       FROM public.todox_ai_provider_capability
      WHERE provider_code = 'yescale_task_image'
-       AND capability_code IN ('character_generation','poster_generation')
+       AND capability_code = 'poster_generation'
        AND enabled = true;
 
     IF poster_enabled > 0 THEN
-        RAISE EXCEPTION 'character_generation/poster_generation must remain disabled for YEScale until routed billing/composite support is complete. Rows=%', poster_enabled;
+        RAISE EXCEPTION 'poster_generation must remain disabled for YEScale until composite support is routed. Rows=%', poster_enabled;
     END IF;
 
     SELECT count(*) INTO missing_billing
@@ -97,6 +102,82 @@ BEGIN
 
     IF missing_billing > 0 THEN
         RAISE EXCEPTION 'YEScale image billing support tables are missing. Count=%', missing_billing;
+    END IF;
+
+    SELECT count(*) INTO missing_columns
+      FROM (
+        VALUES
+          ('token_wallets','wallet_scope'),
+          ('token_wallets','wallet_code'),
+          ('token_wallets','overdraft_limit'),
+          ('ai_image_billing_records','payer_type'),
+          ('ai_image_billing_records','payer_customer_id'),
+          ('ai_image_billing_records','payer_wallet_id'),
+          ('ai_image_billing_records','system_charged_points'),
+          ('ai_image_billing_records','reserved_until'),
+          ('ai_image_billing_records','pending_reconciliation_at'),
+          ('ai_image_provider_attempts','provider_estimated_cost_usd'),
+          ('ai_image_provider_attempts','provider_actual_cost_usd'),
+          ('ai_image_provider_attempts','cost_source'),
+          ('ai_image_provider_attempts','error_code')
+      ) required(table_name, column_name)
+      WHERE NOT EXISTS (
+          SELECT 1
+            FROM information_schema.columns c
+           WHERE c.table_schema = 'billing'
+             AND c.table_name = required.table_name
+             AND c.column_name = required.column_name
+      );
+
+    IF missing_columns > 0 THEN
+        RAISE EXCEPTION 'YEScale billing required columns are missing. Count=%', missing_columns;
+    END IF;
+
+    SELECT count(*) INTO missing_indexes
+      FROM (
+        VALUES
+          ('token_wallets_customer_scope_uk'),
+          ('token_wallets_system_code_uk'),
+          ('ai_image_provider_attempts_record_attempt_uk'),
+          ('ai_image_billing_records_reconciliation_ix')
+      ) required(index_name)
+      WHERE NOT EXISTS (
+          SELECT 1 FROM pg_indexes
+           WHERE schemaname = 'billing'
+             AND indexname = required.index_name
+      );
+
+    IF missing_indexes > 0 THEN
+        RAISE EXCEPTION 'YEScale billing required indexes are missing. Count=%', missing_indexes;
+    END IF;
+
+    SELECT count(*) INTO missing_system_wallet
+      FROM billing.token_wallets
+     WHERE wallet_scope = 'system'
+       AND wallet_code = 'TODOX_AI_IMAGE_SYSTEM';
+
+    IF missing_system_wallet <> 1 THEN
+        RAISE EXCEPTION 'Expected exactly one TODOX_AI_IMAGE_SYSTEM wallet, found %.', missing_system_wallet;
+    END IF;
+
+    SELECT count(*) INTO bad_scale
+      FROM information_schema.columns
+     WHERE table_schema = 'billing'
+       AND table_name IN ('ai_image_billing_records','ai_image_provider_attempts','token_wallets')
+       AND column_name IN ('customer_charged_points','system_charged_points','provider_cost_points','provider_estimated_cost_usd','provider_actual_cost_usd','balance','locked_balance')
+       AND numeric_scale < 4;
+
+    IF bad_scale > 0 THEN
+        RAISE EXCEPTION 'Billing numeric scale must support 0.0192 points. Bad columns=%', bad_scale;
+    END IF;
+
+    SELECT count(*) INTO stale_pending
+      FROM billing.ai_image_billing_records
+     WHERE (status = 'reserved' AND reserved_until < now())
+        OR (status = 'pending_reconciliation' AND pending_reconciliation_at < now() - interval '2 hours');
+
+    IF stale_pending > 0 THEN
+        RAISE EXCEPTION 'Stale image billing reservations/reconciliation rows require manual handling before production enable. Rows=%', stale_pending;
     END IF;
 END $$;
 
@@ -112,6 +193,16 @@ SELECT capability_code,
  WHERE capability_code IN ('avatar_generation','chibi_avatar_generation','character_generation','image_generation','scene_image_generation','poster_generation','thumbnail_generation')
  GROUP BY capability_code
  ORDER BY capability_code;
+
+SELECT wallet_scope, wallet_code, balance, locked_balance, overdraft_limit, low_balance_threshold, status
+  FROM billing.token_wallets
+ WHERE wallet_scope = 'system'
+ ORDER BY wallet_code;
+
+SELECT status, count(*) AS rows, sum(customer_charged_points) AS customer_points, sum(system_charged_points) AS system_points
+  FROM billing.ai_image_billing_records
+ GROUP BY status
+ ORDER BY status;
 
 SELECT table_schema, table_name
   FROM information_schema.tables

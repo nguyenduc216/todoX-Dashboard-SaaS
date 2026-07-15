@@ -24,23 +24,19 @@ public sealed class AiCharacterService : IAiCharacterService
     private static readonly HashSet<string> Statuses = new(StringComparer.OrdinalIgnoreCase) { "active", "inactive" };
 
     private readonly AiCharacterRepository _repo;
-    private readonly AiProviderRepository _providerRepo;
-    private readonly IAiImageProviderFactory _providers;
-    private readonly IAiProviderService _aiProviders;
+    private readonly IAiImageRenderRouter _imageRouter;
     private readonly IMediaFileService _media;
     private readonly CharacterPromptBuilder _promptBuilder;
     private readonly TenantContext _tenant;
     private readonly IConfiguration _config;
     private readonly ILogger<AiCharacterService> _logger;
 
-    public AiCharacterService(AiCharacterRepository repo, AiProviderRepository providerRepo, IAiImageProviderFactory providers,
-        IAiProviderService aiProviders, IMediaFileService media, CharacterPromptBuilder promptBuilder,
+    public AiCharacterService(AiCharacterRepository repo, IAiImageRenderRouter imageRouter,
+        IMediaFileService media, CharacterPromptBuilder promptBuilder,
         TenantContext tenant, IConfiguration config, ILogger<AiCharacterService> logger)
     {
         _repo = repo;
-        _providerRepo = providerRepo;
-        _providers = providers;
-        _aiProviders = aiProviders;
+        _imageRouter = imageRouter;
         _media = media;
         _promptBuilder = promptBuilder;
         _tenant = tenant;
@@ -162,29 +158,6 @@ public sealed class AiCharacterService : IAiCharacterService
         var seed = request.Seed ?? character?.Seed;
         ValidateGenerate(characterName, description, style, gender, aspect, request.ReferenceImageUrls);
 
-        var providerCode = character?.ProviderCode ?? DefaultProviderCode();
-        var modelName = character?.ModelName ?? DefaultModel();
-        AiProviderDetailDto? providerDetail = null;
-        AiProviderCapabilityDto? providerCapability = null;
-
-        // Resolve the AI provider/model/cost from the database (admin-configured). Falls back to the
-        // legacy appsettings default when no provider is configured for character_generation.
-        ProviderOptionDto? providerOption = null;
-        try
-        {
-            providerOption = await _aiProviders.ResolveProviderForCapabilityAsync(
-                "character_generation", request.ProviderCapabilityId, fromUser: true, ct);
-            providerCode = providerOption.ProviderCode;
-            if (!string.IsNullOrWhiteSpace(providerOption.ModelName)) modelName = providerOption.ModelName!;
-            providerDetail = await _providerRepo.GetProviderAsync(providerOption.ProviderId, ct);
-            providerCapability = providerDetail?.Capabilities.FirstOrDefault(c => c.Id == providerOption.ProviderCapabilityId);
-        }
-        catch (Exception ex)
-        {
-            if (request.ProviderCapabilityId is not null) throw; // explicit selection must be valid
-            _logger.LogInformation("AI_CHARACTER_PROVIDER_FALLBACK reason={Reason}", ex.Message);
-        }
-
         var outputFormat = _config["OpenRouter:Image:DefaultOutputFormat"] ?? "png";
         var quality = _config["OpenRouter:Image:DefaultQuality"] ?? "high";
         var resolution = _config["OpenRouter:Image:DefaultResolution"] ?? "1K";
@@ -192,63 +165,69 @@ public sealed class AiCharacterService : IAiCharacterService
         var renderCode = BuildRenderCode("CHR");
         long? renderId = null;
 
-        _logger.LogInformation("AI_CHARACTER_IMAGE_GENERATE_START userId={UserId} characterId={CharacterId} provider={ProviderCode} model={ModelName} aspect={AspectRatio}",
-            user.UserId, character?.Id, providerCode, modelName, aspect);
+        _logger.LogInformation("AI_CHARACTER_IMAGE_GENERATE_START userId={UserId} customerId={CustomerId} characterId={CharacterId} aspect={AspectRatio}",
+            user.UserId, user.CustomerId, character?.Id, aspect);
 
-        var provider = _providers.GetProvider(ProviderCodeMap.ToFactoryKey(providerCode));
-        var response = await provider.GenerateImageAsync(new OpenRouterImageRequest
+        var render = await _imageRouter.RenderImageAsync(new AiImageRenderRequest
         {
+            CustomerId = scope.CustomerId,
+            CustomerGuid = user.CustomerId,
             UserId = user.UserId,
-            CustomerId = user.CustomerId,
-            Model = modelName,
+            FeatureCode = "character_manager",
+            CapabilityCode = "character_generation",
+            ProviderCapabilityId = request.ProviderCapabilityId,
+            FromUser = true,
             Prompt = prompt,
+            ReferenceImageUrls = request.ReferenceImageUrls ?? Array.Empty<string>(),
             AspectRatio = aspect,
             OutputFormat = outputFormat,
             Quality = quality,
             Resolution = resolution,
             Seed = seed,
-            Count = 1,
             FileCategory = BuildStorageCategory(scope, character?.CharacterCode ?? BuildCharacterCode(characterName)),
-            ReferenceImageUrls = request.ReferenceImageUrls ?? Array.Empty<string>(),
-            BaseUrlOverride = providerDetail?.BaseUrl,
-            EndpointPath = providerCapability?.EndpointPath,
-            ApiKeyConfigName = providerDetail?.ApiKeyConfigName,
-            ProviderConfigJson = providerDetail?.ConfigJson,
-            CapabilityConfigJson = providerCapability?.ConfigJson
+            RequestId = renderCode,
+            LogicalRequestId = $"character-{renderCode}",
+            Metadata = new
+            {
+                characterId = character?.Id ?? request.CharacterId,
+                characterName,
+                saveAsMaster = request.SaveAsMaster
+            },
+            CreatedBy = user.UserId.ToString()
         }, ct);
 
         string? imageUrl = null;
         string? objectKey = null;
-        var status = response.Success ? "success" : "failed";
-        var error = response.Success ? null : FriendlyError(response.ErrorMessage);
-        if (response.Success && response.ImageBytes is { Length: > 0 })
+        var status = render.Success ? "success" : "failed";
+        var error = render.Success ? null : FriendlyError(render.ErrorMessage);
+        if (render.Success && render.ImageBytes is { Length: > 0 })
         {
             var category = BuildStorageCategory(scope, character?.CharacterCode ?? BuildCharacterCode(characterName));
-            var media = await _media.SaveAsync(response.ImageBytes, $"{renderCode}.{outputFormat}", response.MimeType ?? $"image/{outputFormat}",
+            var media = await _media.SaveAsync(render.ImageBytes, $"{renderCode}.{outputFormat}", render.MimeType ?? $"image/{outputFormat}",
                 category, user.UserId, user.CustomerId, _tenant.TenantId, ct);
             imageUrl = media.PublicUrl ?? media.FileUrl;
             objectKey = media.ObjectKey;
-            _logger.LogInformation("AI_CHARACTER_IMAGE_STORED renderId={RenderId} objectKey={ObjectKey} cost={Cost}", renderId, objectKey, response.UsageCost);
+            _logger.LogInformation("AI_CHARACTER_IMAGE_STORED renderId={RenderId} objectKey={ObjectKey} cost={Cost}", renderId, objectKey, render.ProviderRawCost);
         }
-        else if (response.Success && !string.IsNullOrWhiteSpace(response.ImageUrl))
+        else if (render.Success && !string.IsNullOrWhiteSpace(render.ImageUrl))
         {
-            imageUrl = response.ImageUrl;
-            objectKey = response.ObjectKey;
+            imageUrl = render.ImageUrl;
+            objectKey = render.ObjectKey;
             _logger.LogInformation("AI_CHARACTER_IMAGE_STORED_BY_PROVIDER renderId={RenderId} provider={ProviderCode} objectKey={ObjectKey} cost={Cost}",
-                renderId, providerCode, objectKey, response.UsageCost);
+                renderId, render.ProviderCode, objectKey, render.ProviderRawCost);
         }
         else
         {
-            _logger.LogWarning("AI_CHARACTER_IMAGE_FAILED characterId={CharacterId} status={StatusCode} error={Error}",
-                character?.Id, response.StatusCode, error);
+            _logger.LogWarning("AI_CHARACTER_IMAGE_FAILED characterId={CharacterId} error={Error}",
+                character?.Id, error);
         }
 
         var characterId = character?.Id ?? request.CharacterId;
         if (characterId is long cid)
         {
             const string renderTable = "todox_ai_character_render";
-            var renderProviderCode = response.ProviderCode ?? providerCode;
-            var renderModelName = response.ModelName ?? modelName;
+            var renderProviderCode = render.ProviderCode ?? "ai_image_router";
+            var renderModelName = render.ModelName;
 
             DbDiagnostics.LogFieldLengths(_logger, "character_render_insert",
                 ("render_code", renderCode),
@@ -278,8 +257,8 @@ public sealed class AiCharacterService : IAiCharacterService
                     ProviderCode = DbDiagnostics.Clip(_logger, renderTable, "provider_code", renderProviderCode)!,
                     ModelName = DbDiagnostics.Clip(_logger, renderTable, "model_name", renderModelName),
                     Prompt = clippedPrompt!,
-                    RequestJson = response.RawRequestJson,
-                    ResponseJson = response.RawResponseJson,
+                    RequestJson = render.RawRequestJson,
+                    ResponseJson = render.RawResponseJson,
                     OutputImageUrl = imageUrl,
                     OutputObjectKey = objectKey,
                     AspectRatio = aspect,
@@ -287,8 +266,8 @@ public sealed class AiCharacterService : IAiCharacterService
                     Quality = DbDiagnostics.Clip(_logger, renderTable, "quality", quality),
                     Resolution = DbDiagnostics.Clip(_logger, renderTable, "resolution", resolution),
                     Seed = seed,
-                    UsageCost = response.UsageCost,
-                    UsageJson = response.UsageJson,
+                    UsageCost = render.ProviderRawCost,
+                    UsageJson = render.UsageJson,
                     Status = DbDiagnostics.Clip(_logger, renderTable, "status", status)!,
                     ErrorMessage = clippedError,
                     CreatedBy = clippedCreatedBy
@@ -300,7 +279,7 @@ public sealed class AiCharacterService : IAiCharacterService
                 throw;
             }
 
-            if (response.Success && request.SaveAsMaster)
+            if (render.Success && request.SaveAsMaster)
             {
                 await _repo.SetMasterAsync(scope, cid, renderId.Value, user.UserId.ToString(), ct);
             }
@@ -311,30 +290,6 @@ public sealed class AiCharacterService : IAiCharacterService
             }
         }
 
-        // Record usage against the resolved provider capability (points come from the DB, not code).
-        if (providerOption is not null)
-        {
-            await _aiProviders.LogUsageAsync(new AiProviderUsageLog
-            {
-                CustomerId = scope.CustomerId,
-                ProviderId = providerOption.ProviderId,
-                ProviderCapabilityId = providerOption.ProviderCapabilityId,
-                ProviderCode = providerOption.ProviderCode,
-                CapabilityCode = providerOption.CapabilityCode,
-                FeatureCode = "character_manager",
-                ModelName = response.ModelName ?? providerOption.ModelName ?? modelName,
-                RequestId = renderCode,
-                Quantity = 1,
-                UnitType = providerOption.UnitType,
-                UnitCostPoints = providerOption.UnitCostPoints,
-                TotalPoints = providerOption.UnitCostPoints,
-                ProviderRawCost = response.UsageCost,
-                Status = status == "success" ? "success" : "failed",
-                ErrorMessage = error,
-                CreatedBy = user.UserId.ToString()
-            }, ct);
-        }
-
         return new GenerateCharacterImageResponse
         {
             CharacterId = characterId,
@@ -342,9 +297,9 @@ public sealed class AiCharacterService : IAiCharacterService
             ImageUrl = imageUrl,
             ObjectKey = objectKey,
             Prompt = prompt,
-            ProviderCode = providerCode,
-            ModelName = response.ModelName ?? modelName,
-            UsageCost = response.UsageCost,
+            ProviderCode = render.ProviderCode ?? "ai_image_router",
+            ModelName = render.ModelName ?? string.Empty,
+            UsageCost = render.ProviderRawCost,
             Status = status,
             ErrorMessage = error
         };

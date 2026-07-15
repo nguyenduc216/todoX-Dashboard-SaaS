@@ -54,8 +54,6 @@ public sealed class AiImageBillingReserveRequest
     public string FeatureCode { get; set; } = string.Empty;
     public string? RequestedModel { get; set; }
     public AiImageBillingCost Cost { get; set; } = AiImageBillingCost.FromConfiguredPoints(0, 8000, 10000);
-    public bool BillingExempt { get; set; }
-    public string? ExemptionReason { get; set; }
     public object? Metadata { get; set; }
     public string? CreatedBy { get; set; }
 }
@@ -71,19 +69,28 @@ public sealed class AiImageBillingCompleteRequest
     public string? ErrorMessage { get; set; }
 }
 
+public sealed class AiImageBillingPendingReconciliationRequest
+{
+    public string LogicalRequestId { get; set; } = string.Empty;
+    public string? ActualModel { get; set; }
+    public string? ProviderTaskId { get; set; }
+    public string? ProviderUsageJson { get; set; }
+    public string? ErrorMessage { get; set; }
+}
+
 public sealed record AiImageBillingReservation(
     bool Ok,
     bool ShouldSubmitProvider,
-    bool BillingExempt,
+    string PayerType,
     string Status,
     string LogicalRequestId,
-    decimal CustomerChargedPoints,
+    decimal ChargedPoints,
     Guid? BillingRecordId,
     Guid? WalletTransactionId,
     string? ErrorMessage)
 {
     public static AiImageBillingReservation Failed(string logicalRequestId, string status, string message)
-        => new(false, false, false, status, logicalRequestId, 0, null, null, message);
+        => new(false, false, string.Empty, status, logicalRequestId, 0, null, null, message);
 }
 
 public sealed record AiImageBillingCompletion(
@@ -97,6 +104,7 @@ public interface IAiImageBillingService
     AiImageBillingCost BuildConfiguredCost(decimal unitCostPoints, decimal quantity);
     Task<AiImageBillingReservation> ReserveAsync(AiImageBillingReserveRequest request, CancellationToken ct = default);
     Task<AiImageBillingCompletion> CompleteAsync(AiImageBillingCompleteRequest request, CancellationToken ct = default);
+    Task<AiImageBillingCompletion> MarkPendingReconciliationAsync(AiImageBillingPendingReconciliationRequest request, CancellationToken ct = default);
 }
 
 public sealed class AiImageBillingService : IAiImageBillingService
@@ -104,17 +112,20 @@ public sealed class AiImageBillingService : IAiImageBillingService
     private readonly TodoXConnectionFactory _factory;
     private readonly TenantContext _tenant;
     private readonly IConfiguration _config;
+    private readonly IAiBillingPayerResolver _payerResolver;
     private readonly ILogger<AiImageBillingService> _logger;
 
     public AiImageBillingService(
         TodoXConnectionFactory factory,
         TenantContext tenant,
         IConfiguration config,
+        IAiBillingPayerResolver payerResolver,
         ILogger<AiImageBillingService> logger)
     {
         _factory = factory;
         _tenant = tenant;
         _config = config;
+        _payerResolver = payerResolver;
         _logger = logger;
     }
 
@@ -132,40 +143,47 @@ public sealed class AiImageBillingService : IAiImageBillingService
             return AiImageBillingReservation.Failed(string.Empty, "invalid", "Missing logical_request_id for image billing.");
         }
 
+        AiBillingPayerContext payer;
+        try
+        {
+            payer = _payerResolver.Resolve(new AiBillingPayerResolveRequest(
+                request.CustomerId,
+                request.UserId,
+                request.FeatureCode,
+                request.CapabilityCode,
+                request.Metadata));
+        }
+        catch (Exception ex)
+        {
+            return AiImageBillingReservation.Failed(request.LogicalRequestId, "missing_payer", ex.Message);
+        }
+
         await _tenant.EnsureLoadedAsync(ct);
         using var conn = await _factory.OpenAsync(ct);
         using var tx = conn.BeginTransaction();
 
+        await LockLogicalRequestAsync(conn, tx, request.LogicalRequestId);
+
         var existing = await GetRecordForUpdateAsync(conn, tx, request.LogicalRequestId);
         if (existing is not null)
         {
-            var decision = await HandleExistingReservationAsync(conn, tx, existing, request, ct);
+            var decision = HandleExistingReservation(existing);
             tx.Commit();
             return decision;
         }
 
-        if (request.BillingExempt)
-        {
-            var recordId = await InsertRecordAsync(conn, tx, request, walletId: null, status: "reserved_exempt", walletTransactionId: null);
-            tx.Commit();
-            return new AiImageBillingReservation(true, true, true, "reserved_exempt", request.LogicalRequestId, 0, recordId, null, null);
-        }
+        var chargePoints = request.Cost.CustomerChargedPoints;
+        var wallet = payer.PayerType == AiBillingPayerTypes.Customer
+            ? await EnsureCustomerWalletForUpdateAsync(conn, tx, payer.PayerCustomerId!.Value)
+            : await GetSystemWalletForUpdateAsync(conn, tx, payer.SystemWalletCode!);
 
-        if (request.CustomerId is null)
+        var available = wallet.Balance + (payer.PayerType == AiBillingPayerTypes.System ? wallet.OverdraftLimit : 0);
+        if (available < chargePoints)
         {
-            var recordId = await InsertRecordAsync(conn, tx, request, walletId: null, status: "missing_customer", walletTransactionId: null);
+            var recordId = await InsertRecordAsync(conn, tx, request, payer, wallet.Id, "insufficient", walletTransactionId: null);
             tx.Commit();
-            return new AiImageBillingReservation(false, false, false, "missing_customer", request.LogicalRequestId, request.Cost.CustomerChargedPoints,
-                recordId, null, "Missing customer UUID for chargeable image render.");
-        }
-
-        var wallet = await EnsureWalletForUpdateAsync(conn, tx, request.CustomerId.Value);
-        if (wallet.Balance < request.Cost.CustomerChargedPoints)
-        {
-            var recordId = await InsertRecordAsync(conn, tx, request, wallet.Id, "insufficient", walletTransactionId: null);
-            tx.Commit();
-            return new AiImageBillingReservation(false, false, false, "insufficient", request.LogicalRequestId, request.Cost.CustomerChargedPoints,
-                recordId, null, $"Insufficient TodoX points. Required {request.Cost.CustomerChargedPoints:0.####}, available {wallet.Balance:0.####}.");
+            return new AiImageBillingReservation(false, false, payer.PayerType, "insufficient", request.LogicalRequestId, chargePoints,
+                recordId, null, $"Insufficient TodoX image points. Required {chargePoints:0.####}, available {available:0.####}.");
         }
 
         await conn.ExecuteAsync(
@@ -176,11 +194,12 @@ public sealed class AiImageBillingService : IAiImageBillingService
                    updated_at = now()
              WHERE id = @walletId;
             """,
-            new { amount = request.Cost.CustomerChargedPoints, walletId = wallet.Id }, tx);
+            new { amount = chargePoints, walletId = wallet.Id }, tx);
 
-        var reservedId = await InsertRecordAsync(conn, tx, request, wallet.Id, "reserved", walletTransactionId: null);
+        var reservedId = await InsertRecordAsync(conn, tx, request, payer, wallet.Id, "reserved", walletTransactionId: null);
         tx.Commit();
-        return new AiImageBillingReservation(true, true, false, "reserved", request.LogicalRequestId, request.Cost.CustomerChargedPoints, reservedId, null, null);
+
+        return new AiImageBillingReservation(true, true, payer.PayerType, "reserved", request.LogicalRequestId, chargePoints, reservedId, null, null);
     }
 
     public async Task<AiImageBillingCompletion> CompleteAsync(AiImageBillingCompleteRequest request, CancellationToken ct = default)
@@ -188,6 +207,8 @@ public sealed class AiImageBillingService : IAiImageBillingService
         await _tenant.EnsureLoadedAsync(ct);
         using var conn = await _factory.OpenAsync(ct);
         using var tx = conn.BeginTransaction();
+
+        await LockLogicalRequestAsync(conn, tx, request.LogicalRequestId);
 
         var record = await GetRecordForUpdateAsync(conn, tx, request.LogicalRequestId);
         if (record is null)
@@ -207,31 +228,20 @@ public sealed class AiImageBillingService : IAiImageBillingService
 
         if (!request.Success)
         {
-            await ReleaseReservationAsync(conn, tx, record, request);
+            await ReleaseReservationAsync(conn, tx, record, request, status: "released");
             tx.Commit();
             return new AiImageBillingCompletion(true, "released", null, null);
         }
 
-        if (record.BillingExempt || record.CustomerChargedPoints <= 0)
+        var reservedPoints = record.ReservedPoints;
+        if (reservedPoints <= 0)
         {
-            await conn.ExecuteAsync(
-                """
-                UPDATE billing.ai_image_billing_records
-                   SET status = 'completed',
-                       actual_model = @model,
-                       provider_task_id = @taskId,
-                       provider_actual_cost_usd = @actualUsd,
-                       provider_cost_source = CASE WHEN @actualUsd IS NULL THEN provider_cost_source ELSE 'provider_actual' END,
-                       completed_at = now(),
-                       updated_at = now()
-                 WHERE id = @id;
-                """,
-                new { id = record.Id, model = request.ActualModel, taskId = request.ProviderTaskId, actualUsd = request.ProviderActualCostUsd }, tx);
+            await CompleteRecordWithoutDebitAsync(conn, tx, record, request);
             tx.Commit();
             return new AiImageBillingCompletion(true, "completed", null, null);
         }
 
-        if (record.WalletId is not Guid walletId)
+        if (record.PayerWalletId is not Guid walletId)
         {
             await ReleaseReservationAsync(conn, tx, record, new AiImageBillingCompleteRequest
             {
@@ -241,22 +251,22 @@ public sealed class AiImageBillingService : IAiImageBillingService
                 ProviderTaskId = request.ProviderTaskId,
                 ProviderActualCostUsd = request.ProviderActualCostUsd,
                 ProviderUsageJson = request.ProviderUsageJson,
-                ErrorMessage = "Missing wallet id on reserved billing record."
-            });
+                ErrorMessage = "Missing payer wallet id on reserved billing record."
+            }, status: "released");
             tx.Commit();
-            return new AiImageBillingCompletion(false, "released", null, "Missing wallet id on reserved billing record.");
+            return new AiImageBillingCompletion(false, "released", null, "Missing payer wallet id on reserved billing record.");
         }
 
         var wallet = await conn.QuerySingleAsync<WalletRow>(
             """
-            SELECT id AS Id, balance AS Balance, locked_balance AS LockedBalance
+            SELECT id AS Id, balance AS Balance, locked_balance AS LockedBalance, COALESCE(overdraft_limit, 0) AS OverdraftLimit
               FROM billing.token_wallets
              WHERE id = @walletId
              FOR UPDATE;
             """,
             new { walletId }, tx);
 
-        var lockedAfter = Math.Max(0, wallet.LockedBalance - record.CustomerChargedPoints);
+        var lockedAfter = Math.Max(0, wallet.LockedBalance - reservedPoints);
         await conn.ExecuteAsync(
             "UPDATE billing.token_wallets SET locked_balance = @lockedAfter, updated_at = now() WHERE id = @walletId;",
             new { lockedAfter, walletId }, tx);
@@ -276,11 +286,11 @@ public sealed class AiImageBillingService : IAiImageBillingService
                 txId,
                 tenant = _tenant.TenantId,
                 walletId,
-                amount = record.CustomerChargedPoints,
-                before = wallet.Balance + record.CustomerChargedPoints,
+                amount = reservedPoints,
+                before = wallet.Balance + reservedPoints,
                 after = wallet.Balance,
                 recordId = record.Id,
-                description = $"AI image render {record.LogicalRequestId}",
+                description = $"AI image render {record.LogicalRequestId} ({record.PayerType})",
                 createdBy = record.CreatedBy
             }, tx);
 
@@ -291,6 +301,7 @@ public sealed class AiImageBillingService : IAiImageBillingService
                    actual_model = @model,
                    provider_task_id = @taskId,
                    provider_actual_cost_usd = @actualUsd,
+                   total_provider_actual_cost_usd = @actualUsd,
                    provider_cost_source = CASE WHEN @actualUsd IS NULL THEN provider_cost_source ELSE 'provider_actual' END,
                    wallet_transaction_id = @txId,
                    completed_at = now(),
@@ -303,42 +314,89 @@ public sealed class AiImageBillingService : IAiImageBillingService
         return new AiImageBillingCompletion(true, "completed", txId, null);
     }
 
-    private async Task<AiImageBillingReservation> HandleExistingReservationAsync(
-        IDbConnection conn,
-        IDbTransaction tx,
-        BillingRecord existing,
-        AiImageBillingReserveRequest request,
-        CancellationToken ct)
+    public async Task<AiImageBillingCompletion> MarkPendingReconciliationAsync(AiImageBillingPendingReconciliationRequest request, CancellationToken ct = default)
+    {
+        await _tenant.EnsureLoadedAsync(CancellationToken.None);
+        using var conn = await _factory.OpenAsync(CancellationToken.None);
+        using var tx = conn.BeginTransaction();
+
+        await LockLogicalRequestAsync(conn, tx, request.LogicalRequestId);
+
+        var record = await GetRecordForUpdateAsync(conn, tx, request.LogicalRequestId);
+        if (record is null)
+        {
+            tx.Commit();
+            return new AiImageBillingCompletion(false, "missing_record", null, "Image billing reservation was not found.");
+        }
+
+        await InsertAttemptsAsync(conn, tx, record.Id, new AiImageBillingCompleteRequest
+        {
+            LogicalRequestId = request.LogicalRequestId,
+            Success = false,
+            ActualModel = request.ActualModel,
+            ProviderTaskId = request.ProviderTaskId,
+            ProviderUsageJson = request.ProviderUsageJson,
+            ErrorMessage = request.ErrorMessage
+        });
+
+        await conn.ExecuteAsync(
+            """
+            UPDATE billing.ai_image_billing_records
+               SET status = 'pending_reconciliation',
+                   actual_model = COALESCE(@model, actual_model),
+                   provider_task_id = COALESCE(@taskId, provider_task_id),
+                   error_message = @errorMessage,
+                   pending_reconciliation_at = now(),
+                   updated_at = now()
+             WHERE id = @id
+               AND status IN ('reserved','pending_reconciliation');
+            """,
+            new { id = record.Id, model = request.ActualModel, taskId = request.ProviderTaskId, errorMessage = request.ErrorMessage }, tx);
+
+        tx.Commit();
+        return new AiImageBillingCompletion(true, "pending_reconciliation", record.WalletTransactionId, null);
+    }
+
+    private static async Task LockLogicalRequestAsync(IDbConnection conn, IDbTransaction tx, string logicalRequestId)
+    {
+        await conn.ExecuteAsync(
+            "SELECT pg_advisory_xact_lock(hashtextextended(@logicalRequestId, 0));",
+            new { logicalRequestId }, tx);
+    }
+
+    private static AiImageBillingReservation HandleExistingReservation(BillingRecord existing)
     {
         if (existing.Status is "completed")
         {
-            return new AiImageBillingReservation(true, false, existing.BillingExempt, "completed", existing.LogicalRequestId,
-                existing.CustomerChargedPoints, existing.Id, existing.WalletTransactionId, "Image render request was already completed.");
+            return new AiImageBillingReservation(true, false, existing.PayerType, "completed", existing.LogicalRequestId,
+                existing.ReservedPoints, existing.Id, existing.WalletTransactionId, "Image render request was already completed.");
         }
 
-        if (existing.Status is "reserved" or "reserved_exempt")
+        if (existing.Status is "reserved" or "pending_reconciliation")
         {
-            return new AiImageBillingReservation(true, false, existing.BillingExempt, existing.Status, existing.LogicalRequestId,
-                existing.CustomerChargedPoints, existing.Id, existing.WalletTransactionId, "Image render request is already in progress.");
+            return new AiImageBillingReservation(true, false, existing.PayerType, existing.Status, existing.LogicalRequestId,
+                existing.ReservedPoints, existing.Id, existing.WalletTransactionId, "Image render request is already in progress.");
         }
 
-        if (existing.Status is "insufficient" or "missing_customer")
+        if (existing.Status is "insufficient" or "missing_payer" or "missing_customer")
         {
-            return new AiImageBillingReservation(false, false, existing.BillingExempt, existing.Status, existing.LogicalRequestId,
-                existing.CustomerChargedPoints, existing.Id, existing.WalletTransactionId, $"Image billing record is already '{existing.Status}'. Create a new logical_request_id after fixing the customer balance/scope.");
+            return new AiImageBillingReservation(false, false, existing.PayerType, existing.Status, existing.LogicalRequestId,
+                existing.ReservedPoints, existing.Id, existing.WalletTransactionId, $"Image billing record is already '{existing.Status}'. Create a new logical_request_id after fixing payer/balance.");
         }
 
-        return new AiImageBillingReservation(false, false, existing.BillingExempt, existing.Status, existing.LogicalRequestId,
-            existing.CustomerChargedPoints, existing.Id, existing.WalletTransactionId, $"Image billing record is in status '{existing.Status}'.");
+        return new AiImageBillingReservation(false, false, existing.PayerType, existing.Status, existing.LogicalRequestId,
+            existing.ReservedPoints, existing.Id, existing.WalletTransactionId, $"Image billing record is in status '{existing.Status}'.");
     }
 
-    private async Task<WalletRow> EnsureWalletForUpdateAsync(IDbConnection conn, IDbTransaction tx, Guid customerId)
+    private async Task<WalletRow> EnsureCustomerWalletForUpdateAsync(IDbConnection conn, IDbTransaction tx, Guid customerId)
     {
         var wallet = await conn.QuerySingleOrDefaultAsync<WalletRow?>(
             """
-            SELECT id AS Id, balance AS Balance, locked_balance AS LockedBalance
+            SELECT id AS Id, balance AS Balance, locked_balance AS LockedBalance, COALESCE(overdraft_limit, 0) AS OverdraftLimit
               FROM billing.token_wallets
-             WHERE tenant_id = @tenant AND customer_id = @customerId
+             WHERE tenant_id = @tenant
+               AND wallet_scope = 'customer'
+               AND customer_id = @customerId
              LIMIT 1
              FOR UPDATE;
             """,
@@ -360,36 +418,77 @@ public sealed class AiImageBillingService : IAiImageBillingService
         var walletId = Guid.NewGuid();
         await conn.ExecuteAsync(
             """
-            INSERT INTO billing.token_wallets (id, tenant_id, customer_id, balance, locked_balance, status, created_at, updated_at)
-            VALUES (@walletId, @tenant, @customerId, @seed, 0, 'active', now(), now());
+            INSERT INTO billing.token_wallets
+                (id, tenant_id, customer_id, wallet_scope, wallet_code, balance, locked_balance, overdraft_limit, status, created_at, updated_at)
+            VALUES
+                (@walletId, @tenant, @customerId, 'customer', NULL, @seed, 0, 0, 'active', now(), now())
+            ON CONFLICT DO NOTHING;
             """,
             new { walletId, tenant = _tenant.TenantId, customerId, seed }, tx);
 
-        return new WalletRow { Id = walletId, Balance = seed, LockedBalance = 0 };
+        return await conn.QuerySingleAsync<WalletRow>(
+            """
+            SELECT id AS Id, balance AS Balance, locked_balance AS LockedBalance, COALESCE(overdraft_limit, 0) AS OverdraftLimit
+              FROM billing.token_wallets
+             WHERE tenant_id = @tenant
+               AND wallet_scope = 'customer'
+               AND customer_id = @customerId
+             LIMIT 1
+             FOR UPDATE;
+            """,
+            new { tenant = _tenant.TenantId, customerId }, tx);
+    }
+
+    private async Task<WalletRow> GetSystemWalletForUpdateAsync(IDbConnection conn, IDbTransaction tx, string walletCode)
+    {
+        var wallet = await conn.QuerySingleOrDefaultAsync<WalletRow?>(
+            """
+            SELECT id AS Id, balance AS Balance, locked_balance AS LockedBalance, COALESCE(overdraft_limit, 0) AS OverdraftLimit
+              FROM billing.token_wallets
+             WHERE tenant_id = @tenant
+               AND wallet_scope = 'system'
+               AND wallet_code = @walletCode
+             LIMIT 1
+             FOR UPDATE;
+            """,
+            new { tenant = _tenant.TenantId, walletCode }, tx);
+
+        return wallet ?? throw new InvalidOperationException(
+            $"System image wallet '{walletCode}' is missing. Run the manual YEScale billing SQL before enabling production image render.");
     }
 
     private async Task<Guid> InsertRecordAsync(
         IDbConnection conn,
         IDbTransaction tx,
         AiImageBillingReserveRequest request,
+        AiBillingPayerContext payer,
         Guid? walletId,
         string status,
         Guid? walletTransactionId)
     {
+        var customerPoints = payer.PayerType == AiBillingPayerTypes.Customer ? request.Cost.CustomerChargedPoints : 0m;
+        var systemPoints = payer.PayerType == AiBillingPayerTypes.System ? request.Cost.CustomerChargedPoints : 0m;
+
         return await conn.ExecuteScalarAsync<Guid>(
             """
             INSERT INTO billing.ai_image_billing_records
                 (id, tenant_id, logical_request_id, render_job_id, customer_id, user_id, wallet_id,
+                 payer_type, payer_customer_id, payer_wallet_id, system_charged_points,
                  provider_id, provider_capability_id, provider_code, capability_code, feature_code,
-                 requested_model, provider_estimated_cost_usd, provider_actual_cost_usd, provider_cost_source,
+                 requested_model, provider_estimated_cost_usd, total_provider_estimated_cost_usd,
+                 provider_actual_cost_usd, total_provider_actual_cost_usd, provider_cost_source,
                  exchange_rate_vnd_per_usd, todox_vnd_per_point, provider_cost_points, customer_charged_points,
-                 billing_exempt, exemption_reason, wallet_transaction_id, status, metadata_json, created_by, created_at, updated_at)
+                 billing_exempt, exemption_reason, wallet_transaction_id, status, metadata_json, created_by,
+                 reserved_until, created_at, updated_at)
             VALUES
                 (gen_random_uuid(), @tenant, @LogicalRequestId, @RenderJobId, @CustomerId, @UserId, @walletId,
+                 @PayerType, @PayerCustomerId, @walletId, @SystemChargedPoints,
                  @ProviderId, @ProviderCapabilityId, @ProviderCode, @CapabilityCode, @FeatureCode,
-                 @RequestedModel, @ProviderEstimatedCostUsd, @ProviderActualCostUsd, @ProviderCostSource,
+                 @RequestedModel, @ProviderEstimatedCostUsd, @ProviderEstimatedCostUsd,
+                 @ProviderActualCostUsd, @ProviderActualCostUsd, @ProviderCostSource,
                  @ExchangeRateVndPerUsd, @TodoXVndPerPoint, @ProviderCostPoints, @CustomerChargedPoints,
-                 @BillingExempt, @ExemptionReason, @walletTransactionId, @status, CAST(@MetadataJson AS jsonb), @CreatedBy, now(), now())
+                 false, NULL, @walletTransactionId, @status, CAST(@MetadataJson AS jsonb), @CreatedBy,
+                 now() + interval '30 minutes', now(), now())
             RETURNING id;
             """,
             new
@@ -397,9 +496,12 @@ public sealed class AiImageBillingService : IAiImageBillingService
                 tenant = _tenant.TenantId,
                 request.LogicalRequestId,
                 request.RenderJobId,
-                request.CustomerId,
+                CustomerId = payer.PayerCustomerId ?? request.CustomerId,
                 request.UserId,
                 walletId,
+                payer.PayerType,
+                PayerCustomerId = payer.PayerCustomerId,
+                SystemChargedPoints = systemPoints,
                 request.ProviderId,
                 request.ProviderCapabilityId,
                 request.ProviderCode,
@@ -412,12 +514,14 @@ public sealed class AiImageBillingService : IAiImageBillingService
                 request.Cost.ExchangeRateVndPerUsd,
                 request.Cost.TodoXVndPerPoint,
                 request.Cost.ProviderCostPoints,
-                request.Cost.CustomerChargedPoints,
-                request.BillingExempt,
-                request.ExemptionReason,
+                CustomerChargedPoints = customerPoints,
                 walletTransactionId,
                 status,
-                MetadataJson = SerializeMetadata(request.Metadata),
+                MetadataJson = SerializeMetadata(new
+                {
+                    request = request.Metadata,
+                    payer = new { payer.PayerType, payer.ResolutionSource, payer.SystemWalletCode }
+                }),
                 request.CreatedBy
             }, tx);
     }
@@ -427,10 +531,11 @@ public sealed class AiImageBillingService : IAiImageBillingService
             """
             SELECT id AS Id,
                    logical_request_id AS LogicalRequestId,
-                   wallet_id AS WalletId,
+                   payer_type AS PayerType,
+                   COALESCE(payer_wallet_id, wallet_id) AS PayerWalletId,
                    wallet_transaction_id AS WalletTransactionId,
                    customer_charged_points AS CustomerChargedPoints,
-                   billing_exempt AS BillingExempt,
+                   system_charged_points AS SystemChargedPoints,
                    status AS Status,
                    created_by AS CreatedBy
               FROM billing.ai_image_billing_records
@@ -439,19 +544,43 @@ public sealed class AiImageBillingService : IAiImageBillingService
             """,
             new { logicalRequestId }, tx);
 
-    private async Task ReleaseReservationAsync(IDbConnection conn, IDbTransaction tx, BillingRecord record, AiImageBillingCompleteRequest request)
+    private static async Task CompleteRecordWithoutDebitAsync(IDbConnection conn, IDbTransaction tx, BillingRecord record, AiImageBillingCompleteRequest request)
     {
-        if (!record.BillingExempt && record.WalletId is Guid walletId && record.CustomerChargedPoints > 0)
+        await conn.ExecuteAsync(
+            """
+            UPDATE billing.ai_image_billing_records
+               SET status = 'completed',
+                   actual_model = @model,
+                   provider_task_id = @taskId,
+                   provider_actual_cost_usd = @actualUsd,
+                   total_provider_actual_cost_usd = @actualUsd,
+                   provider_cost_source = CASE WHEN @actualUsd IS NULL THEN provider_cost_source ELSE 'provider_actual' END,
+                   completed_at = now(),
+                   updated_at = now()
+             WHERE id = @id;
+            """,
+            new { id = record.Id, model = request.ActualModel, taskId = request.ProviderTaskId, actualUsd = request.ProviderActualCostUsd }, tx);
+    }
+
+    private static async Task ReleaseReservationAsync(
+        IDbConnection conn,
+        IDbTransaction tx,
+        BillingRecord record,
+        AiImageBillingCompleteRequest request,
+        string status)
+    {
+        var reservedPoints = record.ReservedPoints;
+        if (record.PayerWalletId is Guid walletId && reservedPoints > 0)
         {
             var wallet = await conn.QuerySingleAsync<WalletRow>(
                 """
-                SELECT id AS Id, balance AS Balance, locked_balance AS LockedBalance
+                SELECT id AS Id, balance AS Balance, locked_balance AS LockedBalance, COALESCE(overdraft_limit, 0) AS OverdraftLimit
                   FROM billing.token_wallets
                  WHERE id = @walletId
                  FOR UPDATE;
                 """,
                 new { walletId }, tx);
-            var release = Math.Min(wallet.LockedBalance, record.CustomerChargedPoints);
+            var release = Math.Min(wallet.LockedBalance, reservedPoints);
             await conn.ExecuteAsync(
                 """
                 UPDATE billing.token_wallets
@@ -466,19 +595,21 @@ public sealed class AiImageBillingService : IAiImageBillingService
         await conn.ExecuteAsync(
             """
             UPDATE billing.ai_image_billing_records
-               SET status = 'released',
+               SET status = @status,
                    actual_model = @model,
                    provider_task_id = @taskId,
                    provider_actual_cost_usd = @actualUsd,
+                   total_provider_actual_cost_usd = @actualUsd,
                    provider_cost_source = CASE WHEN @actualUsd IS NULL THEN provider_cost_source ELSE 'provider_actual' END,
                    error_message = @errorMessage,
-                   failed_at = now(),
+                   failed_at = CASE WHEN @status = 'released' THEN now() ELSE failed_at END,
                    updated_at = now()
              WHERE id = @id;
             """,
             new
             {
                 id = record.Id,
+                status,
                 model = request.ActualModel,
                 taskId = request.ProviderTaskId,
                 actualUsd = request.ProviderActualCostUsd,
@@ -488,29 +619,30 @@ public sealed class AiImageBillingService : IAiImageBillingService
 
     private static async Task InsertAttemptsAsync(IDbConnection conn, IDbTransaction tx, Guid billingRecordId, AiImageBillingCompleteRequest request)
     {
-        var attempts = ExtractAttempts(request).ToList();
-        if (attempts.Count == 0)
-        {
-            attempts.Add(new ProviderAttempt(1, request.ActualModel, request.ProviderTaskId, request.Success, request.ErrorMessage));
-        }
-
+        var attempts = AiImageBillingAttemptParser.Parse(request).ToList();
         foreach (var attempt in attempts)
         {
             await conn.ExecuteAsync(
                 """
                 INSERT INTO billing.ai_image_provider_attempts
                     (id, billing_record_id, attempt_number, model_name, provider_task_id, success,
-                     provider_actual_cost_usd, error_message, raw_usage_json, created_at)
+                     provider_estimated_cost_usd, provider_actual_cost_usd, cost_source, error_code, error_message,
+                     raw_usage_json, started_at, completed_at, created_at)
                 VALUES
                     (gen_random_uuid(), @billingRecordId, @AttemptNumber, @ModelName, @ProviderTaskId, @Success,
-                     @ProviderActualCostUsd, @ErrorMessage, CAST(@RawUsageJson AS jsonb), now())
+                     @ProviderEstimatedCostUsd, @ProviderActualCostUsd, @CostSource, @ErrorCode, @ErrorMessage,
+                     CAST(@RawUsageJson AS jsonb), @StartedAt, @CompletedAt, now())
                 ON CONFLICT (billing_record_id, attempt_number) DO UPDATE
                     SET model_name = EXCLUDED.model_name,
                         provider_task_id = COALESCE(EXCLUDED.provider_task_id, billing.ai_image_provider_attempts.provider_task_id),
                         success = EXCLUDED.success,
+                        provider_estimated_cost_usd = EXCLUDED.provider_estimated_cost_usd,
                         provider_actual_cost_usd = EXCLUDED.provider_actual_cost_usd,
+                        cost_source = EXCLUDED.cost_source,
+                        error_code = EXCLUDED.error_code,
                         error_message = EXCLUDED.error_message,
-                        raw_usage_json = EXCLUDED.raw_usage_json;
+                        raw_usage_json = EXCLUDED.raw_usage_json,
+                        completed_at = EXCLUDED.completed_at;
                 """,
                 new
                 {
@@ -519,37 +651,16 @@ public sealed class AiImageBillingService : IAiImageBillingService
                     attempt.ModelName,
                     attempt.ProviderTaskId,
                     attempt.Success,
-                    ProviderActualCostUsd = request.ProviderActualCostUsd,
+                    attempt.ProviderEstimatedCostUsd,
+                    attempt.ProviderActualCostUsd,
+                    attempt.CostSource,
+                    attempt.ErrorCode,
                     attempt.ErrorMessage,
-                    RawUsageJson = request.ProviderUsageJson
+                    RawUsageJson = request.ProviderUsageJson,
+                    attempt.StartedAt,
+                    attempt.CompletedAt
                 }, tx);
         }
-    }
-
-    private static IEnumerable<ProviderAttempt> ExtractAttempts(AiImageBillingCompleteRequest request)
-    {
-        if (string.IsNullOrWhiteSpace(request.ProviderUsageJson))
-        {
-            yield return new ProviderAttempt(1, request.ActualModel, request.ProviderTaskId, request.Success, request.ErrorMessage);
-            yield break;
-        }
-
-        using var doc = JsonDocument.Parse(request.ProviderUsageJson);
-        var attempt = 1;
-        if (doc.RootElement.TryGetProperty("fallbackTrail", out var trail) && trail.ValueKind == JsonValueKind.Array)
-        {
-            foreach (var item in trail.EnumerateArray())
-            {
-                yield return new ProviderAttempt(
-                    attempt++,
-                    ReadString(item, "from"),
-                    ReadString(item, "taskId"),
-                    Success: false,
-                    ReadString(item, "reason") ?? ReadString(item, "errorCode"));
-            }
-        }
-
-        yield return new ProviderAttempt(attempt, request.ActualModel, request.ProviderTaskId, request.Success, request.ErrorMessage);
     }
 
     private static string? SerializeMetadata(object? metadata)
@@ -565,6 +676,108 @@ public sealed class AiImageBillingService : IAiImageBillingService
         }
     }
 
+    private sealed class WalletRow
+    {
+        public Guid Id { get; init; }
+        public decimal Balance { get; init; }
+        public decimal LockedBalance { get; init; }
+        public decimal OverdraftLimit { get; init; }
+    }
+
+    private sealed class BillingRecord
+    {
+        public Guid Id { get; init; }
+        public string LogicalRequestId { get; init; } = string.Empty;
+        public string PayerType { get; init; } = AiBillingPayerTypes.Customer;
+        public Guid? PayerWalletId { get; init; }
+        public Guid? WalletTransactionId { get; init; }
+        public decimal CustomerChargedPoints { get; init; }
+        public decimal SystemChargedPoints { get; init; }
+        public decimal ReservedPoints => CustomerChargedPoints + SystemChargedPoints;
+        public string Status { get; init; } = string.Empty;
+        public string? CreatedBy { get; init; }
+    }
+}
+
+public sealed record AiImageProviderAttempt(
+    int AttemptNumber,
+    string? ModelName,
+    string? ProviderTaskId,
+    bool Success,
+    decimal? ProviderEstimatedCostUsd,
+    decimal? ProviderActualCostUsd,
+    string? CostSource,
+    string? ErrorCode,
+    string? ErrorMessage,
+    DateTimeOffset? StartedAt,
+    DateTimeOffset? CompletedAt);
+
+public static class AiImageBillingAttemptParser
+{
+    private static readonly IReadOnlyDictionary<string, decimal> EstimatedUsdByModel = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase)
+    {
+        ["nano-banana-2"] = 0.08m,
+        ["gpt-image"] = 0.024m,
+        ["seedream-5"] = 0.065m
+    };
+
+    public static IReadOnlyList<AiImageProviderAttempt> Parse(AiImageBillingCompleteRequest request)
+    {
+        var attempts = new List<AiImageProviderAttempt>();
+        var attemptNumber = 1;
+
+        if (!string.IsNullOrWhiteSpace(request.ProviderUsageJson))
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(request.ProviderUsageJson);
+                if (doc.RootElement.TryGetProperty("fallbackTrail", out var trail) && trail.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var item in trail.EnumerateArray())
+                    {
+                        var model = ReadString(item, "from");
+                        var errorCode = ReadString(item, "errorCode");
+                        attempts.Add(new AiImageProviderAttempt(
+                            attemptNumber++,
+                            model,
+                            ReadString(item, "taskId") ?? ReadString(item, "task_id"),
+                            Success: false,
+                            ProviderEstimatedCostUsd: EstimateUsd(model),
+                            ProviderActualCostUsd: null,
+                            CostSource: EstimateUsd(model) is null ? null : "configured_tariff",
+                            ErrorCode: errorCode,
+                            ErrorMessage: ReadString(item, "reason") ?? errorCode,
+                            StartedAt: ReadDate(item, "startedAt"),
+                            CompletedAt: ReadDate(item, "completedAt")));
+                    }
+                }
+            }
+            catch
+            {
+                attempts.Clear();
+                attemptNumber = 1;
+            }
+        }
+
+        attempts.Add(new AiImageProviderAttempt(
+            attemptNumber,
+            request.ActualModel,
+            request.ProviderTaskId,
+            request.Success,
+            EstimateUsd(request.ActualModel),
+            request.ProviderActualCostUsd,
+            request.ProviderActualCostUsd is null ? EstimateUsd(request.ActualModel) is null ? null : "configured_tariff" : "provider_actual",
+            ErrorCode: null,
+            request.ErrorMessage,
+            StartedAt: null,
+            CompletedAt: DateTimeOffset.UtcNow));
+
+        return attempts;
+    }
+
+    private static decimal? EstimateUsd(string? model)
+        => !string.IsNullOrWhiteSpace(model) && EstimatedUsdByModel.TryGetValue(model, out var value) ? value : null;
+
     private static string? ReadString(JsonElement element, string propertyName)
         => element.ValueKind == JsonValueKind.Object
            && element.TryGetProperty(propertyName, out var value)
@@ -572,24 +785,6 @@ public sealed class AiImageBillingService : IAiImageBillingService
             ? value.GetString()
             : null;
 
-    private sealed class WalletRow
-    {
-        public Guid Id { get; init; }
-        public decimal Balance { get; init; }
-        public decimal LockedBalance { get; init; }
-    }
-
-    private sealed class BillingRecord
-    {
-        public Guid Id { get; init; }
-        public string LogicalRequestId { get; init; } = string.Empty;
-        public Guid? WalletId { get; init; }
-        public Guid? WalletTransactionId { get; init; }
-        public decimal CustomerChargedPoints { get; init; }
-        public bool BillingExempt { get; init; }
-        public string Status { get; init; } = string.Empty;
-        public string? CreatedBy { get; init; }
-    }
-
-    private sealed record ProviderAttempt(int AttemptNumber, string? ModelName, string? ProviderTaskId, bool Success, string? ErrorMessage);
+    private static DateTimeOffset? ReadDate(JsonElement element, string propertyName)
+        => DateTimeOffset.TryParse(ReadString(element, propertyName), out var value) ? value : null;
 }

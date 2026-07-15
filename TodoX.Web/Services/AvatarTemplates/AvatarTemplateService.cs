@@ -450,8 +450,6 @@ public sealed class AvatarTemplateService : IAvatarTemplateService
             AspectRatio = "1:1",
             FileCategory = fileCategory,
             RequestId = $"{featureCode}-{Guid.NewGuid():N}",
-            BillingExempt = customerGuid is null,
-            ExemptionReason = customerGuid is null ? "public_or_admin_avatar_builder_system_user" : null,
             CreatedBy = userId.ToString()
         }, ct);
 

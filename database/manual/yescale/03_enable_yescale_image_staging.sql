@@ -16,17 +16,17 @@ BEGIN
     SELECT count(*) INTO expected_models
       FROM public.todox_ai_provider_capability
      WHERE provider_code = 'yescale_task_image'
-       AND capability_code IN ('avatar_generation','chibi_avatar_generation','image_generation','scene_image_generation','thumbnail_generation')
+       AND capability_code IN ('avatar_generation','chibi_avatar_generation','character_generation','image_generation','scene_image_generation','thumbnail_generation')
        AND model_name IN ('nano-banana-2','gpt-image','seedream-5');
 
-    IF expected_models <> 15 THEN
-        RAISE EXCEPTION 'Expected 15 YEScale staging rows (5 billed routed capabilities x 3 models), found %.', expected_models;
+    IF expected_models <> 18 THEN
+        RAISE EXCEPTION 'Expected 18 YEScale staging rows (6 billed routed capabilities x 3 models), found %.', expected_models;
     END IF;
 
     SELECT count(*) INTO bad_count
       FROM public.todox_ai_provider_capability
      WHERE provider_code = 'yescale_task_image'
-       AND capability_code IN ('avatar_generation','chibi_avatar_generation','image_generation','scene_image_generation','thumbnail_generation')
+       AND capability_code IN ('avatar_generation','chibi_avatar_generation','character_generation','image_generation','scene_image_generation','thumbnail_generation')
        AND unit_cost_points <= 0;
 
     IF bad_count > 0 THEN
@@ -45,7 +45,7 @@ UPDATE public.todox_ai_provider_capability
        updated_by = 'manual_sql_staging',
        updated_at = now()
  WHERE provider_code = 'yescale_task_image'
-   AND capability_code IN ('avatar_generation','chibi_avatar_generation','image_generation','scene_image_generation','thumbnail_generation');
+   AND capability_code IN ('avatar_generation','chibi_avatar_generation','character_generation','image_generation','scene_image_generation','thumbnail_generation');
 
 UPDATE public.todox_ai_provider_capability
    SET enabled = false,
@@ -53,6 +53,6 @@ UPDATE public.todox_ai_provider_capability
        updated_by = 'manual_sql_staging',
        updated_at = now()
  WHERE provider_code = 'yescale_task_image'
-   AND capability_code IN ('character_generation','poster_generation');
+   AND capability_code = 'poster_generation';
 
 COMMIT;

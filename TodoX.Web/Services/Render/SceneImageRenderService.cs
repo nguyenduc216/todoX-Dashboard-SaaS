@@ -232,8 +232,6 @@ public sealed class SceneImageRenderService : ISceneImageRenderService
             RequestId = requestId,
             LogicalRequestId = requestId,
             RenderJobId = context.RenderJobId?.ToString("N"),
-            BillingExempt = context.CustomerId is null,
-            ExemptionReason = context.CustomerId is null ? "system_scene_image_render" : null,
             Metadata = new
             {
                 projectId = context.ProjectId,
