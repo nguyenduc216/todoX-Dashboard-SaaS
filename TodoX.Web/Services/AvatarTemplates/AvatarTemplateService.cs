@@ -246,8 +246,8 @@ public sealed class AvatarTemplateService : IAvatarTemplateService
         var option = await ResolveAvatarOptionAsync(model.ProviderCapabilityId, ct);
         var customerIdLong = ToBigIntCustomerId(customerId);
 
-        // OpenRouter-style providers render from reference URLs; route through the shared image router.
-        if (option is not null && ProviderCodeMap.ToFactoryKey(option.ProviderCode) == "openrouter_image")
+        // Routed providers render from reference URLs; route through the shared image router.
+        if (option is not null && ProviderCodeMap.IsRoutedImageProvider(option.ProviderCode))
         {
             return await RenderViaRouterAsync(option, model.PromptTemplate, "avatar_sample", "avatar_template",
                 userId, customerIdLong, model.AvatarMediaId, model.LogoMediaId, model.ProductMediaId, model.UniformMediaId, model.SceneMediaId, ct);
@@ -311,10 +311,10 @@ public sealed class AvatarTemplateService : IAvatarTemplateService
         var scenario = template?.Scenario ?? "avatar_chibi";
 
         // Backward-compat: Builder public tạm thời chạy luồng legacy ImageAICreativeRenderService.
-        // Chỉ đi qua shared image router khi feature flag bật VÀ provider là openrouter_image.
+        // Chỉ đi qua shared image router khi feature flag bật VÀ provider hỗ trợ router ảnh.
         var useRouter = _config.GetValue<bool>("Features:AvatarBuilderUseImageRouter")
             && option is not null
-            && ProviderCodeMap.ToFactoryKey(option.ProviderCode) == "openrouter_image";
+            && ProviderCodeMap.IsRoutedImageProvider(option.ProviderCode);
 
         _logger.LogInformation("PUBLIC_AVATAR_RENDER_START templateId={TemplateId} useRouter={UseRouter} providerCapabilityId={ProviderCapabilityId} avatarMediaId={AvatarMediaId} scenario={Scenario} promptLength={PromptLength}",
             request.TemplateId, useRouter, request.ProviderCapabilityId, avatarMediaId, scenario, prompt.Length);

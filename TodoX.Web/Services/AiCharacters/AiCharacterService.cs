@@ -24,6 +24,7 @@ public sealed class AiCharacterService : IAiCharacterService
     private static readonly HashSet<string> Statuses = new(StringComparer.OrdinalIgnoreCase) { "active", "inactive" };
 
     private readonly AiCharacterRepository _repo;
+    private readonly AiProviderRepository _providerRepo;
     private readonly IAiImageProviderFactory _providers;
     private readonly IAiProviderService _aiProviders;
     private readonly IMediaFileService _media;
@@ -32,11 +33,12 @@ public sealed class AiCharacterService : IAiCharacterService
     private readonly IConfiguration _config;
     private readonly ILogger<AiCharacterService> _logger;
 
-    public AiCharacterService(AiCharacterRepository repo, IAiImageProviderFactory providers,
+    public AiCharacterService(AiCharacterRepository repo, AiProviderRepository providerRepo, IAiImageProviderFactory providers,
         IAiProviderService aiProviders, IMediaFileService media, CharacterPromptBuilder promptBuilder,
         TenantContext tenant, IConfiguration config, ILogger<AiCharacterService> logger)
     {
         _repo = repo;
+        _providerRepo = providerRepo;
         _providers = providers;
         _aiProviders = aiProviders;
         _media = media;
@@ -162,6 +164,8 @@ public sealed class AiCharacterService : IAiCharacterService
 
         var providerCode = character?.ProviderCode ?? DefaultProviderCode();
         var modelName = character?.ModelName ?? DefaultModel();
+        AiProviderDetailDto? providerDetail = null;
+        AiProviderCapabilityDto? providerCapability = null;
 
         // Resolve the AI provider/model/cost from the database (admin-configured). Falls back to the
         // legacy appsettings default when no provider is configured for character_generation.
@@ -172,6 +176,8 @@ public sealed class AiCharacterService : IAiCharacterService
                 "character_generation", request.ProviderCapabilityId, fromUser: true, ct);
             providerCode = providerOption.ProviderCode;
             if (!string.IsNullOrWhiteSpace(providerOption.ModelName)) modelName = providerOption.ModelName!;
+            providerDetail = await _providerRepo.GetProviderAsync(providerOption.ProviderId, ct);
+            providerCapability = providerDetail?.Capabilities.FirstOrDefault(c => c.Id == providerOption.ProviderCapabilityId);
         }
         catch (Exception ex)
         {
@@ -203,7 +209,12 @@ public sealed class AiCharacterService : IAiCharacterService
             Seed = seed,
             Count = 1,
             FileCategory = BuildStorageCategory(scope, character?.CharacterCode ?? BuildCharacterCode(characterName)),
-            ReferenceImageUrls = request.ReferenceImageUrls ?? Array.Empty<string>()
+            ReferenceImageUrls = request.ReferenceImageUrls ?? Array.Empty<string>(),
+            BaseUrlOverride = providerDetail?.BaseUrl,
+            EndpointPath = providerCapability?.EndpointPath,
+            ApiKeyConfigName = providerDetail?.ApiKeyConfigName,
+            ProviderConfigJson = providerDetail?.ConfigJson,
+            CapabilityConfigJson = providerCapability?.ConfigJson
         }, ct);
 
         string? imageUrl = null;
@@ -311,7 +322,7 @@ public sealed class AiCharacterService : IAiCharacterService
                 ProviderCode = providerOption.ProviderCode,
                 CapabilityCode = providerOption.CapabilityCode,
                 FeatureCode = "character_manager",
-                ModelName = providerOption.ModelName ?? modelName,
+                ModelName = response.ModelName ?? providerOption.ModelName ?? modelName,
                 RequestId = renderCode,
                 Quantity = 1,
                 UnitType = providerOption.UnitType,

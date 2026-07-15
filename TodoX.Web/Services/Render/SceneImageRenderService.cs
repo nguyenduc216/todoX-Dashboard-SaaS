@@ -48,7 +48,7 @@ public interface ISceneImageRenderService
     /// <summary>Bulk / auto path: renders one scene image on Google Cloud (Vertex) via the legacy creative engine.</summary>
     Task<SceneImageRenderOutcome> RenderSceneImageWithVertexAsync(SceneImageRenderContext context, int attempt, CancellationToken ct = default);
 
-    /// <summary>Manual per-scene "Render lại ảnh": renders one scene image on OpenRouter only (never falls back to Google).</summary>
+    /// <summary>Manual per-scene "Render lại ảnh": renders one scene image through the configured routed provider (never falls back to Google).</summary>
     Task<SceneImageRenderOutcome> RerenderSceneImageWithOpenRouterAsync(SceneImageRenderContext context, CancellationToken ct = default);
 }
 
@@ -57,8 +57,8 @@ public interface ISceneImageRenderService
 /// accidentally pick the wrong engine:
 ///   - Vertex (Google Cloud) for bulk auto-render after scene split, mirroring Avatar Builder's legacy
 ///     <see cref="IImageAICreativeRenderService"/> flow; references are passed by media id.
-///   - OpenRouter for the manual single-scene "Render lại ảnh"; the default OpenRouter capability must be
-///     configured and enabled, otherwise a clear error is surfaced with no silent Google fallback.
+///   - Routed image providers for the manual single-scene "Render lại ảnh"; the default routed capability
+///     must be configured and enabled, otherwise a clear error is surfaced with no silent Google fallback.
 /// Provider/model/cost always come from the AI provider configuration, never hard-coded here.
 /// </summary>
 public sealed class SceneImageRenderService : ISceneImageRenderService
@@ -172,8 +172,8 @@ public sealed class SceneImageRenderService : ISceneImageRenderService
 
     public async Task<SceneImageRenderOutcome> RerenderSceneImageWithOpenRouterAsync(SceneImageRenderContext context, CancellationToken ct = default)
     {
-        // Resolve the default provider for this capability and REQUIRE it to be OpenRouter image.
-        // No silent fallback to Google Cloud when OpenRouter is missing or disabled.
+        // Resolve the default provider for this capability and REQUIRE a routed image provider.
+        // No silent fallback to Google Cloud when the routed provider is missing or disabled.
         ProviderOptionDto option;
         try
         {
@@ -181,13 +181,13 @@ public sealed class SceneImageRenderService : ISceneImageRenderService
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "SCENE_IMAGE_OPENROUTER_RESOLVE_FAILED projectId={ProjectId} sceneId={SceneId}", context.ProjectId, context.SceneId);
-            throw new InvalidOperationException("Chưa cấu hình OpenRouter mặc định để render lại ảnh scene.");
+            _logger.LogWarning(ex, "SCENE_IMAGE_PROVIDER_RESOLVE_FAILED projectId={ProjectId} sceneId={SceneId}", context.ProjectId, context.SceneId);
+            throw new InvalidOperationException("Chưa cấu hình provider ảnh mặc định để render lại ảnh scene.");
         }
 
-        if (ProviderCodeMap.ToFactoryKey(option.ProviderCode) != "openrouter_image")
+        if (!ProviderCodeMap.IsRoutedImageProvider(option.ProviderCode))
         {
-            throw new InvalidOperationException("Chưa cấu hình OpenRouter mặc định để render lại ảnh scene.");
+            throw new InvalidOperationException("Chưa cấu hình provider ảnh mặc định để render lại ảnh scene.");
         }
 
         var references = string.IsNullOrWhiteSpace(context.CharacterReferenceUrl)
@@ -195,7 +195,7 @@ public sealed class SceneImageRenderService : ISceneImageRenderService
             : new[] { context.CharacterReferenceUrl! };
 
         _logger.LogInformation(
-            "SCENE_IMAGE_OPENROUTER_RERENDER_START projectId={ProjectId} sceneId={SceneId} sceneIndex={SceneIndex} characterId={CharacterId} providerCapabilityId={ProviderCapabilityId} providerCode={ProviderCode} modelName={ModelName} hasReference={HasReference}",
+            "SCENE_IMAGE_PROVIDER_RERENDER_START projectId={ProjectId} sceneId={SceneId} sceneIndex={SceneIndex} characterId={CharacterId} providerCapabilityId={ProviderCapabilityId} providerCode={ProviderCode} modelName={ModelName} hasReference={HasReference}",
             context.ProjectId, context.SceneId, context.SceneIndex, context.CharacterId,
             option.ProviderCapabilityId, option.ProviderCode, option.ModelName, references.Length > 0);
 
@@ -231,7 +231,7 @@ public sealed class SceneImageRenderService : ISceneImageRenderService
         if (!render.Success)
         {
             _logger.LogWarning(
-                "SCENE_IMAGE_OPENROUTER_RERENDER_FAILED projectId={ProjectId} sceneId={SceneId} sceneIndex={SceneIndex} providerCapabilityId={ProviderCapabilityId} providerCode={ProviderCode} modelName={ModelName} error={Error}",
+                "SCENE_IMAGE_PROVIDER_RERENDER_FAILED projectId={ProjectId} sceneId={SceneId} sceneIndex={SceneIndex} providerCapabilityId={ProviderCapabilityId} providerCode={ProviderCode} modelName={ModelName} error={Error}",
                 context.ProjectId, context.SceneId, context.SceneIndex, render.ProviderCapabilityId, render.ProviderCode, render.ModelName, render.ErrorMessage);
             return new SceneImageRenderOutcome(false, null, null, render.ProviderCode,
                 render.ModelName, render.ProviderCapabilityId, null,
@@ -256,11 +256,11 @@ public sealed class SceneImageRenderService : ISceneImageRenderService
         {
             return new SceneImageRenderOutcome(false, null, null, render.ProviderCode,
                 render.ModelName, render.ProviderCapabilityId, null,
-                "OpenRouter không trả về ảnh cho scene.", QuotaError: false);
+                "Provider ảnh không trả về ảnh cho scene.", QuotaError: false);
         }
 
         _logger.LogInformation(
-            "SCENE_IMAGE_OPENROUTER_RERENDER_DONE projectId={ProjectId} sceneId={SceneId} sceneIndex={SceneIndex} providerCapabilityId={ProviderCapabilityId} providerCode={ProviderCode} modelName={ModelName} imageUrl={ImageUrl}",
+            "SCENE_IMAGE_PROVIDER_RERENDER_DONE projectId={ProjectId} sceneId={SceneId} sceneIndex={SceneIndex} providerCapabilityId={ProviderCapabilityId} providerCode={ProviderCode} modelName={ModelName} imageUrl={ImageUrl}",
             context.ProjectId, context.SceneId, context.SceneIndex, render.ProviderCapabilityId, render.ProviderCode, render.ModelName, imageUrl);
         return new SceneImageRenderOutcome(true, imageUrl, objectKey, render.ProviderCode,
             render.ModelName, render.ProviderCapabilityId, null, null, QuotaError: false);

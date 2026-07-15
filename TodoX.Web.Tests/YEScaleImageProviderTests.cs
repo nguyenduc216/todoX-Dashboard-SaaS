@@ -102,6 +102,23 @@ public class YEScaleImageProviderTests
     }
 
     [Fact]
+    public async Task TaskClient_SubmitMissingTaskId_ThrowsWithoutPolling()
+    {
+        var handler = new QueueHandler(Json(HttpStatusCode.OK, """{"status":"submitted"}"""));
+        var client = CreateClient(handler);
+
+        var ex = await Assert.ThrowsAsync<YEScaleTaskException>(() => client.SubmitAndWaitAsync(new YEScaleTaskSubmitRequest
+        {
+            Model = "nano-banana-2",
+            Prompt = "hello",
+            Config = new YEScaleImageTaskConfig { Size = "1K" }
+        }));
+
+        Assert.Contains("missing task_id", ex.Message);
+        Assert.Single(handler.Requests);
+    }
+
+    [Fact]
     public async Task TaskClient_Disabled_DoesNotSendHttpRequest()
     {
         var handler = new QueueHandler(Json(HttpStatusCode.OK, """{"task_id":"should-not-send"}"""));

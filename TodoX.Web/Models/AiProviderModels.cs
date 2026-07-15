@@ -219,6 +219,13 @@ public static class AiProviderCatalog
 /// <summary>Bridges DB provider_code values to the existing IAiImageProviderFactory keys.</summary>
 public static class ProviderCodeMap
 {
+    public static bool IsRoutedImageProvider(string? providerCode)
+    {
+        var factoryKey = ToFactoryKey(providerCode);
+        return factoryKey.Equals("openrouter_image", StringComparison.OrdinalIgnoreCase)
+               || factoryKey.Equals("yescale_task_image", StringComparison.OrdinalIgnoreCase);
+    }
+
     public static string ToFactoryKey(string? providerCode)
     {
         if (string.IsNullOrWhiteSpace(providerCode)) return "todox_image";
