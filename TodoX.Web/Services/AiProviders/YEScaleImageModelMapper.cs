@@ -10,6 +10,7 @@ public sealed class YEScaleImageRoutingConfig
     public Dictionary<string, string> ModelProfiles { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, string> ModelSizes { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public string[] FallbackModels { get; set; } = Array.Empty<string>();
+    public string[] TransientTerminalErrorCodes { get; set; } = Array.Empty<string>();
     public string? Size { get; set; }
     public string? Quality { get; set; }
     public string? Background { get; set; }
@@ -33,7 +34,7 @@ public static class YEScaleImageModelMapper
     {
         if (string.IsNullOrWhiteSpace(model))
         {
-            throw new InvalidOperationException("YEScale image model is required.");
+            throw new InvalidOperationException("Chưa cấu hình model ảnh YEScale.");
         }
 
         var normalizedModel = model.Trim();
@@ -80,7 +81,7 @@ public static class YEScaleImageModelMapper
                     Size = ValidateOrDefault(config.Size ?? request.Resolution, SeedreamSizes, "2K", normalizedModel, "size")
                 }
             },
-            _ => throw new InvalidOperationException("YEScale image adapter_profile is required for this model.")
+            _ => throw new InvalidOperationException("Chưa cấu hình adapter_profile ảnh YEScale cho model này.")
         };
     }
 
@@ -121,6 +122,7 @@ public static class YEScaleImageModelMapper
                 ModelProfiles = config.ModelProfiles,
                 ModelSizes = config.ModelSizes,
                 FallbackModels = config.FallbackModels,
+                TransientTerminalErrorCodes = config.TransientTerminalErrorCodes,
                 Size = string.IsNullOrWhiteSpace(size) ? config.Size : size,
                 Quality = config.Quality,
                 Background = config.Background,
@@ -155,6 +157,9 @@ public static class YEScaleImageModelMapper
         config.FallbackModels = ReadStringArray(root, "fallback_models")
             ?? ReadStringArray(root, "fallbackModels")
             ?? config.FallbackModels;
+        config.TransientTerminalErrorCodes = ReadStringArray(root, "transient_terminal_error_codes")
+            ?? ReadStringArray(root, "transientTerminalErrorCodes")
+            ?? config.TransientTerminalErrorCodes;
     }
 
     private static string? ReadString(JsonElement root, string name)
@@ -193,7 +198,7 @@ public static class YEScaleImageModelMapper
         var candidate = string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();
         if (string.IsNullOrWhiteSpace(candidate)) return null;
         if (allowed.Contains(candidate)) return candidate;
-        throw new InvalidOperationException($"{field} '{candidate}' is not supported by YEScale model '{model}'.");
+        throw new InvalidOperationException($"{field} '{candidate}' không được YEScale model '{model}' hỗ trợ.");
     }
 
     private static string NormalizeOptional(string? value, string fallback)

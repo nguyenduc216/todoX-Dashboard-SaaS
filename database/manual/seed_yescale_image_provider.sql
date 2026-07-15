@@ -1,12 +1,13 @@
 -- YEScale image provider seed for TodoX.
--- Queried from YEScale MCP on 2026-07-15T16:40:14.893Z UTC:
---   yescale_list_models, yescale_get_model_doc
+-- Queried from YEScale MCP on 2026-07-15T17:22:35.3717796Z UTC:
+--   yescale_list_models, yescale_get_model_doc, yescale_get_task_model_config
 --
 -- Safety:
 -- - This is a standalone manual SQL file, not a migration.
 -- - It does not store YEScale credentials.
 -- - Provider and capabilities are disabled by default.
 -- - Review unit_cost_points, enable the provider/capabilities, then set a default manually.
+-- - Configure transient_terminal_error_codes only with error codes approved from provider docs/operations.
 --
 -- Rollback without deleting history:
 --   UPDATE public.todox_ai_provider_capability
@@ -37,7 +38,7 @@ SELECT
        "poll_endpoint_template": "/task/{task_id}",
        "poll_terminal_statuses": ["SUCCESS", "FAILURE"],
        "poll_interval_seconds": 5,
-       "mcp_verified_at_utc": "2026-07-15T16:40:14.893Z"
+       "mcp_verified_at_utc": "2026-07-15T17:22:35.3717796Z"
      }'::jsonb,
     'manual_sql',
     'manual_sql',
@@ -60,7 +61,7 @@ UPDATE public.todox_ai_provider
          "poll_endpoint_template": "/task/{task_id}",
          "poll_terminal_statuses": ["SUCCESS", "FAILURE"],
          "poll_interval_seconds": 5,
-         "mcp_verified_at_utc": "2026-07-15T16:40:14.893Z"
+         "mcp_verified_at_utc": "2026-07-15T17:22:35.3717796Z"
        }'::jsonb,
        updated_by = 'manual_sql',
        updated_at = now()
@@ -89,6 +90,7 @@ desired AS (
           "google_search": "disable",
           "thinking": "minimal",
           "fallback_models": ["seedream-5"],
+          "transient_terminal_error_codes": [],
           "model_profiles": {
             "seedream-5": "seedream_5"
           },
@@ -101,7 +103,7 @@ desired AS (
           "verified_async": true,
           "verified_price_usd_per_request": "0.06-0.20",
           "verified_throughput": 105,
-          "mcp_verified_at_utc": "2026-07-15T16:40:14.893Z"
+          "mcp_verified_at_utc": "2026-07-15T17:22:35.3717796Z"
         }'::jsonb AS config_json
     FROM provider p
     UNION ALL
@@ -129,7 +131,7 @@ desired AS (
           "verified_async": true,
           "verified_price_usd_per_request": "0.024-0.30",
           "verified_throughput": 95,
-          "mcp_verified_at_utc": "2026-07-15T16:40:14.893Z"
+          "mcp_verified_at_utc": "2026-07-15T17:22:35.3717796Z"
         }'::jsonb
     FROM provider p
     UNION ALL
@@ -155,7 +157,7 @@ desired AS (
           "verified_async": true,
           "verified_price_usd_per_request": "0.065",
           "verified_throughput": 90,
-          "mcp_verified_at_utc": "2026-07-15T16:40:14.893Z"
+          "mcp_verified_at_utc": "2026-07-15T17:22:35.3717796Z"
         }'::jsonb
     FROM provider p
 )
@@ -196,6 +198,7 @@ desired AS (
           "google_search": "disable",
           "thinking": "minimal",
           "fallback_models": ["seedream-5"],
+          "transient_terminal_error_codes": [],
           "model_profiles": {
             "seedream-5": "seedream_5"
           },
@@ -208,7 +211,7 @@ desired AS (
           "verified_async": true,
           "verified_price_usd_per_request": "0.06-0.20",
           "verified_throughput": 105,
-          "mcp_verified_at_utc": "2026-07-15T16:40:14.893Z"
+          "mcp_verified_at_utc": "2026-07-15T17:22:35.3717796Z"
         }'::jsonb AS config_json
     FROM provider p
     UNION ALL
@@ -236,7 +239,7 @@ desired AS (
           "verified_async": true,
           "verified_price_usd_per_request": "0.024-0.30",
           "verified_throughput": 95,
-          "mcp_verified_at_utc": "2026-07-15T16:40:14.893Z"
+          "mcp_verified_at_utc": "2026-07-15T17:22:35.3717796Z"
         }'::jsonb
     FROM provider p
     UNION ALL
@@ -262,7 +265,7 @@ desired AS (
           "verified_async": true,
           "verified_price_usd_per_request": "0.065",
           "verified_throughput": 90,
-          "mcp_verified_at_utc": "2026-07-15T16:40:14.893Z"
+          "mcp_verified_at_utc": "2026-07-15T17:22:35.3717796Z"
         }'::jsonb
     FROM provider p
 )

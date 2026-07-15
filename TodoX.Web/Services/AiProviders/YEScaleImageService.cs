@@ -25,7 +25,7 @@ public sealed class YEScaleImageService : IYEScaleImageService
         var models = YEScaleImageModelMapper.BuildAttemptChain(request.Model, config);
         if (models.Length == 0)
         {
-            return Fail("Chua cau hinh YEScale image model.");
+            return Fail("Chưa cấu hình model ảnh YEScale.");
         }
 
         var fallbackTrail = new List<object>();
@@ -40,13 +40,29 @@ public sealed class YEScaleImageService : IYEScaleImageService
                 var result = await _tasks.SubmitAndWaitAsync(submitRequest, cancellationToken);
                 if (!result.TerminalResponse.IsSuccess)
                 {
-                    return Fail("YEScale image task failed.", requestJson, result.TerminalResponseJson, model, result.TaskId);
+                    var terminalError = TerminalError.From(result.TerminalResponse, result.TaskId);
+                    if (ShouldFallback(terminalError, config) && i < models.Length - 1)
+                    {
+                        fallbackTrail.Add(new
+                        {
+                            from = model,
+                            to = models[i + 1],
+                            taskId = result.TaskId,
+                            errorCode = terminalError.Code,
+                            reason = terminalError.Reason
+                        });
+                        _logger.LogWarning("YESCALE_IMAGE_FALLBACK fromModel={FromModel} toModel={ToModel} taskId={TaskId} errorCode={ErrorCode} reason={Reason}",
+                            model, models[i + 1], result.TaskId, terminalError.Code, terminalError.Reason);
+                        continue;
+                    }
+
+                    return Fail(terminalError.SafeMessage ?? "Task ảnh YEScale thất bại.", requestJson, result.TerminalResponseJson, model, result.TaskId);
                 }
 
                 var image = ExtractImage(result.TerminalResponse);
                 if (image is null)
                 {
-                    return Fail("YEScale image task succeeded but no output image URL/base64 was found.", requestJson, result.TerminalResponseJson, model, result.TaskId);
+                    return Fail("Task ảnh YEScale thành công nhưng không tìm thấy URL/base64 ảnh đầu ra.", requestJson, result.TerminalResponseJson, model, result.TaskId);
                 }
 
                 _logger.LogInformation("YESCALE_IMAGE_DONE model={Model} taskId={TaskId} durationMs={DurationMs}", model, result.TaskId, result.Duration.TotalMilliseconds);
@@ -74,13 +90,13 @@ public sealed class YEScaleImageService : IYEScaleImageService
             }
             catch (YEScaleTaskException ex) when (ShouldFallback(ex) && i < models.Length - 1)
             {
-                fallbackTrail.Add(new { from = model, to = models[i + 1], reason = ex.ErrorCode ?? ex.StatusCode?.ToString() ?? ex.GetType().Name });
+                fallbackTrail.Add(new { from = model, to = models[i + 1], taskId = ex.TaskId, errorCode = ex.ErrorCode, reason = ex.ErrorCode ?? ex.StatusCode?.ToString() ?? ex.GetType().Name });
                 _logger.LogWarning("YESCALE_IMAGE_FALLBACK fromModel={FromModel} toModel={ToModel} statusCode={StatusCode} errorCode={ErrorCode} taskId={TaskId}",
                     model, models[i + 1], ex.StatusCode, ex.ErrorCode, ex.TaskId);
             }
             catch (Exception ex) when (IsFallbackCandidate(ex) && i < models.Length - 1)
             {
-                fallbackTrail.Add(new { from = model, to = models[i + 1], reason = ex.GetType().Name });
+                fallbackTrail.Add(new { from = model, to = models[i + 1], taskId = (string?)null, errorCode = (string?)null, reason = ex.GetType().Name });
                 _logger.LogWarning("YESCALE_IMAGE_FALLBACK fromModel={FromModel} toModel={ToModel} error={Error}",
                     model, models[i + 1], ex.GetType().Name);
             }
@@ -102,24 +118,24 @@ public sealed class YEScaleImageService : IYEScaleImageService
 
     private static bool IsFallbackCandidate(Exception ex) => ex is HttpRequestException or IOException;
 
+    private static bool ShouldFallback(TerminalError error, YEScaleImageRoutingConfig config)
+    {
+        if (string.IsNullOrWhiteSpace(error.Code)) return false;
+        return config.TransientTerminalErrorCodes.Contains(error.Code.Trim(), StringComparer.OrdinalIgnoreCase);
+    }
+
     private static ExtractedImage? ExtractImage(YEScaleTaskStatusResponse response)
     {
         var roots = new List<JsonElement>();
         if (response.Extra is not null)
         {
-            foreach (var key in new[] { "output", "result", "data" })
+            foreach (var key in new[] { "output", "result", "data", "images" })
             {
                 if (response.Extra.TryGetValue(key, out var value))
                 {
                     roots.Add(value);
                 }
             }
-        }
-
-        if (response.Extra is not null)
-        {
-            using var doc = JsonDocument.Parse(JsonSerializer.Serialize(response.Extra, JsonOptions()));
-            roots.Add(doc.RootElement.Clone());
         }
 
         foreach (var root in roots)
@@ -145,7 +161,7 @@ public sealed class YEScaleImageService : IYEScaleImageService
                     }
                 }
 
-                foreach (var b64Key in new[] { "b64_json", "base64", "image", "data" })
+                foreach (var b64Key in new[] { "b64_json", "base64", "base64_image", "image_base64" })
                 {
                     if (element.TryGetProperty(b64Key, out var b64) && b64.ValueKind == JsonValueKind.String)
                     {
@@ -156,6 +172,11 @@ public sealed class YEScaleImageService : IYEScaleImageService
 
                 foreach (var property in element.EnumerateObject())
                 {
+                    if (IsNonOutputMetadataKey(property.Name))
+                    {
+                        continue;
+                    }
+
                     var nested = FindImage(property.Value);
                     if (nested is not null) return nested;
                 }
@@ -169,7 +190,7 @@ public sealed class YEScaleImageService : IYEScaleImageService
                 break;
             case JsonValueKind.String:
                 var text = element.GetString();
-                if (IsHttpUrl(text)) return new ExtractedImage { Url = text };
+                if (IsHttpImageUrl(text)) return new ExtractedImage { Url = text };
                 break;
         }
 
@@ -179,6 +200,22 @@ public sealed class YEScaleImageService : IYEScaleImageService
     private static bool IsHttpUrl(string? value)
         => Uri.TryCreate(value, UriKind.Absolute, out var uri)
            && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
+
+    private static bool IsNonOutputMetadataKey(string key)
+        => key.Contains("metadata", StringComparison.OrdinalIgnoreCase)
+           || key.Contains("document", StringComparison.OrdinalIgnoreCase)
+           || key.Contains("callback", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsHttpImageUrl(string? value)
+    {
+        if (!IsHttpUrl(value)) return false;
+        var path = new Uri(value!, UriKind.Absolute).AbsolutePath;
+        return path.EndsWith(".png", StringComparison.OrdinalIgnoreCase)
+               || path.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase)
+               || path.EndsWith(".jpeg", StringComparison.OrdinalIgnoreCase)
+               || path.EndsWith(".webp", StringComparison.OrdinalIgnoreCase)
+               || path.EndsWith(".gif", StringComparison.OrdinalIgnoreCase);
+    }
 
     private static byte[]? TryDecodeImage(string? value, out string? mimeType)
     {
@@ -225,5 +262,51 @@ public sealed class YEScaleImageService : IYEScaleImageService
         public string? Url { get; set; }
         public byte[]? Bytes { get; set; }
         public string? MimeType { get; set; }
+    }
+
+    private sealed class TerminalError
+    {
+        public string? Code { get; set; }
+        public string? Type { get; set; }
+        public string? SafeMessage { get; set; }
+        public string? TaskId { get; set; }
+        public string Reason => Code ?? Type ?? "terminal_failure";
+
+        public static TerminalError From(YEScaleTaskStatusResponse response, string taskId)
+        {
+            var error = new TerminalError { TaskId = taskId, SafeMessage = "Task ảnh YEScale thất bại." };
+            if (response.Error is JsonElement element)
+            {
+                Apply(element, error);
+            }
+
+            return error;
+        }
+
+        private static void Apply(JsonElement element, TerminalError error)
+        {
+            if (element.ValueKind == JsonValueKind.String)
+            {
+                error.SafeMessage = SafeText(element.GetString());
+                return;
+            }
+
+            if (element.ValueKind != JsonValueKind.Object) return;
+            error.Code = ReadString(element, "code") ?? ReadString(element, "error_code") ?? ReadString(element, "errorCode");
+            error.Type = ReadString(element, "type") ?? ReadString(element, "error_type") ?? ReadString(element, "errorType");
+            error.SafeMessage = SafeText(ReadString(element, "message") ?? ReadString(element, "error") ?? error.SafeMessage);
+        }
+
+        private static string? ReadString(JsonElement root, string name)
+            => root.TryGetProperty(name, out var el) && el.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(el.GetString())
+                ? el.GetString()
+                : null;
+
+        private static string? SafeText(string? text)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return null;
+            var value = text.Trim();
+            return value.Length <= 500 ? value : value[..500];
+        }
     }
 }

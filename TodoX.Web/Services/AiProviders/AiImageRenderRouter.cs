@@ -90,7 +90,9 @@ public sealed class AiImageRenderRouter : IAiImageRenderRouter
         // { "resolution": "2K", "quality": "high", "output_format": "png" }.
         // Resolution defaults to 2K (and is floored to >= 2K downstream) to satisfy model minimums.
         var (cfgResolution, cfgQuality, cfgFormat) = ParseImageConfig(capability?.ConfigJson);
-        var resolution = HighestResolution(cfgResolution, request.Resolution);
+        var resolution = factoryKey.Equals("yescale_task_image", StringComparison.OrdinalIgnoreCase)
+            ? FirstNonBlank(cfgResolution, request.Resolution) ?? "1K"
+            : HighestResolution(cfgResolution, request.Resolution);
         var quality = FirstNonBlank(cfgQuality, request.Quality) ?? "high";
         var outputFormat = FirstNonBlank(cfgFormat, request.OutputFormat) ?? "png";
 
@@ -120,6 +122,7 @@ public sealed class AiImageRenderRouter : IAiImageRenderRouter
 
         var quantity = 1m;
         var unitCost = option.UnitCostPoints;
+        var finalModel = string.IsNullOrWhiteSpace(response.ModelName) ? option.ModelName : response.ModelName;
         var result = new AiImageRenderResult
         {
             Success = response.Success,
@@ -130,7 +133,7 @@ public sealed class AiImageRenderRouter : IAiImageRenderRouter
             ProviderCode = option.ProviderCode,
             ProviderId = option.ProviderId,
             ProviderCapabilityId = option.ProviderCapabilityId,
-            ModelName = option.ModelName,
+            ModelName = finalModel,
             UnitType = option.UnitType,
             UnitCostPoints = unitCost,
             Quantity = quantity,
@@ -148,7 +151,7 @@ public sealed class AiImageRenderRouter : IAiImageRenderRouter
             ProviderCode = option.ProviderCode,
             CapabilityCode = option.CapabilityCode,
             FeatureCode = request.FeatureCode,
-            ModelName = option.ModelName,
+            ModelName = finalModel,
             RequestId = request.RequestId,
             JobId = request.JobId,
             Quantity = quantity,
@@ -158,23 +161,28 @@ public sealed class AiImageRenderRouter : IAiImageRenderRouter
             ProviderRawCost = response.UsageCost,
             Status = response.Success ? "success" : "failed",
             ErrorMessage = response.Success ? null : response.ErrorMessage,
-            MetadataJson = SerializeMetadata(request.Metadata),
+            MetadataJson = SerializeMetadata(request.Metadata, response.UsageJson),
             CreatedBy = request.CreatedBy
         }, cancellationToken);
 
         return result;
     }
 
-    private static string? SerializeMetadata(object? metadata)
+    private static string? SerializeMetadata(object? metadata, string? providerUsageJson)
     {
-        if (metadata is null) return null;
         try
         {
-            return JsonSerializer.Serialize(metadata, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            using var providerUsage = string.IsNullOrWhiteSpace(providerUsageJson) ? null : JsonDocument.Parse(providerUsageJson);
+            if (metadata is null && providerUsage is null) return null;
+            return JsonSerializer.Serialize(new
+            {
+                request = metadata,
+                providerUsage = providerUsage?.RootElement
+            }, new JsonSerializerOptions(JsonSerializerDefaults.Web));
         }
         catch
         {
-            return null;
+            return metadata is null ? null : JsonSerializer.Serialize(metadata, new JsonSerializerOptions(JsonSerializerDefaults.Web));
         }
     }
 

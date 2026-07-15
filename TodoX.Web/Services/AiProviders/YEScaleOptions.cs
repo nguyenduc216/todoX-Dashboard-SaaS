@@ -17,17 +17,25 @@ public sealed class YEScaleOptions
         if (!Uri.TryCreate(BaseUrl, UriKind.Absolute, out var uri) ||
             (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
         {
-            throw new InvalidOperationException("YEScale BaseUrl khong hop le.");
+            throw new InvalidOperationException("YEScale BaseUrl không hợp lệ.");
         }
 
         return uri;
+    }
+
+    public void EnsureEnabled()
+    {
+        if (!Enabled)
+        {
+            throw new InvalidOperationException("YEScale đang bị tắt trong cấu hình hệ thống.");
+        }
     }
 
     public string GetAccessKeyOrThrow()
     {
         if (string.IsNullOrWhiteSpace(AccessKey))
         {
-            throw new InvalidOperationException("Chua cau hinh YEScale access key. Dat bien moi truong AiProviders__YEScale__AccessKey.");
+            throw new InvalidOperationException("Chưa cấu hình access key YEScale. Hãy đặt biến môi trường AiProviders__YEScale__AccessKey.");
         }
 
         return AccessKey;

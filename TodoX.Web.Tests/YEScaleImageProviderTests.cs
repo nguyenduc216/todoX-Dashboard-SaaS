@@ -102,6 +102,40 @@ public class YEScaleImageProviderTests
     }
 
     [Fact]
+    public async Task TaskClient_Disabled_DoesNotSendHttpRequest()
+    {
+        var handler = new QueueHandler(Json(HttpStatusCode.OK, """{"task_id":"should-not-send"}"""));
+        var client = CreateClient(handler, enabled: false);
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => client.SubmitAsync(new YEScaleTaskSubmitRequest
+        {
+            Model = "nano-banana-2",
+            Prompt = "hello",
+            Config = new YEScaleImageTaskConfig { Size = "1K" }
+        }));
+
+        Assert.Contains("YEScale đang bị tắt", ex.Message);
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task TaskClient_MissingAccessKey_DoesNotSendHttpRequest()
+    {
+        var handler = new QueueHandler(Json(HttpStatusCode.OK, """{"task_id":"should-not-send"}"""));
+        var client = CreateClient(handler, accessKey: null);
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => client.SubmitAsync(new YEScaleTaskSubmitRequest
+        {
+            Model = "nano-banana-2",
+            Prompt = "hello",
+            Config = new YEScaleImageTaskConfig { Size = "1K" }
+        }));
+
+        Assert.Contains("Chưa cấu hình access key YEScale", ex.Message);
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
     public async Task TaskClient_SubmitPollFailure_ReturnsFailureStatus()
     {
         var handler = new QueueHandler(
@@ -178,6 +212,45 @@ public class YEScaleImageProviderTests
     }
 
     [Fact]
+    public async Task TaskClient_RetryAfter_IsHonored()
+    {
+        var retry = Json(HttpStatusCode.TooManyRequests, """{"error":{"code":"rate_limit"}}""");
+        retry.Headers.RetryAfter = new RetryConditionHeaderValue(TimeSpan.FromSeconds(1));
+        var handler = new QueueHandler(retry, Json(HttpStatusCode.OK, """{"task_id":"task-after"}"""));
+        var client = CreateClient(handler, retryCount: 1);
+        var started = DateTimeOffset.UtcNow;
+
+        var result = await client.SubmitAsync(new YEScaleTaskSubmitRequest
+        {
+            Model = "nano-banana-2",
+            Prompt = "hello",
+            Config = new YEScaleImageTaskConfig { Size = "1K" }
+        });
+
+        Assert.Equal("task-after", result.TaskId);
+        Assert.True(DateTimeOffset.UtcNow - started >= TimeSpan.FromMilliseconds(900));
+        Assert.Equal(2, handler.Requests.Count);
+    }
+
+    [Fact]
+    public async Task TaskClient_PollTimeout_ThrowsTransientWithTaskId()
+    {
+        var handler = new PendingForeverHandler();
+        var client = CreateClient(handler, pollTimeoutSeconds: 1);
+
+        var ex = await Assert.ThrowsAsync<YEScaleTaskException>(() => client.SubmitAndWaitAsync(new YEScaleTaskSubmitRequest
+        {
+            Model = "nano-banana-2",
+            Prompt = "hello",
+            Config = new YEScaleImageTaskConfig { Size = "1K" }
+        }));
+
+        Assert.True(ex.IsTransient);
+        Assert.Equal("task-timeout", ex.TaskId);
+        Assert.Single(handler.Requests, r => r.Method == HttpMethod.Post);
+    }
+
+    [Fact]
     public async Task ImageAdapter_FallsBackOnTransientFailure_AndReturnsSecondModel()
     {
         var fake = new FakeTaskClient(new YEScaleTaskException("rate", 429, "rate_limit", transient: true), new YEScaleTaskResult
@@ -198,6 +271,183 @@ public class YEScaleImageProviderTests
         Assert.Equal(2, fake.SubmitCalls);
     }
 
+    [Fact]
+    public async Task ImageAdapter_TerminalTransientFailure_FallsBackAndRecordsTrail()
+    {
+        var fake = new FakeTaskClient(new YEScaleTaskResult
+        {
+            TaskId = "task-rate",
+            Status = "FAILURE",
+            Duration = TimeSpan.FromMilliseconds(5),
+            TerminalResponse = Status("""{"task_id":"task-rate","status":"FAILURE","error":{"code":"rate_limit","type":"quota","message":"Rate limited"}}"""),
+            TerminalResponseJson = """{"task_id":"task-rate","status":"FAILURE","error":{"code":"rate_limit","type":"quota","message":"Rate limited"}}"""
+        }, SuccessResult("task-ok", "https://cdn.example/fallback.png"));
+        var service = new YEScaleImageService(fake, NullLogger<YEScaleImageService>.Instance);
+
+        var response = await service.GenerateImageAsync(Request(capabilityConfigJson: YEScaleFallbackConfig("""["rate_limit"]""")));
+
+        Assert.True(response.Success);
+        Assert.Equal("seedream-5", response.ModelName);
+        Assert.Contains("\"taskId\":\"task-rate\"", response.UsageJson);
+        Assert.Contains("\"errorCode\":\"rate_limit\"", response.UsageJson);
+        Assert.Equal(2, fake.SubmitCalls);
+    }
+
+    [Theory]
+    [InlineData("bad_prompt")]
+    [InlineData("mystery_error")]
+    public async Task ImageAdapter_TerminalNonTransientFailure_DoesNotFallback(string errorCode)
+    {
+        var fake = new FakeTaskClient(new YEScaleTaskResult
+        {
+            TaskId = "task-fail",
+            Status = "FAILURE",
+            Duration = TimeSpan.FromMilliseconds(5),
+            TerminalResponse = Status(FailureJson("task-fail", errorCode, "No retry")),
+            TerminalResponseJson = FailureJson("task-fail", errorCode, "No retry")
+        }, SuccessResult("task-should-not-run", "https://cdn.example/unused.png"));
+        var service = new YEScaleImageService(fake, NullLogger<YEScaleImageService>.Instance);
+
+        var response = await service.GenerateImageAsync(Request(capabilityConfigJson: YEScaleFallbackConfig("""["rate_limit"]""")));
+
+        Assert.False(response.Success);
+        Assert.Equal("nano-banana-2", response.ModelName);
+        Assert.Equal(1, fake.SubmitCalls);
+    }
+
+    [Fact]
+    public async Task ImageAdapter_TerminalTransientFailureAtEndOfChain_ReturnsFailure()
+    {
+        var fake = new FakeTaskClient(new YEScaleTaskResult
+        {
+            TaskId = "task-last",
+            Status = "FAILURE",
+            Duration = TimeSpan.FromMilliseconds(5),
+            TerminalResponse = Status("""{"task_id":"task-last","status":"FAILURE","error":{"code":"rate_limit","message":"Rate limited"}}"""),
+            TerminalResponseJson = """{"task_id":"task-last","status":"FAILURE","error":{"code":"rate_limit","message":"Rate limited"}}"""
+        });
+        var service = new YEScaleImageService(fake, NullLogger<YEScaleImageService>.Instance);
+
+        var response = await service.GenerateImageAsync(Request(model: "seedream-5", resolution: "2K", capabilityConfigJson: """{"adapter_profile":"seedream_5","transient_terminal_error_codes":["rate_limit"],"size":"2K"}"""));
+
+        Assert.False(response.Success);
+        Assert.Equal("seedream-5", response.ModelName);
+        Assert.Equal(1, fake.SubmitCalls);
+    }
+
+    [Fact]
+    public async Task ImageAdapter_Cancellation_DoesNotFallback()
+    {
+        var fake = new FakeTaskClient(new OperationCanceledException());
+        var service = new YEScaleImageService(fake, NullLogger<YEScaleImageService>.Instance);
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() => service.GenerateImageAsync(Request(capabilityConfigJson: YEScaleFallbackConfig("""["rate_limit"]"""))));
+
+        Assert.Equal(1, fake.SubmitCalls);
+    }
+
+    [Fact]
+    public async Task ImageAdapter_SuccessWithUrl_ReturnsImageUrl()
+    {
+        var fake = new FakeTaskClient(SuccessResult("task-url", "https://cdn.example/out.png"));
+        var service = new YEScaleImageService(fake, NullLogger<YEScaleImageService>.Instance);
+
+        var response = await service.GenerateImageAsync(Request(capabilityConfigJson: YEScaleBaseConfig()));
+
+        Assert.True(response.Success);
+        Assert.Equal("https://cdn.example/out.png", response.ImageUrl);
+    }
+
+    [Fact]
+    public async Task ImageAdapter_SuccessWithBase64_ReturnsImageBytes()
+    {
+        var png = Convert.ToBase64String(new byte[] { 137, 80, 78, 71 });
+        var fake = new FakeTaskClient(new YEScaleTaskResult
+        {
+            TaskId = "task-b64",
+            Status = "SUCCESS",
+            Duration = TimeSpan.FromMilliseconds(5),
+            TerminalResponse = Status(Base64SuccessJson(png)),
+            TerminalResponseJson = Base64SuccessJson(png)
+        });
+        var service = new YEScaleImageService(fake, NullLogger<YEScaleImageService>.Instance);
+
+        var response = await service.GenerateImageAsync(Request(capabilityConfigJson: YEScaleBaseConfig()));
+
+        Assert.True(response.Success);
+        Assert.NotNull(response.ImageBytes);
+        Assert.Equal("image/png", response.MimeType);
+    }
+
+    [Fact]
+    public async Task ImageAdapter_SuccessWithoutOutputImage_ReturnsFailure()
+    {
+        var fake = new FakeTaskClient(new YEScaleTaskResult
+        {
+            TaskId = "task-empty",
+            Status = "SUCCESS",
+            Duration = TimeSpan.FromMilliseconds(5),
+            TerminalResponse = Status("""{"status":"SUCCESS","output":{"text":"done"}}"""),
+            TerminalResponseJson = """{"status":"SUCCESS","output":{"text":"done"}}"""
+        });
+        var service = new YEScaleImageService(fake, NullLogger<YEScaleImageService>.Instance);
+
+        var response = await service.GenerateImageAsync(Request(capabilityConfigJson: YEScaleBaseConfig()));
+
+        Assert.False(response.Success);
+        Assert.Contains("không tìm thấy", response.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task ImageAdapter_MetadataUrl_IsNotMistakenForOutputImage()
+    {
+        var fake = new FakeTaskClient(new YEScaleTaskResult
+        {
+            TaskId = "task-meta",
+            Status = "SUCCESS",
+            Duration = TimeSpan.FromMilliseconds(5),
+            TerminalResponse = Status("""{"status":"SUCCESS","metadata":{"callback_url":"https://example.com/callback.png"}}"""),
+            TerminalResponseJson = """{"status":"SUCCESS","metadata":{"callback_url":"https://example.com/callback.png"}}"""
+        });
+        var service = new YEScaleImageService(fake, NullLogger<YEScaleImageService>.Instance);
+
+        var response = await service.GenerateImageAsync(Request(capabilityConfigJson: YEScaleBaseConfig()));
+
+        Assert.False(response.Success);
+        Assert.Null(response.ImageUrl);
+    }
+
+    [Fact]
+    public async Task ImageAdapter_OutputMetadataUrl_IsNotMistakenForOutputImage()
+    {
+        var fake = new FakeTaskClient(new YEScaleTaskResult
+        {
+            TaskId = "task-output-meta",
+            Status = "SUCCESS",
+            Duration = TimeSpan.FromMilliseconds(5),
+            TerminalResponse = Status("""{"status":"SUCCESS","output":{"metadata":{"url":"https://example.com/docs.png"}}}"""),
+            TerminalResponseJson = """{"status":"SUCCESS","output":{"metadata":{"url":"https://example.com/docs.png"}}}"""
+        });
+        var service = new YEScaleImageService(fake, NullLogger<YEScaleImageService>.Instance);
+
+        var response = await service.GenerateImageAsync(Request(capabilityConfigJson: YEScaleBaseConfig()));
+
+        Assert.False(response.Success);
+        Assert.Null(response.ImageUrl);
+    }
+
+    [Fact]
+    public async Task ImageAdapter_RawRequest_DoesNotContainAccessKey()
+    {
+        var fake = new FakeTaskClient(SuccessResult("task-url", "https://cdn.example/out.png"));
+        var service = new YEScaleImageService(fake, NullLogger<YEScaleImageService>.Instance);
+
+        var response = await service.GenerateImageAsync(Request(capabilityConfigJson: YEScaleBaseConfig()));
+
+        Assert.DoesNotContain("test-key", response.RawRequestJson);
+        Assert.DoesNotContain("Bearer", response.RawRequestJson);
+    }
+
     private static OpenRouterImageRequest Request(string model = "nano-banana-2", string resolution = "1K", string? capabilityConfigJson = null)
         => new()
         {
@@ -210,14 +460,14 @@ public class YEScaleImageProviderTests
             CapabilityConfigJson = capabilityConfigJson
         };
 
-    private static YEScaleTaskClient CreateClient(HttpMessageHandler handler, int retryCount = 0, int requestTimeoutSeconds = 15, int pollTimeoutSeconds = 30)
+    private static YEScaleTaskClient CreateClient(HttpMessageHandler handler, int retryCount = 0, int requestTimeoutSeconds = 15, int pollTimeoutSeconds = 30, bool enabled = true, string? accessKey = "test-key")
         => new(
             new HttpClient(handler),
             new StaticOptionsMonitor<YEScaleOptions>(new YEScaleOptions
             {
-                Enabled = true,
+                Enabled = enabled,
                 BaseUrl = "https://api.yescale.io",
-                AccessKey = "test-key",
+                AccessKey = accessKey,
                 PollIntervalSeconds = 1,
                 PollTimeoutSeconds = pollTimeoutSeconds,
                 RequestTimeoutSeconds = requestTimeoutSeconds,
@@ -230,6 +480,31 @@ public class YEScaleImageProviderTests
 
     private static YEScaleTaskStatusResponse Status(string json)
         => JsonSerializer.Deserialize<YEScaleTaskStatusResponse>(json, JsonOptions())!;
+
+    private static YEScaleTaskResult SuccessResult(string taskId, string url)
+        => new()
+        {
+            TaskId = taskId,
+            Status = "SUCCESS",
+            Duration = TimeSpan.FromMilliseconds(5),
+            TerminalResponse = Status(SuccessJson(taskId, url)),
+            TerminalResponseJson = SuccessJson(taskId, url)
+        };
+
+    private static string SuccessJson(string taskId, string url)
+        => JsonSerializer.Serialize(new { task_id = taskId, status = "SUCCESS", output = new { url } }, JsonOptions());
+
+    private static string Base64SuccessJson(string base64)
+        => JsonSerializer.Serialize(new { status = "SUCCESS", output = new { b64_json = $"data:image/png;base64,{base64}" } }, JsonOptions());
+
+    private static string FailureJson(string taskId, string errorCode, string message)
+        => JsonSerializer.Serialize(new { task_id = taskId, status = "FAILURE", error = new { code = errorCode, message } }, JsonOptions());
+
+    private static string YEScaleBaseConfig()
+        => """{"adapter_profile":"nano_banana_2","size":"1K"}""";
+
+    private static string YEScaleFallbackConfig(string transientCodes)
+        => $$"""{"adapter_profile":"nano_banana_2","model_profiles":{"seedream-5":"seedream_5"},"model_sizes":{"seedream-5":"2K"},"fallback_models":["seedream-5"],"transient_terminal_error_codes":{{transientCodes}},"size":"1K"}""";
 
     private static JsonSerializerOptions JsonOptions() => new(JsonSerializerDefaults.Web)
     {
@@ -277,6 +552,20 @@ public class YEScaleImageProviderTests
             }
 
             return Json(HttpStatusCode.OK, """{"task_id":"task-timeout-ok"}""");
+        }
+    }
+
+    private sealed class PendingForeverHandler : HttpMessageHandler
+    {
+        public List<HttpRequestMessage> Requests { get; } = new();
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Requests.Add(new HttpRequestMessage(request.Method, request.RequestUri));
+            var json = request.Method == HttpMethod.Post
+                ? """{"task_id":"task-timeout"}"""
+                : """{"task_id":"task-timeout","status":"PENDING"}""";
+            return Task.FromResult(Json(HttpStatusCode.OK, json));
         }
     }
 

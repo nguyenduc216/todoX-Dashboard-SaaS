@@ -36,6 +36,7 @@ public sealed class YEScaleTaskClient : IYEScaleTaskClient
     {
         ValidateSubmitRequest(request);
         var options = _options.CurrentValue;
+        options.EnsureEnabled();
         using var response = await SendWithRetriesAsync(
             () => BuildMessage(HttpMethod.Post, BuildUrl(options, options.TaskSubmitPath), options, JsonSerializer.Serialize(request, JsonOptions)),
             "submit",
@@ -66,6 +67,7 @@ public sealed class YEScaleTaskClient : IYEScaleTaskClient
         }
 
         var options = _options.CurrentValue;
+        options.EnsureEnabled();
         var path = options.TaskStatusPathTemplate.Replace("{task_id}", Uri.EscapeDataString(taskId), StringComparison.Ordinal);
         using var response = await SendWithRetriesAsync(
             () => BuildMessage(HttpMethod.Get, BuildUrl(options, path), options, body: null),
