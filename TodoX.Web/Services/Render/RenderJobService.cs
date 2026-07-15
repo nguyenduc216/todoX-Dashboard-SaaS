@@ -85,15 +85,13 @@ public sealed class RenderJobService : IRenderJobService
                 maxAttempts = Math.Max(1, model.MaxAttempts)
             });
         }
-        catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.NotNullViolation
-                                           && string.Equals(ex.ColumnName, "customer_id", StringComparison.OrdinalIgnoreCase)
-                                           && ex.TableName is not null
-                                           && ex.TableName.Contains("render_jobs", StringComparison.OrdinalIgnoreCase))
+        catch (PostgresException ex) when (IsRenderJobsCustomerIdNotNullViolation(ex))
         {
             // Safe log only — no connection string, credentials, or customer identifiers.
             _logger.LogError(ex,
-                "RENDER_JOB_ENQUEUE_SCHEMA_MISMATCH jobType={JobType} userId={UserId} tenantId={TenantId} customerScope={CustomerScope} sqlState={SqlState} table={Table} column={Column}",
-                model.JobType, model.UserId, _tenant.TenantId, customerScope, ex.SqlState, ex.TableName, ex.ColumnName);
+                "RENDER_JOB_ENQUEUE_SCHEMA_MISMATCH jobType={JobType} userId={UserId} customerId={CustomerId} tenantId={TenantId} customerScope={CustomerScope} logCode={LogCode} projectId={ProjectId} sqlState={SqlState} schema={Schema} table={Table} column={Column}",
+                model.JobType, model.UserId, model.CustomerId, _tenant.TenantId, customerScope, model.LogCode,
+                ExtractProjectId(inputJson), ex.SqlState, ex.SchemaName, ex.TableName, ex.ColumnName);
             throw new InvalidOperationException(
                 "Database render_jobs chưa đồng bộ: customer_id đang NOT NULL trong khi system/admin job không có customer. "
                 + "Vui lòng chạy file SQL đồng bộ database do quản trị viên cung cấp.", ex);
@@ -125,8 +123,10 @@ public sealed class RenderJobService : IRenderJobService
 
         // Serialise concurrent enqueue attempts for the same (jobType, projectId). The advisory lock is
         // transaction-scoped, so it is released automatically on commit/rollback — no leak on error.
-        var lockKey = unchecked((long)(((ulong)(uint)jobType.GetHashCode() << 32) | (uint)projectId.GetHashCode()));
-        await conn.ExecuteAsync("SELECT pg_advisory_xact_lock(@key);", new { key = lockKey }, tx);
+        await conn.ExecuteAsync(
+            "SELECT pg_advisory_xact_lock(hashtextextended(@lockName, 0));",
+            new { lockName = BuildProjectJobLockName(jobType, projectId) },
+            tx);
 
         var active = await conn.QuerySingleOrDefaultAsync<RenderJobDto>(
             SelectJobSql +
@@ -173,15 +173,13 @@ public sealed class RenderJobService : IRenderJobService
                     maxAttempts = Math.Max(1, model.MaxAttempts)
                 }, tx);
         }
-        catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.NotNullViolation
-                                           && string.Equals(ex.ColumnName, "customer_id", StringComparison.OrdinalIgnoreCase)
-                                           && ex.TableName is not null
-                                           && ex.TableName.Contains("render_jobs", StringComparison.OrdinalIgnoreCase))
+        catch (PostgresException ex) when (IsRenderJobsCustomerIdNotNullViolation(ex))
         {
             tx.Rollback();
             _logger.LogError(ex,
-                "RENDER_JOB_ENQUEUE_SCHEMA_MISMATCH jobType={JobType} userId={UserId} tenantId={TenantId} customerScope={CustomerScope} sqlState={SqlState} table={Table} column={Column}",
-                jobType, model.UserId, _tenant.TenantId, customerScope, ex.SqlState, ex.TableName, ex.ColumnName);
+                "RENDER_JOB_ENQUEUE_SCHEMA_MISMATCH jobType={JobType} userId={UserId} customerId={CustomerId} tenantId={TenantId} customerScope={CustomerScope} logCode={LogCode} projectId={ProjectId} sqlState={SqlState} schema={Schema} table={Table} column={Column}",
+                jobType, model.UserId, model.CustomerId, _tenant.TenantId, customerScope, model.LogCode,
+                ExtractProjectId(inputJson), ex.SqlState, ex.SchemaName, ex.TableName, ex.ColumnName);
             throw new InvalidOperationException(
                 "Database render_jobs chưa đồng bộ: customer_id đang NOT NULL trong khi system/admin job không có customer. "
                 + "Vui lòng chạy file SQL đồng bộ database do quản trị viên cung cấp.", ex);
@@ -418,6 +416,39 @@ public sealed class RenderJobService : IRenderJobService
 
     private static string NormalizeStatus(string status)
         => status.Equals(RenderJobStatuses.Processing, StringComparison.OrdinalIgnoreCase) ? RenderJobStatuses.Rendering : status;
+
+    public static string BuildProjectJobLockName(string jobType, long projectId)
+        => $"render.render_jobs:{jobType.Trim().ToLowerInvariant()}:{projectId}";
+
+    public static bool IsRenderJobsCustomerIdNotNullViolation(PostgresException ex)
+        => ex.SqlState == PostgresErrorCodes.NotNullViolation
+           && string.Equals(ex.SchemaName, "render", StringComparison.OrdinalIgnoreCase)
+           && string.Equals(ex.TableName, "render_jobs", StringComparison.OrdinalIgnoreCase)
+           && string.Equals(ex.ColumnName, "customer_id", StringComparison.OrdinalIgnoreCase);
+
+    private static string? ExtractProjectId(string inputJson)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(inputJson);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object
+                || !doc.RootElement.TryGetProperty("projectId", out var projectId))
+            {
+                return null;
+            }
+
+            return projectId.ValueKind switch
+            {
+                JsonValueKind.Number when projectId.TryGetInt64(out var value) => value.ToString(),
+                JsonValueKind.String => projectId.GetString(),
+                _ => null
+            };
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
 
     public async Task ScheduleRetryAsync(Guid jobId, TimeSpan delay, string errorCode, string errorMessage, CancellationToken ct = default)
     {

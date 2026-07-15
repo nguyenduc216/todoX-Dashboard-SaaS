@@ -43,12 +43,14 @@ public sealed class GoogleVertexRateLimiter
     /// error (429 / RESOURCE_EXHAUSTED) or returns a result whose quota-ness is reported via
     /// <paramref name="isQuotaError"/>, the call is retried with backoff up to the configured limit.
     /// <paramref name="onQuotaWait"/> is invoked before each backoff sleep so callers can surface a
-    /// "waiting for quota" state to the UI.
+    /// "waiting for quota" state to the UI. <paramref name="onRetryStart"/> is invoked after that
+    /// sleep, immediately before the next provider call.
     /// </summary>
     public async Task<T> ExecuteAsync<T>(
         Func<int, Task<T>> renderAsync,
         Func<T, bool> isQuotaError,
         Func<int, TimeSpan, Task>? onQuotaWait = null,
+        Func<int, Task>? onRetryStart = null,
         string? context = null,
         CancellationToken ct = default)
     {
@@ -107,6 +109,11 @@ public sealed class GoogleVertexRateLimiter
                 {
                     sw.Stop();
                     _backoffGate.Release();
+                }
+
+                if (onRetryStart is not null)
+                {
+                    await onRetryStart(attempt + 1);
                 }
             }
 

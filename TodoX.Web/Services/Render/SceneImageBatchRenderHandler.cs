@@ -70,9 +70,7 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
 
         var scenes = project.Scenes
             .OrderBy(x => x.SceneIndex)
-            .Where(scene => !input.OnlyMissingOrFailed
-                            || string.IsNullOrWhiteSpace(scene.StaticImageUrl)
-                            || string.Equals(scene.Status, VideoSceneStatuses.Failed, StringComparison.OrdinalIgnoreCase))
+            .Where(scene => ShouldRenderScene(scene, input.OnlyMissingOrFailed))
             .ToList();
 
         await _repo.AddProjectEventAsync(input.ProjectId, "SCENE_IMAGE_BATCH_STARTED", "info",
@@ -96,22 +94,12 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
                 new { jobId = job.Id, projectId = input.ProjectId, sceneId = scene.Id, sceneIndex = scene.SceneIndex, characterId = input.CharacterId }, ct);
         }
 
-        var maxParallel = Math.Clamp(_config.GetValue("RenderQueue:VertexMaxConcurrency", 3), 1, 8);
-        using var throttle = new SemaphoreSlim(maxParallel, maxParallel);
         var failures = 0;
 
         var tasks = scenes.Select(async scene =>
         {
-            await throttle.WaitAsync(ct);
-            try
-            {
-                var ok = await RenderOneAsync(input, project, scene, referenceMediaId, referenceUrl, characterPrompt, job.Id, ct);
-                if (!ok) Interlocked.Increment(ref failures);
-            }
-            finally
-            {
-                throttle.Release();
-            }
+            var ok = await RenderOneAsync(input, project, scene, referenceMediaId, referenceUrl, characterPrompt, job.Id, ct);
+            if (!ok) Interlocked.Increment(ref failures);
         }).ToList();
 
         await Task.WhenAll(tasks);
@@ -143,6 +131,11 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
             return (null, null, null);
         }
     }
+
+    public static bool ShouldRenderScene(VideoProjectSceneDto scene, bool onlyMissingOrFailed)
+        => !onlyMissingOrFailed
+           || string.IsNullOrWhiteSpace(scene.StaticImageUrl)
+           || string.Equals(scene.Status, VideoSceneStatuses.Failed, StringComparison.OrdinalIgnoreCase);
 
     private async Task<bool> RenderOneAsync(
         SceneImageBatchInput input,
@@ -179,7 +172,17 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
 
             var startedAt = DateTime.UtcNow;
             var outcome = await _rateLimiter.ExecuteAsync(
-                renderAsync: attempt => _sceneImages.RenderSceneImageWithVertexAsync(context, attempt, ct),
+                renderAsync: async attempt =>
+                {
+                    if (attempt == 1)
+                    {
+                        await _repo.AddProjectEventAsync(input.ProjectId, "SCENE_IMAGE_RENDER_START", "info",
+                            $"Scene {scene.SceneIndex} bat dau render tren Google Cloud.",
+                            new { jobId, projectId = input.ProjectId, sceneId = scene.Id, sceneIndex = scene.SceneIndex, attempt, provider = "todox_image", startedAt = DateTime.UtcNow }, ct);
+                    }
+
+                    return await _sceneImages.RenderSceneImageWithVertexAsync(context, attempt, ct);
+                },
                 isQuotaError: r => !r.Success && r.QuotaError,
                 onQuotaWait: async (attempt, wait) =>
                 {
@@ -188,9 +191,15 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
                     await _repo.AddProjectEventAsync(input.ProjectId, "SCENE_IMAGE_QUOTA_WAIT", "warning",
                         $"Scene {scene.SceneIndex} chờ quota Google Cloud {wait.TotalSeconds:0}s (lần {attempt}).",
                         new { jobId, sceneId = scene.Id, sceneIndex = scene.SceneIndex, attempt, waitSeconds = wait.TotalSeconds, provider = "todox_image", model = "vertex_scene_image" }, ct);
-                    await _repo.AddProjectEventAsync(input.ProjectId, "SCENE_IMAGE_RETRY_START", "info",
+                    await _repo.AddProjectEventAsync(input.ProjectId, "SCENE_IMAGE_RETRY_SCHEDULED", "info",
                         $"Scene {scene.SceneIndex} thử lại render (lần {attempt + 1}).",
                         new { jobId, sceneId = scene.Id, sceneIndex = scene.SceneIndex, attempt = attempt + 1, provider = "todox_image", timestamp = DateTime.UtcNow }, ct);
+                },
+                onRetryStart: async attempt =>
+                {
+                    await _repo.AddProjectEventAsync(input.ProjectId, "SCENE_IMAGE_RETRY_START", "info",
+                        $"Scene {scene.SceneIndex} thu lai render (lan {attempt}).",
+                        new { jobId, sceneId = scene.Id, sceneIndex = scene.SceneIndex, attempt, provider = "todox_image", timestamp = DateTime.UtcNow }, ct);
                 },
                 context: $"project={input.ProjectId} scene={scene.SceneIndex}",
                 ct: ct);
