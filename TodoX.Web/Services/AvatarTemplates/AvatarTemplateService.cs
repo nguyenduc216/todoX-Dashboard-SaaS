@@ -553,18 +553,37 @@ public sealed class AvatarTemplateService : IAvatarTemplateService
         return value == long.MinValue ? long.MaxValue : Math.Abs(value);
     }
 
+    private static bool IsFailedStatus(string? status)
+        => string.Equals(status, "failed", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsSucceededStatus(string? status)
+        => string.Equals(status, "success", StringComparison.OrdinalIgnoreCase)
+           || string.Equals(status, "completed", StringComparison.OrdinalIgnoreCase);
+
+    // Chuẩn hóa kết quả render legacy sang hợp đồng UI. Engine trả Status="success",
+    // trong khi trước đây phương thức này chỉ chấp nhận "completed" khiến ảnh render thành công
+    // vẫn bị báo thất bại. Coi thành công khi có một ảnh không bị failed và có URL hợp lệ.
     private static PublicAvatarBuilderRenderResult ToPublicResult(ImageAICreativeRenderResult result)
     {
-        var image = result.Images.FirstOrDefault(x => x.Status != "failed") ?? result.Images.FirstOrDefault();
+        var image = result.Images.FirstOrDefault(x =>
+                        !IsFailedStatus(x.Status) && !string.IsNullOrWhiteSpace(x.Url))
+                    ?? result.Images.FirstOrDefault();
+
+        var succeeded =
+            IsSucceededStatus(result.Status) &&
+            image is not null &&
+            !string.IsNullOrWhiteSpace(image.Url) &&
+            !IsFailedStatus(image.Status);
+
         return new PublicAvatarBuilderRenderResult
         {
-            Ok = result.Status == "completed" && image?.Url is not null,
-            Status = result.Status,
+            Ok = succeeded,
+            Status = succeeded ? "completed" : result.Status,
             LogCode = result.LogCode,
             ImageUrl = image?.Url,
             MediaId = image?.MediaId,
             PromptUsed = image?.PromptUsed ?? result.GeneratedPrompt,
-            Error = result.Error ?? image?.Error,
+            Error = succeeded ? null : result.Error ?? image?.Error,
             Logs = result.Logs
         };
     }

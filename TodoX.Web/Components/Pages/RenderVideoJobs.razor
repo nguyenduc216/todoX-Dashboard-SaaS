@@ -5,6 +5,7 @@
 @inject NavigationManager Navigation
 @inject TodoX.Web.Services.VideoRender.VideoRenderRepository VideoRepo
 @inject TodoX.Web.Services.Render.IRenderJobService RenderJobs
+@inject TodoX.Web.Services.Render.ISceneImageRenderService SceneImages
 @inject TodoX.Web.Services.AiCharacters.IAiCharacterService Characters
 @inject TodoX.Web.Services.VideoRender.ITodoXVideoPromptParser PromptParser
 @inject TodoX.Web.Services.AiProviders.IAiImageRenderRouter ImageRenderRouter
@@ -60,32 +61,40 @@
                                         }
                                     </MudSelect>
                                     <MudDivider />
-                                    <div style="max-height:420px;overflow:auto;display:flex;flex-direction:column;gap:12px;">
-                                        @foreach (var character in _characters)
-                                        {
-                                            <MudPaper Class="@GetCharacterCardClass(character.Id)" Outlined="true" rounded="true" @onclick="@(() => OnCharacterChangedAsync(character.Id))" style="cursor:pointer">
-                                                <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Start">
-                                                    <div class="character-thumb-wrap">
-                                                        @if (!string.IsNullOrWhiteSpace(character.MasterImageUrl))
-                                                        {
-                                                            <img src="@character.MasterImageUrl" style="width:100%;height:100%;object-fit:cover;border-radius:10px;" @onclick="@(() => OpenCharacterPreview(character))" />
-                                                        }
-                                                        else
-                                                        {
-                                                            <MudPaper Class="pa-2 text-center" rounded="true" Outlined="true">No img</MudPaper>
-                                                        }
-                                                    </div>
-                                                    <MudStack Spacing="1">
-                                                        <MudText Typo="Typo.subtitle2">@character.CharacterName</MudText>
-                                                        @if (!string.IsNullOrWhiteSpace(character.Description))
-                                                        {
-                                                            <MudText Typo="Typo.caption">@character.Description</MudText>
-                                                        }
-                                                    </MudStack>
+                                    @{
+                                        var previewCharacter = ResolveCurrentCharacter();
+                                    }
+                                    @if (previewCharacter is null)
+                                    {
+                                        <MudPaper Class="pa-4 text-center" Outlined="true" rounded="true">
+                                            <MudText Typo="Typo.body2" Color="Color.Secondary">Chưa chọn nhân vật. Project sẽ được tạo không dùng nhân vật.</MudText>
+                                        </MudPaper>
+                                    }
+                                    else
+                                    {
+                                        <MudPaper Class="pa-3 selected-character-preview" Outlined="true" rounded="true">
+                                            <MudStack Row="true" Spacing="3" AlignItems="AlignItems.Start">
+                                                <div class="character-thumb-wrap">
+                                                    @if (!string.IsNullOrWhiteSpace(previewCharacter.MasterImageUrl))
+                                                    {
+                                                        <img src="@previewCharacter.MasterImageUrl" style="width:100%;height:100%;object-fit:cover;border-radius:10px;cursor:pointer" @onclick="@(() => OpenCharacterPreview(previewCharacter))" />
+                                                    }
+                                                    else
+                                                    {
+                                                        <MudPaper Class="pa-2 text-center" rounded="true" Outlined="true">No img</MudPaper>
+                                                    }
+                                                </div>
+                                                <MudStack Spacing="1">
+                                                    <MudText Typo="Typo.subtitle1">@previewCharacter.CharacterName</MudText>
+                                                    @if (!string.IsNullOrWhiteSpace(previewCharacter.Description))
+                                                    {
+                                                        <MudText Typo="Typo.body2" Color="Color.Secondary">@previewCharacter.Description</MudText>
+                                                    }
+                                                    <MudText Typo="Typo.caption" Color="Color.Secondary">Nhấn ảnh để xem lớn.</MudText>
                                                 </MudStack>
-                                            </MudPaper>
-                                        }
-                                    </div>
+                                            </MudStack>
+                                        </MudPaper>
+                                    }
                                 </MudStack>
                             </MudPaper>
                         </MudItem>
@@ -180,12 +189,14 @@
                 else
                 {
                     <MudStack Row="true" Spacing="2" Class="flex-wrap gap-2 mb-3">
-                        <MudButton Variant="Variant.Filled" Color="Color.Warning" OnClick="RenderAllSceneImagesAsync" Disabled="@_busy">Tạo ảnh tĩnh tất cả scene</MudButton>
+                        <MudButton Variant="Variant.Filled" Color="Color.Warning" OnClick="RenderMissingSceneImagesAsync" Disabled="@(_busy || _batchActive)">Tạo ảnh tĩnh scene còn thiếu</MudButton>
                         <MudButton Variant="Variant.Filled" Color="Color.Warning" OnClick="EnqueueRenderAllScenesAsync" Disabled="@_busy">Render all</MudButton>
                         <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="ReloadAsync" Disabled="@_busy">Refresh</MudButton>
+                        @if (_batchActive)
+                        {
+                            <MudChip T="string" Color="Color.Warning" Icon="@Icons.Material.Filled.HourglassBottom">Đang tạo ảnh tĩnh trên Google Cloud...</MudChip>
+                        }
                     </MudStack>
-
-                    <MudProgressLinear Indeterminate="true" Color="Color.Warning" Class="mb-3" Style="@(_busy ? "visibility:visible" : "visibility:hidden")" />
 
                     <MudTable Items="_project.Scenes.OrderBy(x => x.SceneIndex).ToList()" Dense="true" Hover="true" Bordered="true" Breakpoint="Breakpoint.Sm">
                         <HeaderContent>
@@ -200,16 +211,40 @@
                         <RowTemplate>
                             <MudTd DataLabel="STT">Scene @context.SceneIndex.ToString("00")</MudTd>
                             <MudTd DataLabel="Ảnh tĩnh">
+                                @{
+                                    var sceneState = ResolveSceneImageState(context);
+                                }
                                 <div class="scene-thumb-cell">
-                                    @if (!string.IsNullOrWhiteSpace(context.StaticImageUrl))
+                                    @if (sceneState == SceneImageVisualState.Ready && !string.IsNullOrWhiteSpace(context.StaticImageUrl))
                                     {
                                         <img src="@SceneImageUrl(context)" class="scene-thumb" @onclick="@(() => OpenScenePreview(context))" />
+                                    }
+                                    else if (sceneState is SceneImageVisualState.Rendering or SceneImageVisualState.Queued or SceneImageVisualState.Retrying)
+                                    {
+                                        <div class="scene-image-frame @SceneStateCss(sceneState)">
+                                            @if (!string.IsNullOrWhiteSpace(context.StaticImageUrl))
+                                            {
+                                                <img src="@SceneImageUrl(context)" class="scene-thumb scene-image-dim" />
+                                            }
+                                            <div class="scene-image-shimmer"></div>
+                                            <span class="scene-image-label">@SceneStateLabel(sceneState)</span>
+                                        </div>
+                                    }
+                                    else if (sceneState == SceneImageVisualState.Failed)
+                                    {
+                                        <div class="scene-image-frame scene-image-failed">
+                                            <span class="scene-image-label">Lỗi render</span>
+                                        </div>
                                     }
                                     else
                                     {
                                         <div class="scene-thumb-placeholder">Chưa render</div>
                                     }
                                 </div>
+                                @if (_sceneRerenderErrors.TryGetValue(context.Id, out var sceneErr) && !string.IsNullOrWhiteSpace(sceneErr))
+                                {
+                                    <MudText Typo="Typo.caption" Color="Color.Error">@sceneErr</MudText>
+                                }
                             </MudTd>
                             <MudTd DataLabel="Nội dung scene">
                                 <MudText Typo="Typo.subtitle2">@context.Title</MudText>
@@ -235,14 +270,14 @@
                                 <MudStack Spacing="1">
                                     <MudStack Row="true" Spacing="0" Class="flex-wrap gap-1 scene-action-icons">
                                         <MudTooltip Text="Xem prompt"><MudIconButton Icon="@Icons.Material.Filled.SavedSearch" Size="Size.Small" Color="Color.Primary" OnClick="@(() => OpenScenePrompt(context, ScenePromptKind.Image))" /></MudTooltip>
-                                        <MudTooltip Text="Render ảnh"><MudIconButton Icon="@Icons.Material.Filled.Image" Size="Size.Small" Color="Color.Warning" OnClick="@(() => RenderSceneImageAsync(context))" Disabled="@_busy" /></MudTooltip>
+                                        <MudTooltip Text="Render lại ảnh (OpenRouter)"><MudIconButton Icon="@Icons.Material.Filled.Image" Size="Size.Small" Color="Color.Warning" OnClick="@(() => RerenderSceneImageAsync(context))" Disabled="@(IsSceneRendering(context))" /></MudTooltip>
                                         <MudTooltip Text="Lưu scene"><MudIconButton Icon="@Icons.Material.Filled.Save" Size="Size.Small" Color="Color.Success" OnClick="@(() => SaveSceneAsync(context))" Disabled="@_busy" /></MudTooltip>
                                         <MudTooltip Text="Lên"><MudIconButton Icon="@Icons.Material.Filled.KeyboardArrowUp" Size="Size.Small" Color="Color.Default" OnClick="@(() => MoveSceneUpAsync(context))" Disabled="@(_busy || context.SceneIndex <= 1)" /></MudTooltip>
                                         <MudTooltip Text="Xuống"><MudIconButton Icon="@Icons.Material.Filled.KeyboardArrowDown" Size="Size.Small" Color="Color.Default" OnClick="@(() => MoveSceneDownAsync(context))" Disabled="@(_busy || _project is null || context.SceneIndex >= _project.Scenes.Count)" /></MudTooltip>
                                         <MudTooltip Text="Xóa"><MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="@(() => DeleteSceneAsync(context))" Disabled="@_busy" /></MudTooltip>
                                     </MudStack>
                                     <MudStack Row="true" Spacing="1" Class="flex-wrap gap-1">
-                                        <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning" OnClick="@(() => RenderSceneImageAsync(context))" Disabled="@_busy">@(string.IsNullOrWhiteSpace(context.StaticImageUrl) ? "Tạo ảnh" : "Render lại ảnh")</MudButton>
+                                        <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning" OnClick="@(() => RerenderSceneImageAsync(context))" Disabled="@(IsSceneRendering(context))">@(string.IsNullOrWhiteSpace(context.StaticImageUrl) ? "Tạo ảnh (OpenRouter)" : "Render lại ảnh")</MudButton>
                                         <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(() => SaveSceneAsync(context))" Disabled="@_busy">Lưu</MudButton>
                                     </MudStack>
                                 </MudStack>
@@ -360,6 +395,15 @@
     private readonly List<DebugEntry> _debugEntries = new();
     private int _debugStep;
 
+    // Scenes currently being re-rendered individually (OpenRouter). Keyed by scene id.
+    private readonly HashSet<long> _sceneRerendering = new();
+    // Per-scene re-render error messages (kept so a failed rerender does not wipe the old image).
+    private readonly Dictionary<long, string> _sceneRerenderErrors = new();
+    // True while a background Google Cloud batch job for this project is queued/rendering.
+    private bool _batchActive;
+
+    private enum SceneImageVisualState { None, Queued, Rendering, Retrying, Ready, Failed }
+
     private bool CanMerge => _project is not null && _project.Scenes.Count > 0 && _project.Scenes.All(x => x.Status == VideoSceneStatuses.VideoReady);
 
     private string BuildLogCode() => _projectId is null ? string.Empty : $"video-{_projectId.Value}";
@@ -419,7 +463,10 @@
             _projectId = result.Id;
             Logger.LogInformation("VIDEO_RENDER_CREATE_PROJECT_OK projectId={ProjectId} sceneCount={SceneCount} status={Status}", result.Id, result.SceneCount, result.Status);
             await ReloadAsync();
-            Snackbar.Add("Đã tạo project video.", Severity.Success);
+            // Tự động enqueue batch render ảnh tĩnh (Google Cloud) ngay sau khi scene đã lưu.
+            // Không chờ ảnh render xong; UI chuyển sang tab Scene và hiển thị shimmer từng scene.
+            await EnqueueBulkSceneImageRenderAsync(onlyMissingOrFailed: false);
+            Snackbar.Add("Đã tạo project và bắt đầu render ảnh tĩnh scene.", Severity.Success);
             _tabIndex = 1;
             await LogProjectEvent("PROJECT_CREATED", "info", "Đã tạo project và sinh scene plan mock.", new { result.Id, result.SceneCount, result.Status });
             await AddDebugAsync("ui_done", "Hoàn tất", "SUCCESS", $"Tạo project thành công: {result.Id}", $"SceneCount={result.SceneCount}, Status={result.Status}");
@@ -720,7 +767,7 @@
         {
             ["Text"] = prompt,
             ["Title"] = title,
-            ["OnRenderAgain"] = EventCallback.Factory.Create(this, () => RenderSceneImageAsync(scene))
+            ["OnRenderAgain"] = EventCallback.Factory.Create(this, () => RerenderSceneImageAsync(scene))
         };
         var options = new DialogOptions { CloseButton = true, FullWidth = true, MaxWidth = MaxWidth.Medium };
         _ = DialogService.ShowAsync<Components.Dialogs.TextViewerDialog>(title, parameters, options);
@@ -742,6 +789,11 @@
         try
         {
             _jobs = (await RenderJobs.ListByLogCodeAsync(logCode)).ToList();
+            // Recover batch-active state after a refresh/navigation: the server job keeps running even
+            // if this circuit was recreated, so re-derive the shimmer state from the live job list.
+            _batchActive = _jobs.Any(j =>
+                string.Equals(j.JobType, TodoX.Web.Services.Render.SceneImageBatchRenderHandler.JobTypeName, StringComparison.OrdinalIgnoreCase)
+                && j.Status is RenderJobStatuses.Queued or RenderJobStatuses.Preparing or RenderJobStatuses.Rendering or RenderJobStatuses.PostProcessing);
         }
         catch (Exception ex)
         {
@@ -771,9 +823,19 @@
             {
                 if (!await _pollTimer.WaitForNextTickAsync(ct)) break;
                 if (_project is null) continue;
-                if (_project.Status is VideoProjectStatuses.Rendering or VideoProjectStatuses.Merging or VideoProjectStatuses.SceneReady or VideoProjectStatuses.ReadyToMerge)
+
+                // Keep polling while a Google Cloud batch is active, scenes are still pending an image,
+                // or the video pipeline is mid-flight. Stop once everything has settled to avoid churn.
+                var scenesPending = _batchActive || HasPendingSceneImages();
+                var videoActive = _project.Status is VideoProjectStatuses.Rendering or VideoProjectStatuses.Merging or VideoProjectStatuses.SceneReady or VideoProjectStatuses.ReadyToMerge;
+                if (scenesPending || videoActive)
                 {
                     await InvokeAsync(ReloadAsync);
+                    // Batch is done when no scene is still waiting for its first image.
+                    if (_batchActive && !HasPendingSceneImages())
+                    {
+                        _batchActive = false;
+                    }
                     await InvokeAsync(StateHasChanged);
                 }
             }
@@ -862,160 +924,187 @@
         };
     }
 
-    private async Task RenderSceneImageAsync(VideoProjectSceneDto scene)
+    // ------------------------------------------------------------------
+    // Bulk scene image render — Google Cloud (Vertex), background job.
+    // ------------------------------------------------------------------
+    private async Task EnqueueBulkSceneImageRenderAsync(bool onlyMissingOrFailed)
     {
         if (_project is null || AuthState.CurrentUser is null) return;
-
-        _busy = true;
         var character = ResolveCurrentCharacter();
+        var input = new TodoX.Web.Services.Render.SceneImageBatchInput
+        {
+            ProjectId = _project.Id,
+            CharacterId = character?.Id ?? _project.CharacterId,
+            UserId = AuthState.CurrentUser.UserId,
+            CustomerId = AuthState.CurrentUser.CustomerId,
+            CreatedBy = AuthState.CurrentUser.Email ?? AuthState.CurrentUser.UserId.ToString(),
+            OnlyMissingOrFailed = onlyMissingOrFailed
+        };
+
+        var job = await RenderJobs.EnqueueAsync(new RenderJobCreateModel
+        {
+            JobType = TodoX.Web.Services.Render.SceneImageBatchRenderHandler.JobTypeName,
+            UserId = AuthState.CurrentUser.UserId,
+            CustomerId = AuthState.CurrentUser.CustomerId,
+            Input = input,
+            Prompt = new { projectId = _project.Id },
+            LogCode = BuildLogCode(),
+            ProviderCode = "todox_image",
+            ModelCode = "vertex_scene_image",
+            MaxAttempts = 1,
+            PointCostEstimate = 0,
+            PointStatus = RenderPointStatuses.NotRequired
+        });
+
+        _batchActive = true;
+        Logger.LogInformation("VIDEO_RENDER_SCENE_IMAGE_BATCH_ENQUEUED projectId={ProjectId} jobId={JobId} onlyMissing={OnlyMissing} characterId={CharacterId}",
+            _project.Id, job.Id, onlyMissingOrFailed, input.CharacterId);
+        await LogProjectEvent("SCENE_IMAGE_BATCH_ENQUEUED", "info", "Đã enqueue batch render ảnh tĩnh Google Cloud.",
+            new { job.Id, onlyMissingOrFailed, input.CharacterId });
+        await StartPolling();
+    }
+
+    private async Task RenderMissingSceneImagesAsync()
+    {
+        if (_project is null || AuthState.CurrentUser is null) return;
+        await EnqueueBulkSceneImageRenderAsync(onlyMissingOrFailed: true);
+        Snackbar.Add("Đã enqueue render ảnh cho các scene còn thiếu/lỗi.", Severity.Info);
+    }
+
+    // ------------------------------------------------------------------
+    // Per-scene re-render — OpenRouter only (no Google Cloud fallback).
+    // ------------------------------------------------------------------
+    private async Task RerenderSceneImageAsync(VideoProjectSceneDto scene)
+    {
+        if (_project is null || AuthState.CurrentUser is null) return;
+        if (!_sceneRerendering.Add(scene.Id)) return; // already running for this scene
+
+        _sceneRerenderErrors.Remove(scene.Id);
+        var character = ResolveCurrentCharacter();
+        var previousImageUrl = scene.StaticImageUrl;
+        var previousImagePath = scene.StaticImagePath;
+        var previousStatus = scene.Status;
+        await InvokeAsync(StateHasChanged);
+
         try
         {
-            var prompt = BuildSceneRenderPrompt(scene, character);
-            var referenceImageUrls = !string.IsNullOrWhiteSpace(character?.MasterImageUrl)
-                ? new[] { character!.MasterImageUrl! }
-                : Array.Empty<string>();
+            var prompt = TodoX.Web.Services.Render.SceneImagePromptBuilder.Build(scene, character?.NormalizedPrompt);
+            await LogProjectEvent("SCENE_IMAGE_RERENDER_START", "info", $"Render lại ảnh scene {scene.SceneIndex} qua OpenRouter.",
+                new { projectId = _project.Id, sceneId = scene.Id, sceneIndex = scene.SceneIndex, characterId = character?.Id });
 
-            await AddDebugAsync("scene_image_render_start", $"Render ảnh scene {scene.SceneIndex}", "INFO", $"Bắt đầu render ảnh cho scene {scene.SceneIndex}.");
-            await LogProjectEvent("SCENE_IMAGE_RENDER_START", "info", $"Bắt đầu render ảnh scene {scene.SceneIndex}.", new { projectId = _project.Id, sceneId = scene.Id, sceneIndex = scene.SceneIndex, characterId = character?.Id, referenceCount = referenceImageUrls.Length });
-
-            var render = await ImageRenderRouter.RenderImageAsync(new AiImageRenderRequest
+            var outcome = await SceneImages.RerenderSceneImageWithOpenRouterAsync(new TodoX.Web.Services.Render.SceneImageRenderContext
             {
-                CustomerId = null,
-                UserId = AuthState.CurrentUser.UserId,
-                FeatureCode = "render_job_scene_image",
-                CapabilityCode = "avatar_generation",
-                FromUser = false,
+                ProjectId = _project.Id,
+                SceneId = scene.Id,
+                SceneIndex = scene.SceneIndex,
                 Prompt = prompt,
-                ReferenceImageUrls = referenceImageUrls,
-                AspectRatio = "9:16",
-                OutputFormat = "png",
-                Quality = "high",
-                Resolution = "4K",
-                FileCategory = "video_scene_image",
-                Metadata = new
-                {
-                    projectId = _project.Id,
-                    sceneId = scene.Id,
-                    sceneIndex = scene.SceneIndex,
-                    characterId = character?.Id,
-                    
-                },
-                CreatedBy = AuthState.CurrentUser.Email ?? AuthState.CurrentUser.UserId.ToString()
+                CharacterId = character?.Id,
+                UserId = AuthState.CurrentUser.UserId,
+                CustomerId = AuthState.CurrentUser.CustomerId,
+                CreatedBy = AuthState.CurrentUser.Email ?? AuthState.CurrentUser.UserId.ToString(),
+                CharacterReferenceUrl = character?.MasterImageUrl
             });
 
-            if (!render.Success)
+            if (!outcome.Success || string.IsNullOrWhiteSpace(outcome.ImageUrl))
             {
-                await VideoRepo.UpdateSceneAsync(scene.Id, VideoSceneStatuses.Failed, errorMessage: render.ErrorMessage, title: scene.Title, scenePrompt: scene.ScenePrompt, imagePrompt: scene.ImagePrompt, videoPrompt: scene.VideoPrompt);
-                await LogProjectEvent("SCENE_IMAGE_RENDER_FAILED", "error", $"Render ảnh scene {scene.SceneIndex} thất bại.", new { projectId = _project.Id, sceneId = scene.Id, sceneIndex = scene.SceneIndex, error = render.ErrorMessage, characterId = character?.Id, render.ProviderCode, render.ModelName });
-                await AddDebugAsync("scene_image_render_failed", $"Render ảnh scene {scene.SceneIndex} lỗi", "FAILED", render.ErrorMessage ?? "Render không thành công");
+                // Giữ lại ảnh cũ nếu có; chỉ hiển thị lỗi riêng cho scene.
+                _sceneRerenderErrors[scene.Id] = outcome.Error ?? "Render lại ảnh scene thất bại.";
+                await LogProjectEvent("SCENE_IMAGE_RERENDER_FAILED", "error", $"Render lại ảnh scene {scene.SceneIndex} thất bại.",
+                    new { projectId = _project.Id, sceneId = scene.Id, sceneIndex = scene.SceneIndex, error = outcome.Error, providerCode = outcome.ProviderCode, providerCapabilityId = outcome.ProviderCapabilityId, modelName = outcome.ModelName });
+                Snackbar.Add(_sceneRerenderErrors[scene.Id], Severity.Error);
                 return;
             }
 
-            var saved = await PersistRenderedSceneImageAsync(scene, render);
-            await VideoRepo.UpdateSceneAsync(scene.Id, VideoSceneStatuses.ImageReady, imageUrl: saved.ImageUrl, imagePath: saved.ImagePath, errorMessage: null, title: scene.Title, scenePrompt: scene.ScenePrompt, imagePrompt: scene.ImagePrompt, videoPrompt: scene.VideoPrompt);
+            await VideoRepo.UpdateSceneAsync(scene.Id, VideoSceneStatuses.ImageReady,
+                imageUrl: outcome.ImageUrl, imagePath: outcome.ObjectKey, errorMessage: null,
+                title: scene.Title, scenePrompt: scene.ScenePrompt, imagePrompt: scene.ImagePrompt, videoPrompt: scene.VideoPrompt);
             if (_project.Scenes.FirstOrDefault(x => x.Id == scene.Id) is { } current)
             {
-                current.StaticImageUrl = saved.ImageUrl;
-                current.StaticImagePath = saved.ImagePath;
+                current.StaticImageUrl = outcome.ImageUrl;
+                current.StaticImagePath = outcome.ObjectKey;
                 current.Status = VideoSceneStatuses.ImageReady;
                 current.ErrorMessage = null;
                 current.UpdatedAt = DateTime.UtcNow;
             }
 
-            await LogProjectEvent("SCENE_IMAGE_READY", "info", $"Scene {scene.SceneIndex} image ready.", new { projectId = _project.Id, sceneId = scene.Id, sceneIndex = scene.SceneIndex, characterId = character?.Id, imageUrl = saved.ImageUrl, providerCode = render.ProviderCode, modelName = render.ModelName });
-            await AddDebugAsync("scene_image_rendered", $"Render ảnh scene {scene.SceneIndex} thành công", "SUCCESS", $"ImageUrl={saved.ImageUrl}");
+            await LogProjectEvent("SCENE_IMAGE_RERENDER_DONE", "info", $"Scene {scene.SceneIndex} đã render lại ảnh.",
+                new { projectId = _project.Id, sceneId = scene.Id, sceneIndex = scene.SceneIndex, characterId = character?.Id, providerCode = outcome.ProviderCode, providerCapabilityId = outcome.ProviderCapabilityId, modelName = outcome.ModelName, imageUrl = outcome.ImageUrl });
+            Snackbar.Add($"Đã render lại ảnh scene {scene.SceneIndex}.", Severity.Success);
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "VIDEO_RENDER_SCENE_IMAGE_FAILED projectId={ProjectId} sceneId={SceneId}", _project.Id, scene.Id);
-            await VideoRepo.UpdateSceneAsync(scene.Id, VideoSceneStatuses.Failed, errorMessage: ex.Message, title: scene.Title, scenePrompt: scene.ScenePrompt, imagePrompt: scene.ImagePrompt, videoPrompt: scene.VideoPrompt);
-            await LogProjectEvent("SCENE_IMAGE_RENDER_FAILED", "error", $"Render ảnh scene {scene.SceneIndex} thất bại.", new { projectId = _project.Id, sceneId = scene.Id, sceneIndex = scene.SceneIndex, error = ex.Message, characterId = character?.Id });
-            await AddDebugAsync("scene_image_render_failed", $"Render ảnh scene {scene.SceneIndex} lỗi", "FAILED", ex.Message, ex.ToString());
+            // Không đổi ảnh cũ khi lỗi; chỉ ghi nhận lỗi riêng của scene.
+            _sceneRerenderErrors[scene.Id] = ex.Message;
+            scene.StaticImageUrl = previousImageUrl;
+            scene.StaticImagePath = previousImagePath;
+            scene.Status = previousStatus;
+            Logger.LogError(ex, "VIDEO_RENDER_SCENE_RERENDER_FAILED projectId={ProjectId} sceneId={SceneId}", _project.Id, scene.Id);
+            await LogProjectEvent("SCENE_IMAGE_RERENDER_FAILED", "error", $"Render lại ảnh scene {scene.SceneIndex} lỗi.",
+                new { projectId = _project.Id, sceneId = scene.Id, sceneIndex = scene.SceneIndex, error = ex.Message });
+            Snackbar.Add(ex.Message, Severity.Error);
         }
         finally
         {
-            _busy = false;
-            await ReloadAsync();
+            _sceneRerendering.Remove(scene.Id);
+            await InvokeAsync(StateHasChanged);
         }
     }
 
-    private async Task RenderAllSceneImagesAsync()
+    private bool IsSceneRendering(VideoProjectSceneDto scene) => _sceneRerendering.Contains(scene.Id);
+
+    // A scene is "pending an image" when it has no successful static image yet and is not in a terminal
+    // failed state — i.e. the background batch is expected to still produce it.
+    private bool HasPendingSceneImages()
+        => _project is not null && _project.Scenes.Any(s =>
+               string.IsNullOrWhiteSpace(s.StaticImageUrl)
+               && !string.Equals(s.Status, VideoSceneStatuses.Failed, StringComparison.OrdinalIgnoreCase));
+
+    private SceneImageVisualState ResolveSceneImageState(VideoProjectSceneDto scene)
     {
-        if (_project is null) return;
-        foreach (var scene in _project.Scenes.OrderBy(x => x.SceneIndex))
+        if (_sceneRerendering.Contains(scene.Id))
         {
-            await RenderSceneImageAsync(scene);
+            return SceneImageVisualState.Rendering;
         }
+
+        if (!string.IsNullOrWhiteSpace(scene.StaticImageUrl) && scene.Status != VideoSceneStatuses.Failed)
+        {
+            return SceneImageVisualState.Ready;
+        }
+
+        if (string.Equals(scene.Status, VideoSceneStatuses.Failed, StringComparison.OrdinalIgnoreCase))
+        {
+            return SceneImageVisualState.Failed;
+        }
+
+        // While a background batch is active, draft scenes without an image are queued/rendering.
+        if (_batchActive && string.IsNullOrWhiteSpace(scene.StaticImageUrl))
+        {
+            return SceneImageVisualState.Queued;
+        }
+
+        return SceneImageVisualState.None;
     }
+
+    private static string SceneStateCss(SceneImageVisualState state) => state switch
+    {
+        SceneImageVisualState.Rendering => "scene-image-rendering",
+        SceneImageVisualState.Queued => "scene-image-queued",
+        SceneImageVisualState.Retrying => "scene-image-retrying",
+        SceneImageVisualState.Failed => "scene-image-failed",
+        _ => string.Empty
+    };
+
+    private static string SceneStateLabel(SceneImageVisualState state) => state switch
+    {
+        SceneImageVisualState.Rendering => "Đang tạo ảnh...",
+        SceneImageVisualState.Queued => "Đang chờ",
+        SceneImageVisualState.Retrying => "Đang chờ quota...",
+        SceneImageVisualState.Failed => "Lỗi render",
+        _ => string.Empty
+    };
 
     private ActiveCharacterDto? ResolveCurrentCharacter()
         => _selectedCharacter ?? (_project?.CharacterId is long characterId ? _characters.FirstOrDefault(x => x.Id == characterId) : null);
-    private async Task<(string ImageUrl, string? ImagePath)> PersistRenderedSceneImageAsync(VideoProjectSceneDto scene, AiImageRenderResult result)
-    {
-        // ImageAICreativeRender/TodoXImageProviderService trả về URL đã lưu
-        // trong media storage. Không cần ghi lại file local.
-        if (!string.IsNullOrWhiteSpace(result.ImageUrl))
-        {
-            return (result.ImageUrl, result.ObjectKey);
-        }
-
-        // Một số provider khác có thể trả bytes, vẫn giữ fallback này.
-        if (result.ImageBytes is { Length: > 0 })
-        {
-            var projectFolder = Path.Combine(
-                Directory.GetCurrentDirectory(),
-                "wwwroot",
-                "uploads",
-                "video-render",
-                _project!.Id.ToString(),
-                $"scene_{scene.SceneIndex:00}");
-
-            Directory.CreateDirectory(projectFolder);
-
-            var extension =
-                result.MimeType?.Contains(
-                    "jpeg",
-                    StringComparison.OrdinalIgnoreCase) == true
-                    ? ".jpg"
-                    : ".png";
-
-            var fileName =
-                $"scene_{scene.SceneIndex:00}_{DateTime.UtcNow:yyyyMMddHHmmss}{extension}";
-
-            var imagePath = Path.Combine(projectFolder, fileName);
-
-            await File.WriteAllBytesAsync(
-                imagePath,
-                result.ImageBytes);
-
-            var relative = Path.GetRelativePath(
-                    Path.Combine(
-                        Directory.GetCurrentDirectory(),
-                        "wwwroot"),
-                    imagePath)
-                .Replace(Path.DirectorySeparatorChar, '/');
-
-            return ($"/{relative}", imagePath);
-        }
-
-        throw new InvalidOperationException(
-            $"AI render thành công nhưng không trả về ImageUrl hoặc ImageBytes. " +
-            $"Provider={result.ProviderCode}, " +
-            $"Model={result.ModelName}, " +
-            $"ObjectKey={result.ObjectKey}, " +
-            $"Error={result.ErrorMessage}");
-    }
-
-    private static string BuildSceneRenderPrompt(VideoProjectSceneDto scene, ActiveCharacterDto? character)
-    {
-        var basePrompt = string.IsNullOrWhiteSpace(scene.ImagePrompt) ? scene.ScenePrompt : scene.ImagePrompt;
-        if (character is null || string.IsNullOrWhiteSpace(character.NormalizedPrompt))
-        {
-            return basePrompt;
-        }
-
-        return $"Render a static image for this scene. Scene description: {basePrompt}. Keep the character identity consistent with this character description: {character.NormalizedPrompt}. Maintain the same character across all scenes: face, hairstyle, outfit, body proportions, and visual identity must stay consistent with the selected character and previously rendered scenes.";
-    }
 
     private async Task MoveSceneUpAsync(VideoProjectSceneDto scene)
     {

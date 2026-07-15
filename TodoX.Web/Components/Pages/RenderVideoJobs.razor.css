@@ -1,0 +1,109 @@
+/* Per-scene static image render states for /render-job.
+   Animation is confined to the individual scene image frame — the table itself never flashes,
+   and the frame keeps a fixed size so rows do not jump while rendering. */
+
+.scene-image-frame {
+    position: relative;
+    width: 96px;
+    height: 170px; /* 9:16 aspect for the scene thumb */
+    border-radius: 10px;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--mud-palette-background-grey, #f2f2f5);
+    border: 1px solid var(--mud-palette-lines-default, #d9d9e3);
+}
+
+.scene-image-frame .scene-thumb {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.scene-image-dim {
+    opacity: 0.35;
+    filter: saturate(0.6);
+}
+
+.scene-image-label {
+    position: relative;
+    z-index: 2;
+    font-size: 11px;
+    font-weight: 600;
+    text-align: center;
+    padding: 2px 6px;
+    border-radius: 6px;
+    color: #1f1f1f;
+    background: rgba(255, 255, 255, 0.78);
+    pointer-events: none;
+}
+
+/* Shimmer sweep used by queued / rendering / retrying states. */
+.scene-image-shimmer {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    background: linear-gradient(
+        100deg,
+        rgba(255, 255, 255, 0) 20%,
+        rgba(255, 255, 255, 0.55) 50%,
+        rgba(255, 255, 255, 0) 80%
+    );
+    background-size: 200% 100%;
+    animation: scene-shimmer-sweep 1.35s ease-in-out infinite;
+}
+
+@keyframes scene-shimmer-sweep {
+    0% { background-position: 180% 0; }
+    100% { background-position: -80% 0; }
+}
+
+/* Rendering: warm active tint. */
+.scene-image-rendering {
+    border-color: var(--mud-palette-warning, #f0a000);
+    box-shadow: inset 0 0 0 1px var(--mud-palette-warning, #f0a000);
+}
+
+/* Queued: neutral, calmer shimmer. */
+.scene-image-queued .scene-image-shimmer {
+    animation-duration: 2s;
+    opacity: 0.7;
+}
+
+/* Retrying (quota wait): amber pulse, slower so it reads as "waiting". */
+.scene-image-retrying {
+    border-color: var(--mud-palette-warning, #f0a000);
+}
+
+.scene-image-retrying .scene-image-shimmer {
+    background: linear-gradient(
+        100deg,
+        rgba(240, 160, 0, 0) 20%,
+        rgba(240, 160, 0, 0.35) 50%,
+        rgba(240, 160, 0, 0) 80%
+    );
+    background-size: 200% 100%;
+    animation-duration: 2.4s;
+}
+
+/* Failed: static red frame, no animation. */
+.scene-image-failed {
+    border-color: var(--mud-palette-error, #d32f2f);
+    background: rgba(211, 47, 47, 0.08);
+}
+
+.scene-image-failed .scene-image-label {
+    color: var(--mud-palette-error, #d32f2f);
+    background: rgba(255, 255, 255, 0.85);
+}
+
+/* Respect reduced-motion preferences. */
+@media (prefers-reduced-motion: reduce) {
+    .scene-image-shimmer {
+        animation: none;
+        opacity: 0.5;
+    }
+}

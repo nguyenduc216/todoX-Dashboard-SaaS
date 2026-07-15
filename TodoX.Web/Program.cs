@@ -83,6 +83,9 @@ builder.Services.AddSingleton<TodoX.Web.Services.VideoRender.ITodoXVideoPromptPa
 builder.Services.AddScoped<TodoX.Web.Services.VideoRender.VideoRenderRepository>();
 builder.Services.AddScoped<IRenderJobHandler, TodoX.Web.Services.VideoRender.VideoRenderMockHandler>();
 builder.Services.AddScoped<IRenderJobHandler, TodoX.Web.Services.VideoRender.VideoRenderMergeHandler>();
+builder.Services.AddScoped<IRenderJobHandler, TodoX.Web.Services.Render.SceneImageBatchRenderHandler>();
+builder.Services.AddScoped<TodoX.Web.Services.Render.ISceneImageRenderService, TodoX.Web.Services.Render.SceneImageRenderService>();
+builder.Services.AddSingleton<TodoX.Web.Services.Render.GoogleVertexRateLimiter>();
 builder.Services.AddScoped<AccountService>();
 builder.Services.AddScoped<AuthStateService>();
 builder.Services.AddScoped<StartupSeedFixer>();

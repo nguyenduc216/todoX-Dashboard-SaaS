@@ -27,3 +27,9 @@ TodoX.Web/keys/todox-vertex-sa.json
 TodoX.Web/keys/todox-vertex-sa.json
 TodoX.Web/keys/todox-vertex-sa.json
 TodoX.Web/keys/todox-vertex-sa.json
+TodoX.Web.Tests/TodoX.Web.Tests.csproj
+TodoX.Web.Tests/SceneImageRenderServiceTests.cs
+TodoX.Web.Tests/SceneImagePromptBuilderTests.cs
+TodoX.Web.Tests/GoogleVertexRateLimiterTests.cs
+TodoX.Web.Tests/Fakes.cs
+TodoX.Web/keys/todox-vertex-sa.json

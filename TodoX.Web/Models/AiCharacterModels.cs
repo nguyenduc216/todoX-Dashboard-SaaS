@@ -1,4 +1,4 @@
-namespace TodoX.Web.Models;
+﻿namespace TodoX.Web.Models;
 
 public sealed class AiCharacter
 {
@@ -192,4 +192,5 @@ public sealed class ActiveCharacterDto
     public string? MasterImageUrl { get; set; }
     public string? MasterImageObjectKey { get; set; }
     public string NormalizedPrompt { get; set; } = string.Empty;
+    public string Status { get; set; } = "active";
 }
