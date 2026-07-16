@@ -1107,24 +1107,40 @@
 
     private async Task ToggleImageHistoryAsync(VideoProjectSceneDto scene)
     {
-        _imageHistorySceneId = _imageHistorySceneId == scene.Id ? null : scene.Id;
-        if (_imageHistorySceneId is not null)
+        if (_imageHistorySceneId == scene.Id)
         {
-            if (AuthState.CurrentUser is null) return;
-            _imageVersions[scene.Id] = await SceneVersions.ListImageVersionsAsync(scene.Id, AuthState.CurrentUser, 0, 20);
-            Snackbar.Add($"Đã tải {_imageVersions[scene.Id].Count} phiên bản ảnh cho scene {scene.SceneIndex}.", Severity.Info);
+            _imageHistorySceneId = null;
+            return;
         }
+
+        _imageHistorySceneId = scene.Id;
+        await LoadImageHistoryAsync(scene);
+    }
+
+    private async Task LoadImageHistoryAsync(VideoProjectSceneDto scene)
+    {
+        if (AuthState.CurrentUser is null) return;
+        _imageVersions[scene.Id] = await SceneVersions.ListImageVersionsAsync(scene.Id, AuthState.CurrentUser, 0, 20);
+        Snackbar.Add($"Đã tải {_imageVersions[scene.Id].Count} phiên bản ảnh cho scene {scene.SceneIndex}.", Severity.Info);
     }
 
     private async Task ToggleVideoHistoryAsync(VideoProjectSceneDto scene)
     {
-        _videoHistorySceneId = _videoHistorySceneId == scene.Id ? null : scene.Id;
-        if (_videoHistorySceneId is not null)
+        if (_videoHistorySceneId == scene.Id)
         {
-            if (AuthState.CurrentUser is null) return;
-            _videoVersions[scene.Id] = await SceneVersions.ListSceneVideoVersionsAsync(scene.Id, AuthState.CurrentUser, 0, 20);
-            Snackbar.Add($"Đã tải {_videoVersions[scene.Id].Count} phiên bản video cho scene {scene.SceneIndex}.", Severity.Info);
+            _videoHistorySceneId = null;
+            return;
         }
+
+        _videoHistorySceneId = scene.Id;
+        await LoadVideoHistoryAsync(scene);
+    }
+
+    private async Task LoadVideoHistoryAsync(VideoProjectSceneDto scene)
+    {
+        if (AuthState.CurrentUser is null) return;
+        _videoVersions[scene.Id] = await SceneVersions.ListSceneVideoVersionsAsync(scene.Id, AuthState.CurrentUser, 0, 20);
+        Snackbar.Add($"Đã tải {_videoVersions[scene.Id].Count} phiên bản video cho scene {scene.SceneIndex}.", Severity.Info);
     }
 
     private async Task SelectImageVersionAsync(VideoProjectSceneDto scene, TodoX.Web.Services.VideoRender.SceneImageVersionDto version)
@@ -1134,6 +1150,10 @@
         await LogProjectEvent("SCENE_IMAGE_VERSION_SELECTED_UI", "info", $"Đã chọn phiên bản ảnh {version.VersionNumber} cho scene {scene.SceneIndex}.", new { sceneId = scene.Id, versionId = version.Id });
         Snackbar.Add($"Đã chọn phiên bản ảnh {version.VersionNumber}.", Severity.Success);
         await ReloadAsync();
+        if (_imageHistorySceneId == scene.Id)
+        {
+            await LoadImageHistoryAsync(scene);
+        }
     }
 
     private async Task SelectVideoVersionAsync(VideoProjectSceneDto scene, TodoX.Web.Services.VideoRender.SceneVideoVersionDto version)
@@ -1143,17 +1163,28 @@
         await LogProjectEvent("SCENE_VIDEO_VERSION_SELECTED_UI", "info", $"Đã chọn phiên bản video {version.VersionNumber} cho scene {scene.SceneIndex}.", new { sceneId = scene.Id, versionId = version.Id });
         Snackbar.Add($"Đã chọn phiên bản video {version.VersionNumber}.", Severity.Success);
         await ReloadAsync();
+        if (_videoHistorySceneId == scene.Id)
+        {
+            await LoadVideoHistoryAsync(scene);
+        }
     }
 
     private async Task ToggleFinalHistoryAsync()
     {
         if (_project is null || AuthState.CurrentUser is null) return;
-        _showFinalHistory = !_showFinalHistory;
-        if (!_showFinalHistory)
+        if (_showFinalHistory)
         {
+            _showFinalHistory = false;
             return;
         }
 
+        _showFinalHistory = true;
+        await LoadFinalHistoryAsync();
+    }
+
+    private async Task LoadFinalHistoryAsync()
+    {
+        if (_project is null || AuthState.CurrentUser is null) return;
         _finalVersions = await SceneVersions.ListFinalVideoVersionsAsync(_project.Id, AuthState.CurrentUser, 0, 20);
         _finalVersionItems.Clear();
         foreach (var version in _finalVersions)
@@ -1170,6 +1201,10 @@
         await LogProjectEvent("FINAL_VIDEO_VERSION_SELECTED_UI", "info", $"Đã chọn phiên bản video hoàn chỉnh {version.VersionNumber}.", new { projectId = _project.Id, versionId = version.Id });
         Snackbar.Add($"Đã chọn phiên bản video hoàn chỉnh {version.VersionNumber}.", Severity.Success);
         await ReloadAsync();
+        if (_showFinalHistory)
+        {
+            await LoadFinalHistoryAsync();
+        }
     }
 
     private ValueTask CopyTextAsync(string text)
@@ -1189,7 +1224,7 @@
         <MudStack Spacing="2">
             <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
                 <MudText Typo="Typo.subtitle2">Lịch sử ảnh scene @scene.SceneIndex</MudText>
-                <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(() => ToggleImageHistoryAsync(scene))">Refresh</MudButton>
+                <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(() => LoadImageHistoryAsync(scene))">Refresh</MudButton>
             </MudStack>
             @if (!_imageVersions.TryGetValue(scene.Id, out var versions) || versions.Count == 0)
             {
@@ -1241,7 +1276,7 @@
         <MudStack Spacing="2">
             <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
                 <MudText Typo="Typo.subtitle2">Lịch sử video scene @scene.SceneIndex</MudText>
-                <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(() => ToggleVideoHistoryAsync(scene))">Refresh</MudButton>
+                <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(() => LoadVideoHistoryAsync(scene))">Refresh</MudButton>
             </MudStack>
             @if (!_videoVersions.TryGetValue(scene.Id, out var versions) || versions.Count == 0)
             {
@@ -1289,7 +1324,7 @@
         <MudStack Spacing="2">
             <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
                 <MudText Typo="Typo.subtitle2">Lịch sử video hoàn chỉnh</MudText>
-                <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="ToggleFinalHistoryAsync">Refresh</MudButton>
+                <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="LoadFinalHistoryAsync">Refresh</MudButton>
             </MudStack>
             @if (_finalVersions.Count == 0)
             {
@@ -1500,26 +1535,8 @@
         await ReloadAsync();
     }
 
-    private async Task RenderSceneVideoAsync(VideoProjectSceneDto scene)
-    {
-        if (_project is null) return;
-        var sceneDir = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "uploads", "video-render", _project.Id.ToString(), $"scene_{scene.SceneIndex:00}");
-        Directory.CreateDirectory(sceneDir);
-        var mockPath = Path.Combine(sceneDir, "scene.mp4");
-        var mockSource = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "uploads", "video-render", "mock-scene.mp4");
-        if (!File.Exists(mockSource))
-        {
-            Snackbar.Add("Thiếu file mock scene video. Hãy cấu hình VideoRender:MockSceneVideoPath.", Severity.Error);
-            return;
-        }
-        File.Copy(mockSource, mockPath, true);
-        var relative = Path.GetRelativePath(Path.Combine(Directory.GetCurrentDirectory(), "wwwroot"), mockPath).Replace(Path.DirectorySeparatorChar, '/');
-        var url = "/" + relative;
-        await VideoRepo.UpdateSceneAsync(scene.Id, VideoSceneStatuses.VideoReady, videoUrl: url, videoPath: mockPath, errorMessage: null, title: scene.Title, scenePrompt: scene.ScenePrompt, imagePrompt: scene.ImagePrompt, videoPrompt: scene.VideoPrompt);
-        await VideoRepo.AddProjectEventAsync(_project.Id, "SCENE_VIDEO_READY", "info", $"Scene {scene.SceneIndex} video ready.", new { scene.Id, url });
-        await LogProjectEvent("SCENE_VIDEO_RENDERED", "info", $"Render video mock cho scene {scene.SceneIndex}.", new { scene.Id, url, mockPath });
-        await ReloadAsync();
-    }
+    private Task RenderSceneVideoAsync(VideoProjectSceneDto scene)
+        => EnqueueRenderAllScenesAsync();
 
     private async Task EnqueueRenderAllScenesAsync()
     {
@@ -1542,7 +1559,7 @@
         {
             JobType = jobType,
             UserId = AuthState.CurrentUser.UserId,
-            CustomerId = null,
+            CustomerId = AuthState.CurrentUser.CustomerId,
             Input = input,
             Prompt = new { projectId = _project.Id },
             LogCode = logCode,

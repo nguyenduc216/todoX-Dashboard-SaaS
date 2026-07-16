@@ -232,6 +232,7 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
         using var conn = await _factory.OpenAsync(ct);
         using var tx = conn.BeginTransaction();
 
+        await LockSceneAsync(conn, tx, request.ProjectId, request.SceneId, _tenant.TenantId);
         var existing = await conn.QuerySingleOrDefaultAsync<SceneImageVersionDto>(
             SelectImageVersionSql + " WHERE logical_request_id=@logicalRequestId AND tenant_id=@tenant;",
             new { request.LogicalRequestId, tenant = _tenant.TenantId }, tx);
@@ -252,10 +253,9 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
             return existing;
         }
 
-        await LockSceneAsync(conn, tx, request.ProjectId, request.SceneId);
         var versionNumber = await conn.ExecuteScalarAsync<int>(
-            "SELECT COALESCE(max(version_number), 0) + 1 FROM video_render.scene_image_versions WHERE scene_id=@sceneId;",
-            new { request.SceneId }, tx);
+            "SELECT COALESCE(max(version_number), 0) + 1 FROM video_render.scene_image_versions WHERE scene_id=@sceneId AND project_id=@projectId AND tenant_id=@tenant;",
+            new { request.SceneId, request.ProjectId, tenant = _tenant.TenantId }, tx);
         var id = Guid.NewGuid();
         var storageKey = SceneMediaStorageKeys.SceneImageOutput(_tenant.TenantId, request.ProjectId, request.SceneId, id, "png");
 
@@ -482,6 +482,7 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
         using var conn = await _factory.OpenAsync(ct);
         using var tx = conn.BeginTransaction();
 
+        await LockSceneAsync(conn, tx, request.ProjectId, request.SceneId, _tenant.TenantId);
         var existing = await conn.QuerySingleOrDefaultAsync<SceneVideoVersionDto>(
             SelectSceneVideoVersionSql + " WHERE logical_request_id=@logicalRequestId AND tenant_id=@tenant;",
             new { request.LogicalRequestId, tenant = _tenant.TenantId }, tx);
@@ -502,10 +503,9 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
             return existing;
         }
 
-        _ = await LockSceneAsync(conn, tx, request.ProjectId, request.SceneId);
         var versionNumber = await conn.ExecuteScalarAsync<int>(
-            "SELECT COALESCE(max(version_number), 0) + 1 FROM video_render.scene_video_versions WHERE scene_id=@sceneId;",
-            new { request.SceneId }, tx);
+            "SELECT COALESCE(max(version_number), 0) + 1 FROM video_render.scene_video_versions WHERE scene_id=@sceneId AND project_id=@projectId AND tenant_id=@tenant;",
+            new { request.SceneId, request.ProjectId, tenant = _tenant.TenantId }, tx);
         var id = Guid.NewGuid();
         var storageKey = SceneMediaStorageKeys.SceneVideoOutput(_tenant.TenantId, request.ProjectId, request.SceneId, id);
 
@@ -666,6 +666,9 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
         using var conn = await _factory.OpenAsync(ct);
         using var tx = conn.BeginTransaction();
 
+        await conn.ExecuteAsync(
+            "SELECT id FROM video_render.video_projects WHERE id=@projectId AND tenant_id=@tenant FOR UPDATE;",
+            new { request.ProjectId, tenant = _tenant.TenantId }, tx);
         var existing = await conn.QuerySingleOrDefaultAsync<FinalVideoVersionDto>(
             SelectFinalVideoVersionSql + " WHERE logical_request_id=@logicalRequestId AND tenant_id=@tenant;",
             new { request.LogicalRequestId, tenant = _tenant.TenantId }, tx);
@@ -686,9 +689,6 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
             return existing;
         }
 
-        await conn.ExecuteAsync(
-            "SELECT id FROM video_render.video_projects WHERE id=@projectId AND tenant_id=@tenant FOR UPDATE;",
-            new { request.ProjectId, tenant = _tenant.TenantId }, tx);
         var selectedVideos = (await conn.QueryAsync<SelectedSceneVideoRow>(
             """
             SELECT s.id AS SceneId, s.scene_index AS SceneIndex, s.selected_video_version_id AS SceneVideoVersionId
@@ -703,8 +703,8 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
         }
 
         var versionNumber = await conn.ExecuteScalarAsync<int>(
-            "SELECT COALESCE(max(version_number), 0) + 1 FROM video_render.final_video_versions WHERE project_id=@projectId;",
-            new { request.ProjectId }, tx);
+            "SELECT COALESCE(max(version_number), 0) + 1 FROM video_render.final_video_versions WHERE project_id=@projectId AND tenant_id=@tenant;",
+            new { request.ProjectId, tenant = _tenant.TenantId }, tx);
         var id = Guid.NewGuid();
         var storageKey = SceneMediaStorageKeys.FinalVideoOutput(_tenant.TenantId, request.ProjectId, id);
 
@@ -1009,16 +1009,16 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
             new { versionId, tenant = _tenant.TenantId, errorCode, errorMessage });
     }
 
-    private static async Task<SceneLockRow> LockSceneAsync(System.Data.IDbConnection conn, System.Data.IDbTransaction tx, long projectId, long sceneId)
+    private static async Task<SceneLockRow> LockSceneAsync(System.Data.IDbConnection conn, System.Data.IDbTransaction tx, long projectId, long sceneId, Guid tenantId)
     {
         return await conn.QuerySingleAsync<SceneLockRow>(
             """
             SELECT id AS SceneId, project_id AS ProjectId
               FROM video_render.video_project_scenes
-             WHERE id=@sceneId AND project_id=@projectId
+             WHERE id=@sceneId AND project_id=@projectId AND tenant_id=@tenantId
              FOR UPDATE;
             """,
-            new { sceneId, projectId }, tx);
+            new { sceneId, projectId, tenantId }, tx);
     }
 
     private static string ToJson(object value) => JsonSerializer.Serialize(value, JsonOptions);
