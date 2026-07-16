@@ -10,6 +10,7 @@
 @inject TodoX.Web.Services.VideoRender.ITodoXVideoPromptParser PromptParser
 @inject TodoX.Web.Services.AiProviders.IAiImageRenderRouter ImageRenderRouter
 @inject TodoX.Web.Services.Media.IMediaFileService MediaFiles
+@inject TodoX.Web.Services.VideoRender.ISceneMediaVersioningService SceneVersions
 @inject IOptionsMonitor<TodoX.Web.Services.VideoRender.VideoRenderOptions> VideoOptions
 @inject IDialogService DialogService
 @inject ISnackbar Snackbar
@@ -277,6 +278,8 @@
                                         <MudTooltip Text="Xóa"><MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="@(() => DeleteSceneAsync(context))" Disabled="@_busy" /></MudTooltip>
                                     </MudStack>
                                     <MudStack Row="true" Spacing="1" Class="flex-wrap gap-1">
+                                        <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Info" OnClick="@(() => ToggleImageHistoryAsync(context))">Image history</MudButton>
+                                        <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Info" OnClick="@(() => ToggleVideoHistoryAsync(context))">Video history</MudButton>
                                         <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning" OnClick="@(() => RerenderSceneImageAsync(context))" Disabled="@(IsSceneRendering(context))">@(string.IsNullOrWhiteSpace(context.StaticImageUrl) ? "Tạo ảnh (OpenRouter)" : "Render lại ảnh")</MudButton>
                                         <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(() => SaveSceneAsync(context))" Disabled="@_busy">Lưu</MudButton>
                                     </MudStack>
@@ -401,6 +404,10 @@
     private readonly Dictionary<long, string> _sceneRerenderErrors = new();
     // Transient per-scene render state derived from project events (survives page refresh).
     private readonly Dictionary<long, SceneImageVisualState> _sceneEventState = new();
+    private readonly Dictionary<long, IReadOnlyList<TodoX.Web.Services.VideoRender.SceneImageVersionDto>> _imageVersions = new();
+    private readonly Dictionary<long, IReadOnlyList<TodoX.Web.Services.VideoRender.SceneVideoVersionDto>> _videoVersions = new();
+    private long? _imageHistorySceneId;
+    private long? _videoHistorySceneId;
     // Polling guard: prevents overlapping ReloadAsync calls.
     private readonly SemaphoreSlim _reloadLock = new(1, 1);
     // True while a background Google Cloud batch job for this project is queued/rendering.
@@ -948,10 +955,83 @@
     // ------------------------------------------------------------------
     // Bulk scene image render — Google Cloud (Vertex), background job.
     // ------------------------------------------------------------------
+    private async Task<List<TodoX.Web.Services.Render.SceneImageBatchVersionInput>> PrepareSceneImageVersionsForJobAsync(bool onlyMissingOrFailed, ActiveCharacterDto? character)
+    {
+        var result = new List<TodoX.Web.Services.Render.SceneImageBatchVersionInput>();
+        if (_project is null || AuthState.CurrentUser is null)
+        {
+            return result;
+        }
+
+        if (!await SceneVersions.IsEnabledAsync(TodoX.Web.Services.VideoRender.SceneMediaVersioningFlags.SceneImages))
+        {
+            return result;
+        }
+
+        var batchRequestId = Guid.NewGuid().ToString("N");
+        var scenes = _project.Scenes
+            .OrderBy(x => x.SceneIndex)
+            .Where(x => TodoX.Web.Services.Render.SceneImageBatchRenderHandler.ShouldRenderScene(x, onlyMissingOrFailed))
+            .ToList();
+
+        foreach (var scene in scenes)
+        {
+            var compiledPrompt = TodoX.Web.Services.Render.SceneImagePromptBuilder.Build(scene, character?.NormalizedPrompt);
+            var logicalRequestId = $"render_job_scene_image-batch-{batchRequestId}-scene-{scene.Id}";
+            var version = await SceneVersions.CreateQueuedImageVersionAsync(new TodoX.Web.Services.VideoRender.SceneImageVersionCreateRequest(
+                _project.Id,
+                scene.Id,
+                AuthState.CurrentUser.UserId,
+                AuthState.CurrentUser.CustomerId,
+                RenderJobId: null,
+                logicalRequestId,
+                scene.ImagePrompt,
+                compiledPrompt,
+                scene.VideoPrompt,
+                NegativePromptSnapshot: null,
+                SceneSnapshot: new
+                {
+                    scene.Id,
+                    scene.ProjectId,
+                    scene.SceneIndex,
+                    scene.Title,
+                    scene.DurationSeconds,
+                    scene.ScenePrompt,
+                    scene.ImagePrompt,
+                    scene.VideoPrompt
+                },
+                ReferenceSnapshot: new
+                {
+                    characterId = character?.Id ?? _project.CharacterId,
+                    referenceUrl = character?.MasterImageUrl,
+                    characterPrompt = character?.NormalizedPrompt
+                },
+                RenderConfigSnapshot: new
+                {
+                    capability = TodoX.Web.Services.Render.SceneImageRenderService.CapabilityCode,
+                    aspectRatio = "9:16",
+                    outputFormat = "png",
+                    source = "render_job_ui_pre_enqueue"
+                }));
+
+            result.Add(new TodoX.Web.Services.Render.SceneImageBatchVersionInput
+            {
+                SceneId = scene.Id,
+                VersionId = version.Id,
+                LogicalRequestId = logicalRequestId,
+                CompiledPrompt = compiledPrompt,
+                StorageKey = version.StorageKey
+            });
+        }
+
+        return result;
+    }
+
     private async Task EnqueueBulkSceneImageRenderAsync(bool onlyMissingOrFailed)
     {
         if (_project is null || AuthState.CurrentUser is null) return;
         var character = ResolveCurrentCharacter();
+        var imageVersions = await PrepareSceneImageVersionsForJobAsync(onlyMissingOrFailed, character);
         var input = new TodoX.Web.Services.Render.SceneImageBatchInput
         {
             ProjectId = _project.Id,
@@ -960,7 +1040,8 @@
             CustomerId = AuthState.CurrentUser.CustomerId,
             CreatedBy = AuthState.CurrentUser.Email ?? AuthState.CurrentUser.UserId.ToString(),
             TrustedPayerContext = TodoX.Web.Services.AiProviders.AiBillingPayerResolver.CreateTrustedBackgroundContext(AuthState.CurrentUser),
-            OnlyMissingOrFailed = onlyMissingOrFailed
+            OnlyMissingOrFailed = onlyMissingOrFailed,
+            ImageVersions = imageVersions
         };
 
         var (job, alreadyActive) = await RenderJobs.EnqueueForProjectIfNoneActiveAsync(new RenderJobCreateModel
@@ -1081,6 +1162,57 @@
     }
 
     private bool IsSceneRendering(VideoProjectSceneDto scene) => _sceneRerendering.Contains(scene.Id);
+
+    private async Task ToggleImageHistoryAsync(VideoProjectSceneDto scene)
+    {
+        _imageHistorySceneId = _imageHistorySceneId == scene.Id ? null : scene.Id;
+        if (_imageHistorySceneId is not null)
+        {
+            _imageVersions[scene.Id] = await SceneVersions.ListImageVersionsAsync(scene.Id, 0, 20);
+            Snackbar.Add($"Loaded {_imageVersions[scene.Id].Count} image versions for scene {scene.SceneIndex}.", Severity.Info);
+        }
+    }
+
+    private async Task ToggleVideoHistoryAsync(VideoProjectSceneDto scene)
+    {
+        _videoHistorySceneId = _videoHistorySceneId == scene.Id ? null : scene.Id;
+        if (_videoHistorySceneId is not null)
+        {
+            _videoVersions[scene.Id] = await SceneVersions.ListSceneVideoVersionsAsync(scene.Id, 0, 20);
+            Snackbar.Add($"Loaded {_videoVersions[scene.Id].Count} video versions for scene {scene.SceneIndex}.", Severity.Info);
+        }
+    }
+
+    private async Task SelectImageVersionAsync(VideoProjectSceneDto scene, TodoX.Web.Services.VideoRender.SceneImageVersionDto version)
+    {
+        if (AuthState.CurrentUser is null) return;
+        await SceneVersions.SelectImageVersionAsync(scene.Id, version.Id, AuthState.CurrentUser.UserId);
+        await LogProjectEvent("SCENE_IMAGE_VERSION_SELECTED_UI", "info", $"Selected image version {version.VersionNumber} for scene {scene.SceneIndex}.", new { sceneId = scene.Id, versionId = version.Id });
+        Snackbar.Add($"Selected image version {version.VersionNumber}.", Severity.Success);
+        await ReloadAsync();
+    }
+
+    private async Task SelectVideoVersionAsync(VideoProjectSceneDto scene, TodoX.Web.Services.VideoRender.SceneVideoVersionDto version)
+    {
+        if (AuthState.CurrentUser is null) return;
+        await SceneVersions.SelectSceneVideoVersionAsync(scene.Id, version.Id, AuthState.CurrentUser.UserId);
+        await LogProjectEvent("SCENE_VIDEO_VERSION_SELECTED_UI", "info", $"Selected video version {version.VersionNumber} for scene {scene.SceneIndex}.", new { sceneId = scene.Id, versionId = version.Id });
+        Snackbar.Add($"Selected video version {version.VersionNumber}.", Severity.Success);
+        await ReloadAsync();
+    }
+
+    private ValueTask CopyTextAsync(string text)
+        => string.IsNullOrWhiteSpace(text)
+            ? ValueTask.CompletedTask
+            : JS.InvokeVoidAsync("navigator.clipboard.writeText", text);
+
+    private static Color VersionStatusColor(string status) => status switch
+    {
+        "completed" => Color.Success,
+        "queued" or "submitted" or "processing" => Color.Warning,
+        "failed" or "cancelled" => Color.Error,
+        _ => Color.Default
+    };
 
     // A scene is "pending an image" when it has no successful static image yet and is not in a terminal
     // failed state — i.e. the background batch is expected to still produce it.

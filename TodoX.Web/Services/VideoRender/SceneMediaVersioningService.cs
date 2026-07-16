@@ -20,6 +20,7 @@ public sealed record SceneImageVersionCreateRequest(
     Guid? RenderJobId,
     string LogicalRequestId,
     string? ImagePromptSnapshot,
+    string? CompiledImagePromptSnapshot,
     string? VideoPromptSnapshot,
     string? NegativePromptSnapshot,
     object SceneSnapshot,
@@ -33,6 +34,13 @@ public sealed record SceneImageVersionCompleteRequest(
     string? ModelName,
     long? ProviderCapabilityId,
     string? ProviderTaskId,
+    Guid? ResultMediaId,
+    string? BillingLogicalRequestId,
+    decimal? EstimatedUsd,
+    decimal? ActualUsd,
+    decimal ChargedPoints,
+    decimal RefundedPoints,
+    string? ProviderUsageJson,
     string? MimeType,
     string? CostSource);
 
@@ -85,6 +93,20 @@ public sealed class SceneImageVersionDto
     public string? StorageKey { get; set; }
     public string? PublicUrl { get; set; }
     public string? SourceFilePath { get; set; }
+    public Guid? ResultMediaId { get; set; }
+    public string? ImagePromptSnapshot { get; set; }
+    public string? CompiledImagePromptSnapshot { get; set; }
+    public string? VideoPromptSnapshot { get; set; }
+    public string? ProviderCode { get; set; }
+    public string? ModelName { get; set; }
+    public long? ProviderCapabilityId { get; set; }
+    public string? ProviderTaskId { get; set; }
+    public string? BillingLogicalRequestId { get; set; }
+    public decimal? EstimatedUsd { get; set; }
+    public decimal? ActualUsd { get; set; }
+    public decimal ChargedPoints { get; set; }
+    public decimal RefundedPoints { get; set; }
+    public string? ErrorMessage { get; set; }
 }
 
 public sealed class SceneVideoVersionDto
@@ -113,6 +135,20 @@ public sealed class FinalVideoVersionDto
     public string? SourceFilePath { get; set; }
 }
 
+public sealed class FinalVideoVersionItemDto
+{
+    public Guid Id { get; set; }
+    public Guid FinalVideoVersionId { get; set; }
+    public long SceneId { get; set; }
+    public Guid SceneVideoVersionId { get; set; }
+    public int ItemOrder { get; set; }
+    public string Status { get; set; } = string.Empty;
+    public string? SourceFilePath { get; set; }
+    public string? StorageKey { get; set; }
+    public string? PublicUrl { get; set; }
+    public Guid? SourceImageVersionId { get; set; }
+}
+
 public interface ISceneMediaVersioningService
 {
     Task<bool> IsEnabledAsync(string settingKey, CancellationToken ct = default);
@@ -131,6 +167,7 @@ public interface ISceneMediaVersioningService
     Task CompleteFinalVideoVersionAsync(Guid versionId, FinalVideoVersionCompleteRequest request, CancellationToken ct = default);
     Task FailFinalVideoVersionAsync(Guid versionId, string? errorCode, string? errorMessage, CancellationToken ct = default);
     Task<IReadOnlyList<FinalVideoVersionDto>> ListFinalVideoVersionsAsync(long projectId, int skip = 0, int take = 20, CancellationToken ct = default);
+    Task<IReadOnlyList<FinalVideoVersionItemDto>> ListFinalVideoVersionItemsAsync(Guid finalVersionId, CancellationToken ct = default);
     Task SelectFinalVideoVersionAsync(long projectId, Guid versionId, Guid? selectedBy, CancellationToken ct = default);
 }
 
@@ -191,12 +228,12 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
             """
             INSERT INTO video_render.scene_image_versions
                 (id, project_id, scene_id, tenant_id, customer_id, created_by, version_number,
-                 logical_request_id, render_job_id, image_prompt_snapshot, video_prompt_snapshot,
+                 logical_request_id, render_job_id, image_prompt_snapshot, compiled_image_prompt_snapshot, video_prompt_snapshot,
                  negative_prompt_snapshot, scene_snapshot_json, reference_snapshot_json, render_config_json,
                  storage_key, status, created_at, updated_at)
             VALUES
                 (@id, @projectId, @sceneId, @tenant, @customer, @user, @versionNumber,
-                 @logicalRequestId, @renderJobId, @imagePrompt, @videoPrompt,
+                 @logicalRequestId, @renderJobId, @imagePrompt, @compiledImagePrompt, @videoPrompt,
                  @negativePrompt, CAST(@sceneSnapshot AS jsonb), CAST(@referenceSnapshot AS jsonb),
                  CAST(@renderConfig AS jsonb), @storageKey, 'queued', now(), now());
             """,
@@ -212,6 +249,7 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
                 logicalRequestId = request.LogicalRequestId,
                 request.RenderJobId,
                 imagePrompt = request.ImagePromptSnapshot,
+                compiledImagePrompt = request.CompiledImagePromptSnapshot,
                 videoPrompt = request.VideoPromptSnapshot,
                 negativePrompt = request.NegativePromptSnapshot,
                 sceneSnapshot = ToJson(request.SceneSnapshot),
@@ -254,10 +292,17 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
                    actual_model=@modelName,
                    provider_capability_id=@providerCapabilityId,
                    provider_task_id=@providerTaskId,
+                   result_media_id=@resultMediaId,
                    storage_key=@storageKey,
                    source_file_path=@objectKey,
                    public_url=@imageUrl,
                    mime_type=@mimeType,
+                   billing_logical_request_id=@billingLogicalRequestId,
+                   estimated_usd=@estimatedUsd,
+                   actual_usd=@actualUsd,
+                   charged_points=@chargedPoints,
+                   refunded_points=@refundedPoints,
+                   provider_usage_json=CAST(@providerUsageJson AS jsonb),
                    cost_source=@costSource,
                    is_selected=true,
                    selected_at=now(),
@@ -274,10 +319,17 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
                 modelName = request.ModelName,
                 request.ProviderCapabilityId,
                 request.ProviderTaskId,
+                request.ResultMediaId,
                 storageKey,
                 objectKey = request.ObjectKey,
                 request.ImageUrl,
                 request.MimeType,
+                request.BillingLogicalRequestId,
+                request.EstimatedUsd,
+                request.ActualUsd,
+                request.ChargedPoints,
+                request.RefundedPoints,
+                request.ProviderUsageJson,
                 request.CostSource
             }, tx);
         await conn.ExecuteAsync(
@@ -348,10 +400,28 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
                SET selected_image_version_id=@versionId,
                    static_image_url=COALESCE(@publicUrl, static_image_url),
                    static_image_path=COALESCE(@sourceFilePath, static_image_path),
+                   image_prompt=COALESCE(@imagePromptSnapshot, image_prompt),
+                   video_prompt=COALESCE(@videoPromptSnapshot, video_prompt),
                    updated_at=now()
              WHERE id=@sceneId AND tenant_id=@tenant;
+            INSERT INTO video_render.video_project_events
+                (project_id, tenant_id, event_type, level, message, data_json, created_at)
+            VALUES
+                (@projectId, @tenant, 'SCENE_IMAGE_VERSION_SELECTED', 'info', 'Scene image version selected.', CAST(@data AS jsonb), now());
             """,
-            new { versionId, sceneId, tenant = _tenant.TenantId, selectedBy, publicUrl = version.PublicUrl, sourceFilePath = version.SourceFilePath }, tx);
+            new
+            {
+                versionId,
+                sceneId,
+                projectId = version.ProjectId,
+                tenant = _tenant.TenantId,
+                selectedBy,
+                publicUrl = version.PublicUrl,
+                sourceFilePath = version.SourceFilePath,
+                version.ImagePromptSnapshot,
+                version.VideoPromptSnapshot,
+                data = ToJson(new { sceneId, versionId, selectedBy, selectedAt = DateTimeOffset.UtcNow })
+            }, tx);
         tx.Commit();
     }
 
@@ -663,6 +733,36 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
         return rows.ToList();
     }
 
+    public async Task<IReadOnlyList<FinalVideoVersionItemDto>> ListFinalVideoVersionItemsAsync(Guid finalVersionId, CancellationToken ct = default)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        var rows = await conn.QueryAsync<FinalVideoVersionItemDto>(
+            """
+            SELECT i.id AS Id,
+                   i.final_video_version_id AS FinalVideoVersionId,
+                   i.scene_id AS SceneId,
+                   i.scene_video_version_id AS SceneVideoVersionId,
+                   i.item_order AS ItemOrder,
+                   v.status AS Status,
+                   v.source_file_path AS SourceFilePath,
+                   v.storage_key AS StorageKey,
+                   v.public_url AS PublicUrl,
+                   v.source_image_version_id AS SourceImageVersionId
+              FROM video_render.final_video_version_items i
+              JOIN video_render.final_video_versions f ON f.id=i.final_video_version_id
+              JOIN video_render.scene_video_versions v ON v.id=i.scene_video_version_id
+             WHERE i.final_video_version_id=@finalVersionId
+               AND f.tenant_id=@tenant
+               AND v.tenant_id=@tenant
+               AND v.project_id=f.project_id
+               AND v.scene_id=i.scene_id
+             ORDER BY i.item_order;
+            """,
+            new { finalVersionId, tenant = _tenant.TenantId });
+        return rows.ToList();
+    }
+
     public async Task SelectFinalVideoVersionAsync(long projectId, Guid versionId, Guid? selectedBy, CancellationToken ct = default)
     {
         await _tenant.EnsureLoadedAsync(ct);
@@ -726,7 +826,13 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
         """
         SELECT id AS Id, project_id AS ProjectId, scene_id AS SceneId, version_number AS VersionNumber,
                logical_request_id AS LogicalRequestId, status AS Status, storage_key AS StorageKey,
-               public_url AS PublicUrl, source_file_path AS SourceFilePath
+               public_url AS PublicUrl, source_file_path AS SourceFilePath, result_media_id AS ResultMediaId,
+               image_prompt_snapshot AS ImagePromptSnapshot, compiled_image_prompt_snapshot AS CompiledImagePromptSnapshot,
+               video_prompt_snapshot AS VideoPromptSnapshot, provider_code AS ProviderCode,
+               actual_model AS ModelName, provider_capability_id AS ProviderCapabilityId,
+               provider_task_id AS ProviderTaskId, billing_logical_request_id AS BillingLogicalRequestId,
+               estimated_usd AS EstimatedUsd, actual_usd AS ActualUsd, charged_points AS ChargedPoints,
+               refunded_points AS RefundedPoints, error_message AS ErrorMessage
           FROM video_render.scene_image_versions
         """;
 

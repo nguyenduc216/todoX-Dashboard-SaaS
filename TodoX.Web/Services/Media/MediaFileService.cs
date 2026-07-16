@@ -30,6 +30,10 @@ public interface IMediaFileService
     Task<MediaFileDto> SaveAsync(byte[] content, string originalFileName, string mimeType, string fileCategory,
         Guid? userId, Guid? customerId, Guid tenantId, CancellationToken ct = default);
 
+    /// <summary>Persist bytes at an immutable caller-provided object key and insert a media.media_files row.</summary>
+    Task<MediaFileDto> SaveAtObjectKeyAsync(byte[] content, string objectKey, string originalFileName, string mimeType, string fileCategory,
+        Guid? userId, Guid? customerId, Guid tenantId, CancellationToken ct = default);
+
     Task<MediaFileDto?> GetAsync(Guid id, CancellationToken ct = default);
 
     /// <summary>Read raw bytes for a media file (used to pass reference images to the render API).</summary>
@@ -45,6 +49,9 @@ public interface IMediaFileService
         bool enforceOwnership = true, CancellationToken ct = default);
 
     Task<MediaFileDto> DownloadAndSaveImageAsync(string imageUrl, string fileCategory,
+        Guid? userId, Guid? customerId, Guid tenantId, CancellationToken ct = default);
+
+    Task<MediaFileDto> DownloadAndSaveImageAtObjectKeyAsync(string imageUrl, string objectKey, string fileCategory,
         Guid? userId, Guid? customerId, Guid tenantId, CancellationToken ct = default);
 }
 
@@ -133,6 +140,90 @@ public sealed class MediaFileService : IMediaFileService
             FileName = safeName, MimeType = mimeType, FileSizeBytes = content.Length,
             StorageProvider = storageProvider, ObjectKey = objectKey, FileUrl = publicUrl, PublicUrl = publicUrl,
             IsActive = true, CreatedAt = DateTime.UtcNow
+        };
+    }
+
+    public async Task<MediaFileDto> SaveAtObjectKeyAsync(byte[] content, string objectKey, string originalFileName, string mimeType,
+        string fileCategory, Guid? userId, Guid? customerId, Guid tenantId, CancellationToken ct = default)
+    {
+        mimeType = NormalizeMimeType(mimeType, originalFileName);
+        fileCategory = NormalizeDbText(fileCategory, "media");
+        if (content.Length == 0) throw new InvalidOperationException("Tep rong.");
+        if (content.Length > MaxBytes) throw new InvalidOperationException("Tep vuot qua 10MB.");
+        if (!AllowedMime.Contains(mimeType)) throw new InvalidOperationException("Chi chap nhan anh PNG, JPEG, WEBP.");
+
+        objectKey = NormalizeObjectKey(objectKey);
+        var ext = ContentTypeToExtension(mimeType);
+        var safeName = Path.GetFileName(objectKey);
+        if (string.IsNullOrWhiteSpace(safeName))
+        {
+            safeName = $"{Guid.NewGuid():N}{ext}";
+        }
+
+        var uploadRoot = _config["Storage:LocalUploadRoot"] ?? "wwwroot/uploads";
+        var absRoot = Path.GetFullPath(Path.Combine(_env.ContentRootPath, uploadRoot));
+        var absPath = Path.GetFullPath(Path.Combine(absRoot, objectKey.Replace('/', Path.DirectorySeparatorChar)));
+        if (!absPath.StartsWith(absRoot, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Storage key khong hop le.");
+        }
+
+        var absDir = Path.GetDirectoryName(absPath) ?? absRoot;
+        Directory.CreateDirectory(absDir);
+        var tempPath = Path.Combine(absDir, $".{Guid.NewGuid():N}.tmp");
+        await File.WriteAllBytesAsync(tempPath, content, ct);
+        if (File.Exists(absPath))
+        {
+            throw new InvalidOperationException("Storage key version da ton tai, khong ghi de.");
+        }
+        File.Move(tempPath, absPath);
+
+        var publicBase = _config["Storage:PublicUploadBase"] ?? "/uploads";
+        var publicUrl = $"{publicBase.TrimEnd('/')}/{objectKey}";
+        var id = Guid.NewGuid();
+        var storageProvider = NormalizeDbText(_config["Storage:Provider"] ?? "local", "local");
+
+        using var conn = await _factory.OpenAsync(ct);
+        await conn.ExecuteAsync(
+            """
+            INSERT INTO media.media_files
+                (id, tenant_id, customer_id, user_id, file_category, file_name, file_ext, mime_type,
+                 file_size_bytes, storage_provider, object_key, file_url, public_url, is_active, created_at, created_by)
+            VALUES
+                (@id, @tenant, @customer, @user, @cat, @name, @ext, @mime,
+                 @size, @storage, @key, @url, @url, true, now(), @user);
+            """,
+            new
+            {
+                id,
+                tenant = tenantId,
+                customer = customerId,
+                user = userId,
+                cat = fileCategory,
+                name = safeName,
+                ext,
+                mime = mimeType,
+                size = (long)content.Length,
+                storage = storageProvider,
+                key = objectKey,
+                url = publicUrl
+            });
+
+        return new MediaFileDto
+        {
+            Id = id,
+            UserId = userId,
+            CustomerId = customerId,
+            FileCategory = fileCategory,
+            FileName = safeName,
+            MimeType = mimeType,
+            FileSizeBytes = content.Length,
+            StorageProvider = storageProvider,
+            ObjectKey = objectKey,
+            FileUrl = publicUrl,
+            PublicUrl = publicUrl,
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow
         };
     }
 
@@ -254,6 +345,27 @@ public sealed class MediaFileService : IMediaFileService
     public async Task<MediaFileDto> DownloadAndSaveImageAsync(string imageUrl, string fileCategory,
         Guid? userId, Guid? customerId, Guid tenantId, CancellationToken ct = default)
     {
+        var (bytes, contentType, fileName, uri) = await DownloadImageBytesAsync(imageUrl, ct);
+        var saved = await SaveAsync(bytes, fileName, contentType, fileCategory,
+            userId, customerId, tenantId, ct);
+        _logger.LogInformation("PRODUCT_IMAGE_URL_DOWNLOAD_SUCCESS url={Url} mediaId={MediaId} mime={MimeType} size={Size}",
+            uri, saved.Id, saved.MimeType, saved.FileSizeBytes);
+        return saved;
+    }
+
+    public async Task<MediaFileDto> DownloadAndSaveImageAtObjectKeyAsync(string imageUrl, string objectKey, string fileCategory,
+        Guid? userId, Guid? customerId, Guid tenantId, CancellationToken ct = default)
+    {
+        var (bytes, contentType, fileName, uri) = await DownloadImageBytesAsync(imageUrl, ct);
+        var saved = await SaveAtObjectKeyAsync(bytes, objectKey, fileName, contentType, fileCategory,
+            userId, customerId, tenantId, ct);
+        _logger.LogInformation("PRODUCT_IMAGE_URL_DOWNLOAD_SUCCESS url={Url} mediaId={MediaId} mime={MimeType} size={Size}",
+            uri, saved.Id, saved.MimeType, saved.FileSizeBytes);
+        return saved;
+    }
+
+    private async Task<(byte[] Bytes, string ContentType, string FileName, Uri Uri)> DownloadImageBytesAsync(string imageUrl, CancellationToken ct)
+    {
         var uri = ValidatePublicImageUri(imageUrl);
         _logger.LogInformation("PRODUCT_IMAGE_URL_DOWNLOAD_START url={Url}", uri);
 
@@ -306,11 +418,7 @@ public sealed class MediaFileService : IMediaFileService
             fileName = $"product-url{ContentTypeToExtension(contentType)}";
         }
 
-        var saved = await SaveAsync(ms.ToArray(), fileName, contentType, fileCategory,
-            userId, customerId, tenantId, ct);
-        _logger.LogInformation("PRODUCT_IMAGE_URL_DOWNLOAD_SUCCESS url={Url} mediaId={MediaId} mime={MimeType} size={Size}",
-            uri, saved.Id, saved.MimeType, saved.FileSizeBytes);
-        return saved;
+        return (ms.ToArray(), contentType, fileName, uri);
     }
 
     private static string NormalizeMimeType(string? mimeType, string originalFileName)
@@ -340,6 +448,19 @@ public sealed class MediaFileService : IMediaFileService
     {
         var text = string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();
         return text.Length <= 50 ? text : text[..50];
+    }
+
+    private static string NormalizeObjectKey(string objectKey)
+    {
+        var normalized = objectKey.Trim().Replace('\\', '/').TrimStart('/');
+        if (string.IsNullOrWhiteSpace(normalized)
+            || normalized.Contains("..", StringComparison.Ordinal)
+            || Path.IsPathRooted(normalized))
+        {
+            throw new InvalidOperationException("Storage key khong hop le.");
+        }
+
+        return normalized;
     }
 
     private static Uri ValidatePublicImageUri(string imageUrl)

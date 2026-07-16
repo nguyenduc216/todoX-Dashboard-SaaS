@@ -16,7 +16,18 @@ public sealed record SceneImageRenderOutcome(
     long? ProviderCapabilityId,
     string? RequestId,
     string? Error,
-    bool QuotaError);
+    bool QuotaError)
+{
+    public string? ProviderTaskId { get; init; }
+    public Guid? ResultMediaId { get; init; }
+    public string? BillingLogicalRequestId { get; init; }
+    public decimal? EstimatedUsd { get; init; }
+    public decimal? ActualUsd { get; init; }
+    public decimal ChargedPoints { get; init; }
+    public decimal RefundedPoints { get; init; }
+    public string? CostSource { get; init; }
+    public string? ProviderUsageJson { get; init; }
+}
 
 /// <summary>Everything needed to render one scene image, independent of the chosen provider.</summary>
 public sealed class SceneImageRenderContext
@@ -32,6 +43,7 @@ public sealed class SceneImageRenderContext
     public string? CreatedBy { get; init; }
     public Guid? RenderJobId { get; init; }
     public string? LogicalRequestId { get; init; }
+    public string? OutputObjectKey { get; init; }
 
     /// <summary>Media id of the character reference (Vertex path passes references by media id).</summary>
     public Guid? CharacterReferenceMediaId { get; init; }
@@ -261,13 +273,30 @@ public sealed class SceneImageRenderService : ISceneImageRenderService
         // Persist bytes if the provider returned raw image data; otherwise trust the provider URL.
         var imageUrl = render.ImageUrl;
         var objectKey = render.ObjectKey;
+        Guid? resultMediaId = null;
         if (render.ImageBytes is { Length: > 0 })
         {
             await _tenant.EnsureLoadedAsync(ct);
-            var media = await _media.SaveAsync(render.ImageBytes,
-                $"scene_{context.SceneIndex:00}_{DateTime.UtcNow:yyyyMMddHHmmss}.png",
-                render.MimeType ?? "image/png", "video_scene_image",
-                context.UserId, context.CustomerId, _tenant.TenantId, ct);
+            var media = string.IsNullOrWhiteSpace(context.OutputObjectKey)
+                ? await _media.SaveAsync(render.ImageBytes,
+                    $"scene_{context.SceneIndex:00}_{DateTime.UtcNow:yyyyMMddHHmmss}.png",
+                    render.MimeType ?? "image/png", "video_scene_image",
+                    context.UserId, context.CustomerId, _tenant.TenantId, ct)
+                : await _media.SaveAtObjectKeyAsync(render.ImageBytes,
+                    context.OutputObjectKey,
+                    $"scene_{context.SceneIndex:00}.png",
+                    render.MimeType ?? "image/png", "video_scene_image",
+                    context.UserId, context.CustomerId, _tenant.TenantId, ct);
+            resultMediaId = media.Id;
+            imageUrl = media.PublicUrl ?? media.FileUrl;
+            objectKey = media.ObjectKey;
+        }
+        else if (!string.IsNullOrWhiteSpace(render.ImageUrl) && !string.IsNullOrWhiteSpace(context.OutputObjectKey))
+        {
+            await _tenant.EnsureLoadedAsync(ct);
+            var media = await _media.DownloadAndSaveImageAtObjectKeyAsync(render.ImageUrl, context.OutputObjectKey,
+                "video_scene_image", context.UserId, context.CustomerId, _tenant.TenantId, ct);
+            resultMediaId = media.Id;
             imageUrl = media.PublicUrl ?? media.FileUrl;
             objectKey = media.ObjectKey;
         }
@@ -283,7 +312,18 @@ public sealed class SceneImageRenderService : ISceneImageRenderService
             "SCENE_IMAGE_PROVIDER_RERENDER_DONE projectId={ProjectId} sceneId={SceneId} sceneIndex={SceneIndex} providerCapabilityId={ProviderCapabilityId} providerCode={ProviderCode} modelName={ModelName} imageUrl={ImageUrl}",
             context.ProjectId, context.SceneId, context.SceneIndex, render.ProviderCapabilityId, render.ProviderCode, render.ModelName, imageUrl);
         return new SceneImageRenderOutcome(true, imageUrl, objectKey, render.ProviderCode,
-            render.ModelName, render.ProviderCapabilityId, null, null, QuotaError: false);
+            render.ModelName, render.ProviderCapabilityId, null, null, QuotaError: false)
+        {
+            ProviderTaskId = render.ProviderTaskId,
+            ResultMediaId = resultMediaId,
+            BillingLogicalRequestId = render.BillingLogicalRequestId,
+            EstimatedUsd = render.EstimatedUsd,
+            ActualUsd = render.ActualUsd,
+            ChargedPoints = render.ChargedPoints,
+            RefundedPoints = render.RefundedPoints,
+            CostSource = render.CostSource,
+            ProviderUsageJson = render.UsageJson
+        };
     }
 
     private static bool IsSucceededStatus(string? status)

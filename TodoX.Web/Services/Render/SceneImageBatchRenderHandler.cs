@@ -18,6 +18,16 @@ public sealed class SceneImageBatchInput
 
     /// <summary>When true, only scenes without a successful image (or failed) are rendered.</summary>
     public bool OnlyMissingOrFailed { get; set; }
+    public List<SceneImageBatchVersionInput> ImageVersions { get; set; } = new();
+}
+
+public sealed class SceneImageBatchVersionInput
+{
+    public long SceneId { get; set; }
+    public Guid VersionId { get; set; }
+    public string LogicalRequestId { get; set; } = string.Empty;
+    public string CompiledPrompt { get; set; } = string.Empty;
+    public string? StorageKey { get; set; }
 }
 
 /// <summary>
@@ -157,12 +167,29 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
         CancellationToken ct)
     {
         var queuedAt = DateTime.UtcNow;
-        var logicalRequestId = SceneImageRenderService.BuildLogicalRequestId("render_job_scene_image", scene.Id, jobId);
+        var precreated = input.ImageVersions.FirstOrDefault(x => x.SceneId == scene.Id);
+        var logicalRequestId = string.IsNullOrWhiteSpace(precreated?.LogicalRequestId)
+            ? SceneImageRenderService.BuildLogicalRequestId("render_job_scene_image", scene.Id, jobId)
+            : precreated!.LogicalRequestId;
         var versioningEnabled = await _versions.IsEnabledAsync(SceneMediaVersioningFlags.SceneImages, ct);
-        SceneImageVersionDto? imageVersion = null;
+        var compiledPrompt = string.IsNullOrWhiteSpace(precreated?.CompiledPrompt)
+            ? SceneImagePromptBuilder.Build(scene, characterPrompt)
+            : precreated!.CompiledPrompt;
+        SceneImageVersionDto? imageVersion = precreated is null
+            ? null
+            : new SceneImageVersionDto
+            {
+                Id = precreated.VersionId,
+                ProjectId = input.ProjectId,
+                SceneId = scene.Id,
+                LogicalRequestId = logicalRequestId,
+                StorageKey = precreated.StorageKey,
+                CompiledImagePromptSnapshot = compiledPrompt,
+                Status = "queued"
+            };
         if (versioningEnabled)
         {
-            imageVersion = await _versions.CreateQueuedImageVersionAsync(new SceneImageVersionCreateRequest(
+            imageVersion ??= await _versions.CreateQueuedImageVersionAsync(new SceneImageVersionCreateRequest(
                 input.ProjectId,
                 scene.Id,
                 input.UserId,
@@ -170,6 +197,7 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
                 jobId,
                 logicalRequestId,
                 scene.ImagePrompt,
+                compiledPrompt,
                 scene.VideoPrompt,
                 NegativePromptSnapshot: null,
                 SceneSnapshot: new
@@ -204,7 +232,7 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
             ProjectId = input.ProjectId,
             SceneId = scene.Id,
             SceneIndex = scene.SceneIndex,
-            Prompt = SceneImagePromptBuilder.Build(scene, characterPrompt),
+            Prompt = imageVersion?.CompiledImagePromptSnapshot ?? compiledPrompt,
             CharacterId = input.CharacterId,
             UserId = input.UserId,
             CustomerId = input.CustomerId,
@@ -212,6 +240,7 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
             CreatedBy = input.CreatedBy,
             RenderJobId = jobId,
             LogicalRequestId = logicalRequestId,
+            OutputObjectKey = imageVersion?.StorageKey,
             CharacterReferenceMediaId = referenceMediaId,
             CharacterReferenceUrl = referenceUrl
         };
@@ -239,9 +268,16 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
                         outcome.ProviderCode,
                         outcome.ModelName,
                         outcome.ProviderCapabilityId,
-                        ProviderTaskId: null,
+                        outcome.ProviderTaskId,
+                        outcome.ResultMediaId,
+                        outcome.BillingLogicalRequestId,
+                        outcome.EstimatedUsd,
+                        outcome.ActualUsd,
+                        outcome.ChargedPoints,
+                        outcome.RefundedPoints,
+                        outcome.ProviderUsageJson,
                         MimeType: "image/png",
-                        CostSource: null), ct);
+                        CostSource: outcome.CostSource), ct);
                 }
 
                 await _repo.UpdateSceneAsync(scene.Id, VideoSceneStatuses.ImageReady,

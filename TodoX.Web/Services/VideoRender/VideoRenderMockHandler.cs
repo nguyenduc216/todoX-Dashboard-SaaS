@@ -153,8 +153,15 @@ public sealed class VideoRenderMockHandler : IRenderJobHandler
         Directory.CreateDirectory(finalDir);
         var finalPath = Path.Combine(finalDir, version is null ? "final.mp4" : "final-video.mp4");
         var concat = Path.Combine(finalDir, "concat.txt");
-        var lines = scenes.Select(scene => $"file '{Path.GetFullPath(scene.SceneVideoPath ?? string.Empty).Replace("'", "''")}'").ToArray();
+        var mergeItems = version is null
+            ? scenes.OrderBy(x => x.SceneIndex).Select(scene => new MergeInput(scene.Id, scene.SceneIndex, null, scene.SceneVideoPath)).ToList()
+            : (await _versions.ListFinalVideoVersionItemsAsync(version.Id, ct))
+                .Select(item => new MergeInput(item.SceneId, item.ItemOrder, item.SceneVideoVersionId, item.SourceFilePath))
+                .ToList();
+        ValidateMergeInputs(mergeItems);
+        var lines = mergeItems.Select(item => $"file '{Path.GetFullPath(item.VideoPath ?? string.Empty).Replace("'", "''")}'").ToArray();
         await File.WriteAllLinesAsync(concat, lines, Encoding.UTF8, ct);
+        await WriteCompositionManifestAsync(finalDir, version, mergeItems, ct);
 
         var ffmpeg = _options.CurrentValue.FfmpegPath;
         var psi = new ProcessStartInfo
@@ -194,6 +201,37 @@ public sealed class VideoRenderMockHandler : IRenderJobHandler
         await _repo.UpdateProjectAsync(project.Id, VideoProjectStatuses.Completed, url, finalPath, null, ct);
         await _repo.AddProjectEventAsync(project.Id, "PROJECT_MERGED", "info", "Final video merged.", new { finalPath, url }, ct);
     }
+
+    private static void ValidateMergeInputs(IReadOnlyList<MergeInput> items)
+    {
+        if (items.Count == 0)
+        {
+            throw new InvalidOperationException("Final video version has no scene video items.");
+        }
+
+        foreach (var item in items)
+        {
+            if (string.IsNullOrWhiteSpace(item.VideoPath) || !File.Exists(item.VideoPath))
+            {
+                throw new InvalidOperationException($"Scene video version input is missing. sceneId={item.SceneId} sceneVideoVersionId={item.SceneVideoVersionId}");
+            }
+        }
+    }
+
+    private static Task WriteCompositionManifestAsync(string finalDir, FinalVideoVersionDto? version, IReadOnlyList<MergeInput> items, CancellationToken ct)
+    {
+        var manifestPath = Path.Combine(finalDir, "..", "manifests", "composition.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(manifestPath)!);
+        var json = JsonSerializer.Serialize(new
+        {
+            finalVideoVersionId = version?.Id,
+            createdAtUtc = DateTimeOffset.UtcNow,
+            items = items.Select(x => new { x.SceneId, x.ItemOrder, x.SceneVideoVersionId, x.VideoPath })
+        }, new JsonSerializerOptions(JsonSerializerDefaults.Web) { WriteIndented = true });
+        return File.WriteAllTextAsync(manifestPath, json, ct);
+    }
+
+    private sealed record MergeInput(long SceneId, int ItemOrder, Guid? SceneVideoVersionId, string? VideoPath);
 
     private string ResolveRoot(string? path)
         => Path.IsPathRooted(path) ? path! : Path.Combine(_env.ContentRootPath, path ?? string.Empty);

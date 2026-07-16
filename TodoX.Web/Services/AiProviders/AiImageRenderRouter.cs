@@ -41,12 +41,19 @@ public sealed class AiImageRenderResult
     public string? ProviderCode { get; set; }
     public long? ProviderId { get; set; }
     public long? ProviderCapabilityId { get; set; }
+    public string? ProviderTaskId { get; set; }
     public string? ModelName { get; set; }
     public string UnitType { get; set; } = "image";
     public decimal UnitCostPoints { get; set; }
     public decimal Quantity { get; set; } = 1;
     public decimal TotalPoints { get; set; }
     public decimal? ProviderRawCost { get; set; }
+    public string? BillingLogicalRequestId { get; set; }
+    public decimal? EstimatedUsd { get; set; }
+    public decimal? ActualUsd { get; set; }
+    public decimal ChargedPoints { get; set; }
+    public decimal RefundedPoints { get; set; }
+    public string? CostSource { get; set; }
     public string? RawRequestJson { get; set; }
     public string? RawResponseJson { get; set; }
     public string? UsageJson { get; set; }
@@ -149,6 +156,12 @@ public sealed class AiImageRenderRouter : IAiImageRenderRouter
                 UnitCostPoints = unitCost,
                 Quantity = quantity,
                 TotalPoints = unitCost * quantity,
+                BillingLogicalRequestId = logicalRequestId,
+                EstimatedUsd = billingCost.ProviderEstimatedCostUsd,
+                ActualUsd = null,
+                ChargedPoints = reservation.ChargedPoints,
+                RefundedPoints = 0,
+                CostSource = billingCost.ProviderCostSource,
                 ErrorMessage = reservation.ErrorMessage ?? "Image billing reservation did not allow provider submit."
             };
         }
@@ -276,6 +289,13 @@ public sealed class AiImageRenderRouter : IAiImageRenderRouter
                 Quantity = quantity,
                 TotalPoints = reservation.ChargedPoints,
                 ProviderRawCost = response.UsageCost,
+                ProviderTaskId = providerTaskId,
+                BillingLogicalRequestId = logicalRequestId,
+                EstimatedUsd = billingCost.ProviderEstimatedCostUsd,
+                ActualUsd = response.UsageCost,
+                ChargedPoints = reservation.ChargedPoints,
+                RefundedPoints = 0,
+                CostSource = billingCost.ProviderCostSource,
                 RawRequestJson = response.RawRequestJson,
                 RawResponseJson = response.RawResponseJson,
                 UsageJson = response.UsageJson,
@@ -299,6 +319,13 @@ public sealed class AiImageRenderRouter : IAiImageRenderRouter
             Quantity = quantity,
             TotalPoints = reservation.ChargedPoints,
             ProviderRawCost = response.UsageCost,
+            ProviderTaskId = providerTaskId,
+            BillingLogicalRequestId = logicalRequestId,
+            EstimatedUsd = billingCost.ProviderEstimatedCostUsd,
+            ActualUsd = response.UsageCost,
+            ChargedPoints = reservation.ChargedPoints,
+            RefundedPoints = 0,
+            CostSource = billingCost.ProviderCostSource,
             RawRequestJson = response.RawRequestJson,
             RawResponseJson = response.RawResponseJson,
             UsageJson = response.UsageJson,

@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS video_render.scene_image_versions (
   actual_model text NULL,
   provider_task_id text NULL,
   image_prompt_snapshot text NULL,
+  compiled_image_prompt_snapshot text NULL,
   video_prompt_snapshot text NULL,
   negative_prompt_snapshot text NULL,
   scene_snapshot_json jsonb NOT NULL DEFAULT '{}'::jsonb,
@@ -43,6 +44,7 @@ CREATE TABLE IF NOT EXISTS video_render.scene_image_versions (
   actual_usd numeric(18,6) NULL,
   charged_points numeric(18,6) NOT NULL DEFAULT 0,
   refunded_points numeric(18,6) NOT NULL DEFAULT 0,
+  provider_usage_json jsonb NULL,
   cost_source text NULL,
   status text NOT NULL DEFAULT 'queued',
   error_code text NULL,
@@ -188,7 +190,15 @@ CREATE INDEX IF NOT EXISTS ix_final_video_history ON video_render.final_video_ve
 CREATE INDEX IF NOT EXISTS ix_final_video_items_source ON video_render.final_video_version_items(scene_video_version_id);
 
 ALTER TABLE video_render.scene_image_versions
-  ADD COLUMN IF NOT EXISTS provider_capability_id bigint NULL;
+  ADD COLUMN IF NOT EXISTS provider_capability_id bigint NULL,
+  ADD COLUMN IF NOT EXISTS compiled_image_prompt_snapshot text NULL,
+  ADD COLUMN IF NOT EXISTS provider_usage_json jsonb NULL,
+  ADD COLUMN IF NOT EXISTS result_media_id uuid NULL,
+  ADD COLUMN IF NOT EXISTS billing_logical_request_id text NULL,
+  ADD COLUMN IF NOT EXISTS estimated_usd numeric(18,6) NULL,
+  ADD COLUMN IF NOT EXISTS actual_usd numeric(18,6) NULL,
+  ADD COLUMN IF NOT EXISTS charged_points numeric(18,6) NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS refunded_points numeric(18,6) NOT NULL DEFAULT 0;
 
 ALTER TABLE video_render.scene_video_versions
   ADD COLUMN IF NOT EXISTS provider_capability_id bigint NULL;
