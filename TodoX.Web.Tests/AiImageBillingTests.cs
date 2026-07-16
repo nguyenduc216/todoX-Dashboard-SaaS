@@ -31,6 +31,22 @@ public class AiImageBillingTests
     }
 
     [Fact]
+    public async Task BillingDashboard_RequiresDashboardPermissionNotSystemWalletPermission()
+    {
+        var service = new AiImageBillingDashboardService(null!, null!);
+        var session = new CurrentUserSession
+        {
+            IsAuthenticated = true,
+            UserId = Guid.NewGuid(),
+            Role = TodoXUserRole.Admin,
+            Permissions = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { AiBillingPermissions.UseSystemImageWallet }
+        };
+
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
+            service.GetSnapshotAsync(new AiImageBillingDashboardRequest(), session));
+    }
+
+    [Fact]
     public void PayerResolver_UsesAuthenticatedCustomerScope()
     {
         var customerId = Guid.NewGuid();

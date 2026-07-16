@@ -12,6 +12,8 @@ public static class AiBillingPayerTypes
 public static class AiBillingPermissions
 {
     public const string UseSystemImageWallet = "ai.image.system_wallet.use";
+    public const string ViewBillingDashboard = "ai.billing.dashboard.view";
+    public const string ManageBillingReconciliation = "ai.billing.reconciliation.manage";
 }
 
 public sealed record AiBillingTrustedPayerContext(

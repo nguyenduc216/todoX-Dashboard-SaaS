@@ -57,7 +57,7 @@ public sealed class AiImageBillingDashboardService : IAiImageBillingDashboardSer
 
     public async Task<AiImageBillingDashboardSnapshot> GetSnapshotAsync(AiImageBillingDashboardRequest request, CurrentUserSession user, CancellationToken ct = default)
     {
-        if (user.IsAuthenticated != true || (!user.IsRoot && !user.Can(AiBillingPermissions.UseSystemImageWallet)))
+        if (user.IsAuthenticated != true || (!user.IsRoot && !user.Can(AiBillingPermissions.ViewBillingDashboard)))
         {
             throw new UnauthorizedAccessException("User is not allowed to view AI image billing dashboard.");
         }
