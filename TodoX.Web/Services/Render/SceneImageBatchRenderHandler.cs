@@ -1,6 +1,7 @@
 using System.Text.Json;
 using TodoX.Web.Models;
 using TodoX.Web.Services.AiCharacters;
+using TodoX.Web.Services.AiProviders;
 using TodoX.Web.Services.VideoRender;
 
 namespace TodoX.Web.Services.Render;
@@ -13,6 +14,7 @@ public sealed class SceneImageBatchInput
     public Guid UserId { get; set; }
     public Guid? CustomerId { get; set; }
     public string? CreatedBy { get; set; }
+    public AiBillingTrustedPayerContext? TrustedPayerContext { get; set; }
 
     /// <summary>When true, only scenes without a successful image (or failed) are rendered.</summary>
     public bool OnlyMissingOrFailed { get; set; }
@@ -161,6 +163,7 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
             CharacterId = input.CharacterId,
             UserId = input.UserId,
             CustomerId = input.CustomerId,
+            TrustedPayerContext = input.TrustedPayerContext,
             CreatedBy = input.CreatedBy,
             RenderJobId = jobId,
             CharacterReferenceMediaId = referenceMediaId,

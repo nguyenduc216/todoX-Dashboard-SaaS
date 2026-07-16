@@ -11,6 +11,7 @@ DECLARE
     missing_columns int;
     missing_indexes int;
     missing_system_wallet int;
+    missing_tariff_snapshot int;
     bad_backup_selectable int;
     poster_enabled int;
     stale_pending int;
@@ -114,8 +115,13 @@ BEGIN
           ('ai_image_billing_records','payer_customer_id'),
           ('ai_image_billing_records','payer_wallet_id'),
           ('ai_image_billing_records','system_charged_points'),
+          ('ai_image_billing_records','tariff_snapshot_json'),
+          ('ai_image_billing_records','actual_cost_incomplete'),
           ('ai_image_billing_records','reserved_until'),
           ('ai_image_billing_records','pending_reconciliation_at'),
+          ('ai_image_billing_records','reconciliation_attempt_count'),
+          ('ai_image_billing_records','reconciliation_lock_owner'),
+          ('ai_image_billing_records','reconciliation_lock_until'),
           ('ai_image_provider_attempts','provider_estimated_cost_usd'),
           ('ai_image_provider_attempts','provider_actual_cost_usd'),
           ('ai_image_provider_attempts','cost_source'),
@@ -174,10 +180,21 @@ BEGIN
     SELECT count(*) INTO stale_pending
       FROM billing.ai_image_billing_records
      WHERE (status = 'reserved' AND reserved_until < now())
-        OR (status = 'pending_reconciliation' AND pending_reconciliation_at < now() - interval '2 hours');
+        OR (status IN ('pending_reconciliation','manual_review') AND pending_reconciliation_at < now() - interval '2 hours');
 
     IF stale_pending > 0 THEN
         RAISE EXCEPTION 'Stale image billing reservations/reconciliation rows require manual handling before production enable. Rows=%', stale_pending;
+    END IF;
+
+    SELECT count(*) INTO missing_tariff_snapshot
+      FROM public.todox_ai_provider_capability
+     WHERE provider_code = 'yescale_task_image'
+       AND capability_code IN ('avatar_generation','chibi_avatar_generation','character_generation','image_generation','scene_image_generation','thumbnail_generation')
+       AND enabled = true
+       AND NOT (config_json ? 'provider_estimated_cost_usd');
+
+    IF missing_tariff_snapshot > 0 THEN
+        RAISE EXCEPTION 'Enabled YEScale image rows must include provider_estimated_cost_usd tariff snapshot source. Rows=%', missing_tariff_snapshot;
     END IF;
 END $$;
 

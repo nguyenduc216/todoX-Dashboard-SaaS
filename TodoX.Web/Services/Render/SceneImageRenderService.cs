@@ -28,6 +28,7 @@ public sealed class SceneImageRenderContext
     public long? CharacterId { get; init; }
     public Guid UserId { get; init; }
     public Guid? CustomerId { get; init; }
+    public AiBillingTrustedPayerContext? TrustedPayerContext { get; init; }
     public string? CreatedBy { get; init; }
     public Guid? RenderJobId { get; init; }
 
@@ -218,6 +219,7 @@ public sealed class SceneImageRenderService : ISceneImageRenderService
             CustomerId = ToBigIntCustomerId(context.CustomerId),
             CustomerGuid = context.CustomerId,
             UserId = context.UserId,
+            TrustedPayerContext = context.TrustedPayerContext,
             FeatureCode = featureCode,
             CapabilityCode = CapabilityCode,
             ProviderCapabilityId = option.ProviderCapabilityId,

@@ -315,6 +315,16 @@ public sealed class AvatarTemplateService : IAvatarTemplateService
             && option is not null
             && ProviderCodeMap.IsRoutedImageProvider(option.ProviderCode);
 
+        if (useRouter && !_config.GetValue<bool>("PublicAvatarBuilder:AllowAnonymousSponsoredRender"))
+        {
+            return new PublicAvatarBuilderRenderResult
+            {
+                Ok = false,
+                Status = "failed",
+                Error = "Public Avatar Builder cần đăng nhập hoặc cấu hình campaign tài trợ trước khi render bằng YEScale."
+            };
+        }
+
         _logger.LogInformation("PUBLIC_AVATAR_RENDER_START templateId={TemplateId} useRouter={UseRouter} providerCapabilityId={ProviderCapabilityId} avatarMediaId={AvatarMediaId} scenario={Scenario} promptLength={PromptLength}",
             request.TemplateId, useRouter, request.ProviderCapabilityId, avatarMediaId, scenario, prompt.Length);
 

@@ -6,6 +6,7 @@ BEGIN;
 DO $$
 DECLARE
     snapshot_count int;
+    active_reconciliation int;
 BEGIN
     IF to_regclass('billing.yescale_image_default_snapshot') IS NULL THEN
         RAISE EXCEPTION 'Missing billing.yescale_image_default_snapshot. Cannot restore exact previous defaults.';
@@ -18,6 +19,14 @@ BEGIN
 
     IF snapshot_count <> 6 THEN
         RAISE EXCEPTION 'Expected 6 snapshot rows, found %. Cannot rollback safely.', snapshot_count;
+    END IF;
+
+    SELECT count(*) INTO active_reconciliation
+      FROM billing.ai_image_billing_records
+     WHERE status IN ('reserved','pending_reconciliation','manual_review');
+
+    IF active_reconciliation > 0 THEN
+        RAISE EXCEPTION 'Image billing reconciliation rows are still active/manual review. Resolve before rollback. Rows=%', active_reconciliation;
     END IF;
 END $$;
 

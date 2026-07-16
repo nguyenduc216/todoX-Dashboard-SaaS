@@ -26,6 +26,7 @@ public sealed class AiImageRenderRequest
     public string? JobId { get; set; }
     public string? LogicalRequestId { get; set; }
     public string? RenderJobId { get; set; }
+    public AiBillingTrustedPayerContext? TrustedPayerContext { get; set; }
     public object? Metadata { get; set; }
     public string? CreatedBy { get; set; }
 }
@@ -106,6 +107,8 @@ public sealed class AiImageRenderRouter : IAiImageRenderRouter
         request.RequestId ??= logicalRequestId;
         request.JobId ??= request.RenderJobId;
         var billingCost = _billing.BuildConfiguredCost(unitCost, quantity);
+        var tariffSnapshotJson = BuildTariffSnapshotJson(detail?.Capabilities, option.CapabilityCode, billingCost.ExchangeRateVndPerUsd, billingCost.TodoXVndPerPoint);
+        ValidateYEScaleTariffCoverage(factoryKey, option.ModelName, detail?.ConfigJson, capability?.ConfigJson, tariffSnapshotJson);
 
         _logger.LogInformation(
             "AI_IMAGE_ROUTER_RESOLVED capability={CapabilityCode} feature={FeatureCode} provider={ProviderCode} model={ModelName} resolution={Resolution} logicalRequestId={LogicalRequestId}",
@@ -124,6 +127,8 @@ public sealed class AiImageRenderRouter : IAiImageRenderRouter
             FeatureCode = request.FeatureCode,
             RequestedModel = option.ModelName,
             Cost = billingCost,
+            TrustedPayerContext = request.TrustedPayerContext,
+            TariffSnapshotJson = tariffSnapshotJson,
             Metadata = request.Metadata,
             CreatedBy = request.CreatedBy
         }, cancellationToken);
@@ -224,16 +229,36 @@ public sealed class AiImageRenderRouter : IAiImageRenderRouter
 
         var finalModel = string.IsNullOrWhiteSpace(response.ModelName) ? option.ModelName : response.ModelName;
         var providerTaskId = TryReadTaskId(response.UsageJson);
-        var billingCompletion = await _billing.CompleteAsync(new AiImageBillingCompleteRequest
+        AiImageBillingCompletion billingCompletion;
+        try
         {
-            LogicalRequestId = logicalRequestId,
-            Success = response.Success,
-            ActualModel = finalModel,
-            ProviderTaskId = providerTaskId,
-            ProviderActualCostUsd = response.UsageCost,
-            ProviderUsageJson = response.UsageJson,
-            ErrorMessage = response.Success ? null : response.ErrorMessage
-        }, cancellationToken);
+            billingCompletion = await _billing.CompleteAsync(new AiImageBillingCompleteRequest
+            {
+                LogicalRequestId = logicalRequestId,
+                Success = response.Success,
+                ActualModel = finalModel,
+                ProviderTaskId = providerTaskId,
+                ProviderActualCostUsd = response.UsageCost,
+                ProviderUsageJson = response.UsageJson,
+                TariffSnapshotJson = tariffSnapshotJson,
+                ErrorMessage = response.Success ? null : response.ErrorMessage
+            }, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "AI_IMAGE_BILLING_COMPLETE_EXCEPTION capability={CapabilityCode} feature={FeatureCode} logicalRequestId={LogicalRequestId} providerTaskId={ProviderTaskId}",
+                request.CapabilityCode, request.FeatureCode, logicalRequestId, providerTaskId);
+            billingCompletion = await _billing.MarkPendingReconciliationAsync(new AiImageBillingPendingReconciliationRequest
+            {
+                LogicalRequestId = logicalRequestId,
+                ActualModel = finalModel,
+                ProviderTaskId = providerTaskId,
+                ProviderUsageJson = response.UsageJson,
+                TariffSnapshotJson = tariffSnapshotJson,
+                ErrorMessage = ex.Message
+            }, CancellationToken.None);
+        }
         if (!billingCompletion.Ok)
         {
             _logger.LogError(
@@ -339,6 +364,91 @@ public sealed class AiImageRenderRouter : IAiImageRenderRouter
         catch
         {
             return metadata is null ? null : JsonSerializer.Serialize(metadata, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        }
+    }
+
+    private static string? BuildTariffSnapshotJson(
+        IEnumerable<AiProviderCapabilityDto>? capabilities,
+        string capabilityCode,
+        decimal exchangeRateVndPerUsd,
+        decimal todoxVndPerPoint)
+    {
+        if (capabilities is null) return null;
+        var tariffs = capabilities
+            .Where(c => c.Enabled
+                        && string.Equals(c.CapabilityCode, capabilityCode, StringComparison.OrdinalIgnoreCase)
+                        && !string.IsNullOrWhiteSpace(c.ModelName))
+            .Select(c =>
+            {
+                var estimatedUsd = TryReadDecimal(c.ConfigJson, "provider_estimated_cost_usd")
+                    ?? AiImageBillingCost.ToUsd(c.UnitCostPoints, exchangeRateVndPerUsd, todoxVndPerPoint);
+                return new
+                {
+                    model = c.ModelName,
+                    providerCapabilityId = c.Id,
+                    unitCostPoints = c.UnitCostPoints,
+                    providerEstimatedCostUsd = estimatedUsd,
+                    costSource = TryReadString(c.ConfigJson, "cost_source") ?? "configured_tariff",
+                    configJson = c.ConfigJson,
+                    capturedAtUtc = DateTimeOffset.UtcNow
+                };
+            })
+            .ToArray();
+
+        return tariffs.Length == 0
+            ? null
+            : JsonSerializer.Serialize(new { tariffs }, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+    }
+
+    private static void ValidateYEScaleTariffCoverage(
+        string factoryKey,
+        string? requestedModel,
+        string? providerConfigJson,
+        string? capabilityConfigJson,
+        string? tariffSnapshotJson)
+    {
+        if (!factoryKey.Equals("yescale_task_image", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var config = YEScaleImageModelMapper.ParseConfig(providerConfigJson, capabilityConfigJson);
+        var chain = YEScaleImageModelMapper.BuildAttemptChain(requestedModel ?? string.Empty, config);
+        var snapshot = AiImageTariffSnapshot.Parse(tariffSnapshotJson);
+        var missing = chain.Where(model => snapshot.Find(model) is null).ToArray();
+        if (missing.Length > 0)
+        {
+            throw new InvalidOperationException($"YEScale image tariff snapshot missing for model(s): {string.Join(", ", missing)}.");
+        }
+    }
+
+    private static decimal? TryReadDecimal(string? json, string name)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            return doc.RootElement.TryGetProperty(name, out var value) && value.TryGetDecimal(out var number)
+                ? number
+                : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string? TryReadString(string? json, string name)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            return ReadString(doc.RootElement, name);
+        }
+        catch
+        {
+            return null;
         }
     }
 

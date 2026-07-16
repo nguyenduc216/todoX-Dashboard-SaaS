@@ -19,6 +19,29 @@ BEGIN
     END IF;
 END $$;
 
+INSERT INTO auth.permissions (id, module, action, name, description, permission_group, is_active, created_at)
+SELECT gen_random_uuid(), 'ai.image', 'system_wallet.use',
+       'Use AI image system wallet',
+       'Allows an authenticated admin/root user to charge YEScale image renders to the system image wallet.',
+       'AI Providers', true, now()
+WHERE to_regclass('auth.permissions') IS NOT NULL
+  AND NOT EXISTS (
+      SELECT 1 FROM auth.permissions
+       WHERE module = 'ai.image'
+         AND action = 'system_wallet.use'
+  );
+
+INSERT INTO auth.role_permissions (role_id, permission_id)
+SELECT r.id, p.id
+  FROM auth.roles r
+  JOIN auth.permissions p ON p.module = 'ai.image' AND p.action = 'system_wallet.use'
+ WHERE r.code IN ('administrator_root', 'root', 'admin', 'administrator')
+   AND to_regclass('auth.role_permissions') IS NOT NULL
+   AND NOT EXISTS (
+       SELECT 1 FROM auth.role_permissions rp
+        WHERE rp.role_id = r.id AND rp.permission_id = p.id
+   );
+
 ALTER TABLE billing.token_wallets
     ADD COLUMN IF NOT EXISTS wallet_scope text NOT NULL DEFAULT 'customer',
     ADD COLUMN IF NOT EXISTS wallet_code text NULL,
@@ -92,7 +115,9 @@ CREATE TABLE IF NOT EXISTS billing.ai_image_billing_records (
     total_provider_estimated_cost_usd numeric(18,6) NOT NULL DEFAULT 0,
     provider_actual_cost_usd numeric(18,6) NULL,
     total_provider_actual_cost_usd numeric(18,6) NULL,
+    actual_cost_incomplete boolean NOT NULL DEFAULT false,
     provider_cost_source text NOT NULL DEFAULT 'configured_tariff',
+    tariff_snapshot_json jsonb NULL,
     exchange_rate_vnd_per_usd numeric(18,6) NOT NULL DEFAULT 8000,
     todox_vnd_per_point numeric(18,6) NOT NULL DEFAULT 10000,
     provider_cost_points numeric(18,6) NOT NULL DEFAULT 0,
@@ -107,12 +132,15 @@ CREATE TABLE IF NOT EXISTS billing.ai_image_billing_records (
     created_by text NULL,
     reserved_until timestamptz NULL,
     pending_reconciliation_at timestamptz NULL,
+    reconciliation_attempt_count integer NOT NULL DEFAULT 0,
+    reconciliation_lock_owner text NULL,
+    reconciliation_lock_until timestamptz NULL,
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
     completed_at timestamptz NULL,
     failed_at timestamptz NULL,
     CONSTRAINT ai_image_billing_records_logical_request_uk UNIQUE (logical_request_id),
-    CONSTRAINT ai_image_billing_records_status_ck CHECK (status IN ('reserved','completed','released','pending_reconciliation','insufficient','missing_payer','missing_customer','failed','invalid')),
+    CONSTRAINT ai_image_billing_records_status_ck CHECK (status IN ('reserved','completed','released','pending_reconciliation','manual_review','insufficient','missing_payer','missing_customer','failed','invalid')),
     CONSTRAINT ai_image_billing_records_payer_ck CHECK (
         (payer_type = 'customer' AND payer_customer_id IS NOT NULL AND customer_charged_points >= 0 AND system_charged_points = 0)
         OR (payer_type = 'system' AND payer_customer_id IS NULL AND system_charged_points >= 0 AND customer_charged_points = 0)
@@ -133,8 +161,13 @@ ALTER TABLE billing.ai_image_billing_records
     ADD COLUMN IF NOT EXISTS system_charged_points numeric(18,6) NOT NULL DEFAULT 0,
     ADD COLUMN IF NOT EXISTS total_provider_estimated_cost_usd numeric(18,6) NOT NULL DEFAULT 0,
     ADD COLUMN IF NOT EXISTS total_provider_actual_cost_usd numeric(18,6) NULL,
+    ADD COLUMN IF NOT EXISTS actual_cost_incomplete boolean NOT NULL DEFAULT false,
+    ADD COLUMN IF NOT EXISTS tariff_snapshot_json jsonb NULL,
     ADD COLUMN IF NOT EXISTS reserved_until timestamptz NULL,
-    ADD COLUMN IF NOT EXISTS pending_reconciliation_at timestamptz NULL;
+    ADD COLUMN IF NOT EXISTS pending_reconciliation_at timestamptz NULL,
+    ADD COLUMN IF NOT EXISTS reconciliation_attempt_count integer NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS reconciliation_lock_owner text NULL,
+    ADD COLUMN IF NOT EXISTS reconciliation_lock_until timestamptz NULL;
 
 UPDATE billing.ai_image_billing_records
    SET payer_type = CASE WHEN customer_id IS NULL THEN 'system' ELSE 'customer' END,
@@ -155,7 +188,7 @@ DO $$
 BEGIN
     ALTER TABLE billing.ai_image_billing_records DROP CONSTRAINT IF EXISTS ai_image_billing_records_status_ck;
     ALTER TABLE billing.ai_image_billing_records ADD CONSTRAINT ai_image_billing_records_status_ck
-        CHECK (status IN ('reserved','completed','released','pending_reconciliation','insufficient','missing_payer','missing_customer','failed','invalid'));
+        CHECK (status IN ('reserved','completed','released','pending_reconciliation','manual_review','insufficient','missing_payer','missing_customer','failed','invalid'));
 
     ALTER TABLE billing.ai_image_billing_records DROP CONSTRAINT IF EXISTS ai_image_billing_records_payer_ck;
     ALTER TABLE billing.ai_image_billing_records ADD CONSTRAINT ai_image_billing_records_payer_ck
@@ -212,8 +245,8 @@ CREATE INDEX IF NOT EXISTS ai_image_billing_records_payer_created_ix
     ON billing.ai_image_billing_records (tenant_id, payer_type, payer_customer_id, created_at DESC);
 
 CREATE INDEX IF NOT EXISTS ai_image_billing_records_reconciliation_ix
-    ON billing.ai_image_billing_records (status, reserved_until, pending_reconciliation_at)
- WHERE status IN ('reserved','pending_reconciliation');
+    ON billing.ai_image_billing_records (status, reserved_until, pending_reconciliation_at, reconciliation_lock_until)
+ WHERE status IN ('reserved','pending_reconciliation','manual_review');
 
 DO $$
 DECLARE
@@ -232,8 +265,13 @@ BEGIN
             ('ai_image_billing_records', 'payer_customer_id'),
             ('ai_image_billing_records', 'payer_wallet_id'),
             ('ai_image_billing_records', 'system_charged_points'),
+            ('ai_image_billing_records', 'tariff_snapshot_json'),
+            ('ai_image_billing_records', 'actual_cost_incomplete'),
             ('ai_image_billing_records', 'reserved_until'),
             ('ai_image_billing_records', 'pending_reconciliation_at'),
+            ('ai_image_billing_records', 'reconciliation_attempt_count'),
+            ('ai_image_billing_records', 'reconciliation_lock_owner'),
+            ('ai_image_billing_records', 'reconciliation_lock_until'),
             ('ai_image_provider_attempts', 'provider_estimated_cost_usd'),
             ('ai_image_provider_attempts', 'provider_actual_cost_usd'),
             ('ai_image_provider_attempts', 'cost_source'),

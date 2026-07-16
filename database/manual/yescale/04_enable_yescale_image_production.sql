@@ -24,6 +24,9 @@ DECLARE
     row_count int;
     default_count int;
     bad_count int;
+    missing_system_wallet int;
+    stale_reconciliation int;
+    missing_columns int;
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM public.todox_ai_provider WHERE provider_code='yescale_task_image') THEN
         RAISE EXCEPTION 'Refusing production enable: yescale_task_image provider is missing.';
@@ -33,6 +36,42 @@ BEGIN
     END IF;
     IF to_regclass('billing.ai_image_provider_attempts') IS NULL THEN
         RAISE EXCEPTION 'Run 02_add_yescale_billing_support.sql before production enable.';
+    END IF;
+
+    SELECT count(*) INTO missing_columns
+      FROM (
+        VALUES
+          ('tariff_snapshot_json'),
+          ('actual_cost_incomplete'),
+          ('reconciliation_attempt_count'),
+          ('reconciliation_lock_until')
+      ) required(column_name)
+      WHERE NOT EXISTS (
+          SELECT 1 FROM information_schema.columns c
+           WHERE c.table_schema = 'billing'
+             AND c.table_name = 'ai_image_billing_records'
+             AND c.column_name = required.column_name
+      );
+
+    IF missing_columns > 0 THEN
+        RAISE EXCEPTION 'Run updated 02_add_yescale_billing_support.sql before production enable. Missing reconciliation/tariff columns=%', missing_columns;
+    END IF;
+
+    SELECT count(*) INTO missing_system_wallet
+      FROM billing.token_wallets
+     WHERE wallet_scope = 'system'
+       AND wallet_code = 'TODOX_AI_IMAGE_SYSTEM';
+
+    IF missing_system_wallet <> 1 THEN
+        RAISE EXCEPTION 'Refusing production enable: TODOX_AI_IMAGE_SYSTEM wallet missing or duplicated. Count=%.', missing_system_wallet;
+    END IF;
+
+    SELECT count(*) INTO stale_reconciliation
+      FROM billing.ai_image_billing_records
+     WHERE status IN ('reserved','pending_reconciliation','manual_review');
+
+    IF stale_reconciliation > 0 THEN
+        RAISE EXCEPTION 'Refusing production enable: unresolved image billing reconciliation rows exist. Rows=%.', stale_reconciliation;
     END IF;
 
     FOREACH cap IN ARRAY ARRAY['avatar_generation','chibi_avatar_generation','character_generation','image_generation','scene_image_generation','thumbnail_generation']

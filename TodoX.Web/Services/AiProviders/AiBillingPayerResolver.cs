@@ -6,14 +6,28 @@ public static class AiBillingPayerTypes
 {
     public const string Customer = "customer";
     public const string System = "system";
+    public const string SystemCampaign = "system_campaign";
 }
+
+public static class AiBillingPermissions
+{
+    public const string UseSystemImageWallet = "ai.image.system_wallet.use";
+}
+
+public sealed record AiBillingTrustedPayerContext(
+    string PayerType,
+    Guid? PayerCustomerId,
+    Guid? UserId,
+    string? SystemWalletCode,
+    string Source);
 
 public sealed record AiBillingPayerResolveRequest(
     Guid? CustomerId,
     Guid? UserId,
     string? FeatureCode,
     string? CapabilityCode,
-    object? Metadata);
+    object? Metadata,
+    AiBillingTrustedPayerContext? TrustedContext = null);
 
 public sealed record AiBillingPayerContext(
     string PayerType,
@@ -59,24 +73,97 @@ public sealed class AiBillingPayerResolver : IAiBillingPayerResolver
                 ResolutionSource: "authenticated_customer");
         }
 
-        if (request.CustomerId is Guid customerIdFromServer)
+        if (current?.IsAuthenticated == true)
         {
-            return new AiBillingPayerContext(
-                AiBillingPayerTypes.Customer,
-                customerIdFromServer,
-                SystemWalletCode: null,
-                ResolutionSource: "trusted_server_customer_context");
+            if (current.IsRoot || current.Can(AiBillingPermissions.UseSystemImageWallet))
+            {
+                return new AiBillingPayerContext(
+                    AiBillingPayerTypes.System,
+                    PayerCustomerId: null,
+                    SystemImageWalletCode,
+                    ResolutionSource: current.IsRoot ? "authenticated_root" : "authenticated_system_wallet_permission");
+            }
+
+            throw new InvalidOperationException("Authenticated user is not allowed to use the system image wallet.");
         }
 
-        if (request.UserId is Guid)
+        if (request.TrustedContext is not null)
         {
+            return ResolveTrustedContext(request);
+        }
+
+        throw new InvalidOperationException("Cannot resolve image billing payer: missing authenticated session or trusted background payer context.");
+    }
+
+    public static AiBillingTrustedPayerContext CreateTrustedBackgroundContext(CurrentUserSession user)
+    {
+        if (user.IsAuthenticated && user.IsCustomer)
+        {
+            return new AiBillingTrustedPayerContext(
+                AiBillingPayerTypes.Customer,
+                user.CustomerId ?? throw new InvalidOperationException("Authenticated customer session is missing customer id."),
+                user.UserId,
+                SystemWalletCode: null,
+                Source: "background_job");
+        }
+
+        if (user.IsAuthenticated && (user.IsRoot || user.Can(AiBillingPermissions.UseSystemImageWallet)))
+        {
+            return new AiBillingTrustedPayerContext(
+                AiBillingPayerTypes.System,
+                PayerCustomerId: null,
+                user.UserId,
+                SystemImageWalletCode,
+                Source: "background_job");
+        }
+
+        throw new InvalidOperationException("Current user is not allowed to enqueue system-funded image billing jobs.");
+    }
+
+    private static AiBillingPayerContext ResolveTrustedContext(AiBillingPayerResolveRequest request)
+    {
+        var trusted = request.TrustedContext!;
+        if (!string.Equals(trusted.Source, "background_job", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(trusted.Source, "public_campaign", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Trusted image billing payer context has an invalid source.");
+        }
+
+        if (trusted.UserId is Guid trustedUser && request.UserId is Guid requestUser && trustedUser != requestUser)
+        {
+            throw new InvalidOperationException("Trusted image billing payer context user does not match the render request.");
+        }
+
+        if (string.Equals(trusted.PayerType, AiBillingPayerTypes.Customer, StringComparison.OrdinalIgnoreCase))
+        {
+            var customerId = trusted.PayerCustomerId
+                ?? throw new InvalidOperationException("Trusted customer payer context is missing customer id.");
+            if (request.CustomerId is Guid requested && requested != customerId)
+            {
+                throw new InvalidOperationException("Trusted image billing payer context customer does not match the render request.");
+            }
+
+            return new AiBillingPayerContext(
+                AiBillingPayerTypes.Customer,
+                customerId,
+                SystemWalletCode: null,
+                ResolutionSource: trusted.Source);
+        }
+
+        if (string.Equals(trusted.PayerType, AiBillingPayerTypes.System, StringComparison.OrdinalIgnoreCase))
+        {
+            if (!string.Equals(trusted.SystemWalletCode, SystemImageWalletCode, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("Trusted system payer context references an unsupported system wallet.");
+            }
+
             return new AiBillingPayerContext(
                 AiBillingPayerTypes.System,
                 PayerCustomerId: null,
                 SystemImageWalletCode,
-                ResolutionSource: current?.IsAuthenticated == true ? "authenticated_system_user" : "trusted_background_user");
+                ResolutionSource: trusted.Source);
         }
 
-        throw new InvalidOperationException("Cannot resolve image billing payer: missing customer and authenticated/system user context.");
+        throw new InvalidOperationException("Trusted image billing payer context has an unsupported payer type.");
     }
 }

@@ -959,6 +959,7 @@
             UserId = AuthState.CurrentUser.UserId,
             CustomerId = AuthState.CurrentUser.CustomerId,
             CreatedBy = AuthState.CurrentUser.Email ?? AuthState.CurrentUser.UserId.ToString(),
+            TrustedPayerContext = TodoX.Web.Services.AiProviders.AiBillingPayerResolver.CreateTrustedBackgroundContext(AuthState.CurrentUser),
             OnlyMissingOrFailed = onlyMissingOrFailed
         };
 
