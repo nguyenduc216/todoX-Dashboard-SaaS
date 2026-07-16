@@ -19,8 +19,9 @@ public sealed class VideoRenderMockHandler : IRenderJobHandler
     private readonly VideoRenderRepository _repo;
     private readonly IMediaFileService _media;
     private readonly TenantContext _tenant;
+    private readonly ISceneMediaVersioningService _versions;
 
-    public VideoRenderMockHandler(ILogger<VideoRenderMockHandler> logger, IWebHostEnvironment env, IOptionsMonitor<VideoRenderOptions> options, VideoRenderRepository repo, IMediaFileService media, TenantContext tenant)
+    public VideoRenderMockHandler(ILogger<VideoRenderMockHandler> logger, IWebHostEnvironment env, IOptionsMonitor<VideoRenderOptions> options, VideoRenderRepository repo, IMediaFileService media, TenantContext tenant, ISceneMediaVersioningService versions)
     {
         _logger = logger;
         _env = env;
@@ -28,6 +29,7 @@ public sealed class VideoRenderMockHandler : IRenderJobHandler
         _repo = repo;
         _media = media;
         _tenant = tenant;
+        _versions = versions;
     }
 
     public async Task HandleAsync(RenderJobDto job, CancellationToken ct)
@@ -67,29 +69,89 @@ public sealed class VideoRenderMockHandler : IRenderJobHandler
 
         foreach (var scene in scenes)
         {
-            await RenderSceneMockAsync(project, scene, mockSource, projectRoot, publicBase, ct);
+            await RenderSceneMockAsync(project, scene, mockSource, projectRoot, publicBase, job.Id, ct);
         }
 
-        await MergeAsync(project, scenes, projectRoot, publicBase, ct);
+        await MergeAsync(project, scenes, projectRoot, publicBase, job.Id, ct);
     }
 
-    private async Task RenderSceneMockAsync(VideoProjectDto project, VideoProjectSceneDto scene, string mockSource, string projectRoot, string publicBase, CancellationToken ct)
+    private async Task RenderSceneMockAsync(VideoProjectDto project, VideoProjectSceneDto scene, string mockSource, string projectRoot, string publicBase, Guid jobId, CancellationToken ct)
     {
-        var sceneFolder = Path.Combine(projectRoot, $"scene_{scene.SceneIndex:00}");
+        var versioningEnabled = await _versions.IsEnabledAsync(SceneMediaVersioningFlags.SceneVideos, ct);
+        SceneVideoVersionDto? version = null;
+        if (versioningEnabled)
+        {
+            var selectedImage = await _versions.GetSelectedImageVersionAsync(scene.Id, ct);
+            version = await _versions.CreateQueuedSceneVideoVersionAsync(new SceneVideoVersionCreateRequest(
+                project.Id,
+                scene.Id,
+                selectedImage?.Id,
+                project.UserId,
+                project.CustomerId,
+                jobId,
+                $"scene-video-job-{jobId:N}-scene-{scene.Id}",
+                scene.ImagePrompt,
+                scene.VideoPrompt,
+                SceneSnapshot: new
+                {
+                    scene.Id,
+                    scene.ProjectId,
+                    scene.SceneIndex,
+                    scene.Title,
+                    scene.DurationSeconds,
+                    scene.ScenePrompt,
+                    scene.ImagePrompt,
+                    scene.VideoPrompt,
+                    sourceImageVersionId = selectedImage?.Id
+                },
+                RenderConfigSnapshot: new { source = "mock_scene_video", mockSource = Path.GetFileName(mockSource) }), ct);
+        }
+
+        var sceneFolder = version is null
+            ? Path.Combine(projectRoot, $"scene_{scene.SceneIndex:00}")
+            : Path.Combine(projectRoot, "scenes", scene.Id.ToString(), "videos", version.Id.ToString("N"), "output");
         Directory.CreateDirectory(sceneFolder);
-        var targetVideo = Path.Combine(sceneFolder, "scene.mp4");
+        var targetVideo = Path.Combine(sceneFolder, version is null ? "scene.mp4" : "scene-video.mp4");
         File.Copy(mockSource, targetVideo, true);
         var relative = Path.GetRelativePath(ResolveRoot(_options.CurrentValue.StorageRoot), targetVideo).Replace(Path.DirectorySeparatorChar, '/');
         var url = $"{publicBase}/{relative}";
+        if (version is not null)
+        {
+            await _versions.CompleteSceneVideoVersionAsync(version.Id, new SceneVideoVersionCompleteRequest(
+                url,
+                targetVideo,
+                PosterUrl: null,
+                scene.DurationSeconds,
+                "video/mp4"), ct);
+        }
+
         await _repo.UpdateSceneAsync(scene.Id, VideoSceneStatuses.VideoReady, videoUrl: url, videoPath: targetVideo, errorMessage: null, ct: ct);
         await _repo.AddProjectEventAsync(project.Id, "SCENE_VIDEO_READY", "info", $"Scene {scene.SceneIndex} ready.", new { scene.Id, scene.SceneIndex, url }, ct);
     }
 
-    private async Task MergeAsync(VideoProjectDto project, List<VideoProjectSceneDto> scenes, string projectRoot, string publicBase, CancellationToken ct)
+    private async Task MergeAsync(VideoProjectDto project, List<VideoProjectSceneDto> scenes, string projectRoot, string publicBase, Guid jobId, CancellationToken ct)
     {
-        var finalDir = Path.Combine(projectRoot, "final");
+        var versioningEnabled = await _versions.IsEnabledAsync(SceneMediaVersioningFlags.FinalVideos, ct);
+        FinalVideoVersionDto? version = null;
+        if (versioningEnabled)
+        {
+            version = await _versions.CreateQueuedFinalVideoVersionAsync(new FinalVideoVersionCreateRequest(
+                project.Id,
+                project.UserId,
+                project.CustomerId,
+                jobId,
+                $"final-video-job-{jobId:N}-project-{project.Id}",
+                CompositionConfigSnapshot: new { source = "mock_merge", sceneCount = scenes.Count, scenes = scenes.Select(x => new { x.Id, x.SceneIndex, x.SceneVideoPath }) },
+                TransitionConfigSnapshot: new { mode = "copy_concat" },
+                AudioConfigSnapshot: new { },
+                SubtitleConfigSnapshot: new { }), ct);
+        }
+
+        var finalDir = version is null
+            ? Path.Combine(projectRoot, "final")
+            : Path.Combine(projectRoot, "final-videos", version.Id.ToString("N"), "output");
         Directory.CreateDirectory(finalDir);
-        var finalPath = Path.Combine(finalDir, "final.mp4");
+        var finalPath = Path.Combine(finalDir, version is null ? "final.mp4" : "final-video.mp4");
         var concat = Path.Combine(finalDir, "concat.txt");
         var lines = scenes.Select(scene => $"file '{Path.GetFullPath(scene.SceneVideoPath ?? string.Empty).Replace("'", "''")}'").ToArray();
         await File.WriteAllLinesAsync(concat, lines, Encoding.UTF8, ct);
@@ -119,6 +181,16 @@ public sealed class VideoRenderMockHandler : IRenderJobHandler
 
         var relative = Path.GetRelativePath(ResolveRoot(_options.CurrentValue.StorageRoot), finalPath).Replace(Path.DirectorySeparatorChar, '/');
         var url = $"{publicBase}/{relative}";
+        if (version is not null)
+        {
+            await _versions.CompleteFinalVideoVersionAsync(version.Id, new FinalVideoVersionCompleteRequest(
+                url,
+                finalPath,
+                PosterUrl: null,
+                DurationSeconds: scenes.Sum(x => (decimal)x.DurationSeconds),
+                "video/mp4"), ct);
+        }
+
         await _repo.UpdateProjectAsync(project.Id, VideoProjectStatuses.Completed, url, finalPath, null, ct);
         await _repo.AddProjectEventAsync(project.Id, "PROJECT_MERGED", "info", "Final video merged.", new { finalPath, url }, ct);
     }

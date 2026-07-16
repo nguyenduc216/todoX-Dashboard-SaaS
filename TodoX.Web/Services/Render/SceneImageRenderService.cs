@@ -31,6 +31,7 @@ public sealed class SceneImageRenderContext
     public AiBillingTrustedPayerContext? TrustedPayerContext { get; init; }
     public string? CreatedBy { get; init; }
     public Guid? RenderJobId { get; init; }
+    public string? LogicalRequestId { get; init; }
 
     /// <summary>Media id of the character reference (Vertex path passes references by media id).</summary>
     public Guid? CharacterReferenceMediaId { get; init; }
@@ -209,7 +210,9 @@ public sealed class SceneImageRenderService : ISceneImageRenderService
             context.ProjectId, context.SceneId, context.SceneIndex, context.CharacterId,
             option.ProviderCapabilityId, option.ProviderCode, option.ModelName, references.Length > 0);
 
-        var requestId = BuildLogicalRequestId(featureCode, context.SceneId, context.RenderJobId);
+        var requestId = string.IsNullOrWhiteSpace(context.LogicalRequestId)
+            ? BuildLogicalRequestId(featureCode, context.SceneId, context.RenderJobId)
+            : context.LogicalRequestId;
 
         var render = await _imageRouter.RenderImageAsync(new AiImageRenderRequest
         {

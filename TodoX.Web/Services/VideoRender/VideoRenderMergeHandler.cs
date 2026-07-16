@@ -16,13 +16,15 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
     private readonly IOptionsMonitor<VideoRenderOptions> _options;
     private readonly VideoRenderRepository _repo;
     private readonly IWebHostEnvironment _env;
+    private readonly ISceneMediaVersioningService _versions;
 
-    public VideoRenderMergeHandler(ILogger<VideoRenderMergeHandler> logger, IOptionsMonitor<VideoRenderOptions> options, VideoRenderRepository repo, IWebHostEnvironment env)
+    public VideoRenderMergeHandler(ILogger<VideoRenderMergeHandler> logger, IOptionsMonitor<VideoRenderOptions> options, VideoRenderRepository repo, IWebHostEnvironment env, ISceneMediaVersioningService versions)
     {
         _logger = logger;
         _options = options;
         _repo = repo;
         _env = env;
+        _versions = versions;
     }
 
     public async Task HandleAsync(RenderJobDto job, CancellationToken ct)
@@ -37,10 +39,28 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
         await _repo.UpdateProjectAsync(project.Id, VideoProjectStatuses.Merging, errorMessage: null, ct: ct);
         var root = ResolveRoot(_options.CurrentValue.StorageRoot);
         var projectRoot = Path.Combine(root, project.JobFolder);
-        var finalDir = Path.Combine(projectRoot, "final");
+        var versioningEnabled = await _versions.IsEnabledAsync(SceneMediaVersioningFlags.FinalVideos, ct);
+        FinalVideoVersionDto? version = null;
+        if (versioningEnabled)
+        {
+            version = await _versions.CreateQueuedFinalVideoVersionAsync(new FinalVideoVersionCreateRequest(
+                project.Id,
+                project.UserId,
+                project.CustomerId,
+                job.Id,
+                $"final-video-job-{job.Id:N}-project-{project.Id}",
+                CompositionConfigSnapshot: new { source = "merge_video_job", sceneCount = project.Scenes.Count, scenes = project.Scenes.OrderBy(x => x.SceneIndex).Select(x => new { x.Id, x.SceneIndex, x.SceneVideoPath }) },
+                TransitionConfigSnapshot: new { mode = "copy_concat" },
+                AudioConfigSnapshot: new { },
+                SubtitleConfigSnapshot: new { }), ct);
+        }
+
+        var finalDir = version is null
+            ? Path.Combine(projectRoot, "final")
+            : Path.Combine(projectRoot, "final-videos", version.Id.ToString("N"), "output");
         Directory.CreateDirectory(finalDir);
         var concat = Path.Combine(finalDir, "concat.txt");
-        var finalPath = Path.Combine(finalDir, "final.mp4");
+        var finalPath = Path.Combine(finalDir, version is null ? "final.mp4" : "final-video.mp4");
         var lines = project.Scenes.OrderBy(x => x.SceneIndex).Select(scene => $"file '{Path.GetFullPath(scene.SceneVideoPath ?? string.Empty).Replace("'", "''")}'").ToArray();
         await File.WriteAllLinesAsync(concat, lines, Encoding.UTF8, ct);
 
@@ -69,6 +89,16 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
 
         var relative = Path.GetRelativePath(root, finalPath).Replace(Path.DirectorySeparatorChar, '/');
         var url = $"{_options.CurrentValue.PublicBase.TrimEnd('/')}/{relative}";
+        if (version is not null)
+        {
+            await _versions.CompleteFinalVideoVersionAsync(version.Id, new FinalVideoVersionCompleteRequest(
+                url,
+                finalPath,
+                PosterUrl: null,
+                DurationSeconds: project.Scenes.Sum(x => (decimal)x.DurationSeconds),
+                "video/mp4"), ct);
+        }
+
         await _repo.UpdateProjectAsync(project.Id, VideoProjectStatuses.Completed, url, finalPath, null, ct);
         await _repo.AddProjectEventAsync(project.Id, "PROJECT_MERGED", "info", "Final video merged.", new { finalPath, url }, ct);
     }

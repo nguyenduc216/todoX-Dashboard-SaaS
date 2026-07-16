@@ -34,6 +34,7 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
 
     private readonly VideoRenderRepository _repo;
     private readonly ISceneImageRenderService _sceneImages;
+    private readonly ISceneMediaVersioningService _versions;
     private readonly IAiCharacterService _characters;
     private readonly IConfiguration _config;
     private readonly ILogger<SceneImageBatchRenderHandler> _logger;
@@ -41,12 +42,14 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
     public SceneImageBatchRenderHandler(
         VideoRenderRepository repo,
         ISceneImageRenderService sceneImages,
+        ISceneMediaVersioningService versions,
         IAiCharacterService characters,
         IConfiguration config,
         ILogger<SceneImageBatchRenderHandler> logger)
     {
         _repo = repo;
         _sceneImages = sceneImages;
+        _versions = versions;
         _characters = characters;
         _config = config;
         _logger = logger;
@@ -154,6 +157,48 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
         CancellationToken ct)
     {
         var queuedAt = DateTime.UtcNow;
+        var logicalRequestId = SceneImageRenderService.BuildLogicalRequestId("render_job_scene_image", scene.Id, jobId);
+        var versioningEnabled = await _versions.IsEnabledAsync(SceneMediaVersioningFlags.SceneImages, ct);
+        SceneImageVersionDto? imageVersion = null;
+        if (versioningEnabled)
+        {
+            imageVersion = await _versions.CreateQueuedImageVersionAsync(new SceneImageVersionCreateRequest(
+                input.ProjectId,
+                scene.Id,
+                input.UserId,
+                input.CustomerId,
+                jobId,
+                logicalRequestId,
+                scene.ImagePrompt,
+                scene.VideoPrompt,
+                NegativePromptSnapshot: null,
+                SceneSnapshot: new
+                {
+                    scene.Id,
+                    scene.ProjectId,
+                    scene.SceneIndex,
+                    scene.Title,
+                    scene.DurationSeconds,
+                    scene.ScenePrompt,
+                    scene.ImagePrompt,
+                    scene.VideoPrompt
+                },
+                ReferenceSnapshot: new
+                {
+                    characterId = input.CharacterId,
+                    referenceMediaId,
+                    referenceUrl,
+                    characterPrompt
+                },
+                RenderConfigSnapshot: new
+                {
+                    capability = SceneImageRenderService.CapabilityCode,
+                    aspectRatio = "9:16",
+                    outputFormat = "png",
+                    source = "scene_image_batch"
+                }), ct);
+        }
+
         var context = new SceneImageRenderContext
         {
             ProjectId = input.ProjectId,
@@ -166,6 +211,7 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
             TrustedPayerContext = input.TrustedPayerContext,
             CreatedBy = input.CreatedBy,
             RenderJobId = jobId,
+            LogicalRequestId = logicalRequestId,
             CharacterReferenceMediaId = referenceMediaId,
             CharacterReferenceUrl = referenceUrl
         };
@@ -185,6 +231,19 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
 
             if (outcome.Success)
             {
+                if (imageVersion is not null)
+                {
+                    await _versions.CompleteImageVersionAsync(imageVersion.Id, new SceneImageVersionCompleteRequest(
+                        outcome.ImageUrl,
+                        outcome.ObjectKey,
+                        outcome.ProviderCode,
+                        outcome.ModelName,
+                        outcome.ProviderCapabilityId,
+                        ProviderTaskId: null,
+                        MimeType: "image/png",
+                        CostSource: null), ct);
+                }
+
                 await _repo.UpdateSceneAsync(scene.Id, VideoSceneStatuses.ImageReady,
                     imageUrl: outcome.ImageUrl, imagePath: outcome.ObjectKey, errorMessage: null,
                     title: scene.Title, scenePrompt: scene.ScenePrompt, imagePrompt: scene.ImagePrompt, videoPrompt: scene.VideoPrompt, ct: ct);
@@ -206,6 +265,11 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
                         durationMs = (completedAt - startedAt).TotalMilliseconds
                     }, ct);
                 return true;
+            }
+
+            if (imageVersion is not null)
+            {
+                await _versions.FailImageVersionAsync(imageVersion.Id, outcome.QuotaError ? "quota" : "provider_error", outcome.Error, ct);
             }
 
             await _repo.UpdateSceneAsync(scene.Id, VideoSceneStatuses.Failed,
@@ -241,6 +305,11 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
         {
             _logger.LogError(ex, "SCENE_IMAGE_BATCH_SCENE_EXCEPTION projectId={ProjectId} sceneId={SceneId} sceneIndex={SceneIndex}",
                 input.ProjectId, scene.Id, scene.SceneIndex);
+            if (imageVersion is not null)
+            {
+                await _versions.FailImageVersionAsync(imageVersion.Id, ex.GetType().Name, ex.Message, ct);
+            }
+
             await _repo.UpdateSceneAsync(scene.Id, VideoSceneStatuses.Failed,
                 errorMessage: ex.Message, title: scene.Title, scenePrompt: scene.ScenePrompt,
                 imagePrompt: scene.ImagePrompt, videoPrompt: scene.VideoPrompt, ct: ct);

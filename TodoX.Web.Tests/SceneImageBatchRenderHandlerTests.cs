@@ -1,5 +1,6 @@
 using TodoX.Web.Models;
 using TodoX.Web.Services.Render;
+using TodoX.Web.Services.VideoRender;
 using Xunit;
 
 namespace TodoX.Web.Tests;
@@ -53,5 +54,24 @@ public class SceneImageBatchRenderHandlerTests
 
         Assert.NotEqual(first, second);
         Assert.StartsWith("render_job_scene_image_rerender-scene-42-", first);
+    }
+
+    [Fact]
+    public void SceneMediaStorageKeys_UseImmutableVersionFolders()
+    {
+        var tenantId = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+        var imageVersionId = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+        var videoVersionId = Guid.Parse("cccccccc-cccc-cccc-cccc-cccccccccccc");
+        var finalVersionId = Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd");
+
+        Assert.Equal(
+            "render-projects/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/12/scenes/34/images/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/output/scene-image.png",
+            SceneMediaStorageKeys.SceneImageOutput(tenantId, 12, 34, imageVersionId, "png"));
+        Assert.Equal(
+            "render-projects/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/12/scenes/34/videos/cccccccccccccccccccccccccccccccc/output/scene-video.mp4",
+            SceneMediaStorageKeys.SceneVideoOutput(tenantId, 12, 34, videoVersionId));
+        Assert.Equal(
+            "render-projects/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/12/final-videos/dddddddddddddddddddddddddddddddd/output/final-video.mp4",
+            SceneMediaStorageKeys.FinalVideoOutput(tenantId, 12, finalVersionId));
     }
 }
