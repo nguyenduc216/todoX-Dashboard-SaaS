@@ -55,59 +55,73 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
                 SubtitleConfigSnapshot: new { }), ct);
         }
 
-        var finalDir = version is null
-            ? Path.Combine(projectRoot, "final")
-            : Path.Combine(projectRoot, "final-videos", version.Id.ToString("N"), "output");
-        Directory.CreateDirectory(finalDir);
-        var concat = Path.Combine(finalDir, "concat.txt");
-        var finalPath = Path.Combine(finalDir, version is null ? "final.mp4" : "final-video.mp4");
-        var mergeItems = version is null
-            ? project.Scenes.OrderBy(x => x.SceneIndex).Select(scene => new MergeInput(scene.Id, scene.SceneIndex, null, scene.SceneVideoPath)).ToList()
-            : (await _versions.ListFinalVideoVersionItemsAsync(version.Id, ct))
-                .Select(item => new MergeInput(item.SceneId, item.ItemOrder, item.SceneVideoVersionId, item.SourceFilePath))
-                .ToList();
-        ValidateMergeInputs(mergeItems);
-        var lines = mergeItems.Select(item => $"file '{Path.GetFullPath(item.VideoPath ?? string.Empty).Replace("'", "''")}'").ToArray();
-        await File.WriteAllLinesAsync(concat, lines, Encoding.UTF8, ct);
-        await WriteCompositionManifestAsync(finalDir, version, mergeItems, ct);
-
-        var ffmpegPath = _options.CurrentValue.FfmpegPath;
-        var psi = new ProcessStartInfo
+        try
         {
-            FileName = ffmpegPath,
-            Arguments = $"-y -f concat -safe 0 -i \"{concat}\" -c copy \"{finalPath}\"",
-            WorkingDirectory = finalDir,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
+            var finalDir = version is null
+                ? Path.Combine(projectRoot, "final")
+                : Path.Combine(projectRoot, "final-videos", version.Id.ToString("N"), "output");
+            Directory.CreateDirectory(finalDir);
+            var concat = Path.Combine(finalDir, "concat.txt");
+            var finalPath = Path.Combine(finalDir, version is null ? "final.mp4" : "final-video.mp4");
+            var mergeItems = version is null
+                ? project.Scenes.OrderBy(x => x.SceneIndex).Select(scene => new MergeInput(scene.Id, scene.SceneIndex, null, scene.SceneVideoPath)).ToList()
+                : (await _versions.ListFinalVideoVersionItemsAsync(version.Id, ct))
+                    .Select(item => new MergeInput(item.SceneId, item.ItemOrder, item.SceneVideoVersionId, item.SourceFilePath))
+                    .ToList();
+            ValidateMergeInputs(mergeItems);
+            var lines = mergeItems.Select(item => $"file '{Path.GetFullPath(item.VideoPath ?? string.Empty).Replace("'", "''")}'").ToArray();
+            await File.WriteAllLinesAsync(concat, lines, Encoding.UTF8, ct);
+            await WriteCompositionManifestAsync(finalDir, version, mergeItems, ct);
 
-        using var process = Process.Start(psi) ?? throw new InvalidOperationException("Khong khoi dong duoc FFmpeg.");
-        var stdout = await process.StandardOutput.ReadToEndAsync(ct);
-        var stderr = await process.StandardError.ReadToEndAsync(ct);
-        await process.WaitForExitAsync(ct);
-        await File.WriteAllTextAsync(Path.Combine(finalDir, "ffmpeg.log"), stdout + Environment.NewLine + stderr, ct);
+            var ffmpegPath = _options.CurrentValue.FfmpegPath;
+            var psi = new ProcessStartInfo
+            {
+                FileName = ffmpegPath,
+                Arguments = $"-y -f concat -safe 0 -i \"{concat}\" -c copy \"{finalPath}\"",
+                WorkingDirectory = finalDir,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
 
-        if (process.ExitCode != 0)
-        {
-            throw new InvalidOperationException($"FFmpeg merge failed. ExitCode={process.ExitCode}");
+            using var process = Process.Start(psi) ?? throw new InvalidOperationException("Khong khoi dong duoc FFmpeg.");
+            var stdout = await process.StandardOutput.ReadToEndAsync(ct);
+            var stderr = await process.StandardError.ReadToEndAsync(ct);
+            await process.WaitForExitAsync(ct);
+            await File.WriteAllTextAsync(Path.Combine(finalDir, "ffmpeg.log"), stdout + Environment.NewLine + stderr, ct);
+
+            if (process.ExitCode != 0)
+            {
+                throw new InvalidOperationException($"FFmpeg merge failed. ExitCode={process.ExitCode}");
+            }
+
+            var relative = Path.GetRelativePath(root, finalPath).Replace(Path.DirectorySeparatorChar, '/');
+            var url = $"{_options.CurrentValue.PublicBase.TrimEnd('/')}/{relative}";
+            if (version is not null)
+            {
+                await _versions.CompleteFinalVideoVersionAsync(version.Id, new FinalVideoVersionCompleteRequest(
+                    url,
+                    finalPath,
+                    PosterUrl: null,
+                    DurationSeconds: project.Scenes.Sum(x => (decimal)x.DurationSeconds),
+                    "video/mp4"), ct);
+            }
+
+            await _repo.UpdateProjectAsync(project.Id, VideoProjectStatuses.Completed, url, finalPath, null, ct);
+            await _repo.AddProjectEventAsync(project.Id, "PROJECT_MERGED", "info", "Final video merged.", new { finalPath, url }, ct);
         }
-
-        var relative = Path.GetRelativePath(root, finalPath).Replace(Path.DirectorySeparatorChar, '/');
-        var url = $"{_options.CurrentValue.PublicBase.TrimEnd('/')}/{relative}";
-        if (version is not null)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            await _versions.CompleteFinalVideoVersionAsync(version.Id, new FinalVideoVersionCompleteRequest(
-                url,
-                finalPath,
-                PosterUrl: null,
-                DurationSeconds: project.Scenes.Sum(x => (decimal)x.DurationSeconds),
-                "video/mp4"), ct);
-        }
+            if (version is not null)
+            {
+                await _versions.FailFinalVideoVersionAsync(version.Id, ex.GetType().Name, ex.Message, ct);
+            }
 
-        await _repo.UpdateProjectAsync(project.Id, VideoProjectStatuses.Completed, url, finalPath, null, ct);
-        await _repo.AddProjectEventAsync(project.Id, "PROJECT_MERGED", "info", "Final video merged.", new { finalPath, url }, ct);
+            await _repo.UpdateProjectAsync(project.Id, VideoProjectStatuses.Failed, errorMessage: ex.Message, ct: ct);
+            await _repo.AddProjectEventAsync(project.Id, "PROJECT_MERGE_FAILED", "error", "Final video merge failed.", new { versionId = version?.Id, error = ex.Message }, ct);
+            throw;
+        }
     }
 
     private static void ValidateMergeInputs(IReadOnlyList<MergeInput> items)

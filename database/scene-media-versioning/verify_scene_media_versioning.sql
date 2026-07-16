@@ -62,6 +62,44 @@ SELECT 'COUNTS' section,
  (SELECT count(*) FROM video_render.final_video_versions) final_video_versions,
  (SELECT count(*) FROM video_render.final_video_version_items) final_items;
 
+SELECT 'VERSION_STATUS_COUNTS' section, media_type, status, count(*) row_count
+FROM (
+ SELECT 'image' media_type,status FROM video_render.scene_image_versions
+ UNION ALL SELECT 'scene_video',status FROM video_render.scene_video_versions
+ UNION ALL SELECT 'final_video',status FROM video_render.final_video_versions
+) s
+GROUP BY media_type,status
+ORDER BY media_type,status;
+
+SELECT 'ORPHAN_QUEUED' section, media_type, count(*) row_count
+FROM (
+ SELECT 'image' media_type FROM video_render.scene_image_versions WHERE status='queued' AND render_job_id IS NULL
+ UNION ALL SELECT 'scene_video' FROM video_render.scene_video_versions WHERE status='queued' AND render_job_id IS NULL
+ UNION ALL SELECT 'final_video' FROM video_render.final_video_versions WHERE status='queued' AND render_job_id IS NULL
+) q
+GROUP BY media_type
+ORDER BY media_type;
+
+SELECT 'DUPLICATE_LOGICAL_REQUEST' section, media_type, logical_request_id, count(*) row_count
+FROM (
+ SELECT 'image' media_type,logical_request_id FROM video_render.scene_image_versions
+ UNION ALL SELECT 'scene_video',logical_request_id FROM video_render.scene_video_versions
+ UNION ALL SELECT 'final_video',logical_request_id FROM video_render.final_video_versions
+) d
+GROUP BY media_type,logical_request_id
+HAVING count(*)>1
+ORDER BY media_type,logical_request_id;
+
+SELECT 'BILLING_GAPS' section, count(*) image_completed_missing_billing
+FROM video_render.scene_image_versions
+WHERE status='completed'
+  AND (billing_logical_request_id IS NULL OR estimated_usd IS NULL OR charged_points IS NULL);
+
+SELECT 'FINAL_ITEM_GAPS' section, count(*) invalid_final_items
+FROM video_render.final_video_version_items item
+LEFT JOIN video_render.scene_video_versions v ON v.id=item.scene_video_version_id
+WHERE v.id IS NULL OR v.status<>'completed' OR v.scene_id<>item.scene_id;
+
 SELECT 'SCENE_SELECTION' section,s.project_id,s.id scene_id,s.scene_index,
  s.selected_image_version_id,s.selected_video_version_id,
  CASE WHEN v.source_image_version_id IS DISTINCT FROM s.selected_image_version_id THEN 'VIDEO_OUTDATED' ELSE 'CURRENT' END video_state

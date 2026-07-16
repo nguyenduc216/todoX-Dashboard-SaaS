@@ -90,6 +90,7 @@ public sealed class SceneImageVersionDto
     public int VersionNumber { get; set; }
     public string LogicalRequestId { get; set; } = string.Empty;
     public string Status { get; set; } = string.Empty;
+    public bool IsSelected { get; set; }
     public string? StorageKey { get; set; }
     public string? PublicUrl { get; set; }
     public string? SourceFilePath { get; set; }
@@ -107,6 +108,7 @@ public sealed class SceneImageVersionDto
     public decimal ChargedPoints { get; set; }
     public decimal RefundedPoints { get; set; }
     public string? ErrorMessage { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
 }
 
 public sealed class SceneVideoVersionDto
@@ -118,9 +120,19 @@ public sealed class SceneVideoVersionDto
     public int VersionNumber { get; set; }
     public string LogicalRequestId { get; set; } = string.Empty;
     public string Status { get; set; } = string.Empty;
+    public bool IsSelected { get; set; }
     public string? StorageKey { get; set; }
     public string? PublicUrl { get; set; }
     public string? SourceFilePath { get; set; }
+    public string? ImagePromptSnapshot { get; set; }
+    public string? VideoPromptSnapshot { get; set; }
+    public string? ProviderCode { get; set; }
+    public string? ModelName { get; set; }
+    public string? ProviderTaskId { get; set; }
+    public decimal? DurationSeconds { get; set; }
+    public string? PosterUrl { get; set; }
+    public string? ErrorMessage { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
 }
 
 public sealed class FinalVideoVersionDto
@@ -130,9 +142,14 @@ public sealed class FinalVideoVersionDto
     public int VersionNumber { get; set; }
     public string LogicalRequestId { get; set; } = string.Empty;
     public string Status { get; set; } = string.Empty;
+    public bool IsSelected { get; set; }
     public string? StorageKey { get; set; }
     public string? PublicUrl { get; set; }
     public string? SourceFilePath { get; set; }
+    public decimal? DurationSeconds { get; set; }
+    public string? PosterUrl { get; set; }
+    public string? ErrorMessage { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
 }
 
 public sealed class FinalVideoVersionItemDto
@@ -157,18 +174,25 @@ public interface ISceneMediaVersioningService
     Task FailImageVersionAsync(Guid versionId, string? errorCode, string? errorMessage, CancellationToken ct = default);
     Task<SceneImageVersionDto?> GetSelectedImageVersionAsync(long sceneId, CancellationToken ct = default);
     Task<IReadOnlyList<SceneImageVersionDto>> ListImageVersionsAsync(long sceneId, int skip = 0, int take = 20, CancellationToken ct = default);
+    Task<IReadOnlyList<SceneImageVersionDto>> ListImageVersionsAsync(long sceneId, CurrentUserSession user, int skip = 0, int take = 20, CancellationToken ct = default);
     Task SelectImageVersionAsync(long sceneId, Guid versionId, Guid? selectedBy, CancellationToken ct = default);
+    Task SelectImageVersionAsync(long sceneId, Guid versionId, CurrentUserSession user, CancellationToken ct = default);
     Task<SceneVideoVersionDto> CreateQueuedSceneVideoVersionAsync(SceneVideoVersionCreateRequest request, CancellationToken ct = default);
     Task CompleteSceneVideoVersionAsync(Guid versionId, SceneVideoVersionCompleteRequest request, CancellationToken ct = default);
     Task FailSceneVideoVersionAsync(Guid versionId, string? errorCode, string? errorMessage, CancellationToken ct = default);
     Task<IReadOnlyList<SceneVideoVersionDto>> ListSceneVideoVersionsAsync(long sceneId, int skip = 0, int take = 20, CancellationToken ct = default);
+    Task<IReadOnlyList<SceneVideoVersionDto>> ListSceneVideoVersionsAsync(long sceneId, CurrentUserSession user, int skip = 0, int take = 20, CancellationToken ct = default);
     Task SelectSceneVideoVersionAsync(long sceneId, Guid versionId, Guid? selectedBy, CancellationToken ct = default);
+    Task SelectSceneVideoVersionAsync(long sceneId, Guid versionId, CurrentUserSession user, CancellationToken ct = default);
     Task<FinalVideoVersionDto> CreateQueuedFinalVideoVersionAsync(FinalVideoVersionCreateRequest request, CancellationToken ct = default);
     Task CompleteFinalVideoVersionAsync(Guid versionId, FinalVideoVersionCompleteRequest request, CancellationToken ct = default);
     Task FailFinalVideoVersionAsync(Guid versionId, string? errorCode, string? errorMessage, CancellationToken ct = default);
     Task<IReadOnlyList<FinalVideoVersionDto>> ListFinalVideoVersionsAsync(long projectId, int skip = 0, int take = 20, CancellationToken ct = default);
+    Task<IReadOnlyList<FinalVideoVersionDto>> ListFinalVideoVersionsAsync(long projectId, CurrentUserSession user, int skip = 0, int take = 20, CancellationToken ct = default);
     Task<IReadOnlyList<FinalVideoVersionItemDto>> ListFinalVideoVersionItemsAsync(Guid finalVersionId, CancellationToken ct = default);
+    Task<IReadOnlyList<FinalVideoVersionItemDto>> ListFinalVideoVersionItemsAsync(Guid finalVersionId, CurrentUserSession user, CancellationToken ct = default);
     Task SelectFinalVideoVersionAsync(long projectId, Guid versionId, Guid? selectedBy, CancellationToken ct = default);
+    Task SelectFinalVideoVersionAsync(long projectId, Guid versionId, CurrentUserSession user, CancellationToken ct = default);
 }
 
 public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
@@ -213,6 +237,17 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
             new { request.LogicalRequestId, tenant = _tenant.TenantId }, tx);
         if (existing is not null)
         {
+            if (request.RenderJobId is not null)
+            {
+                await conn.ExecuteAsync(
+                    """
+                    UPDATE video_render.scene_image_versions
+                       SET render_job_id=COALESCE(render_job_id, @renderJobId),
+                           updated_at=now()
+                     WHERE id=@id AND tenant_id=@tenant;
+                    """,
+                    new { existing.Id, request.RenderJobId, tenant = _tenant.TenantId }, tx);
+            }
             tx.Commit();
             return existing;
         }
@@ -282,7 +317,9 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
             new { versionId, tenant = _tenant.TenantId }, tx);
         var storageKey = request.ObjectKey ?? version.StorageKey;
 
-        await conn.ExecuteAsync("UPDATE video_render.scene_image_versions SET is_selected=false WHERE scene_id=@sceneId;", new { version.SceneId }, tx);
+        await conn.ExecuteAsync(
+            "UPDATE video_render.scene_image_versions SET is_selected=false WHERE scene_id=@sceneId AND project_id=@projectId AND tenant_id=@tenant;",
+            new { version.SceneId, version.ProjectId, tenant = _tenant.TenantId }, tx);
         await conn.ExecuteAsync(
             """
             UPDATE video_render.scene_image_versions
@@ -377,6 +414,12 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
         return rows.ToList();
     }
 
+    public async Task<IReadOnlyList<SceneImageVersionDto>> ListImageVersionsAsync(long sceneId, CurrentUserSession user, int skip = 0, int take = 20, CancellationToken ct = default)
+    {
+        await EnsureSceneAccessAsync(sceneId, user, ct);
+        return await ListImageVersionsAsync(sceneId, skip, take, ct);
+    }
+
     public async Task SelectImageVersionAsync(long sceneId, Guid versionId, Guid? selectedBy, CancellationToken ct = default)
     {
         await _tenant.EnsureLoadedAsync(ct);
@@ -390,7 +433,9 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
             """,
             new { versionId, sceneId, tenant = _tenant.TenantId }, tx);
 
-        await conn.ExecuteAsync("UPDATE video_render.scene_image_versions SET is_selected=false WHERE scene_id=@sceneId;", new { sceneId }, tx);
+        await conn.ExecuteAsync(
+            "UPDATE video_render.scene_image_versions SET is_selected=false WHERE scene_id=@sceneId AND project_id=@projectId AND tenant_id=@tenant;",
+            new { sceneId, projectId = version.ProjectId, tenant = _tenant.TenantId }, tx);
         await conn.ExecuteAsync(
             """
             UPDATE video_render.scene_image_versions
@@ -425,6 +470,12 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
         tx.Commit();
     }
 
+    public async Task SelectImageVersionAsync(long sceneId, Guid versionId, CurrentUserSession user, CancellationToken ct = default)
+    {
+        await EnsureSceneAccessAsync(sceneId, user, ct);
+        await SelectImageVersionAsync(sceneId, versionId, user.UserId, ct);
+    }
+
     public async Task<SceneVideoVersionDto> CreateQueuedSceneVideoVersionAsync(SceneVideoVersionCreateRequest request, CancellationToken ct = default)
     {
         await _tenant.EnsureLoadedAsync(ct);
@@ -436,6 +487,17 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
             new { request.LogicalRequestId, tenant = _tenant.TenantId }, tx);
         if (existing is not null)
         {
+            if (request.RenderJobId is not null)
+            {
+                await conn.ExecuteAsync(
+                    """
+                    UPDATE video_render.scene_video_versions
+                       SET render_job_id=COALESCE(render_job_id, @renderJobId),
+                           updated_at=now()
+                     WHERE id=@id AND tenant_id=@tenant;
+                    """,
+                    new { existing.Id, request.RenderJobId, tenant = _tenant.TenantId }, tx);
+            }
             tx.Commit();
             return existing;
         }
@@ -500,7 +562,9 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
         var version = await conn.QuerySingleAsync<SceneVideoVersionDto>(
             SelectSceneVideoVersionSql + " WHERE id=@versionId AND tenant_id=@tenant FOR UPDATE;",
             new { versionId, tenant = _tenant.TenantId }, tx);
-        await conn.ExecuteAsync("UPDATE video_render.scene_video_versions SET is_selected=false WHERE scene_id=@sceneId;", new { version.SceneId }, tx);
+        await conn.ExecuteAsync(
+            "UPDATE video_render.scene_video_versions SET is_selected=false WHERE scene_id=@sceneId AND project_id=@projectId AND tenant_id=@tenant;",
+            new { version.SceneId, version.ProjectId, tenant = _tenant.TenantId }, tx);
         await conn.ExecuteAsync(
             """
             UPDATE video_render.scene_video_versions
@@ -553,6 +617,12 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
         return rows.ToList();
     }
 
+    public async Task<IReadOnlyList<SceneVideoVersionDto>> ListSceneVideoVersionsAsync(long sceneId, CurrentUserSession user, int skip = 0, int take = 20, CancellationToken ct = default)
+    {
+        await EnsureSceneAccessAsync(sceneId, user, ct);
+        return await ListSceneVideoVersionsAsync(sceneId, skip, take, ct);
+    }
+
     public async Task SelectSceneVideoVersionAsync(long sceneId, Guid versionId, Guid? selectedBy, CancellationToken ct = default)
     {
         await _tenant.EnsureLoadedAsync(ct);
@@ -565,7 +635,9 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
              FOR UPDATE;
             """,
             new { versionId, sceneId, tenant = _tenant.TenantId }, tx);
-        await conn.ExecuteAsync("UPDATE video_render.scene_video_versions SET is_selected=false WHERE scene_id=@sceneId;", new { sceneId }, tx);
+        await conn.ExecuteAsync(
+            "UPDATE video_render.scene_video_versions SET is_selected=false WHERE scene_id=@sceneId AND project_id=@projectId AND tenant_id=@tenant;",
+            new { sceneId, projectId = version.ProjectId, tenant = _tenant.TenantId }, tx);
         await conn.ExecuteAsync(
             """
             UPDATE video_render.scene_video_versions
@@ -582,6 +654,12 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
         tx.Commit();
     }
 
+    public async Task SelectSceneVideoVersionAsync(long sceneId, Guid versionId, CurrentUserSession user, CancellationToken ct = default)
+    {
+        await EnsureSceneAccessAsync(sceneId, user, ct);
+        await SelectSceneVideoVersionAsync(sceneId, versionId, user.UserId, ct);
+    }
+
     public async Task<FinalVideoVersionDto> CreateQueuedFinalVideoVersionAsync(FinalVideoVersionCreateRequest request, CancellationToken ct = default)
     {
         await _tenant.EnsureLoadedAsync(ct);
@@ -593,6 +671,17 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
             new { request.LogicalRequestId, tenant = _tenant.TenantId }, tx);
         if (existing is not null)
         {
+            if (request.RenderJobId is not null)
+            {
+                await conn.ExecuteAsync(
+                    """
+                    UPDATE video_render.final_video_versions
+                       SET render_job_id=COALESCE(render_job_id, @renderJobId),
+                           updated_at=now()
+                     WHERE id=@id AND tenant_id=@tenant;
+                    """,
+                    new { existing.Id, request.RenderJobId, tenant = _tenant.TenantId }, tx);
+            }
             tx.Commit();
             return existing;
         }
@@ -680,7 +769,9 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
         var version = await conn.QuerySingleAsync<FinalVideoVersionDto>(
             SelectFinalVideoVersionSql + " WHERE id=@versionId AND tenant_id=@tenant FOR UPDATE;",
             new { versionId, tenant = _tenant.TenantId }, tx);
-        await conn.ExecuteAsync("UPDATE video_render.final_video_versions SET is_selected=false WHERE project_id=@projectId;", new { version.ProjectId }, tx);
+        await conn.ExecuteAsync(
+            "UPDATE video_render.final_video_versions SET is_selected=false WHERE project_id=@projectId AND tenant_id=@tenant;",
+            new { version.ProjectId, tenant = _tenant.TenantId }, tx);
         await conn.ExecuteAsync(
             """
             UPDATE video_render.final_video_versions
@@ -733,6 +824,12 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
         return rows.ToList();
     }
 
+    public async Task<IReadOnlyList<FinalVideoVersionDto>> ListFinalVideoVersionsAsync(long projectId, CurrentUserSession user, int skip = 0, int take = 20, CancellationToken ct = default)
+    {
+        await EnsureProjectAccessAsync(projectId, user, ct);
+        return await ListFinalVideoVersionsAsync(projectId, skip, take, ct);
+    }
+
     public async Task<IReadOnlyList<FinalVideoVersionItemDto>> ListFinalVideoVersionItemsAsync(Guid finalVersionId, CancellationToken ct = default)
     {
         await _tenant.EnsureLoadedAsync(ct);
@@ -763,6 +860,12 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
         return rows.ToList();
     }
 
+    public async Task<IReadOnlyList<FinalVideoVersionItemDto>> ListFinalVideoVersionItemsAsync(Guid finalVersionId, CurrentUserSession user, CancellationToken ct = default)
+    {
+        await EnsureFinalVersionAccessAsync(finalVersionId, user, ct);
+        return await ListFinalVideoVersionItemsAsync(finalVersionId, ct);
+    }
+
     public async Task SelectFinalVideoVersionAsync(long projectId, Guid versionId, Guid? selectedBy, CancellationToken ct = default)
     {
         await _tenant.EnsureLoadedAsync(ct);
@@ -775,7 +878,9 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
              FOR UPDATE;
             """,
             new { versionId, projectId, tenant = _tenant.TenantId }, tx);
-        await conn.ExecuteAsync("UPDATE video_render.final_video_versions SET is_selected=false WHERE project_id=@projectId;", new { projectId }, tx);
+        await conn.ExecuteAsync(
+            "UPDATE video_render.final_video_versions SET is_selected=false WHERE project_id=@projectId AND tenant_id=@tenant;",
+            new { projectId, tenant = _tenant.TenantId }, tx);
         await conn.ExecuteAsync(
             """
             UPDATE video_render.final_video_versions
@@ -791,6 +896,102 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
             new { versionId, projectId, tenant = _tenant.TenantId, selectedBy, publicUrl = version.PublicUrl, sourceFilePath = version.SourceFilePath }, tx);
         tx.Commit();
     }
+
+    public async Task SelectFinalVideoVersionAsync(long projectId, Guid versionId, CurrentUserSession user, CancellationToken ct = default)
+    {
+        await EnsureProjectAccessAsync(projectId, user, ct);
+        await SelectFinalVideoVersionAsync(projectId, versionId, user.UserId, ct);
+    }
+
+    private async Task EnsureSceneAccessAsync(long sceneId, CurrentUserSession user, CancellationToken ct)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        var allowed = await conn.ExecuteScalarAsync<bool>(
+            """
+            SELECT EXISTS(
+                SELECT 1
+                  FROM video_render.video_project_scenes s
+                  JOIN video_render.video_projects p ON p.id=s.project_id AND p.tenant_id=s.tenant_id
+                 WHERE s.id=@sceneId
+                   AND s.tenant_id=@tenant
+                   AND (
+                        @canCrossCustomer
+                        OR p.user_id=@userId
+                        OR (@customerId IS NOT NULL AND p.customer_id IS NOT DISTINCT FROM @customerId)
+                   )
+            );
+            """,
+            new
+            {
+                sceneId,
+                tenant = _tenant.TenantId,
+                userId = user.UserId,
+                customerId = user.CustomerId,
+                canCrossCustomer = CanCrossCustomer(user)
+            });
+        if (!allowed)
+        {
+            throw new UnauthorizedAccessException("Bạn không có quyền truy cập lịch sử media của scene này.");
+        }
+    }
+
+    private async Task EnsureProjectAccessAsync(long projectId, CurrentUserSession user, CancellationToken ct)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        var allowed = await conn.ExecuteScalarAsync<bool>(
+            """
+            SELECT EXISTS(
+                SELECT 1
+                  FROM video_render.video_projects p
+                 WHERE p.id=@projectId
+                   AND p.tenant_id=@tenant
+                   AND (
+                        @canCrossCustomer
+                        OR p.user_id=@userId
+                        OR (@customerId IS NOT NULL AND p.customer_id IS NOT DISTINCT FROM @customerId)
+                   )
+            );
+            """,
+            new
+            {
+                projectId,
+                tenant = _tenant.TenantId,
+                userId = user.UserId,
+                customerId = user.CustomerId,
+                canCrossCustomer = CanCrossCustomer(user)
+            });
+        if (!allowed)
+        {
+            throw new UnauthorizedAccessException("Bạn không có quyền truy cập lịch sử media của project này.");
+        }
+    }
+
+    private async Task EnsureFinalVersionAccessAsync(Guid finalVersionId, CurrentUserSession user, CancellationToken ct)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        var projectId = await conn.ExecuteScalarAsync<long?>(
+            """
+            SELECT project_id
+              FROM video_render.final_video_versions
+             WHERE id=@finalVersionId AND tenant_id=@tenant;
+            """,
+            new { finalVersionId, tenant = _tenant.TenantId });
+        if (projectId is null)
+        {
+            throw new UnauthorizedAccessException("Bạn không có quyền truy cập phiên bản final video này.");
+        }
+
+        await EnsureProjectAccessAsync(projectId.Value, user, ct);
+    }
+
+    private static bool CanCrossCustomer(CurrentUserSession user)
+        => user.IsRoot
+           || user.Can("video.render.manage")
+           || user.Can("render.video.manage")
+           || user.Can("ai.video.version.manage");
 
     private async Task UpdateVersionFailureAsync(string tableName, Guid versionId, string? errorCode, string? errorMessage, CancellationToken ct)
     {
@@ -825,14 +1026,14 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
     private const string SelectImageVersionSql =
         """
         SELECT id AS Id, project_id AS ProjectId, scene_id AS SceneId, version_number AS VersionNumber,
-               logical_request_id AS LogicalRequestId, status AS Status, storage_key AS StorageKey,
+               logical_request_id AS LogicalRequestId, status AS Status, is_selected AS IsSelected, storage_key AS StorageKey,
                public_url AS PublicUrl, source_file_path AS SourceFilePath, result_media_id AS ResultMediaId,
                image_prompt_snapshot AS ImagePromptSnapshot, compiled_image_prompt_snapshot AS CompiledImagePromptSnapshot,
                video_prompt_snapshot AS VideoPromptSnapshot, provider_code AS ProviderCode,
                actual_model AS ModelName, provider_capability_id AS ProviderCapabilityId,
                provider_task_id AS ProviderTaskId, billing_logical_request_id AS BillingLogicalRequestId,
                estimated_usd AS EstimatedUsd, actual_usd AS ActualUsd, charged_points AS ChargedPoints,
-               refunded_points AS RefundedPoints, error_message AS ErrorMessage
+               refunded_points AS RefundedPoints, error_message AS ErrorMessage, created_at AS CreatedAt
           FROM video_render.scene_image_versions
         """;
 
@@ -840,15 +1041,21 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
         """
         SELECT id AS Id, project_id AS ProjectId, scene_id AS SceneId, source_image_version_id AS SourceImageVersionId,
                version_number AS VersionNumber, logical_request_id AS LogicalRequestId, status AS Status,
-               storage_key AS StorageKey, public_url AS PublicUrl, source_file_path AS SourceFilePath
+               is_selected AS IsSelected, storage_key AS StorageKey, public_url AS PublicUrl, source_file_path AS SourceFilePath,
+               image_prompt_snapshot AS ImagePromptSnapshot, video_prompt_snapshot AS VideoPromptSnapshot,
+               provider_code AS ProviderCode, actual_model AS ModelName, provider_task_id AS ProviderTaskId,
+               duration_seconds AS DurationSeconds, poster_url AS PosterUrl, error_message AS ErrorMessage,
+               created_at AS CreatedAt
           FROM video_render.scene_video_versions
         """;
 
     private const string SelectFinalVideoVersionSql =
         """
         SELECT id AS Id, project_id AS ProjectId, version_number AS VersionNumber,
-               logical_request_id AS LogicalRequestId, status AS Status, storage_key AS StorageKey,
-               public_url AS PublicUrl, source_file_path AS SourceFilePath
+               logical_request_id AS LogicalRequestId, status AS Status, is_selected AS IsSelected,
+               storage_key AS StorageKey, public_url AS PublicUrl, source_file_path AS SourceFilePath,
+               duration_seconds AS DurationSeconds, poster_url AS PosterUrl, error_message AS ErrorMessage,
+               created_at AS CreatedAt
           FROM video_render.final_video_versions
         """;
 

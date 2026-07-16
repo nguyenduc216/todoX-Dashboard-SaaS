@@ -9,9 +9,12 @@ Recommended order:
 3. Run `01_add_scene_media_versioning.sql`.
 4. Run `02_backfill_existing_scene_media.sql`.
 5. Run `03_seed_scene_media_versioning_settings.sql`.
-6. Run `verify_scene_media_versioning.sql`.
-7. Build/test/publish the application.
-8. Enable feature flags only after smoke testing.
+6. Run `04_mark_orphan_queued_versions.sql`.
+7. Run `verify_scene_media_versioning.sql`.
+8. Build/test/publish the application.
+9. Enable feature flags only after smoke testing.
+
+See `README_SQL.md` for detailed expected results and rollback notes.
 
 Feature flags are seeded as `false`:
 

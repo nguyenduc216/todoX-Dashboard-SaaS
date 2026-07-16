@@ -126,8 +126,18 @@ public sealed class MediaFileService : IMediaFileService
             """,
             new
             {
-                id, tenant = tenantId, customer = customerId, user = userId, cat = fileCategory,
-                name = safeName, ext, mime = mimeType, size = (long)content.Length, key = objectKey, url = publicUrl, storage = storageProvider
+                id,
+                tenant = tenantId,
+                customer = customerId,
+                user = userId,
+                cat = fileCategory,
+                name = safeName,
+                ext,
+                mime = mimeType,
+                size = (long)content.Length,
+                key = objectKey,
+                url = publicUrl,
+                storage = storageProvider
             });
 
         _logger.LogInformation(
@@ -136,10 +146,19 @@ public sealed class MediaFileService : IMediaFileService
 
         return new MediaFileDto
         {
-            Id = id, UserId = userId, CustomerId = customerId, FileCategory = fileCategory,
-            FileName = safeName, MimeType = mimeType, FileSizeBytes = content.Length,
-            StorageProvider = storageProvider, ObjectKey = objectKey, FileUrl = publicUrl, PublicUrl = publicUrl,
-            IsActive = true, CreatedAt = DateTime.UtcNow
+            Id = id,
+            UserId = userId,
+            CustomerId = customerId,
+            FileCategory = fileCategory,
+            FileName = safeName,
+            MimeType = mimeType,
+            FileSizeBytes = content.Length,
+            StorageProvider = storageProvider,
+            ObjectKey = objectKey,
+            FileUrl = publicUrl,
+            PublicUrl = publicUrl,
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow
         };
     }
 
@@ -148,9 +167,9 @@ public sealed class MediaFileService : IMediaFileService
     {
         mimeType = NormalizeMimeType(mimeType, originalFileName);
         fileCategory = NormalizeDbText(fileCategory, "media");
-        if (content.Length == 0) throw new InvalidOperationException("Tep rong.");
-        if (content.Length > MaxBytes) throw new InvalidOperationException("Tep vuot qua 10MB.");
-        if (!AllowedMime.Contains(mimeType)) throw new InvalidOperationException("Chi chap nhan anh PNG, JPEG, WEBP.");
+        if (content.Length == 0) throw new InvalidOperationException("Tệp rỗng.");
+        if (content.Length > MaxBytes) throw new InvalidOperationException("Tệp vượt quá 10MB.");
+        if (!AllowedMime.Contains(mimeType)) throw new InvalidOperationException("Chỉ chấp nhận ảnh PNG, JPEG, WEBP.");
 
         objectKey = NormalizeObjectKey(objectKey);
         var ext = ContentTypeToExtension(mimeType);
@@ -165,49 +184,62 @@ public sealed class MediaFileService : IMediaFileService
         var absPath = Path.GetFullPath(Path.Combine(absRoot, objectKey.Replace('/', Path.DirectorySeparatorChar)));
         if (!absPath.StartsWith(absRoot, StringComparison.OrdinalIgnoreCase))
         {
-            throw new InvalidOperationException("Storage key khong hop le.");
+            throw new InvalidOperationException("Storage key không hợp lệ.");
         }
 
         var absDir = Path.GetDirectoryName(absPath) ?? absRoot;
         Directory.CreateDirectory(absDir);
         var tempPath = Path.Combine(absDir, $".{Guid.NewGuid():N}.tmp");
-        await File.WriteAllBytesAsync(tempPath, content, ct);
-        if (File.Exists(absPath))
-        {
-            throw new InvalidOperationException("Storage key version da ton tai, khong ghi de.");
-        }
-        File.Move(tempPath, absPath);
-
         var publicBase = _config["Storage:PublicUploadBase"] ?? "/uploads";
         var publicUrl = $"{publicBase.TrimEnd('/')}/{objectKey}";
         var id = Guid.NewGuid();
         var storageProvider = NormalizeDbText(_config["Storage:Provider"] ?? "local", "local");
-
-        using var conn = await _factory.OpenAsync(ct);
-        await conn.ExecuteAsync(
-            """
-            INSERT INTO media.media_files
-                (id, tenant_id, customer_id, user_id, file_category, file_name, file_ext, mime_type,
-                 file_size_bytes, storage_provider, object_key, file_url, public_url, is_active, created_at, created_by)
-            VALUES
-                (@id, @tenant, @customer, @user, @cat, @name, @ext, @mime,
-                 @size, @storage, @key, @url, @url, true, now(), @user);
-            """,
-            new
+        var movedToFinal = false;
+        try
+        {
+            await File.WriteAllBytesAsync(tempPath, content, ct);
+            if (File.Exists(absPath))
             {
-                id,
-                tenant = tenantId,
-                customer = customerId,
-                user = userId,
-                cat = fileCategory,
-                name = safeName,
-                ext,
-                mime = mimeType,
-                size = (long)content.Length,
-                storage = storageProvider,
-                key = objectKey,
-                url = publicUrl
-            });
+                throw new InvalidOperationException("Storage key của phiên bản đã tồn tại, không ghi đè.");
+            }
+            File.Move(tempPath, absPath);
+            movedToFinal = true;
+
+            using var conn = await _factory.OpenAsync(ct);
+            await conn.ExecuteAsync(
+                """
+                INSERT INTO media.media_files
+                    (id, tenant_id, customer_id, user_id, file_category, file_name, file_ext, mime_type,
+                     file_size_bytes, storage_provider, object_key, file_url, public_url, is_active, created_at, created_by)
+                VALUES
+                    (@id, @tenant, @customer, @user, @cat, @name, @ext, @mime,
+                     @size, @storage, @key, @url, @url, true, now(), @user);
+                """,
+                new
+                {
+                    id,
+                    tenant = tenantId,
+                    customer = customerId,
+                    user = userId,
+                    cat = fileCategory,
+                    name = safeName,
+                    ext,
+                    mime = mimeType,
+                    size = (long)content.Length,
+                    storage = storageProvider,
+                    key = objectKey,
+                    url = publicUrl
+                });
+        }
+        catch
+        {
+            TryDeleteFile(tempPath);
+            if (movedToFinal)
+            {
+                TryDeleteFile(absPath);
+            }
+            throw;
+        }
 
         return new MediaFileDto
         {
@@ -457,10 +489,25 @@ public sealed class MediaFileService : IMediaFileService
             || normalized.Contains("..", StringComparison.Ordinal)
             || Path.IsPathRooted(normalized))
         {
-            throw new InvalidOperationException("Storage key khong hop le.");
+            throw new InvalidOperationException("Storage key không hợp lệ.");
         }
 
         return normalized;
+    }
+
+    private static void TryDeleteFile(string path)
+    {
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(path) && File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch
+        {
+            // Best-effort cleanup only; the caller still receives the original persistence error.
+        }
     }
 
     private static Uri ValidatePublicImageUri(string imageUrl)

@@ -47,6 +47,26 @@ public class SceneImageBatchRenderHandlerTests
     }
 
     [Fact]
+    public void SceneImageLogicalRequest_ForDifferentJobs_CreatesDifferentVersionOperations()
+    {
+        var first = SceneImageRenderService.BuildLogicalRequestId("render_job_scene_image", 42, Guid.NewGuid());
+        var second = SceneImageRenderService.BuildLogicalRequestId("render_job_scene_image", 42, Guid.NewGuid());
+
+        Assert.NotEqual(first, second);
+    }
+
+    [Fact]
+    public void ProjectJobLockName_IsStableForSameProjectAndJobType()
+    {
+        var first = RenderJobService.BuildProjectJobLockName("render_scene_images", 123);
+        var second = RenderJobService.BuildProjectJobLockName(" render_scene_images ", 123);
+
+        Assert.Equal(first, second);
+        Assert.Contains("render_scene_images", first);
+        Assert.Contains("123", first);
+    }
+
+    [Fact]
     public void SceneImageLogicalRequest_ForUserRerender_IsNewOperation()
     {
         var first = SceneImageRenderService.BuildLogicalRequestId("render_job_scene_image_rerender", 42, null);

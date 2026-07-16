@@ -278,11 +278,19 @@
                                         <MudTooltip Text="Xóa"><MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="@(() => DeleteSceneAsync(context))" Disabled="@_busy" /></MudTooltip>
                                     </MudStack>
                                     <MudStack Row="true" Spacing="1" Class="flex-wrap gap-1">
-                                        <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Info" OnClick="@(() => ToggleImageHistoryAsync(context))">Image history</MudButton>
-                                        <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Info" OnClick="@(() => ToggleVideoHistoryAsync(context))">Video history</MudButton>
+                                        <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Info" OnClick="@(() => ToggleImageHistoryAsync(context))">Lịch sử ảnh</MudButton>
+                                        <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Info" OnClick="@(() => ToggleVideoHistoryAsync(context))">Lịch sử video</MudButton>
                                         <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning" OnClick="@(() => RerenderSceneImageAsync(context))" Disabled="@(IsSceneRendering(context))">@(string.IsNullOrWhiteSpace(context.StaticImageUrl) ? "Tạo ảnh (OpenRouter)" : "Render lại ảnh")</MudButton>
                                         <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(() => SaveSceneAsync(context))" Disabled="@_busy">Lưu</MudButton>
                                     </MudStack>
+                                    @if (_imageHistorySceneId == context.Id)
+                                    {
+                                        @RenderImageHistoryPanel(context)
+                                    }
+                                    @if (_videoHistorySceneId == context.Id)
+                                    {
+                                        @RenderVideoHistoryPanel(context)
+                                    }
                                 </MudStack>
                             </MudTd>
                         </RowTemplate>
@@ -305,10 +313,15 @@
                             <MudStack Row="true" Spacing="2" Class="flex-wrap gap-2">
                                 <MudButton Color="Color.Warning" Variant="Variant.Filled" OnClick="EnqueueMergeAsync" Disabled="@(_busy || !CanMerge)">Tạo video kết quả</MudButton>
                                 <MudButton Color="Color.Primary" Variant="Variant.Outlined" OnClick="ReloadAsync">Refresh</MudButton>
+                                <MudButton Color="Color.Info" Variant="Variant.Outlined" OnClick="ToggleFinalHistoryAsync">Lịch sử video hoàn chỉnh</MudButton>
                             </MudStack>
                             @if (!string.IsNullOrWhiteSpace(_project.FinalVideoUrl))
                             {
                                 <video src="@_project.FinalVideoUrl" controls style="width:100%;border-radius:12px"></video>
+                            }
+                            @if (_showFinalHistory)
+                            {
+                                @RenderFinalHistoryPanel()
                             }
                         </MudStack>
                     </MudPaper>
@@ -406,8 +419,11 @@
     private readonly Dictionary<long, SceneImageVisualState> _sceneEventState = new();
     private readonly Dictionary<long, IReadOnlyList<TodoX.Web.Services.VideoRender.SceneImageVersionDto>> _imageVersions = new();
     private readonly Dictionary<long, IReadOnlyList<TodoX.Web.Services.VideoRender.SceneVideoVersionDto>> _videoVersions = new();
+    private IReadOnlyList<TodoX.Web.Services.VideoRender.FinalVideoVersionDto> _finalVersions = Array.Empty<TodoX.Web.Services.VideoRender.FinalVideoVersionDto>();
+    private readonly Dictionary<Guid, IReadOnlyList<TodoX.Web.Services.VideoRender.FinalVideoVersionItemDto>> _finalVersionItems = new();
     private long? _imageHistorySceneId;
     private long? _videoHistorySceneId;
+    private bool _showFinalHistory;
     // Polling guard: prevents overlapping ReloadAsync calls.
     private readonly SemaphoreSlim _reloadLock = new(1, 1);
     // True while a background Google Cloud batch job for this project is queued/rendering.
@@ -955,83 +971,10 @@
     // ------------------------------------------------------------------
     // Bulk scene image render — Google Cloud (Vertex), background job.
     // ------------------------------------------------------------------
-    private async Task<List<TodoX.Web.Services.Render.SceneImageBatchVersionInput>> PrepareSceneImageVersionsForJobAsync(bool onlyMissingOrFailed, ActiveCharacterDto? character)
-    {
-        var result = new List<TodoX.Web.Services.Render.SceneImageBatchVersionInput>();
-        if (_project is null || AuthState.CurrentUser is null)
-        {
-            return result;
-        }
-
-        if (!await SceneVersions.IsEnabledAsync(TodoX.Web.Services.VideoRender.SceneMediaVersioningFlags.SceneImages))
-        {
-            return result;
-        }
-
-        var batchRequestId = Guid.NewGuid().ToString("N");
-        var scenes = _project.Scenes
-            .OrderBy(x => x.SceneIndex)
-            .Where(x => TodoX.Web.Services.Render.SceneImageBatchRenderHandler.ShouldRenderScene(x, onlyMissingOrFailed))
-            .ToList();
-
-        foreach (var scene in scenes)
-        {
-            var compiledPrompt = TodoX.Web.Services.Render.SceneImagePromptBuilder.Build(scene, character?.NormalizedPrompt);
-            var logicalRequestId = $"render_job_scene_image-batch-{batchRequestId}-scene-{scene.Id}";
-            var version = await SceneVersions.CreateQueuedImageVersionAsync(new TodoX.Web.Services.VideoRender.SceneImageVersionCreateRequest(
-                _project.Id,
-                scene.Id,
-                AuthState.CurrentUser.UserId,
-                AuthState.CurrentUser.CustomerId,
-                RenderJobId: null,
-                logicalRequestId,
-                scene.ImagePrompt,
-                compiledPrompt,
-                scene.VideoPrompt,
-                NegativePromptSnapshot: null,
-                SceneSnapshot: new
-                {
-                    scene.Id,
-                    scene.ProjectId,
-                    scene.SceneIndex,
-                    scene.Title,
-                    scene.DurationSeconds,
-                    scene.ScenePrompt,
-                    scene.ImagePrompt,
-                    scene.VideoPrompt
-                },
-                ReferenceSnapshot: new
-                {
-                    characterId = character?.Id ?? _project.CharacterId,
-                    referenceUrl = character?.MasterImageUrl,
-                    characterPrompt = character?.NormalizedPrompt
-                },
-                RenderConfigSnapshot: new
-                {
-                    capability = TodoX.Web.Services.Render.SceneImageRenderService.CapabilityCode,
-                    aspectRatio = "9:16",
-                    outputFormat = "png",
-                    source = "render_job_ui_pre_enqueue"
-                }));
-
-            result.Add(new TodoX.Web.Services.Render.SceneImageBatchVersionInput
-            {
-                SceneId = scene.Id,
-                VersionId = version.Id,
-                LogicalRequestId = logicalRequestId,
-                CompiledPrompt = compiledPrompt,
-                StorageKey = version.StorageKey
-            });
-        }
-
-        return result;
-    }
-
     private async Task EnqueueBulkSceneImageRenderAsync(bool onlyMissingOrFailed)
     {
         if (_project is null || AuthState.CurrentUser is null) return;
         var character = ResolveCurrentCharacter();
-        var imageVersions = await PrepareSceneImageVersionsForJobAsync(onlyMissingOrFailed, character);
         var input = new TodoX.Web.Services.Render.SceneImageBatchInput
         {
             ProjectId = _project.Id,
@@ -1040,8 +983,7 @@
             CustomerId = AuthState.CurrentUser.CustomerId,
             CreatedBy = AuthState.CurrentUser.Email ?? AuthState.CurrentUser.UserId.ToString(),
             TrustedPayerContext = TodoX.Web.Services.AiProviders.AiBillingPayerResolver.CreateTrustedBackgroundContext(AuthState.CurrentUser),
-            OnlyMissingOrFailed = onlyMissingOrFailed,
-            ImageVersions = imageVersions
+            OnlyMissingOrFailed = onlyMissingOrFailed
         };
 
         var (job, alreadyActive) = await RenderJobs.EnqueueForProjectIfNoneActiveAsync(new RenderJobCreateModel
@@ -1168,8 +1110,9 @@
         _imageHistorySceneId = _imageHistorySceneId == scene.Id ? null : scene.Id;
         if (_imageHistorySceneId is not null)
         {
-            _imageVersions[scene.Id] = await SceneVersions.ListImageVersionsAsync(scene.Id, 0, 20);
-            Snackbar.Add($"Loaded {_imageVersions[scene.Id].Count} image versions for scene {scene.SceneIndex}.", Severity.Info);
+            if (AuthState.CurrentUser is null) return;
+            _imageVersions[scene.Id] = await SceneVersions.ListImageVersionsAsync(scene.Id, AuthState.CurrentUser, 0, 20);
+            Snackbar.Add($"Đã tải {_imageVersions[scene.Id].Count} phiên bản ảnh cho scene {scene.SceneIndex}.", Severity.Info);
         }
     }
 
@@ -1178,26 +1121,54 @@
         _videoHistorySceneId = _videoHistorySceneId == scene.Id ? null : scene.Id;
         if (_videoHistorySceneId is not null)
         {
-            _videoVersions[scene.Id] = await SceneVersions.ListSceneVideoVersionsAsync(scene.Id, 0, 20);
-            Snackbar.Add($"Loaded {_videoVersions[scene.Id].Count} video versions for scene {scene.SceneIndex}.", Severity.Info);
+            if (AuthState.CurrentUser is null) return;
+            _videoVersions[scene.Id] = await SceneVersions.ListSceneVideoVersionsAsync(scene.Id, AuthState.CurrentUser, 0, 20);
+            Snackbar.Add($"Đã tải {_videoVersions[scene.Id].Count} phiên bản video cho scene {scene.SceneIndex}.", Severity.Info);
         }
     }
 
     private async Task SelectImageVersionAsync(VideoProjectSceneDto scene, TodoX.Web.Services.VideoRender.SceneImageVersionDto version)
     {
         if (AuthState.CurrentUser is null) return;
-        await SceneVersions.SelectImageVersionAsync(scene.Id, version.Id, AuthState.CurrentUser.UserId);
-        await LogProjectEvent("SCENE_IMAGE_VERSION_SELECTED_UI", "info", $"Selected image version {version.VersionNumber} for scene {scene.SceneIndex}.", new { sceneId = scene.Id, versionId = version.Id });
-        Snackbar.Add($"Selected image version {version.VersionNumber}.", Severity.Success);
+        await SceneVersions.SelectImageVersionAsync(scene.Id, version.Id, AuthState.CurrentUser);
+        await LogProjectEvent("SCENE_IMAGE_VERSION_SELECTED_UI", "info", $"Đã chọn phiên bản ảnh {version.VersionNumber} cho scene {scene.SceneIndex}.", new { sceneId = scene.Id, versionId = version.Id });
+        Snackbar.Add($"Đã chọn phiên bản ảnh {version.VersionNumber}.", Severity.Success);
         await ReloadAsync();
     }
 
     private async Task SelectVideoVersionAsync(VideoProjectSceneDto scene, TodoX.Web.Services.VideoRender.SceneVideoVersionDto version)
     {
         if (AuthState.CurrentUser is null) return;
-        await SceneVersions.SelectSceneVideoVersionAsync(scene.Id, version.Id, AuthState.CurrentUser.UserId);
-        await LogProjectEvent("SCENE_VIDEO_VERSION_SELECTED_UI", "info", $"Selected video version {version.VersionNumber} for scene {scene.SceneIndex}.", new { sceneId = scene.Id, versionId = version.Id });
-        Snackbar.Add($"Selected video version {version.VersionNumber}.", Severity.Success);
+        await SceneVersions.SelectSceneVideoVersionAsync(scene.Id, version.Id, AuthState.CurrentUser);
+        await LogProjectEvent("SCENE_VIDEO_VERSION_SELECTED_UI", "info", $"Đã chọn phiên bản video {version.VersionNumber} cho scene {scene.SceneIndex}.", new { sceneId = scene.Id, versionId = version.Id });
+        Snackbar.Add($"Đã chọn phiên bản video {version.VersionNumber}.", Severity.Success);
+        await ReloadAsync();
+    }
+
+    private async Task ToggleFinalHistoryAsync()
+    {
+        if (_project is null || AuthState.CurrentUser is null) return;
+        _showFinalHistory = !_showFinalHistory;
+        if (!_showFinalHistory)
+        {
+            return;
+        }
+
+        _finalVersions = await SceneVersions.ListFinalVideoVersionsAsync(_project.Id, AuthState.CurrentUser, 0, 20);
+        _finalVersionItems.Clear();
+        foreach (var version in _finalVersions)
+        {
+            _finalVersionItems[version.Id] = await SceneVersions.ListFinalVideoVersionItemsAsync(version.Id, AuthState.CurrentUser);
+        }
+        Snackbar.Add($"Đã tải {_finalVersions.Count} phiên bản video hoàn chỉnh.", Severity.Info);
+    }
+
+    private async Task SelectFinalVersionAsync(TodoX.Web.Services.VideoRender.FinalVideoVersionDto version)
+    {
+        if (_project is null || AuthState.CurrentUser is null) return;
+        await SceneVersions.SelectFinalVideoVersionAsync(_project.Id, version.Id, AuthState.CurrentUser);
+        await LogProjectEvent("FINAL_VIDEO_VERSION_SELECTED_UI", "info", $"Đã chọn phiên bản video hoàn chỉnh {version.VersionNumber}.", new { projectId = _project.Id, versionId = version.Id });
+        Snackbar.Add($"Đã chọn phiên bản video hoàn chỉnh {version.VersionNumber}.", Severity.Success);
         await ReloadAsync();
     }
 
@@ -1213,6 +1184,164 @@
         "failed" or "cancelled" => Color.Error,
         _ => Color.Default
     };
+
+    private RenderFragment RenderImageHistoryPanel(VideoProjectSceneDto scene) => @<MudPaper Class="pa-3 mt-2" Outlined="true">
+        <MudStack Spacing="2">
+            <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+                <MudText Typo="Typo.subtitle2">Lịch sử ảnh scene @scene.SceneIndex</MudText>
+                <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(() => ToggleImageHistoryAsync(scene))">Refresh</MudButton>
+            </MudStack>
+            @if (!_imageVersions.TryGetValue(scene.Id, out var versions) || versions.Count == 0)
+            {
+                <MudAlert Severity="Severity.Info" Dense="true">Chưa có phiên bản ảnh.</MudAlert>
+            }
+            else
+            {
+                @foreach (var version in versions)
+                {
+                    <MudPaper Class="pa-2" Outlined="true">
+                        <MudStack Spacing="1">
+                            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1" Class="flex-wrap gap-1">
+                                <MudChip T="string" Size="Size.Small" Color="@VersionStatusColor(version.Status)">v@version.VersionNumber - @version.Status</MudChip>
+                                @if (version.IsSelected)
+                                {
+                                    <MudChip T="string" Size="Size.Small" Color="Color.Success">Đang được chọn</MudChip>
+                                }
+                                <MudText Typo="Typo.caption">@version.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</MudText>
+                            </MudStack>
+                            @if (!string.IsNullOrWhiteSpace(version.PublicUrl))
+                            {
+                                <img src="@version.PublicUrl" style="max-width:160px;max-height:96px;object-fit:cover;border-radius:6px" />
+                            }
+                            <MudText Typo="Typo.caption">Provider: @version.ProviderCode | Model: @version.ModelName | Task: @version.ProviderTaskId</MudText>
+                            <MudText Typo="Typo.caption">Điểm trừ: @version.ChargedPoints.ToString("0.####") | USD dự kiến: @FormatMoney(version.EstimatedUsd) | USD thực tế: @FormatMoney(version.ActualUsd)</MudText>
+                            <MudText Typo="Typo.caption">Prompt gốc: @ShortText(version.ImagePromptSnapshot)</MudText>
+                            <MudText Typo="Typo.caption">Prompt gửi provider: @ShortText(version.CompiledImagePromptSnapshot)</MudText>
+                            <MudText Typo="Typo.caption">Prompt video: @ShortText(version.VideoPromptSnapshot)</MudText>
+                            @if (!string.IsNullOrWhiteSpace(version.ErrorMessage))
+                            {
+                                <MudText Typo="Typo.caption" Color="Color.Error">Lỗi: @version.ErrorMessage</MudText>
+                            }
+                            <MudStack Row="true" Spacing="1" Class="flex-wrap gap-1">
+                                @if (!string.IsNullOrWhiteSpace(version.PublicUrl))
+                                {
+                                    <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(() => OpenUrl(version.PublicUrl!))">Xem ảnh</MudButton>
+                                }
+                                <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(() => CopyTextAsync(version.CompiledImagePromptSnapshot ?? version.ImagePromptSnapshot ?? string.Empty))">Sao chép prompt</MudButton>
+                                <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Success" Disabled="@(!CanSelectVersion(version.Status, version.IsSelected))" OnClick="@(() => SelectImageVersionAsync(scene, version))">Chọn làm mặc định</MudButton>
+                            </MudStack>
+                        </MudStack>
+                    </MudPaper>
+                }
+            }
+        </MudStack>
+    </MudPaper>;
+
+    private RenderFragment RenderVideoHistoryPanel(VideoProjectSceneDto scene) => @<MudPaper Class="pa-3 mt-2" Outlined="true">
+        <MudStack Spacing="2">
+            <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+                <MudText Typo="Typo.subtitle2">Lịch sử video scene @scene.SceneIndex</MudText>
+                <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(() => ToggleVideoHistoryAsync(scene))">Refresh</MudButton>
+            </MudStack>
+            @if (!_videoVersions.TryGetValue(scene.Id, out var versions) || versions.Count == 0)
+            {
+                <MudAlert Severity="Severity.Info" Dense="true">Chưa có phiên bản video.</MudAlert>
+            }
+            else
+            {
+                @foreach (var version in versions)
+                {
+                    <MudPaper Class="pa-2" Outlined="true">
+                        <MudStack Spacing="1">
+                            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1" Class="flex-wrap gap-1">
+                                <MudChip T="string" Size="Size.Small" Color="@VersionStatusColor(version.Status)">v@version.VersionNumber - @version.Status</MudChip>
+                                @if (version.IsSelected)
+                                {
+                                    <MudChip T="string" Size="Size.Small" Color="Color.Success">Đang được chọn</MudChip>
+                                }
+                                <MudText Typo="Typo.caption">@version.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</MudText>
+                            </MudStack>
+                            @if (!string.IsNullOrWhiteSpace(version.PublicUrl))
+                            {
+                                <video src="@version.PublicUrl" controls style="max-width:220px;width:100%;border-radius:6px"></video>
+                            }
+                            <MudText Typo="Typo.caption">Source image version: @version.SourceImageVersionId</MudText>
+                            <MudText Typo="Typo.caption">Provider: @version.ProviderCode | Model: @version.ModelName | Task: @version.ProviderTaskId</MudText>
+                            <MudText Typo="Typo.caption">Thời lượng: @version.DurationSeconds giây</MudText>
+                            <MudText Typo="Typo.caption">Prompt ảnh: @ShortText(version.ImagePromptSnapshot)</MudText>
+                            <MudText Typo="Typo.caption">Prompt video: @ShortText(version.VideoPromptSnapshot)</MudText>
+                            @if (!string.IsNullOrWhiteSpace(version.ErrorMessage))
+                            {
+                                <MudText Typo="Typo.caption" Color="Color.Error">Lỗi: @version.ErrorMessage</MudText>
+                            }
+                            <MudStack Row="true" Spacing="1" Class="flex-wrap gap-1">
+                                <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(() => CopyTextAsync(version.VideoPromptSnapshot ?? string.Empty))">Sao chép prompt</MudButton>
+                                <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Success" Disabled="@(!CanSelectVersion(version.Status, version.IsSelected))" OnClick="@(() => SelectVideoVersionAsync(scene, version))">Chọn làm mặc định</MudButton>
+                            </MudStack>
+                        </MudStack>
+                    </MudPaper>
+                }
+            }
+        </MudStack>
+    </MudPaper>;
+
+    private RenderFragment RenderFinalHistoryPanel() => @<MudPaper Class="pa-3 mt-2" Outlined="true">
+        <MudStack Spacing="2">
+            <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+                <MudText Typo="Typo.subtitle2">Lịch sử video hoàn chỉnh</MudText>
+                <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="ToggleFinalHistoryAsync">Refresh</MudButton>
+            </MudStack>
+            @if (_finalVersions.Count == 0)
+            {
+                <MudAlert Severity="Severity.Info" Dense="true">Chưa có phiên bản final video.</MudAlert>
+            }
+            else
+            {
+                @foreach (var version in _finalVersions)
+                {
+                    <MudPaper Class="pa-2" Outlined="true">
+                        <MudStack Spacing="1">
+                            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1" Class="flex-wrap gap-1">
+                                <MudChip T="string" Size="Size.Small" Color="@VersionStatusColor(version.Status)">v@version.VersionNumber - @version.Status</MudChip>
+                                @if (version.IsSelected)
+                                {
+                                    <MudChip T="string" Size="Size.Small" Color="Color.Success">Đang được chọn</MudChip>
+                                }
+                                <MudText Typo="Typo.caption">@version.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</MudText>
+                            </MudStack>
+                            @if (!string.IsNullOrWhiteSpace(version.PublicUrl))
+                            {
+                                <video src="@version.PublicUrl" controls style="max-width:260px;width:100%;border-radius:6px"></video>
+                            }
+                            <MudText Typo="Typo.caption">Thời lượng: @version.DurationSeconds giây</MudText>
+                            @if (_finalVersionItems.TryGetValue(version.Id, out var items) && items.Count > 0)
+                            {
+                                <MudText Typo="Typo.caption">Scene video versions: @string.Join(", ", items.OrderBy(x => x.ItemOrder).Select(x => $"{x.ItemOrder}:{x.SceneVideoVersionId}"))</MudText>
+                            }
+                            @if (!string.IsNullOrWhiteSpace(version.ErrorMessage))
+                            {
+                                <MudText Typo="Typo.caption" Color="Color.Error">Lỗi: @version.ErrorMessage</MudText>
+                            }
+                            <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Success" Disabled="@(!CanSelectVersion(version.Status, version.IsSelected))" OnClick="@(() => SelectFinalVersionAsync(version))">Chọn làm mặc định</MudButton>
+                        </MudStack>
+                    </MudPaper>
+                }
+            }
+        </MudStack>
+    </MudPaper>;
+
+    private static bool CanSelectVersion(string status, bool isSelected)
+        => !isSelected && string.Equals(status, "completed", StringComparison.OrdinalIgnoreCase);
+
+    private static string ShortText(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return "(trống)";
+        var text = value.Trim();
+        return text.Length <= 220 ? text : text[..220] + "...";
+    }
+
+    private static string FormatMoney(decimal? value)
+        => value.HasValue ? value.Value.ToString("0.######") : "N/A";
 
     // A scene is "pending an image" when it has no successful static image yet and is not in a terminal
     // failed state — i.e. the background batch is expected to still produce it.
