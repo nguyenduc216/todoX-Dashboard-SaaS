@@ -376,6 +376,103 @@ public class YEScaleImageProviderTests
     }
 
     [Fact]
+    public async Task ImageAdapter_TaskResultUrl_ReturnsImageUrlAndTaskMetadata()
+    {
+        const string json = """
+        {
+          "finish_time": 1784241504,
+          "message": "YEScale - YESCALE_MEDIA - nano-banana-2 - Task Result",
+          "progress": "100%",
+          "status": "SUCCESS",
+          "submit_time": 1784241488,
+          "task_id": "yescale-nano-banana-2-prod",
+          "task_result": {
+            "note": "temporary link",
+            "url": "https://cdn.yescale.vip/yescale-nano-banana-2-prod.png",
+            "url_expires_at": "2026-08-01 05:38:24"
+          }
+        }
+        """;
+        var fake = new FakeTaskClient(new YEScaleTaskResult
+        {
+            TaskId = "yescale-nano-banana-2-prod",
+            Status = "SUCCESS",
+            Duration = TimeSpan.FromMilliseconds(5),
+            TerminalResponse = Status(json),
+            TerminalResponseJson = json
+        });
+        var service = new YEScaleImageService(fake, NullLogger<YEScaleImageService>.Instance);
+
+        var response = await service.GenerateImageAsync(Request(capabilityConfigJson: YEScaleBaseConfig()));
+
+        Assert.True(response.Success);
+        Assert.Equal("https://cdn.yescale.vip/yescale-nano-banana-2-prod.png", response.ImageUrl);
+        Assert.Contains("\"taskId\":\"yescale-nano-banana-2-prod\"", response.UsageJson);
+        Assert.Contains("\"finishTime\":1784241504", response.UsageJson);
+        Assert.Contains("\"submitTime\":1784241488", response.UsageJson);
+        Assert.Contains("\"urlExpiresAt\":\"2026-08-01 05:38:24\"", response.UsageJson);
+        Assert.Contains("\"model\":\"nano-banana-2\"", response.UsageJson);
+        Assert.Contains("\"providerCode\":\"yescale_task_image\"", response.UsageJson);
+    }
+
+    [Theory]
+    [InlineData("""{"status":"SUCCESS","task_id":"task-query","task_result":{"url":"https://cdn.yescale.vip/signed-output?token=abc123"}}""", "https://cdn.yescale.vip/signed-output?token=abc123")]
+    [InlineData("""{"status":"SUCCESS","task_id":"task-output","output":{"url":"https://cdn.example/output-without-extension?sig=1"}}""", "https://cdn.example/output-without-extension?sig=1")]
+    [InlineData("""{"status":"SUCCESS","task_id":"task-result","result":{"url":"https://cdn.example/result.png"}}""", "https://cdn.example/result.png")]
+    [InlineData("""{"status":"SUCCESS","task_id":"task-data","data":{"url":"https://cdn.example/data.webp"}}""", "https://cdn.example/data.webp")]
+    [InlineData("""{"status":"SUCCESS","task_id":"task-images","task_result":{"images":["https://cdn.example/image-list?sig=2"]}}""", "https://cdn.example/image-list?sig=2")]
+    public async Task ImageAdapter_SupportedOutputShapes_ReturnImageUrl(string json, string expectedUrl)
+    {
+        var fake = new FakeTaskClient(new YEScaleTaskResult
+        {
+            TaskId = "task-shape",
+            Status = "SUCCESS",
+            Duration = TimeSpan.FromMilliseconds(5),
+            TerminalResponse = Status(json),
+            TerminalResponseJson = json
+        });
+        var service = new YEScaleImageService(fake, NullLogger<YEScaleImageService>.Instance);
+
+        var response = await service.GenerateImageAsync(Request(capabilityConfigJson: YEScaleBaseConfig()));
+
+        Assert.True(response.Success);
+        Assert.Equal(expectedUrl, response.ImageUrl);
+    }
+
+    [Fact]
+    public async Task ImageAdapter_NonOutputUrls_AreNotMistakenForOutputImage()
+    {
+        const string json = """
+        {
+          "status": "SUCCESS",
+          "task_id": "task-non-output",
+          "response": {
+            "callback_url": "https://example.com/callback.png",
+            "metadata_url": "https://example.com/meta.png",
+            "documentation_url": "https://example.com/docs.png",
+            "input_image_url": "https://example.com/input.png",
+            "message": "Render succeeded, see https://example.com/not-output.png"
+          }
+        }
+        """;
+        var fake = new FakeTaskClient(new YEScaleTaskResult
+        {
+            TaskId = "task-non-output",
+            Status = "SUCCESS",
+            Duration = TimeSpan.FromMilliseconds(5),
+            TerminalResponse = Status(json),
+            TerminalResponseJson = json
+        });
+        var service = new YEScaleImageService(fake, NullLogger<YEScaleImageService>.Instance);
+
+        var response = await service.GenerateImageAsync(Request(capabilityConfigJson: YEScaleBaseConfig()));
+
+        Assert.False(response.Success);
+        Assert.Null(response.ImageUrl);
+        Assert.Contains("task_id=task-non-output", response.ErrorMessage);
+    }
+
+    [Fact]
     public async Task ImageAdapter_SuccessWithBase64_ReturnsImageBytes()
     {
         var png = Convert.ToBase64String(new byte[] { 137, 80, 78, 71 });
@@ -463,6 +560,57 @@ public class YEScaleImageProviderTests
 
         Assert.DoesNotContain("test-key", response.RawRequestJson);
         Assert.DoesNotContain("Bearer", response.RawRequestJson);
+    }
+
+    [Fact]
+    public async Task ImageAdapter_RawResponse_RedactsSensitiveFields()
+    {
+        const string json = """
+        {
+          "status": "SUCCESS",
+          "task_id": "task-secret",
+          "task_result": { "url": "https://cdn.example/out.png" },
+          "authorization": "Bearer should-not-leak",
+          "nested": { "access_key": "secret-value", "apiKey": "api-secret" }
+        }
+        """;
+        var fake = new FakeTaskClient(new YEScaleTaskResult
+        {
+            TaskId = "task-secret",
+            Status = "SUCCESS",
+            Duration = TimeSpan.FromMilliseconds(5),
+            TerminalResponse = Status(json),
+            TerminalResponseJson = json
+        });
+        var service = new YEScaleImageService(fake, NullLogger<YEScaleImageService>.Instance);
+
+        var response = await service.GenerateImageAsync(Request(capabilityConfigJson: YEScaleBaseConfig()));
+
+        Assert.True(response.Success);
+        Assert.DoesNotContain("should-not-leak", response.RawResponseJson);
+        Assert.DoesNotContain("secret-value", response.RawResponseJson);
+        Assert.DoesNotContain("api-secret", response.RawResponseJson);
+        Assert.Contains("[redacted]", response.RawResponseJson);
+    }
+
+    [Fact]
+    public async Task RecoverImageAsync_GetsExistingSuccessfulTaskWithoutSubmit()
+    {
+        const string json = """
+        {"status":"SUCCESS","task_id":"task-recover","task_result":{"url":"https://cdn.yescale.vip/recover?sig=1"}}
+        """;
+        var fake = new FakeTaskClient(Status(json), Status(json));
+        var service = new YEScaleImageService(fake, NullLogger<YEScaleImageService>.Instance);
+
+        var first = await service.RecoverImageAsync("task-recover", "nano-banana-2");
+        var second = await service.RecoverImageAsync("task-recover", "nano-banana-2");
+
+        Assert.True(first.Success);
+        Assert.True(second.Success);
+        Assert.Equal("https://cdn.yescale.vip/recover?sig=1", first.ImageUrl);
+        Assert.Equal("https://cdn.yescale.vip/recover?sig=1", second.ImageUrl);
+        Assert.Equal(0, fake.SubmitCalls);
+        Assert.Equal(2, fake.GetStatusCalls);
     }
 
     private static OpenRouterImageRequest Request(string model = "nano-banana-2", string resolution = "1K", string? capabilityConfigJson = null)
@@ -598,6 +746,7 @@ public class YEScaleImageProviderTests
     {
         private readonly Queue<object> _results;
         public int SubmitCalls { get; private set; }
+        public int GetStatusCalls { get; private set; }
 
         public FakeTaskClient(params object[] results)
         {
@@ -608,7 +757,12 @@ public class YEScaleImageProviderTests
             => throw new NotSupportedException();
 
         public Task<YEScaleTaskStatusResponse> GetStatusAsync(string taskId, CancellationToken ct = default)
-            => throw new NotSupportedException();
+        {
+            GetStatusCalls++;
+            var next = _results.Dequeue();
+            if (next is Exception ex) throw ex;
+            return Task.FromResult((YEScaleTaskStatusResponse)next);
+        }
 
         public Task<YEScaleTaskResult> SubmitAndWaitAsync(YEScaleTaskSubmitRequest request, CancellationToken ct = default)
         {

@@ -211,9 +211,14 @@ public sealed class AiCharacterService : IAiCharacterService
         }
         else if (render.Success && !string.IsNullOrWhiteSpace(render.ImageUrl))
         {
-            imageUrl = render.ImageUrl;
-            objectKey = render.ObjectKey;
-            _logger.LogInformation("AI_CHARACTER_IMAGE_STORED_BY_PROVIDER renderId={RenderId} provider={ProviderCode} objectKey={ObjectKey} cost={Cost}",
+            var category = BuildStorageCategory(scope, character?.CharacterCode ?? BuildCharacterCode(characterName));
+            await _tenant.EnsureLoadedAsync(ct);
+            var media = string.IsNullOrWhiteSpace(render.ObjectKey)
+                ? await _media.DownloadAndSaveImageAsync(render.ImageUrl, category, user.UserId, user.CustomerId, _tenant.TenantId, ct)
+                : await _media.DownloadAndSaveImageAtObjectKeyAsync(render.ImageUrl, render.ObjectKey, category, user.UserId, user.CustomerId, _tenant.TenantId, ct);
+            imageUrl = media.PublicUrl ?? media.FileUrl;
+            objectKey = media.ObjectKey;
+            _logger.LogInformation("AI_CHARACTER_IMAGE_DOWNLOADED_TO_STORAGE renderId={RenderId} provider={ProviderCode} objectKey={ObjectKey} cost={Cost}",
                 renderId, render.ProviderCode, objectKey, render.ProviderRawCost);
         }
         else

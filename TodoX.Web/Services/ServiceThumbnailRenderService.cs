@@ -204,6 +204,14 @@ public sealed class ServiceThumbnailRenderService
             imageUrl = media.PublicUrl ?? media.FileUrl;
             mediaId = media.Id;
         }
+        else if (render.Success && !string.IsNullOrWhiteSpace(render.ImageUrl))
+        {
+            await _tenant.EnsureLoadedAsync(ct);
+            var media = await _media.DownloadAndSaveImageAsync(render.ImageUrl, "service_thumbnail",
+                request.User?.UserId, request.User?.CustomerId, _tenant.TenantId, ct);
+            imageUrl = media.PublicUrl ?? media.FileUrl;
+            mediaId = media.Id;
+        }
 
         return new ServiceThumbnailRenderResult
         {

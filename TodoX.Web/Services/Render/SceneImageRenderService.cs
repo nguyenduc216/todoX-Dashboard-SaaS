@@ -270,7 +270,7 @@ public sealed class SceneImageRenderService : ISceneImageRenderService
                 render.ErrorMessage ?? "Render lại ảnh scene thất bại.", QuotaError: false);
         }
 
-        // Persist bytes if the provider returned raw image data; otherwise trust the provider URL.
+        // Persist provider output immediately; YEScale CDN URLs are temporary and must not be used as final scene URLs.
         var imageUrl = render.ImageUrl;
         var objectKey = render.ObjectKey;
         Guid? resultMediaId = null;
@@ -291,11 +291,14 @@ public sealed class SceneImageRenderService : ISceneImageRenderService
             imageUrl = media.PublicUrl ?? media.FileUrl;
             objectKey = media.ObjectKey;
         }
-        else if (!string.IsNullOrWhiteSpace(render.ImageUrl) && !string.IsNullOrWhiteSpace(context.OutputObjectKey))
+        else if (!string.IsNullOrWhiteSpace(render.ImageUrl))
         {
             await _tenant.EnsureLoadedAsync(ct);
-            var media = await _media.DownloadAndSaveImageAtObjectKeyAsync(render.ImageUrl, context.OutputObjectKey,
-                "video_scene_image", context.UserId, context.CustomerId, _tenant.TenantId, ct);
+            var media = string.IsNullOrWhiteSpace(context.OutputObjectKey)
+                ? await _media.DownloadAndSaveImageAsync(render.ImageUrl,
+                    "video_scene_image", context.UserId, context.CustomerId, _tenant.TenantId, ct)
+                : await _media.DownloadAndSaveImageAtObjectKeyAsync(render.ImageUrl, context.OutputObjectKey,
+                    "video_scene_image", context.UserId, context.CustomerId, _tenant.TenantId, ct);
             resultMediaId = media.Id;
             imageUrl = media.PublicUrl ?? media.FileUrl;
             objectKey = media.ObjectKey;

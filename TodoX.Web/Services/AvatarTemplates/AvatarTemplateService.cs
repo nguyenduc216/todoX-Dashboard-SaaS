@@ -478,6 +478,13 @@ public sealed class AvatarTemplateService : IAvatarTemplateService
             imageUrl = media.PublicUrl ?? media.FileUrl;
             mediaId = media.Id;
         }
+        else if (!string.IsNullOrWhiteSpace(render.ImageUrl))
+        {
+            await _tenant.EnsureLoadedAsync(ct);
+            var media = await _media.DownloadAndSaveImageAsync(render.ImageUrl, fileCategory, userId, null, _tenant.TenantId, ct);
+            imageUrl = media.PublicUrl ?? media.FileUrl;
+            mediaId = media.Id;
+        }
 
         return new PublicAvatarBuilderRenderResult
         {

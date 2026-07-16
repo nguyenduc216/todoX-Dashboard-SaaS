@@ -1,15 +1,31 @@
 using System.Net;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using TodoX.Web.Services.AiCharacters;
 
 namespace TodoX.Web.Services.AiProviders;
 
 public interface IYEScaleImageService : IAiImageProviderService
 {
+    Task<OpenRouterImageResponse> RecoverImageAsync(string taskId, string model, CancellationToken cancellationToken = default);
 }
 
 public sealed class YEScaleImageService : IYEScaleImageService
 {
+    private static readonly string[] OutputRootKeys = { "task_result", "output", "result", "data", "images", "response", "artifacts", "files" };
+    private static readonly string[] OutputUrlKeys = { "url", "image_url", "imageUrl", "output_url", "outputUrl" };
+    private static readonly string[] OutputBase64Keys = { "b64_json", "base64", "base64_image", "image_base64" };
+    private static readonly string[][] PreferredImagePaths =
+    {
+        new[] { "task_result", "url" },
+        new[] { "task_result", "image_url" },
+        new[] { "task_result", "imageUrl" },
+        new[] { "task_result", "images" },
+        new[] { "output", "url" },
+        new[] { "result", "url" },
+        new[] { "data", "url" }
+    };
+
     private readonly IYEScaleTaskClient _tasks;
     private readonly ILogger<YEScaleImageService> _logger;
 
@@ -74,14 +90,9 @@ public sealed class YEScaleImageService : IYEScaleImageService
                     MimeType = image.MimeType ?? "image/png",
                     ProviderCode = "yescale_task_image",
                     ModelName = model,
-                    RawRequestJson = requestJson,
-                    RawResponseJson = result.TerminalResponseJson,
-                    UsageJson = JsonSerializer.Serialize(new
-                    {
-                        taskId = result.TaskId,
-                        durationMs = result.Duration.TotalMilliseconds,
-                        fallbackTrail
-                    }, JsonOptions())
+                    RawRequestJson = SanitizeJson(requestJson),
+                    RawResponseJson = SanitizeJson(result.TerminalResponseJson),
+                    UsageJson = JsonSerializer.Serialize(BuildUsageMetadata(result, model, fallbackTrail), JsonOptions())
                 };
             }
             catch (OperationCanceledException)
@@ -110,6 +121,47 @@ public sealed class YEScaleImageService : IYEScaleImageService
         return Fail("YEScale image fallback chain exhausted.");
     }
 
+    public async Task<OpenRouterImageResponse> RecoverImageAsync(string taskId, string model, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(taskId))
+        {
+            return Fail("Thiếu provider task_id để khôi phục ảnh YEScale.");
+        }
+
+        var status = await _tasks.GetStatusAsync(taskId, cancellationToken);
+        var responseJson = JsonSerializer.Serialize(status, JsonOptions());
+        if (!status.IsSuccess)
+        {
+            return Fail("Task ảnh YEScale chưa SUCCESS hoặc đã thất bại, không thể khôi phục ảnh.", null, responseJson, model, taskId);
+        }
+
+        var image = ExtractImage(status);
+        if (image is null)
+        {
+            return Fail("Task ảnh YEScale SUCCESS nhưng không tìm thấy URL/base64 ảnh để khôi phục.", null, responseJson, model, taskId);
+        }
+
+        var result = new YEScaleTaskResult
+        {
+            TaskId = taskId,
+            Status = status.Status ?? "SUCCESS",
+            TerminalResponse = status,
+            TerminalResponseJson = responseJson,
+            Duration = TimeSpan.Zero
+        };
+        return new OpenRouterImageResponse
+        {
+            Success = true,
+            ImageUrl = image.Url,
+            ImageBytes = image.Bytes,
+            MimeType = image.MimeType ?? "image/png",
+            ProviderCode = "yescale_task_image",
+            ModelName = model,
+            RawResponseJson = SanitizeJson(responseJson),
+            UsageJson = JsonSerializer.Serialize(BuildUsageMetadata(result, model, Array.Empty<object>()), JsonOptions())
+        };
+    }
+
     private static bool ShouldFallback(YEScaleTaskException ex)
         => ex.IsTransient
            || ex.StatusCode is 408 or 429
@@ -126,33 +178,51 @@ public sealed class YEScaleImageService : IYEScaleImageService
 
     private static ExtractedImage? ExtractImage(YEScaleTaskStatusResponse response)
     {
-        var roots = new List<JsonElement>();
-        if (response.Extra is not null)
+        if (response.Extra is null)
         {
-            foreach (var key in new[] { "output", "result", "data", "images" })
+            return null;
+        }
+
+        foreach (var path in PreferredImagePaths)
+        {
+            if (TryGetPath(response.Extra, path, out var preferred))
             {
-                if (response.Extra.TryGetValue(key, out var value))
-                {
-                    roots.Add(value);
-                }
+                var found = FindImage(preferred, path[^1]);
+                if (found is not null) return found;
             }
         }
 
-        foreach (var root in roots)
+        foreach (var key in OutputRootKeys)
         {
-            var found = FindImage(root);
+            if (!response.Extra.TryGetValue(key, out var root))
+            {
+                continue;
+            }
+
+            var found = FindImage(root, key);
+            if (found is not null) return found;
+        }
+
+        foreach (var property in response.Extra)
+        {
+            if (IsNonOutputMetadataKey(property.Key))
+            {
+                continue;
+            }
+
+            var found = FindImage(property.Value, property.Key);
             if (found is not null) return found;
         }
 
         return null;
     }
 
-    private static ExtractedImage? FindImage(JsonElement element)
+    private static ExtractedImage? FindImage(JsonElement element, string? currentKey = null)
     {
         switch (element.ValueKind)
         {
             case JsonValueKind.Object:
-                foreach (var urlKey in new[] { "url", "image_url", "imageUrl", "output_url", "outputUrl" })
+                foreach (var urlKey in OutputUrlKeys)
                 {
                     if (element.TryGetProperty(urlKey, out var url) && url.ValueKind == JsonValueKind.String)
                     {
@@ -161,7 +231,7 @@ public sealed class YEScaleImageService : IYEScaleImageService
                     }
                 }
 
-                foreach (var b64Key in new[] { "b64_json", "base64", "base64_image", "image_base64" })
+                foreach (var b64Key in OutputBase64Keys)
                 {
                     if (element.TryGetProperty(b64Key, out var b64) && b64.ValueKind == JsonValueKind.String)
                     {
@@ -177,19 +247,20 @@ public sealed class YEScaleImageService : IYEScaleImageService
                         continue;
                     }
 
-                    var nested = FindImage(property.Value);
+                    var nested = FindImage(property.Value, property.Name);
                     if (nested is not null) return nested;
                 }
                 break;
             case JsonValueKind.Array:
                 foreach (var item in element.EnumerateArray())
                 {
-                    var nested = FindImage(item);
+                    var nested = FindImage(item, currentKey);
                     if (nested is not null) return nested;
                 }
                 break;
             case JsonValueKind.String:
                 var text = element.GetString();
+                if (IsOutputUrlKey(currentKey) && IsHttpUrl(text)) return new ExtractedImage { Url = text };
                 if (IsHttpImageUrl(text)) return new ExtractedImage { Url = text };
                 break;
         }
@@ -197,14 +268,49 @@ public sealed class YEScaleImageService : IYEScaleImageService
         return null;
     }
 
+    private static bool TryGetPath(Dictionary<string, JsonElement> root, string[] path, out JsonElement element)
+    {
+        element = default;
+        if (path.Length == 0 || !root.TryGetValue(path[0], out element))
+        {
+            return false;
+        }
+
+        for (var i = 1; i < path.Length; i++)
+        {
+            if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty(path[i], out element))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     private static bool IsHttpUrl(string? value)
         => Uri.TryCreate(value, UriKind.Absolute, out var uri)
            && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
 
     private static bool IsNonOutputMetadataKey(string key)
-        => key.Contains("metadata", StringComparison.OrdinalIgnoreCase)
-           || key.Contains("document", StringComparison.OrdinalIgnoreCase)
-           || key.Contains("callback", StringComparison.OrdinalIgnoreCase);
+    {
+        var normalized = key.Replace("_", string.Empty, StringComparison.Ordinal)
+            .Replace("-", string.Empty, StringComparison.Ordinal);
+        return normalized.Contains("metadata", StringComparison.OrdinalIgnoreCase)
+               || normalized.Contains("document", StringComparison.OrdinalIgnoreCase)
+               || normalized.Contains("docs", StringComparison.OrdinalIgnoreCase)
+               || normalized.Contains("callback", StringComparison.OrdinalIgnoreCase)
+               || normalized.Contains("request", StringComparison.OrdinalIgnoreCase)
+               || normalized.Contains("input", StringComparison.OrdinalIgnoreCase)
+               || normalized.Contains("prompt", StringComparison.OrdinalIgnoreCase)
+               || normalized.Contains("message", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsOutputUrlKey(string? key)
+        => !string.IsNullOrWhiteSpace(key)
+           && (OutputUrlKeys.Contains(key, StringComparer.OrdinalIgnoreCase)
+               || key.Equals("images", StringComparison.OrdinalIgnoreCase)
+               || key.Equals("artifacts", StringComparison.OrdinalIgnoreCase)
+               || key.Equals("files", StringComparison.OrdinalIgnoreCase));
 
     private static bool IsHttpImageUrl(string? value)
     {
@@ -215,6 +321,54 @@ public sealed class YEScaleImageService : IYEScaleImageService
                || path.EndsWith(".jpeg", StringComparison.OrdinalIgnoreCase)
                || path.EndsWith(".webp", StringComparison.OrdinalIgnoreCase)
                || path.EndsWith(".gif", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static object BuildUsageMetadata(YEScaleTaskResult result, string model, IReadOnlyList<object> fallbackTrail)
+    {
+        var response = result.TerminalResponse;
+        return new
+        {
+            taskId = result.TaskId,
+            responseTaskId = response.TaskId,
+            status = result.Status,
+            submitTime = ReadExtraLong(response, "submit_time"),
+            finishTime = ReadExtraLong(response, "finish_time"),
+            urlExpiresAt = ReadExtraStringPath(response.Extra, "task_result", "url_expires_at"),
+            model,
+            providerCode = "yescale_task_image",
+            durationMs = result.Duration.TotalMilliseconds,
+            fallbackTrail
+        };
+    }
+
+    private static long? ReadExtraLong(YEScaleTaskStatusResponse response, string key)
+    {
+        if (response.Extra is null || !response.Extra.TryGetValue(key, out var element))
+        {
+            return null;
+        }
+
+        if (element.ValueKind == JsonValueKind.Number && element.TryGetInt64(out var number))
+        {
+            return number;
+        }
+
+        if (element.ValueKind == JsonValueKind.String && long.TryParse(element.GetString(), out var parsed))
+        {
+            return parsed;
+        }
+
+        return null;
+    }
+
+    private static string? ReadExtraStringPath(Dictionary<string, JsonElement>? root, params string[] path)
+    {
+        if (root is null || !TryGetPath(root, path, out var element))
+        {
+            return null;
+        }
+
+        return element.ValueKind == JsonValueKind.String ? element.GetString() : null;
     }
 
     private static byte[]? TryDecodeImage(string? value, out string? mimeType)
@@ -246,11 +400,69 @@ public sealed class YEScaleImageService : IYEScaleImageService
             Success = false,
             ProviderCode = "yescale_task_image",
             ModelName = model,
-            RawRequestJson = requestJson,
-            RawResponseJson = responseJson,
+            RawRequestJson = SanitizeJson(requestJson),
+            RawResponseJson = SanitizeJson(responseJson),
             StatusCode = HttpStatusCode.BadGateway,
             ErrorMessage = string.IsNullOrWhiteSpace(taskId) ? message : $"{message} task_id={taskId}"
         };
+
+    private static string? SanitizeJson(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return json;
+        try
+        {
+            var node = JsonNode.Parse(json);
+            if (node is null) return json;
+            RedactSensitiveFields(node);
+            return node.ToJsonString(JsonOptions());
+        }
+        catch
+        {
+            return json;
+        }
+    }
+
+    private static void RedactSensitiveFields(JsonNode node)
+    {
+        if (node is JsonObject obj)
+        {
+            foreach (var property in obj.ToList())
+            {
+                if (IsSensitiveJsonKey(property.Key))
+                {
+                    obj[property.Key] = "[redacted]";
+                    continue;
+                }
+
+                if (property.Value is not null)
+                {
+                    RedactSensitiveFields(property.Value);
+                }
+            }
+        }
+        else if (node is JsonArray arr)
+        {
+            foreach (var item in arr)
+            {
+                if (item is not null)
+                {
+                    RedactSensitiveFields(item);
+                }
+            }
+        }
+    }
+
+    private static bool IsSensitiveJsonKey(string key)
+    {
+        var normalized = key.Replace("_", string.Empty, StringComparison.Ordinal)
+            .Replace("-", string.Empty, StringComparison.Ordinal)
+            .ToLowerInvariant();
+        return normalized.Contains("authorization", StringComparison.Ordinal)
+               || normalized.Contains("accesskey", StringComparison.Ordinal)
+               || normalized.Contains("apikey", StringComparison.Ordinal)
+               || normalized.Contains("secret", StringComparison.Ordinal)
+               || normalized.Contains("password", StringComparison.Ordinal);
+    }
 
     private static JsonSerializerOptions JsonOptions() => new(JsonSerializerDefaults.Web)
     {
