@@ -195,7 +195,7 @@
                         <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="ReloadAsync" Disabled="@_busy">Refresh</MudButton>
                         @if (_batchActive)
                         {
-                            <MudChip T="string" Color="Color.Warning" Icon="@Icons.Material.Filled.HourglassBottom">Đang tạo ảnh tĩnh trên Google Cloud...</MudChip>
+                            <MudChip T="string" Color="Color.Warning" Icon="@Icons.Material.Filled.HourglassBottom">Đang tạo ảnh tĩnh qua AI provider đã cấu hình...</MudChip>
                         }
                     </MudStack>
 
@@ -426,7 +426,7 @@
     private bool _showFinalHistory;
     // Polling guard: prevents overlapping ReloadAsync calls.
     private readonly SemaphoreSlim _reloadLock = new(1, 1);
-    // True while a background Google Cloud batch job for this project is queued/rendering.
+    // True while a background scene image batch job for this project is queued/rendering.
     private bool _batchActive;
 
     private enum SceneImageVisualState { None, Queued, Rendering, Retrying, Ready, Failed }
@@ -491,7 +491,7 @@
             _projectId = result.Id;
             Logger.LogInformation("VIDEO_RENDER_CREATE_PROJECT_OK projectId={ProjectId} sceneCount={SceneCount} status={Status}", result.Id, result.SceneCount, result.Status);
             await ReloadAsync();
-            // Tự động enqueue batch render ảnh tĩnh (Google Cloud) ngay sau khi scene đã lưu.
+            // Tự động enqueue batch render ảnh tĩnh qua provider ảnh đã cấu hình ngay sau khi scene đã lưu.
             // Không chờ ảnh render xong; UI chuyển sang tab Scene và hiển thị shimmer từng scene.
             await EnqueueBulkSceneImageRenderAsync(onlyMissingOrFailed: false);
             Snackbar.Add("Đã tạo project và bắt đầu render ảnh tĩnh scene.", Severity.Success);
@@ -867,7 +867,7 @@
                 if (!await _pollTimer.WaitForNextTickAsync(ct)) break;
                 if (_project is null) continue;
 
-                // Keep polling while a Google Cloud batch is active, scenes are actively rendering/retrying,
+                // Keep polling while a configured image-provider batch is active, scenes are actively rendering/retrying,
                 // scenes are still pending an image, or the video pipeline is mid-flight. Stop once everything
                 // has settled to avoid churn.
                 var scenesPending = _batchActive || HasActiveSceneRenders() || HasPendingSceneImages();
@@ -969,7 +969,7 @@
     }
 
     // ------------------------------------------------------------------
-    // Bulk scene image render — Google Cloud (Vertex), background job.
+    // Bulk scene image render — configured image provider router, background job.
     // ------------------------------------------------------------------
     private async Task EnqueueBulkSceneImageRenderAsync(bool onlyMissingOrFailed)
     {
@@ -994,8 +994,8 @@
             Input = input,
             Prompt = new { projectId = _project.Id },
             LogCode = BuildLogCode(),
-            ProviderCode = "todox_image",
-            ModelCode = "vertex_scene_image",
+            ProviderCode = TodoX.Web.Services.Render.SceneImageBatchRenderHandler.RoutingProviderCode,
+            ModelCode = TodoX.Web.Services.Render.SceneImageBatchRenderHandler.RoutingModelCode,
             MaxAttempts = 1,
             PointCostEstimate = 0,
             PointStatus = RenderPointStatuses.NotRequired
@@ -1012,7 +1012,7 @@
 
         Logger.LogInformation("VIDEO_RENDER_SCENE_IMAGE_BATCH_ENQUEUED projectId={ProjectId} jobId={JobId} onlyMissing={OnlyMissing} characterId={CharacterId}",
             _project.Id, job.Id, onlyMissingOrFailed, input.CharacterId);
-        await LogProjectEvent("SCENE_IMAGE_BATCH_ENQUEUED", "info", "Đã enqueue batch render ảnh tĩnh Google Cloud.",
+        await LogProjectEvent("SCENE_IMAGE_BATCH_ENQUEUED", "info", "Đã enqueue batch render ảnh tĩnh qua AI provider đã cấu hình.",
             new { job.Id, onlyMissingOrFailed, input.CharacterId });
         await StartPolling();
     }
@@ -1025,7 +1025,7 @@
     }
 
     // ------------------------------------------------------------------
-    // Per-scene re-render — OpenRouter only (no Google Cloud fallback).
+    // Per-scene re-render — configured routed image provider only.
     // ------------------------------------------------------------------
     private async Task RerenderSceneImageAsync(VideoProjectSceneDto scene)
     {

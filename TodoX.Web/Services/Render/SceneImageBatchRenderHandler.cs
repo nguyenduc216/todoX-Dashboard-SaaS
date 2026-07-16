@@ -28,6 +28,8 @@ public sealed class SceneImageBatchInput
 public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
 {
     public const string JobTypeName = "render_scene_images";
+    public const string RoutingProviderCode = "configured_image_router";
+    public const string RoutingModelCode = "scene_image_default";
     public string JobType => JobTypeName;
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
