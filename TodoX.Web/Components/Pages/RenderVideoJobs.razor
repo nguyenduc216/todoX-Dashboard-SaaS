@@ -40,8 +40,9 @@ else
         @if (_projectDialogOpen)
         {
             <div class="render-project-dialog" role="dialog" aria-modal="true">
-                <MudPaper Class="render-project-dialog-surface" Square="true">
-                    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="render-project-dialog-header">
+                <div class="render-project-dialog-surface">
+                    <header class="render-project-dialog-header">
+                    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
                         <MudStack Spacing="0">
                             <MudText Typo="Typo.h6">@(_project?.Title ?? "Render Video Job")</MudText>
                             <MudText Typo="Typo.caption">@ProjectHeaderMeta</MudText>
@@ -50,7 +51,8 @@ else
                             <MudIconButton Icon="@Icons.Material.Filled.Close" Color="Color.Default" OnClick="CloseProjectDialogAsync" />
                         </MudStack>
                     </MudStack>
-                    <div class="render-project-dialog-body">
+                    </header>
+                    <main class="render-project-dialog-body">
                     <MudTabs Class="render-project-tabs" rounded="true" ApplyEffectsToContainer="true" panelClass="render-tab-panel" @bind-ActivePanelIndex="_tabIndex">
             <MudTabPanel Text="Thông tin">
                 <MudPaper Class="todox-card pa-4" rounded="true">
@@ -443,12 +445,12 @@ else
                 }
             </MudTabPanel>
                     </MudTabs>
-                    </div>
+                    </main>
                     <div class="render-project-dialog-footer">
                         <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveJobAsync" Disabled="@(_projectId is null || _busy)">Lưu project</MudButton>
                         <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Close" OnClick="CloseProjectDialogAsync">Đóng</MudButton>
                     </div>
-                </MudPaper>
+                </div>
             </div>
         }
     }
