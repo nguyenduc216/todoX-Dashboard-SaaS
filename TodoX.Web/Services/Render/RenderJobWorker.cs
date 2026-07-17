@@ -69,7 +69,7 @@ public sealed class RenderJobWorker : BackgroundService
 
                 var jobs = scope.ServiceProvider.GetRequiredService<IRenderJobService>();
                 var dispatcher = scope.ServiceProvider.GetRequiredService<IRenderJobDispatcher>();
-                var job = await jobs.ClaimNextAsync(_workerKey, lockFor, stoppingToken);
+                var job = await jobs.ClaimNextExcludingJobTypesAsync(_workerKey, lockFor, new[] { RenderJobTypes.RenderSceneVideo }, stoppingToken);
                 if (job is null)
                 {
                     await Task.Delay(idleDelay, stoppingToken);

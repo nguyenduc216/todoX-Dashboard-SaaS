@@ -26,6 +26,8 @@ public interface IRenderJobService
     Task<bool> CancelAsync(Guid jobId, string reason, Guid? userId = null, CancellationToken ct = default);
     Task<RenderJobDto?> RetryAsync(Guid jobId, Guid? userId = null, CancellationToken ct = default);
     Task<RenderJobDto?> ClaimNextAsync(string workerKey, TimeSpan lockFor, CancellationToken ct = default);
+    Task<RenderJobDto?> ClaimNextByJobTypeAsync(string workerKey, TimeSpan lockFor, IReadOnlyCollection<string> jobTypes, CancellationToken ct = default);
+    Task<RenderJobDto?> ClaimNextExcludingJobTypesAsync(string workerKey, TimeSpan lockFor, IReadOnlyCollection<string> excludedJobTypes, CancellationToken ct = default);
     Task MarkStatusAsync(Guid jobId, string status, object? output = null, string? errorCode = null, string? errorMessage = null, CancellationToken ct = default);
     Task ScheduleRetryAsync(Guid jobId, TimeSpan delay, string errorCode, string errorMessage, CancellationToken ct = default);
 }
@@ -349,21 +351,56 @@ public sealed class RenderJobService : IRenderJobService
     }
 
     public async Task<RenderJobDto?> ClaimNextAsync(string workerKey, TimeSpan lockFor, CancellationToken ct = default)
+        => await ClaimNextInternal(workerKey, lockFor, jobTypes: null, ct);
+
+    public async Task<RenderJobDto?> ClaimNextByJobTypeAsync(string workerKey, TimeSpan lockFor, IReadOnlyCollection<string> jobTypes, CancellationToken ct = default)
+        => await ClaimNextInternal(workerKey, lockFor, jobTypes, ct);
+
+    public async Task<RenderJobDto?> ClaimNextExcludingJobTypesAsync(string workerKey, TimeSpan lockFor, IReadOnlyCollection<string> excludedJobTypes, CancellationToken ct = default)
+        => await ClaimNextInternal(workerKey, lockFor, includeJobTypes: null, excludeJobTypes: excludedJobTypes, ct);
+
+    private async Task<RenderJobDto?> ClaimNextInternal(string workerKey, TimeSpan lockFor, IReadOnlyCollection<string>? jobTypes, CancellationToken ct)
+        => await ClaimNextInternal(workerKey, lockFor, jobTypes, excludeJobTypes: null, ct);
+
+    private async Task<RenderJobDto?> ClaimNextInternal(
+        string workerKey,
+        TimeSpan lockFor,
+        IReadOnlyCollection<string>? includeJobTypes,
+        IReadOnlyCollection<string>? excludeJobTypes,
+        CancellationToken ct)
     {
         await _tenant.EnsureLoadedAsync(ct);
         using var conn = await _factory.OpenAsync(ct);
         using var tx = conn.BeginTransaction();
 
-        var job = await conn.QuerySingleOrDefaultAsync<RenderJobDto>(
-            SelectJobSql +
-            """
-             WHERE status='queued'
-               AND (retry_after IS NULL OR retry_after <= now())
-             ORDER BY priority ASC, queued_at ASC
-             FOR UPDATE SKIP LOCKED
-             LIMIT 1;
-            """,
-            transaction: tx);
+        var sql = SelectJobSql +
+                  """
+                   WHERE status='queued'
+                     AND (retry_after IS NULL OR retry_after <= now())
+                  """;
+        object parameters;
+        if (includeJobTypes is not null && includeJobTypes.Count > 0)
+        {
+            sql += " AND job_type = ANY(@jobTypes)";
+            parameters = new { jobTypes = includeJobTypes.ToArray(), excludedJobTypes = excludeJobTypes?.ToArray() ?? Array.Empty<string>() };
+        }
+        else if (excludeJobTypes is not null && excludeJobTypes.Count > 0)
+        {
+            sql += " AND NOT (job_type = ANY(@excludedJobTypes))";
+            parameters = new { excludedJobTypes = excludeJobTypes.ToArray() };
+        }
+        else
+        {
+            parameters = new { };
+        }
+
+        sql += """
+                ORDER BY priority ASC, queued_at ASC
+                FOR UPDATE SKIP LOCKED
+                LIMIT 1;
+               """;
+
+        var job = await conn.QuerySingleOrDefaultAsync<RenderJobDto>(sql, parameters, tx);
 
         if (job is null)
         {

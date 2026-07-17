@@ -74,6 +74,13 @@ public sealed class RenderJobDto
     public DateTime? UpdatedAt { get; set; }
 }
 
+public static class RenderJobTypes
+{
+    public const string RenderVideoBatch = "render_video_job";
+    public const string RenderSceneVideo = "render_scene_video";
+    public const string MergeProjectVideo = "merge_video_job";
+}
+
 public sealed class RenderJobEventDto
 {
     public Guid Id { get; set; }

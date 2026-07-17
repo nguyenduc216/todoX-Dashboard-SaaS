@@ -58,4 +58,10 @@ public class AiProviderCatalogTests
         Assert.Equal(factoryKey, ProviderCodeMap.ToFactoryKey(providerCode));
         Assert.True(ProviderCodeMap.IsRoutedImageProvider(providerCode));
     }
+
+    [Fact]
+    public void ProviderCodeMap_MapsYEScaleVideoProvider()
+    {
+        Assert.Equal("yescale_task_video", ProviderCodeMap.ToFactoryKey("yescale_task_video"));
+    }
 }

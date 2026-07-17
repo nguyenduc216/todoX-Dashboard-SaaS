@@ -203,6 +203,9 @@ public interface ISceneMediaVersioningService
     Task<IReadOnlyList<SceneVideoVersionDto>> ListSceneVideoVersionsAsync(long sceneId, CurrentUserSession user, int skip = 0, int take = 20, CancellationToken ct = default);
     Task SelectSceneVideoVersionAsync(long sceneId, Guid versionId, Guid? selectedBy, CancellationToken ct = default);
     Task SelectSceneVideoVersionAsync(long sceneId, Guid versionId, CurrentUserSession user, CancellationToken ct = default);
+    Task MarkSceneVideoVersionSubmittedAsync(Guid versionId, string? providerCode, string? modelName, long? providerCapabilityId, string providerTaskId, CancellationToken ct = default);
+    Task<string?> GetSceneVideoProviderTaskIdAsync(Guid versionId, CancellationToken ct = default);
+    Task MarkSceneVideoPendingReconciliationAsync(Guid versionId, string? errorCode, string? errorMessage, CancellationToken ct = default);
     Task<FinalVideoVersionDto> CreateQueuedFinalVideoVersionAsync(FinalVideoVersionCreateRequest request, CancellationToken ct = default);
     Task CompleteFinalVideoVersionAsync(Guid versionId, FinalVideoVersionCompleteRequest request, CancellationToken ct = default);
     Task FailFinalVideoVersionAsync(Guid versionId, string? errorCode, string? errorMessage, CancellationToken ct = default);
@@ -709,6 +712,64 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
     {
         await EnsureSceneAccessAsync(sceneId, user, ct);
         await SelectSceneVideoVersionAsync(sceneId, versionId, user.UserId, ct);
+    }
+
+    public async Task MarkSceneVideoVersionSubmittedAsync(Guid versionId, string? providerCode, string? modelName, long? providerCapabilityId, string providerTaskId, CancellationToken ct = default)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        await conn.ExecuteAsync(
+            """
+            UPDATE video_render.scene_video_versions
+               SET status='submitted',
+                   provider_code=COALESCE(@providerCode, provider_code),
+                   provider_capability_id=COALESCE(@providerCapabilityId, provider_capability_id),
+                   requested_model=COALESCE(requested_model, @modelName),
+                   actual_model=COALESCE(@modelName, actual_model),
+                   provider_task_id=@providerTaskId,
+                   submitted_at=COALESCE(submitted_at, now()),
+                   updated_at=now()
+             WHERE id=@versionId AND tenant_id=@tenant;
+            """,
+            new
+            {
+                versionId,
+                tenant = _tenant.TenantId,
+                providerCode,
+                modelName,
+                providerCapabilityId,
+                providerTaskId
+            });
+    }
+
+    public async Task<string?> GetSceneVideoProviderTaskIdAsync(Guid versionId, CancellationToken ct = default)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        return await conn.ExecuteScalarAsync<string?>(
+            """
+            SELECT provider_task_id
+              FROM video_render.scene_video_versions
+             WHERE id=@versionId AND tenant_id=@tenant
+             LIMIT 1;
+            """,
+            new { versionId, tenant = _tenant.TenantId });
+    }
+
+    public async Task MarkSceneVideoPendingReconciliationAsync(Guid versionId, string? errorCode, string? errorMessage, CancellationToken ct = default)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        await conn.ExecuteAsync(
+            """
+            UPDATE video_render.scene_video_versions
+               SET status='pending_reconciliation',
+                   error_code=@errorCode,
+                   error_message=@errorMessage,
+                   updated_at=now()
+             WHERE id=@versionId AND tenant_id=@tenant;
+            """,
+            new { versionId, tenant = _tenant.TenantId, errorCode, errorMessage });
     }
 
     public async Task<FinalVideoVersionDto> CreateQueuedFinalVideoVersionAsync(FinalVideoVersionCreateRequest request, CancellationToken ct = default)

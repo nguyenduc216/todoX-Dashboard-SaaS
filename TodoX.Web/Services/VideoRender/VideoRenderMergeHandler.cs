@@ -9,7 +9,7 @@ namespace TodoX.Web.Services.VideoRender;
 
 public sealed class VideoRenderMergeHandler : IRenderJobHandler
 {
-    public const string JobTypeName = "merge_video_job";
+    public const string JobTypeName = RenderJobTypes.MergeProjectVideo;
     public string JobType => JobTypeName;
 
     private readonly ILogger<VideoRenderMergeHandler> _logger;
@@ -31,9 +31,9 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
     {
         var projectId = TryReadLong(job.InputJson, "projectId") ?? TryReadLong(job.PromptJson, "projectId") ?? throw new InvalidOperationException("Thieu projectId trong job input.");
         var project = await _repo.GetProjectAsync(projectId, ct) ?? throw new InvalidOperationException("Khong tim thay project video.");
-        if (!project.Scenes.Any() || project.Scenes.Any(x => x.Status != VideoSceneStatuses.VideoReady))
+        if (!project.Scenes.Any())
         {
-            throw new InvalidOperationException("Chua du scene video ready de merge.");
+            throw new InvalidOperationException("Project khong co scene de merge.");
         }
 
         await _repo.UpdateProjectAsync(project.Id, VideoProjectStatuses.Merging, errorMessage: null, ct: ct);
@@ -41,6 +41,7 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
         var projectRoot = Path.Combine(root, project.JobFolder);
         var versioningEnabled = await _versions.IsEnabledAsync(SceneMediaVersioningFlags.FinalVideos, ct);
         FinalVideoVersionDto? version = null;
+        IReadOnlyList<MergeInput> mergeItems;
         if (versioningEnabled)
         {
             version = await _versions.CreateQueuedFinalVideoVersionAsync(new FinalVideoVersionCreateRequest(
@@ -53,6 +54,25 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
                 TransitionConfigSnapshot: new { mode = "copy_concat" },
                 AudioConfigSnapshot: new { },
                 SubtitleConfigSnapshot: new { }), ct);
+            mergeItems = (await _versions.ListFinalVideoVersionItemsAsync(version.Id, ct))
+                .Select(item => new MergeInput(item.SceneId, item.ItemOrder, item.SceneVideoVersionId, item.SourceFilePath))
+                .ToList();
+            if (mergeItems.Count != project.Scenes.Count)
+            {
+                throw new InvalidOperationException("Project is missing selected completed scene video versions.");
+            }
+        }
+        else
+        {
+            if (project.Scenes.Any(x => x.Status != VideoSceneStatuses.VideoReady))
+            {
+                throw new InvalidOperationException("Chua du scene video ready de merge.");
+            }
+
+            mergeItems = project.Scenes
+                .OrderBy(x => x.SceneIndex)
+                .Select(scene => new MergeInput(scene.Id, scene.SceneIndex, null, scene.SceneVideoPath))
+                .ToList();
         }
 
         try
@@ -63,11 +83,6 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
             Directory.CreateDirectory(finalDir);
             var concat = Path.Combine(finalDir, "concat.txt");
             var finalPath = Path.Combine(finalDir, version is null ? "final.mp4" : "final-video.mp4");
-            var mergeItems = version is null
-                ? project.Scenes.OrderBy(x => x.SceneIndex).Select(scene => new MergeInput(scene.Id, scene.SceneIndex, null, scene.SceneVideoPath)).ToList()
-                : (await _versions.ListFinalVideoVersionItemsAsync(version.Id, ct))
-                    .Select(item => new MergeInput(item.SceneId, item.ItemOrder, item.SceneVideoVersionId, item.SourceFilePath))
-                    .ToList();
             ValidateMergeInputs(mergeItems);
             var lines = mergeItems.Select(item => $"file '{Path.GetFullPath(item.VideoPath ?? string.Empty).Replace("'", "''")}'").ToArray();
             await File.WriteAllLinesAsync(concat, lines, Encoding.UTF8, ct);
@@ -77,18 +92,29 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
             var psi = new ProcessStartInfo
             {
                 FileName = ffmpegPath,
-                Arguments = $"-y -f concat -safe 0 -i \"{concat}\" -c copy \"{finalPath}\"",
                 WorkingDirectory = finalDir,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
                 CreateNoWindow = true
             };
+            psi.ArgumentList.Add("-y");
+            psi.ArgumentList.Add("-f");
+            psi.ArgumentList.Add("concat");
+            psi.ArgumentList.Add("-safe");
+            psi.ArgumentList.Add("0");
+            psi.ArgumentList.Add("-i");
+            psi.ArgumentList.Add(concat);
+            psi.ArgumentList.Add("-c");
+            psi.ArgumentList.Add("copy");
+            psi.ArgumentList.Add(finalPath);
 
             using var process = Process.Start(psi) ?? throw new InvalidOperationException("Khong khoi dong duoc FFmpeg.");
             var stdout = await process.StandardOutput.ReadToEndAsync(ct);
             var stderr = await process.StandardError.ReadToEndAsync(ct);
-            await process.WaitForExitAsync(ct);
+            using var mergeTimeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            mergeTimeout.CancelAfter(TimeSpan.FromMinutes(Math.Max(1, _options.CurrentValue.MergeTimeoutMinutes)));
+            await process.WaitForExitAsync(mergeTimeout.Token);
             await File.WriteAllTextAsync(Path.Combine(finalDir, "ffmpeg.log"), stdout + Environment.NewLine + stderr, ct);
 
             if (process.ExitCode != 0)

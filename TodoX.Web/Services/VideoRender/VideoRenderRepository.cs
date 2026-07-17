@@ -702,6 +702,45 @@ public sealed class VideoRenderRepository
         }
     }
 
+    public async Task<SceneVersionProjection?> GetSelectedImageProjectionAsync(long sceneId, CancellationToken ct = default)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        return await conn.QuerySingleOrDefaultAsync<SceneVersionProjection>(
+            """
+            SELECT public_url AS PublicUrl,
+                   source_file_path AS SourceFilePath,
+                   storage_key AS StorageKey,
+                   id AS Id
+              FROM video_render.scene_image_versions
+             WHERE scene_id=@sceneId
+               AND tenant_id=@tenant
+               AND is_selected=true
+             LIMIT 1;
+            """,
+            new { sceneId, tenant = _tenant.TenantId });
+    }
+
+    public async Task<SceneVersionProjection?> GetSelectedVideoProjectionAsync(long sceneId, CancellationToken ct = default)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        return await conn.QuerySingleOrDefaultAsync<SceneVersionProjection>(
+            """
+            SELECT public_url AS PublicUrl,
+                   source_file_path AS SourceFilePath,
+                   storage_key AS StorageKey,
+                   source_image_version_id AS SourceImageVersionId,
+                   id AS Id
+              FROM video_render.scene_video_versions
+             WHERE scene_id=@sceneId
+               AND tenant_id=@tenant
+               AND is_selected=true
+             LIMIT 1;
+            """,
+            new { sceneId, tenant = _tenant.TenantId });
+    }
+
     public async Task MoveSceneAsync(long projectId, long sceneId, int direction, CurrentUserSession user, CancellationToken ct = default)
     {
         try
@@ -910,10 +949,12 @@ public sealed class VideoRenderRepository
            || user.Can("render.video.manage")
            || user.Can("ai.video.version.manage");
 
-    private sealed class SceneVersionProjection
+    public sealed class SceneVersionProjection
     {
+        public Guid Id { get; init; }
         public string? PublicUrl { get; init; }
         public string? SourceFilePath { get; init; }
         public string? StorageKey { get; init; }
+        public Guid? SourceImageVersionId { get; init; }
     }
 }
