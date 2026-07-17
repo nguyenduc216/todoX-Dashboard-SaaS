@@ -187,10 +187,23 @@
     min-width: 0;
 }
 
+.scene-image-column {
+    min-width: 0;
+}
+
+.scene-details-column {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
 .scene-prompt-panel {
     display: flex;
     flex-direction: column;
     gap: 8px;
+    min-width: 0;
+    width: 100%;
 }
 
 .scene-prompt-panel ::deep textarea,
@@ -200,7 +213,7 @@
 
 .scene-voice-row {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: minmax(120px, 0.75fr) minmax(180px, 1.5fr) minmax(180px, 1.5fr);
     gap: 12px;
 }
 
@@ -301,6 +314,26 @@
     overflow: hidden;
 }
 
+.render-tab-scroll {
+    flex: 1 1 0;
+    height: 0;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+    -webkit-overflow-scrolling: touch;
+    padding: 12px 10px 32px 0;
+}
+
+.scene-video-tab {
+    height: 100%;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
 .scene-image-toolbar {
     flex: 0 0 auto;
     display: flex;
@@ -339,6 +372,12 @@
 
 .scene-video-grid textarea {
     width: 100%;
+}
+
+.render-result-scroll video {
+    max-height: min(62dvh, 620px);
+    object-fit: contain;
+    background: #10161d;
 }
 
 .render-project-dialog-footer {
@@ -401,7 +440,11 @@
 
 @media (max-width: 1100px) {
     .scene-workflow {
-        grid-template-columns: minmax(220px, 280px) minmax(260px, 1fr);
+        grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+    }
+
+    .scene-voice-row {
+        grid-template-columns: minmax(120px, 1fr) minmax(180px, 1fr);
     }
 
     .scene-video-grid {

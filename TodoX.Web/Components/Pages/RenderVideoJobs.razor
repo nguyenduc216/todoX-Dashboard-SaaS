@@ -55,6 +55,7 @@ else
                     <main class="render-project-dialog-body">
                     <MudTabs Class="render-project-tabs" rounded="true" ApplyEffectsToContainer="true" panelClass="render-tab-panel" @bind-ActivePanelIndex="_tabIndex">
             <MudTabPanel Text="Thông tin">
+                <div class="render-tab-scroll render-info-scroll">
                 <MudPaper Class="todox-card pa-4" rounded="true">
                     <MudGrid>
                         <MudItem xs="12" md="4">
@@ -205,6 +206,7 @@ else
                         </MudItem>
                     </MudGrid>
                 </MudPaper>
+                </div>
             </MudTabPanel>
 
             <MudTabPanel Text="Scene / Hình ảnh">
@@ -269,23 +271,24 @@ else
                                     </MudStack>
 
                                     <div class="scene-workflow">
-                                        <div class="scene-workflow-cell">
+                                        <div class="scene-workflow-cell scene-image-column">
                                             <MudText Typo="Typo.subtitle2">Khung ảnh</MudText>
                                             @RenderSceneImageFrame(scene, sceneState, draft)
                                         </div>
-                                        <div class="scene-workflow-cell scene-prompt-panel">
-                                            <MudTextField T="string" Label="Prompt ảnh" Value="@draft.ImagePrompt" ValueChanged="@((string? value) => UpdateDraft(scene.Id, d => d.ImagePrompt = value))" Variant="Variant.Outlined" Lines="7" Immediate="true" />
-                                            @if (_sceneRerenderErrors.TryGetValue(scene.Id, out var sceneErr) && !string.IsNullOrWhiteSpace(sceneErr))
-                                            {
-                                                <MudText Typo="Typo.caption" Color="Color.Error">@sceneErr</MudText>
-                                            }
+                                        <div class="scene-workflow-cell scene-details-column">
+                                            <div class="scene-prompt-panel">
+                                                <MudTextField T="string" Label="Prompt ảnh" Value="@draft.ImagePrompt" ValueChanged="@((string? value) => UpdateDraft(scene.Id, d => d.ImagePrompt = value))" Variant="Variant.Outlined" Lines="7" Immediate="true" />
+                                                @if (_sceneRerenderErrors.TryGetValue(scene.Id, out var sceneErr) && !string.IsNullOrWhiteSpace(sceneErr))
+                                                {
+                                                    <MudText Typo="Typo.caption" Color="Color.Error">@sceneErr</MudText>
+                                                }
+                                            </div>
+                                            <div class="scene-voice-row">
+                                                <MudTextField T="string" Label="Purpose" Value="@draft.Purpose" ValueChanged="@((string? value) => UpdateDraft(scene.Id, d => d.Purpose = value))" Variant="Variant.Outlined" Lines="2" Immediate="true" />
+                                                <MudTextField T="string" Label="Voice" Value="@draft.Voice" ValueChanged="@((string? value) => UpdateDraft(scene.Id, d => d.Voice = value))" Variant="Variant.Outlined" Lines="2" Immediate="true" />
+                                                <MudTextField T="string" Label="Voice instruction" Value="@draft.VoiceInstruction" ValueChanged="@((string? value) => UpdateDraft(scene.Id, d => d.VoiceInstruction = value))" Variant="Variant.Outlined" Lines="2" Immediate="true" />
+                                            </div>
                                         </div>
-                                    </div>
-
-                                    <div class="scene-voice-row">
-                                        <MudTextField T="string" Label="Purpose" Value="@draft.Purpose" ValueChanged="@((string? value) => UpdateDraft(scene.Id, d => d.Purpose = value))" Variant="Variant.Outlined" Lines="2" Immediate="true" />
-                                        <MudTextField T="string" Label="Voice" Value="@draft.Voice" ValueChanged="@((string? value) => UpdateDraft(scene.Id, d => d.Voice = value))" Variant="Variant.Outlined" Lines="2" Immediate="true" />
-                                        <MudTextField T="string" Label="Voice instruction" Value="@draft.VoiceInstruction" ValueChanged="@((string? value) => UpdateDraft(scene.Id, d => d.VoiceInstruction = value))" Variant="Variant.Outlined" Lines="2" Immediate="true" />
                                     </div>
 
                                     @if (_imageHistorySceneId == scene.Id)
@@ -302,12 +305,15 @@ else
             </MudTabPanel>
 
             <MudTabPanel Text="Video">
-                @if (_project is null)
-                {
-                    <MudAlert Severity="Severity.Info">Hãy tạo project ở tab Thông tin trước.</MudAlert>
-                }
-                else
-                {
+                <div class="scene-video-tab">
+                    @if (_project is null)
+                    {
+                        <div class="render-tab-scroll">
+                            <MudAlert Severity="Severity.Info">Hãy tạo project ở tab Thông tin trước.</MudAlert>
+                        </div>
+                    }
+                    else
+                    {
                     <MudStack Row="true" Spacing="2" Class="flex-wrap gap-2 mb-3">
                         <MudChip T="string" Color="Color.Info">Tổng scene: @_project.Scenes.Count</MudChip>
                         <MudChip T="string" Color="Color.Success">Đủ ảnh: @_project.Scenes.Count(x => !string.IsNullOrWhiteSpace(x.StaticImageUrl))</MudChip>
@@ -318,6 +324,7 @@ else
                         <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="ReloadAsync" Disabled="@_busy">Refresh</MudButton>
                     </MudStack>
 
+                    <div class="render-tab-scroll scene-video-scroll">
                     <div class="scene-video-grid">
                         @foreach (var scene in _project.Scenes.OrderBy(x => x.SceneIndex))
                         {
@@ -352,16 +359,19 @@ else
                             </MudPaper>
                         }
                     </div>
-                }
+                    </div>
+                    }
+                </div>
             </MudTabPanel>
 
             <MudTabPanel Text="Kết quả">
-                @if (_project is null)
-                {
-                    <MudAlert Severity="Severity.Info">Chưa có project.</MudAlert>
-                }
-                else
-                {
+                <div class="render-tab-scroll render-result-scroll">
+                    @if (_project is null)
+                    {
+                        <MudAlert Severity="Severity.Info">Chưa có project.</MudAlert>
+                    }
+                    else
+                    {
                     <MudPaper Class="todox-card pa-4" rounded="true">
                         <MudStack Spacing="2">
                             <MudText Typo="Typo.h6">@(_project.Title ?? "Video project")</MudText>
@@ -391,7 +401,7 @@ else
                             </MudStack>
                         </MudStack>
                         <MudDivider Class="my-2" />
-                        <div class="video-render-log-panel" style="max-height:320px;overflow:auto;">
+                        <div class="video-render-log-panel">
                             @foreach (var log in _project.Events.Take(50))
                             {
                                 <MudPaper Class="pa-3 mb-2" rounded="true" Outlined="true">
@@ -442,7 +452,8 @@ else
                             </MudTable>
                         }
                     </MudPaper>
-                }
+                    }
+                </div>
             </MudTabPanel>
                     </MudTabs>
                     </main>

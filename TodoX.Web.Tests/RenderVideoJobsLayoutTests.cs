@@ -11,19 +11,19 @@ public class RenderVideoJobsLayoutTests
     private static readonly string CssPath = Path.Combine(WebRoot, "Components", "Pages", "RenderVideoJobs.razor.css");
 
     [Fact]
-    public void ProjectDialog_KeepsExpectedFourWorkflowTabs()
+    public void ProjectDialog_KeepsFourTabs()
     {
         var razor = File.ReadAllText(RazorPath);
 
         Assert.Equal(4, Regex.Matches(razor, "<MudTabPanel\\s+Text=").Count);
-        Assert.Contains("<MudTabPanel Text=\"Thông tin\">", razor);
-        Assert.Contains("<MudTabPanel Text=\"Scene / Hình ảnh\">", razor);
         Assert.Contains("<MudTabPanel Text=\"Video\">", razor);
-        Assert.Contains("<MudTabPanel Text=\"Kết quả\">", razor);
+        Assert.Contains("class=\"scene-image-tab\"", razor);
+        Assert.Contains("class=\"scene-video-tab\"", razor);
+        Assert.Contains("class=\"render-tab-scroll render-result-scroll\"", razor);
     }
 
     [Fact]
-    public void SceneImageTab_UsesDedicatedScrollOwnerBelowToolbar()
+    public void SceneImageTab_UsesSingleScrollOwnerBelowToolbar()
     {
         var razor = File.ReadAllText(RazorPath);
         var toolbarIndex = razor.IndexOf("class=\"scene-image-toolbar\"", StringComparison.Ordinal);
@@ -31,6 +31,22 @@ public class RenderVideoJobsLayoutTests
 
         Assert.True(toolbarIndex > 0);
         Assert.True(scrollIndex > toolbarIndex);
+        Assert.Single(Regex.Matches(razor, "class=\"scene-list-scroll\""));
+    }
+
+    [Fact]
+    public void Tabs_HaveDedicatedScrollHosts()
+    {
+        var razor = File.ReadAllText(RazorPath);
+        var css = File.ReadAllText(CssPath);
+        var scrollRule = CssRule(css, ".render-tab-scroll");
+
+        Assert.Contains("class=\"render-tab-scroll render-info-scroll\"", razor);
+        Assert.Contains("class=\"render-tab-scroll scene-video-scroll\"", razor);
+        Assert.Contains("class=\"render-tab-scroll render-result-scroll\"", razor);
+        Assert.Contains("overflow-y: auto", scrollRule);
+        Assert.Contains("height: 0", scrollRule);
+        Assert.Contains("flex: 1 1 0", scrollRule);
     }
 
     [Fact]
@@ -62,7 +78,33 @@ public class RenderVideoJobsLayoutTests
     }
 
     [Fact]
-    public void DialogLayout_UsesRealHtmlWrappersForHeightChain()
+    public void SceneAuxiliaryFields_StayUnderImagePromptInsideDetailsColumn()
+    {
+        var razor = File.ReadAllText(RazorPath);
+        var css = File.ReadAllText(CssPath);
+        var workflow = Between(razor, "<div class=\"scene-workflow\">", "@if (_imageHistorySceneId == scene.Id)");
+        var detailsIndex = workflow.IndexOf("class=\"scene-workflow-cell scene-details-column\"", StringComparison.Ordinal);
+        var promptIndex = workflow.IndexOf("Value=\"@draft.ImagePrompt\"", StringComparison.Ordinal);
+        var voiceRowIndex = workflow.IndexOf("class=\"scene-voice-row\"", StringComparison.Ordinal);
+        var purposeIndex = workflow.IndexOf("Value=\"@draft.Purpose\"", StringComparison.Ordinal);
+        var voiceIndex = workflow.IndexOf("Value=\"@draft.Voice\"", StringComparison.Ordinal);
+        var instructionIndex = workflow.IndexOf("Value=\"@draft.VoiceInstruction\"", StringComparison.Ordinal);
+
+        Assert.True(detailsIndex >= 0);
+        Assert.True(promptIndex > detailsIndex);
+        Assert.True(voiceRowIndex > promptIndex);
+        Assert.True(purposeIndex > voiceRowIndex);
+        Assert.True(voiceIndex > purposeIndex);
+        Assert.True(instructionIndex > voiceIndex);
+        Assert.Single(Regex.Matches(workflow, "class=\"scene-voice-row\""));
+        Assert.Contains("ValueChanged=\"@((string? value) => UpdateDraft(scene.Id, d => d.Purpose = value))\"", workflow);
+        Assert.Contains("ValueChanged=\"@((string? value) => UpdateDraft(scene.Id, d => d.Voice = value))\"", workflow);
+        Assert.Contains("ValueChanged=\"@((string? value) => UpdateDraft(scene.Id, d => d.VoiceInstruction = value))\"", workflow);
+        Assert.Contains("display: flex", CssRule(css, ".scene-details-column"));
+    }
+
+    [Fact]
+    public void DialogLayout_UsesHtmlWrappersForHeightChain()
     {
         var razor = File.ReadAllText(RazorPath);
         var css = File.ReadAllText(CssPath);
@@ -87,5 +129,16 @@ public class RenderVideoJobsLayoutTests
         Assert.True(close >= 0, $"Selector '{selector}' has no closing brace.");
 
         return css.Substring(open + 1, close - open - 1);
+    }
+
+    private static string Between(string source, string startText, string endText)
+    {
+        var start = source.IndexOf(startText, StringComparison.Ordinal);
+        Assert.True(start >= 0, $"Start marker '{startText}' was not found.");
+
+        var end = source.IndexOf(endText, start, StringComparison.Ordinal);
+        Assert.True(end > start, $"End marker '{endText}' was not found after '{startText}'.");
+
+        return source[start..end];
     }
 }
