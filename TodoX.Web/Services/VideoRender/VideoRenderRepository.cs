@@ -203,6 +203,7 @@ public sealed class VideoRenderRepository
                        p.user_id AS UserId,
                        p.customer_id AS CustomerId,
                        p.title AS Title,
+                       p.original_prompt AS OriginalPrompt,
                        p.character_id AS CharacterId,
                        c.character_name AS CharacterName,
                        COALESCE(count(s.id), 0)::int AS SceneCount,

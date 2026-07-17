@@ -20,19 +20,13 @@
 
 <PageTitle>Render Video Job</PageTitle>
 
-<MudStack Spacing="3">
-    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-3">
-        <div>
-            <MudText Typo="Typo.h4" Class="todox-page-title">Render Video Job</MudText>
-            <MudText Typo="Typo.body1" Class="todox-page-subtitle">Phase 1: chọn nhân vật chuẩn, tạo project rỗng hoặc tách scene, rồi render từng scene.</MudText>
-        </div>
-        <MudStack Row="true" Spacing="2" Class="flex-wrap gap-2">
-            <MudButton Color="Color.Warning" Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.Add" OnClick="NewProjectAsync">Tạo mới</MudButton>
-            <MudButton Color="Color.Success" Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveJobAsync" Disabled="@(_projectId is null || _busy)">Lưu job</MudButton>
-            <MudButton Color="Color.Primary" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh" OnClick="ReloadAsync" Disabled="@(_projectId is null)">Refresh</MudButton>
-        </MudStack>
-    </MudStack>
-
+@if (!Embedded)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+}
+else
+{
+<MudStack Spacing="0">
     @if (!AuthState.IsInitialized)
     {
         <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
@@ -43,59 +37,6 @@
     }
     else
     {
-        <MudPaper Class="todox-card pa-4" rounded="true">
-                    <MudStack Spacing="3">
-                        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
-                            <div>
-                                <MudText Typo="Typo.h6">Danh sách dự án render</MudText>
-                                <MudText Typo="Typo.body2" Color="Color.Secondary">Các video project đã lưu, tách riêng khỏi lịch sử tác vụ xử lý nền.</MudText>
-                            </div>
-                            <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh" OnClick="LoadProjectListAsync" Disabled="@_busy">Refresh</MudButton>
-                        </MudStack>
-                        @if (_projects.Count == 0)
-                        {
-                            <MudAlert Severity="Severity.Info">Chưa có dự án render nào trong phạm vi tài khoản hiện tại.</MudAlert>
-                        }
-                        else
-                        {
-                            <MudGrid>
-                                @foreach (var item in _projects)
-                                {
-                                    <MudItem xs="12" md="6" lg="4">
-                                        <MudPaper Class="@ProjectCardClass(item)" Outlined="true">
-                                            <MudStack Spacing="2">
-                                                <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="gap-2">
-                                                    <MudText Typo="Typo.subtitle1">@(!string.IsNullOrWhiteSpace(item.Title) ? item.Title : $"Project {item.Id}")</MudText>
-                                                    <MudChip T="string" Size="Size.Small" Color="@ProjectStatusColor(item.Status)">@item.Status</MudChip>
-                                                </MudStack>
-                                                <div class="render-project-thumb">
-                                                    @if (!string.IsNullOrWhiteSpace(item.ThumbnailUrl))
-                                                    {
-                                                        <img src="@item.ThumbnailUrl" />
-                                                    }
-                                                    else
-                                                    {
-                                                        <span>Chưa có thumbnail</span>
-                                                    }
-                                                </div>
-                                                <MudText Typo="Typo.caption">ID: @item.Id</MudText>
-                                                <MudText Typo="Typo.caption">Character: @(item.CharacterName ?? item.CharacterId?.ToString() ?? "Không dùng")</MudText>
-                                                <MudText Typo="Typo.caption">Scene: @item.SceneCount | Ảnh: @item.ImageReadyCount/@item.SceneCount | Video: @item.VideoReadyCount/@item.SceneCount</MudText>
-                                                <MudText Typo="Typo.caption">Tạo: @item.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</MudText>
-                                                <MudText Typo="Typo.caption">Cập nhật: @item.UpdatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</MudText>
-                                                <MudStack Row="true" Spacing="1">
-                                                    <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" OnClick="@(() => OpenProjectAsync(item.Id))">Mở</MudButton>
-                                                    <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="LoadProjectListAsync">Refresh</MudButton>
-                                                </MudStack>
-                                            </MudStack>
-                                        </MudPaper>
-                                    </MudItem>
-                                }
-                            </MudGrid>
-                        }
-                    </MudStack>
-        </MudPaper>
-
         @if (_projectDialogOpen)
         {
             <div class="render-project-dialog" role="dialog" aria-modal="true">
@@ -103,13 +44,13 @@
                     <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="render-project-dialog-header">
                         <MudStack Spacing="0">
                             <MudText Typo="Typo.h6">@(_project?.Title ?? "Render Video Job")</MudText>
-                            <MudText Typo="Typo.caption">Aspect ratio: @ProjectAspectRatio</MudText>
+                            <MudText Typo="Typo.caption">@ProjectHeaderMeta</MudText>
                         </MudStack>
                         <MudStack Row="true" Spacing="1" Class="flex-wrap gap-1">
-                            <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveJobAsync" Disabled="@(_projectId is null || _busy)">Lưu job</MudButton>
                             <MudIconButton Icon="@Icons.Material.Filled.Close" Color="Color.Default" OnClick="CloseProjectDialogAsync" />
                         </MudStack>
                     </MudStack>
+                    <div class="render-project-dialog-body">
                     <MudTabs rounded="true" ApplyEffectsToContainer="true" panelClass="pt-4" @bind-ActivePanelIndex="_tabIndex">
             <MudTabPanel Text="Thông tin">
                 <MudPaper Class="todox-card pa-4" rounded="true">
@@ -445,22 +386,33 @@
                 }
             </MudTabPanel>
                     </MudTabs>
+                    </div>
+                    <div class="render-project-dialog-footer">
+                        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveJobAsync" Disabled="@(_projectId is null || _busy)">Lưu project</MudButton>
+                        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Close" OnClick="CloseProjectDialogAsync">Đóng</MudButton>
+                    </div>
                 </MudPaper>
             </div>
         }
     }
 </MudStack>
+}
 
 @code {
     [SupplyParameterFromQuery(Name = "projectId")]
     public long? QueryProjectId { get; set; }
+
+    [Parameter] public bool Embedded { get; set; }
+    [Parameter] public long? ProjectId { get; set; }
+    [Parameter] public EventCallback<long> ProjectCreated { get; set; }
+    [Parameter] public EventCallback ProjectSaved { get; set; }
+    [Parameter] public EventCallback Closed { get; set; }
 
     private int _tabIndex;
     private bool _busy;
     private bool _projectDialogOpen;
     private long? _projectId;
     private VideoProjectDto? _project;
-    private List<VideoProjectListItemDto> _projects = new();
     private List<RenderJobDto> _jobs = new();
     private readonly List<ActiveCharacterDto> _characters = new();
     private ActiveCharacterDto? _selectedCharacter;
@@ -523,33 +475,72 @@
 
     private bool HasProjectAspectRatio => IsSupportedAspectRatio(_aspectRatio);
 
+    private string ProjectHeaderMeta
+        => _projectId is long id
+            ? $"Project #{id} · Aspect ratio: {ProjectAspectRatio}"
+            : $"Project mới · Aspect ratio: {ProjectAspectRatio}";
+
     private sealed record DebugEntry(DateTimeOffset Timestamp, int StepNumber, string StepCode, string StepName, string Status, long DurationMs, string Message, string? Details = null);
 
     protected override async Task OnInitializedAsync()
     {
-        _projectId = QueryProjectId;
+        if (!Embedded)
+        {
+            var target = QueryProjectId is long projectId ? $"/render-jobs?projectId={projectId}" : "/render-jobs";
+            Navigation.NavigateTo(target, replace: true);
+            return;
+        }
+
+        _projectId = ProjectId ?? QueryProjectId;
         if (AuthState.CurrentUser is not null)
         {
             await LoadCharactersAsync();
-            await LoadProjectListAsync();
         }
-        if (AuthState.CurrentUser is not null && _projectId is not null)
+        if (AuthState.CurrentUser is not null)
         {
             _projectDialogOpen = true;
-            await ReloadAsync();
+            if (_projectId is not null)
+            {
+                await ReloadAsync();
+            }
         }
-        await StartPolling();
+        if (_projectId is not null)
+        {
+            await StartPolling();
+        }
     }
 
     protected override async Task OnParametersSetAsync()
     {
-        if (QueryProjectId is not null && QueryProjectId != _projectId)
+        if (!Embedded)
         {
-            _projectId = QueryProjectId;
+            var target = QueryProjectId is long projectId ? $"/render-jobs?projectId={projectId}" : "/render-jobs";
+            Navigation.NavigateTo(target, replace: true);
+            return;
+        }
+
+        var incomingProjectId = ProjectId ?? QueryProjectId;
+        if (incomingProjectId != _projectId)
+        {
+            _projectId = incomingProjectId;
+            _sceneDrafts.Clear();
+            _imageVersions.Clear();
+            _videoVersions.Clear();
             if (AuthState.CurrentUser is not null)
             {
                 _projectDialogOpen = true;
-                await ReloadAsync();
+                if (_projectId is null)
+                {
+                    _project = null;
+                    _prompt = string.Empty;
+                    _aspectRatio = string.Empty;
+                    StopPolling();
+                }
+                else
+                {
+                    await ReloadAsync();
+                    await StartPolling();
+                }
                 _tabIndex = 0;
             }
         }
@@ -599,7 +590,8 @@
                 CreateEmptyProject = false,
                 Scenes = BuildSceneRequests()
             }, AuthState.CurrentUser.UserId, AuthState.CurrentUser.CustomerId, storageRoot, publicBase, jobFolder);
-            _projectId = result.Id;
+        _projectId = result.Id;
+            await ProjectCreated.InvokeAsync(result.Id);
             Logger.LogInformation("VIDEO_RENDER_CREATE_PROJECT_OK projectId={ProjectId} sceneCount={SceneCount} status={Status}", result.Id, result.SceneCount, result.Status);
             await ReloadAsync();
             // Tự động enqueue batch render ảnh tĩnh qua provider ảnh đã cấu hình ngay sau khi scene đã lưu.
@@ -645,6 +637,7 @@
                 CreateEmptyProject = true
             }, AuthState.CurrentUser.UserId, AuthState.CurrentUser.CustomerId, storageRoot, publicBase, jobFolder);
             _projectId = result.Id;
+            await ProjectCreated.InvokeAsync(result.Id);
             await ReloadAsync();
             _tabIndex = 1;
             Snackbar.Add("Đã tạo project rỗng.", Severity.Success);
@@ -766,15 +759,11 @@
         _thinkScenes = false;
         _projectDialogOpen = true;
         _tabIndex = 0;
-        Navigation.NavigateTo("/render-job", replace: true);
+        if (!Embedded)
+        {
+            Navigation.NavigateTo("/render-jobs", replace: true);
+        }
         Snackbar.Add("Đã reset form tạo project mới.", Severity.Info);
-        await InvokeAsync(StateHasChanged);
-    }
-
-    private async Task LoadProjectListAsync()
-    {
-        if (AuthState.CurrentUser is null) return;
-        _projects = (await VideoRepo.ListProjectsAsync(AuthState.CurrentUser, 0, 50)).ToList();
         await InvokeAsync(StateHasChanged);
     }
 
@@ -783,16 +772,28 @@
         _projectId = projectId;
         QueryProjectId = projectId;
         _projectDialogOpen = true;
-        Navigation.NavigateTo($"/render-job?projectId={projectId}", replace: false);
+        if (!Embedded)
+        {
+            Navigation.NavigateTo($"/render-jobs?projectId={projectId}", replace: false);
+        }
         await ReloadAsync();
+        await StartPolling();
         _tabIndex = 0;
     }
 
-    private Task CloseProjectDialogAsync()
+    private async Task CloseProjectDialogAsync()
     {
         _projectDialogOpen = false;
-        Navigation.NavigateTo("/render-job", replace: true);
-        return InvokeAsync(StateHasChanged);
+        StopPolling();
+        if (Embedded)
+        {
+            await Closed.InvokeAsync();
+        }
+        else
+        {
+            Navigation.NavigateTo("/render-jobs", replace: true);
+        }
+        await InvokeAsync(StateHasChanged);
     }
 
     private async Task ReloadAsync()
@@ -837,7 +838,6 @@
                 ReconcileSceneDrafts();
                 RebuildSceneEventState();
                 await ReloadJobsAsync();
-                await LoadProjectListAsync();
             }
         }
         finally
@@ -1294,11 +1294,25 @@
 
     private async Task StartPolling()
     {
+        if (_projectId is null)
+        {
+            StopPolling();
+            return;
+        }
         _pollCts?.Cancel();
         _pollCts = new CancellationTokenSource();
         _pollTimer?.Dispose();
         _pollTimer = new PeriodicTimer(TimeSpan.FromSeconds(VideoOptions.CurrentValue.PollIntervalSeconds));
         _ = PollLoopAsync(_pollCts.Token);
+    }
+
+    private void StopPolling()
+    {
+        _pollCts?.Cancel();
+        _pollCts?.Dispose();
+        _pollCts = null;
+        _pollTimer?.Dispose();
+        _pollTimer = null;
     }
 
     private async Task PollLoopAsync(CancellationToken ct)
@@ -1366,6 +1380,7 @@
         Snackbar.Add("Đã lưu scene.", Severity.Success);
         await LogProjectEvent("SCENE_SAVED", "info", $"Đã lưu scene {scene.SceneIndex}.", new { scene.Id, scene.SceneIndex, scene.Status, draft.SelectedImageVersionId, draft.SelectedVideoVersionId, AspectRatio = draft.AspectRatio });
         await ReloadAsync();
+        await ProjectSaved.InvokeAsync();
     }
 
     private async Task EditScenePromptsAsync(VideoProjectSceneDto scene)
@@ -1432,6 +1447,7 @@
             await LogProjectEvent("JOB_SAVED", "info", "Lưu video project render-job.", snapshot);
             Snackbar.Add("Đã lưu job.", Severity.Success);
             await ReloadAsync();
+            await ProjectSaved.InvokeAsync();
         }
         catch (Exception ex)
         {

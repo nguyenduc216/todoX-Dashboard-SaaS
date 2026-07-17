@@ -94,6 +94,8 @@ public sealed class VideoProjectListItemDto
     public Guid? UserId { get; set; }
     public Guid? CustomerId { get; set; }
     public string? Title { get; set; }
+    public string OriginalPrompt { get; set; } = string.Empty;
+    public string? AspectRatio { get; set; }
     public long? CharacterId { get; set; }
     public string? CharacterName { get; set; }
     public int SceneCount { get; set; }

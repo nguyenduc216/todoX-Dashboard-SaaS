@@ -1,8 +1,10 @@
 @page "/render-jobs"
-@inject CatalogRepository Catalog
+@using TodoX.Web.Models
+@using TodoX.Web.Services.VideoRender
 @inject AuthStateService AuthState
-@inject IDialogService DialogService
 @inject NavigationManager Navigation
+@inject VideoRenderRepository VideoRepo
+@inject ITodoXVideoPromptParser PromptParser
 
 <PageTitle>Render Jobs</PageTitle>
 
@@ -10,128 +12,220 @@
     <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-3">
         <div>
             <MudText Typo="Typo.h4" Class="todox-page-title">Render Jobs</MudText>
-            <MudText Typo="Typo.body1" Class="todox-page-subtitle">Theo dõi đơn render video/hình ảnh AI của khách hàng.</MudText>
+            <MudText Typo="Typo.body1" Class="todox-page-subtitle">Dashboard quản lý video render project.</MudText>
         </div>
 
         <MudStack Row="true" Spacing="2" Class="flex-wrap gap-2">
             <MudButton Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.Add" OnClick="CreateNewAsync">Tạo mới</MudButton>
-            <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Movie" Href="/render-job">Mở job video</MudButton>
             <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Refresh" OnClick="ReloadAsync">Refresh</MudButton>
         </MudStack>
     </MudStack>
 
-    <MudGrid>
-        <MudItem xs="6" sm="6" md="3">
-            <MudPaper Class="todox-card pa-4">
-                <MudText Typo="Typo.subtitle2">Đang xử lý</MudText>
-                <div class="todox-stat-value">@_stats.Processing</div>
-            </MudPaper>
-        </MudItem>
-        <MudItem xs="6" sm="6" md="3">
-            <MudPaper Class="todox-card pa-4">
-                <MudText Typo="Typo.subtitle2">Hoàn tất</MudText>
-                <div class="todox-stat-value">@_stats.Completed</div>
-            </MudPaper>
-        </MudItem>
-        <MudItem xs="6" sm="6" md="3">
-            <MudPaper Class="todox-card pa-4">
-                <MudText Typo="Typo.subtitle2">Trong hàng đợi</MudText>
-                <div class="todox-stat-value">@_stats.Queued</div>
-            </MudPaper>
-        </MudItem>
-        <MudItem xs="6" sm="6" md="3">
-            <MudPaper Class="todox-card pa-4">
-                <MudText Typo="Typo.subtitle2">Lỗi</MudText>
-                <div class="todox-stat-value">@_stats.Failed</div>
-            </MudPaper>
-        </MudItem>
-    </MudGrid>
+    @if (!AuthState.IsInitialized)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+    }
+    else if (AuthState.CurrentUser is null)
+    {
+        <MudAlert Severity="Severity.Warning">Vui lòng đăng nhập.</MudAlert>
+    }
+    else
+    {
+        <MudGrid>
+            <MudItem xs="6" sm="6" md="2">
+                <MudPaper Class="todox-card pa-4">
+                    <MudText Typo="Typo.subtitle2">Tổng dự án</MudText>
+                    <div class="todox-stat-value">@_stats.Total</div>
+                </MudPaper>
+            </MudItem>
+            <MudItem xs="6" sm="6" md="2">
+                <MudPaper Class="todox-card pa-4">
+                    <MudText Typo="Typo.subtitle2">Đang xử lý</MudText>
+                    <div class="todox-stat-value">@_stats.Processing</div>
+                </MudPaper>
+            </MudItem>
+            <MudItem xs="6" sm="6" md="2">
+                <MudPaper Class="todox-card pa-4">
+                    <MudText Typo="Typo.subtitle2">Hoàn tất</MudText>
+                    <div class="todox-stat-value">@_stats.Completed</div>
+                </MudPaper>
+            </MudItem>
+            <MudItem xs="6" sm="6" md="2">
+                <MudPaper Class="todox-card pa-4">
+                    <MudText Typo="Typo.subtitle2">Trong hàng đợi</MudText>
+                    <div class="todox-stat-value">@_stats.Queued</div>
+                </MudPaper>
+            </MudItem>
+            <MudItem xs="6" sm="6" md="2">
+                <MudPaper Class="todox-card pa-4">
+                    <MudText Typo="Typo.subtitle2">Lỗi</MudText>
+                    <div class="todox-stat-value">@_stats.Failed</div>
+                </MudPaper>
+            </MudItem>
+        </MudGrid>
 
-    <MudPaper Class="todox-table-card pa-4" rounded="true">
-        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="mb-2 flex-wrap gap-2">
-            <MudText Typo="Typo.h6">Danh sách đơn render</MudText>
-            <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Add" OnClick="CreateNewAsync">Tạo mới</MudButton>
-        </MudStack>
-        <MudDivider Class="mb-3" />
+        <MudPaper Class="todox-table-card pa-4" rounded="true">
+            <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="mb-2 flex-wrap gap-2">
+                <MudText Typo="Typo.h6">Danh sách dự án render</MudText>
+                <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Add" OnClick="CreateNewAsync">Tạo mới</MudButton>
+            </MudStack>
+            <MudDivider Class="mb-3" />
 
-        <MudTable Items="@_orders" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Class="todox-table">
-            <HeaderContent>
-                <MudTh>Mã đơn</MudTh>
-                <MudTh>Khách hàng</MudTh>
-                <MudTh>Loại</MudTh>
-                <MudTh Style="text-align:right">Thời lượng</MudTh>
-                <MudTh Style="text-align:right">Điểm ước tính</MudTh>
-                <MudTh>Trạng thái</MudTh>
-                <MudTh>Hành động</MudTh>
-                <MudTh>Ngày tạo</MudTh>
-            </HeaderContent>
-            <RowTemplate>
-                <MudTd DataLabel="Mã đơn">@context.OrderCode</MudTd>
-                <MudTd DataLabel="Khách hàng">@context.CustomerName</MudTd>
-                <MudTd DataLabel="Loại">@context.ServiceType</MudTd>
-                <MudTd DataLabel="Thời lượng" Style="text-align:right">@(context.VideoSeconds > 0 ? context.VideoSeconds + "s" : "-")</MudTd>
-                <MudTd DataLabel="Điểm ước tính" Style="text-align:right">@context.EstimatedTokens.ToString("#,0")</MudTd>
-                <MudTd DataLabel="Trạng thái"><MudChip T="string" Size="Size.Small" Color="@StatusColor(context.Status)">@context.Status</MudChip></MudTd>
-                <MudTd DataLabel="Hành động">
-                    <MudIconButton Icon="@Icons.Material.Filled.Visibility" Color="Color.Warning" Size="Size.Small" OnClick="@(() => OpenDetailAsync(context))" />
-                </MudTd>
-                <MudTd DataLabel="Ngày tạo">@context.CreatedAt.ToString("dd/MM/yyyy HH:mm")</MudTd>
-            </RowTemplate>
-            <NoRecordsContent>
-                <MudStack AlignItems="AlignItems.Center" Class="pa-6" Spacing="2">
-                    <MudIcon Icon="@Icons.Material.Filled.Movie" Size="Size.Large" Class="todox-gold" />
-                    <MudText Class="todox-page-subtitle">Chưa có đơn render nào trong database.</MudText>
-                </MudStack>
-            </NoRecordsContent>
-        </MudTable>
-    </MudPaper>
+            <MudTable Items="@_projects" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Class="todox-table">
+                <HeaderContent>
+                    <MudTh>Mã project</MudTh>
+                    <MudTh>Thumbnail</MudTh>
+                    <MudTh>Tên project</MudTh>
+                    <MudTh>Khách hàng</MudTh>
+                    <MudTh>Character</MudTh>
+                    <MudTh>Tỷ lệ</MudTh>
+                    <MudTh>Scene</MudTh>
+                    <MudTh>Ảnh</MudTh>
+                    <MudTh>Video</MudTh>
+                    <MudTh>Điểm</MudTh>
+                    <MudTh>Trạng thái</MudTh>
+                    <MudTh>Cập nhật</MudTh>
+                    <MudTh>Hành động</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd DataLabel="Mã project">#@context.Id</MudTd>
+                    <MudTd DataLabel="Thumbnail">
+                        <div class="render-job-thumb">
+                            @if (!string.IsNullOrWhiteSpace(context.ThumbnailUrl))
+                            {
+                                <img src="@context.ThumbnailUrl" />
+                            }
+                        </div>
+                    </MudTd>
+                    <MudTd DataLabel="Tên project">@(!string.IsNullOrWhiteSpace(context.Title) ? context.Title : $"Project {context.Id}")</MudTd>
+                    <MudTd DataLabel="Khách hàng">@(context.CustomerId?.ToString() ?? "-")</MudTd>
+                    <MudTd DataLabel="Character">@(context.CharacterName ?? context.CharacterId?.ToString() ?? "-")</MudTd>
+                    <MudTd DataLabel="Tỷ lệ">@ResolveProjectAspectRatio(context)</MudTd>
+                    <MudTd DataLabel="Scene">@context.SceneCount</MudTd>
+                    <MudTd DataLabel="Ảnh">@context.ImageReadyCount/@context.SceneCount</MudTd>
+                    <MudTd DataLabel="Video">@context.VideoReadyCount/@context.SceneCount</MudTd>
+                    <MudTd DataLabel="Điểm">-</MudTd>
+                    <MudTd DataLabel="Trạng thái"><MudChip T="string" Size="Size.Small" Color="@ProjectStatusColor(context.Status)">@context.Status</MudChip></MudTd>
+                    <MudTd DataLabel="Cập nhật">@context.UpdatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</MudTd>
+                    <MudTd DataLabel="Hành động">
+                        <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Warning" OnClick="@(() => OpenProjectAsync(context.Id))">Mở</MudButton>
+                    </MudTd>
+                </RowTemplate>
+                <NoRecordsContent>
+                    <MudStack AlignItems="AlignItems.Center" Class="pa-6" Spacing="2">
+                        <MudIcon Icon="@Icons.Material.Filled.Movie" Size="Size.Large" Class="todox-gold" />
+                        <MudText Class="todox-page-subtitle">Chưa có dự án render nào.</MudText>
+                    </MudStack>
+                </NoRecordsContent>
+            </MudTable>
+        </MudPaper>
+    }
 </MudStack>
 
+@if (_editorOpen)
+{
+    <RenderVideoJobs Embedded="true"
+                     ProjectId="@_editorProjectId"
+                     ProjectCreated="OnProjectCreatedAsync"
+                     ProjectSaved="OnProjectSavedAsync"
+                     Closed="CloseEditorAsync" />
+}
+
 @code {
-    private RenderStats _stats = new(0, 0, 0, 0, 0);
-    private IReadOnlyList<RenderOrderView> _orders = new List<RenderOrderView>();
+    [SupplyParameterFromQuery(Name = "projectId")]
+    public long? QueryProjectId { get; set; }
+
+    private IReadOnlyList<VideoProjectListItemDto> _projects = Array.Empty<VideoProjectListItemDto>();
+    private RenderJobsDashboardStats _stats = new(0, 0, 0, 0, 0);
+    private bool _editorOpen;
+    private long? _editorProjectId;
 
     protected override async Task OnInitializedAsync()
     {
-        await ReloadAsync();
+        if (AuthState.CurrentUser is not null)
+        {
+            await ReloadAsync();
+        }
+        if (QueryProjectId is not null)
+        {
+            OpenProjectFromQuery(QueryProjectId.Value);
+        }
+    }
+
+    protected override Task OnParametersSetAsync()
+    {
+        if (QueryProjectId is not null && QueryProjectId != _editorProjectId)
+        {
+            OpenProjectFromQuery(QueryProjectId.Value);
+        }
+
+        return Task.CompletedTask;
     }
 
     private async Task ReloadAsync()
     {
-        var cid = AuthState.CurrentUser?.IsCustomer == true ? AuthState.CurrentUser.CustomerId : null;
-        _stats = await Catalog.GetRenderStatsAsync(cid);
-        _orders = await Catalog.GetRenderOrdersAsync(customerId: cid);
+        if (AuthState.CurrentUser is null) return;
+        _projects = await VideoRepo.ListProjectsAsync(AuthState.CurrentUser, 0, 100);
+        _stats = RenderJobsDashboardMetrics.BuildStats(_projects);
         await InvokeAsync(StateHasChanged);
     }
 
     private Task CreateNewAsync()
     {
-        Navigation.NavigateTo("/render-job");
+        _editorProjectId = null;
+        _editorOpen = true;
+        Navigation.NavigateTo("/render-jobs", replace: false);
         return Task.CompletedTask;
     }
 
-    private async Task OpenDetailAsync(RenderOrderView order)
+    private Task OpenProjectAsync(long projectId)
+        => OpenProjectAsync(projectId, replace: false);
+
+    private Task OpenProjectAsync(long projectId, bool replace)
     {
-        var parameters = new DialogParameters
-        {
-            [nameof(RenderOrderDetailDialog.Order)] = order
-        };
-
-        var options = new DialogOptions
-        {
-            CloseButton = true,
-            MaxWidth = MaxWidth.Medium,
-            FullWidth = true
-        };
-
-        await DialogService.ShowAsync<RenderOrderDetailDialog>($"Chi tiết đơn {order.OrderCode}", parameters, options);
+        _editorProjectId = projectId;
+        _editorOpen = true;
+        Navigation.NavigateTo($"/render-jobs?projectId={projectId}", replace);
+        return Task.CompletedTask;
     }
 
-    private static Color StatusColor(string status) => status switch
+    private void OpenProjectFromQuery(long projectId)
     {
-        "Completed" or "Done" or "Success" => Color.Success,
-        "Processing" or "Rendering" or "Running" => Color.Info,
-        "Failed" or "Error" => Color.Error,
+        _editorProjectId = projectId;
+        _editorOpen = true;
+    }
+
+    private async Task OnProjectCreatedAsync(long projectId)
+    {
+        _editorProjectId = projectId;
+        Navigation.NavigateTo($"/render-jobs?projectId={projectId}", replace: true);
+        await ReloadAsync();
+    }
+
+    private async Task OnProjectSavedAsync()
+        => await ReloadAsync();
+
+    private async Task CloseEditorAsync()
+    {
+        _editorOpen = false;
+        _editorProjectId = null;
+        Navigation.NavigateTo("/render-jobs", replace: true);
+        await ReloadAsync();
+    }
+
+    private string ResolveProjectAspectRatio(VideoProjectListItemDto item)
+    {
+        if (!string.IsNullOrWhiteSpace(item.AspectRatio)) return item.AspectRatio!;
+        var parsed = PromptParser.Parse(item.OriginalPrompt);
+        return parsed.Model.AspectRatio ?? "-";
+    }
+
+    private static Color ProjectStatusColor(string status) => status switch
+    {
+        VideoProjectStatuses.Completed => Color.Success,
+        VideoProjectStatuses.Rendering or VideoProjectStatuses.Merging => Color.Info,
+        VideoProjectStatuses.Failed => Color.Error,
         _ => Color.Warning
     };
+
 }
