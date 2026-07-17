@@ -242,14 +242,14 @@ else
                         {
                             var draft = GetSceneDraft(scene);
                             var sceneState = ResolveSceneImageState(scene);
-                            <MudPaper Class="scene-card pa-3" Outlined="true">
-                                <MudStack Spacing="3">
-                                    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
+                            <MudPaper Class="scene-card scene-card-compact pa-3" Outlined="true">
+                                <MudStack Spacing="2">
+                                    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="scene-card-header flex-wrap gap-1">
                                         <MudStack Spacing="0">
-                                            <MudText Typo="Typo.subtitle1">Scene @scene.SceneIndex.ToString("00") - @scene.Title</MudText>
+                                            <MudText Typo="Typo.subtitle1" Class="scene-card-title">Scene @scene.SceneIndex.ToString("00") - @scene.Title</MudText>
                                             <MudText Typo="Typo.caption">@scene.DurationSeconds giây</MudText>
                                         </MudStack>
-                                        <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
+                                        <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center" Class="scene-card-meta flex-wrap gap-1">
                                             <MudChip T="string" Size="Size.Small" Color="Color.Info">@ProjectAspectRatio</MudChip>
                                             @if (draft.IsDirty)
                                             {
@@ -277,16 +277,16 @@ else
                                         </div>
                                         <div class="scene-workflow-cell scene-details-column">
                                             <div class="scene-prompt-panel">
-                                                <MudTextField T="string" Label="Prompt ảnh" Value="@draft.ImagePrompt" ValueChanged="@((string? value) => UpdateDraft(scene.Id, d => d.ImagePrompt = value))" Variant="Variant.Outlined" Lines="7" Immediate="true" />
+                                                <MudTextField T="string" Label="Prompt ảnh" Value="@draft.ImagePrompt" ValueChanged="@((string? value) => UpdateDraft(scene.Id, d => d.ImagePrompt = value))" Variant="Variant.Outlined" Lines="5" Immediate="true" />
                                                 @if (_sceneRerenderErrors.TryGetValue(scene.Id, out var sceneErr) && !string.IsNullOrWhiteSpace(sceneErr))
                                                 {
                                                     <MudText Typo="Typo.caption" Color="Color.Error">@sceneErr</MudText>
                                                 }
                                             </div>
                                             <div class="scene-voice-row">
-                                                <MudTextField T="string" Label="Purpose" Value="@draft.Purpose" ValueChanged="@((string? value) => UpdateDraft(scene.Id, d => d.Purpose = value))" Variant="Variant.Outlined" Lines="2" Immediate="true" />
-                                                <MudTextField T="string" Label="Voice" Value="@draft.Voice" ValueChanged="@((string? value) => UpdateDraft(scene.Id, d => d.Voice = value))" Variant="Variant.Outlined" Lines="2" Immediate="true" />
-                                                <MudTextField T="string" Label="Voice instruction" Value="@draft.VoiceInstruction" ValueChanged="@((string? value) => UpdateDraft(scene.Id, d => d.VoiceInstruction = value))" Variant="Variant.Outlined" Lines="2" Immediate="true" />
+                                                <MudTextField T="string" Label="Purpose" Value="@draft.Purpose" ValueChanged="@((string? value) => UpdateDraft(scene.Id, d => d.Purpose = value))" Variant="Variant.Outlined" Lines="1" Immediate="true" />
+                                                <MudTextField T="string" Label="Voice" Value="@draft.Voice" ValueChanged="@((string? value) => UpdateDraft(scene.Id, d => d.Voice = value))" Variant="Variant.Outlined" Lines="1" Immediate="true" />
+                                                <MudTextField T="string" Label="Voice instruction" Value="@draft.VoiceInstruction" ValueChanged="@((string? value) => UpdateDraft(scene.Id, d => d.VoiceInstruction = value))" Variant="Variant.Outlined" Lines="1" Immediate="true" />
                                             </div>
                                         </div>
                                     </div>
@@ -329,21 +329,19 @@ else
                         @foreach (var scene in _project.Scenes.OrderBy(x => x.SceneIndex))
                         {
                             var draft = GetSceneDraft(scene);
-                            <MudPaper Class="scene-card pa-3" Outlined="true">
+                            <MudPaper Class="scene-card scene-card-compact scene-video-card pa-3" Outlined="true">
                                 <MudStack Spacing="2">
-                                    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
-                                        <MudText Typo="Typo.subtitle1">Scene @scene.SceneIndex.ToString("00") - @scene.Title</MudText>
+                                    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="scene-card-header flex-wrap gap-1">
+                                        <MudText Typo="Typo.subtitle1" Class="scene-card-title">Scene @scene.SceneIndex.ToString("00") - @scene.Title</MudText>
                                         <MudChip T="string" Color="@SceneColor(scene.Status)">@SceneLabel(scene.Status)</MudChip>
                                     </MudStack>
                                     @RenderSceneVideoFrame(scene, draft)
-                                    <MudStack Row="true" Spacing="1" Class="flex-wrap gap-1">
+                                    <MudStack Row="true" Spacing="1" Class="scene-card-meta flex-wrap gap-1">
                                         <MudChip T="string" Size="Size.Small" Color="Color.Info">@ProjectAspectRatio</MudChip>
                                         <MudChip T="string" Size="Size.Small" Color="Color.Info">@ProjectResolution</MudChip>
                                         <MudChip T="string" Size="Size.Small">@scene.DurationSeconds giây</MudChip>
                                     </MudStack>
-                                    <MudTextField T="string" Label="Prompt video" Value="@draft.MotionPrompt" ValueChanged="@((string? value) => UpdateDraft(scene.Id, d => d.MotionPrompt = value))" Variant="Variant.Outlined" Lines="5" Immediate="true" />
-                                    <MudTextField T="string" Label="Voice" Value="@draft.Voice" ValueChanged="@((string? value) => UpdateDraft(scene.Id, d => d.Voice = value))" Variant="Variant.Outlined" Lines="2" Immediate="true" />
-                                    <MudTextField T="string" Label="Voice instruction" Value="@draft.VoiceInstruction" ValueChanged="@((string? value) => UpdateDraft(scene.Id, d => d.VoiceInstruction = value))" Variant="Variant.Outlined" Lines="2" Immediate="true" />
+                                    <MudTextField T="string" Label="Prompt video" Value="@draft.MotionPrompt" ValueChanged="@((string? value) => UpdateDraft(scene.Id, d => d.MotionPrompt = value))" Variant="Variant.Outlined" Lines="4" Immediate="true" />
                                     <MudStack Row="true" Spacing="1" Class="flex-wrap gap-1">
                                         <MudTooltip Text="@SceneVideoDisabledReason(scene, draft)">
                                             <MudButton Size="Size.Small" Variant="Variant.Outlined" Disabled="@(!CanCreateSceneVideo(scene, draft))" OnClick="@(() => RenderSceneVideoAsync(scene))">Tạo video</MudButton>

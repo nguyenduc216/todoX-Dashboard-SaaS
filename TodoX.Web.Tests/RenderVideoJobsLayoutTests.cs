@@ -45,8 +45,8 @@ public class RenderVideoJobsLayoutTests
         Assert.Contains("class=\"render-tab-scroll scene-video-scroll\"", razor);
         Assert.Contains("class=\"render-tab-scroll render-result-scroll\"", razor);
         Assert.Contains("overflow-y: auto", scrollRule);
-        Assert.Contains("height: 0", scrollRule);
-        Assert.Contains("flex: 1 1 0", scrollRule);
+        Assert.Contains("height: 100%", scrollRule);
+        Assert.Contains("flex: 1 1 auto", scrollRule);
     }
 
     [Fact]
@@ -58,9 +58,9 @@ public class RenderVideoJobsLayoutTests
 
         Assert.Contains("overflow: hidden", bodyRule);
         Assert.DoesNotContain("overflow-y: auto", bodyRule);
-        Assert.Contains("height: 0", bodyRule);
+        Assert.DoesNotContain("\n    height: 0", bodyRule);
         Assert.Contains("overflow-y: auto", scrollRule);
-        Assert.Contains("height: 0", scrollRule);
+        Assert.Contains("height: 100%", scrollRule);
     }
 
     [Fact]
@@ -75,6 +75,35 @@ public class RenderVideoJobsLayoutTests
         Assert.Contains(".scene-video-grid > *", css);
         Assert.Contains("min-width: 0", css);
         Assert.Contains("object-fit: contain", CssRule(css, ".scene-media-video"));
+    }
+
+    [Fact]
+    public void SceneCards_UseCompactLayoutAndBoundedMedia()
+    {
+        var razor = File.ReadAllText(RazorPath);
+        var css = File.ReadAllText(CssPath);
+
+        Assert.Contains("scene-card scene-card-compact", razor);
+        Assert.Contains("Value=\"@draft.ImagePrompt\"", razor);
+        Assert.Contains("Lines=\"5\"", Between(razor, "Value=\"@draft.ImagePrompt\"", "Value=\"@draft.Purpose\""));
+        Assert.Contains("Lines=\"1\"", Between(razor, "Value=\"@draft.Purpose\"", "@if (_imageHistorySceneId == scene.Id)"));
+        Assert.Contains("grid-template-columns: minmax(150px, 190px) minmax(0, 1fr)", CssRule(css, ".scene-workflow"));
+        Assert.Contains("width: min(100%, 190px)", CssRule(css, ".scene-media-square"));
+        Assert.Contains("max-height: 250px", CssRule(css, ".scene-media-square"));
+    }
+
+    [Fact]
+    public void VideoCards_HideVoiceFieldsButKeepSceneBindings()
+    {
+        var razor = File.ReadAllText(RazorPath);
+        var sceneTab = Between(razor, "class=\"scene-image-tab\"", "<MudTabPanel Text=\"Video\">");
+        var videoTab = Between(razor, "class=\"scene-video-tab\"", "<div class=\"render-tab-scroll render-result-scroll\">");
+
+        Assert.Contains("Value=\"@draft.Voice\"", sceneTab);
+        Assert.Contains("Value=\"@draft.VoiceInstruction\"", sceneTab);
+        Assert.Contains("Value=\"@draft.MotionPrompt\"", videoTab);
+        Assert.DoesNotContain("Value=\"@draft.Voice\"", videoTab);
+        Assert.DoesNotContain("Value=\"@draft.VoiceInstruction\"", videoTab);
     }
 
     [Fact]
@@ -115,6 +144,8 @@ public class RenderVideoJobsLayoutTests
         Assert.DoesNotContain("::deep(", css);
         Assert.Contains(".render-project-dialog-body ::deep .render-project-tabs", css);
         Assert.Contains(".render-project-dialog-body ::deep .mud-tabs-panels", css);
+        Assert.DoesNotContain("\n    height: 0", CssRule(css, ".render-project-dialog-body"));
+        Assert.DoesNotContain("\n    height: 0", CssRule(css, ".render-project-dialog-body ::deep .mud-tabs-panels"));
     }
 
     private static string CssRule(string css, string selector)

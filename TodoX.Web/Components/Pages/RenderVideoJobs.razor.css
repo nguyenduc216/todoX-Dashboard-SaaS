@@ -175,10 +175,40 @@
     border-radius: 8px;
 }
 
+.scene-card-compact {
+    padding: 9px !important;
+}
+
+.scene-card-compact ::deep .mud-stack {
+    gap: 7px;
+}
+
+.scene-card-header {
+    min-width: 0;
+}
+
+.scene-card-title,
+.scene-card-compact ::deep .mud-typography-subtitle1 {
+    min-width: 0;
+    font-size: 0.875rem;
+    line-height: 1.25;
+}
+
+.scene-card-compact ::deep .mud-typography-caption,
+.scene-card-meta ::deep .mud-chip {
+    font-size: 0.72rem;
+    line-height: 1.2;
+}
+
+.scene-card-compact ::deep .mud-chip {
+    min-height: 22px;
+    height: 22px;
+}
+
 .scene-workflow {
     display: grid;
-    grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
-    gap: 12px;
+    grid-template-columns: minmax(150px, 190px) minmax(0, 1fr);
+    gap: 10px;
     align-items: stretch;
     width: 100%;
 }
@@ -195,13 +225,13 @@
     min-width: 0;
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 8px;
 }
 
 .scene-prompt-panel {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 6px;
     min-width: 0;
     width: 100%;
 }
@@ -211,15 +241,26 @@
     width: 100%;
 }
 
+.scene-card-compact ::deep textarea,
+.scene-card-compact ::deep input {
+    font-size: 0.8rem;
+    line-height: 1.38;
+}
+
+.scene-card-compact ::deep .mud-input-control {
+    margin-top: 0;
+}
+
 .scene-voice-row {
     display: grid;
     grid-template-columns: minmax(120px, 0.75fr) minmax(180px, 1.5fr) minmax(180px, 1.5fr);
-    gap: 12px;
+    gap: 8px;
 }
 
 .scene-media-square {
     position: relative;
-    width: min(100%, 280px);
+    width: min(100%, 190px);
+    max-height: 250px;
     aspect-ratio: 1 / 1;
     overflow: hidden;
     border-radius: 10px;
@@ -268,8 +309,7 @@
 }
 
 .render-project-dialog-body {
-    flex: 1 1 0;
-    height: 0;
+    flex: 1 1 auto;
     min-height: 0;
     display: flex;
     flex-direction: column;
@@ -279,7 +319,7 @@
 }
 
 .render-project-dialog-body ::deep .render-project-tabs {
-    flex: 1 1 0;
+    flex: 1 1 auto;
     height: 100%;
     min-height: 0;
     display: flex;
@@ -292,17 +332,19 @@
 }
 
 .render-project-dialog-body ::deep .mud-tabs-panels {
-    flex: 1 1 0;
-    height: 0;
+    flex: 1 1 auto;
+    height: 100%;
     min-height: 0;
     overflow: hidden;
 }
 
 .render-project-dialog-body ::deep .mud-tabs-panels > div,
 .render-project-dialog-body ::deep .render-tab-panel {
-    flex: 1 1 0;
+    flex: 1 1 auto;
     height: 100%;
     min-height: 0;
+    display: flex;
+    flex-direction: column;
     overflow: hidden;
 }
 
@@ -315,8 +357,8 @@
 }
 
 .render-tab-scroll {
-    flex: 1 1 0;
-    height: 0;
+    flex: 1 1 auto;
+    height: 100%;
     min-height: 0;
     overflow-y: auto;
     overflow-x: hidden;
@@ -345,8 +387,8 @@
 }
 
 .scene-list-scroll {
-    flex: 1 1 0;
-    height: 0;
+    flex: 1 1 auto;
+    height: 100%;
     min-height: 0;
     overflow-y: auto;
     overflow-x: hidden;
@@ -359,7 +401,7 @@
 .scene-video-grid {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 16px;
+    gap: 10px;
     align-items: start;
     width: 100%;
 }
@@ -372,6 +414,12 @@
 
 .scene-video-grid textarea {
     width: 100%;
+}
+
+.scene-video-card .scene-media-square,
+.scene-video-card .scene-media-frame {
+    max-width: 100%;
+    max-height: 210px;
 }
 
 .render-result-scroll video {
@@ -440,7 +488,7 @@
 
 @media (max-width: 1100px) {
     .scene-workflow {
-        grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+        grid-template-columns: minmax(150px, 190px) minmax(0, 1fr);
     }
 
     .scene-voice-row {
@@ -464,6 +512,7 @@
     }
 
     .scene-media-square {
-        width: min(100%, 320px);
+        width: min(100%, 260px);
+        max-height: 260px;
     }
 }
