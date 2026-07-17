@@ -10,6 +10,7 @@ namespace TodoX.Web.Services.Render;
 public sealed class SceneImageBatchInput
 {
     public long ProjectId { get; set; }
+    public string AspectRatio { get; set; } = "9:16";
     public long? CharacterId { get; set; }
     public Guid UserId { get; set; }
     public Guid? CustomerId { get; set; }
@@ -197,7 +198,7 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
                 RenderConfigSnapshot: new
                 {
                     capability = SceneImageRenderService.CapabilityCode,
-                    aspectRatio = "9:16",
+                    aspectRatio = SceneImageRenderService.NormalizeAspectRatio(input.AspectRatio),
                     outputFormat = "png",
                     source = "scene_image_batch"
                 }), ct);
@@ -209,6 +210,7 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
             SceneId = scene.Id,
             SceneIndex = scene.SceneIndex,
             Prompt = imageVersion?.CompiledImagePromptSnapshot ?? compiledPrompt,
+            AspectRatio = SceneImageRenderService.NormalizeAspectRatio(input.AspectRatio),
             CharacterId = input.CharacterId,
             UserId = input.UserId,
             CustomerId = input.CustomerId,

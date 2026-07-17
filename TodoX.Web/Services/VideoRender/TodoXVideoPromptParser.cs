@@ -4,6 +4,7 @@ namespace TodoX.Web.Services.VideoRender;
 
 public sealed class TodoXVideoPromptModel
 {
+    public string? AspectRatio { get; set; }
     public string? VideoTitle { get; set; }
     public string? VideoObjective { get; set; }
     public int? DurationSeconds { get; set; }
@@ -26,6 +27,7 @@ public sealed class TodoXVideoScenePromptModel
 
 public sealed class TodoXVideoPromptSummary
 {
+    public string? AspectRatio { get; set; }
     public string? VideoTitle { get; set; }
     public string? VideoObjective { get; set; }
     public string? Style { get; set; }
@@ -118,6 +120,7 @@ public sealed class TodoXVideoPromptParser : ITodoXVideoPromptParser
         var root = doc.RootElement;
         var model = new TodoXVideoPromptModel
         {
+            AspectRatio = NormalizeAspectRatio(ReadString(root, "aspect_ratio", "aspectRatio")),
             VideoTitle = ReadString(root, "video_title", "title"),
             VideoObjective = ReadString(root, "video_objective", "objective"),
             DurationSeconds = ParseDuration(ReadRaw(root, "duration")),
@@ -150,6 +153,7 @@ public sealed class TodoXVideoPromptParser : ITodoXVideoPromptParser
     {
         var summary = new TodoXVideoPromptSummary
         {
+            AspectRatio = model.AspectRatio,
             VideoTitle = model.VideoTitle,
             VideoObjective = model.VideoObjective,
             Style = model.Style,
@@ -206,7 +210,8 @@ public sealed class TodoXVideoPromptParser : ITodoXVideoPromptParser
     }
 
     private static bool HasTodoXMetadata(TodoXVideoPromptModel model)
-        => !string.IsNullOrWhiteSpace(model.VideoTitle)
+        => !string.IsNullOrWhiteSpace(model.AspectRatio)
+           || !string.IsNullOrWhiteSpace(model.VideoTitle)
            || !string.IsNullOrWhiteSpace(model.VideoObjective)
            || !string.IsNullOrWhiteSpace(model.Cta)
            || model.Scenes.Count > 0;
@@ -233,5 +238,17 @@ public sealed class TodoXVideoPromptParser : ITodoXVideoPromptParser
         }
 
         return int.TryParse(text, out direct) ? direct : null;
+    }
+
+    private static string? NormalizeAspectRatio(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        var text = value.Trim();
+        return text switch
+        {
+            "16:9" => "16:9",
+            "9:16" => "9:16",
+            _ => null
+        };
     }
 }

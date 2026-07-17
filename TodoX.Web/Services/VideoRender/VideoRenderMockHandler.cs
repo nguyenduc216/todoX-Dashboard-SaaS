@@ -69,13 +69,13 @@ public sealed class VideoRenderMockHandler : IRenderJobHandler
 
         foreach (var scene in scenes)
         {
-            await RenderSceneMockAsync(project, scene, mockSource, projectRoot, publicBase, job.Id, ct);
+            await RenderSceneMockAsync(project, scene, mockSource, projectRoot, publicBase, job.Id, NormalizeAspectRatio(input.AspectRatio), ct);
         }
 
         await MergeAsync(project, scenes, projectRoot, publicBase, job.Id, ct);
     }
 
-    private async Task RenderSceneMockAsync(VideoProjectDto project, VideoProjectSceneDto scene, string mockSource, string projectRoot, string publicBase, Guid jobId, CancellationToken ct)
+    private async Task RenderSceneMockAsync(VideoProjectDto project, VideoProjectSceneDto scene, string mockSource, string projectRoot, string publicBase, Guid jobId, string aspectRatio, CancellationToken ct)
     {
         var versioningEnabled = await _versions.IsEnabledAsync(SceneMediaVersioningFlags.SceneVideos, ct);
         SceneVideoVersionDto? version = null;
@@ -104,7 +104,7 @@ public sealed class VideoRenderMockHandler : IRenderJobHandler
                     scene.VideoPrompt,
                     sourceImageVersionId = selectedImage?.Id
                 },
-                RenderConfigSnapshot: new { source = "mock_scene_video", mockSource = Path.GetFileName(mockSource) }), ct);
+                RenderConfigSnapshot: new { source = "mock_scene_video", mockSource = Path.GetFileName(mockSource), aspectRatio }), ct);
         }
 
         var sceneFolder = version is null
@@ -262,4 +262,7 @@ public sealed class VideoRenderMockHandler : IRenderJobHandler
             ? parsedId
             : null;
     }
+
+    private static string NormalizeAspectRatio(string? aspectRatio)
+        => string.Equals(aspectRatio, "16:9", StringComparison.Ordinal) ? "16:9" : "9:16";
 }

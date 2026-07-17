@@ -1,5 +1,6 @@
 @page "/render-job"
 @using System.Text.Json
+@using System.Text.Json.Nodes
 @using TodoX.Web.Services.AiProviders
 @inject AuthStateService AuthState
 @inject NavigationManager Navigation
@@ -42,9 +43,7 @@
     }
     else
     {
-        <MudTabs rounded="true" ApplyEffectsToContainer="true" panelClass="pt-4" @bind-ActivePanelIndex="_tabIndex">
-            <MudTabPanel Text="Dự án">
-                <MudPaper Class="todox-card pa-4" rounded="true">
+        <MudPaper Class="todox-card pa-4" rounded="true">
                     <MudStack Spacing="3">
                         <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
                             <div>
@@ -95,9 +94,23 @@
                             </MudGrid>
                         }
                     </MudStack>
-                </MudPaper>
-            </MudTabPanel>
+        </MudPaper>
 
+        @if (_projectDialogOpen)
+        {
+            <div class="render-project-dialog" role="dialog" aria-modal="true">
+                <MudPaper Class="render-project-dialog-surface" Square="true">
+                    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="render-project-dialog-header">
+                        <MudStack Spacing="0">
+                            <MudText Typo="Typo.h6">@(_project?.Title ?? "Render Video Job")</MudText>
+                            <MudText Typo="Typo.caption">Aspect ratio: @ProjectAspectRatio</MudText>
+                        </MudStack>
+                        <MudStack Row="true" Spacing="1" Class="flex-wrap gap-1">
+                            <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveJobAsync" Disabled="@(_projectId is null || _busy)">Lưu job</MudButton>
+                            <MudIconButton Icon="@Icons.Material.Filled.Close" Color="Color.Default" OnClick="CloseProjectDialogAsync" />
+                        </MudStack>
+                    </MudStack>
+                    <MudTabs rounded="true" ApplyEffectsToContainer="true" panelClass="pt-4" @bind-ActivePanelIndex="_tabIndex">
             <MudTabPanel Text="Thông tin">
                 <MudPaper Class="todox-card pa-4" rounded="true">
                     <MudGrid>
@@ -159,6 +172,11 @@
                                 <MudStack Spacing="2" Class="h-100">
                                     <MudTextField T="string" Label="Prompt video" @bind-Value="_prompt" Variant="Variant.Outlined" Lines="10" Immediate="true" />
                                     <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="CheckPromptAsync">Kiểm tra cấu trúc</MudButton>
+                                    <MudSelect T="string" Label="Tỷ lệ video của project" Value="@_aspectRatio" ValueChanged="OnAspectRatioChangedAsync" Variant="Variant.Outlined" Dense="true" Required="true">
+                                        <MudSelectItem T="string" Value="@string.Empty">Chọn tỷ lệ trước khi tạo scene</MudSelectItem>
+                                        <MudSelectItem T="string" Value="@AspectRatioLandscape">16:9 — video ngang</MudSelectItem>
+                                        <MudSelectItem T="string" Value="@AspectRatioPortrait">9:16 — video dọc</MudSelectItem>
+                                    </MudSelect>
                                     <MudAlert Severity="@( _promptParseResult.IsJsonValid ? (_promptParseResult.IsTodoXPrompt ? Severity.Success : Severity.Info) : Severity.Warning )" Dense="true">
                                         @(_promptParseResult.IsJsonValid ? (_promptParseResult.IsTodoXPrompt ? "Prompt TodoX hợp lệ." : "Prompt thường.") : "JSON không hợp lệ hoặc chưa parse được.")
                                     </MudAlert>
@@ -175,6 +193,7 @@
                                             <MudItem xs="12" md="6"><MudText><b>CTA:</b> @_promptParseResult.Summary.Cta</MudText></MudItem>
                                             <MudItem xs="12" md="6"><MudText><b>DeclaredDuration:</b> @_promptParseResult.Summary.DeclaredDurationSeconds</MudText></MudItem>
                                             <MudItem xs="12" md="6"><MudText><b>SceneCount:</b> @_promptParseResult.Summary.SceneCount</MudText></MudItem>
+                                            <MudItem xs="12" md="6"><MudText><b>AspectRatio:</b> @(ProjectAspectRatio)</MudText></MudItem>
                                         </MudGrid>
                                         @if (_promptParseResult.Summary.HasDurationMismatch)
                                         {
@@ -276,26 +295,27 @@
                                         </MudStack>
                                     </MudStack>
 
-                                    <div class="scene-media-grid">
-                                        <MudPaper Class="scene-media-panel pa-2" Outlined="true">
-                                            <MudText Typo="Typo.subtitle2">Ảnh tĩnh</MudText>
-                                            @RenderSceneImageFrame(scene, sceneState)
-                                            @if (_sceneRerenderErrors.TryGetValue(scene.Id, out var sceneErr) && !string.IsNullOrWhiteSpace(sceneErr))
-                                            {
-                                                <MudText Typo="Typo.caption" Color="Color.Error">@sceneErr</MudText>
-                                            }
-                                        </MudPaper>
-                                        <MudPaper Class="scene-media-panel pa-2" Outlined="true">
-                                            <MudText Typo="Typo.subtitle2">Video scene</MudText>
-                                            @RenderSceneVideoFrame(scene, metadata)
-                                        </MudPaper>
-                                    </div>
+                                    <MudStack Spacing="2" Class="scene-sequence">
+                                        <MudText Typo="Typo.subtitle2">Khung ảnh</MudText>
+                                        @RenderSceneImageFrame(scene, sceneState)
+                                        @if (_sceneRerenderErrors.TryGetValue(scene.Id, out var sceneErr) && !string.IsNullOrWhiteSpace(sceneErr))
+                                        {
+                                            <MudText Typo="Typo.caption" Color="Color.Error">@sceneErr</MudText>
+                                        }
 
-                                    <MudGrid>
-                                        <MudItem xs="12" md="4"><MudText Typo="Typo.body2"><b>Purpose:</b> @ShortText(metadata.ScenePurpose)</MudText></MudItem>
-                                        <MudItem xs="12" md="4"><MudText Typo="Typo.body2"><b>Voice:</b> @ShortText(metadata.Voice)</MudText></MudItem>
-                                        <MudItem xs="12" md="4"><MudText Typo="Typo.body2"><b>Voice instruction:</b> @ShortText(metadata.VoiceInstruction)</MudText></MudItem>
-                                    </MudGrid>
+                                        <MudTextField T="string" Label="Prompt ảnh" @bind-Value="scene.ImagePrompt" Variant="Variant.Outlined" Lines="4" Immediate="true" />
+
+                                        <MudText Typo="Typo.subtitle2">Khung video</MudText>
+                                        @RenderSceneVideoFrame(scene, metadata)
+
+                                        <MudTextField T="string" Label="Prompt video" @bind-Value="scene.VideoPrompt" Variant="Variant.Outlined" Lines="4" Immediate="true" />
+
+                                        <MudGrid>
+                                            <MudItem xs="12" md="4"><MudText Typo="Typo.body2"><b>Purpose:</b> @ShortText(metadata.ScenePurpose)</MudText></MudItem>
+                                            <MudItem xs="12" md="4"><MudText Typo="Typo.body2"><b>Voice:</b> @ShortText(metadata.Voice)</MudText></MudItem>
+                                            <MudItem xs="12" md="4"><MudText Typo="Typo.body2"><b>Voice instruction:</b> @ShortText(metadata.VoiceInstruction)</MudText></MudItem>
+                                        </MudGrid>
+                                    </MudStack>
 
                                     <MudStack Row="true" Spacing="1" Class="flex-wrap gap-1">
                                         <MudMenu Dense="true" Variant="Variant.Outlined" AnchorOrigin="Origin.BottomCenter" TransformOrigin="Origin.TopCenter">
@@ -423,7 +443,10 @@
                     </MudPaper>
                 }
             </MudTabPanel>
-        </MudTabs>
+                    </MudTabs>
+                </MudPaper>
+            </div>
+        }
     }
 </MudStack>
 
@@ -433,6 +456,7 @@
 
     private int _tabIndex;
     private bool _busy;
+    private bool _projectDialogOpen;
     private long? _projectId;
     private VideoProjectDto? _project;
     private List<VideoProjectListItemDto> _projects = new();
@@ -443,6 +467,7 @@
     private string _prompt = string.Empty;
     private string _characterPrompt = string.Empty;
     private TodoXVideoPromptParseResult _promptParseResult = new();
+    private string _aspectRatio = string.Empty;
     private int _totalSeconds = 16;
     private int _sceneSeconds = 8;
     private bool _thinkScenes = false;
@@ -471,9 +496,16 @@
 
     private enum SceneImageVisualState { None, Queued, Rendering, Retrying, Ready, Failed }
 
+    private const string AspectRatioLandscape = "16:9";
+    private const string AspectRatioPortrait = "9:16";
+
     private bool CanMerge => _project is not null && _project.Scenes.Count > 0 && _project.Scenes.All(x => x.Status == VideoSceneStatuses.VideoReady);
 
     private string BuildLogCode() => _projectId is null ? string.Empty : $"video-{_projectId.Value}";
+
+    private string ProjectAspectRatio => HasProjectAspectRatio ? _aspectRatio : "Chưa chọn";
+
+    private bool HasProjectAspectRatio => IsSupportedAspectRatio(_aspectRatio);
 
     private sealed record DebugEntry(DateTimeOffset Timestamp, int StepNumber, string StepCode, string StepName, string Status, long DurationMs, string Message, string? Details = null);
 
@@ -487,6 +519,7 @@
         }
         if (AuthState.CurrentUser is not null && _projectId is not null)
         {
+            _projectDialogOpen = true;
             await ReloadAsync();
         }
         await StartPolling();
@@ -499,8 +532,9 @@
             _projectId = QueryProjectId;
             if (AuthState.CurrentUser is not null)
             {
+                _projectDialogOpen = true;
                 await ReloadAsync();
-                _tabIndex = 1;
+                _tabIndex = 0;
             }
         }
     }
@@ -516,6 +550,10 @@
     private async Task CreateProjectAsync()
     {
         if (AuthState.CurrentUser is null) return;
+        if (!EnsureAspectRatioSelected())
+        {
+            return;
+        }
         _busy = true;
         try
         {
@@ -527,6 +565,7 @@
             await AddDebugAsync("ui_auth", "Kiểm tra đăng nhập", "INFO", $"User={MaskGuid(AuthState.CurrentUser.UserId)}, Customer={MaskGuid(AuthState.CurrentUser.CustomerId)}");
             var inputDebug = BuildInputDebugMessage();
             await AddDebugAsync("ui_input", "Kiểm tra prompt", "INFO", inputDebug);
+            _prompt = PersistPromptAspectRatio(_prompt, _aspectRatio);
 
             var storageRoot = VideoOptions.CurrentValue.StorageRoot;
             var publicBase = VideoOptions.CurrentValue.PublicBase;
@@ -535,6 +574,7 @@
             var result = await VideoRepo.CreateProjectAsync(new VideoProjectCreateRequest
             {
                 Prompt = _prompt,
+                AspectRatio = _aspectRatio,
                 CharacterId = _selectedCharacter?.Id,
                 TotalSeconds = _totalSeconds,
                 SceneSeconds = Math.Max(1, _sceneSeconds),
@@ -566,6 +606,10 @@
     private async Task CreateEmptyProjectAsync()
     {
         if (AuthState.CurrentUser is null) return;
+        if (!EnsureAspectRatioSelected())
+        {
+            return;
+        }
         _promptParseResult = PromptParser.Parse(_prompt);
         _busy = true;
         try
@@ -575,7 +619,8 @@
             var jobFolder = DateTime.UtcNow.ToString("yyyyMMdd-HHmmss");
             var result = await VideoRepo.CreateProjectAsync(new VideoProjectCreateRequest
             {
-                Prompt = string.Empty,
+                Prompt = PersistPromptAspectRatio(_prompt, _aspectRatio),
+                AspectRatio = _aspectRatio,
                 CharacterId = _selectedCharacter?.Id,
                 TotalSeconds = _totalSeconds,
                 SceneSeconds = Math.Max(1, _sceneSeconds),
@@ -643,7 +688,7 @@
         => ScenePromptMetadata.Parse(scenePrompt).ScenePurpose ?? string.Empty;
 
     private string BuildInputDebugMessage()
-        => $"PromptLength={_prompt.Length}, CharacterId={(_selectedCharacter?.Id.ToString() ?? "null")}, TotalSeconds={_totalSeconds}, SceneSeconds={_sceneSeconds}, ThinkScenes={_thinkScenes}, IsTodoX={_promptParseResult.IsTodoXPrompt}, Scenes={_promptParseResult.Model.Scenes.Count}";
+        => $"PromptLength={_prompt.Length}, AspectRatio={ProjectAspectRatio}, CharacterId={(_selectedCharacter?.Id.ToString() ?? "null")}, TotalSeconds={_totalSeconds}, SceneSeconds={_sceneSeconds}, ThinkScenes={_thinkScenes}, IsTodoX={_promptParseResult.IsTodoXPrompt}, Scenes={_promptParseResult.Model.Scenes.Count}";
 
     private static string? ExtractValue(string? source, string key)
     {
@@ -697,11 +742,14 @@
         QueryProjectId = null;
         _project = null;
         _prompt = string.Empty;
+        _promptParseResult = new();
+        _aspectRatio = string.Empty;
         _characterPrompt = string.Empty;
         _totalSeconds = 16;
         _sceneSeconds = 8;
         _thinkScenes = false;
-        _tabIndex = 1;
+        _projectDialogOpen = true;
+        _tabIndex = 0;
         Navigation.NavigateTo("/render-job", replace: true);
         Snackbar.Add("Đã reset form tạo project mới.", Severity.Info);
         await InvokeAsync(StateHasChanged);
@@ -718,9 +766,17 @@
     {
         _projectId = projectId;
         QueryProjectId = projectId;
+        _projectDialogOpen = true;
         Navigation.NavigateTo($"/render-job?projectId={projectId}", replace: false);
         await ReloadAsync();
-        _tabIndex = 1;
+        _tabIndex = 0;
+    }
+
+    private Task CloseProjectDialogAsync()
+    {
+        _projectDialogOpen = false;
+        Navigation.NavigateTo("/render-job", replace: true);
+        return InvokeAsync(StateHasChanged);
     }
 
     private async Task ReloadAsync()
@@ -749,6 +805,8 @@
             {
                 _thinkScenes = _project.ThinkScenes;
                 _prompt = _project.OriginalPrompt;
+                _promptParseResult = PromptParser.Parse(_prompt);
+                ApplyAspectRatioFromPrompt();
                 _totalSeconds = _project.TotalSeconds;
                 _sceneSeconds = _project.SceneSeconds;
                 _selectedCharacterId = _project.CharacterId;
@@ -963,7 +1021,7 @@
             <div class="scene-video-ready">
                 <img src="@SceneImageUrl(scene)" class="scene-media-image scene-image-dim" />
                 <MudText Typo="Typo.caption">Sẵn sàng tạo video</MudText>
-                <MudText Typo="Typo.caption">@ShortText(metadata.MotionPrompt)</MudText>
+                <MudText Typo="Typo.caption">@ShortText(scene.VideoPrompt ?? metadata.MotionPrompt)</MudText>
             </div>
         }
         @if (string.Equals(scene.Status, VideoSceneStatuses.Failed, StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(scene.ErrorMessage))
@@ -983,7 +1041,87 @@
     private Task CheckPromptAsync()
     {
         _promptParseResult = PromptParser.Parse(_prompt);
+        ApplyAspectRatioFromPrompt();
         return InvokeAsync(StateHasChanged);
+    }
+
+    private Task OnAspectRatioChangedAsync(string value)
+    {
+        _aspectRatio = NormalizeAspectRatio(value) ?? string.Empty;
+        return InvokeAsync(StateHasChanged);
+    }
+
+    private void ApplyAspectRatioFromPrompt()
+    {
+        var parsed = NormalizeAspectRatio(_promptParseResult.Model.AspectRatio);
+        if (!string.IsNullOrWhiteSpace(parsed))
+        {
+            _aspectRatio = parsed;
+        }
+    }
+
+    private bool EnsureAspectRatioSelected()
+    {
+        if (HasProjectAspectRatio)
+        {
+            return true;
+        }
+
+        if (!_promptParseResult.IsJsonValid)
+        {
+            _promptParseResult = PromptParser.Parse(_prompt);
+            ApplyAspectRatioFromPrompt();
+            if (HasProjectAspectRatio)
+            {
+                return true;
+            }
+        }
+
+        Snackbar.Add("Vui lòng chọn tỷ lệ video 16:9 hoặc 9:16 trước khi tạo/phân tách scene.", Severity.Warning);
+        return false;
+    }
+
+    private static bool IsSupportedAspectRatio(string? value)
+        => string.Equals(value, AspectRatioLandscape, StringComparison.Ordinal)
+           || string.Equals(value, AspectRatioPortrait, StringComparison.Ordinal);
+
+    private static string? NormalizeAspectRatio(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        var text = value.Trim();
+        return IsSupportedAspectRatio(text) ? text : null;
+    }
+
+    private static string PersistPromptAspectRatio(string? prompt, string aspectRatio)
+    {
+        var ratio = NormalizeAspectRatio(aspectRatio) ?? AspectRatioPortrait;
+        var source = prompt ?? string.Empty;
+        if (TryExtractJsonRange(source, out var start, out var end))
+        {
+            try
+            {
+                var json = source[start..(end + 1)];
+                if (JsonNode.Parse(json) is JsonObject obj)
+                {
+                    obj["aspect_ratio"] = ratio;
+                    return source[..start] + obj.ToJsonString() + source[(end + 1)..];
+                }
+            }
+            catch (JsonException)
+            {
+                // Fall through and append a small metadata object.
+            }
+        }
+
+        var metadata = new JsonObject { ["aspect_ratio"] = ratio }.ToJsonString();
+        return string.IsNullOrWhiteSpace(source) ? metadata : $"{source.TrimEnd()}{Environment.NewLine}{metadata}";
+    }
+
+    private static bool TryExtractJsonRange(string input, out int start, out int end)
+    {
+        start = input.IndexOf('{');
+        end = input.LastIndexOf('}');
+        return start >= 0 && end > start;
     }
 
     private async Task ReloadJobsAsync()
@@ -1095,6 +1233,10 @@
     private async Task SaveJobAsync()
     {
         if (_project is null || AuthState.CurrentUser is null) return;
+        if (!EnsureAspectRatioSelected())
+        {
+            return;
+        }
 
         _busy = true;
         try
@@ -1104,6 +1246,7 @@
                 NormalizeScenePrompts(scene);
             }
 
+            _prompt = PersistPromptAspectRatio(_prompt, _aspectRatio);
             var snapshot = BuildJobSnapshot();
             await VideoRepo.UpdateProjectDraftAsync(_project.Id, new VideoProjectUpdateRequest
             {
@@ -1161,6 +1304,7 @@
             ProjectId = _project!.Id,
             _project.Title,
             _project.OriginalPrompt,
+            AspectRatio = _aspectRatio,
             _project.CharacterId,
             CharacterName = _selectedCharacter?.CharacterName ?? ResolveCurrentCharacter()?.CharacterName,
             CharacterPrompt = _selectedCharacter?.NormalizedPrompt ?? ResolveCurrentCharacter()?.NormalizedPrompt,
@@ -1186,6 +1330,7 @@
         var input = new TodoX.Web.Services.Render.SceneImageBatchInput
         {
             ProjectId = _project.Id,
+            AspectRatio = _aspectRatio,
             CharacterId = character?.Id ?? _project.CharacterId,
             UserId = AuthState.CurrentUser.UserId,
             CustomerId = AuthState.CurrentUser.CustomerId,
@@ -1228,6 +1373,10 @@
     private async Task RenderMissingSceneImagesAsync()
     {
         if (_project is null || AuthState.CurrentUser is null) return;
+        if (!EnsureAspectRatioSelected())
+        {
+            return;
+        }
         await EnqueueBulkSceneImageRenderAsync(onlyMissingOrFailed: true);
         Snackbar.Add("Đã enqueue render ảnh cho các scene còn thiếu/lỗi.", Severity.Info);
     }
@@ -1238,6 +1387,10 @@
     private async Task RerenderSceneImageAsync(VideoProjectSceneDto scene)
     {
         if (_project is null || AuthState.CurrentUser is null) return;
+        if (!EnsureAspectRatioSelected())
+        {
+            return;
+        }
         if (!_sceneRerendering.Add(scene.Id)) return; // already running for this scene
 
         _sceneRerenderErrors.Remove(scene.Id);
@@ -1259,6 +1412,7 @@
                 SceneId = scene.Id,
                 SceneIndex = scene.SceneIndex,
                 Prompt = prompt,
+                AspectRatio = _aspectRatio,
                 CharacterId = character?.Id,
                 UserId = AuthState.CurrentUser.UserId,
                 CustomerId = AuthState.CurrentUser.CustomerId,

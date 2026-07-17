@@ -36,6 +36,7 @@ public sealed class SceneImageRenderContext
     public long SceneId { get; init; }
     public int SceneIndex { get; init; }
     public string Prompt { get; init; } = string.Empty;
+    public string AspectRatio { get; init; } = "9:16";
     public long? CharacterId { get; init; }
     public Guid UserId { get; init; }
     public Guid? CustomerId { get; init; }
@@ -152,7 +153,7 @@ public sealed class SceneImageRenderService : ISceneImageRenderService
             Scenario = "video_scene",
             Count = 1,
             PromptOverride = context.Prompt,
-            AspectRatio = "9:16",
+            AspectRatio = NormalizeAspectRatio(context.AspectRatio),
             FileCategory = "video_scene_image",
             AvatarMediaId = context.CharacterReferenceMediaId,
             RequireReferenceImages = context.CharacterReferenceMediaId is not null,
@@ -241,7 +242,7 @@ public sealed class SceneImageRenderService : ISceneImageRenderService
             FromUser = false,
             Prompt = context.Prompt,
             ReferenceImageUrls = references,
-            AspectRatio = "9:16",
+            AspectRatio = NormalizeAspectRatio(context.AspectRatio),
             OutputFormat = "png",
             Quality = "high",
             Resolution = "4K",
@@ -254,6 +255,7 @@ public sealed class SceneImageRenderService : ISceneImageRenderService
                 projectId = context.ProjectId,
                 sceneId = context.SceneId,
                 sceneIndex = context.SceneIndex,
+                aspectRatio = NormalizeAspectRatio(context.AspectRatio),
                 characterId = context.CharacterId,
                 renderJobId = context.RenderJobId
             },
@@ -332,6 +334,9 @@ public sealed class SceneImageRenderService : ISceneImageRenderService
     private static bool IsSucceededStatus(string? status)
         => string.Equals(status, "success", StringComparison.OrdinalIgnoreCase)
            || string.Equals(status, "completed", StringComparison.OrdinalIgnoreCase);
+
+    public static string NormalizeAspectRatio(string? aspectRatio)
+        => string.Equals(aspectRatio, "16:9", StringComparison.Ordinal) ? "16:9" : "9:16";
 
     public static string BuildLogicalRequestId(string featureCode, long sceneId, Guid? renderJobId)
         => string.Equals(featureCode, "render_job_scene_image_rerender", StringComparison.OrdinalIgnoreCase)

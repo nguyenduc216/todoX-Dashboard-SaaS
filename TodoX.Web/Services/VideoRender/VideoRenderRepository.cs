@@ -79,7 +79,8 @@ public sealed class VideoRenderRepository
                     : index == sceneCount
                         ? Math.Max(1, totalSeconds - sceneSeconds * (sceneCount - 1))
                         : sceneSeconds;
-                var scenePrompt = sceneData?.ScenePrompt ?? BuildScenePrompt(request.Prompt, index, sceneCount, duration, request.ThinkScenes);
+                var aspectRatio = NormalizeAspectRatio(request.AspectRatio);
+                var scenePrompt = sceneData?.ScenePrompt ?? BuildScenePrompt(request.Prompt, index, sceneCount, duration, request.ThinkScenes, aspectRatio);
 
                 await conn.ExecuteAsync(
                     """
@@ -99,7 +100,7 @@ public sealed class VideoRenderRepository
                         duration,
                         scenePrompt,
                         imagePrompt = sceneData?.ImagePrompt ?? $"Static preview for scene {index}. {scenePrompt}",
-                        videoPrompt = sceneData?.VideoPrompt ?? $"Vertical 9:16 video, {duration} seconds. {scenePrompt}",
+                        videoPrompt = sceneData?.VideoPrompt ?? $"{AspectRatioLabel(aspectRatio)} video, {duration} seconds. {scenePrompt}",
                         status = VideoSceneStatuses.Draft
                     }, tx);
             }
@@ -517,7 +518,7 @@ public sealed class VideoRenderRepository
         }
     }
 
-    private static string BuildScenePrompt(string originalPrompt, int sceneIndex, int sceneCount, int durationSeconds, bool thinkScenes)
+    private static string BuildScenePrompt(string originalPrompt, int sceneIndex, int sceneCount, int durationSeconds, bool thinkScenes, string aspectRatio)
     {
         var text = string.IsNullOrWhiteSpace(originalPrompt) ? "TodoX AI video" : originalPrompt.Trim();
         if (!thinkScenes)
@@ -525,8 +526,14 @@ public sealed class VideoRenderRepository
             return text;
         }
 
-        return $"Scene {sceneIndex}/{sceneCount}, duration {durationSeconds}s. Based on: {text}. Make the scene clear, visual, vertical 9:16, with distinct action and camera movement.";
+        return $"Scene {sceneIndex}/{sceneCount}, duration {durationSeconds}s. Based on: {text}. Make the scene clear, visual, {AspectRatioLabel(aspectRatio)}, with distinct action and camera movement.";
     }
+
+    private static string NormalizeAspectRatio(string? aspectRatio)
+        => string.Equals(aspectRatio, "16:9", StringComparison.Ordinal) ? "16:9" : "9:16";
+
+    private static string AspectRatioLabel(string aspectRatio)
+        => string.Equals(aspectRatio, "16:9", StringComparison.Ordinal) ? "horizontal 16:9" : "vertical 9:16";
 
     private static bool CanAccessProject(VideoProjectDto project, CurrentUserSession user)
         => CanCrossCustomer(user)

@@ -108,6 +108,7 @@ public sealed class VideoProjectListItemDto
 public sealed class VideoProjectCreateRequest
 {
     public string Prompt { get; set; } = string.Empty;
+    public string AspectRatio { get; set; } = "9:16";
     public long? CharacterId { get; set; }
     public string? UploadedCharacterUrl { get; set; }
     public bool ThinkScenes { get; set; } = true;
