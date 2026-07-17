@@ -43,6 +43,61 @@
     else
     {
         <MudTabs rounded="true" ApplyEffectsToContainer="true" panelClass="pt-4" @bind-ActivePanelIndex="_tabIndex">
+            <MudTabPanel Text="Dự án">
+                <MudPaper Class="todox-card pa-4" rounded="true">
+                    <MudStack Spacing="3">
+                        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
+                            <div>
+                                <MudText Typo="Typo.h6">Danh sách dự án render</MudText>
+                                <MudText Typo="Typo.body2" Color="Color.Secondary">Các video project đã lưu, tách riêng khỏi lịch sử tác vụ xử lý nền.</MudText>
+                            </div>
+                            <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh" OnClick="LoadProjectListAsync" Disabled="@_busy">Refresh</MudButton>
+                        </MudStack>
+                        @if (_projects.Count == 0)
+                        {
+                            <MudAlert Severity="Severity.Info">Chưa có dự án render nào trong phạm vi tài khoản hiện tại.</MudAlert>
+                        }
+                        else
+                        {
+                            <MudGrid>
+                                @foreach (var item in _projects)
+                                {
+                                    <MudItem xs="12" md="6" lg="4">
+                                        <MudPaper Class="@ProjectCardClass(item)" Outlined="true">
+                                            <MudStack Spacing="2">
+                                                <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="gap-2">
+                                                    <MudText Typo="Typo.subtitle1">@(!string.IsNullOrWhiteSpace(item.Title) ? item.Title : $"Project {item.Id}")</MudText>
+                                                    <MudChip T="string" Size="Size.Small" Color="@ProjectStatusColor(item.Status)">@item.Status</MudChip>
+                                                </MudStack>
+                                                <div class="render-project-thumb">
+                                                    @if (!string.IsNullOrWhiteSpace(item.ThumbnailUrl))
+                                                    {
+                                                        <img src="@item.ThumbnailUrl" />
+                                                    }
+                                                    else
+                                                    {
+                                                        <span>Chưa có thumbnail</span>
+                                                    }
+                                                </div>
+                                                <MudText Typo="Typo.caption">ID: @item.Id</MudText>
+                                                <MudText Typo="Typo.caption">Character: @(item.CharacterName ?? item.CharacterId?.ToString() ?? "Không dùng")</MudText>
+                                                <MudText Typo="Typo.caption">Scene: @item.SceneCount | Ảnh: @item.ImageReadyCount/@item.SceneCount | Video: @item.VideoReadyCount/@item.SceneCount</MudText>
+                                                <MudText Typo="Typo.caption">Tạo: @item.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</MudText>
+                                                <MudText Typo="Typo.caption">Cập nhật: @item.UpdatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</MudText>
+                                                <MudStack Row="true" Spacing="1">
+                                                    <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" OnClick="@(() => OpenProjectAsync(item.Id))">Mở</MudButton>
+                                                    <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="LoadProjectListAsync">Refresh</MudButton>
+                                                </MudStack>
+                                            </MudStack>
+                                        </MudPaper>
+                                    </MudItem>
+                                }
+                            </MudGrid>
+                        }
+                    </MudStack>
+                </MudPaper>
+            </MudTabPanel>
+
             <MudTabPanel Text="Thông tin">
                 <MudPaper Class="todox-card pa-4" rounded="true">
                     <MudGrid>
@@ -191,7 +246,7 @@
                 {
                     <MudStack Row="true" Spacing="2" Class="flex-wrap gap-2 mb-3">
                         <MudButton Variant="Variant.Filled" Color="Color.Warning" OnClick="RenderMissingSceneImagesAsync" Disabled="@(_busy || _batchActive)">Tạo ảnh tĩnh scene còn thiếu</MudButton>
-                        <MudButton Variant="Variant.Filled" Color="Color.Warning" OnClick="EnqueueRenderAllScenesAsync" Disabled="@_busy">Render all</MudButton>
+                        <MudTooltip Text="Chưa cấu hình provider image-to-video"><MudButton Variant="Variant.Filled" Color="Color.Warning" OnClick="EnqueueRenderAllScenesAsync" Disabled="true">Tạo video all</MudButton></MudTooltip>
                         <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="ReloadAsync" Disabled="@_busy">Refresh</MudButton>
                         @if (_batchActive)
                         {
@@ -199,102 +254,83 @@
                         }
                     </MudStack>
 
-                    <MudTable Items="_project.Scenes.OrderBy(x => x.SceneIndex).ToList()" Dense="true" Hover="true" Bordered="true" Breakpoint="Breakpoint.Sm">
-                        <HeaderContent>
-                            <MudTh>STT</MudTh>
-                            <MudTh>Ảnh tĩnh</MudTh>
-                            <MudTh>Nội dung scene</MudTh>
-                            <MudTh>Thời lượng</MudTh>
-                            <MudTh>Prompt</MudTh>
-                            <MudTh>Trạng thái</MudTh>
-                            <MudTh>Thao tác</MudTh>
-                        </HeaderContent>
-                        <RowTemplate>
-                            <MudTd DataLabel="STT">Scene @context.SceneIndex.ToString("00")</MudTd>
-                            <MudTd DataLabel="Ảnh tĩnh">
-                                @{
-                                    var sceneState = ResolveSceneImageState(context);
-                                }
-                                <div class="scene-thumb-cell">
-                                    @if (sceneState == SceneImageVisualState.Ready && !string.IsNullOrWhiteSpace(context.StaticImageUrl))
-                                    {
-                                        <img src="@SceneImageUrl(context)" class="scene-thumb" @onclick="@(() => OpenScenePreview(context))" />
-                                    }
-                                    else if (sceneState is SceneImageVisualState.Rendering or SceneImageVisualState.Queued or SceneImageVisualState.Retrying)
-                                    {
-                                        <div class="scene-image-frame @SceneStateCss(sceneState)">
-                                            @if (!string.IsNullOrWhiteSpace(context.StaticImageUrl))
+                    <MudStack Spacing="3">
+                        @foreach (var scene in _project.Scenes.OrderBy(x => x.SceneIndex))
+                        {
+                            var metadata = ScenePromptMetadata.FromScene(scene);
+                            var sceneState = ResolveSceneImageState(scene);
+                            <MudPaper Class="scene-card pa-3" Outlined="true">
+                                <MudStack Spacing="3">
+                                    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
+                                        <MudStack Spacing="0">
+                                            <MudText Typo="Typo.subtitle1">Scene @scene.SceneIndex.ToString("00") - @scene.Title</MudText>
+                                            <MudText Typo="Typo.caption">@scene.DurationSeconds giây</MudText>
+                                        </MudStack>
+                                        <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
+                                            <MudChip T="string" Color="@SceneColor(scene.Status)">@SceneLabel(scene.Status)</MudChip>
+                                            <MudMenu Dense="true" Icon="@Icons.Material.Filled.MoreVert">
+                                                <MudMenuItem Disabled="@(_busy || scene.SceneIndex <= 1)" OnClick="@(() => MoveSceneUpAsync(scene))">Lên</MudMenuItem>
+                                                <MudMenuItem Disabled="@(_busy || _project is null || scene.SceneIndex >= _project.Scenes.Count)" OnClick="@(() => MoveSceneDownAsync(scene))">Xuống</MudMenuItem>
+                                                <MudMenuItem Disabled="@_busy" OnClick="@(() => DeleteSceneAsync(scene))">Xóa</MudMenuItem>
+                                            </MudMenu>
+                                        </MudStack>
+                                    </MudStack>
+
+                                    <div class="scene-media-grid">
+                                        <MudPaper Class="scene-media-panel pa-2" Outlined="true">
+                                            <MudText Typo="Typo.subtitle2">Ảnh tĩnh</MudText>
+                                            @RenderSceneImageFrame(scene, sceneState)
+                                            @if (_sceneRerenderErrors.TryGetValue(scene.Id, out var sceneErr) && !string.IsNullOrWhiteSpace(sceneErr))
                                             {
-                                                <img src="@SceneImageUrl(context)" class="scene-thumb scene-image-dim" />
+                                                <MudText Typo="Typo.caption" Color="Color.Error">@sceneErr</MudText>
                                             }
-                                            <div class="scene-image-shimmer"></div>
-                                            <span class="scene-image-label">@SceneStateLabel(sceneState)</span>
-                                        </div>
-                                    }
-                                    else if (sceneState == SceneImageVisualState.Failed)
-                                    {
-                                        <div class="scene-image-frame scene-image-failed">
-                                            <span class="scene-image-label">Lỗi render</span>
-                                        </div>
-                                    }
-                                    else
-                                    {
-                                        <div class="scene-thumb-placeholder">Chưa render</div>
-                                    }
-                                </div>
-                                @if (_sceneRerenderErrors.TryGetValue(context.Id, out var sceneErr) && !string.IsNullOrWhiteSpace(sceneErr))
-                                {
-                                    <MudText Typo="Typo.caption" Color="Color.Error">@sceneErr</MudText>
-                                }
-                            </MudTd>
-                            <MudTd DataLabel="Nội dung scene">
-                                <MudText Typo="Typo.subtitle2">@context.Title</MudText>
-                                <MudText Typo="Typo.body2"><b>Purpose:</b> @ExtractScenePurpose(context.ScenePrompt)</MudText>
-                                <MudText Typo="Typo.body2"><b>Voice:</b> @ExtractValue(context.ScenePrompt, "voice")</MudText>
-                                <MudText Typo="Typo.body2"><b>VoiceInstruction:</b> @ExtractValue(context.ScenePrompt, "voice_instruction")</MudText>
-                            </MudTd>
-                            <MudTd DataLabel="Thời lượng">@context.DurationSeconds giây</MudTd>
-                            <MudTd DataLabel="Prompt">
-                                <MudMenu Dense="true" Variant="Variant.Outlined" AnchorOrigin="Origin.BottomCenter" TransformOrigin="Origin.TopCenter">
-                                    <ActivatorContent Context="promptMenu">
-                                        <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Visibility">Xem prompt</MudButton>
-                                    </ActivatorContent>
-                                    <ChildContent>
-                                        <MudMenuItem OnClick="@(() => OpenScenePrompt(context, ScenePromptKind.Image))">Prompt ảnh</MudMenuItem>
-                                        <MudMenuItem OnClick="@(() => OpenScenePrompt(context, ScenePromptKind.Motion))">Chuyển động</MudMenuItem>
-                                        <MudMenuItem OnClick="@(() => OpenScenePrompt(context, ScenePromptKind.Voice))">Lời thoại</MudMenuItem>
-                                    </ChildContent>
-                                </MudMenu>
-                            </MudTd>
-                            <MudTd DataLabel="Trạng thái"><MudChip T="string" Color="@SceneColor(context.Status)">@SceneLabel(context.Status)</MudChip></MudTd>
-                            <MudTd DataLabel="Thao tác">
-                                <MudStack Spacing="1">
-                                    <MudStack Row="true" Spacing="0" Class="flex-wrap gap-1 scene-action-icons">
-                                        <MudTooltip Text="Xem prompt"><MudIconButton Icon="@Icons.Material.Filled.SavedSearch" Size="Size.Small" Color="Color.Primary" OnClick="@(() => OpenScenePrompt(context, ScenePromptKind.Image))" /></MudTooltip>
-                                        <MudTooltip Text="Render lại ảnh (OpenRouter)"><MudIconButton Icon="@Icons.Material.Filled.Image" Size="Size.Small" Color="Color.Warning" OnClick="@(() => RerenderSceneImageAsync(context))" Disabled="@(IsSceneRendering(context))" /></MudTooltip>
-                                        <MudTooltip Text="Lưu scene"><MudIconButton Icon="@Icons.Material.Filled.Save" Size="Size.Small" Color="Color.Success" OnClick="@(() => SaveSceneAsync(context))" Disabled="@_busy" /></MudTooltip>
-                                        <MudTooltip Text="Lên"><MudIconButton Icon="@Icons.Material.Filled.KeyboardArrowUp" Size="Size.Small" Color="Color.Default" OnClick="@(() => MoveSceneUpAsync(context))" Disabled="@(_busy || context.SceneIndex <= 1)" /></MudTooltip>
-                                        <MudTooltip Text="Xuống"><MudIconButton Icon="@Icons.Material.Filled.KeyboardArrowDown" Size="Size.Small" Color="Color.Default" OnClick="@(() => MoveSceneDownAsync(context))" Disabled="@(_busy || _project is null || context.SceneIndex >= _project.Scenes.Count)" /></MudTooltip>
-                                        <MudTooltip Text="Xóa"><MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="@(() => DeleteSceneAsync(context))" Disabled="@_busy" /></MudTooltip>
-                                    </MudStack>
+                                        </MudPaper>
+                                        <MudPaper Class="scene-media-panel pa-2" Outlined="true">
+                                            <MudText Typo="Typo.subtitle2">Video scene</MudText>
+                                            @RenderSceneVideoFrame(scene, metadata)
+                                        </MudPaper>
+                                    </div>
+
+                                    <MudGrid>
+                                        <MudItem xs="12" md="4"><MudText Typo="Typo.body2"><b>Purpose:</b> @ShortText(metadata.ScenePurpose)</MudText></MudItem>
+                                        <MudItem xs="12" md="4"><MudText Typo="Typo.body2"><b>Voice:</b> @ShortText(metadata.Voice)</MudText></MudItem>
+                                        <MudItem xs="12" md="4"><MudText Typo="Typo.body2"><b>Voice instruction:</b> @ShortText(metadata.VoiceInstruction)</MudText></MudItem>
+                                    </MudGrid>
+
                                     <MudStack Row="true" Spacing="1" Class="flex-wrap gap-1">
-                                        <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Info" OnClick="@(() => ToggleImageHistoryAsync(context))">Lịch sử ảnh</MudButton>
-                                        <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Info" OnClick="@(() => ToggleVideoHistoryAsync(context))">Lịch sử video</MudButton>
-                                        <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning" OnClick="@(() => RerenderSceneImageAsync(context))" Disabled="@(IsSceneRendering(context))">@(string.IsNullOrWhiteSpace(context.StaticImageUrl) ? "Tạo ảnh (OpenRouter)" : "Render lại ảnh")</MudButton>
-                                        <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(() => SaveSceneAsync(context))" Disabled="@_busy">Lưu</MudButton>
+                                        <MudMenu Dense="true" Variant="Variant.Outlined" AnchorOrigin="Origin.BottomCenter" TransformOrigin="Origin.TopCenter">
+                                            <ActivatorContent Context="promptMenu">
+                                                <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Visibility">Prompt</MudButton>
+                                            </ActivatorContent>
+                                            <ChildContent>
+                                                <MudMenuItem OnClick="@(() => OpenScenePrompt(scene, ScenePromptKind.Image))">Xem prompt ảnh</MudMenuItem>
+                                                <MudMenuItem OnClick="@(() => OpenScenePrompt(scene, ScenePromptKind.Motion))">Xem prompt chuyển động</MudMenuItem>
+                                                <MudMenuItem OnClick="@(() => OpenScenePrompt(scene, ScenePromptKind.Voice))">Xem lời thoại</MudMenuItem>
+                                                <MudMenuItem OnClick="@(() => OpenSceneVoiceInstruction(scene))">Xem hướng dẫn giọng đọc</MudMenuItem>
+                                                <MudMenuItem OnClick="@(() => EditScenePromptsAsync(scene))">Chỉnh sửa toàn bộ</MudMenuItem>
+                                            </ChildContent>
+                                        </MudMenu>
+                                        <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning" OnClick="@(() => RerenderSceneImageAsync(scene))" Disabled="@(IsSceneRendering(scene))">@(string.IsNullOrWhiteSpace(scene.StaticImageUrl) ? "Tạo ảnh" : "Render lại ảnh")</MudButton>
+                                        <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Info" OnClick="@(() => ToggleImageHistoryAsync(scene))">Lịch sử ảnh</MudButton>
+                                        <MudTooltip Text="@SceneVideoDisabledReason(scene)">
+                                            <MudButton Size="Size.Small" Variant="Variant.Outlined" Disabled="@(!CanCreateSceneVideo(scene))" OnClick="@(() => RenderSceneVideoAsync(scene))">Tạo video</MudButton>
+                                        </MudTooltip>
+                                        <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Info" OnClick="@(() => ToggleVideoHistoryAsync(scene))">Lịch sử video</MudButton>
+                                        <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Success" OnClick="@(() => SaveSceneAsync(scene))" Disabled="@_busy">Lưu scene</MudButton>
                                     </MudStack>
-                                    @if (_imageHistorySceneId == context.Id)
+
+                                    @if (_imageHistorySceneId == scene.Id)
                                     {
-                                        @RenderImageHistoryPanel(context)
+                                        @RenderImageHistoryPanel(scene)
                                     }
-                                    @if (_videoHistorySceneId == context.Id)
+                                    @if (_videoHistorySceneId == scene.Id)
                                     {
-                                        @RenderVideoHistoryPanel(context)
+                                        @RenderVideoHistoryPanel(scene)
                                     }
                                 </MudStack>
-                            </MudTd>
-                        </RowTemplate>
-                    </MudTable>
+                            </MudPaper>
+                        }
+                    </MudStack>
                 }
             </MudTabPanel>
 
@@ -311,7 +347,7 @@
                             <MudText>Trạng thái: @_project.Status</MudText>
                             <MudText>Final video: @_project.FinalVideoUrl</MudText>
                             <MudStack Row="true" Spacing="2" Class="flex-wrap gap-2">
-                                <MudButton Color="Color.Warning" Variant="Variant.Filled" OnClick="EnqueueMergeAsync" Disabled="@(_busy || !CanMerge)">Tạo video kết quả</MudButton>
+                                <MudTooltip Text="Chưa cấu hình provider/merger video thật"><MudButton Color="Color.Warning" Variant="Variant.Filled" OnClick="EnqueueMergeAsync" Disabled="true">Tạo video kết quả</MudButton></MudTooltip>
                                 <MudButton Color="Color.Primary" Variant="Variant.Outlined" OnClick="ReloadAsync">Refresh</MudButton>
                                 <MudButton Color="Color.Info" Variant="Variant.Outlined" OnClick="ToggleFinalHistoryAsync">Lịch sử video hoàn chỉnh</MudButton>
                             </MudStack>
@@ -357,7 +393,7 @@
 
                     <MudPaper Class="todox-card pa-4 mt-4" rounded="true">
                         <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
-                            <MudText Typo="Typo.h6">Danh sách job render</MudText>
+                            <MudText Typo="Typo.h6">Lịch sử tác vụ xử lý</MudText>
                             <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="ReloadJobsAsync">Refresh jobs</MudButton>
                         </MudStack>
                         <MudDivider Class="my-2" />
@@ -392,10 +428,14 @@
 </MudStack>
 
 @code {
+    [SupplyParameterFromQuery(Name = "projectId")]
+    public long? QueryProjectId { get; set; }
+
     private int _tabIndex;
     private bool _busy;
     private long? _projectId;
     private VideoProjectDto? _project;
+    private List<VideoProjectListItemDto> _projects = new();
     private List<RenderJobDto> _jobs = new();
     private readonly List<ActiveCharacterDto> _characters = new();
     private ActiveCharacterDto? _selectedCharacter;
@@ -439,15 +479,30 @@
 
     protected override async Task OnInitializedAsync()
     {
+        _projectId = QueryProjectId;
         if (AuthState.CurrentUser is not null)
         {
             await LoadCharactersAsync();
+            await LoadProjectListAsync();
         }
         if (AuthState.CurrentUser is not null && _projectId is not null)
         {
             await ReloadAsync();
         }
         await StartPolling();
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (QueryProjectId is not null && QueryProjectId != _projectId)
+        {
+            _projectId = QueryProjectId;
+            if (AuthState.CurrentUser is not null)
+            {
+                await ReloadAsync();
+                _tabIndex = 1;
+            }
+        }
     }
 
     public void Dispose()
@@ -572,34 +627,36 @@
     }
 
     private static string BuildSceneMetadata(TodoXVideoScenePromptModel scene)
-        => string.Join(" | ", new[]
+        => new ScenePromptMetadata
         {
-            scene.ScenePurpose is null ? null : $"scene_purpose: {scene.ScenePurpose}",
-            scene.ImagePrompt is null ? null : $"image_prompt: {scene.ImagePrompt}",
-            scene.MotionPrompt is null ? null : $"motion_prompt: {scene.MotionPrompt}",
-            scene.Voice is null ? null : $"voice: {scene.Voice}",
-            scene.VoiceInstruction is null ? null : $"voice_instruction: {scene.VoiceInstruction}"
-        }.Where(x => !string.IsNullOrWhiteSpace(x)));
+            ScenePurpose = scene.ScenePurpose,
+            ImagePrompt = scene.ImagePrompt,
+            MotionPrompt = scene.MotionPrompt,
+            Voice = scene.Voice,
+            VoiceInstruction = scene.VoiceInstruction
+        }.Serialize();
 
     private string GetCharacterCardClass(long characterId)
         => $"pa-2 {(IsCharacterSelected(characterId) ? "todox-card-selected" : string.Empty)}".Trim();
 
     private static string ExtractScenePurpose(string? scenePrompt)
-        => ExtractValue(scenePrompt, "scene_purpose") ?? ExtractValue(scenePrompt, "purpose") ?? string.Empty;
+        => ScenePromptMetadata.Parse(scenePrompt).ScenePurpose ?? string.Empty;
 
     private string BuildInputDebugMessage()
         => $"PromptLength={_prompt.Length}, CharacterId={(_selectedCharacter?.Id.ToString() ?? "null")}, TotalSeconds={_totalSeconds}, SceneSeconds={_sceneSeconds}, ThinkScenes={_thinkScenes}, IsTodoX={_promptParseResult.IsTodoXPrompt}, Scenes={_promptParseResult.Model.Scenes.Count}";
 
     private static string? ExtractValue(string? source, string key)
     {
-        if (string.IsNullOrWhiteSpace(source)) return null;
-        var marker = $"{key}:";
-        var index = source.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
-        if (index < 0) return null;
-        var value = source[(index + marker.Length)..].Trim();
-        var separator = value.IndexOf('|');
-        if (separator >= 0) value = value[..separator].Trim();
-        return string.IsNullOrWhiteSpace(value) ? null : value;
+        var metadata = ScenePromptMetadata.Parse(source);
+        return key switch
+        {
+            "scene_purpose" or "purpose" => metadata.ScenePurpose,
+            "image_prompt" => metadata.ImagePrompt,
+            "motion_prompt" or "video_prompt" => metadata.MotionPrompt,
+            "voice" => metadata.Voice,
+            "voice_instruction" => metadata.VoiceInstruction,
+            _ => metadata.Extra.TryGetValue(key, out var value) ? value : null
+        };
     }
 
     private Task AddDebugAsync(string stepCode, string stepName, string status, string message, string? details = null)
@@ -637,20 +694,39 @@
     private async Task NewProjectAsync()
     {
         _projectId = null;
+        QueryProjectId = null;
         _project = null;
         _prompt = string.Empty;
         _characterPrompt = string.Empty;
         _totalSeconds = 16;
         _sceneSeconds = 8;
         _thinkScenes = false;
-        _tabIndex = 0;
+        _tabIndex = 1;
+        Navigation.NavigateTo("/render-job", replace: true);
         Snackbar.Add("Đã reset form tạo project mới.", Severity.Info);
         await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task LoadProjectListAsync()
+    {
+        if (AuthState.CurrentUser is null) return;
+        _projects = (await VideoRepo.ListProjectsAsync(AuthState.CurrentUser, 0, 50)).ToList();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task OpenProjectAsync(long projectId)
+    {
+        _projectId = projectId;
+        QueryProjectId = projectId;
+        Navigation.NavigateTo($"/render-job?projectId={projectId}", replace: false);
+        await ReloadAsync();
+        _tabIndex = 1;
     }
 
     private async Task ReloadAsync()
     {
         if (_projectId is null) return;
+        if (AuthState.CurrentUser is null) return;
 
         // Guard against overlapping ReloadAsync calls from concurrent polling/UI refresh. Non-blocking: if
         // already reloading, skip this call instead of queueing (the next poll will catch the new state).
@@ -662,7 +738,7 @@
         {
             try
             {
-                _project = await VideoRepo.GetProjectAsync(_projectId.Value);
+                _project = await VideoRepo.GetProjectAsync(_projectId.Value, AuthState.CurrentUser);
             }
             catch (Exception ex)
             {
@@ -673,12 +749,20 @@
             {
                 _thinkScenes = _project.ThinkScenes;
                 _prompt = _project.OriginalPrompt;
+                _totalSeconds = _project.TotalSeconds;
+                _sceneSeconds = _project.SceneSeconds;
+                _selectedCharacterId = _project.CharacterId;
                 if (_project.CharacterId is not null)
                 {
                     await OnCharacterChangedAsync(_project.CharacterId);
                 }
+                else
+                {
+                    await ClearSelectedCharacterAsync();
+                }
                 RebuildSceneEventState();
                 await ReloadJobsAsync();
+                await LoadProjectListAsync();
             }
         }
         finally
@@ -792,11 +876,12 @@
 
     private Task OpenScenePrompt(VideoProjectSceneDto scene, ScenePromptKind kind)
     {
+        var metadata = ScenePromptMetadata.FromScene(scene);
         var prompt = kind switch
         {
-            ScenePromptKind.Image => scene.ImagePrompt,
-            ScenePromptKind.Motion => scene.VideoPrompt,
-            ScenePromptKind.Voice => ExtractValue(scene.ScenePrompt, "voice"),
+            ScenePromptKind.Image => metadata.ImagePrompt,
+            ScenePromptKind.Motion => metadata.MotionPrompt,
+            ScenePromptKind.Voice => metadata.Voice,
             _ => scene.ScenePrompt
         } ?? string.Empty;
         var title = kind switch
@@ -809,13 +894,91 @@
         var parameters = new DialogParameters
         {
             ["Text"] = prompt,
-            ["Title"] = title,
-            ["OnRenderAgain"] = EventCallback.Factory.Create(this, () => RerenderSceneImageAsync(scene))
+            ["Title"] = title
         };
         var options = new DialogOptions { CloseButton = true, FullWidth = true, MaxWidth = MaxWidth.Medium };
         _ = DialogService.ShowAsync<Components.Dialogs.TextViewerDialog>(title, parameters, options);
         return Task.CompletedTask;
     }
+
+    private Task OpenSceneVoiceInstruction(VideoProjectSceneDto scene)
+    {
+        var metadata = ScenePromptMetadata.FromScene(scene);
+        var title = "Xem hướng dẫn giọng đọc";
+        var parameters = new DialogParameters
+        {
+            ["Text"] = metadata.VoiceInstruction ?? string.Empty,
+            ["Title"] = title
+        };
+        var options = new DialogOptions { CloseButton = true, FullWidth = true, MaxWidth = MaxWidth.Medium };
+        _ = DialogService.ShowAsync<Components.Dialogs.TextViewerDialog>(title, parameters, options);
+        return Task.CompletedTask;
+    }
+
+    private RenderFragment RenderSceneImageFrame(VideoProjectSceneDto scene, SceneImageVisualState sceneState) => @<div class="scene-media-frame">
+        @if (sceneState == SceneImageVisualState.Ready && !string.IsNullOrWhiteSpace(scene.StaticImageUrl))
+        {
+            <img src="@SceneImageUrl(scene)" class="scene-media-image" @onclick="@(() => OpenScenePreview(scene))" />
+        }
+        else if (sceneState is SceneImageVisualState.Rendering or SceneImageVisualState.Queued or SceneImageVisualState.Retrying)
+        {
+            <div class="scene-image-frame @SceneStateCss(sceneState)">
+                @if (!string.IsNullOrWhiteSpace(scene.StaticImageUrl))
+                {
+                    <img src="@SceneImageUrl(scene)" class="scene-media-image scene-image-dim" />
+                }
+                <div class="scene-image-shimmer"></div>
+                <span class="scene-image-label">@SceneStateLabel(sceneState)</span>
+            </div>
+        }
+        else if (sceneState == SceneImageVisualState.Failed)
+        {
+            <div class="scene-thumb-placeholder scene-image-failed">Lỗi render ảnh</div>
+        }
+        else
+        {
+            <div class="scene-thumb-placeholder">Chưa render ảnh</div>
+        }
+    </div>;
+
+    private RenderFragment RenderSceneVideoFrame(VideoProjectSceneDto scene, ScenePromptMetadata metadata) => @<div class="scene-media-frame">
+        @if (!string.IsNullOrWhiteSpace(scene.SceneVideoUrl))
+        {
+            <video src="@scene.SceneVideoUrl" poster="@scene.StaticImageUrl" controls class="scene-media-video"></video>
+        }
+        else if (string.IsNullOrWhiteSpace(scene.StaticImageUrl))
+        {
+            <div class="scene-thumb-placeholder">Cần chọn/render ảnh trước</div>
+        }
+        else if (scene.Status is VideoSceneStatuses.VideoQueued or VideoSceneStatuses.VideoRendering)
+        {
+            <div class="scene-image-frame scene-image-rendering">
+                <img src="@SceneImageUrl(scene)" class="scene-media-image scene-image-dim" />
+                <div class="scene-image-shimmer"></div>
+                <span class="scene-image-label">@SceneLabel(scene.Status)</span>
+            </div>
+        }
+        else
+        {
+            <div class="scene-video-ready">
+                <img src="@SceneImageUrl(scene)" class="scene-media-image scene-image-dim" />
+                <MudText Typo="Typo.caption">Sẵn sàng tạo video</MudText>
+                <MudText Typo="Typo.caption">@ShortText(metadata.MotionPrompt)</MudText>
+            </div>
+        }
+        @if (string.Equals(scene.Status, VideoSceneStatuses.Failed, StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(scene.ErrorMessage))
+        {
+            <MudText Typo="Typo.caption" Color="Color.Error">@scene.ErrorMessage</MudText>
+        }
+    </div>;
+
+    private bool CanCreateSceneVideo(VideoProjectSceneDto scene)
+        => false;
+
+    private string SceneVideoDisabledReason(VideoProjectSceneDto scene)
+        => string.IsNullOrWhiteSpace(scene.StaticImageUrl)
+            ? "Cần chọn/render ảnh trước"
+            : "Chưa cấu hình provider image-to-video";
 
     private Task CheckPromptAsync()
     {
@@ -893,10 +1056,40 @@
     private async Task SaveSceneAsync(VideoProjectSceneDto scene)
     {
         if (_projectId is null) return;
+        NormalizeScenePrompts(scene);
         await VideoRepo.UpdateSceneAsync(scene.Id, scene.Status, scene.StaticImageUrl, scene.StaticImagePath, scene.SceneVideoUrl, scene.SceneVideoPath, scene.ErrorMessage, scene.Title, scene.ScenePrompt, scene.ImagePrompt, scene.VideoPrompt);
         Snackbar.Add("Đã lưu scene.", Severity.Success);
         await LogProjectEvent("SCENE_SAVED", "info", $"Đã lưu scene {scene.SceneIndex}.", new { scene.Id, scene.SceneIndex, scene.Status });
         await ReloadAsync();
+    }
+
+    private async Task EditScenePromptsAsync(VideoProjectSceneDto scene)
+    {
+        var parameters = new DialogParameters
+        {
+            [nameof(Components.Dialogs.ScenePromptEditorDialog.Metadata)] = ScenePromptMetadata.FromScene(scene),
+            [nameof(Components.Dialogs.ScenePromptEditorDialog.IsRendering)] = IsSceneRendering(scene) || ResolveSceneImageState(scene) is SceneImageVisualState.Queued or SceneImageVisualState.Rendering or SceneImageVisualState.Retrying
+        };
+        var options = new DialogOptions { CloseButton = true, FullWidth = true, MaxWidth = MaxWidth.Medium };
+        var dialog = await DialogService.ShowAsync<Components.Dialogs.ScenePromptEditorDialog>($"Chỉnh prompt scene {scene.SceneIndex}", parameters, options);
+        var result = await dialog.Result;
+        if (result is null || result.Canceled || result.Data is not ScenePromptMetadata metadata)
+        {
+            return;
+        }
+
+        scene.ImagePrompt = metadata.ImagePrompt;
+        scene.VideoPrompt = metadata.MotionPrompt;
+        scene.ScenePrompt = metadata.Serialize();
+        await SaveSceneAsync(scene);
+    }
+
+    private static void NormalizeScenePrompts(VideoProjectSceneDto scene)
+    {
+        var metadata = ScenePromptMetadata.FromScene(scene);
+        scene.ImagePrompt = metadata.ImagePrompt;
+        scene.VideoPrompt = metadata.MotionPrompt;
+        scene.ScenePrompt = metadata.Serialize();
     }
 
     private async Task SaveJobAsync()
@@ -906,8 +1099,23 @@
         _busy = true;
         try
         {
+            foreach (var scene in _project.Scenes)
+            {
+                NormalizeScenePrompts(scene);
+            }
+
             var snapshot = BuildJobSnapshot();
-            await LogProjectEvent("JOB_SAVED", "info", "Lưu job render-job.", snapshot);
+            await VideoRepo.UpdateProjectDraftAsync(_project.Id, new VideoProjectUpdateRequest
+            {
+                Title = _project.Title,
+                OriginalPrompt = _prompt,
+                CharacterId = _selectedCharacter?.Id ?? _selectedCharacterId,
+                TotalSeconds = _totalSeconds,
+                SceneSeconds = Math.Max(1, _sceneSeconds),
+                ThinkScenes = _thinkScenes,
+                Scenes = _project.Scenes.OrderBy(x => x.SceneIndex).ToList()
+            }, AuthState.CurrentUser);
+            await LogProjectEvent("JOB_SAVED", "info", "Lưu video project render-job.", snapshot);
             Snackbar.Add("Đã lưu job.", Severity.Success);
             await ReloadAsync();
         }
@@ -1378,6 +1586,17 @@
     private static string FormatMoney(decimal? value)
         => value.HasValue ? value.Value.ToString("0.######") : "N/A";
 
+    private string ProjectCardClass(VideoProjectListItemDto item)
+        => $"pa-3 render-project-card {(_projectId == item.Id ? "render-project-card-active" : string.Empty)}";
+
+    private static Color ProjectStatusColor(string status) => status switch
+    {
+        VideoProjectStatuses.Completed => Color.Success,
+        VideoProjectStatuses.Rendering or VideoProjectStatuses.Merging or VideoProjectStatuses.SceneReady or VideoProjectStatuses.ReadyToMerge => Color.Warning,
+        VideoProjectStatuses.Failed => Color.Error,
+        _ => Color.Default
+    };
+
     // A scene is "pending an image" when it has no successful static image yet and is not in a terminal
     // failed state — i.e. the background batch is expected to still produce it.
     private bool HasPendingSceneImages()
@@ -1536,55 +1755,21 @@
     }
 
     private Task RenderSceneVideoAsync(VideoProjectSceneDto scene)
-        => EnqueueRenderAllScenesAsync();
+    {
+        Snackbar.Add(SceneVideoDisabledReason(scene), Severity.Info);
+        return Task.CompletedTask;
+    }
 
     private async Task EnqueueRenderAllScenesAsync()
     {
-        if (_project is null || AuthState.CurrentUser is null) return;
-        await EnqueueVideoJobAsync("render_video_job");
+        Snackbar.Add("Chưa cấu hình provider image-to-video.", Severity.Info);
+        await Task.CompletedTask;
     }
 
     private async Task EnqueueMergeAsync()
     {
-        if (_project is null || AuthState.CurrentUser is null) return;
-        await EnqueueVideoJobAsync("merge_video_job");
-    }
-
-    private async Task EnqueueVideoJobAsync(string jobType)
-    {
-        if (_project is null || AuthState.CurrentUser is null) return;
-        var input = new { projectId = _project.Id, mockMode = true };
-        var logCode = BuildLogCode();
-        var job = await RenderJobs.EnqueueAsync(new RenderJobCreateModel
-        {
-            JobType = jobType,
-            UserId = AuthState.CurrentUser.UserId,
-            CustomerId = AuthState.CurrentUser.CustomerId,
-            Input = input,
-            Prompt = new { projectId = _project.Id },
-            LogCode = logCode,
-            ProviderCode = "todox_video_mock",
-            ModelCode = "mock_scene_video",
-            MaxAttempts = 1,
-            PointCostEstimate = 0,
-            PointStatus = RenderPointStatuses.NotRequired
-        });
-        Snackbar.Add($"Đã tạo job video: {job.Id}", Severity.Success);
-        await LogProjectEvent("JOB_ENQUEUED", "info", $"Đã enqueue job {jobType}.", new { job.Id, job.JobType, job.Status });
-        _tabIndex = 2;
-        await ReloadAsync();
-    }
-
-    private async Task<string> LoadMockImageBase64Async()
-    {
-        var png = new byte[]
-        {
-            0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A,0x00,0x00,0x00,0x0D,0x49,0x48,0x44,0x52,
-            0x00,0x00,0x01,0x00,0x00,0x00,0x01,0x00,0x08,0x06,0x00,0x00,0x00,0x5C,0x72,0xA8,0x66,
-            0x00,0x00,0x00,0x0C,0x49,0x44,0x41,0x54,0x78,0x9C,0x63,0xF8,0xCF,0xC0,0x00,0x00,0x03,0x01,0x01,0x00,0x18,0xDD,0x8D,0x18,
-            0x00,0x00,0x00,0x00,0x49,0x45,0x4E,0x44,0xAE,0x42,0x60,0x82
-        };
-        return Convert.ToBase64String(png);
+        Snackbar.Add("Chưa cấu hình provider/merger video thật.", Severity.Info);
+        await Task.CompletedTask;
     }
 
     private void OpenUrl(string url) => JS.InvokeVoidAsync("open", url);

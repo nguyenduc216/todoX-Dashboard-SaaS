@@ -179,6 +179,194 @@ public sealed class VideoRenderRepository
         }
     }
 
+    public async Task<VideoProjectDto?> GetProjectAsync(long projectId, CurrentUserSession user, CancellationToken ct = default)
+    {
+        var project = await GetProjectAsync(projectId, ct);
+        if (project is null || CanAccessProject(project, user))
+        {
+            return project;
+        }
+
+        return null;
+    }
+
+    public async Task<IReadOnlyList<VideoProjectListItemDto>> ListProjectsAsync(CurrentUserSession user, int skip = 0, int take = 30, CancellationToken ct = default)
+    {
+        try
+        {
+            await _tenant.EnsureLoadedAsync(ct);
+            using var conn = await _factory.OpenAsync(ct);
+            var rows = await conn.QueryAsync<VideoProjectListItemDto>(
+                """
+                SELECT p.id AS Id,
+                       p.user_id AS UserId,
+                       p.customer_id AS CustomerId,
+                       p.title AS Title,
+                       p.character_id AS CharacterId,
+                       c.character_name AS CharacterName,
+                       COALESCE(count(s.id), 0)::int AS SceneCount,
+                       COALESCE(count(s.id) FILTER (WHERE s.static_image_url IS NOT NULL AND s.static_image_url <> ''), 0)::int AS ImageReadyCount,
+                       COALESCE(count(s.id) FILTER (WHERE s.scene_video_url IS NOT NULL AND s.scene_video_url <> ''), 0)::int AS VideoReadyCount,
+                       p.status AS Status,
+                       (
+                         SELECT s2.static_image_url
+                           FROM video_render.video_project_scenes s2
+                          WHERE s2.project_id = p.id
+                            AND s2.tenant_id = p.tenant_id
+                            AND s2.static_image_url IS NOT NULL
+                            AND s2.static_image_url <> ''
+                          ORDER BY s2.updated_at DESC, s2.scene_index
+                          LIMIT 1
+                       ) AS ThumbnailUrl,
+                       p.created_at AS CreatedAt,
+                       p.updated_at AS UpdatedAt
+                  FROM video_render.video_projects p
+                  LEFT JOIN video_render.video_project_scenes s ON s.project_id = p.id AND s.tenant_id = p.tenant_id
+                  LEFT JOIN public.todox_ai_character c ON c.id = p.character_id
+                 WHERE p.tenant_id = @tenant
+                   AND (
+                        @canCrossCustomer
+                        OR p.user_id = @userId
+                        OR (@customerId IS NOT NULL AND p.customer_id IS NOT DISTINCT FROM @customerId)
+                   )
+                 GROUP BY p.id, c.character_name
+                 ORDER BY p.updated_at DESC, p.created_at DESC
+                 OFFSET @skip LIMIT @take;
+                """,
+                new
+                {
+                    tenant = _tenant.TenantId,
+                    userId = user.UserId,
+                    customerId = user.CustomerId,
+                    canCrossCustomer = CanCrossCustomer(user),
+                    skip = Math.Max(0, skip),
+                    take = Math.Clamp(take, 1, 100)
+                });
+            return rows.ToList();
+        }
+        catch (Exception ex) when (DbDiagnostics.LogPostgresException(_logger, ex, "video_render_list_projects"))
+        {
+            throw;
+        }
+    }
+
+    public async Task UpdateProjectDraftAsync(long projectId, VideoProjectUpdateRequest request, CurrentUserSession user, CancellationToken ct = default)
+    {
+        try
+        {
+            await _tenant.EnsureLoadedAsync(ct);
+            using var conn = await _factory.OpenAsync(ct);
+            using var tx = conn.BeginTransaction();
+
+            var project = await conn.QuerySingleOrDefaultAsync<VideoProjectDto>(
+                """
+                SELECT id AS Id, tenant_id AS TenantId, user_id AS UserId, customer_id AS CustomerId, title AS Title,
+                       original_prompt AS OriginalPrompt, total_seconds AS TotalSeconds, scene_seconds AS SceneSeconds,
+                       scene_count AS SceneCount, think_scenes AS ThinkScenes, character_id AS CharacterId,
+                       status AS Status, created_at AS CreatedAt, updated_at AS UpdatedAt
+                  FROM video_render.video_projects
+                 WHERE id=@projectId AND tenant_id=@tenant
+                 FOR UPDATE;
+                """,
+                new { projectId, tenant = _tenant.TenantId }, tx);
+            if (project is null || !CanAccessProject(project, user))
+            {
+                tx.Rollback();
+                throw new UnauthorizedAccessException("Bạn không có quyền lưu project render này.");
+            }
+
+            var scenes = request.Scenes.OrderBy(x => x.SceneIndex).ToList();
+            await conn.ExecuteAsync(
+                """
+                UPDATE video_render.video_projects
+                   SET title=@title,
+                       original_prompt=@prompt,
+                       character_id=@characterId,
+                       total_seconds=@totalSeconds,
+                       scene_seconds=@sceneSeconds,
+                       scene_count=@sceneCount,
+                       think_scenes=@thinkScenes,
+                       updated_at=now()
+                 WHERE id=@projectId AND tenant_id=@tenant;
+                """,
+                new
+                {
+                    projectId,
+                    tenant = _tenant.TenantId,
+                    title = request.Title,
+                    prompt = request.OriginalPrompt,
+                    characterId = request.CharacterId,
+                    totalSeconds = Math.Max(1, request.TotalSeconds),
+                    sceneSeconds = Math.Max(1, request.SceneSeconds),
+                    sceneCount = scenes.Count,
+                    thinkScenes = request.ThinkScenes
+                }, tx);
+
+            foreach (var scene in scenes)
+            {
+                await conn.ExecuteAsync(
+                    """
+                    UPDATE video_render.video_project_scenes
+                       SET scene_index=@sceneIndex,
+                           title=@title,
+                           duration_seconds=@durationSeconds,
+                           scene_prompt=@scenePrompt,
+                           image_prompt=@imagePrompt,
+                           video_prompt=@videoPrompt,
+                           status=@status,
+                           error_message=@errorMessage,
+                           updated_at=now()
+                     WHERE id=@sceneId
+                       AND project_id=@projectId
+                       AND tenant_id=@tenant;
+                    """,
+                    new
+                    {
+                        sceneId = scene.Id,
+                        projectId,
+                        tenant = _tenant.TenantId,
+                        sceneIndex = scene.SceneIndex,
+                        title = scene.Title,
+                        durationSeconds = Math.Max(1, scene.DurationSeconds),
+                        scenePrompt = scene.ScenePrompt,
+                        imagePrompt = scene.ImagePrompt,
+                        videoPrompt = scene.VideoPrompt,
+                        status = string.IsNullOrWhiteSpace(scene.Status) ? VideoSceneStatuses.Draft : scene.Status,
+                        errorMessage = scene.ErrorMessage
+                    }, tx);
+            }
+
+            await conn.ExecuteAsync(
+                """
+                INSERT INTO video_render.video_project_events
+                    (project_id, tenant_id, event_type, level, message, data_json, created_at)
+                VALUES
+                    (@projectId, @tenant, 'PROJECT_SAVED', 'info', 'Video project saved from /render-job.', CAST(@data AS jsonb), now());
+                """,
+                new
+                {
+                    projectId,
+                    tenant = _tenant.TenantId,
+                    data = JsonSerializer.Serialize(new
+                    {
+                        projectId,
+                        request.Title,
+                        request.CharacterId,
+                        request.TotalSeconds,
+                        request.SceneSeconds,
+                        request.ThinkScenes,
+                        sceneCount = scenes.Count
+                    }, JsonOptions)
+                }, tx);
+
+            tx.Commit();
+        }
+        catch (Exception ex) when (DbDiagnostics.LogPostgresException(_logger, ex, "video_render_update_project_draft"))
+        {
+            throw;
+        }
+    }
+
     public async Task<VideoProjectSceneDto?> GetSceneAsync(long sceneId, CancellationToken ct = default)
     {
         try
@@ -339,4 +527,15 @@ public sealed class VideoRenderRepository
 
         return $"Scene {sceneIndex}/{sceneCount}, duration {durationSeconds}s. Based on: {text}. Make the scene clear, visual, vertical 9:16, with distinct action and camera movement.";
     }
+
+    private static bool CanAccessProject(VideoProjectDto project, CurrentUserSession user)
+        => CanCrossCustomer(user)
+           || project.UserId == user.UserId
+           || (user.CustomerId is not null && project.CustomerId == user.CustomerId);
+
+    private static bool CanCrossCustomer(CurrentUserSession user)
+        => user.IsRoot
+           || user.Can("video.render.manage")
+           || user.Can("render.video.manage")
+           || user.Can("ai.video.version.manage");
 }

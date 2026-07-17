@@ -1,0 +1,73 @@
+@using TodoX.Web.Services.VideoRender
+
+<MudDialog>
+    <DialogContent>
+        <MudStack Spacing="2">
+            @if (IsRendering)
+            {
+                <MudAlert Severity="Severity.Warning" Dense="true">Scene đang render. Thay đổi prompt chỉ áp dụng cho lần render tiếp theo và không sửa snapshot version cũ.</MudAlert>
+            }
+            @if (!string.IsNullOrWhiteSpace(_scenePurpose))
+            {
+                <MudTextField T="string" Label="Mục đích scene" @bind-Value="_scenePurpose" Variant="Variant.Outlined" Lines="2" />
+            }
+            <MudTextField T="string" Label="Prompt hình ảnh" @bind-Value="_imagePrompt" Variant="Variant.Outlined" Lines="5" Required="true" />
+            <MudTextField T="string" Label="Prompt chuyển động/video" @bind-Value="_motionPrompt" Variant="Variant.Outlined" Lines="5" Required="true" />
+            <MudTextField T="string" Label="Lời thoại/voice" @bind-Value="_voice" Variant="Variant.Outlined" Lines="4" />
+            <MudTextField T="string" Label="Hướng dẫn giọng đọc/voice_instruction" @bind-Value="_voiceInstruction" Variant="Variant.Outlined" Lines="4" />
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton Variant="Variant.Text" OnClick="Cancel">Hủy</MudButton>
+        <MudButton Color="Color.Success" Variant="Variant.Filled" OnClick="Submit" Disabled="@(!CanSubmit)">Lưu</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter] public ScenePromptMetadata Metadata { get; set; } = new();
+    [Parameter] public bool IsRendering { get; set; }
+
+    private string? _scenePurpose;
+    private string? _imagePrompt;
+    private string? _motionPrompt;
+    private string? _voice;
+    private string? _voiceInstruction;
+
+    private bool CanSubmit
+        => !string.IsNullOrWhiteSpace(_imagePrompt)
+           && !string.IsNullOrWhiteSpace(_motionPrompt);
+
+    protected override void OnInitialized()
+    {
+        _scenePurpose = Metadata.ScenePurpose;
+        _imagePrompt = Metadata.ImagePrompt;
+        _motionPrompt = Metadata.MotionPrompt;
+        _voice = Metadata.Voice;
+        _voiceInstruction = Metadata.VoiceInstruction;
+    }
+
+    private void Submit()
+    {
+        var result = new ScenePromptMetadata
+        {
+            ScenePurpose = TrimOrNull(_scenePurpose),
+            ImagePrompt = TrimOrNull(_imagePrompt),
+            MotionPrompt = TrimOrNull(_motionPrompt),
+            Voice = TrimOrNull(_voice),
+            VoiceInstruction = TrimOrNull(_voiceInstruction)
+        };
+        foreach (var item in Metadata.Extra)
+        {
+            result.Extra[item.Key] = item.Value;
+        }
+
+        MudDialog.Close(DialogResult.Ok(result));
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+
+    private static string? TrimOrNull(string? value)
+        => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+}

@@ -88,6 +88,23 @@ public sealed class VideoProjectEventDto
     public DateTime CreatedAt { get; set; }
 }
 
+public sealed class VideoProjectListItemDto
+{
+    public long Id { get; set; }
+    public Guid? UserId { get; set; }
+    public Guid? CustomerId { get; set; }
+    public string? Title { get; set; }
+    public long? CharacterId { get; set; }
+    public string? CharacterName { get; set; }
+    public int SceneCount { get; set; }
+    public int ImageReadyCount { get; set; }
+    public int VideoReadyCount { get; set; }
+    public string Status { get; set; } = VideoProjectStatuses.Draft;
+    public string? ThumbnailUrl { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+}
+
 public sealed class VideoProjectCreateRequest
 {
     public string Prompt { get; set; } = string.Empty;
@@ -118,6 +135,17 @@ public sealed class VideoProjectSaveSceneRequest
     public string ScenePrompt { get; set; } = string.Empty;
     public string? ImagePrompt { get; set; }
     public string? VideoPrompt { get; set; }
+}
+
+public sealed class VideoProjectUpdateRequest
+{
+    public string? Title { get; set; }
+    public string OriginalPrompt { get; set; } = string.Empty;
+    public long? CharacterId { get; set; }
+    public int TotalSeconds { get; set; }
+    public int SceneSeconds { get; set; }
+    public bool ThinkScenes { get; set; }
+    public IReadOnlyList<VideoProjectSceneDto> Scenes { get; set; } = Array.Empty<VideoProjectSceneDto>();
 }
 
 public sealed class VideoProjectSplitResult
