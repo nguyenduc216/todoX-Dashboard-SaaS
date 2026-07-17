@@ -10,6 +10,7 @@
 @inject TodoX.Web.Services.AiCharacters.IAiCharacterService Characters
 @inject TodoX.Web.Services.VideoRender.ITodoXVideoPromptParser PromptParser
 @inject TodoX.Web.Services.AiProviders.IAiImageRenderRouter ImageRenderRouter
+@inject TodoX.Web.Services.AiProviders.IAiProviderService AiProviders
 @inject TodoX.Web.Services.Media.IMediaFileService MediaFiles
 @inject TodoX.Web.Services.VideoRender.ISceneMediaVersioningService SceneVersions
 @inject IOptionsMonitor<TodoX.Web.Services.VideoRender.VideoRenderOptions> VideoOptions
@@ -320,7 +321,7 @@ else
                         <MudChip T="string" Color="Color.Warning">Đang render: @_project.Scenes.Count(x => x.Status is VideoSceneStatuses.VideoQueued or VideoSceneStatuses.VideoRendering)</MudChip>
                         <MudChip T="string" Color="Color.Success">Hoàn tất: @_project.Scenes.Count(x => !string.IsNullOrWhiteSpace(x.SceneVideoUrl))</MudChip>
                         <MudChip T="string" Color="Color.Error">Lỗi: @_project.Scenes.Count(x => x.Status == VideoSceneStatuses.Failed)</MudChip>
-                        <MudTooltip Text="Chưa cấu hình provider image-to-video"><MudButton Variant="Variant.Filled" Color="Color.Warning" OnClick="EnqueueRenderAllScenesAsync" Disabled="true">Render video còn thiếu</MudButton></MudTooltip>
+                        <MudTooltip Text="@BulkSceneVideoDisabledReason()"><MudButton Variant="Variant.Filled" Color="Color.Warning" OnClick="EnqueueRenderAllScenesAsync" Disabled="@(!CanEnqueueSceneVideos())">Render video còn thiếu</MudButton></MudTooltip>
                         <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="ReloadAsync" Disabled="@_busy">Refresh</MudButton>
                     </MudStack>
 
@@ -376,7 +377,7 @@ else
                             <MudText>Trạng thái: @_project.Status</MudText>
                             <MudText>Final video: @_project.FinalVideoUrl</MudText>
                             <MudStack Row="true" Spacing="2" Class="flex-wrap gap-2">
-                                <MudTooltip Text="Chưa cấu hình provider/merger video thật"><MudButton Color="Color.Warning" Variant="Variant.Filled" OnClick="EnqueueMergeAsync" Disabled="true">Tạo video kết quả</MudButton></MudTooltip>
+                                <MudTooltip Text="Ghép các scene video đang được chọn thành final video"><MudButton Color="Color.Warning" Variant="Variant.Filled" OnClick="EnqueueMergeAsync" Disabled="@(!CanMerge)">Tạo video kết quả</MudButton></MudTooltip>
                                 <MudButton Color="Color.Primary" Variant="Variant.Outlined" OnClick="ReloadAsync">Refresh</MudButton>
                                 <MudButton Color="Color.Info" Variant="Variant.Outlined" OnClick="ToggleFinalHistoryAsync">Lịch sử video hoàn chỉnh</MudButton>
                             </MudStack>
@@ -509,6 +510,7 @@ else
     private readonly Dictionary<long, SceneEditorState> _sceneDrafts = new();
     private IReadOnlyList<TodoX.Web.Services.VideoRender.FinalVideoVersionDto> _finalVersions = Array.Empty<TodoX.Web.Services.VideoRender.FinalVideoVersionDto>();
     private readonly Dictionary<Guid, IReadOnlyList<TodoX.Web.Services.VideoRender.FinalVideoVersionItemDto>> _finalVersionItems = new();
+    private ProviderOptionDto? _defaultImageToVideoProvider;
     private long? _imageHistorySceneId;
     private long? _videoHistorySceneId;
     private bool _showFinalHistory;
@@ -918,6 +920,7 @@ else
                 }
                 ReconcileSceneDrafts();
                 RebuildSceneEventState();
+                _defaultImageToVideoProvider = await AiProviders.GetDefaultProviderAsync(AiProviderCatalog.ImageToVideo);
                 await ReloadJobsAsync();
             }
         }
@@ -1251,16 +1254,41 @@ else
     </div>;
 
     private bool CanCreateSceneVideo(VideoProjectSceneDto scene, SceneEditorState draft)
-        => false;
+        => !string.IsNullOrWhiteSpace(ResolveDraftImageUrl(scene, draft))
+           && !string.IsNullOrWhiteSpace(draft.MotionPrompt)
+           && HasProjectAspectRatio
+           && HasProjectResolution
+           && _defaultImageToVideoProvider is not null;
 
     private string SceneVideoDisabledReason(VideoProjectSceneDto scene, SceneEditorState draft)
         => string.IsNullOrWhiteSpace(ResolveDraftImageUrl(scene, draft))
             ? "Cần chọn/render ảnh trước"
             : string.IsNullOrWhiteSpace(draft.MotionPrompt)
                 ? "Cần nhập prompt video"
+            : !HasProjectAspectRatio
+                ? "Cần chọn tỷ lệ video"
             : !HasProjectResolution
                 ? "Cần chọn độ phân giải video"
-            : "Chưa cấu hình provider image-to-video";
+            : _defaultImageToVideoProvider is null
+                ? "Chưa cấu hình provider image-to-video"
+                : string.Empty;
+
+    private bool CanEnqueueSceneVideos()
+        => _project is not null
+           && _project.Scenes.Any(scene => CanCreateSceneVideo(scene, GetSceneDraft(scene)));
+
+    private string BulkSceneVideoDisabledReason()
+        => _project is null
+            ? "Chưa có project"
+            : !HasProjectAspectRatio
+                ? "Cần chọn tỷ lệ video"
+            : !HasProjectResolution
+                ? "Cần chọn độ phân giải video"
+            : _defaultImageToVideoProvider is null
+                ? "Chưa cấu hình provider image-to-video"
+                : !_project.Scenes.Any(scene => CanCreateSceneVideo(scene, GetSceneDraft(scene)))
+                    ? "Không có scene nào đủ điều kiện render video"
+                    : string.Empty;
 
     private Task CheckPromptAsync()
     {
@@ -2266,25 +2294,156 @@ else
 
     private Task RenderSceneVideoAsync(VideoProjectSceneDto scene)
     {
-        if (!EnsureResolutionSelected())
-        {
-            return Task.CompletedTask;
-        }
-
-        Snackbar.Add(SceneVideoDisabledReason(scene, GetSceneDraft(scene)), Severity.Info);
-        return Task.CompletedTask;
+        return EnqueueSceneVideoAsync(scene);
     }
 
     private async Task EnqueueRenderAllScenesAsync()
     {
-        Snackbar.Add("Chưa cấu hình provider image-to-video.", Severity.Info);
-        await Task.CompletedTask;
+        if (_project is null || AuthState.CurrentUser is null) return;
+        if (!EnsureAspectRatioSelected() || !EnsureResolutionSelected())
+        {
+            return;
+        }
+        if (_defaultImageToVideoProvider is null)
+        {
+            Snackbar.Add("Chưa cấu hình provider image-to-video.", Severity.Warning);
+            return;
+        }
+
+        var sceneIds = _project.Scenes
+            .Where(scene => CanCreateSceneVideo(scene, GetSceneDraft(scene)))
+            .Select(scene => scene.Id)
+            .ToArray();
+        if (sceneIds.Length == 0)
+        {
+            Snackbar.Add("Không có scene nào đủ điều kiện render video.", Severity.Info);
+            return;
+        }
+
+        var input = new TodoX.Web.Services.VideoRender.SceneVideoRenderInput
+        {
+            ProjectId = _project.Id,
+            SceneIds = sceneIds,
+            AspectRatio = _aspectRatio,
+            Resolution = _resolution,
+            UserId = AuthState.CurrentUser.UserId,
+            CustomerId = AuthState.CurrentUser.CustomerId,
+            CreatedBy = AuthState.CurrentUser.Email ?? AuthState.CurrentUser.UserId.ToString(),
+            TrustedPayerContext = TodoX.Web.Services.AiProviders.AiBillingPayerResolver.CreateTrustedBackgroundContext(AuthState.CurrentUser)
+        };
+
+        var (job, alreadyActive) = await RenderJobs.EnqueueForProjectIfNoneActiveAsync(new RenderJobCreateModel
+        {
+            JobType = TodoX.Web.Services.VideoRender.SceneVideoRenderHandler.JobTypeName,
+            UserId = AuthState.CurrentUser.UserId,
+            CustomerId = AuthState.CurrentUser.CustomerId,
+            Input = input,
+            Prompt = new { projectId = _project.Id, sceneIds },
+            LogCode = BuildLogCode(),
+            ProviderCode = TodoX.Web.Services.VideoRender.SceneVideoRenderHandler.RoutingProviderCode,
+            ModelCode = TodoX.Web.Services.VideoRender.SceneVideoRenderHandler.RoutingModelCode,
+            MaxAttempts = 1,
+            PointCostEstimate = 0,
+            PointStatus = RenderPointStatuses.Pending
+        }, _project.Id);
+
+        if (alreadyActive)
+        {
+            Snackbar.Add("Project này đang có job render video scene đang chạy.", Severity.Info);
+        }
+        else
+        {
+            await LogProjectEvent("SCENE_VIDEO_BATCH_ENQUEUED", "info", "Đã enqueue batch render scene video.",
+                new { job.Id, sceneCount = sceneIds.Length, provider = _defaultImageToVideoProvider.ProviderCode, model = _defaultImageToVideoProvider.ModelName });
+            Snackbar.Add($"Đã enqueue render video cho {sceneIds.Length} scene.", Severity.Success);
+        }
+
+        await StartPolling();
     }
 
     private async Task EnqueueMergeAsync()
     {
-        Snackbar.Add("Chưa cấu hình provider/merger video thật.", Severity.Info);
-        await Task.CompletedTask;
+        if (_project is null || AuthState.CurrentUser is null) return;
+        if (!CanMerge)
+        {
+            Snackbar.Add("Cần tất cả scene có video sẵn sàng trước khi ghép.", Severity.Warning);
+            return;
+        }
+
+        var (job, alreadyActive) = await RenderJobs.EnqueueForProjectIfNoneActiveAsync(new RenderJobCreateModel
+        {
+            JobType = TodoX.Web.Services.VideoRender.VideoRenderMergeHandler.JobTypeName,
+            UserId = AuthState.CurrentUser.UserId,
+            CustomerId = AuthState.CurrentUser.CustomerId,
+            Input = new { projectId = _project.Id },
+            Prompt = new { projectId = _project.Id },
+            LogCode = BuildLogCode(),
+            ProviderCode = "internal_merge",
+            ModelCode = "ffmpeg_concat",
+            MaxAttempts = 1,
+            PointCostEstimate = 0,
+            PointStatus = RenderPointStatuses.NotRequired
+        }, _project.Id);
+
+        if (alreadyActive)
+        {
+            Snackbar.Add("Project này đang có job ghép video.", Severity.Info);
+        }
+        else
+        {
+            await LogProjectEvent("FINAL_VIDEO_MERGE_ENQUEUED", "info", "Đã enqueue ghép final video.", new { job.Id, projectId = _project.Id });
+            Snackbar.Add("Đã enqueue ghép final video.", Severity.Success);
+        }
+
+        await StartPolling();
+    }
+
+    private async Task EnqueueSceneVideoAsync(VideoProjectSceneDto scene)
+    {
+        if (_project is null || AuthState.CurrentUser is null) return;
+        if (!EnsureAspectRatioSelected() || !EnsureResolutionSelected())
+        {
+            return;
+        }
+
+        var draft = GetSceneDraft(scene);
+        if (!CanCreateSceneVideo(scene, draft))
+        {
+            Snackbar.Add(SceneVideoDisabledReason(scene, draft), Severity.Info);
+            return;
+        }
+
+        var input = new TodoX.Web.Services.VideoRender.SceneVideoRenderInput
+        {
+            ProjectId = _project.Id,
+            SceneIds = new[] { scene.Id },
+            AspectRatio = _aspectRatio,
+            Resolution = _resolution,
+            UserId = AuthState.CurrentUser.UserId,
+            CustomerId = AuthState.CurrentUser.CustomerId,
+            CreatedBy = AuthState.CurrentUser.Email ?? AuthState.CurrentUser.UserId.ToString(),
+            TrustedPayerContext = TodoX.Web.Services.AiProviders.AiBillingPayerResolver.CreateTrustedBackgroundContext(AuthState.CurrentUser)
+        };
+
+        var job = await RenderJobs.EnqueueAsync(new RenderJobCreateModel
+        {
+            JobType = TodoX.Web.Services.VideoRender.SceneVideoRenderHandler.JobTypeName,
+            UserId = AuthState.CurrentUser.UserId,
+            CustomerId = AuthState.CurrentUser.CustomerId,
+            Input = input,
+            Prompt = new { projectId = _project.Id, sceneId = scene.Id },
+            LogCode = BuildLogCode(),
+            ProviderCode = TodoX.Web.Services.VideoRender.SceneVideoRenderHandler.RoutingProviderCode,
+            ModelCode = TodoX.Web.Services.VideoRender.SceneVideoRenderHandler.RoutingModelCode,
+            MaxAttempts = 1,
+            PointCostEstimate = 0,
+            PointStatus = RenderPointStatuses.Pending
+        });
+
+        await LogProjectEvent("SCENE_VIDEO_ENQUEUED", "info", $"Đã enqueue render video cho scene {scene.SceneIndex}.",
+            new { job.Id, sceneId = scene.Id, scene.SceneIndex, provider = _defaultImageToVideoProvider?.ProviderCode, model = _defaultImageToVideoProvider?.ModelName });
+        Snackbar.Add($"Đã enqueue render video cho scene {scene.SceneIndex}.", Severity.Success);
+        await StartPolling();
     }
 
     private void OpenUrl(string url) => JS.InvokeVoidAsync("open", url);
