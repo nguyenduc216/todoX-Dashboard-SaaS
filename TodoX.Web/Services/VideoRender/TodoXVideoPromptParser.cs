@@ -6,6 +6,8 @@ public sealed class TodoXVideoPromptModel
 {
     public string? RawAspectRatio { get; set; }
     public string? AspectRatio { get; set; }
+    public string? RawResolution { get; set; }
+    public string? Resolution { get; set; }
     public string? VideoTitle { get; set; }
     public string? VideoObjective { get; set; }
     public int? DurationSeconds { get; set; }
@@ -29,6 +31,7 @@ public sealed class TodoXVideoScenePromptModel
 public sealed class TodoXVideoPromptSummary
 {
     public string? AspectRatio { get; set; }
+    public string? Resolution { get; set; }
     public string? VideoTitle { get; set; }
     public string? VideoObjective { get; set; }
     public string? Style { get; set; }
@@ -47,6 +50,8 @@ public sealed class TodoXVideoPromptParseResult
     public bool IsJsonValid { get; set; }
     public bool HasInvalidAspectRatio { get; set; }
     public string? InvalidAspectRatio { get; set; }
+    public bool HasInvalidResolution { get; set; }
+    public string? InvalidResolution { get; set; }
     public bool HasScenes => Model.Scenes.Count > 0;
     public string? ErrorMessage { get; set; }
     public TodoXVideoPromptModel Model { get; set; } = new();
@@ -99,7 +104,14 @@ public sealed class TodoXVideoPromptParser : ITodoXVideoPromptParser
             {
                 result.HasInvalidAspectRatio = true;
                 result.InvalidAspectRatio = rawAspectRatio;
-                result.ErrorMessage = "Aspect ratio không hợp lệ. Chỉ hỗ trợ 16:9 hoặc 9:16.";
+                result.ErrorMessage = AppendError(result.ErrorMessage, "Render Video Job hiện chỉ hỗ trợ 16:9 hoặc 9:16.");
+            }
+            var rawResolution = model.RawResolution;
+            if (!string.IsNullOrWhiteSpace(rawResolution) && string.IsNullOrWhiteSpace(result.Model.Resolution))
+            {
+                result.HasInvalidResolution = true;
+                result.InvalidResolution = rawResolution;
+                result.ErrorMessage = AppendError(result.ErrorMessage, "Độ phân giải không hợp lệ.");
             }
             return result;
         }
@@ -113,6 +125,7 @@ public sealed class TodoXVideoPromptParser : ITodoXVideoPromptParser
     private static TodoXVideoPromptModel Normalize(TodoXVideoPromptModel model)
     {
         model.AspectRatio = NormalizeAspectRatio(model.RawAspectRatio ?? model.AspectRatio);
+        model.Resolution = NormalizeResolution(model.RawResolution ?? model.Resolution);
         model.DurationSeconds = ParseDuration(model.DurationSeconds?.ToString());
         if (model.Scenes is not null)
         {
@@ -132,6 +145,7 @@ public sealed class TodoXVideoPromptParser : ITodoXVideoPromptParser
         var model = new TodoXVideoPromptModel
         {
             RawAspectRatio = ReadString(root, "aspect_ratio", "aspectRatio", "video_aspect_ratio", "ratio"),
+            RawResolution = ReadString(root, "resolution", "video_resolution", "output_resolution", "quality_resolution"),
             VideoTitle = ReadString(root, "video_title", "title"),
             VideoObjective = ReadString(root, "video_objective", "objective"),
             DurationSeconds = ParseDuration(ReadRaw(root, "duration")),
@@ -165,6 +179,7 @@ public sealed class TodoXVideoPromptParser : ITodoXVideoPromptParser
         var summary = new TodoXVideoPromptSummary
         {
             AspectRatio = model.AspectRatio,
+            Resolution = model.Resolution,
             VideoTitle = model.VideoTitle,
             VideoObjective = model.VideoObjective,
             Style = model.Style,
@@ -223,6 +238,7 @@ public sealed class TodoXVideoPromptParser : ITodoXVideoPromptParser
     private static bool HasTodoXMetadata(TodoXVideoPromptModel model)
         => !string.IsNullOrWhiteSpace(model.AspectRatio)
            || !string.IsNullOrWhiteSpace(model.VideoTitle)
+           || !string.IsNullOrWhiteSpace(model.Resolution)
            || !string.IsNullOrWhiteSpace(model.VideoObjective)
            || !string.IsNullOrWhiteSpace(model.Cta)
            || model.Scenes.Count > 0;
@@ -262,4 +278,20 @@ public sealed class TodoXVideoPromptParser : ITodoXVideoPromptParser
             _ => null
         };
     }
+
+    private static string? NormalizeResolution(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        var text = value.Trim();
+        return text.ToLowerInvariant() switch
+        {
+            "720p" => "720p",
+            "1080p" => "1080p",
+            "4k" => "4K",
+            _ => null
+        };
+    }
+
+    private static string AppendError(string? current, string next)
+        => string.IsNullOrWhiteSpace(current) ? next : $"{current} {next}";
 }

@@ -588,6 +588,253 @@ public sealed class VideoRenderRepository
         }
     }
 
+    public async Task<VideoProjectSceneDto> AddSceneAsync(long projectId, VideoProjectAddSceneRequest request, CurrentUserSession user, CancellationToken ct = default)
+    {
+        try
+        {
+            await _tenant.EnsureLoadedAsync(ct);
+            using var conn = await _factory.OpenAsync(ct);
+            using var tx = conn.BeginTransaction();
+
+            var project = await conn.QuerySingleOrDefaultAsync<VideoProjectDto>(
+                """
+                SELECT id AS Id, tenant_id AS TenantId, user_id AS UserId, customer_id AS CustomerId,
+                       scene_count AS SceneCount
+                  FROM video_render.video_projects
+                 WHERE id=@projectId AND tenant_id=@tenant
+                 FOR UPDATE;
+                """,
+                new { projectId, tenant = _tenant.TenantId }, tx);
+            if (project is null || !CanAccessProject(project, user))
+            {
+                tx.Rollback();
+                throw new UnauthorizedAccessException("Bạn không có quyền thêm scene cho project render này.");
+            }
+
+            var sceneCount = await conn.ExecuteScalarAsync<int>(
+                "SELECT count(*)::int FROM video_render.video_project_scenes WHERE project_id=@projectId AND tenant_id=@tenant;",
+                new { projectId, tenant = _tenant.TenantId }, tx);
+            var insertIndex = request.InsertAfterSceneIndex is int after && after > 0
+                ? Math.Min(after + 1, sceneCount + 1)
+                : sceneCount + 1;
+
+            await conn.ExecuteAsync(
+                """
+                UPDATE video_render.video_project_scenes
+                   SET scene_index=scene_index + 1,
+                       updated_at=now()
+                 WHERE project_id=@projectId
+                   AND tenant_id=@tenant
+                   AND scene_index >= @insertIndex;
+                """,
+                new { projectId, tenant = _tenant.TenantId, insertIndex }, tx);
+
+            var metadata = new ScenePromptMetadata
+            {
+                ScenePurpose = request.Purpose,
+                ImagePrompt = request.ImagePrompt,
+                MotionPrompt = request.VideoPrompt,
+                Voice = request.Voice,
+                VoiceInstruction = request.VoiceInstruction
+            };
+            if (!string.IsNullOrWhiteSpace(request.AspectRatio))
+            {
+                metadata.Extra["aspect_ratio"] = NormalizeAspectRatio(request.AspectRatio);
+            }
+
+            var scene = await conn.QuerySingleAsync<VideoProjectSceneDto>(
+                """
+                INSERT INTO video_render.video_project_scenes
+                    (project_id, tenant_id, scene_index, title, duration_seconds, scene_prompt, image_prompt, video_prompt,
+                     static_image_path, static_image_url, scene_video_path, scene_video_url, status, error_message, created_at, updated_at)
+                VALUES
+                    (@projectId, @tenant, @sceneIndex, @title, @duration, @scenePrompt, @imagePrompt, @videoPrompt,
+                     NULL, NULL, NULL, NULL, @status, NULL, now(), now())
+                RETURNING id AS Id, project_id AS ProjectId, tenant_id AS TenantId, scene_index AS SceneIndex,
+                          title AS Title, duration_seconds AS DurationSeconds, scene_prompt AS ScenePrompt,
+                          image_prompt AS ImagePrompt, video_prompt AS VideoPrompt, static_image_path AS StaticImagePath,
+                          static_image_url AS StaticImageUrl, scene_video_path AS SceneVideoPath, scene_video_url AS SceneVideoUrl,
+                          status AS Status, error_message AS ErrorMessage, created_at AS CreatedAt, updated_at AS UpdatedAt;
+                """,
+                new
+                {
+                    projectId,
+                    tenant = _tenant.TenantId,
+                    sceneIndex = insertIndex,
+                    title = string.IsNullOrWhiteSpace(request.Title) ? $"Scene {insertIndex:00}" : request.Title,
+                    duration = Math.Max(1, request.DurationSeconds),
+                    scenePrompt = metadata.Serialize(),
+                    imagePrompt = request.ImagePrompt,
+                    videoPrompt = request.VideoPrompt,
+                    status = VideoSceneStatuses.Draft
+                }, tx);
+
+            await conn.ExecuteAsync(
+                """
+                UPDATE video_render.video_projects
+                   SET scene_count=(SELECT count(*)::int FROM video_render.video_project_scenes WHERE project_id=@projectId AND tenant_id=@tenant),
+                       total_seconds=(SELECT COALESCE(sum(duration_seconds), 0)::int FROM video_render.video_project_scenes WHERE project_id=@projectId AND tenant_id=@tenant),
+                       updated_at=now()
+                 WHERE id=@projectId AND tenant_id=@tenant;
+                """,
+                new { projectId, tenant = _tenant.TenantId }, tx);
+
+            await conn.ExecuteAsync(
+                """
+                INSERT INTO video_render.video_project_events
+                    (project_id, tenant_id, event_type, level, message, data_json, created_at)
+                VALUES
+                    (@projectId, @tenant, 'SCENE_MANUALLY_ADDED', 'info', 'Scene manually added.', CAST(@data AS jsonb), now());
+                """,
+                new
+                {
+                    projectId,
+                    tenant = _tenant.TenantId,
+                    data = JsonSerializer.Serialize(new { sceneId = scene.Id, scene.SceneIndex, scene.DurationSeconds, request.AspectRatio }, JsonOptions)
+                }, tx);
+
+            tx.Commit();
+            return scene;
+        }
+        catch (Exception ex) when (DbDiagnostics.LogPostgresException(_logger, ex, "video_render_add_scene"))
+        {
+            throw;
+        }
+    }
+
+    public async Task MoveSceneAsync(long projectId, long sceneId, int direction, CurrentUserSession user, CancellationToken ct = default)
+    {
+        try
+        {
+            await _tenant.EnsureLoadedAsync(ct);
+            using var conn = await _factory.OpenAsync(ct);
+            using var tx = conn.BeginTransaction();
+
+            var project = await conn.QuerySingleOrDefaultAsync<VideoProjectDto>(
+                """
+                SELECT id AS Id, tenant_id AS TenantId, user_id AS UserId, customer_id AS CustomerId
+                  FROM video_render.video_projects
+                 WHERE id=@projectId AND tenant_id=@tenant
+                 FOR UPDATE;
+                """,
+                new { projectId, tenant = _tenant.TenantId }, tx);
+            if (project is null || !CanAccessProject(project, user))
+            {
+                tx.Rollback();
+                throw new UnauthorizedAccessException("Bạn không có quyền sắp xếp scene project render này.");
+            }
+
+            var current = await conn.QuerySingleOrDefaultAsync<VideoProjectSceneDto>(
+                """
+                SELECT id AS Id, scene_index AS SceneIndex
+                  FROM video_render.video_project_scenes
+                 WHERE id=@sceneId AND project_id=@projectId AND tenant_id=@tenant
+                 FOR UPDATE;
+                """,
+                new { sceneId, projectId, tenant = _tenant.TenantId }, tx);
+            if (current is null)
+            {
+                tx.Rollback();
+                return;
+            }
+
+            var targetIndex = current.SceneIndex + Math.Sign(direction);
+            var target = await conn.QuerySingleOrDefaultAsync<VideoProjectSceneDto>(
+                """
+                SELECT id AS Id, scene_index AS SceneIndex
+                  FROM video_render.video_project_scenes
+                 WHERE project_id=@projectId AND tenant_id=@tenant AND scene_index=@targetIndex
+                 FOR UPDATE;
+                """,
+                new { projectId, tenant = _tenant.TenantId, targetIndex }, tx);
+            if (target is null)
+            {
+                tx.Rollback();
+                return;
+            }
+
+            await conn.ExecuteAsync("UPDATE video_render.video_project_scenes SET scene_index=@index, updated_at=now() WHERE id=@id AND tenant_id=@tenant;",
+                new { id = current.Id, tenant = _tenant.TenantId, index = target.SceneIndex }, tx);
+            await conn.ExecuteAsync("UPDATE video_render.video_project_scenes SET scene_index=@index, updated_at=now() WHERE id=@id AND tenant_id=@tenant;",
+                new { id = target.Id, tenant = _tenant.TenantId, index = current.SceneIndex }, tx);
+            await conn.ExecuteAsync("UPDATE video_render.video_projects SET updated_at=now() WHERE id=@projectId AND tenant_id=@tenant;",
+                new { projectId, tenant = _tenant.TenantId }, tx);
+
+            tx.Commit();
+        }
+        catch (Exception ex) when (DbDiagnostics.LogPostgresException(_logger, ex, "video_render_move_scene"))
+        {
+            throw;
+        }
+    }
+
+    public async Task DeleteSceneAsync(long projectId, long sceneId, CurrentUserSession user, CancellationToken ct = default)
+    {
+        try
+        {
+            await _tenant.EnsureLoadedAsync(ct);
+            using var conn = await _factory.OpenAsync(ct);
+            using var tx = conn.BeginTransaction();
+
+            var project = await conn.QuerySingleOrDefaultAsync<VideoProjectDto>(
+                """
+                SELECT id AS Id, tenant_id AS TenantId, user_id AS UserId, customer_id AS CustomerId
+                  FROM video_render.video_projects
+                 WHERE id=@projectId AND tenant_id=@tenant
+                 FOR UPDATE;
+                """,
+                new { projectId, tenant = _tenant.TenantId }, tx);
+            if (project is null || !CanAccessProject(project, user))
+            {
+                tx.Rollback();
+                throw new UnauthorizedAccessException("Bạn không có quyền xóa scene project render này.");
+            }
+
+            var deletedIndex = await conn.ExecuteScalarAsync<int?>(
+                """
+                SELECT scene_index
+                  FROM video_render.video_project_scenes
+                 WHERE id=@sceneId AND project_id=@projectId AND tenant_id=@tenant
+                 FOR UPDATE;
+                """,
+                new { sceneId, projectId, tenant = _tenant.TenantId }, tx);
+            if (deletedIndex is null)
+            {
+                tx.Rollback();
+                return;
+            }
+
+            await conn.ExecuteAsync(
+                "DELETE FROM video_render.video_project_scenes WHERE id=@sceneId AND project_id=@projectId AND tenant_id=@tenant;",
+                new { sceneId, projectId, tenant = _tenant.TenantId }, tx);
+            await conn.ExecuteAsync(
+                """
+                UPDATE video_render.video_project_scenes
+                   SET scene_index=scene_index - 1,
+                       updated_at=now()
+                 WHERE project_id=@projectId
+                   AND tenant_id=@tenant
+                   AND scene_index > @deletedIndex;
+                """,
+                new { projectId, tenant = _tenant.TenantId, deletedIndex }, tx);
+            await conn.ExecuteAsync(
+                """
+                UPDATE video_render.video_projects
+                   SET scene_count=(SELECT count(*)::int FROM video_render.video_project_scenes WHERE project_id=@projectId AND tenant_id=@tenant),
+                       total_seconds=(SELECT COALESCE(sum(duration_seconds), 0)::int FROM video_render.video_project_scenes WHERE project_id=@projectId AND tenant_id=@tenant),
+                       updated_at=now()
+                 WHERE id=@projectId AND tenant_id=@tenant;
+                """,
+                new { projectId, tenant = _tenant.TenantId }, tx);
+
+            tx.Commit();
+        }
+        catch (Exception ex) when (DbDiagnostics.LogPostgresException(_logger, ex, "video_render_delete_scene"))
+        {
+            throw;
+        }
+    }
+
     public async Task<List<VideoProjectSceneDto>> ReplaceScenesAsync(long projectId, IEnumerable<VideoProjectSceneDto> scenes, CancellationToken ct = default)
     {
         try

@@ -10,5 +10,5 @@ public sealed class VideoRenderOptions
     public int SceneSecondsDefault { get; set; } = 8;
     public int PollIntervalSeconds { get; set; } = 5;
     public bool MockMode { get; set; } = true;
+    public string[] SupportedResolutions { get; set; } = ["720p", "1080p"];
 }
-

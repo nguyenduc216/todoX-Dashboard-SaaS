@@ -49,6 +49,27 @@ public class TodoXVideoPromptParserTests
     }
 
     [Fact]
+    public void Parse_ReadsResolutionAndAliases()
+    {
+        var parser = new TodoXVideoPromptParser();
+
+        var result = parser.Parse("""
+        {
+          "aspect_ratio": "16:9",
+          "resolution": "1080p",
+          "video_title": "Demo"
+        }
+        """);
+
+        Assert.True(result.IsJsonValid);
+        Assert.Equal("1080p", result.Model.Resolution);
+        Assert.Equal("1080p", result.Summary.Resolution);
+
+        var aliasResult = parser.Parse("""{"video_resolution":"4K","video_title":"Demo"}""");
+        Assert.Equal("4K", aliasResult.Model.Resolution);
+    }
+
+    [Fact]
     public void Parse_AllowsMissingAspectRatio()
     {
         var parser = new TodoXVideoPromptParser();
@@ -73,5 +94,18 @@ public class TodoXVideoPromptParserTests
         Assert.True(result.HasInvalidAspectRatio);
         Assert.Equal("1:1", result.InvalidAspectRatio);
         Assert.Contains("16:9", result.ErrorMessage);
+    }
+
+    [Fact]
+    public void Parse_FlagsUnsupportedResolution()
+    {
+        var parser = new TodoXVideoPromptParser();
+
+        var result = parser.Parse("""{"resolution":"2K","video_title":"Demo"}""");
+
+        Assert.True(result.IsJsonValid);
+        Assert.Null(result.Model.Resolution);
+        Assert.True(result.HasInvalidResolution);
+        Assert.Equal("2K", result.InvalidResolution);
     }
 }

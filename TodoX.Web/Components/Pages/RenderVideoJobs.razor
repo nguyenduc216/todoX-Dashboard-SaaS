@@ -1,4 +1,4 @@
-@page "/render-job"
+﻿@page "/render-job"
 @using System.Text.Json
 @using System.Text.Json.Nodes
 @using TodoX.Web.Services.AiProviders
@@ -51,7 +51,7 @@ else
                         </MudStack>
                     </MudStack>
                     <div class="render-project-dialog-body">
-                    <MudTabs rounded="true" ApplyEffectsToContainer="true" panelClass="pt-4" @bind-ActivePanelIndex="_tabIndex">
+                    <MudTabs Class="render-project-tabs" rounded="true" ApplyEffectsToContainer="true" panelClass="render-tab-panel" @bind-ActivePanelIndex="_tabIndex">
             <MudTabPanel Text="Thông tin">
                 <MudPaper Class="todox-card pa-4" rounded="true">
                     <MudGrid>
@@ -118,6 +118,13 @@ else
                                         <MudSelectItem T="string" Value="@AspectRatioLandscape">16:9 — video ngang</MudSelectItem>
                                         <MudSelectItem T="string" Value="@AspectRatioPortrait">9:16 — video dọc</MudSelectItem>
                                     </MudSelect>
+                                    <MudSelect T="string" Label="Độ phân giải video" Value="@_resolution" ValueChanged="OnResolutionChangedAsync" Variant="Variant.Outlined" Dense="true" Required="true">
+                                        <MudSelectItem T="string" Value="@string.Empty">Chọn độ phân giải trước khi render video</MudSelectItem>
+                                        @foreach (var resolution in SupportedVideoResolutions)
+                                        {
+                                            <MudSelectItem T="string" Value="@resolution">@resolution</MudSelectItem>
+                                        }
+                                    </MudSelect>
                                     <MudAlert Severity="@( _promptParseResult.IsJsonValid ? (_promptParseResult.IsTodoXPrompt ? Severity.Success : Severity.Info) : Severity.Warning )" Dense="true">
                                         @(_promptParseResult.IsJsonValid ? (_promptParseResult.IsTodoXPrompt ? "Prompt TodoX hợp lệ." : "Prompt thường.") : "JSON không hợp lệ hoặc chưa parse được.")
                                     </MudAlert>
@@ -134,7 +141,8 @@ else
                                             <MudItem xs="12" md="6"><MudText><b>CTA:</b> @_promptParseResult.Summary.Cta</MudText></MudItem>
                                             <MudItem xs="12" md="6"><MudText><b>DeclaredDuration:</b> @_promptParseResult.Summary.DeclaredDurationSeconds</MudText></MudItem>
                                             <MudItem xs="12" md="6"><MudText><b>SceneCount:</b> @_promptParseResult.Summary.SceneCount</MudText></MudItem>
-                                            <MudItem xs="12" md="6"><MudText><b>AspectRatio:</b> @(ProjectAspectRatio)</MudText></MudItem>
+                                            <MudItem xs="12" md="6"><MudText><b>Tỷ lệ video:</b> @(ProjectAspectRatio)</MudText></MudItem>
+                                            <MudItem xs="12" md="6"><MudText><b>Độ phân giải:</b> @(ProjectResolution)</MudText></MudItem>
                                         </MudGrid>
                                         @if (_promptParseResult.Summary.HasDurationMismatch)
                                         {
@@ -197,24 +205,35 @@ else
                 </MudPaper>
             </MudTabPanel>
 
-            <MudTabPanel Text="Scene">
-                @if (_project is null)
-                {
-                    <MudAlert Severity="Severity.Info">Hãy tạo project ở tab Thông tin trước.</MudAlert>
-                }
-                else
-                {
-                    <MudStack Row="true" Spacing="2" Class="flex-wrap gap-2 mb-3">
-                        <MudButton Variant="Variant.Filled" Color="Color.Warning" OnClick="RenderMissingSceneImagesAsync" Disabled="@(_busy || _batchActive)">Tạo ảnh tĩnh scene còn thiếu</MudButton>
-                        <MudTooltip Text="Chưa cấu hình provider image-to-video"><MudButton Variant="Variant.Filled" Color="Color.Warning" OnClick="EnqueueRenderAllScenesAsync" Disabled="true">Tạo video all</MudButton></MudTooltip>
-                        <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="ReloadAsync" Disabled="@_busy">Refresh</MudButton>
-                        @if (_batchActive)
-                        {
-                            <MudChip T="string" Color="Color.Warning" Icon="@Icons.Material.Filled.HourglassBottom">Đang tạo ảnh tĩnh qua AI provider đã cấu hình...</MudChip>
-                        }
-                    </MudStack>
+            <MudTabPanel Text="Scene / Hình ảnh">
+                <div class="scene-image-tab">
+                    @if (_project is null)
+                    {
+                        <MudAlert Severity="Severity.Info">Hãy tạo project ở tab Thông tin trước.</MudAlert>
+                    }
+                    else
+                    {
+                        <div class="scene-image-toolbar" role="toolbar" aria-label="Thao tác Scene / Hình ảnh">
+                            @if (_batchActive)
+                            {
+                                <MudChip T="string" Color="Color.Warning" Icon="@Icons.Material.Filled.HourglassBottom">Đang tạo ảnh tĩnh qua AI provider đã cấu hình...</MudChip>
+                            }
+                            <MudTooltip Text="Tạo ảnh tĩnh cho các scene còn thiếu hoặc lỗi">
+                                <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.AddPhotoAlternate" OnClick="RenderMissingSceneImagesAsync" Disabled="@_batchActive">Tạo ảnh còn thiếu</MudButton>
+                            </MudTooltip>
+                            <MudTooltip Text="Thêm scene thủ công">
+                                <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="AddSceneAsync" Disabled="@_busy">Thêm scene</MudButton>
+                            </MudTooltip>
+                            <MudTooltip Text="Chuyển sang tab Video">
+                                <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary" EndIcon="@Icons.Material.Filled.ArrowForward" OnClick="@(() => _tabIndex = 2)">Tiếp tục tạo video</MudButton>
+                            </MudTooltip>
+                            <MudTooltip Text="Tải lại scene">
+                                <MudIconButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary" Icon="@Icons.Material.Filled.Refresh" OnClick="ReloadAsync" Disabled="@_busy" aria-label="Refresh scene" />
+                            </MudTooltip>
+                        </div>
 
-                    <MudStack Spacing="3">
+                        <div class="scene-list-scroll" tabindex="0">
+                        <MudStack Spacing="3">
                         @foreach (var scene in _project.Scenes.OrderBy(x => x.SceneIndex))
                         {
                             var draft = GetSceneDraft(scene);
@@ -234,9 +253,15 @@ else
                                             }
                                             <MudChip T="string" Color="@SceneColor(scene.Status)">@SceneLabel(scene.Status)</MudChip>
                                             <MudMenu Dense="true" Icon="@Icons.Material.Filled.MoreVert">
-                                                <MudMenuItem Disabled="@(_busy || scene.SceneIndex <= 1)" OnClick="@(() => MoveSceneUpAsync(scene))">Lên</MudMenuItem>
-                                                <MudMenuItem Disabled="@(_busy || _project is null || scene.SceneIndex >= _project.Scenes.Count)" OnClick="@(() => MoveSceneDownAsync(scene))">Xuống</MudMenuItem>
-                                                <MudMenuItem Disabled="@_busy" OnClick="@(() => DeleteSceneAsync(scene))">Xóa</MudMenuItem>
+                                                <MudMenuItem Icon="@Icons.Material.Filled.Save" Disabled="@_busy" OnClick="@(() => SaveSceneAsync(scene))">Lưu scene</MudMenuItem>
+                                                <MudMenuItem Icon="@Icons.Material.Filled.AddPhotoAlternate" Disabled="@IsSceneRendering(scene)" OnClick="@(() => RerenderSceneImageAsync(scene))">@(string.IsNullOrWhiteSpace(ResolveDraftImageUrl(scene, draft)) ? "Tạo ảnh" : "Render lại ảnh")</MudMenuItem>
+                                                <MudMenuItem Icon="@Icons.Material.Filled.Edit" OnClick="@(() => EditScenePromptsAsync(scene))">Chỉnh sửa prompt ảnh</MudMenuItem>
+                                                <MudMenuItem Icon="@Icons.Material.Filled.History" OnClick="@(() => ToggleImageHistoryAsync(scene))">Lịch sử ảnh</MudMenuItem>
+                                                <MudDivider />
+                                                <MudMenuItem Icon="@Icons.Material.Filled.KeyboardArrowUp" Disabled="@(_busy || scene.SceneIndex <= 1)" OnClick="@(() => MoveSceneUpAsync(scene))">Lên</MudMenuItem>
+                                                <MudMenuItem Icon="@Icons.Material.Filled.KeyboardArrowDown" Disabled="@(_busy || _project is null || scene.SceneIndex >= _project.Scenes.Count)" OnClick="@(() => MoveSceneDownAsync(scene))">Xuống</MudMenuItem>
+                                                <MudDivider />
+                                                <MudMenuItem Icon="@Icons.Material.Filled.Delete" Disabled="@_busy" OnClick="@(() => DeleteSceneAsync(scene))">Xóa</MudMenuItem>
                                             </MudMenu>
                                         </MudStack>
                                     </MudStack>
@@ -252,26 +277,6 @@ else
                                             {
                                                 <MudText Typo="Typo.caption" Color="Color.Error">@sceneErr</MudText>
                                             }
-                                            <MudStack Row="true" Spacing="1" Class="flex-wrap gap-1">
-                                                <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning" OnClick="@(() => RerenderSceneImageAsync(scene))" Disabled="@(IsSceneRendering(scene))">@(string.IsNullOrWhiteSpace(ResolveDraftImageUrl(scene, draft)) ? "Tạo ảnh" : "Render lại ảnh")</MudButton>
-                                                <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Info" OnClick="@(() => ToggleImageHistoryAsync(scene))">Lịch sử ảnh</MudButton>
-                                            </MudStack>
-                                        </div>
-                                        <div class="scene-workflow-cell">
-                                            <MudText Typo="Typo.subtitle2">Khung video</MudText>
-                                            @RenderSceneVideoFrame(scene, draft)
-                                        </div>
-                                        <div class="scene-workflow-cell scene-prompt-panel">
-                                            <MudTextField T="string" Label="Prompt video" Value="@draft.MotionPrompt" ValueChanged="@((string? value) => UpdateDraft(scene.Id, d => d.MotionPrompt = value))" Variant="Variant.Outlined" Lines="7" Immediate="true" />
-                                            <MudStack Row="true" Spacing="1" Class="flex-wrap gap-1">
-                                                <MudTooltip Text="@SceneVideoDisabledReason(scene, draft)">
-                                                    <MudButton Size="Size.Small" Variant="Variant.Outlined" Disabled="@(!CanCreateSceneVideo(scene, draft))" OnClick="@(() => RenderSceneVideoAsync(scene))">Tạo video</MudButton>
-                                                </MudTooltip>
-                                                <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Info" OnClick="@(() => ToggleVideoHistoryAsync(scene))">Lịch sử video</MudButton>
-                                            </MudStack>
-                                        </div>
-                                        <div class="scene-save-panel">
-                                            <MudButton Variant="Variant.Filled" Color="Color.Success" OnClick="@(() => SaveSceneAsync(scene))" Disabled="@_busy">Lưu scene</MudButton>
                                         </div>
                                     </div>
 
@@ -285,6 +290,58 @@ else
                                     {
                                         @RenderImageHistoryPanel(scene)
                                     }
+                                </MudStack>
+                            </MudPaper>
+                        }
+                        </MudStack>
+                        </div>
+                    }
+                </div>
+            </MudTabPanel>
+
+            <MudTabPanel Text="Video">
+                @if (_project is null)
+                {
+                    <MudAlert Severity="Severity.Info">Hãy tạo project ở tab Thông tin trước.</MudAlert>
+                }
+                else
+                {
+                    <MudStack Row="true" Spacing="2" Class="flex-wrap gap-2 mb-3">
+                        <MudChip T="string" Color="Color.Info">Tổng scene: @_project.Scenes.Count</MudChip>
+                        <MudChip T="string" Color="Color.Success">Đủ ảnh: @_project.Scenes.Count(x => !string.IsNullOrWhiteSpace(x.StaticImageUrl))</MudChip>
+                        <MudChip T="string" Color="Color.Warning">Đang render: @_project.Scenes.Count(x => x.Status is VideoSceneStatuses.VideoQueued or VideoSceneStatuses.VideoRendering)</MudChip>
+                        <MudChip T="string" Color="Color.Success">Hoàn tất: @_project.Scenes.Count(x => !string.IsNullOrWhiteSpace(x.SceneVideoUrl))</MudChip>
+                        <MudChip T="string" Color="Color.Error">Lỗi: @_project.Scenes.Count(x => x.Status == VideoSceneStatuses.Failed)</MudChip>
+                        <MudTooltip Text="Chưa cấu hình provider image-to-video"><MudButton Variant="Variant.Filled" Color="Color.Warning" OnClick="EnqueueRenderAllScenesAsync" Disabled="true">Render video còn thiếu</MudButton></MudTooltip>
+                        <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="ReloadAsync" Disabled="@_busy">Refresh</MudButton>
+                    </MudStack>
+
+                    <div class="scene-video-grid">
+                        @foreach (var scene in _project.Scenes.OrderBy(x => x.SceneIndex))
+                        {
+                            var draft = GetSceneDraft(scene);
+                            <MudPaper Class="scene-card pa-3" Outlined="true">
+                                <MudStack Spacing="2">
+                                    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
+                                        <MudText Typo="Typo.subtitle1">Scene @scene.SceneIndex.ToString("00") - @scene.Title</MudText>
+                                        <MudChip T="string" Color="@SceneColor(scene.Status)">@SceneLabel(scene.Status)</MudChip>
+                                    </MudStack>
+                                    @RenderSceneVideoFrame(scene, draft)
+                                    <MudStack Row="true" Spacing="1" Class="flex-wrap gap-1">
+                                        <MudChip T="string" Size="Size.Small" Color="Color.Info">@ProjectAspectRatio</MudChip>
+                                        <MudChip T="string" Size="Size.Small" Color="Color.Info">@ProjectResolution</MudChip>
+                                        <MudChip T="string" Size="Size.Small">@scene.DurationSeconds giây</MudChip>
+                                    </MudStack>
+                                    <MudTextField T="string" Label="Prompt video" Value="@draft.MotionPrompt" ValueChanged="@((string? value) => UpdateDraft(scene.Id, d => d.MotionPrompt = value))" Variant="Variant.Outlined" Lines="5" Immediate="true" />
+                                    <MudTextField T="string" Label="Voice" Value="@draft.Voice" ValueChanged="@((string? value) => UpdateDraft(scene.Id, d => d.Voice = value))" Variant="Variant.Outlined" Lines="2" Immediate="true" />
+                                    <MudTextField T="string" Label="Voice instruction" Value="@draft.VoiceInstruction" ValueChanged="@((string? value) => UpdateDraft(scene.Id, d => d.VoiceInstruction = value))" Variant="Variant.Outlined" Lines="2" Immediate="true" />
+                                    <MudStack Row="true" Spacing="1" Class="flex-wrap gap-1">
+                                        <MudTooltip Text="@SceneVideoDisabledReason(scene, draft)">
+                                            <MudButton Size="Size.Small" Variant="Variant.Outlined" Disabled="@(!CanCreateSceneVideo(scene, draft))" OnClick="@(() => RenderSceneVideoAsync(scene))">Tạo video</MudButton>
+                                        </MudTooltip>
+                                        <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Info" OnClick="@(() => ToggleVideoHistoryAsync(scene))">Lịch sử video</MudButton>
+                                        <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Success" OnClick="@(() => SaveSceneAsync(scene))" Disabled="@_busy">Lưu scene</MudButton>
+                                    </MudStack>
                                     @if (_videoHistorySceneId == scene.Id)
                                     {
                                         @RenderVideoHistoryPanel(scene)
@@ -292,7 +349,7 @@ else
                                 </MudStack>
                             </MudPaper>
                         }
-                    </MudStack>
+                    </div>
                 }
             </MudTabPanel>
 
@@ -421,6 +478,7 @@ else
     private string _characterPrompt = string.Empty;
     private TodoXVideoPromptParseResult _promptParseResult = new();
     private string _aspectRatio = string.Empty;
+    private string _resolution = string.Empty;
     private int _totalSeconds = 16;
     private int _sceneSeconds = 8;
     private bool _thinkScenes = false;
@@ -434,7 +492,7 @@ else
     // Per-scene re-render error messages (kept so a failed rerender does not wipe the old image).
     private readonly Dictionary<long, string> _sceneRerenderErrors = new();
     // Transient per-scene render state derived from project events (survives page refresh).
-    private readonly Dictionary<long, SceneImageVisualState> _sceneEventState = new();
+    private readonly Dictionary<long, RenderSceneImageVisualState> _sceneEventState = new();
     private readonly Dictionary<long, IReadOnlyList<TodoX.Web.Services.VideoRender.SceneImageVersionDto>> _imageVersions = new();
     private readonly Dictionary<long, IReadOnlyList<TodoX.Web.Services.VideoRender.SceneVideoVersionDto>> _videoVersions = new();
     private readonly Dictionary<long, SceneEditorState> _sceneDrafts = new();
@@ -447,8 +505,6 @@ else
     private readonly SemaphoreSlim _reloadLock = new(1, 1);
     // True while a background scene image batch job for this project is queued/rendering.
     private bool _batchActive;
-
-    private enum SceneImageVisualState { None, Queued, Rendering, Retrying, Ready, Failed }
 
     private sealed class SceneEditorState
     {
@@ -466,6 +522,9 @@ else
 
     private const string AspectRatioLandscape = "16:9";
     private const string AspectRatioPortrait = "9:16";
+    private const string Resolution720p = "720p";
+    private const string Resolution1080p = "1080p";
+    private const string Resolution4K = "4K";
 
     private bool CanMerge => _project is not null && _project.Scenes.Count > 0 && _project.Scenes.All(x => x.Status == VideoSceneStatuses.VideoReady);
 
@@ -474,6 +533,18 @@ else
     private string ProjectAspectRatio => HasProjectAspectRatio ? _aspectRatio : "Chưa chọn";
 
     private bool HasProjectAspectRatio => IsSupportedAspectRatio(_aspectRatio);
+
+    private string ProjectResolution => HasProjectResolution ? _resolution : "Chưa chọn";
+
+    private bool HasProjectResolution => IsSupportedResolution(_resolution);
+
+    private IReadOnlyList<string> SupportedVideoResolutions
+        => (VideoOptions.CurrentValue.SupportedResolutions is { Length: > 0 } values ? values : new[] { Resolution720p, Resolution1080p })
+            .Select(NormalizeResolution)
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Cast<string>()
+            .ToList();
 
     private string ProjectHeaderMeta
         => _projectId is long id
@@ -534,6 +605,7 @@ else
                     _project = null;
                     _prompt = string.Empty;
                     _aspectRatio = string.Empty;
+                    _resolution = string.Empty;
                     StopPolling();
                 }
                 else
@@ -572,7 +644,7 @@ else
             await AddDebugAsync("ui_auth", "Kiểm tra đăng nhập", "INFO", $"User={MaskGuid(AuthState.CurrentUser.UserId)}, Customer={MaskGuid(AuthState.CurrentUser.CustomerId)}");
             var inputDebug = BuildInputDebugMessage();
             await AddDebugAsync("ui_input", "Kiểm tra prompt", "INFO", inputDebug);
-            _prompt = PersistPromptAspectRatio(_prompt, _aspectRatio);
+            _prompt = PersistPromptVideoSettings(_prompt, _aspectRatio, _resolution);
 
             var storageRoot = VideoOptions.CurrentValue.StorageRoot;
             var publicBase = VideoOptions.CurrentValue.PublicBase;
@@ -594,10 +666,7 @@ else
             await ProjectCreated.InvokeAsync(result.Id);
             Logger.LogInformation("VIDEO_RENDER_CREATE_PROJECT_OK projectId={ProjectId} sceneCount={SceneCount} status={Status}", result.Id, result.SceneCount, result.Status);
             await ReloadAsync();
-            // Tự động enqueue batch render ảnh tĩnh qua provider ảnh đã cấu hình ngay sau khi scene đã lưu.
-            // Không chờ ảnh render xong; UI chuyển sang tab Scene và hiển thị shimmer từng scene.
-            await EnqueueBulkSceneImageRenderAsync(onlyMissingOrFailed: false);
-            Snackbar.Add("Đã tạo project và bắt đầu render ảnh tĩnh scene.", Severity.Success);
+            Snackbar.Add("Đã tạo project và chuyển sang tab Scene / Hình ảnh.", Severity.Success);
             _tabIndex = 1;
             await LogProjectEvent("PROJECT_CREATED", "info", "Đã tạo project và sinh scene plan mock.", new { result.Id, result.SceneCount, result.Status });
             await AddDebugAsync("ui_done", "Hoàn tất", "SUCCESS", $"Tạo project thành công: {result.Id}", $"SceneCount={result.SceneCount}, Status={result.Status}");
@@ -627,7 +696,7 @@ else
             var jobFolder = DateTime.UtcNow.ToString("yyyyMMdd-HHmmss");
             var result = await VideoRepo.CreateProjectAsync(new VideoProjectCreateRequest
             {
-                Prompt = PersistPromptAspectRatio(_prompt, _aspectRatio),
+                Prompt = PersistPromptVideoSettings(_prompt, _aspectRatio, _resolution),
                 AspectRatio = _aspectRatio,
                 CharacterId = _selectedCharacter?.Id,
                 TotalSeconds = _totalSeconds,
@@ -697,7 +766,7 @@ else
         => ScenePromptMetadata.Parse(scenePrompt).ScenePurpose ?? string.Empty;
 
     private string BuildInputDebugMessage()
-        => $"PromptLength={_prompt.Length}, AspectRatio={ProjectAspectRatio}, CharacterId={(_selectedCharacter?.Id.ToString() ?? "null")}, TotalSeconds={_totalSeconds}, SceneSeconds={_sceneSeconds}, ThinkScenes={_thinkScenes}, IsTodoX={_promptParseResult.IsTodoXPrompt}, Scenes={_promptParseResult.Model.Scenes.Count}";
+        => $"PromptLength={_prompt.Length}, AspectRatio={ProjectAspectRatio}, Resolution={ProjectResolution}, CharacterId={(_selectedCharacter?.Id.ToString() ?? "null")}, TotalSeconds={_totalSeconds}, SceneSeconds={_sceneSeconds}, ThinkScenes={_thinkScenes}, IsTodoX={_promptParseResult.IsTodoXPrompt}, Scenes={_promptParseResult.Model.Scenes.Count}";
 
     private static string? ExtractValue(string? source, string key)
     {
@@ -753,6 +822,7 @@ else
         _prompt = string.Empty;
         _promptParseResult = new();
         _aspectRatio = string.Empty;
+        _resolution = string.Empty;
         _characterPrompt = string.Empty;
         _totalSeconds = 16;
         _sceneSeconds = 8;
@@ -823,7 +893,7 @@ else
                 _thinkScenes = _project.ThinkScenes;
                 _prompt = _project.OriginalPrompt;
                 _promptParseResult = PromptParser.Parse(_prompt);
-                ApplyAspectRatioFromPrompt();
+                ApplyVideoSettingsFromPrompt();
                 _totalSeconds = _project.TotalSeconds;
                 _sceneSeconds = _project.SceneSeconds;
                 _selectedCharacterId = _project.CharacterId;
@@ -1107,26 +1177,25 @@ else
         return Task.CompletedTask;
     }
 
-    private RenderFragment RenderSceneImageFrame(VideoProjectSceneDto scene, SceneImageVisualState sceneState, SceneEditorState draft) => @<div class="scene-media-square">
+    private RenderFragment RenderSceneImageFrame(VideoProjectSceneDto scene, RenderSceneImageVisualState sceneState, SceneEditorState draft) => @<div class="scene-media-square">
         @{
             var imageUrl = ResolveDraftImageUrl(scene, draft);
         }
-        @if (sceneState == SceneImageVisualState.Ready && !string.IsNullOrWhiteSpace(imageUrl))
+        @if (sceneState == RenderSceneImageVisualState.Ready && !string.IsNullOrWhiteSpace(imageUrl))
         {
             <img src="@CacheBust(imageUrl, scene.UpdatedAt)" class="scene-media-image" @onclick="@(() => OpenScenePreview(scene))" />
         }
-        else if (sceneState is SceneImageVisualState.Rendering or SceneImageVisualState.Queued or SceneImageVisualState.Retrying)
+        else if (RenderSceneImageUiState.IsActive(sceneState))
         {
-            <div class="scene-image-frame @SceneStateCss(sceneState)">
+            <div class="scene-image-frame @SceneStateCss(sceneState) is-rendering">
                 @if (!string.IsNullOrWhiteSpace(imageUrl))
                 {
                     <img src="@CacheBust(imageUrl, scene.UpdatedAt)" class="scene-media-image scene-image-dim" />
                 }
-                <div class="scene-image-shimmer"></div>
-                <span class="scene-image-label">@SceneStateLabel(sceneState)</span>
+                <div class="scene-image-shimmer"><span>@SceneStateLabel(sceneState)</span></div>
             </div>
         }
-        else if (sceneState == SceneImageVisualState.Failed)
+        else if (sceneState == RenderSceneImageVisualState.Failed)
         {
             <div class="scene-thumb-placeholder scene-image-failed">Lỗi render ảnh</div>
         }
@@ -1151,10 +1220,9 @@ else
         }
         else if (scene.Status is VideoSceneStatuses.VideoQueued or VideoSceneStatuses.VideoRendering)
         {
-            <div class="scene-image-frame scene-image-rendering">
+            <div class="scene-image-frame scene-image-rendering is-rendering">
                 <img src="@CacheBust(imageUrl, scene.UpdatedAt)" class="scene-media-image scene-image-dim" />
-                <div class="scene-image-shimmer"></div>
-                <span class="scene-image-label">@SceneLabel(scene.Status)</span>
+                <div class="scene-image-shimmer"><span>@SceneLabel(scene.Status)</span></div>
             </div>
         }
         else
@@ -1179,12 +1247,14 @@ else
             ? "Cần chọn/render ảnh trước"
             : string.IsNullOrWhiteSpace(draft.MotionPrompt)
                 ? "Cần nhập prompt video"
+            : !HasProjectResolution
+                ? "Cần chọn độ phân giải video"
             : "Chưa cấu hình provider image-to-video";
 
     private Task CheckPromptAsync()
     {
         _promptParseResult = PromptParser.Parse(_prompt);
-        ApplyAspectRatioFromPrompt();
+        ApplyVideoSettingsFromPrompt();
         return InvokeAsync(StateHasChanged);
     }
 
@@ -1194,12 +1264,24 @@ else
         return InvokeAsync(StateHasChanged);
     }
 
-    private void ApplyAspectRatioFromPrompt()
+    private Task OnResolutionChangedAsync(string value)
+    {
+        _resolution = NormalizeResolution(value) ?? string.Empty;
+        return InvokeAsync(StateHasChanged);
+    }
+
+    private void ApplyVideoSettingsFromPrompt()
     {
         var parsed = NormalizeAspectRatio(_promptParseResult.Model.AspectRatio);
         if (!string.IsNullOrWhiteSpace(parsed))
         {
             _aspectRatio = parsed;
+        }
+
+        var resolution = NormalizeResolution(_promptParseResult.Model.Resolution);
+        if (!string.IsNullOrWhiteSpace(resolution))
+        {
+            _resolution = resolution;
         }
     }
 
@@ -1213,7 +1295,7 @@ else
         if (!_promptParseResult.IsJsonValid)
         {
             _promptParseResult = PromptParser.Parse(_prompt);
-            ApplyAspectRatioFromPrompt();
+            ApplyVideoSettingsFromPrompt();
             if (HasProjectAspectRatio)
             {
                 return true;
@@ -1221,6 +1303,27 @@ else
         }
 
         Snackbar.Add("Vui lòng chọn tỷ lệ video 16:9 hoặc 9:16 trước khi tạo/phân tách scene.", Severity.Warning);
+        return false;
+    }
+
+    private bool EnsureResolutionSelected()
+    {
+        if (HasProjectResolution)
+        {
+            return true;
+        }
+
+        if (!_promptParseResult.IsJsonValid)
+        {
+            _promptParseResult = PromptParser.Parse(_prompt);
+            ApplyVideoSettingsFromPrompt();
+            if (HasProjectResolution)
+            {
+                return true;
+            }
+        }
+
+        Snackbar.Add("Vui lòng chọn độ phân giải video trước khi render video.", Severity.Warning);
         return false;
     }
 
@@ -1235,9 +1338,25 @@ else
         return IsSupportedAspectRatio(text) ? text : null;
     }
 
-    private static string PersistPromptAspectRatio(string? prompt, string aspectRatio)
+    private bool IsSupportedResolution(string? value)
+        => SupportedVideoResolutions.Any(x => string.Equals(x, NormalizeResolution(value), StringComparison.OrdinalIgnoreCase));
+
+    private static string? NormalizeResolution(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        return value.Trim().ToLowerInvariant() switch
+        {
+            "720p" => Resolution720p,
+            "1080p" => Resolution1080p,
+            "4k" => Resolution4K,
+            _ => null
+        };
+    }
+
+    private static string PersistPromptVideoSettings(string? prompt, string aspectRatio, string resolution)
     {
         var ratio = NormalizeAspectRatio(aspectRatio) ?? AspectRatioPortrait;
+        var normalizedResolution = NormalizeResolution(resolution);
         var source = prompt ?? string.Empty;
         if (TryExtractJsonRange(source, out var start, out var end))
         {
@@ -1247,6 +1366,10 @@ else
                 if (JsonNode.Parse(json) is JsonObject obj)
                 {
                     obj["aspect_ratio"] = ratio;
+                    if (!string.IsNullOrWhiteSpace(normalizedResolution))
+                    {
+                        obj["resolution"] = normalizedResolution;
+                    }
                     return source[..start] + obj.ToJsonString() + source[(end + 1)..];
                 }
             }
@@ -1256,7 +1379,11 @@ else
             }
         }
 
-        var metadata = new JsonObject { ["aspect_ratio"] = ratio }.ToJsonString();
+        var metadata = new JsonObject
+        {
+            ["aspect_ratio"] = ratio,
+            ["resolution"] = normalizedResolution
+        }.ToJsonString();
         return string.IsNullOrWhiteSpace(source) ? metadata : $"{source.TrimEnd()}{Environment.NewLine}{metadata}";
     }
 
@@ -1328,13 +1455,14 @@ else
                 // Keep polling while a configured image-provider batch is active, scenes are actively rendering/retrying,
                 // scenes are still pending an image, or the video pipeline is mid-flight. Stop once everything
                 // has settled to avoid churn.
-                var scenesPending = _batchActive || HasActiveSceneRenders() || HasPendingSceneImages();
-                var videoActive = _project.Status is VideoProjectStatuses.Rendering or VideoProjectStatuses.Merging or VideoProjectStatuses.SceneReady or VideoProjectStatuses.ReadyToMerge;
+                var hasPendingSceneImages = HasPendingSceneImages();
+                var scenesPending = _batchActive || HasActiveSceneRenders();
+                var videoActive = _project.Status is VideoProjectStatuses.Rendering or VideoProjectStatuses.Merging;
                 if (scenesPending || videoActive)
                 {
                     await InvokeAsync(ReloadAsync);
                     // Batch is done when no scene is still waiting for its first image.
-                    if (_batchActive && !HasPendingSceneImages())
+                    if (_batchActive && !hasPendingSceneImages)
                     {
                         _batchActive = false;
                     }
@@ -1388,7 +1516,7 @@ else
         var parameters = new DialogParameters
         {
             [nameof(Components.Dialogs.ScenePromptEditorDialog.Metadata)] = ScenePromptMetadata.FromScene(scene),
-            [nameof(Components.Dialogs.ScenePromptEditorDialog.IsRendering)] = IsSceneRendering(scene) || ResolveSceneImageState(scene) is SceneImageVisualState.Queued or SceneImageVisualState.Rendering or SceneImageVisualState.Retrying
+            [nameof(Components.Dialogs.ScenePromptEditorDialog.IsRendering)] = IsSceneRendering(scene) || RenderSceneImageUiState.IsActive(ResolveSceneImageState(scene))
         };
         var options = new DialogOptions { CloseButton = true, FullWidth = true, MaxWidth = MaxWidth.Medium };
         var dialog = await DialogService.ShowAsync<Components.Dialogs.ScenePromptEditorDialog>($"Chỉnh prompt scene {scene.SceneIndex}", parameters, options);
@@ -1432,7 +1560,7 @@ else
                 NormalizeScenePrompts(scene);
             }
 
-            _prompt = PersistPromptAspectRatio(_prompt, _aspectRatio);
+            _prompt = PersistPromptVideoSettings(_prompt, _aspectRatio, _resolution);
             var snapshot = BuildJobSnapshot();
             await VideoRepo.UpdateProjectDraftAsync(_project.Id, new VideoProjectUpdateRequest
             {
@@ -1492,6 +1620,7 @@ else
             _project.Title,
             _project.OriginalPrompt,
             AspectRatio = _aspectRatio,
+            Resolution = _resolution,
             _project.CharacterId,
             CharacterName = _selectedCharacter?.CharacterName ?? ResolveCurrentCharacter()?.CharacterName,
             CharacterPrompt = _selectedCharacter?.NormalizedPrompt ?? ResolveCurrentCharacter()?.NormalizedPrompt,
@@ -1963,48 +2092,48 @@ else
 
     // True when any scene is actively being processed (queued, rendering, or retrying) per events or UI state.
     private bool HasActiveSceneRenders()
-        => _sceneEventState.Values.Any(state => state is SceneImageVisualState.Queued or SceneImageVisualState.Rendering or SceneImageVisualState.Retrying)
+        => _sceneEventState.Values.Any(RenderSceneImageUiState.IsActive)
            || _sceneRerendering.Count > 0;
 
-    private SceneImageVisualState ResolveSceneImageState(VideoProjectSceneDto scene)
+    private RenderSceneImageVisualState ResolveSceneImageState(VideoProjectSceneDto scene)
     {
         // A locally-running OpenRouter re-render always wins for its own scene.
         if (_sceneRerendering.Contains(scene.Id))
         {
-            return SceneImageVisualState.Rendering;
+            return RenderSceneImageVisualState.Rendering;
         }
 
         // A scene that already has a valid image is Ready regardless of stale events.
         if (!string.IsNullOrWhiteSpace(scene.StaticImageUrl) && scene.Status != VideoSceneStatuses.Failed)
         {
-            return SceneImageVisualState.Ready;
+            return RenderSceneImageVisualState.Ready;
         }
 
         // Otherwise derive the transient state from the latest batch event for this scene. This is what
         // makes the per-scene state survive a page refresh (state is reconstructed from project events).
-        if (_sceneEventState.TryGetValue(scene.Id, out var evState) && evState != SceneImageVisualState.None)
+        if (_sceneEventState.TryGetValue(scene.Id, out var evState) && evState != RenderSceneImageVisualState.None)
         {
             // A terminal DB status still overrides a stale non-terminal event.
             if (string.Equals(scene.Status, VideoSceneStatuses.Failed, StringComparison.OrdinalIgnoreCase)
-                && evState is not SceneImageVisualState.Rendering and not SceneImageVisualState.Retrying and not SceneImageVisualState.Queued)
+                && !RenderSceneImageUiState.IsActive(evState))
             {
-                return SceneImageVisualState.Failed;
+                return RenderSceneImageVisualState.Failed;
             }
             return evState;
         }
 
         if (string.Equals(scene.Status, VideoSceneStatuses.Failed, StringComparison.OrdinalIgnoreCase))
         {
-            return SceneImageVisualState.Failed;
+            return RenderSceneImageVisualState.Failed;
         }
 
         // Fallback while a batch is active but no per-scene event has arrived yet.
         if (_batchActive && string.IsNullOrWhiteSpace(scene.StaticImageUrl))
         {
-            return SceneImageVisualState.Queued;
+            return RenderSceneImageVisualState.Queued;
         }
 
-        return SceneImageVisualState.None;
+        return RenderSceneImageVisualState.None;
     }
 
     // Rebuilds the per-scene transient render state from project events (latest event per scene wins).
@@ -2023,15 +2152,15 @@ else
 
             var state = ev.EventType switch
             {
-                "SCENE_IMAGE_QUEUED" => SceneImageVisualState.Queued,
-                "SCENE_IMAGE_RENDER_START" => SceneImageVisualState.Rendering,
-                "SCENE_IMAGE_RETRY_START" => SceneImageVisualState.Rendering,
-                "SCENE_IMAGE_QUOTA_WAIT" => SceneImageVisualState.Retrying,
-                "SCENE_IMAGE_READY" => SceneImageVisualState.Ready,
-                "SCENE_IMAGE_RENDER_FAILED" => SceneImageVisualState.Failed,
-                _ => (SceneImageVisualState?)null
+                "SCENE_IMAGE_QUEUED" => RenderSceneImageVisualState.Queued,
+                "SCENE_IMAGE_RENDER_START" => RenderSceneImageVisualState.Rendering,
+                "SCENE_IMAGE_RETRY_START" => RenderSceneImageVisualState.Rendering,
+                "SCENE_IMAGE_QUOTA_WAIT" => RenderSceneImageVisualState.Retrying,
+                "SCENE_IMAGE_READY" => RenderSceneImageVisualState.Ready,
+                "SCENE_IMAGE_RENDER_FAILED" => RenderSceneImageVisualState.Failed,
+                _ => (RenderSceneImageVisualState?)null
             };
-            if (state is SceneImageVisualState resolved)
+            if (state is RenderSceneImageVisualState resolved)
             {
                 _sceneEventState[id] = resolved;
             }
@@ -2058,21 +2187,21 @@ else
         return null;
     }
 
-    private static string SceneStateCss(SceneImageVisualState state) => state switch
+    private static string SceneStateCss(RenderSceneImageVisualState state) => state switch
     {
-        SceneImageVisualState.Rendering => "scene-image-rendering",
-        SceneImageVisualState.Queued => "scene-image-queued",
-        SceneImageVisualState.Retrying => "scene-image-retrying",
-        SceneImageVisualState.Failed => "scene-image-failed",
+        RenderSceneImageVisualState.Rendering => "scene-image-rendering",
+        RenderSceneImageVisualState.Queued => "scene-image-queued",
+        RenderSceneImageVisualState.Retrying => "scene-image-retrying",
+        RenderSceneImageVisualState.Failed => "scene-image-failed",
         _ => string.Empty
     };
 
-    private static string SceneStateLabel(SceneImageVisualState state) => state switch
+    private static string SceneStateLabel(RenderSceneImageVisualState state) => state switch
     {
-        SceneImageVisualState.Rendering => "Đang tạo ảnh...",
-        SceneImageVisualState.Queued => "Đang chờ",
-        SceneImageVisualState.Retrying => "Đang chờ quota...",
-        SceneImageVisualState.Failed => "Lỗi render",
+        RenderSceneImageVisualState.Rendering => "Đang tạo ảnh...",
+        RenderSceneImageVisualState.Queued => "Đang chờ",
+        RenderSceneImageVisualState.Retrying => "Đang chờ quota...",
+        RenderSceneImageVisualState.Failed => "Lỗi render",
         _ => string.Empty
     };
 
@@ -2081,38 +2210,56 @@ else
 
     private async Task MoveSceneUpAsync(VideoProjectSceneDto scene)
     {
-        if (_project is null || scene.SceneIndex <= 1) return;
-        var previous = _project.Scenes.FirstOrDefault(x => x.SceneIndex == scene.SceneIndex - 1);
-        if (previous is null) return;
-        (scene.SceneIndex, previous.SceneIndex) = (previous.SceneIndex, scene.SceneIndex);
-        await VideoRepo.ReplaceScenesAsync(_project.Id, _project.Scenes.OrderBy(x => x.SceneIndex).ToList(), default);
+        if (_project is null || AuthState.CurrentUser is null || scene.SceneIndex <= 1) return;
+        await VideoRepo.MoveSceneAsync(_project.Id, scene.Id, -1, AuthState.CurrentUser);
         await ReloadAsync();
     }
 
     private async Task MoveSceneDownAsync(VideoProjectSceneDto scene)
     {
-        if (_project is null || scene.SceneIndex >= _project.Scenes.Count) return;
-        var next = _project.Scenes.FirstOrDefault(x => x.SceneIndex == scene.SceneIndex + 1);
-        if (next is null) return;
-        (scene.SceneIndex, next.SceneIndex) = (next.SceneIndex, scene.SceneIndex);
-        await VideoRepo.ReplaceScenesAsync(_project.Id, _project.Scenes.OrderBy(x => x.SceneIndex).ToList(), default);
+        if (_project is null || AuthState.CurrentUser is null || scene.SceneIndex >= _project.Scenes.Count) return;
+        await VideoRepo.MoveSceneAsync(_project.Id, scene.Id, 1, AuthState.CurrentUser);
         await ReloadAsync();
     }
 
     private async Task DeleteSceneAsync(VideoProjectSceneDto scene)
     {
-        if (_project is null) return;
-        var remaining = _project.Scenes.Where(x => x.Id != scene.Id).OrderBy(x => x.SceneIndex).ToList();
-        for (var index = 0; index < remaining.Count; index++)
+        if (_project is null || AuthState.CurrentUser is null) return;
+        await VideoRepo.DeleteSceneAsync(_project.Id, scene.Id, AuthState.CurrentUser);
+        await ReloadAsync();
+    }
+
+    private async Task AddSceneAsync()
+    {
+        if (_project is null || AuthState.CurrentUser is null) return;
+        if (!EnsureAspectRatioSelected())
         {
-            remaining[index].SceneIndex = index + 1;
+            return;
         }
-        await VideoRepo.ReplaceScenesAsync(_project.Id, remaining, default);
+
+        var index = _project.Scenes.Count + 1;
+        await VideoRepo.AddSceneAsync(_project.Id, new VideoProjectAddSceneRequest
+        {
+            Title = $"Scene {index:00}",
+            Purpose = "manual_scene",
+            DurationSeconds = Math.Max(1, _sceneSeconds),
+            ImagePrompt = $"Scene {index} image prompt",
+            VideoPrompt = $"Scene {index} motion prompt",
+            Voice = string.Empty,
+            VoiceInstruction = string.Empty,
+            AspectRatio = _aspectRatio
+        }, AuthState.CurrentUser);
+        Snackbar.Add("Đã thêm scene thủ công.", Severity.Success);
         await ReloadAsync();
     }
 
     private Task RenderSceneVideoAsync(VideoProjectSceneDto scene)
     {
+        if (!EnsureResolutionSelected())
+        {
+            return Task.CompletedTask;
+        }
+
         Snackbar.Add(SceneVideoDisabledReason(scene, GetSceneDraft(scene)), Severity.Info);
         return Task.CompletedTask;
     }

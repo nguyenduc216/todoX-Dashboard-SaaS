@@ -131,6 +131,19 @@ public sealed class VideoProjectSceneCreateRequest
     public string? VideoPrompt { get; set; }
 }
 
+public sealed class VideoProjectAddSceneRequest
+{
+    public int? InsertAfterSceneIndex { get; set; }
+    public string? Title { get; set; }
+    public string? Purpose { get; set; }
+    public int DurationSeconds { get; set; } = 8;
+    public string? ImagePrompt { get; set; }
+    public string? VideoPrompt { get; set; }
+    public string? Voice { get; set; }
+    public string? VoiceInstruction { get; set; }
+    public string? AspectRatio { get; set; }
+}
+
 public sealed class VideoProjectSaveSceneRequest
 {
     public long ProjectId { get; set; }
