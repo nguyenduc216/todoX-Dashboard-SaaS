@@ -138,6 +138,25 @@ public sealed class VideoProjectSaveSceneRequest
     public string? VideoPrompt { get; set; }
 }
 
+public sealed class VideoProjectSaveSceneDraftRequest
+{
+    public long SceneId { get; set; }
+    public string Status { get; set; } = VideoSceneStatuses.Draft;
+    public string? Title { get; set; }
+    public int SceneIndex { get; set; }
+    public string ScenePrompt { get; set; } = string.Empty;
+    public string? ImagePrompt { get; set; }
+    public string? VideoPrompt { get; set; }
+    public string? ImageUrl { get; set; }
+    public string? ImagePath { get; set; }
+    public string? VideoUrl { get; set; }
+    public string? VideoPath { get; set; }
+    public string? ErrorMessage { get; set; }
+    public Guid? SelectedImageVersionId { get; set; }
+    public Guid? SelectedVideoVersionId { get; set; }
+    public string? AspectRatio { get; set; }
+}
+
 public sealed class VideoProjectUpdateRequest
 {
     public string? Title { get; set; }

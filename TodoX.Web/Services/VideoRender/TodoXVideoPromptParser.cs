@@ -4,6 +4,7 @@ namespace TodoX.Web.Services.VideoRender;
 
 public sealed class TodoXVideoPromptModel
 {
+    public string? RawAspectRatio { get; set; }
     public string? AspectRatio { get; set; }
     public string? VideoTitle { get; set; }
     public string? VideoObjective { get; set; }
@@ -44,6 +45,8 @@ public sealed class TodoXVideoPromptParseResult
 {
     public bool IsTodoXPrompt { get; set; }
     public bool IsJsonValid { get; set; }
+    public bool HasInvalidAspectRatio { get; set; }
+    public string? InvalidAspectRatio { get; set; }
     public bool HasScenes => Model.Scenes.Count > 0;
     public string? ErrorMessage { get; set; }
     public TodoXVideoPromptModel Model { get; set; } = new();
@@ -91,6 +94,13 @@ public sealed class TodoXVideoPromptParser : ITodoXVideoPromptParser
             result.IsJsonValid = true;
             result.IsTodoXPrompt = HasTodoXMetadata(result.Model);
             result.Summary = BuildSummary(result.Model);
+            var rawAspectRatio = model.RawAspectRatio;
+            if (!string.IsNullOrWhiteSpace(rawAspectRatio) && string.IsNullOrWhiteSpace(result.Model.AspectRatio))
+            {
+                result.HasInvalidAspectRatio = true;
+                result.InvalidAspectRatio = rawAspectRatio;
+                result.ErrorMessage = "Aspect ratio không hợp lệ. Chỉ hỗ trợ 16:9 hoặc 9:16.";
+            }
             return result;
         }
         catch (Exception ex)
@@ -102,6 +112,7 @@ public sealed class TodoXVideoPromptParser : ITodoXVideoPromptParser
 
     private static TodoXVideoPromptModel Normalize(TodoXVideoPromptModel model)
     {
+        model.AspectRatio = NormalizeAspectRatio(model.RawAspectRatio ?? model.AspectRatio);
         model.DurationSeconds = ParseDuration(model.DurationSeconds?.ToString());
         if (model.Scenes is not null)
         {
@@ -120,7 +131,7 @@ public sealed class TodoXVideoPromptParser : ITodoXVideoPromptParser
         var root = doc.RootElement;
         var model = new TodoXVideoPromptModel
         {
-            AspectRatio = NormalizeAspectRatio(ReadString(root, "aspect_ratio", "aspectRatio")),
+            RawAspectRatio = ReadString(root, "aspect_ratio", "aspectRatio", "video_aspect_ratio", "ratio"),
             VideoTitle = ReadString(root, "video_title", "title"),
             VideoObjective = ReadString(root, "video_objective", "objective"),
             DurationSeconds = ParseDuration(ReadRaw(root, "duration")),

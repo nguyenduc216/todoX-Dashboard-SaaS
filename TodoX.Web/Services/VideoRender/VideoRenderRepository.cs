@@ -471,6 +471,122 @@ public sealed class VideoRenderRepository
         }
     }
 
+    public async Task SaveSceneDraftAsync(VideoProjectSaveSceneDraftRequest request, Guid? selectedBy, CancellationToken ct = default)
+    {
+        try
+        {
+            await _tenant.EnsureLoadedAsync(ct);
+            using var conn = await _factory.OpenAsync(ct);
+            using var tx = conn.BeginTransaction();
+
+            var scene = await conn.QuerySingleOrDefaultAsync<VideoProjectSceneDto>(
+                """
+                SELECT id AS Id, project_id AS ProjectId, tenant_id AS TenantId, scene_index AS SceneIndex
+                  FROM video_render.video_project_scenes
+                 WHERE id=@sceneId AND tenant_id=@tenant
+                 FOR UPDATE;
+                """,
+                new { sceneId = request.SceneId, tenant = _tenant.TenantId }, tx);
+            if (scene is null)
+            {
+                tx.Rollback();
+                throw new InvalidOperationException("Không tìm thấy scene render video.");
+            }
+
+            if (request.SelectedImageVersionId is Guid imageVersionId)
+            {
+                var imageVersion = await conn.QuerySingleAsync<SceneVersionProjection>(
+                    """
+                    SELECT public_url AS PublicUrl, source_file_path AS SourceFilePath, storage_key AS StorageKey
+                      FROM video_render.scene_image_versions
+                     WHERE id=@versionId AND scene_id=@sceneId AND project_id=@projectId AND tenant_id=@tenant AND status='completed'
+                     FOR UPDATE;
+                    """,
+                    new { versionId = imageVersionId, sceneId = scene.Id, projectId = scene.ProjectId, tenant = _tenant.TenantId }, tx);
+                await conn.ExecuteAsync("UPDATE video_render.scene_image_versions SET is_selected=false WHERE scene_id=@sceneId AND project_id=@projectId AND tenant_id=@tenant;", new { sceneId = scene.Id, projectId = scene.ProjectId, tenant = _tenant.TenantId }, tx);
+                await conn.ExecuteAsync(
+                    "UPDATE video_render.scene_image_versions SET is_selected=true, selected_at=now(), selected_by=@selectedBy, updated_at=now() WHERE id=@versionId AND tenant_id=@tenant;",
+                    new { versionId = imageVersionId, tenant = _tenant.TenantId, selectedBy }, tx);
+                request.ImageUrl = imageVersion.PublicUrl ?? request.ImageUrl;
+                request.ImagePath = imageVersion.SourceFilePath ?? imageVersion.StorageKey ?? request.ImagePath;
+            }
+
+            if (request.SelectedVideoVersionId is Guid videoVersionId)
+            {
+                var videoVersion = await conn.QuerySingleAsync<SceneVersionProjection>(
+                    """
+                    SELECT public_url AS PublicUrl, source_file_path AS SourceFilePath, storage_key AS StorageKey
+                      FROM video_render.scene_video_versions
+                     WHERE id=@versionId AND scene_id=@sceneId AND project_id=@projectId AND tenant_id=@tenant AND status='completed'
+                     FOR UPDATE;
+                    """,
+                    new { versionId = videoVersionId, sceneId = scene.Id, projectId = scene.ProjectId, tenant = _tenant.TenantId }, tx);
+                await conn.ExecuteAsync("UPDATE video_render.scene_video_versions SET is_selected=false WHERE scene_id=@sceneId AND project_id=@projectId AND tenant_id=@tenant;", new { sceneId = scene.Id, projectId = scene.ProjectId, tenant = _tenant.TenantId }, tx);
+                await conn.ExecuteAsync(
+                    "UPDATE video_render.scene_video_versions SET is_selected=true, selected_at=now(), selected_by=@selectedBy, updated_at=now() WHERE id=@versionId AND tenant_id=@tenant;",
+                    new { versionId = videoVersionId, tenant = _tenant.TenantId, selectedBy }, tx);
+                request.VideoUrl = videoVersion.PublicUrl ?? request.VideoUrl;
+                request.VideoPath = videoVersion.SourceFilePath ?? videoVersion.StorageKey ?? request.VideoPath;
+            }
+
+            await conn.ExecuteAsync(
+                """
+                UPDATE video_render.video_project_scenes
+                   SET title=COALESCE(@title, title),
+                       scene_prompt=@scenePrompt,
+                       image_prompt=@imagePrompt,
+                       video_prompt=@videoPrompt,
+                       static_image_url=COALESCE(@imageUrl, static_image_url),
+                       static_image_path=COALESCE(@imagePath, static_image_path),
+                       scene_video_url=COALESCE(@videoUrl, scene_video_url),
+                       scene_video_path=COALESCE(@videoPath, scene_video_path),
+                       selected_image_version_id=COALESCE(@selectedImageVersionId, selected_image_version_id),
+                       selected_video_version_id=COALESCE(@selectedVideoVersionId, selected_video_version_id),
+                       status=@status,
+                       error_message=@errorMessage,
+                       updated_at=now()
+                 WHERE id=@sceneId AND tenant_id=@tenant;
+                """,
+                new
+                {
+                    sceneId = scene.Id,
+                    tenant = _tenant.TenantId,
+                    title = request.Title,
+                    scenePrompt = request.ScenePrompt,
+                    imagePrompt = request.ImagePrompt,
+                    videoPrompt = request.VideoPrompt,
+                    imageUrl = request.ImageUrl,
+                    imagePath = request.ImagePath,
+                    videoUrl = request.VideoUrl,
+                    videoPath = request.VideoPath,
+                    selectedImageVersionId = request.SelectedImageVersionId,
+                    selectedVideoVersionId = request.SelectedVideoVersionId,
+                    status = string.IsNullOrWhiteSpace(request.Status) ? VideoSceneStatuses.Draft : request.Status,
+                    errorMessage = request.ErrorMessage
+                }, tx);
+
+            await conn.ExecuteAsync(
+                """
+                INSERT INTO video_render.video_project_events
+                    (project_id, tenant_id, event_type, level, message, data_json, created_at)
+                VALUES
+                    (@projectId, @tenant, 'SCENE_SAVED', 'info', 'Video scene draft saved atomically.', CAST(@data AS jsonb), now());
+                """,
+                new
+                {
+                    projectId = scene.ProjectId,
+                    tenant = _tenant.TenantId,
+                    data = JsonSerializer.Serialize(new { sceneId = scene.Id, request.SceneIndex, request.SelectedImageVersionId, request.SelectedVideoVersionId, request.AspectRatio }, JsonOptions)
+                }, tx);
+
+            tx.Commit();
+        }
+        catch (Exception ex) when (DbDiagnostics.LogPostgresException(_logger, ex, "video_render_save_scene_draft"))
+        {
+            throw;
+        }
+    }
+
     public async Task<List<VideoProjectSceneDto>> ReplaceScenesAsync(long projectId, IEnumerable<VideoProjectSceneDto> scenes, CancellationToken ct = default)
     {
         try
@@ -545,4 +661,11 @@ public sealed class VideoRenderRepository
            || user.Can("video.render.manage")
            || user.Can("render.video.manage")
            || user.Can("ai.video.version.manage");
+
+    private sealed class SceneVersionProjection
+    {
+        public string? PublicUrl { get; init; }
+        public string? SourceFilePath { get; init; }
+        public string? StorageKey { get; init; }
+    }
 }
