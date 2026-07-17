@@ -53,6 +53,12 @@ public interface IMediaFileService
 
     Task<MediaFileDto> DownloadAndSaveImageAtObjectKeyAsync(string imageUrl, string objectKey, string fileCategory,
         Guid? userId, Guid? customerId, Guid tenantId, CancellationToken ct = default);
+
+    Task<MediaFileDto> SaveBinaryAtObjectKeyAsync(byte[] content, string objectKey, string originalFileName, string mimeType, string fileCategory,
+        Guid? userId, Guid? customerId, Guid tenantId, CancellationToken ct = default);
+
+    Task<MediaFileDto> DownloadAndSaveBinaryAtObjectKeyAsync(string fileUrl, string objectKey, string fileCategory, string expectedMimeType,
+        Guid? userId, Guid? customerId, Guid tenantId, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -62,7 +68,7 @@ public interface IMediaFileService
 public sealed class MediaFileService : IMediaFileService
 {
     private static readonly HashSet<string> AllowedMime = new(StringComparer.OrdinalIgnoreCase)
-        { "image/png", "image/jpeg", "image/webp" };
+        { "image/png", "image/jpeg", "image/webp", "video/mp4" };
     private const long MaxBytes = 10 * 1024 * 1024;
 
     private readonly TodoXConnectionFactory _factory;
@@ -396,6 +402,21 @@ public sealed class MediaFileService : IMediaFileService
         return saved;
     }
 
+    public Task<MediaFileDto> SaveBinaryAtObjectKeyAsync(byte[] content, string objectKey, string originalFileName, string mimeType,
+        string fileCategory, Guid? userId, Guid? customerId, Guid tenantId, CancellationToken ct = default)
+        => SaveAtObjectKeyAsync(content, objectKey, originalFileName, mimeType, fileCategory, userId, customerId, tenantId, ct);
+
+    public async Task<MediaFileDto> DownloadAndSaveBinaryAtObjectKeyAsync(string fileUrl, string objectKey, string fileCategory, string expectedMimeType,
+        Guid? userId, Guid? customerId, Guid tenantId, CancellationToken ct = default)
+    {
+        var (bytes, contentType, fileName, uri) = await DownloadBinaryBytesAsync(fileUrl, expectedMimeType, ct);
+        var saved = await SaveAtObjectKeyAsync(bytes, objectKey, fileName, contentType, fileCategory,
+            userId, customerId, tenantId, ct);
+        _logger.LogInformation("MEDIA_BINARY_URL_DOWNLOAD_SUCCESS url={Url} mediaId={MediaId} mime={MimeType} size={Size}",
+            uri, saved.Id, saved.MimeType, saved.FileSizeBytes);
+        return saved;
+    }
+
     private async Task<(byte[] Bytes, string ContentType, string FileName, Uri Uri)> DownloadImageBytesAsync(string imageUrl, CancellationToken ct)
     {
         var uri = ValidatePublicImageUri(imageUrl);
@@ -448,6 +469,58 @@ public sealed class MediaFileService : IMediaFileService
         if (string.IsNullOrWhiteSpace(fileName) || !Path.HasExtension(fileName))
         {
             fileName = $"product-url{ContentTypeToExtension(contentType)}";
+        }
+
+        return (ms.ToArray(), contentType, fileName, uri);
+    }
+
+    private async Task<(byte[] Bytes, string ContentType, string FileName, Uri Uri)> DownloadBinaryBytesAsync(
+        string fileUrl,
+        string expectedMimeType,
+        CancellationToken ct)
+    {
+        var uri = ValidatePublicImageUri(fileUrl);
+        _logger.LogInformation("MEDIA_BINARY_URL_DOWNLOAD_START url={Url}", uri);
+
+        var client = _httpClientFactory.CreateClient();
+        client.Timeout = TimeSpan.FromSeconds(60);
+        using var request = new HttpRequestMessage(HttpMethod.Get, uri);
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue(expectedMimeType));
+
+        using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException($"Không tải được file media từ URL. HTTP {(int)response.StatusCode}.");
+        }
+
+        var contentType = NormalizeMimeType(response.Content.Headers.ContentType?.MediaType, uri.AbsolutePath);
+        if (!string.Equals(contentType, expectedMimeType, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException($"URL không trả về media hợp lệ. Content-Type: {response.Content.Headers.ContentType?.MediaType ?? "unknown"}.");
+        }
+
+        var length = response.Content.Headers.ContentLength;
+        if (length is > MaxBytes)
+        {
+            throw new InvalidOperationException("File media từ URL vượt quá 10MB.");
+        }
+
+        await using var stream = await response.Content.ReadAsStreamAsync(ct);
+        using var ms = new MemoryStream();
+        await stream.CopyToAsync(ms, ct);
+        if (ms.Length == 0)
+        {
+            throw new InvalidOperationException("URL media trả về tệp rỗng.");
+        }
+        if (ms.Length > MaxBytes)
+        {
+            throw new InvalidOperationException("File media từ URL vượt quá 10MB.");
+        }
+
+        var fileName = Path.GetFileName(uri.AbsolutePath);
+        if (string.IsNullOrWhiteSpace(fileName) || !Path.HasExtension(fileName))
+        {
+            fileName = $"media-url{ContentTypeToExtension(contentType)}";
         }
 
         return (ms.ToArray(), contentType, fileName, uri);

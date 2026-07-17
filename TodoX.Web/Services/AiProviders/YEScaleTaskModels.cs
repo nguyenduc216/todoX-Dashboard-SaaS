@@ -12,22 +12,34 @@ public sealed class YEScaleTaskSubmitRequest
     public string Prompt { get; set; } = string.Empty;
 
     [JsonPropertyName("config")]
-    public YEScaleImageTaskConfig Config { get; set; } = new();
+    public YEScaleTaskConfig Config { get; set; } = new();
 }
 
-public sealed class YEScaleImageTaskConfig
+public class YEScaleTaskConfig
 {
     [JsonPropertyName("images")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string[]? Images { get; set; }
 
+    [JsonPropertyName("videos")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string[]? Videos { get; set; }
+
     [JsonPropertyName("aspect_ratio")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? AspectRatio { get; set; }
 
+    [JsonPropertyName("duration")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? Duration { get; set; }
+
     [JsonPropertyName("size")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Size { get; set; }
+
+    [JsonPropertyName("mode")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Mode { get; set; }
 
     [JsonPropertyName("quality")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -44,6 +56,10 @@ public sealed class YEScaleImageTaskConfig
     [JsonPropertyName("thinking")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Thinking { get; set; }
+}
+
+public sealed class YEScaleImageTaskConfig : YEScaleTaskConfig
+{
 }
 
 public sealed class YEScaleTaskSubmitResponse

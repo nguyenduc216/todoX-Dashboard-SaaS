@@ -298,6 +298,7 @@ public static class ProviderCodeMap
         {
             "openrouter" or "openrouter_image" => "openrouter_image",
             "yescale" or "yescale_task" or "yescale_task_image" => "yescale_task_image",
+            "yescale_task_video" => "yescale_task_video",
             "image_ai_creative_render" or "todox_image" or "todox" => "todox_image",
             _ => providerCode.Trim()
         };

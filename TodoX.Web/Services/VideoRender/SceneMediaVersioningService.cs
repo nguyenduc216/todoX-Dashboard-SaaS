@@ -62,7 +62,18 @@ public sealed record SceneVideoVersionCompleteRequest(
     string? VideoPath,
     string? PosterUrl,
     decimal? DurationSeconds,
-    string? MimeType);
+    string? MimeType,
+    string? ProviderCode = null,
+    string? ModelName = null,
+    long? ProviderCapabilityId = null,
+    string? ProviderTaskId = null,
+    string? BillingLogicalRequestId = null,
+    decimal? EstimatedUsd = null,
+    decimal? ActualUsd = null,
+    decimal ChargedPoints = 0,
+    decimal RefundedPoints = 0,
+    string? CostSource = null,
+    string? AspectRatio = null);
 
 public sealed record FinalVideoVersionCreateRequest(
     long ProjectId,
@@ -128,8 +139,16 @@ public sealed class SceneVideoVersionDto
     public string? VideoPromptSnapshot { get; set; }
     public string? ProviderCode { get; set; }
     public string? ModelName { get; set; }
+    public long? ProviderCapabilityId { get; set; }
     public string? ProviderTaskId { get; set; }
     public decimal? DurationSeconds { get; set; }
+    public string? AspectRatio { get; set; }
+    public string? BillingLogicalRequestId { get; set; }
+    public decimal? EstimatedUsd { get; set; }
+    public decimal? ActualUsd { get; set; }
+    public decimal ChargedPoints { get; set; }
+    public decimal RefundedPoints { get; set; }
+    public string? CostSource { get; set; }
     public string? PosterUrl { get; set; }
     public string? ErrorMessage { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
@@ -569,11 +588,23 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
             """
             UPDATE video_render.scene_video_versions
                SET status='completed',
+                   provider_code=COALESCE(@providerCode, provider_code),
+                   provider_capability_id=COALESCE(@providerCapabilityId, provider_capability_id),
+                   requested_model=COALESCE(requested_model, @modelName),
+                   actual_model=COALESCE(@modelName, actual_model),
+                   provider_task_id=COALESCE(@providerTaskId, provider_task_id),
                    public_url=@videoUrl,
                    source_file_path=@videoPath,
                    poster_url=@posterUrl,
                    duration_seconds=@durationSeconds,
+                   aspect_ratio=COALESCE(@aspectRatio, aspect_ratio),
                    mime_type=@mimeType,
+                   billing_logical_request_id=COALESCE(@billingLogicalRequestId, billing_logical_request_id),
+                   estimated_usd=COALESCE(@estimatedUsd, estimated_usd),
+                   actual_usd=@actualUsd,
+                   charged_points=@chargedPoints,
+                   refunded_points=@refundedPoints,
+                   cost_source=COALESCE(@costSource, cost_source),
                    is_selected=true,
                    selected_at=now(),
                    selected_by=created_by,
@@ -581,7 +612,27 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
                    updated_at=now()
              WHERE id=@versionId AND tenant_id=@tenant;
             """,
-            new { versionId, tenant = _tenant.TenantId, request.VideoUrl, request.VideoPath, request.PosterUrl, request.DurationSeconds, request.MimeType }, tx);
+            new
+            {
+                versionId,
+                tenant = _tenant.TenantId,
+                request.ProviderCode,
+                modelName = request.ModelName,
+                request.ProviderCapabilityId,
+                request.ProviderTaskId,
+                request.VideoUrl,
+                request.VideoPath,
+                request.PosterUrl,
+                request.DurationSeconds,
+                request.AspectRatio,
+                request.MimeType,
+                request.BillingLogicalRequestId,
+                request.EstimatedUsd,
+                request.ActualUsd,
+                request.ChargedPoints,
+                request.RefundedPoints,
+                request.CostSource
+            }, tx);
         await conn.ExecuteAsync(
             """
             UPDATE video_render.video_project_scenes
@@ -1043,9 +1094,11 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
                version_number AS VersionNumber, logical_request_id AS LogicalRequestId, status AS Status,
                is_selected AS IsSelected, storage_key AS StorageKey, public_url AS PublicUrl, source_file_path AS SourceFilePath,
                image_prompt_snapshot AS ImagePromptSnapshot, video_prompt_snapshot AS VideoPromptSnapshot,
-               provider_code AS ProviderCode, actual_model AS ModelName, provider_task_id AS ProviderTaskId,
-               duration_seconds AS DurationSeconds, poster_url AS PosterUrl, error_message AS ErrorMessage,
-               created_at AS CreatedAt
+               provider_code AS ProviderCode, actual_model AS ModelName, provider_capability_id AS ProviderCapabilityId,
+               provider_task_id AS ProviderTaskId, duration_seconds AS DurationSeconds, aspect_ratio AS AspectRatio,
+               billing_logical_request_id AS BillingLogicalRequestId, estimated_usd AS EstimatedUsd, actual_usd AS ActualUsd,
+               charged_points AS ChargedPoints, refunded_points AS RefundedPoints, cost_source AS CostSource,
+               poster_url AS PosterUrl, error_message AS ErrorMessage, created_at AS CreatedAt
           FROM video_render.scene_video_versions
         """;
 
