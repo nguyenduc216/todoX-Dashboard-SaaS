@@ -134,7 +134,7 @@ public sealed class RenderJobService : IRenderJobService
             SelectJobSql +
             """
              WHERE job_type = @jobType
-               AND status IN ('queued', 'preparing', 'rendering', 'post_processing')
+               AND status IN ('queued', 'preparing', 'rendering', 'post_processing', 'pending_reconciliation')
                AND (input_json->>'projectId') = @projectId
              ORDER BY queued_at DESC, created_at DESC
              LIMIT 1;
@@ -439,14 +439,20 @@ public sealed class RenderJobService : IRenderJobService
                    output_json = CASE WHEN @output IS NULL THEN output_json ELSE CAST(@output AS jsonb) END,
                    error_code=@errorCode,
                    error_message=@errorMessage,
-                   completed_at = CASE WHEN @status IN ('completed', 'failed', 'cancelled') THEN now() ELSE completed_at END,
+                   completed_at = CASE
+                       WHEN @status IN ('completed', 'failed', 'cancelled') THEN now()
+                       WHEN @status='pending_reconciliation' THEN NULL
+                       ELSE completed_at
+                   END,
                    cancelled_at = CASE WHEN @status='cancelled' THEN now() ELSE cancelled_at END,
                    updated_at=now()
              WHERE id=@jobId;
             """,
             new { jobId, status = dbStatus, output = output is null ? null : ToJson(output), errorCode, errorMessage });
 
-        var level = dbStatus == RenderJobStatuses.Failed ? "error" : dbStatus == RenderJobStatuses.Cancelled ? "warning" : "info";
+        var level = dbStatus == RenderJobStatuses.Failed ? "error"
+            : dbStatus == RenderJobStatuses.Cancelled || dbStatus == RenderJobStatuses.PendingReconciliation ? "warning"
+            : "info";
         await AddEventAsync(jobId, "JOB_STATUS_CHANGED", $"Render job status changed to {dbStatus}.",
             new { status = dbStatus, errorCode, errorMessage }, level, ct);
     }

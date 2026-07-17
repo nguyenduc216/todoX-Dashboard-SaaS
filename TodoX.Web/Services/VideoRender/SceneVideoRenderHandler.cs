@@ -29,6 +29,7 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
     private readonly IAiProviderService _providers;
     private readonly AiProviderRepository _providerRepo;
     private readonly IRenderJobService _jobs;
+    private readonly IYEScaleVideoPricingResolver _pricing;
     private readonly ILogger<SceneVideoRenderHandler> _logger;
 
     public string JobType => JobTypeName;
@@ -38,12 +39,14 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
         IAiProviderService providers,
         AiProviderRepository providerRepo,
         IRenderJobService jobs,
+        IYEScaleVideoPricingResolver pricing,
         ILogger<SceneVideoRenderHandler> logger)
     {
         _repo = repo;
         _providers = providers;
         _providerRepo = providerRepo;
         _jobs = jobs;
+        _pricing = pricing;
         _logger = logger;
     }
 
@@ -117,6 +120,13 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
         var sourceImageUrl = !string.IsNullOrWhiteSpace(selectedImage?.PublicUrl)
             ? selectedImage.PublicUrl
             : scene.StaticImageUrl;
+        var resolvedPrice = _pricing.Resolve(
+            option,
+            capability,
+            input.AspectRatio,
+            input.Resolution,
+            scene.DurationSeconds,
+            !string.IsNullOrWhiteSpace(sourceImageUrl));
 
         await _repo.UpdateSceneAsync(
             scene.Id,
@@ -153,8 +163,12 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
             AspectRatio = input.AspectRatio,
             Resolution = input.Resolution,
             DurationSeconds = scene.DurationSeconds,
-            EstimatedUsd = ResolveEstimatedUsd(option.UnitCostPoints, capability.ConfigJson),
-            EstimatedPoints = option.UnitCostPoints,
+            EstimatedUsd = resolvedPrice.ProviderEstimatedCostUsd,
+            EstimatedPoints = resolvedPrice.ChargedPoints,
+            PricingMode = resolvedPrice.Mode,
+            PricingRuleKey = resolvedPrice.RuleKey,
+            TariffSnapshotJson = resolvedPrice.TariffSnapshotJson,
+            CostSource = resolvedPrice.CostSource,
             LogicalRequestId = BuildLogicalRequestId(parentJob.Id, scene.Id),
             CreatedAtUtc = DateTimeOffset.UtcNow
         };
@@ -193,33 +207,4 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
 
     public static string BuildLogicalRequestId(Guid parentJobId, long sceneId)
         => $"render_job_scene_video-job-{parentJobId:N}-scene-{sceneId}";
-
-    private static decimal? ResolveEstimatedUsd(decimal unitCostPoints, string? capabilityConfigJson)
-    {
-        if (!string.IsNullOrWhiteSpace(capabilityConfigJson))
-        {
-            try
-            {
-                using var doc = JsonDocument.Parse(capabilityConfigJson);
-                if (doc.RootElement.TryGetProperty("provider_estimated_cost_usd", out var usd))
-                {
-                    if (usd.ValueKind == JsonValueKind.Number && usd.TryGetDecimal(out var decimalValue))
-                    {
-                        return decimalValue;
-                    }
-
-                    if (usd.ValueKind == JsonValueKind.String && decimal.TryParse(usd.GetString(), out decimalValue))
-                    {
-                        return decimalValue;
-                    }
-                }
-            }
-            catch (JsonException)
-            {
-                // Keep runtime tolerant; capability config validation lives elsewhere.
-            }
-        }
-
-        return unitCostPoints / 0.8m;
-    }
 }

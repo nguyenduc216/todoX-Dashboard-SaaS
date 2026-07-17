@@ -2320,6 +2320,15 @@ else
             return;
         }
 
+        foreach (var scene in _project.Scenes.Where(scene => sceneIds.Contains(scene.Id)))
+        {
+            var draft = GetSceneDraft(scene);
+            if (draft.IsDirty)
+            {
+                await SaveSceneAsync(scene);
+            }
+        }
+
         var input = new TodoX.Web.Services.VideoRender.SceneVideoRenderInput
         {
             ProjectId = _project.Id,
@@ -2411,6 +2420,12 @@ else
         {
             Snackbar.Add(SceneVideoDisabledReason(scene, draft), Severity.Info);
             return;
+        }
+
+        if (draft.IsDirty)
+        {
+            await SaveSceneAsync(scene);
+            draft = GetSceneDraft(scene);
         }
 
         var input = new TodoX.Web.Services.VideoRender.SceneVideoRenderInput

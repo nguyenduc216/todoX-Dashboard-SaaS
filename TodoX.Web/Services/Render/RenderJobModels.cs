@@ -6,6 +6,7 @@ public static class RenderJobStatuses
     public const string Preparing = "preparing";
     public const string Rendering = "rendering";
     public const string PostProcessing = "post_processing";
+    public const string PendingReconciliation = "pending_reconciliation";
     public const string Completed = "completed";
     public const string Failed = "failed";
     public const string Cancelled = "cancelled";

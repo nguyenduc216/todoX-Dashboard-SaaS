@@ -408,11 +408,10 @@ public sealed class MediaFileService : IMediaFileService
     public async Task<MediaFileDto> DownloadAndSaveBinaryAtObjectKeyAsync(string fileUrl, string objectKey, string fileCategory, string expectedMimeType,
         Guid? userId, Guid? customerId, Guid tenantId, CancellationToken ct = default)
     {
-        var (bytes, contentType, fileName, uri) = await DownloadBinaryBytesAsync(fileUrl, expectedMimeType, ct);
-        var saved = await SaveAtObjectKeyAsync(bytes, objectKey, fileName, contentType, fileCategory,
+        var saved = await DownloadBinaryToObjectKeyAsync(fileUrl, objectKey, fileCategory, expectedMimeType,
             userId, customerId, tenantId, ct);
         _logger.LogInformation("MEDIA_BINARY_URL_DOWNLOAD_SUCCESS url={Url} mediaId={MediaId} mime={MimeType} size={Size}",
-            uri, saved.Id, saved.MimeType, saved.FileSizeBytes);
+            fileUrl, saved.Id, saved.MimeType, saved.FileSizeBytes);
         return saved;
     }
 
@@ -473,9 +472,14 @@ public sealed class MediaFileService : IMediaFileService
         return (ms.ToArray(), contentType, fileName, uri);
     }
 
-    private async Task<(byte[] Bytes, string ContentType, string FileName, Uri Uri)> DownloadBinaryBytesAsync(
+    private async Task<MediaFileDto> DownloadBinaryToObjectKeyAsync(
         string fileUrl,
+        string objectKey,
+        string fileCategory,
         string expectedMimeType,
+        Guid? userId,
+        Guid? customerId,
+        Guid tenantId,
         CancellationToken ct)
     {
         var uri = ValidatePublicImageUri(fileUrl);
@@ -492,12 +496,7 @@ public sealed class MediaFileService : IMediaFileService
             throw new InvalidOperationException($"KhÃ´ng táº£i Ä‘Æ°á»£c file media tá»« URL. HTTP {(int)response.StatusCode}.");
         }
 
-        var contentType = NormalizeMimeType(response.Content.Headers.ContentType?.MediaType, uri.AbsolutePath);
-        if (!string.Equals(contentType, expectedMimeType, StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidOperationException($"URL khÃ´ng tráº£ vá» media há»£p lá»‡. Content-Type: {response.Content.Headers.ContentType?.MediaType ?? "unknown"}.");
-        }
-
+        var responseMime = NormalizeMimeType(response.Content.Headers.ContentType?.MediaType, uri.AbsolutePath);
         var length = response.Content.Headers.ContentLength;
         if (length.HasValue && length.Value > GetMaxVideoBytes())
         {
@@ -505,24 +504,152 @@ public sealed class MediaFileService : IMediaFileService
         }
 
         await using var stream = await response.Content.ReadAsStreamAsync(ct);
-        using var ms = new MemoryStream();
-        await stream.CopyToAsync(ms, ct);
-        if (ms.Length == 0)
-        {
-            throw new InvalidOperationException("URL media tráº£ vá» tá»‡p rá»—ng.");
-        }
-        if (ms.Length > GetMaxVideoBytes())
-        {
-            throw new InvalidOperationException("File media tá»« URL vÆ°á»£t quÃ¡ 10MB.");
-        }
-
         var fileName = Path.GetFileName(uri.AbsolutePath);
         if (string.IsNullOrWhiteSpace(fileName) || !Path.HasExtension(fileName))
         {
-            fileName = $"media-url{ContentTypeToExtension(contentType)}";
+            fileName = "media-url.mp4";
         }
 
-        return (ms.ToArray(), contentType, fileName, uri);
+        return await SaveDownloadedBinaryStreamAsync(stream, objectKey, fileName, fileCategory, expectedMimeType, responseMime,
+            userId, customerId, tenantId, ct);
+    }
+
+    private async Task<MediaFileDto> SaveDownloadedBinaryStreamAsync(
+        Stream source,
+        string objectKey,
+        string originalFileName,
+        string fileCategory,
+        string expectedMimeType,
+        string responseMime,
+        Guid? userId,
+        Guid? customerId,
+        Guid tenantId,
+        CancellationToken ct)
+    {
+        objectKey = NormalizeObjectKey(objectKey);
+        var mimeType = ResolveDownloadedBinaryMime(expectedMimeType, responseMime, originalFileName);
+        if (!string.Equals(mimeType, "video/mp4", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException($"URL khÃ´ng tráº£ vá» media há»£p lá»‡. Content-Type: {responseMime}.");
+        }
+
+        var uploadRoot = _config["Storage:LocalUploadRoot"] ?? "wwwroot/uploads";
+        var absRoot = Path.GetFullPath(Path.Combine(_env.ContentRootPath, uploadRoot));
+        var absPath = Path.GetFullPath(Path.Combine(absRoot, objectKey.Replace('/', Path.DirectorySeparatorChar)));
+        if (!absPath.StartsWith(absRoot, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Storage key khÃ´ng há»£p lá»‡.");
+        }
+
+        var absDir = Path.GetDirectoryName(absPath) ?? absRoot;
+        Directory.CreateDirectory(absDir);
+        var tempPath = Path.Combine(absDir, $".{Guid.NewGuid():N}.tmp");
+        var publicBase = _config["Storage:PublicUploadBase"] ?? "/uploads";
+        var publicUrl = $"{publicBase.TrimEnd('/')}/{objectKey}";
+        var safeName = Path.GetFileName(absPath);
+        var ext = ContentTypeToExtension(mimeType);
+        var storageProvider = NormalizeDbText(_config["Storage:Provider"] ?? "local", "local");
+        var id = Guid.NewGuid();
+        var movedToFinal = false;
+        long totalBytes = 0;
+        var sniff = new byte[32];
+        var sniffCount = 0;
+
+        try
+        {
+            await using (var file = new FileStream(tempPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, useAsync: true))
+            {
+                var buffer = new byte[81920];
+                int read;
+                while ((read = await source.ReadAsync(buffer.AsMemory(0, buffer.Length), ct)) > 0)
+                {
+                    if (sniffCount < sniff.Length)
+                    {
+                        var copy = Math.Min(read, sniff.Length - sniffCount);
+                        Array.Copy(buffer, 0, sniff, sniffCount, copy);
+                        sniffCount += copy;
+                    }
+
+                    totalBytes += read;
+                    if (totalBytes > GetMaxVideoBytes())
+                    {
+                        throw new InvalidOperationException("File media tá»« URL vÆ°á»£t quÃ¡ 10MB.");
+                    }
+
+                    await file.WriteAsync(buffer.AsMemory(0, read), ct);
+                }
+            }
+
+            if (totalBytes == 0)
+            {
+                throw new InvalidOperationException("URL media tráº£ vá» tá»‡p rá»—ng.");
+            }
+
+            if (!LooksLikeMp4(sniff.AsSpan(0, sniffCount)))
+            {
+                throw new InvalidOperationException("URL media khÃ´ng tráº£ vá» video MP4 há»£p lá»‡.");
+            }
+
+            if (File.Exists(absPath))
+            {
+                throw new InvalidOperationException("Storage key cá»§a phiÃªn báº£n Ä‘Ã£ tá»“n táº¡i, khÃ´ng ghi Ä‘Ã¨.");
+            }
+
+            File.Move(tempPath, absPath);
+            movedToFinal = true;
+
+            using var conn = await _factory.OpenAsync(ct);
+            await conn.ExecuteAsync(
+                """
+                INSERT INTO media.media_files
+                    (id, tenant_id, customer_id, user_id, file_category, file_name, file_ext, mime_type,
+                     file_size_bytes, storage_provider, object_key, file_url, public_url, is_active, created_at, created_by)
+                VALUES
+                    (@id, @tenant, @customer, @user, @cat, @name, @ext, @mime,
+                     @size, @storage, @key, @url, @url, true, now(), @user);
+                """,
+                new
+                {
+                    id,
+                    tenant = tenantId,
+                    customer = customerId,
+                    user = userId,
+                    cat = NormalizeDbText(fileCategory, "media"),
+                    name = safeName,
+                    ext,
+                    mime = mimeType,
+                    size = totalBytes,
+                    storage = storageProvider,
+                    key = objectKey,
+                    url = publicUrl
+                });
+        }
+        catch
+        {
+            TryDeleteFile(tempPath);
+            if (movedToFinal)
+            {
+                TryDeleteFile(absPath);
+            }
+            throw;
+        }
+
+        return new MediaFileDto
+        {
+            Id = id,
+            UserId = userId,
+            CustomerId = customerId,
+            FileCategory = NormalizeDbText(fileCategory, "media"),
+            FileName = safeName,
+            MimeType = mimeType,
+            FileSizeBytes = totalBytes,
+            StorageProvider = storageProvider,
+            ObjectKey = objectKey,
+            FileUrl = publicUrl,
+            PublicUrl = publicUrl,
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow
+        };
     }
 
     private static string NormalizeMimeType(string? mimeType, string originalFileName)
@@ -536,6 +663,7 @@ public sealed class MediaFileService : IMediaFileService
             ".png" => "image/png",
             ".jpg" or ".jpeg" => "image/jpeg",
             ".webp" => "image/webp",
+            ".mp4" => "video/mp4",
             _ => normalized
         };
     }
@@ -565,6 +693,40 @@ public sealed class MediaFileService : IMediaFileService
 
     private static bool IsPersistableMime(string mimeType)
         => mimeType is "image/png" or "image/jpeg" or "image/webp" or "video/mp4" or "application/octet-stream";
+
+    private static string ResolveDownloadedBinaryMime(string expectedMimeType, string responseMime, string originalFileName)
+    {
+        if (string.Equals(responseMime, expectedMimeType, StringComparison.OrdinalIgnoreCase))
+        {
+            return responseMime;
+        }
+
+        if (string.Equals(responseMime, "application/octet-stream", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(expectedMimeType, "video/mp4", StringComparison.OrdinalIgnoreCase))
+        {
+            return "video/mp4";
+        }
+
+        return NormalizeMimeType(responseMime, originalFileName);
+    }
+
+    private static bool LooksLikeMp4(ReadOnlySpan<byte> bytes)
+    {
+        if (bytes.Length < 12)
+        {
+            return false;
+        }
+
+        for (var i = 4; i <= bytes.Length - 8; i++)
+        {
+            if (bytes.Slice(i, 4).SequenceEqual("ftyp"u8))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     private static string NormalizeDbText(string? value, string fallback)
     {

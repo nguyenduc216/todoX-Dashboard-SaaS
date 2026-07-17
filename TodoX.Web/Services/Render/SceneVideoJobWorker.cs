@@ -58,6 +58,18 @@ public sealed class SceneVideoJobWorker : BackgroundService
                     await dispatcher.DispatchAsync(job, stoppingToken);
                     await jobs.MarkStatusAsync(job.Id, RenderJobStatuses.Completed, ct: stoppingToken);
                 }
+                catch (RenderJobPendingReconciliationException ex)
+                {
+                    await jobs.AddEventAsync(job.Id, "JOB_PENDING_RECONCILIATION", ex.Message,
+                        new { job.AttemptCount, job.MaxAttempts }, "warning", stoppingToken);
+                    await jobs.MarkStatusAsync(job.Id, RenderJobStatuses.PendingReconciliation, errorCode: ex.GetType().Name, errorMessage: ex.Message, ct: stoppingToken);
+                }
+                catch (RenderJobTerminalFailureException ex)
+                {
+                    await jobs.AddEventAsync(job.Id, "JOB_FAILED", ex.Message,
+                        new { ex.GetType().Name, job.AttemptCount, job.MaxAttempts }, "error", stoppingToken);
+                    await jobs.MarkStatusAsync(job.Id, RenderJobStatuses.Failed, errorCode: ex.GetType().Name, errorMessage: ex.Message, ct: stoppingToken);
+                }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
                 {
                     await jobs.CancelAsync(job.Id, "Scene video worker cancellation requested.", ct: CancellationToken.None);

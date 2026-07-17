@@ -34,6 +34,10 @@ public sealed class SceneVideoRenderWorkItemInput
     public int DurationSeconds { get; set; }
     public decimal? EstimatedUsd { get; set; }
     public decimal EstimatedPoints { get; set; }
+    public string? PricingMode { get; set; }
+    public string? PricingRuleKey { get; set; }
+    public string? TariffSnapshotJson { get; set; }
+    public string? CostSource { get; set; }
     public string LogicalRequestId { get; set; } = string.Empty;
     public DateTimeOffset CreatedAtUtc { get; set; }
 }
@@ -45,6 +49,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
     private readonly VideoRenderRepository _repo;
     private readonly ISceneMediaVersioningService _versions;
     private readonly IAiImageBillingService _billing;
+    private readonly IAiProviderService _providers;
     private readonly IYEScaleTaskClient _tasks;
     private readonly IMediaFileService _media;
     private readonly TenantContext _tenant;
@@ -58,6 +63,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         VideoRenderRepository repo,
         ISceneMediaVersioningService versions,
         IAiImageBillingService billing,
+        IAiProviderService providers,
         IYEScaleTaskClient tasks,
         IMediaFileService media,
         TenantContext tenant,
@@ -68,6 +74,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         _repo = repo;
         _versions = versions;
         _billing = billing;
+        _providers = providers;
         _tasks = tasks;
         _media = media;
         _tenant = tenant;
@@ -82,13 +89,13 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
             ?? throw new InvalidOperationException("Scene video worker input invalid.");
         if (input.ProjectId <= 0 || input.SceneId <= 0 || string.IsNullOrWhiteSpace(input.LogicalRequestId))
         {
-            throw new InvalidOperationException("Thiếu dữ liệu snapshot cho scene video worker.");
+            throw new InvalidOperationException("Missing scene video worker snapshot.");
         }
 
         var project = await _repo.GetProjectAsync(input.ProjectId, ct)
-            ?? throw new InvalidOperationException("Không tìm thấy project video.");
+            ?? throw new InvalidOperationException("Video project not found.");
         var scene = project.Scenes.FirstOrDefault(x => x.Id == input.SceneId)
-            ?? throw new InvalidOperationException("Không tìm thấy scene video.");
+            ?? throw new InvalidOperationException("Video scene not found.");
 
         var version = await _versions.CreateQueuedSceneVideoVersionAsync(new SceneVideoVersionCreateRequest(
             input.ProjectId,
@@ -114,27 +121,30 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
 
         if (string.IsNullOrWhiteSpace(input.SourceImageUrl))
         {
-            await FailAsync(project.Id, scene, version.Id, "missing_image", "Scene chưa có ảnh đầu vào để tạo video.", ct);
-            return;
+            await FailAsync(project.Id, scene, version.Id, "missing_image", "Scene has no source image for video render.", ct);
+            throw new RenderJobTerminalFailureException("Scene has no source image for video render.");
         }
 
         if (string.IsNullOrWhiteSpace(input.VideoPrompt))
         {
-            await FailAsync(project.Id, scene, version.Id, "missing_prompt", "Scene chưa có prompt video.", ct);
-            return;
+            await FailAsync(project.Id, scene, version.Id, "missing_prompt", "Scene has no video prompt.", ct);
+            throw new RenderJobTerminalFailureException("Scene has no video prompt.");
         }
 
         var billingCost = _billing.BuildConfiguredCost(input.EstimatedPoints, 1);
-
-        var tariffSnapshot = JsonSerializer.Serialize(new
-        {
-            model = input.ModelName,
-            providerCapabilityId = input.ProviderCapabilityId,
-            unitCostPoints = input.EstimatedPoints,
-            providerEstimatedCostUsd = input.EstimatedUsd,
-            costSource = "configured_tariff",
-            capturedAtUtc = DateTimeOffset.UtcNow
-        }, JsonOptions);
+        var tariffSnapshot = string.IsNullOrWhiteSpace(input.TariffSnapshotJson)
+            ? JsonSerializer.Serialize(new
+            {
+                model = input.ModelName,
+                providerCapabilityId = input.ProviderCapabilityId,
+                unitCostPoints = input.EstimatedPoints,
+                providerEstimatedCostUsd = input.EstimatedUsd,
+                costSource = input.CostSource ?? "configured_tariff",
+                pricingMode = input.PricingMode,
+                pricingRuleKey = input.PricingRuleKey,
+                capturedAtUtc = DateTimeOffset.UtcNow
+            }, JsonOptions)
+            : input.TariffSnapshotJson;
 
         var reservation = await _billing.ReserveAsync(new AiImageBillingReserveRequest
         {
@@ -166,14 +176,14 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
 
         if (!reservation.Ok)
         {
-            await FailAsync(project.Id, scene, version.Id, reservation.Status, reservation.ErrorMessage ?? "Không thể reserve billing.", ct);
-            return;
+            await FailAsync(project.Id, scene, version.Id, reservation.Status, reservation.ErrorMessage ?? "Unable to reserve billing.", ct);
+            throw new RenderJobTerminalFailureException(reservation.ErrorMessage ?? "Unable to reserve billing.");
         }
 
         if (!reservation.ShouldSubmitProvider)
         {
             await _repo.AddProjectEventAsync(project.Id, "SCENE_VIDEO_PROVIDER_REUSED", "info",
-                $"Scene {input.SceneIndex} tiếp tục theo logical request hiện có.",
+                $"Scene {input.SceneIndex} continues polling an existing logical request.",
                 new { jobId = job.Id, input.SceneId, input.SceneIndex, input.LogicalRequestId }, ct);
         }
 
@@ -199,12 +209,12 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                 taskId = string.IsNullOrWhiteSpace(submit.TaskId) ? null : submit.TaskId.Trim();
                 if (string.IsNullOrWhiteSpace(taskId))
                 {
-                    throw new InvalidOperationException("YEScale submit response thiếu task_id.");
+                    throw new InvalidOperationException("YEScale submit response is missing task_id.");
                 }
 
                 await _versions.MarkSceneVideoVersionSubmittedAsync(version.Id, input.ProviderCode, input.ModelName, input.ProviderCapabilityId, taskId, ct);
                 await _repo.AddProjectEventAsync(project.Id, "SCENE_VIDEO_PROVIDER_SUBMITTED", "info",
-                    $"Scene {input.SceneIndex} đã submit sang YEScale.",
+                    $"Scene {input.SceneIndex} submitted to YEScale.",
                     new { jobId = job.Id, input.SceneId, input.SceneIndex, taskId, input.ModelName }, ct);
             }
             else
@@ -212,14 +222,8 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                 taskId = await _versions.GetSceneVideoProviderTaskIdAsync(version.Id, ct);
                 if (string.IsNullOrWhiteSpace(taskId))
                 {
-                    await _billing.MarkPendingReconciliationAsync(new AiImageBillingPendingReconciliationRequest
-                    {
-                        LogicalRequestId = input.LogicalRequestId,
-                        ActualModel = input.ModelName,
-                        ErrorMessage = "Thiếu provider_task_id để tiếp tục poll scene video."
-                    }, ct);
-                    await _versions.MarkSceneVideoPendingReconciliationAsync(version.Id, "missing_task_id", "Thiếu provider_task_id để tiếp tục poll scene video.", ct);
-                    return;
+                    await MarkPendingReconciliationAsync(input, version.Id, tariffSnapshot, "missing_task_id", "Missing provider_task_id for scene video reconciliation.", ct);
+                    throw new RenderJobPendingReconciliationException("Missing provider_task_id for scene video reconciliation.");
                 }
             }
 
@@ -228,6 +232,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
 
             if (!terminal.IsSuccess)
             {
+                var failure = ExtractFailureMessage(terminal);
                 await _billing.CompleteAsync(new AiImageBillingCompleteRequest
                 {
                     LogicalRequestId = input.LogicalRequestId,
@@ -236,15 +241,15 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                     ProviderTaskId = taskId,
                     ProviderUsageJson = responseJson,
                     TariffSnapshotJson = tariffSnapshot,
-                    ErrorMessage = ExtractFailureMessage(terminal)
+                    ErrorMessage = failure
                 }, ct);
-
-                await FailAsync(project.Id, scene, version.Id, "provider_failure", ExtractFailureMessage(terminal), ct);
-                return;
+                await LogUsageAsync(input, job, reservation.ChargedPoints, responseJson, false, failure, taskId, ct);
+                await FailAsync(project.Id, scene, version.Id, "provider_failure", failure, ct);
+                throw new RenderJobTerminalFailureException(failure);
             }
 
             var outputUrl = ExtractVideoUrl(terminal, input.SourceImageUrl)
-                ?? throw new InvalidOperationException($"YEScale SUCCESS nhưng không tìm thấy output video hợp lệ. task_id={taskId}");
+                ?? throw new InvalidOperationException($"YEScale returned SUCCESS but no output video URL. task_id={taskId}");
 
             await _tenant.EnsureLoadedAsync(ct);
             var objectKey = version.StorageKey ?? SceneMediaStorageKeys.SceneVideoOutput(_tenant.TenantId, project.Id, scene.Id, version.Id);
@@ -267,6 +272,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                 ProviderUsageJson = responseJson,
                 TariffSnapshotJson = tariffSnapshot
             }, ct);
+            await LogUsageAsync(input, job, reservation.ChargedPoints, responseJson, true, null, taskId, ct);
 
             await _versions.CompleteSceneVideoVersionAsync(version.Id, new SceneVideoVersionCompleteRequest(
                 saved.PublicUrl ?? saved.FileUrl,
@@ -283,11 +289,11 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                 ActualUsd: null,
                 ChargedPoints: reservation.ChargedPoints,
                 RefundedPoints: 0,
-                CostSource: "configured_tariff",
+                CostSource: input.CostSource ?? "configured_tariff",
                 AspectRatio: input.AspectRatio), ct);
 
             await _repo.AddProjectEventAsync(project.Id, "SCENE_VIDEO_READY", "info",
-                $"Scene {input.SceneIndex} đã render video thành công.",
+                $"Scene {input.SceneIndex} rendered successfully.",
                 new { jobId = job.Id, input.SceneId, input.SceneIndex, taskId, videoUrl = saved.PublicUrl ?? saved.FileUrl }, ct);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -296,26 +302,8 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         }
         catch (YEScaleTaskException ex) when (ex.IsTransient && !string.IsNullOrWhiteSpace(taskId))
         {
-            await _billing.MarkPendingReconciliationAsync(new AiImageBillingPendingReconciliationRequest
-            {
-                LogicalRequestId = input.LogicalRequestId,
-                ActualModel = input.ModelName,
-                ProviderTaskId = taskId,
-                ErrorMessage = ex.Message
-            }, CancellationToken.None);
-            await _versions.MarkSceneVideoPendingReconciliationAsync(version.Id, ex.ErrorCode ?? ex.GetType().Name, ex.Message, CancellationToken.None);
-        }
-        catch (Exception ex)
-        {
-            await _billing.CompleteAsync(new AiImageBillingCompleteRequest
-            {
-                LogicalRequestId = input.LogicalRequestId,
-                Success = false,
-                ActualModel = input.ModelName,
-                ProviderTaskId = taskId,
-                ErrorMessage = ex.Message
-            }, CancellationToken.None);
-            await FailAsync(project.Id, scene, version.Id, ex.GetType().Name, ex.Message, CancellationToken.None);
+            await MarkPendingReconciliationAsync(input, version.Id, tariffSnapshot, ex.ErrorCode ?? ex.GetType().Name, ex.Message, CancellationToken.None, taskId);
+            throw new RenderJobPendingReconciliationException(ex.Message);
         }
     }
 
@@ -339,7 +327,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
 
                 if (normalized is not "QUEUED" and not "PENDING" and not "SUBMITTED" and not "PROCESSING" and not "RUNNING")
                 {
-                    throw new YEScaleTaskException($"YEScale trả về status không hỗ trợ: {status.Status}", errorCode: "unknown_status", taskId: taskId);
+                    throw new YEScaleTaskException($"YEScale returned unsupported status: {status.Status}", errorCode: "unknown_status", taskId: taskId);
                 }
 
                 await Task.Delay(TimeSpan.FromSeconds(Math.Max(1, _options.PollIntervalSeconds)), ct);
@@ -360,13 +348,116 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         throw new YEScaleTaskException("YEScale poll timed out.", transient: true, taskId: taskId);
     }
 
+    private async Task MarkPendingReconciliationAsync(
+        SceneVideoRenderWorkItemInput input,
+        Guid versionId,
+        string? tariffSnapshot,
+        string? errorCode,
+        string errorMessage,
+        CancellationToken ct,
+        string? providerTaskId = null)
+    {
+        await _billing.MarkPendingReconciliationAsync(new AiImageBillingPendingReconciliationRequest
+        {
+            LogicalRequestId = input.LogicalRequestId,
+            ActualModel = input.ModelName,
+            ProviderTaskId = providerTaskId,
+            TariffSnapshotJson = tariffSnapshot,
+            ErrorMessage = errorMessage
+        }, ct);
+        await _versions.MarkSceneVideoPendingReconciliationAsync(versionId, errorCode, errorMessage, ct);
+    }
+
+    private async Task LogUsageAsync(
+        SceneVideoRenderWorkItemInput input,
+        RenderJobDto job,
+        decimal chargedPoints,
+        string? providerUsageJson,
+        bool success,
+        string? errorMessage,
+        string? providerTaskId,
+        CancellationToken ct)
+    {
+        await _providers.LogUsageAsync(new AiProviderUsageLog
+        {
+            CustomerId = null,
+            ProviderId = input.ProviderId,
+            ProviderCapabilityId = input.ProviderCapabilityId,
+            ProviderCode = input.ProviderCode,
+            CapabilityCode = input.CapabilityCode,
+            FeatureCode = "render_job_scene_video",
+            ModelName = input.ModelName,
+            RequestId = input.LogicalRequestId,
+            JobId = job.Id.ToString("N"),
+            Quantity = 1,
+            UnitType = "request",
+            UnitCostPoints = input.EstimatedPoints,
+            TotalPoints = chargedPoints,
+            ProviderRawCost = input.EstimatedUsd,
+            Status = success ? "success" : "failed",
+            ErrorMessage = errorMessage,
+            MetadataJson = BuildUsageMetadata(input, providerTaskId, providerUsageJson, chargedPoints),
+            CreatedBy = input.CreatedBy
+        }, ct);
+    }
+
+    private static string BuildUsageMetadata(
+        SceneVideoRenderWorkItemInput input,
+        string? providerTaskId,
+        string? providerUsageJson,
+        decimal chargedPoints)
+    {
+        try
+        {
+            using var providerUsage = string.IsNullOrWhiteSpace(providerUsageJson) ? null : JsonDocument.Parse(providerUsageJson);
+            return JsonSerializer.Serialize(new
+            {
+                customerGuid = input.CustomerId,
+                projectId = input.ProjectId,
+                sceneId = input.SceneId,
+                input.SceneIndex,
+                input.ParentJobId,
+                providerTaskId,
+                input.DurationSeconds,
+                input.AspectRatio,
+                input.Resolution,
+                chargedPoints,
+                providerEstimatedCostUsd = input.EstimatedUsd,
+                costSource = input.CostSource,
+                pricingMode = input.PricingMode,
+                pricingRuleKey = input.PricingRuleKey,
+                providerUsage = providerUsage?.RootElement
+            }, JsonOptions);
+        }
+        catch (JsonException)
+        {
+            return JsonSerializer.Serialize(new
+            {
+                customerGuid = input.CustomerId,
+                projectId = input.ProjectId,
+                sceneId = input.SceneId,
+                input.SceneIndex,
+                input.ParentJobId,
+                providerTaskId,
+                input.DurationSeconds,
+                input.AspectRatio,
+                input.Resolution,
+                chargedPoints,
+                providerEstimatedCostUsd = input.EstimatedUsd,
+                costSource = input.CostSource,
+                pricingMode = input.PricingMode,
+                pricingRuleKey = input.PricingRuleKey
+            }, JsonOptions);
+        }
+    }
+
     private async Task FailAsync(long projectId, VideoProjectSceneDto scene, Guid versionId, string? errorCode, string errorMessage, CancellationToken ct)
     {
         await _versions.FailSceneVideoVersionAsync(versionId, errorCode, errorMessage, ct);
         await _repo.UpdateSceneAsync(scene.Id, VideoSceneStatuses.Failed,
             errorMessage: errorMessage, title: scene.Title, scenePrompt: scene.ScenePrompt, imagePrompt: scene.ImagePrompt, videoPrompt: scene.VideoPrompt, ct: ct);
         await _repo.AddProjectEventAsync(projectId, "SCENE_VIDEO_RENDER_FAILED", "error",
-            $"Render video scene {scene.SceneIndex} thất bại.",
+            $"Scene video render failed for scene {scene.SceneIndex}.",
             new { sceneId = scene.Id, scene.SceneIndex, errorCode, error = errorMessage }, ct);
     }
 
@@ -444,16 +535,16 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                 return error.GetString()!;
             }
 
-            if (error.ValueKind == JsonValueKind.Object)
+            if (error.ValueKind == JsonValueKind.Object
+                && error.TryGetProperty("message", out var message)
+                && message.ValueKind == JsonValueKind.String
+                && !string.IsNullOrWhiteSpace(message.GetString()))
             {
-                if (error.TryGetProperty("message", out var message) && message.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(message.GetString()))
-                {
-                    return message.GetString()!;
-                }
+                return message.GetString()!;
             }
         }
 
-        return $"Task video YEScale thất bại với status {response.Status ?? "unknown"}.";
+        return $"YEScale video task failed with status {response.Status ?? "unknown"}.";
     }
 
     private string ResolvePhysicalPath(string? objectKey)
