@@ -226,6 +226,65 @@ public sealed class AiProviderRepository
         tx.Commit();
     }
 
+    public async Task SetDefaultCapabilitiesAsync(IReadOnlyList<long> capabilityIds, string? userId, CancellationToken ct = default)
+    {
+        if (capabilityIds.Count == 0)
+        {
+            return;
+        }
+
+        using var conn = await _factory.OpenAsync(ct);
+        var targets = (await conn.QueryAsync<(long Id, string CapabilityCode, bool Enabled, bool ProviderEnabled)>(
+            """
+            SELECT c.id AS Id,
+                   c.capability_code AS CapabilityCode,
+                   c.enabled AS Enabled,
+                   p.enabled AS ProviderEnabled
+              FROM public.todox_ai_provider_capability c
+              JOIN public.todox_ai_provider p ON p.id = c.provider_id
+             WHERE c.id = ANY(@capabilityIds);
+            """, new { capabilityIds = capabilityIds.ToArray() })).ToList();
+
+        if (targets.Count != capabilityIds.Distinct().Count())
+        {
+            throw new InvalidOperationException("Một hoặc nhiều model đã chọn không còn tồn tại.");
+        }
+
+        var disabled = targets.FirstOrDefault(x => !x.Enabled || !x.ProviderEnabled);
+        if (disabled != default)
+        {
+            throw new InvalidOperationException("Chỉ đặt mặc định khi provider và capability đều đang được bật.");
+        }
+
+        var duplicateCapability = targets
+            .GroupBy(x => x.CapabilityCode, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault(g => g.Count() > 1);
+        if (duplicateCapability is not null)
+        {
+            throw new InvalidOperationException($"Không thể lưu nhiều model mặc định cho cùng capability {duplicateCapability.Key}.");
+        }
+
+        using var tx = conn.BeginTransaction();
+        foreach (var target in targets)
+        {
+            await conn.ExecuteAsync(
+                """
+                UPDATE public.todox_ai_provider_capability
+                   SET is_default = false, updated_by = @userId, updated_at = now()
+                 WHERE capability_code = @code AND is_default = true AND id <> @capabilityId;
+                """, new { code = target.CapabilityCode, capabilityId = target.Id, userId }, tx);
+
+            await conn.ExecuteAsync(
+                """
+                UPDATE public.todox_ai_provider_capability
+                   SET is_default = true, updated_by = @userId, updated_at = now()
+                 WHERE id = @capabilityId;
+                """, new { capabilityId = target.Id, userId }, tx);
+        }
+
+        tx.Commit();
+    }
+
     public async Task<IReadOnlyList<ProviderOptionDto>> GetSelectableAsync(string capabilityCode, CancellationToken ct = default)
     {
         using var conn = await _factory.OpenAsync(ct);

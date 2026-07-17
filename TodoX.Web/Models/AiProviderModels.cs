@@ -193,17 +193,23 @@ public sealed class ProviderOptionDto
 
 public static class AiProviderCatalog
 {
+    public const string AvatarGeneration = "avatar_generation";
+    public const string ChibiAvatarGeneration = "chibi_avatar_generation";
+    public const string CharacterGeneration = "character_generation";
+    public const string SceneImageGeneration = "scene_image_generation";
+    public const string ImageToVideo = "image_to_video";
+
     public static IReadOnlyList<string> CapabilityCodes { get; } = new[]
     {
-        "avatar_generation",
-        "chibi_avatar_generation",
-        "character_generation",
+        AvatarGeneration,
+        ChibiAvatarGeneration,
+        CharacterGeneration,
         "image_generation",
-        "scene_image_generation",
+        SceneImageGeneration,
         "poster_generation",
         "thumbnail_generation",
         "text_to_video",
-        "image_to_video"
+        ImageToVideo
     };
 
     public static IReadOnlyList<string> UnitTypes { get; } = new[]
@@ -214,6 +220,62 @@ public static class AiProviderCatalog
     public static IReadOnlyList<string> ProviderTypes { get; } = new[]
     {
         "external_api", "internal_api", "local_service"
+    };
+}
+
+public sealed record AiFeatureProviderCatalogItem(
+    string FeatureKey,
+    string FeatureCode,
+    string DisplayName,
+    string CapabilityCode,
+    string MediaKind,
+    string Description,
+    int SortOrder);
+
+public static class AiFeatureProviderCatalog
+{
+    public static IReadOnlyList<AiFeatureProviderCatalogItem> QuickDefaultFeatures { get; } = new[]
+    {
+        new AiFeatureProviderCatalogItem(
+            "avatar_image",
+            "admin_avatar_manager",
+            "Ảnh Avatar",
+            AiProviderCatalog.AvatarGeneration,
+            "image",
+            "Render ảnh avatar trong khu vực quản trị và avatar thường.",
+            10),
+        new AiFeatureProviderCatalogItem(
+            "character_image",
+            "character_manager",
+            "Ảnh Character",
+            AiProviderCatalog.CharacterGeneration,
+            "image",
+            "Render ảnh nhân vật AI.",
+            20),
+        new AiFeatureProviderCatalogItem(
+            "scene_image",
+            "render_job_scene_image",
+            "Ảnh Scene",
+            AiProviderCatalog.SceneImageGeneration,
+            "image",
+            "Render ảnh tĩnh cho scene video.",
+            30),
+        new AiFeatureProviderCatalogItem(
+            "avatar_builder",
+            "avatar_builder",
+            "Avatar Builder",
+            AiProviderCatalog.ChibiAvatarGeneration,
+            "image",
+            "Render avatar builder/chibi độc lập với avatar thường.",
+            40),
+        new AiFeatureProviderCatalogItem(
+            "image_to_video",
+            "render_job_scene_video",
+            "Video từ ảnh",
+            AiProviderCatalog.ImageToVideo,
+            "video",
+            "Render video scene từ ảnh đã chọn.",
+            50)
     };
 }
 

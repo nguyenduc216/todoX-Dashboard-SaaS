@@ -13,6 +13,7 @@ public interface IAiProviderService
     Task<IReadOnlyList<AiProviderCapabilityDto>> GetCapabilitiesAsync(long? providerId, string? capabilityCode, CancellationToken ct = default);
     Task<AiProviderCapabilityDto> UpdateCapabilityAsync(long id, UpdateAiProviderCapabilityRequest request, CurrentUserSession user, CancellationToken ct = default);
     Task SetDefaultCapabilityAsync(long capabilityId, CurrentUserSession user, CancellationToken ct = default);
+    Task SetDefaultCapabilitiesAsync(IReadOnlyList<long> capabilityIds, CurrentUserSession user, CancellationToken ct = default);
     Task<IReadOnlyList<ProviderOptionDto>> GetSelectableProvidersAsync(string capabilityCode, CancellationToken ct = default);
     Task<ProviderOptionDto?> GetDefaultProviderAsync(string capabilityCode, CancellationToken ct = default);
     Task<ProviderOptionDto> ResolveProviderForCapabilityAsync(string capabilityCode, long? providerCapabilityId, bool fromUser, CancellationToken ct = default);
@@ -110,6 +111,9 @@ public sealed class AiProviderService : IAiProviderService
 
     public Task SetDefaultCapabilityAsync(long capabilityId, CurrentUserSession user, CancellationToken ct = default)
         => _repo.SetDefaultCapabilityAsync(capabilityId, user.UserId.ToString(), ct);
+
+    public Task SetDefaultCapabilitiesAsync(IReadOnlyList<long> capabilityIds, CurrentUserSession user, CancellationToken ct = default)
+        => _repo.SetDefaultCapabilitiesAsync(capabilityIds, user.UserId.ToString(), ct);
 
     public Task<IReadOnlyList<ProviderOptionDto>> GetSelectableProvidersAsync(string capabilityCode, CancellationToken ct = default)
         => _repo.GetSelectableAsync(capabilityCode, ct);

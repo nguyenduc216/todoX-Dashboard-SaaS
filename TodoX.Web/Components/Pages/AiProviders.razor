@@ -19,6 +19,79 @@
     }
     else
     {
+        <MudPaper Class="todox-card pa-4" rounded="true">
+            <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
+                <div>
+                    <MudText Typo="Typo.h6">Cài đặt nhanh Provider mặc định</MudText>
+                    <MudText Typo="Typo.body2" Class="todox-page-subtitle">Chọn provider/model mặc định theo từng chức năng. Mỗi model là một capability row hiện có, không tạo cấu hình song song.</MudText>
+                </div>
+                <MudButton Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.Save" Disabled="@(_busy || _loadingQuickDefaults || !CanSaveQuickDefaults)" OnClick="SaveQuickDefaultsAsync">Lưu cài đặt mặc định</MudButton>
+            </MudStack>
+            <MudDivider Class="my-3" />
+            @if (_loadingQuickDefaults)
+            {
+                <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+            }
+            else
+            {
+                <MudTable Items="_quickDefaults" Dense="true" Hover="true" T="QuickDefaultRow">
+                    <HeaderContent>
+                        <MudTh>Chức năng</MudTh>
+                        <MudTh>Provider</MudTh>
+                        <MudTh>Model</MudTh>
+                        <MudTh>Trạng thái</MudTh>
+                    </HeaderContent>
+                    <RowTemplate Context="row">
+                        <MudTd DataLabel="Chức năng">
+                            <MudText Typo="Typo.body2"><b>@row.Feature.DisplayName</b></MudText>
+                            <MudText Typo="Typo.caption" Class="todox-page-subtitle">@row.Feature.CapabilityCode · @row.Feature.MediaKind</MudText>
+                            <MudText Typo="Typo.caption">@row.Feature.Description</MudText>
+                        </MudTd>
+                        <MudTd DataLabel="Provider">
+                            <MudSelect T="long?" Value="@row.SelectedProviderId" ValueChanged="@((long? value) => OnQuickProviderChanged(row, value))" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" Disabled="@_busy">
+                                <MudSelectItem T="long?" Value="@((long?)null)">Chọn provider</MudSelectItem>
+                                @foreach (var provider in row.ProviderOptions)
+                                {
+                                    <MudSelectItem T="long?" Value="@provider.ProviderId">@provider.ProviderName (@provider.ProviderCode)</MudSelectItem>
+                                }
+                            </MudSelect>
+                        </MudTd>
+                        <MudTd DataLabel="Model">
+                            <MudSelect T="long?" Value="@row.SelectedCapabilityId" ValueChanged="@((long? value) => OnQuickModelChanged(row, value))" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" Disabled="@(_busy || row.SelectedProviderId is null || row.ModelOptions.Count == 0)">
+                                <MudSelectItem T="long?" Value="@((long?)null)">Chọn model</MudSelectItem>
+                                @foreach (var model in row.ModelOptions)
+                                {
+                                    <MudSelectItem T="long?" Value="@model.ProviderCapabilityId">@ModelOptionLabel(model)</MudSelectItem>
+                                }
+                            </MudSelect>
+                            @if (row.SelectedCapability is not null)
+                            {
+                                <MudText Typo="Typo.caption" Class="todox-page-subtitle">@row.SelectedCapability.CapabilityCode · @row.SelectedCapability.UnitCostPoints.ToString("0.####") điểm/@row.SelectedCapability.UnitType</MudText>
+                            }
+                        </MudTd>
+                        <MudTd DataLabel="Trạng thái">
+                            @if (row.SelectedCapability is null)
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Warning">Chưa chọn model</MudChip>
+                            }
+                            else if (row.SelectedCapability.IsDefault)
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Success">Đang dùng</MudChip>
+                            }
+                            else
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Info">Sẽ cập nhật</MudChip>
+                            }
+                            @if (!string.IsNullOrWhiteSpace(row.Warning))
+                            {
+                                <MudText Typo="Typo.caption" Color="Color.Warning">@row.Warning</MudText>
+                            }
+                        </MudTd>
+                    </RowTemplate>
+                </MudTable>
+            }
+        </MudPaper>
+
         <MudGrid>
             <MudItem xs="12" md="5">
                 <MudPaper Class="todox-card pa-4" rounded="true">
@@ -147,11 +220,17 @@
 
 @code {
     private bool _loading = true;
+    private bool _loadingQuickDefaults = true;
     private bool _busy;
     private List<AiProviderListItemDto> _providers = new();
     private AiProviderDetailDto? _selected;
     private UpdateAiProviderRequest _providerEdit = new();
     private List<AiProviderCapabilityDto> _capabilities = new();
+    private List<QuickDefaultRow> _quickDefaults = new();
+
+    private bool CanSaveQuickDefaults
+        => _quickDefaults.Count == AiFeatureProviderCatalog.QuickDefaultFeatures.Count
+           && _quickDefaults.All(x => x.SelectedCapabilityId is not null && string.IsNullOrWhiteSpace(x.Warning));
 
     private bool IsAdmin => AuthState.CurrentUser?.Role is TodoXUserRole.Admin or TodoXUserRole.SystemOperator || AuthState.CurrentUser?.IsRoot == true;
 
@@ -164,8 +243,112 @@
     private async Task ReloadProviders()
     {
         _loading = true;
-        _providers = (await Providers.GetProvidersAsync()).ToList();
-        _loading = false;
+        _loadingQuickDefaults = true;
+        try
+        {
+            _providers = (await Providers.GetProvidersAsync()).ToList();
+            await LoadQuickDefaultsAsync();
+        }
+        finally
+        {
+            _loading = false;
+            _loadingQuickDefaults = false;
+        }
+    }
+
+    private async Task LoadQuickDefaultsAsync()
+    {
+        var rows = new List<QuickDefaultRow>();
+        foreach (var feature in AiFeatureProviderCatalog.QuickDefaultFeatures.OrderBy(x => x.SortOrder))
+        {
+            var options = (await Providers.GetSelectableProvidersAsync(feature.CapabilityCode)).ToList();
+            var row = new QuickDefaultRow(feature, options);
+            var selected = options.FirstOrDefault(x => x.IsDefault) ?? (options.Count == 1 ? options[0] : null);
+            if (selected is not null)
+            {
+                row.SelectedProviderId = selected.ProviderId;
+                row.SelectedCapabilityId = selected.ProviderCapabilityId;
+                row.RefreshModelOptions();
+            }
+            else
+            {
+                row.RefreshModelOptions();
+            }
+
+            if (options.Count == 0)
+            {
+                row.Warning = "Chưa có provider/model được bật cho chức năng này.";
+            }
+
+            rows.Add(row);
+        }
+
+        _quickDefaults = rows;
+    }
+
+    private void OnQuickProviderChanged(QuickDefaultRow row, long? providerId)
+    {
+        row.SelectedProviderId = providerId;
+        row.SelectedCapabilityId = null;
+        row.RefreshModelOptions();
+        if (row.ModelOptions.Count == 1)
+        {
+            row.SelectedCapabilityId = row.ModelOptions[0].ProviderCapabilityId;
+        }
+        row.Warning = row.ModelOptions.Count == 0 && providerId is not null
+            ? "Provider chưa có model được bật cho chức năng này."
+            : null;
+    }
+
+    private void OnQuickModelChanged(QuickDefaultRow row, long? providerCapabilityId)
+    {
+        row.SelectedCapabilityId = providerCapabilityId;
+        row.Warning = null;
+    }
+
+    private async Task SaveQuickDefaultsAsync()
+    {
+        if (AuthState.CurrentUser is null) return;
+        var selectedIds = _quickDefaults
+            .Select(x => x.SelectedCapabilityId)
+            .Where(x => x is not null)
+            .Select(x => x!.Value)
+            .ToList();
+
+        if (selectedIds.Count != AiFeatureProviderCatalog.QuickDefaultFeatures.Count)
+        {
+            Snackbar.Add("Vui lòng chọn đủ provider và model cho tất cả chức năng.", Severity.Warning);
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            await Providers.SetDefaultCapabilitiesAsync(selectedIds, AuthState.CurrentUser);
+            Snackbar.Add("Đã lưu cài đặt provider mặc định.", Severity.Success);
+            if (_selected is not null)
+            {
+                await RefreshSelected();
+            }
+            else
+            {
+                await ReloadProviders();
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private static string ModelOptionLabel(ProviderOptionDto option)
+    {
+        var model = string.IsNullOrWhiteSpace(option.ModelName) ? option.DisplayName : option.ModelName;
+        return $"{model} · {option.DisplayName} · {option.UnitCostPoints:0.####} điểm/{option.UnitType}";
     }
 
     private async Task SelectProviderAsync(AiProviderListItemDto item)
@@ -254,5 +437,34 @@
         _selected = await Providers.GetProviderAsync(_selected.Id);
         _capabilities = _selected?.Capabilities.ToList() ?? new();
         await ReloadProviders();
+    }
+
+    private sealed class QuickDefaultRow
+    {
+        public QuickDefaultRow(AiFeatureProviderCatalogItem feature, List<ProviderOptionDto> options)
+        {
+            Feature = feature;
+            AllOptions = options;
+            RefreshModelOptions();
+        }
+
+        public AiFeatureProviderCatalogItem Feature { get; }
+        public List<ProviderOptionDto> AllOptions { get; }
+        public long? SelectedProviderId { get; set; }
+        public long? SelectedCapabilityId { get; set; }
+        public string? Warning { get; set; }
+        public List<ProviderOptionDto> ModelOptions { get; private set; } = new();
+        public IEnumerable<ProviderOptionDto> ProviderOptions => AllOptions
+            .GroupBy(x => x.ProviderId)
+            .Select(x => x.OrderByDescending(o => o.IsDefault).First())
+            .OrderBy(x => x.ProviderName);
+        public ProviderOptionDto? SelectedCapability => AllOptions.FirstOrDefault(x => x.ProviderCapabilityId == SelectedCapabilityId);
+
+        public void RefreshModelOptions()
+        {
+            ModelOptions = SelectedProviderId is long providerId
+                ? AllOptions.Where(x => x.ProviderId == providerId).OrderByDescending(x => x.IsDefault).ThenBy(x => x.DisplayName).ToList()
+                : new List<ProviderOptionDto>();
+        }
     }
 }

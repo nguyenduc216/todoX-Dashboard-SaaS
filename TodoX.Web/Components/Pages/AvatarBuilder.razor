@@ -204,7 +204,7 @@
     {
         try
         {
-            _providerOptions = (await AiProviders.GetSelectableProvidersAsync("avatar_generation")).ToList();
+            _providerOptions = (await AiProviders.GetSelectableProvidersAsync(AiProviderCatalog.ChibiAvatarGeneration)).ToList();
             if (_providerOptions.Count > 0)
             {
                 _providerCapabilityId = (_providerOptions.FirstOrDefault(o => o.IsDefault) ?? _providerOptions[0]).ProviderCapabilityId;

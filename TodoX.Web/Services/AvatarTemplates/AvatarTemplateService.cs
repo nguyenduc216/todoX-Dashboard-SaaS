@@ -399,11 +399,11 @@ public sealed class AvatarTemplateService : IAvatarTemplateService
     {
         try
         {
-            return await _aiProviders.ResolveProviderForCapabilityAsync("avatar_generation", providerCapabilityId, fromUser: true, ct);
+            return await _aiProviders.ResolveProviderForCapabilityAsync(AiProviderCatalog.ChibiAvatarGeneration, providerCapabilityId, fromUser: true, ct);
         }
         catch (Exception ex) when (providerCapabilityId is null)
         {
-            // No provider configured for avatar_generation — keep the legacy ImageAICreativeRender path.
+            // No provider configured for Avatar Builder — keep the legacy ImageAICreativeRender path.
             _logger.LogInformation("AVATAR_PROVIDER_FALLBACK reason={Reason}", ex.Message);
             return null;
         }
@@ -452,7 +452,7 @@ public sealed class AvatarTemplateService : IAvatarTemplateService
             CustomerGuid = customerGuid,
             UserId = userId,
             FeatureCode = featureCode,
-            CapabilityCode = "avatar_generation",
+            CapabilityCode = AiProviderCatalog.ChibiAvatarGeneration,
             ProviderCapabilityId = option.ProviderCapabilityId,
             FromUser = true,
             Prompt = prompt,
