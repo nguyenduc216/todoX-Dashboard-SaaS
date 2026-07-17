@@ -34,3 +34,4 @@ TodoX.Web.Tests/GoogleVertexRateLimiterTests.cs
 TodoX.Web.Tests/Fakes.cs
 TodoX.Web/keys/todox-vertex-sa.json
 TodoX.Web/keys/todox-vertex-sa.json
+/artifacts
