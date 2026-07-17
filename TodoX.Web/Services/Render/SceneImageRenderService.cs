@@ -61,7 +61,7 @@ public interface ISceneImageRenderService
     /// </summary>
     Task<Guid?> ResolveCharacterReferenceMediaIdAsync(long projectId, string? masterImageUrl, Guid userId, Guid? customerId, CancellationToken ct = default);
 
-    /// <summary>Bulk / auto path: renders one scene image on Google Cloud (Vertex) via the legacy creative engine.</summary>
+    /// <summary>Legacy direct ImageAICreativeRender path; normal scene rendering resolves the configured provider.</summary>
     Task<SceneImageRenderOutcome> RenderSceneImageWithVertexAsync(SceneImageRenderContext context, int attempt, CancellationToken ct = default);
 
     Task<SceneImageRenderOutcome> RenderSceneImageAsync(SceneImageRenderContext context, CancellationToken ct = default);
@@ -196,8 +196,8 @@ public sealed class SceneImageRenderService : ISceneImageRenderService
 
     private async Task<SceneImageRenderOutcome> RenderViaRouterAsync(SceneImageRenderContext context, string featureCode, CancellationToken ct)
     {
-        // Resolve the default provider for this capability and REQUIRE a routed image provider.
-        // No silent fallback to Google Cloud when the routed provider is missing or disabled.
+        // Resolve the default provider for this capability and require a supported image provider.
+        // No silent fallback to ImageAICreativeRender when the provider row is missing or disabled.
         ProviderOptionDto option;
         try
         {

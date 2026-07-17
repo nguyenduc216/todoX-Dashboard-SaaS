@@ -285,7 +285,8 @@ public static class ProviderCodeMap
     public static bool IsRoutedImageProvider(string? providerCode)
     {
         var factoryKey = ToFactoryKey(providerCode);
-        return factoryKey.Equals("openrouter_image", StringComparison.OrdinalIgnoreCase)
+        return factoryKey.Equals("todox_image", StringComparison.OrdinalIgnoreCase)
+               || factoryKey.Equals("openrouter_image", StringComparison.OrdinalIgnoreCase)
                || factoryKey.Equals("yescale_task_image", StringComparison.OrdinalIgnoreCase);
     }
 

@@ -47,4 +47,15 @@ public class AiProviderCatalogTests
         Assert.Equal(AiProviderCatalog.ChibiAvatarGeneration, builder.CapabilityCode);
         Assert.NotEqual(avatar.CapabilityCode, builder.CapabilityCode);
     }
+
+    [Theory]
+    [InlineData("image_ai_creative_render", "todox_image")]
+    [InlineData("todox_image", "todox_image")]
+    [InlineData("openrouter_image", "openrouter_image")]
+    [InlineData("yescale_task_image", "yescale_task_image")]
+    public void ProviderCodeMap_SupportsSceneImageQuickDefaultProviders(string providerCode, string factoryKey)
+    {
+        Assert.Equal(factoryKey, ProviderCodeMap.ToFactoryKey(providerCode));
+        Assert.True(ProviderCodeMap.IsRoutedImageProvider(providerCode));
+    }
 }
