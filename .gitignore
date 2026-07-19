@@ -35,3 +35,4 @@ TodoX.Web.Tests/Fakes.cs
 TodoX.Web/keys/todox-vertex-sa.json
 TodoX.Web/keys/todox-vertex-sa.json
 /artifacts
+database/manual/yescale-omni-flash-default/00_preflight.sql
