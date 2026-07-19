@@ -26,9 +26,12 @@ public sealed class SceneVideoRenderWorkItemInput
     public string? VoiceInstruction { get; set; }
     public long ProviderId { get; set; }
     public string ProviderCode { get; set; } = string.Empty;
+    public string? ProviderConfigJson { get; set; }
     public long ProviderCapabilityId { get; set; }
     public string CapabilityCode { get; set; } = string.Empty;
+    public string? CapabilityConfigJson { get; set; }
     public string? ModelName { get; set; }
+    public int? MaxPromptCharacters { get; set; }
     public string AspectRatio { get; set; } = "9:16";
     public string Resolution { get; set; } = "720P";
     public int DurationSeconds { get; set; }
@@ -52,6 +55,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
     private readonly IAiProviderService _providers;
     private readonly IYEScaleTaskClient _tasks;
     private readonly IMediaFileService _media;
+    private readonly IVideoPromptValidator _promptValidator;
     private readonly TenantContext _tenant;
     private readonly IConfiguration _config;
     private readonly ILogger<SceneVideoWorkerHandler> _logger;
@@ -66,6 +70,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         IAiProviderService providers,
         IYEScaleTaskClient tasks,
         IMediaFileService media,
+        IVideoPromptValidator promptValidator,
         TenantContext tenant,
         IConfiguration config,
         IOptionsMonitor<VideoRenderOptions> options,
@@ -77,6 +82,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         _providers = providers;
         _tasks = tasks;
         _media = media;
+        _promptValidator = promptValidator;
         _tenant = tenant;
         _config = config;
         _logger = logger;
@@ -119,16 +125,31 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
             },
             RenderConfigSnapshot: input), ct);
 
+        var validation = _promptValidator.Validate(input.VideoPrompt, input.ModelName, input.CapabilityConfigJson, input.SceneIndex);
+        input.VideoPrompt = validation.TrimmedPrompt;
+        input.MaxPromptCharacters = validation.MaxCharacterCount;
+        if (!validation.IsValid)
+        {
+            await _repo.AddProjectEventAsync(project.Id, "SCENE_VIDEO_PROMPT_VALIDATION_FAILED", "warning",
+                validation.Message ?? $"Scene {input.SceneIndex:00}: prompt video không hợp lệ.",
+                new
+                {
+                    jobId = job.Id,
+                    input.SceneId,
+                    input.SceneIndex,
+                    model = validation.ModelName,
+                    actualCharacters = validation.ActualCharacterCount,
+                    maxCharacters = validation.MaxCharacterCount,
+                    errorCode = validation.ErrorCode
+                }, ct);
+            await FailAsync(project.Id, scene, version.Id, validation.ErrorCode, validation.Message ?? "Scene video prompt invalid.", ct);
+            throw new RenderJobTerminalFailureException(validation.Message ?? "Scene video prompt invalid.");
+        }
+
         if (string.IsNullOrWhiteSpace(input.SourceImageUrl))
         {
             await FailAsync(project.Id, scene, version.Id, "missing_image", "Scene has no source image for video render.", ct);
             throw new RenderJobTerminalFailureException("Scene has no source image for video render.");
-        }
-
-        if (string.IsNullOrWhiteSpace(input.VideoPrompt))
-        {
-            await FailAsync(project.Id, scene, version.Id, "missing_prompt", "Scene has no video prompt.", ct);
-            throw new RenderJobTerminalFailureException("Scene has no video prompt.");
         }
 
         var billingCost = _billing.BuildConfiguredCost(input.EstimatedPoints, 1);
@@ -202,8 +223,8 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                     input.AspectRatio,
                     input.Resolution,
                     input.DurationSeconds,
-                    providerConfigJson: null,
-                    capabilityConfigJson: null);
+                    providerConfigJson: input.ProviderConfigJson,
+                    capabilityConfigJson: input.CapabilityConfigJson);
 
                 var submit = await _tasks.SubmitAsync(payload, ct);
                 taskId = string.IsNullOrWhiteSpace(submit.TaskId) ? null : submit.TaskId.Trim();

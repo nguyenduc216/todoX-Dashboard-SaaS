@@ -88,6 +88,7 @@ builder.Services.AddScoped<TodoX.Web.Services.AiProviders.IAiImageRenderRouter, 
 builder.Services.AddHostedService<TodoX.Web.Services.AiProviders.AiImageBillingReconciliationWorker>();
 builder.Services.Configure<TodoX.Web.Services.VideoRender.VideoRenderOptions>(builder.Configuration.GetSection("VideoRender"));
 builder.Services.AddSingleton<TodoX.Web.Services.VideoRender.ITodoXVideoPromptParser, TodoX.Web.Services.VideoRender.TodoXVideoPromptParser>();
+builder.Services.AddSingleton<TodoX.Web.Services.VideoRender.IVideoPromptValidator, TodoX.Web.Services.VideoRender.VideoPromptValidator>();
 builder.Services.AddScoped<TodoX.Web.Services.VideoRender.VideoRenderRepository>();
 builder.Services.AddScoped<TodoX.Web.Services.VideoRender.ISceneMediaVersioningService, TodoX.Web.Services.VideoRender.SceneMediaVersioningService>();
 builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IYEScaleVideoPricingResolver, TodoX.Web.Services.VideoRender.YEScaleVideoPricingResolver>();

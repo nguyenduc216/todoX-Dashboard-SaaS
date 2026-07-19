@@ -15,6 +15,8 @@ public sealed class SceneVideoRenderInput
     public Guid? CustomerId { get; set; }
     public string? CreatedBy { get; set; }
     public AiBillingTrustedPayerContext? TrustedPayerContext { get; set; }
+    public string? ProviderConfigJson { get; set; }
+    public string? CapabilityConfigJson { get; set; }
 }
 
 public sealed class SceneVideoRenderHandler : IRenderJobHandler
@@ -30,6 +32,7 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
     private readonly AiProviderRepository _providerRepo;
     private readonly IRenderJobService _jobs;
     private readonly IYEScaleVideoPricingResolver _pricing;
+    private readonly IVideoPromptValidator _promptValidator;
     private readonly ILogger<SceneVideoRenderHandler> _logger;
 
     public string JobType => JobTypeName;
@@ -40,6 +43,7 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
         AiProviderRepository providerRepo,
         IRenderJobService jobs,
         IYEScaleVideoPricingResolver pricing,
+        IVideoPromptValidator promptValidator,
         ILogger<SceneVideoRenderHandler> logger)
     {
         _repo = repo;
@@ -47,6 +51,7 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
         _providerRepo = providerRepo;
         _jobs = jobs;
         _pricing = pricing;
+        _promptValidator = promptValidator;
         _logger = logger;
     }
 
@@ -67,11 +72,18 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
         {
             throw new InvalidOperationException("The current image-to-video provider is not supported by the TodoX runtime yet.");
         }
+        if (!string.Equals(option.CapabilityCode, AiProviderCatalog.ImageToVideo, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(option.ModelName, "omni-flash", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("The current image-to-video runtime must resolve YEScale omni-flash.");
+        }
 
         var detail = await _providerRepo.GetProviderAsync(option.ProviderId, ct)
             ?? throw new InvalidOperationException("Configured image-to-video provider could not be loaded.");
         var capability = detail.Capabilities.FirstOrDefault(x => x.Id == option.ProviderCapabilityId)
             ?? throw new InvalidOperationException("Configured image-to-video capability could not be loaded.");
+        input.ProviderConfigJson = detail.ConfigJson;
+        input.CapabilityConfigJson = capability.ConfigJson;
 
         var targetSceneIds = input.SceneIds.Length == 0
             ? project.Scenes.Select(x => x.Id).ToHashSet()
@@ -97,17 +109,36 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
                 input.Resolution
             }, ct);
 
+        var enqueued = 0;
+        var validationFailed = new List<int>();
         foreach (var scene in scenes)
         {
-            await EnqueueSceneChildJobAsync(project, scene, input, option, capability, job, ct);
+            if (await EnqueueSceneChildJobAsync(project, scene, input, option, capability, job, ct))
+            {
+                enqueued++;
+            }
+            else
+            {
+                validationFailed.Add(scene.SceneIndex);
+            }
         }
 
         await _repo.AddProjectEventAsync(project.Id, "SCENE_VIDEO_BATCH_COMPLETED", "info",
-            $"Batch job enqueued {scenes.Count} child scene-video jobs.",
-            new { batchJobId = job.Id, total = scenes.Count }, ct);
+            $"Batch job enqueued {enqueued} child scene-video jobs and skipped {validationFailed.Count} invalid scenes.",
+            new
+            {
+                batchJobId = job.Id,
+                totalRequested = scenes.Count,
+                enqueued,
+                validationFailed = validationFailed.Count,
+                validationFailedSceneIndexes = validationFailed,
+                provider = option.ProviderCode,
+                model = option.ModelName,
+                capability = option.CapabilityCode
+            }, ct);
     }
 
-    private async Task EnqueueSceneChildJobAsync(
+    private async Task<bool> EnqueueSceneChildJobAsync(
         VideoProjectDto project,
         VideoProjectSceneDto scene,
         SceneVideoRenderInput input,
@@ -117,16 +148,34 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
         CancellationToken ct)
     {
         var selectedImage = await _repo.GetSelectedImageProjectionAsync(scene.Id, ct);
-        var sourceImageUrl = !string.IsNullOrWhiteSpace(selectedImage?.PublicUrl)
-            ? selectedImage.PublicUrl
-            : scene.StaticImageUrl;
+        var validation = _promptValidator.Validate(scene.VideoPrompt, option.ModelName, capability.ConfigJson, scene.SceneIndex);
+        if (!validation.IsValid)
+        {
+            await MarkSceneValidationFailedAsync(project.Id, scene, validation, ct);
+            return false;
+        }
+
+        var sourceImageUrl = selectedImage?.PublicUrl;
+        if (string.IsNullOrWhiteSpace(sourceImageUrl))
+        {
+            var imageValidation = new VideoPromptValidationResult(
+                false,
+                validation.ModelName,
+                validation.TrimmedPrompt,
+                validation.ActualCharacterCount,
+                validation.MaxCharacterCount,
+                "scene_source_image_required",
+                $"Scene {scene.SceneIndex:00}: cần ảnh nguồn đã chọn trước khi render video.");
+            await MarkSceneValidationFailedAsync(project.Id, scene, imageValidation, ct);
+            return false;
+        }
         var resolvedPrice = _pricing.Resolve(
             option,
             capability,
             input.AspectRatio,
             input.Resolution,
             scene.DurationSeconds,
-            !string.IsNullOrWhiteSpace(sourceImageUrl));
+            true);
 
         await _repo.UpdateSceneAsync(
             scene.Id,
@@ -152,14 +201,17 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
             SourceImageUrl = sourceImageUrl,
             SourceImageObjectKey = selectedImage?.StorageKey,
             ImagePrompt = scene.ImagePrompt,
-            VideoPrompt = scene.VideoPrompt,
+            VideoPrompt = validation.TrimmedPrompt,
             Voice = null,
             VoiceInstruction = null,
             ProviderId = option.ProviderId,
             ProviderCode = option.ProviderCode,
+            ProviderConfigJson = input.ProviderConfigJson,
             ProviderCapabilityId = option.ProviderCapabilityId,
             CapabilityCode = option.CapabilityCode,
+            CapabilityConfigJson = input.CapabilityConfigJson,
             ModelName = option.ModelName,
+            MaxPromptCharacters = validation.MaxCharacterCount,
             AspectRatio = input.AspectRatio,
             Resolution = input.Resolution,
             DurationSeconds = scene.DurationSeconds,
@@ -202,6 +254,37 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
                 option.ProviderCode,
                 option.ModelName,
                 sourceImageVersionId = selectedImage?.Id
+            }, ct);
+
+        return true;
+    }
+
+    private async Task MarkSceneValidationFailedAsync(
+        long projectId,
+        VideoProjectSceneDto scene,
+        VideoPromptValidationResult validation,
+        CancellationToken ct)
+    {
+        await _repo.UpdateSceneAsync(
+            scene.Id,
+            VideoSceneStatuses.Failed,
+            errorMessage: validation.Message,
+            title: scene.Title,
+            scenePrompt: scene.ScenePrompt,
+            imagePrompt: scene.ImagePrompt,
+            videoPrompt: scene.VideoPrompt,
+            ct: ct);
+
+        await _repo.AddProjectEventAsync(projectId, "SCENE_VIDEO_PROMPT_VALIDATION_FAILED", "warning",
+            validation.Message ?? $"Scene {scene.SceneIndex:00}: prompt video không hợp lệ.",
+            new
+            {
+                sceneId = scene.Id,
+                scene.SceneIndex,
+                model = validation.ModelName,
+                actualCharacters = validation.ActualCharacterCount,
+                maxCharacters = validation.MaxCharacterCount,
+                errorCode = validation.ErrorCode
             }, ct);
     }
 

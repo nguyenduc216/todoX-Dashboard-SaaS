@@ -35,6 +35,7 @@ public static class YEScaleVideoModelMapper
         if (string.IsNullOrWhiteSpace(imageUrl)) throw new InvalidOperationException("Thiếu ảnh đầu vào cho YEScale video.");
 
         var normalizedModel = model.Trim();
+        var normalizedPrompt = prompt.Trim();
         var config = ParseConfig(providerConfigJson, capabilityConfigJson);
         var normalizedAspectRatio = NormalizeAspectRatio(aspectRatio);
         var normalizedSize = NormalizeResolution(resolution);
@@ -45,7 +46,7 @@ public static class YEScaleVideoModelMapper
             "grok-video" => new YEScaleTaskSubmitRequest
             {
                 Model = normalizedModel,
-                Prompt = prompt,
+                Prompt = normalizedPrompt,
                 Config = new YEScaleTaskConfig
                 {
                     Images = new[] { imageUrl },
@@ -57,7 +58,7 @@ public static class YEScaleVideoModelMapper
             "grok-video-1.5" => new YEScaleTaskSubmitRequest
             {
                 Model = normalizedModel,
-                Prompt = prompt,
+                Prompt = normalizedPrompt,
                 Config = new YEScaleTaskConfig
                 {
                     Images = new[] { imageUrl },
@@ -69,7 +70,7 @@ public static class YEScaleVideoModelMapper
             "omni-flash" => new YEScaleTaskSubmitRequest
             {
                 Model = normalizedModel,
-                Prompt = prompt,
+                Prompt = normalizedPrompt,
                 Config = new YEScaleTaskConfig
                 {
                     Images = new[] { imageUrl },

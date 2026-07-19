@@ -343,6 +343,13 @@ else
                                         <MudChip T="string" Size="Size.Small">@scene.DurationSeconds giây</MudChip>
                                     </MudStack>
                                     <MudTextField T="string" Label="Prompt video" Value="@draft.MotionPrompt" ValueChanged="@((string? value) => UpdateDraft(scene.Id, d => d.MotionPrompt = value))" Variant="Variant.Outlined" Lines="4" Immediate="true" />
+                                    @if (IsOmniFlashVideoModel())
+                                    {
+                                        var promptState = ResolveVideoPromptState(scene, draft);
+                                        <MudText Typo="Typo.caption" Color="@promptState.Color">
+                                            @promptState.Text
+                                        </MudText>
+                                    }
                                     <MudStack Row="true" Spacing="1" Class="flex-wrap gap-1">
                                         <MudTooltip Text="@SceneVideoDisabledReason(scene, draft)">
                                             <MudButton Size="Size.Small" Variant="Variant.Outlined" Disabled="@(!CanCreateSceneVideo(scene, draft))" OnClick="@(() => RenderSceneVideoAsync(scene))">Tạo video</MudButton>
@@ -1258,7 +1265,8 @@ else
            && !string.IsNullOrWhiteSpace(draft.MotionPrompt)
            && HasProjectAspectRatio
            && HasProjectResolution
-           && _defaultImageToVideoProvider is not null;
+           && _defaultImageToVideoProvider is not null
+           && IsSceneVideoPromptValid(scene, draft);
 
     private string SceneVideoDisabledReason(VideoProjectSceneDto scene, SceneEditorState draft)
         => string.IsNullOrWhiteSpace(ResolveDraftImageUrl(scene, draft))
@@ -1271,7 +1279,9 @@ else
                 ? "Cần chọn độ phân giải video"
             : _defaultImageToVideoProvider is null
                 ? "Chưa cấu hình provider image-to-video"
-                : string.Empty;
+            : !IsSceneVideoPromptValid(scene, draft)
+                ? ResolveVideoPromptState(scene, draft).Text
+            : string.Empty;
 
     private bool CanEnqueueSceneVideos()
         => _project is not null
@@ -1289,6 +1299,47 @@ else
                 : !_project.Scenes.Any(scene => CanCreateSceneVideo(scene, GetSceneDraft(scene)))
                     ? "Không có scene nào đủ điều kiện render video"
                     : string.Empty;
+
+    private bool IsOmniFlashVideoModel()
+        => string.Equals(_defaultImageToVideoProvider?.ModelName, "omni-flash", StringComparison.OrdinalIgnoreCase);
+
+    private bool IsSceneVideoPromptValid(VideoProjectSceneDto scene, SceneEditorState draft)
+    {
+        if (!IsOmniFlashVideoModel())
+        {
+            return !string.IsNullOrWhiteSpace(draft.MotionPrompt);
+        }
+
+        var state = ResolveVideoPromptState(scene, draft);
+        return state.IsValid;
+    }
+
+    private VideoPromptState ResolveVideoPromptState(VideoProjectSceneDto scene, SceneEditorState draft)
+    {
+        var prompt = draft.MotionPrompt ?? string.Empty;
+        var modelName = _defaultImageToVideoProvider?.ModelName ?? string.Empty;
+        var maxCharacters = TodoX.Web.Services.VideoRender.VideoPromptValidator.ResolveMaxPromptCharacters(modelName, null);
+        var actualCharacters = TodoX.Web.Services.VideoRender.VideoPromptValidator.CountUnicodeScalars(prompt.Trim());
+
+        if (string.IsNullOrWhiteSpace(prompt))
+        {
+            return new VideoPromptState(false, Color.Error, $"Scene {scene.SceneIndex:00}: prompt video không được để trống.");
+        }
+
+        if (maxCharacters is int max && actualCharacters > max)
+        {
+            return new VideoPromptState(false, Color.Error, $"Scene {scene.SceneIndex:00}: {actualCharacters:n0} / {max:n0} ký tự, vượt giới hạn của Omni Flash.");
+        }
+
+        if (maxCharacters is int warningMax && actualCharacters > TodoX.Web.Services.VideoRender.VideoPromptValidator.OmniFlashWarningPromptCharacters)
+        {
+            return new VideoPromptState(true, Color.Warning, $"Scene {scene.SceneIndex:00}: {actualCharacters:n0} / {warningMax:n0} ký tự.");
+        }
+
+        return new VideoPromptState(true, Color.Success, $"Scene {scene.SceneIndex:00}: {actualCharacters:n0} / {maxCharacters?.ToString("n0") ?? "?"} ký tự.");
+    }
+
+    private sealed record VideoPromptState(bool IsValid, Color Color, string Text);
 
     private Task CheckPromptAsync()
     {
@@ -2314,6 +2365,11 @@ else
             .Where(scene => CanCreateSceneVideo(scene, GetSceneDraft(scene)))
             .Select(scene => scene.Id)
             .ToArray();
+        var invalidPromptScenes = _project.Scenes
+            .Where(scene => !IsSceneVideoPromptValid(scene, GetSceneDraft(scene)))
+            .OrderBy(scene => scene.SceneIndex)
+            .Select(scene => $"Scene {scene.SceneIndex:00}")
+            .ToArray();
         if (sceneIds.Length == 0)
         {
             Snackbar.Add("Không có scene nào đủ điều kiện render video.", Severity.Info);
@@ -2363,8 +2419,19 @@ else
         else
         {
             await LogProjectEvent("SCENE_VIDEO_BATCH_ENQUEUED", "info", "Đã enqueue batch render scene video.",
-                new { job.Id, sceneCount = sceneIds.Length, provider = _defaultImageToVideoProvider.ProviderCode, model = _defaultImageToVideoProvider.ModelName });
-            Snackbar.Add($"Đã enqueue render video cho {sceneIds.Length} scene.", Severity.Success);
+                new
+                {
+                    job.Id,
+                    sceneCount = sceneIds.Length,
+                    skippedInvalidPromptCount = invalidPromptScenes.Length,
+                    skippedInvalidPromptScenes = invalidPromptScenes,
+                    provider = _defaultImageToVideoProvider.ProviderCode,
+                    model = _defaultImageToVideoProvider.ModelName
+                });
+            var skippedText = invalidPromptScenes.Length > 0
+                ? $" Bỏ qua {invalidPromptScenes.Length} scene do prompt không hợp lệ: {string.Join(", ", invalidPromptScenes)}."
+                : string.Empty;
+            Snackbar.Add($"Đã enqueue {sceneIds.Length} scene.{skippedText}", Severity.Success);
         }
 
         await StartPolling();
