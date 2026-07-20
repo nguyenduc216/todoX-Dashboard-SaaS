@@ -9,6 +9,8 @@ public class RenderVideoJobsLayoutTests
     private static readonly string WebRoot = Path.Combine(RepoRoot, "TodoX.Web");
     private static readonly string RazorPath = Path.Combine(WebRoot, "Components", "Pages", "RenderVideoJobs.razor");
     private static readonly string CssPath = Path.Combine(WebRoot, "Components", "Pages", "RenderVideoJobs.razor.css");
+    private static readonly string ErrorDialogPath = Path.Combine(WebRoot, "Components", "Dialogs", "SceneRenderErrorDetailDialog.razor");
+    private static readonly string VersioningServicePath = Path.Combine(WebRoot, "Services", "VideoRender", "SceneMediaVersioningService.cs");
 
     [Fact]
     public void ProjectDialog_KeepsFourTabs()
@@ -104,6 +106,59 @@ public class RenderVideoJobsLayoutTests
         Assert.Contains("Value=\"@draft.MotionPrompt\"", videoTab);
         Assert.DoesNotContain("Value=\"@draft.Voice\"", videoTab);
         Assert.DoesNotContain("Value=\"@draft.VoiceInstruction\"", videoTab);
+    }
+
+    [Fact]
+    public void VideoCards_ShowOmniFlashPromptCounterAndBlockInvalidPrompt()
+    {
+        var razor = File.ReadAllText(RazorPath);
+        var videoTab = Between(razor, "class=\"scene-video-tab\"", "<div class=\"render-tab-scroll render-result-scroll\">");
+
+        Assert.Contains("ResolveVideoPromptState(scene, draft)", videoTab);
+        Assert.Contains("Disabled=\"@(!CanCreateSceneVideo(scene, draft))\"", videoTab);
+        Assert.Contains("VideoPromptValidator.CountUnicodeScalars", razor);
+        Assert.Contains("VideoPromptValidator.ResolveMaxPromptCharacters", razor);
+    }
+
+    [Fact]
+    public void FailedStatusBadge_IsClickableInImageAndVideoTabs()
+    {
+        var razor = File.ReadAllText(RazorPath);
+
+        Assert.Contains("@RenderSceneStatusBadge(scene, \"image\")", razor);
+        Assert.Contains("@RenderSceneStatusBadge(scene, \"video\")", razor);
+        Assert.Contains("scene-failed-status-trigger", razor);
+        Assert.Contains("@onclick:stopPropagation=\"true\"", razor);
+        Assert.Contains("@onkeydown:stopPropagation=\"true\"", razor);
+        Assert.Contains("OpenSceneErrorKeyDownAsync", razor);
+        Assert.Contains("GetSceneRenderErrorDetailAsync(scene.Id, taskType", razor);
+    }
+
+    [Fact]
+    public void SceneErrorDialog_HasCopyActionsAndJsonBlocks()
+    {
+        var dialog = File.ReadAllText(ErrorDialogPath);
+
+        Assert.Contains("Provider Request", dialog);
+        Assert.Contains("Provider Response", dialog);
+        Assert.Contains("Provider Error", dialog);
+        Assert.Contains("Copy lỗi", dialog);
+        Assert.Contains("Copy JSON", dialog);
+        Assert.Contains("navigator.clipboard.writeText", dialog);
+    }
+
+    [Fact]
+    public void SceneErrorDetailService_RedactsSensitiveJsonKeys()
+    {
+        var service = File.ReadAllText(VersioningServicePath);
+
+        Assert.Contains("GetSceneRenderErrorDetailAsync", service);
+        Assert.Contains("RedactSensitiveJson", service);
+        Assert.Contains("\"***REDACTED***\"", service);
+        Assert.Contains("authorization", service);
+        Assert.Contains("access_key", service);
+        Assert.Contains("provider_usage_json", service);
+        Assert.Contains("todox_ai_provider_usage_log", service);
     }
 
     [Fact]

@@ -53,7 +53,7 @@ public class YEScaleVideoModelMapperTests
     {
         var payload = YEScaleVideoModelMapper.BuildSubmitRequest(
             "omni-flash",
-            "animate product shot",
+            "  animate product shot  ",
             "https://cdn.example/frame.png",
             "16:9",
             "720P",
@@ -63,10 +63,28 @@ public class YEScaleVideoModelMapperTests
 
         var json = JsonSerializer.Serialize(payload);
         Assert.Contains("\"model\":\"omni-flash\"", json);
+        Assert.Contains("\"prompt\":\"animate product shot\"", json);
         Assert.Contains("\"images\":[\"https://cdn.example/frame.png\"]", json);
         Assert.Contains("\"aspect_ratio\":\"16:9\"", json);
         Assert.Contains("\"mode\":\"i2v(img_ref)\"", json);
         Assert.DoesNotContain("\"duration\":", json);
         Assert.DoesNotContain("\"size\":", json);
+    }
+
+    [Fact]
+    public void Mapper_UsesCapabilityConfigSnapshotForOmniFlashMode()
+    {
+        var payload = YEScaleVideoModelMapper.BuildSubmitRequest(
+            "omni-flash",
+            "animate product shot",
+            "https://cdn.example/frame.png",
+            "16:9",
+            "720P",
+            4,
+            providerConfigJson: null,
+            capabilityConfigJson: """{"mode":"v2v"}""");
+
+        Assert.Equal("omni-flash", payload.Model);
+        Assert.Equal("v2v", payload.Config.Mode);
     }
 }
