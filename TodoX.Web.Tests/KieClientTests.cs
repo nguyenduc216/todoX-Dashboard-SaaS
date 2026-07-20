@@ -76,17 +76,61 @@ public sealed class KieClientTests
         Assert.Contains("nope", ex.RawResponse);
     }
 
-    private static KieClient CreateClient(HttpMessageHandler handler)
+    [Fact]
+    public async Task CreateTaskAsync_InternalTimeoutMapsToTransientProviderUnavailable()
+    {
+        var handler = new FakeHttpMessageHandler(async (_, ct) =>
+        {
+            await Task.Delay(TimeSpan.FromSeconds(5), ct);
+            return new HttpResponseMessage(HttpStatusCode.OK);
+        });
+        var client = CreateClient(handler, new KieOptions { ApiKey = "test-key", HttpTimeoutSeconds = 1 });
+
+        var ex = await Assert.ThrowsAsync<KieProviderException>(() => client.CreateTaskAsync(new KieMotionControlRequest
+        {
+            Model = "kling-2.6/motion-control",
+            Input = new KieMotionControlInput { Prompt = "Dance." }
+        }, CancellationToken.None));
+
+        Assert.Equal(KieErrorCodes.ProviderUnavailable, ex.ErrorCode);
+        Assert.True(ex.IsTransient);
+    }
+
+    [Fact]
+    public async Task CreateTaskAsync_CallerCancellationStaysCanceled()
+    {
+        var handler = new FakeHttpMessageHandler((_, ct) =>
+        {
+            ct.ThrowIfCancellationRequested();
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
+        });
+        var client = CreateClient(handler);
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => client.CreateTaskAsync(new KieMotionControlRequest
+        {
+            Model = "kling-2.6/motion-control",
+            Input = new KieMotionControlInput { Prompt = "Dance." }
+        }, cts.Token));
+    }
+
+    private static KieClient CreateClient(HttpMessageHandler handler, KieOptions? options = null)
         => new(
             new HttpClient(handler),
-            new StaticOptionsMonitor<KieOptions>(new KieOptions { ApiKey = "test-key" }),
+            new StaticOptionsMonitor<KieOptions>(options ?? new KieOptions { ApiKey = "test-key" }),
             NullLogger<KieClient>.Instance);
 
     private sealed class FakeHttpMessageHandler : HttpMessageHandler
     {
-        private readonly Func<HttpRequestMessage, HttpResponseMessage> _handler;
+        private readonly Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> _handler;
 
         public FakeHttpMessageHandler(Func<HttpRequestMessage, HttpResponseMessage> handler)
+            : this((request, _) => Task.FromResult(handler(request)))
+        {
+        }
+
+        public FakeHttpMessageHandler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> handler)
         {
             _handler = handler;
         }
@@ -96,7 +140,7 @@ public sealed class KieClientTests
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             LastRequest = request;
-            return Task.FromResult(_handler(request));
+            return _handler(request, cancellationToken);
         }
     }
 }

@@ -148,10 +148,15 @@ public static class DanceSellPhase1Endpoints
         HttpRequest request,
         IKieClient client,
         IDanceSellRepository danceSellJobs,
-        IRenderJobService renderJobs,
+        IDanceSellCompletionService completion,
         IOptionsMonitor<KieOptions> options,
         CancellationToken ct)
     {
+        if (!IsCallbackConfigured(options.CurrentValue.CallbackSecret))
+        {
+            return Results.Json(new { success = false, message = "KIE callback secret is not configured." }, statusCode: StatusCodes.Status503ServiceUnavailable);
+        }
+
         if (!IsCallbackAuthorized(request, options.CurrentValue.CallbackSecret))
         {
             return Results.Json(new { success = false, message = "Invalid callback secret." }, statusCode: StatusCodes.Status401Unauthorized);
@@ -187,15 +192,21 @@ public static class DanceSellPhase1Endpoints
             ? (callback.FailMsg ?? "KIE task failed.")
             : callback.ResultParseError;
 
+        if (resultUrl is not null)
+        {
+            await completion.CompleteAsync(new DanceSellCompletionRequest
+            {
+                DanceJob = job,
+                ProviderTaskId = callback.TaskId,
+                ProviderStatus = callback.ProviderState ?? callback.Status,
+                ResponseJson = raw,
+                ResultVideoUrl = resultUrl,
+                ResultUrlCount = callback.ResultUrls.Count,
+                Source = "callback"
+            }, ct);
+        }
+
         await danceSellJobs.UpdateCallbackAsync(callback.TaskId, KieJsonRedactor.Redact(raw) ?? "{}", callback.ProviderState ?? callback.Status, resultUrl, errorCode, errorMessage, ct);
-        if (job.RenderJobId is Guid renderJobId && resultUrl is not null)
-        {
-            await renderJobs.MarkStatusAsync(renderJobId, RenderJobStatuses.Completed, new { resultVideoUrl = resultUrl, callback = true }, ct: ct);
-        }
-        else if (job.RenderJobId is Guid failedRenderJobId && errorCode is not null)
-        {
-            await renderJobs.MarkStatusAsync(failedRenderJobId, RenderJobStatuses.Failed, errorCode: errorCode, errorMessage: errorMessage, ct: ct);
-        }
 
         return Results.Json(new { success = true, taskId = callback.TaskId, status = callback.Status });
     }
@@ -206,13 +217,11 @@ public static class DanceSellPhase1Endpoints
 
     private static bool IsCallbackAuthorized(HttpRequest request, string? configuredSecret)
     {
-        if (string.IsNullOrWhiteSpace(configuredSecret))
-        {
-            return true;
-        }
-
         var provided = request.Headers["X-KIE-CALLBACK-SECRET"].FirstOrDefault()
                        ?? request.Query["secret"].FirstOrDefault();
         return string.Equals(provided, configuredSecret, StringComparison.Ordinal);
     }
+
+    public static bool IsCallbackConfigured(string? configuredSecret)
+        => !string.IsNullOrWhiteSpace(configuredSecret);
 }

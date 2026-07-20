@@ -13,7 +13,7 @@ public interface IDanceSellRepository
     Task SetRenderJobIdAsync(Guid id, Guid renderJobId, CancellationToken ct = default);
     Task UpdateSubmittedAsync(Guid id, string requestJson, string providerTaskId, string submitResponseJson, CancellationToken ct = default);
     Task UpdatePollingAsync(Guid id, string providerStatus, string pollResponseJson, int pollCount, DateTime nextPollAtUtc, CancellationToken ct = default);
-    Task UpdateCompletedAsync(Guid id, string providerStatus, string pollResponseJson, string resultVideoUrl, CancellationToken ct = default);
+    Task<bool> UpdateCompletedAsync(Guid id, string providerStatus, string pollResponseJson, string resultVideoUrl, CancellationToken ct = default);
     Task UpdateFailedAsync(Guid id, string status, string? providerStatus, string? responseJson, string errorCode, string errorMessage, CancellationToken ct = default);
     Task UpdateCallbackAsync(string providerTaskId, string callbackJson, string providerStatus, string? resultVideoUrl, string? errorCode, string? errorMessage, CancellationToken ct = default);
 }
@@ -143,23 +143,27 @@ public sealed class DanceSellRepository : IDanceSellRepository
             new { id, providerStatus, pollResponseJson, pollCount, nextPollAtUtc });
     }
 
-    public async Task UpdateCompletedAsync(Guid id, string providerStatus, string pollResponseJson, string resultVideoUrl, CancellationToken ct = default)
+    public const string UpdateCompletedSql =
+        """
+        UPDATE dance_sell.dance_sell_jobs
+           SET status='completed',
+               provider_status=@providerStatus,
+               poll_response_json=CAST(@pollResponseJson AS jsonb),
+               result_video_url=COALESCE(result_video_url, @resultVideoUrl),
+               last_polled_at=now(),
+               completed_at=COALESCE(completed_at, now()),
+               updated_at=now()
+         WHERE id=@id
+           AND status NOT IN ('completed','failed','timeout');
+        """;
+
+    public async Task<bool> UpdateCompletedAsync(Guid id, string providerStatus, string pollResponseJson, string resultVideoUrl, CancellationToken ct = default)
     {
         using var conn = await _factory.OpenAsync(ct);
-        await conn.ExecuteAsync(
-            """
-            UPDATE dance_sell.dance_sell_jobs
-               SET status='completed',
-                   provider_status=@providerStatus,
-                   poll_response_json=CAST(@pollResponseJson AS jsonb),
-                   result_video_url=COALESCE(result_video_url, @resultVideoUrl),
-                   last_polled_at=now(),
-                   completed_at=CASE WHEN @status IN ('failed','timeout') THEN COALESCE(completed_at, now()) ELSE completed_at END,
-                   updated_at=now()
-             WHERE id=@id
-               AND status NOT IN ('completed','failed','timeout');
-            """,
+        var changed = await conn.ExecuteAsync(
+            UpdateCompletedSql,
             new { id, providerStatus, pollResponseJson, resultVideoUrl });
+        return changed > 0;
     }
 
     public async Task UpdateFailedAsync(Guid id, string status, string? providerStatus, string? responseJson, string errorCode, string errorMessage, CancellationToken ct = default)

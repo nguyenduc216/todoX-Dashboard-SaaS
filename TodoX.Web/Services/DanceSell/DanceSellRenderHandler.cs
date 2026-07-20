@@ -15,6 +15,7 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
     private readonly IKieClient _client;
     private readonly IKieRateLimiter _rateLimiter;
     private readonly IRenderJobService _renderJobs;
+    private readonly IDanceSellCompletionService _completion;
     private readonly IAiProviderService _providers;
     private readonly IOptionsMonitor<KieOptions> _options;
     private readonly ILogger<DanceSellRenderHandler> _logger;
@@ -27,6 +28,7 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
         IKieClient client,
         IKieRateLimiter rateLimiter,
         IRenderJobService renderJobs,
+        IDanceSellCompletionService completion,
         IAiProviderService providers,
         IOptionsMonitor<KieOptions> options,
         ILogger<DanceSellRenderHandler> logger)
@@ -36,6 +38,7 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
         _client = client;
         _rateLimiter = rateLimiter;
         _renderJobs = renderJobs;
+        _completion = completion;
         _providers = providers;
         _options = options;
         _logger = logger;
@@ -154,10 +157,16 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
                     throw new RenderJobTerminalFailureException("KIE resultUrls is empty.");
                 }
 
-                await _repo.UpdateCompletedAsync(danceJob.Id, detail.ProviderState ?? detail.Status, responseJson, resultUrl, ct);
-                await _renderJobs.AddEventAsync(renderJob.Id, "KIE_TASK_COMPLETED", "KIE Motion Control task completed.",
-                    new { danceSellJobId = danceJob.Id, danceJob.ProviderTaskId, resultUrlCount = detail.ResultUrls.Count }, ct: ct);
-                await LogUsageAsync(danceJob, renderJob, "completed", danceJob.ProviderTaskId, detail.ProviderState, detail.ResultUrls.Count, null, ct);
+                await _completion.CompleteAsync(new DanceSellCompletionRequest
+                {
+                    DanceJob = danceJob,
+                    ProviderTaskId = danceJob.ProviderTaskId,
+                    ProviderStatus = detail.ProviderState ?? detail.Status,
+                    ResponseJson = responseJson,
+                    ResultVideoUrl = resultUrl,
+                    ResultUrlCount = detail.ResultUrls.Count,
+                    Source = "poll"
+                }, ct);
                 return;
             }
 
@@ -205,7 +214,7 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
     {
         await _providers.LogUsageAsync(new AiProviderUsageLog
         {
-            CustomerId = null,
+            CustomerId = DanceSellCompletionService.ToBigIntCustomerId(danceJob.CustomerId),
             ProviderCode = DanceSellConstants.ProviderCode,
             CapabilityCode = DanceSellConstants.CapabilityCode,
             FeatureCode = DanceSellConstants.FeatureCode,

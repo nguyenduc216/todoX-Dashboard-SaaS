@@ -37,8 +37,8 @@ public sealed class KieClient : IKieClient
 
         var body = JsonSerializer.Serialize(request, KieJson.Options);
         using var message = BuildMessage(HttpMethod.Post, BuildUrl(options, CreateTaskPath), options, body);
-        using var response = await SendAsync(message, timeout.Token);
-        var raw = await response.Content.ReadAsStringAsync(timeout.Token);
+        using var response = await SendAsync(message, timeout.Token, cancellationToken);
+        var raw = await ReadContentAsync(response, timeout.Token, cancellationToken);
         if (!IsSuccess(response.StatusCode))
         {
             throw BuildException(response, raw, operation: "submit");
@@ -67,8 +67,8 @@ public sealed class KieClient : IKieClient
 
         var path = $"{RecordInfoPath}?taskId={Uri.EscapeDataString(taskId.Trim())}";
         using var message = BuildMessage(HttpMethod.Get, BuildUrl(options, path), options, body: null);
-        using var response = await SendAsync(message, timeout.Token);
-        var raw = await response.Content.ReadAsStringAsync(timeout.Token);
+        using var response = await SendAsync(message, timeout.Token, cancellationToken);
+        var raw = await ReadContentAsync(response, timeout.Token, cancellationToken);
         if (!IsSuccess(response.StatusCode))
         {
             throw BuildException(response, raw, operation: "poll");
@@ -95,19 +95,39 @@ public sealed class KieClient : IKieClient
         }
     }
 
-    private async Task<HttpResponseMessage> SendAsync(HttpRequestMessage message, CancellationToken ct)
+    private async Task<HttpResponseMessage> SendAsync(HttpRequestMessage message, CancellationToken timeoutToken, CancellationToken callerToken)
     {
         try
         {
-            return await _http.SendAsync(message, ct);
+            return await _http.SendAsync(message, timeoutToken);
         }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        catch (OperationCanceledException) when (callerToken.IsCancellationRequested)
         {
-            throw new KieProviderException("KIE request timed out.", KieErrorCodes.ProviderUnavailable, transient: true);
+            throw;
+        }
+        catch (OperationCanceledException ex) when (timeoutToken.IsCancellationRequested && !callerToken.IsCancellationRequested)
+        {
+            throw new KieProviderException("KIE request timed out.", KieErrorCodes.ProviderUnavailable, transient: true, innerException: ex);
         }
         catch (HttpRequestException ex)
         {
             throw new KieProviderException("KIE network request failed.", KieErrorCodes.ProviderUnavailable, transient: true, innerException: ex);
+        }
+    }
+
+    private static async Task<string> ReadContentAsync(HttpResponseMessage response, CancellationToken timeoutToken, CancellationToken callerToken)
+    {
+        try
+        {
+            return await response.Content.ReadAsStringAsync(timeoutToken);
+        }
+        catch (OperationCanceledException) when (callerToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException ex) when (timeoutToken.IsCancellationRequested && !callerToken.IsCancellationRequested)
+        {
+            throw new KieProviderException("KIE request timed out.", KieErrorCodes.ProviderUnavailable, transient: true, innerException: ex);
         }
     }
 
