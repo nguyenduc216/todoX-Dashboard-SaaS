@@ -5,6 +5,8 @@ using TodoX.Web.Services;
 using TodoX.Web.Services.Render;
 using TodoX.Web.Services.Reup;
 using TodoX.Web.Services.AiCharacters;
+using TodoX.Web.Services.AiProviders.Kie;
+using TodoX.Web.Services.DanceSell;
 using MudBlazor.Services;
 using Microsoft.Extensions.FileProviders;
 
@@ -73,6 +75,25 @@ builder.Services.AddScoped<ITodoXImageProviderService, TodoXImageProviderService
 builder.Services.AddHttpClient<IOpenRouterImageService, OpenRouterImageService>();
 builder.Services.Configure<TodoX.Web.Services.AiProviders.YEScaleOptions>(builder.Configuration.GetSection("AiProviders:YEScale"));
 builder.Services.AddHttpClient<TodoX.Web.Services.AiProviders.IYEScaleTaskClient, TodoX.Web.Services.AiProviders.YEScaleTaskClient>();
+builder.Services.Configure<KieOptions>(builder.Configuration.GetSection(KieOptions.SectionName));
+builder.Services.PostConfigure<KieOptions>(options =>
+{
+    ApplyEnv("KIE_API_BASE_URL", value => options.ApiBaseUrl = value);
+    ApplyEnv("KIE_API_KEY", value => options.ApiKey = value);
+    ApplyEnv("KIE_CALLBACK_URL", value => options.CallbackUrl = value);
+    ApplyEnv("KIE_CALLBACK_SECRET", value => options.CallbackSecret = value);
+    ApplyEnv("KIE_MOTION_CONTROL_MODEL", value => options.MotionControlModel = value);
+    ApplyEnv("KIE_DEFAULT_MODE", value => options.DefaultMode = value);
+    ApplyEnvInt("KIE_HTTP_TIMEOUT_SECONDS", value => options.HttpTimeoutSeconds = value);
+    ApplyEnvInt("KIE_POLL_INTERVAL_SECONDS", value => options.PollIntervalSeconds = value);
+    ApplyEnvInt("KIE_MAX_POLL_COUNT", value => options.MaxPollCount = value);
+    ApplyEnvInt("KIE_SUBMIT_MAX_RETRY", value => options.SubmitMaxRetry = value);
+    ApplyEnvInt("KIE_RATE_LIMIT_REQUESTS_PER_10S", value => options.RateLimitRequestsPer10S = value);
+    ApplyEnvInt("KIE_MAX_CONCURRENT_TASKS", value => options.MaxConcurrentTasks = value);
+});
+builder.Services.AddHttpClient<IKieClient, KieClient>();
+builder.Services.AddScoped<IKiePayloadBuilder, KiePayloadBuilder>();
+builder.Services.AddSingleton<IKieRateLimiter, InMemoryKieRateLimiter>();
 builder.Services.AddScoped<TodoX.Web.Services.AiProviders.IYEScaleImageService, TodoX.Web.Services.AiProviders.YEScaleImageService>();
 builder.Services.AddScoped<IAiImageProviderFactory, AiImageProviderFactory>();
 builder.Services.AddScoped<CharacterPromptBuilder>();
@@ -92,10 +113,12 @@ builder.Services.AddSingleton<TodoX.Web.Services.VideoRender.IVideoPromptValidat
 builder.Services.AddScoped<TodoX.Web.Services.VideoRender.VideoRenderRepository>();
 builder.Services.AddScoped<TodoX.Web.Services.VideoRender.ISceneMediaVersioningService, TodoX.Web.Services.VideoRender.SceneMediaVersioningService>();
 builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IYEScaleVideoPricingResolver, TodoX.Web.Services.VideoRender.YEScaleVideoPricingResolver>();
+builder.Services.AddScoped<IDanceSellRepository, DanceSellRepository>();
 builder.Services.AddScoped<IRenderJobHandler, TodoX.Web.Services.VideoRender.SceneVideoRenderHandler>();
 builder.Services.AddScoped<IRenderJobHandler, TodoX.Web.Services.VideoRender.SceneVideoWorkerHandler>();
 builder.Services.AddScoped<IRenderJobHandler, TodoX.Web.Services.VideoRender.VideoRenderMergeHandler>();
 builder.Services.AddScoped<IRenderJobHandler, TodoX.Web.Services.Render.SceneImageBatchRenderHandler>();
+builder.Services.AddScoped<IRenderJobHandler, DanceSellRenderHandler>();
 builder.Services.AddScoped<TodoX.Web.Services.Render.ISceneImageRenderService, TodoX.Web.Services.Render.SceneImageRenderService>();
 builder.Services.AddSingleton<TodoX.Web.Services.Render.GoogleVertexRateLimiter>();
 builder.Services.AddScoped<AccountService>();
@@ -118,6 +141,24 @@ builder.Services.AddSingleton<ReupStorageService>();
 builder.Services.AddSingleton<ReupTaskPageGate>();
 builder.Services.AddHostedService<ReupCampaignWorker>();
 var app = builder.Build();
+
+static void ApplyEnv(string key, Action<string> apply)
+{
+    var value = Environment.GetEnvironmentVariable(key);
+    if (!string.IsNullOrWhiteSpace(value))
+    {
+        apply(value.Trim());
+    }
+}
+
+static void ApplyEnvInt(string key, Action<int> apply)
+{
+    var value = Environment.GetEnvironmentVariable(key);
+    if (int.TryParse(value, out var parsed))
+    {
+        apply(parsed);
+    }
+}
 
 // Load tenant and repair placeholder seed credentials (writes data only, never schema).
 using (var scope = app.Services.CreateScope())
@@ -299,6 +340,7 @@ extensionApi.MapGet("/download", async (
     return Results.File(package.Bytes, package.ContentType, package.FileName);
 });
 
+app.MapDanceSellPhase1Endpoints();
 
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();

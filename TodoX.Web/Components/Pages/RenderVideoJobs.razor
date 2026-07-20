@@ -1,6 +1,7 @@
 ﻿@page "/render-job"
 @using System.Text.Json
 @using System.Text.Json.Nodes
+@using TodoX.Web.Components.Dialogs
 @using TodoX.Web.Services.AiProviders
 @inject AuthStateService AuthState
 @inject NavigationManager Navigation
@@ -256,7 +257,7 @@ else
                                             {
                                                 <MudChip T="string" Size="Size.Small" Color="Color.Warning">Chưa lưu</MudChip>
                                             }
-                                            <MudChip T="string" Color="@SceneColor(scene.Status)">@SceneLabel(scene.Status)</MudChip>
+                                            @RenderSceneStatusBadge(scene, "image")
                                             <MudMenu Dense="true" Icon="@Icons.Material.Filled.MoreVert">
                                                 <MudMenuItem Icon="@Icons.Material.Filled.Save" Disabled="@_busy" OnClick="@(() => SaveSceneAsync(scene))">Lưu scene</MudMenuItem>
                                                 <MudMenuItem Icon="@Icons.Material.Filled.AddPhotoAlternate" Disabled="@IsSceneRendering(scene)" OnClick="@(() => RerenderSceneImageAsync(scene))">@(string.IsNullOrWhiteSpace(ResolveDraftImageUrl(scene, draft)) ? "Tạo ảnh" : "Render lại ảnh")</MudMenuItem>
@@ -334,7 +335,7 @@ else
                                 <MudStack Spacing="2">
                                     <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="scene-card-header flex-wrap gap-1">
                                         <MudText Typo="Typo.subtitle1" Class="scene-card-title">Scene @scene.SceneIndex.ToString("00") - @scene.Title</MudText>
-                                        <MudChip T="string" Color="@SceneColor(scene.Status)">@SceneLabel(scene.Status)</MudChip>
+                                        @RenderSceneStatusBadge(scene, "video")
                                     </MudStack>
                                     @RenderSceneVideoFrame(scene, draft)
                                     <MudStack Row="true" Spacing="1" Class="scene-card-meta flex-wrap gap-1">
@@ -1198,6 +1199,77 @@ else
         return Task.CompletedTask;
     }
 
+    private RenderFragment RenderSceneStatusBadge(VideoProjectSceneDto scene, string taskType) => @<span>
+        @if (IsErrorStatus(scene.Status))
+        {
+            <MudTooltip Text="Click để xem chi tiết lỗi">
+                <span class="scene-failed-status-trigger"
+                      role="button"
+                      tabindex="0"
+                      title="Click để xem chi tiết lỗi"
+                      aria-label="@($"Click để xem chi tiết lỗi Scene {scene.SceneIndex:00}")"
+                      @onclick:stopPropagation="true"
+                      @onclick="@(() => OpenSceneErrorDetailAsync(scene, taskType))"
+                      @onkeydown:stopPropagation="true"
+                      @onkeydown="@((KeyboardEventArgs e) => OpenSceneErrorKeyDownAsync(e, scene, taskType))">
+                    <MudChip T="string" Color="@SceneColor(scene.Status)">@SceneLabel(scene.Status)</MudChip>
+                </span>
+            </MudTooltip>
+        }
+        else
+        {
+            <MudChip T="string" Color="@SceneColor(scene.Status)">@SceneLabel(scene.Status)</MudChip>
+        }
+    </span>;
+
+    private Task OpenSceneErrorKeyDownAsync(KeyboardEventArgs args, VideoProjectSceneDto scene, string taskType)
+        => args.Key is "Enter" or " " or "Spacebar"
+            ? OpenSceneErrorDetailAsync(scene, taskType)
+            : Task.CompletedTask;
+
+    private async Task OpenSceneErrorDetailAsync(VideoProjectSceneDto scene, string taskType)
+    {
+        if (AuthState.CurrentUser is null)
+        {
+            Snackbar.Add("Vui lòng đăng nhập để xem log lỗi.", Severity.Warning);
+            return;
+        }
+
+        SceneRenderErrorDetailDto detail;
+        try
+        {
+            detail = await SceneVersions.GetSceneRenderErrorDetailAsync(scene.Id, taskType, AuthState.CurrentUser)
+                ?? BuildFallbackSceneErrorDetail(scene, taskType, "Không tìm thấy nội dung lỗi chi tiết");
+        }
+        catch (Exception ex)
+        {
+            detail = BuildFallbackSceneErrorDetail(scene, taskType, $"Không thể tải log lỗi: {ex.Message}");
+        }
+
+        var parameters = new DialogParameters<SceneRenderErrorDetailDialog>
+        {
+            { x => x.Detail, detail }
+        };
+        var options = new DialogOptions { CloseButton = true, FullWidth = true, MaxWidth = MaxWidth.Large, CloseOnEscapeKey = true };
+        await DialogService.ShowAsync<SceneRenderErrorDetailDialog>($"Chi tiết lỗi Scene {scene.SceneIndex:00}", parameters, options);
+    }
+
+    private SceneRenderErrorDetailDto BuildFallbackSceneErrorDetail(VideoProjectSceneDto scene, string taskType, string message)
+        => new()
+        {
+            ProjectId = _project?.Id ?? scene.ProjectId,
+            JobTitle = _project?.Title ?? "Render Video Job",
+            SceneId = scene.Id,
+            SceneIndex = scene.SceneIndex,
+            SceneTitle = scene.Title,
+            TaskType = string.Equals(taskType, "video", StringComparison.OrdinalIgnoreCase) ? "video" : "image",
+            Status = scene.Status,
+            ErrorStage = "UNKNOWN",
+            ErrorCode = "log_detail_unavailable",
+            ErrorMessage = string.IsNullOrWhiteSpace(scene.ErrorMessage) ? message : scene.ErrorMessage,
+            UpdatedAt = new DateTimeOffset(DateTime.SpecifyKind(scene.UpdatedAt, DateTimeKind.Utc))
+        };
+
     private RenderFragment RenderSceneImageFrame(VideoProjectSceneDto scene, RenderSceneImageVisualState sceneState, SceneEditorState draft) => @<div class="scene-media-square">
         @{
             var imageUrl = ResolveDraftImageUrl(scene, draft);
@@ -1840,6 +1912,8 @@ else
                 UserId = AuthState.CurrentUser.UserId,
                 CustomerId = AuthState.CurrentUser.CustomerId,
                 CreatedBy = AuthState.CurrentUser.Email ?? AuthState.CurrentUser.UserId.ToString(),
+                CharacterReferenceMediaId = await SceneImages.ResolveCharacterReferenceMediaIdAsync(_project.Id, character?.MasterImageUrl, character?.MasterImageObjectKey, AuthState.CurrentUser.UserId, AuthState.CurrentUser.CustomerId),
+                CharacterReferenceObjectKey = character?.MasterImageObjectKey,
                 CharacterReferenceUrl = character?.MasterImageUrl
             });
 
@@ -2543,6 +2617,9 @@ else
         VideoSceneStatuses.Failed => "Failed",
         _ => status
     };
+
+    private static bool IsErrorStatus(string? status)
+        => status?.Trim().ToUpperInvariant() is "FAILED" or "FAILURE" or "ERROR" or "CANCELLED" or "CANCELED" or "EXPIRED";
 
     private static Color SceneColor(string status) => status switch
     {

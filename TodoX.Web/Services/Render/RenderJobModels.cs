@@ -80,6 +80,7 @@ public static class RenderJobTypes
     public const string RenderVideoBatch = "render_video_job";
     public const string RenderSceneVideo = "render_scene_video";
     public const string MergeProjectVideo = "merge_video_job";
+    public const string DanceSell = "dance_sell";
 }
 
 public sealed class RenderJobEventDto

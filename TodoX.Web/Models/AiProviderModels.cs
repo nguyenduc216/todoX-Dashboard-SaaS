@@ -198,6 +198,7 @@ public static class AiProviderCatalog
     public const string CharacterGeneration = "character_generation";
     public const string SceneImageGeneration = "scene_image_generation";
     public const string ImageToVideo = "image_to_video";
+    public const string MotionControlVideo = "motion_control_video";
 
     public static IReadOnlyList<string> CapabilityCodes { get; } = new[]
     {
@@ -209,7 +210,8 @@ public static class AiProviderCatalog
         "poster_generation",
         "thumbnail_generation",
         "text_to_video",
-        ImageToVideo
+        ImageToVideo,
+        MotionControlVideo
     };
 
     public static IReadOnlyList<string> UnitTypes { get; } = new[]

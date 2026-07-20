@@ -205,6 +205,21 @@
     height: 22px;
 }
 
+.scene-failed-status-trigger {
+    display: inline-flex;
+    cursor: pointer;
+    border-radius: 999px;
+    outline: none;
+}
+
+.scene-failed-status-trigger:hover {
+    filter: brightness(1.08);
+}
+
+.scene-failed-status-trigger:focus-visible {
+    box-shadow: 0 0 0 2px var(--mud-palette-error, #d32f2f);
+}
+
 .scene-workflow {
     display: grid;
     grid-template-columns: minmax(150px, 190px) minmax(0, 1fr);

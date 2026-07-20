@@ -85,7 +85,7 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
         }
 
         // Resolve the character master image once for both router URL references and legacy media references.
-        var (referenceMediaId, referenceUrl, characterPrompt) = await ResolveCharacterReferenceAsync(input, ct);
+        var (referenceMediaId, referenceUrl, referenceObjectKey, characterPrompt) = await ResolveCharacterReferenceAsync(input, ct);
 
         // Emit a QUEUED event for every scene up-front so the UI can render "Đang chờ" per scene
         // (and restore that state after a refresh) before any slot opens.
@@ -105,7 +105,7 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
             await concurrency.WaitAsync(ct);
             try
             {
-                var ok = await RenderOneAsync(input, project, scene, referenceMediaId, referenceUrl, characterPrompt, job.Id, ct);
+                var ok = await RenderOneAsync(input, project, scene, referenceMediaId, referenceUrl, referenceObjectKey, characterPrompt, job.Id, ct);
                 if (!ok) Interlocked.Increment(ref failures);
             }
             finally
@@ -122,11 +122,11 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
             new { jobId = job.Id, total = scenes.Count, failed = failures }, ct);
     }
 
-    private async Task<(Guid? MediaId, string? Url, string? CharacterPrompt)> ResolveCharacterReferenceAsync(SceneImageBatchInput input, CancellationToken ct)
+    private async Task<(Guid? MediaId, string? Url, string? ObjectKey, string? CharacterPrompt)> ResolveCharacterReferenceAsync(SceneImageBatchInput input, CancellationToken ct)
     {
         if (input.CharacterId is not long characterId)
         {
-            return (null, null, null);
+            return (null, null, null, null);
         }
 
         try
@@ -134,13 +134,21 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
             var user = new CurrentUserSession { UserId = input.UserId, CustomerId = input.CustomerId };
             var character = await _characters.GetCharacterAsync(user, characterId, ct);
             var url = character?.MasterImageUrl;
-            var mediaId = await _sceneImages.ResolveCharacterReferenceMediaIdAsync(input.ProjectId, url, input.UserId, input.CustomerId, ct);
-            return (mediaId, url, character?.NormalizedPrompt);
+            var objectKey = character?.MasterImageObjectKey;
+            var mediaId = await _sceneImages.ResolveCharacterReferenceMediaIdAsync(input.ProjectId, url, objectKey, input.UserId, input.CustomerId, ct);
+            if (input.CharacterId is not null && mediaId is null && !string.IsNullOrWhiteSpace(character?.NormalizedPrompt))
+            {
+                _logger.LogWarning(
+                    "SCENE_IMAGE_BATCH_CHARACTER_REFERENCE_UNAVAILABLE projectId={ProjectId} characterId={CharacterId} hasReferenceUrl={HasReferenceUrl} hasObjectKey={HasObjectKey} keepCharacterPrompt=true",
+                    input.ProjectId, characterId, !string.IsNullOrWhiteSpace(url), !string.IsNullOrWhiteSpace(objectKey));
+                url = null;
+            }
+            return (mediaId, url, objectKey, character?.NormalizedPrompt);
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "SCENE_IMAGE_BATCH_CHARACTER_RESOLVE_FAILED projectId={ProjectId} characterId={CharacterId}", input.ProjectId, characterId);
-            return (null, null, null);
+            return (null, null, null, null);
         }
     }
 
@@ -155,6 +163,7 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
         VideoProjectSceneDto scene,
         Guid? referenceMediaId,
         string? referenceUrl,
+        string? referenceObjectKey,
         string? characterPrompt,
         Guid jobId,
         CancellationToken ct)
@@ -220,6 +229,7 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
             LogicalRequestId = logicalRequestId,
             OutputObjectKey = imageVersion?.StorageKey,
             CharacterReferenceMediaId = referenceMediaId,
+            CharacterReferenceObjectKey = referenceObjectKey,
             CharacterReferenceUrl = referenceUrl
         };
 

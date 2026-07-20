@@ -19,6 +19,7 @@ public sealed class OpenRouterImageRequest
     public long? Seed { get; set; }
     public string FileCategory { get; set; } = "ai_character";
     public string[] ReferenceImageUrls { get; set; } = Array.Empty<string>();
+    public Guid[] ReferenceMediaIds { get; set; } = Array.Empty<Guid>();
 
     /// <summary>Overrides OpenRouter:BaseUrl when the provider row supplies its own base_url.</summary>
     public string? BaseUrlOverride { get; set; }
@@ -42,6 +43,7 @@ public sealed class OpenRouterImageResponse
     public byte[]? ImageBytes { get; set; }
     public string? ImageUrl { get; set; }
     public string? ObjectKey { get; set; }
+    public Guid? ResultMediaId { get; set; }
     public string? MimeType { get; set; }
     public string? ProviderCode { get; set; }
     public string? ModelName { get; set; }

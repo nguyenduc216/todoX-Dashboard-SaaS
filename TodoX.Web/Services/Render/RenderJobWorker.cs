@@ -102,6 +102,17 @@ public sealed class RenderJobWorker : BackgroundService
         {
             await jobs.CancelAsync(job.Id, "Worker cancellation requested.", ct: CancellationToken.None);
         }
+        catch (RenderJobDeferredException ex)
+        {
+            await jobs.AddEventAsync(job.Id, "JOB_DEFERRED", ex.Message,
+                new { job.AttemptCount, job.MaxAttempts }, "info", ct);
+        }
+        catch (RenderJobTerminalFailureException ex)
+        {
+            await jobs.AddEventAsync(job.Id, "JOB_FAILED", ex.Message,
+                new { ex.GetType().Name, job.AttemptCount, job.MaxAttempts }, "error", ct);
+            await jobs.MarkStatusAsync(job.Id, RenderJobStatuses.Failed, errorCode: ex.GetType().Name, errorMessage: ex.Message, ct: ct);
+        }
         catch (Exception ex)
         {
             var shouldRetry = job.AttemptCount < job.MaxAttempts;

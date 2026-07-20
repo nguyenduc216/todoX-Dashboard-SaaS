@@ -20,3 +20,11 @@ public sealed class RenderJobTerminalFailureException : Exception
     {
     }
 }
+
+public sealed class RenderJobDeferredException : Exception
+{
+    public RenderJobDeferredException(string message)
+        : base(message)
+    {
+    }
+}

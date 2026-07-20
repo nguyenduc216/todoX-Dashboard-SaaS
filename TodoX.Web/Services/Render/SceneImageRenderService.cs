@@ -29,6 +29,108 @@ public sealed record SceneImageRenderOutcome(
     public string? ProviderUsageJson { get; init; }
 }
 
+public enum ProviderImageSourceType
+{
+    Bytes,
+    ExistingMedia,
+    PublicHttpUrl,
+    LocalPublicPath,
+    Invalid
+}
+
+public sealed record ProviderImageOutputClassification(
+    ProviderImageSourceType SourceType,
+    string? ImageUrl,
+    string? ObjectKey,
+    Guid? MediaId,
+    string? Error)
+{
+    public static ProviderImageOutputClassification Classify(byte[]? imageBytes, Guid? mediaId, string? objectKey, string? imageUrl)
+    {
+        if (imageBytes is { Length: > 0 })
+        {
+            return new(ProviderImageSourceType.Bytes, imageUrl, NormalizeObjectKeyOrNull(objectKey), mediaId, null);
+        }
+
+        var normalizedObjectKey = NormalizeObjectKeyOrNull(objectKey);
+        var normalizedUrl = imageUrl?.Trim();
+        if (mediaId is not null || !string.IsNullOrWhiteSpace(normalizedObjectKey))
+        {
+            return new(ProviderImageSourceType.ExistingMedia, normalizedUrl, normalizedObjectKey, mediaId, null);
+        }
+
+        if (IsPublicHttpUrl(normalizedUrl))
+        {
+            return new(ProviderImageSourceType.PublicHttpUrl, normalizedUrl, null, null, null);
+        }
+
+        if (TryGetLocalObjectKey(normalizedUrl, out var localObjectKey))
+        {
+            return new(ProviderImageSourceType.LocalPublicPath, normalizedUrl, localObjectKey, null, null);
+        }
+
+        return new(ProviderImageSourceType.Invalid, normalizedUrl, null, null, "Đường dẫn ảnh đầu ra của provider không hợp lệ.");
+    }
+
+    public static bool IsPublicHttpUrl(string? value)
+        => Uri.TryCreate(value?.Trim(), UriKind.Absolute, out var uri)
+           && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
+
+    public static bool TryGetLocalObjectKey(string? value, out string? objectKey)
+    {
+        objectKey = null;
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        var text = value.Trim().Replace('\\', '/');
+        if (Uri.TryCreate(text, UriKind.Absolute, out var uri))
+        {
+            text = uri.AbsolutePath;
+        }
+
+        var withoutLeadingSlash = text.TrimStart('/');
+        if (withoutLeadingSlash.StartsWith("uploads/", StringComparison.OrdinalIgnoreCase))
+        {
+            text = withoutLeadingSlash["uploads/".Length..];
+        }
+        else
+        {
+            return false;
+        }
+
+        var normalized = NormalizeObjectKeyOrNull(text);
+        if (normalized is null)
+        {
+            return false;
+        }
+
+        objectKey = normalized;
+        return true;
+    }
+
+    private static string? NormalizeObjectKeyOrNull(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var normalized = value.Trim().Replace('\\', '/').TrimStart('/');
+        if (normalized.StartsWith("uploads/", StringComparison.OrdinalIgnoreCase))
+        {
+            normalized = normalized["uploads/".Length..];
+        }
+
+        return string.IsNullOrWhiteSpace(normalized)
+               || normalized.Contains("..", StringComparison.Ordinal)
+               || Path.IsPathRooted(normalized)
+            ? null
+            : normalized;
+    }
+}
+
 /// <summary>Everything needed to render one scene image, independent of the chosen provider.</summary>
 public sealed class SceneImageRenderContext
 {
@@ -49,6 +151,9 @@ public sealed class SceneImageRenderContext
     /// <summary>Media id of the character reference (Vertex path passes references by media id).</summary>
     public Guid? CharacterReferenceMediaId { get; init; }
 
+    /// <summary>Object key of the character reference stored in TodoX media storage.</summary>
+    public string? CharacterReferenceObjectKey { get; init; }
+
     /// <summary>Character reference image URL (OpenRouter path passes references by URL).</summary>
     public string? CharacterReferenceUrl { get; init; }
 }
@@ -59,7 +164,7 @@ public interface ISceneImageRenderService
     /// Resolves a character's master image into a media id usable as a Vertex reference. Downloads the
     /// image into media storage when needed. Returns null when the character has no usable master image.
     /// </summary>
-    Task<Guid?> ResolveCharacterReferenceMediaIdAsync(long projectId, string? masterImageUrl, Guid userId, Guid? customerId, CancellationToken ct = default);
+    Task<Guid?> ResolveCharacterReferenceMediaIdAsync(long projectId, string? masterImageUrl, string? masterImageObjectKey, Guid userId, Guid? customerId, CancellationToken ct = default);
 
     /// <summary>Legacy direct ImageAICreativeRender path; normal scene rendering resolves the configured provider.</summary>
     Task<SceneImageRenderOutcome> RenderSceneImageWithVertexAsync(SceneImageRenderContext context, int attempt, CancellationToken ct = default);
@@ -107,9 +212,10 @@ public sealed class SceneImageRenderService : ISceneImageRenderService
         _logger = logger;
     }
 
-    public async Task<Guid?> ResolveCharacterReferenceMediaIdAsync(long projectId, string? masterImageUrl, Guid userId, Guid? customerId, CancellationToken ct = default)
+    public async Task<Guid?> ResolveCharacterReferenceMediaIdAsync(long projectId, string? masterImageUrl, string? masterImageObjectKey, Guid userId, Guid? customerId, CancellationToken ct = default)
     {
-        if (string.IsNullOrWhiteSpace(masterImageUrl))
+        var classification = ProviderImageOutputClassification.Classify(null, null, masterImageObjectKey, masterImageUrl);
+        if (classification.SourceType == ProviderImageSourceType.Invalid)
         {
             return null;
         }
@@ -117,24 +223,41 @@ public sealed class SceneImageRenderService : ISceneImageRenderService
         try
         {
             await _tenant.EnsureLoadedAsync(ct);
-            var media = await _media.DownloadAndSaveImageAsync(
-                masterImageUrl,
-                $"video_scene_reference/{projectId}",
-                userId,
-                customerId,
-                _tenant.TenantId,
-                ct);
+            var media = classification.SourceType switch
+            {
+                ProviderImageSourceType.ExistingMedia when classification.MediaId is Guid mediaId => await _media.GetAsync(mediaId, ct),
+                ProviderImageSourceType.ExistingMedia when !string.IsNullOrWhiteSpace(classification.ObjectKey) => await _media.GetByObjectKeyAsync(classification.ObjectKey!, ct),
+                ProviderImageSourceType.LocalPublicPath when !string.IsNullOrWhiteSpace(classification.ObjectKey) => await _media.GetByObjectKeyAsync(classification.ObjectKey!, ct)
+                    ?? await _media.GetByPublicUrlAsync(masterImageUrl!, ct),
+                ProviderImageSourceType.PublicHttpUrl => await _media.DownloadAndSaveImageAsync(
+                    masterImageUrl!,
+                    $"video_scene_reference/{projectId}",
+                    userId,
+                    customerId,
+                    _tenant.TenantId,
+                    ct),
+                _ => null
+            };
+
+            if (media is null)
+            {
+                _logger.LogWarning(
+                    "SCENE_IMAGE_CHARACTER_REFERENCE_UNAVAILABLE projectId={ProjectId} sourceType={SourceType} objectKey={ObjectKey} hasUrl={HasUrl}",
+                    projectId, classification.SourceType, classification.ObjectKey, !string.IsNullOrWhiteSpace(masterImageUrl));
+                return null;
+            }
+
             _logger.LogInformation(
-                "SCENE_IMAGE_CHARACTER_REFERENCE_READY projectId={ProjectId} mediaId={MediaId}",
-                projectId, media.Id);
+                "SCENE_IMAGE_CHARACTER_REFERENCE_READY projectId={ProjectId} mediaId={MediaId} objectKey={ObjectKey} sourceType={SourceType}",
+                projectId, media.Id, media.ObjectKey, classification.SourceType);
             return media.Id;
         }
         catch (Exception ex)
         {
             // A missing/broken reference must not abort the whole batch; render without it and log.
             _logger.LogWarning(ex,
-                "SCENE_IMAGE_CHARACTER_REFERENCE_FAILED projectId={ProjectId} url={Url}",
-                projectId, masterImageUrl);
+                "SCENE_IMAGE_CHARACTER_REFERENCE_FAILED projectId={ProjectId} sourceType={SourceType} objectKey={ObjectKey} hasUrl={HasUrl}",
+                projectId, classification.SourceType, classification.ObjectKey, !string.IsNullOrWhiteSpace(masterImageUrl));
             return null;
         }
     }
@@ -214,14 +337,27 @@ public sealed class SceneImageRenderService : ISceneImageRenderService
             throw new InvalidOperationException("Chưa cấu hình provider ảnh mặc định để render lại ảnh scene.");
         }
 
-        var references = string.IsNullOrWhiteSpace(context.CharacterReferenceUrl)
-            ? Array.Empty<string>()
-            : new[] { context.CharacterReferenceUrl! };
+        var references = ProviderImageOutputClassification.IsPublicHttpUrl(context.CharacterReferenceUrl)
+            ? new[] { context.CharacterReferenceUrl!.Trim() }
+            : Array.Empty<string>();
+        var referenceMediaIds = context.CharacterReferenceMediaId is Guid referenceMediaId
+            ? new[] { referenceMediaId }
+            : Array.Empty<Guid>();
+        if (referenceMediaIds.Length > 0
+            && references.Length == 0
+            && !ProviderCodeMap.ToFactoryKey(option.ProviderCode).Equals("todox_image", StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogWarning(
+                "SCENE_IMAGE_REFERENCE_NOT_SENT_TO_PROVIDER projectId={ProjectId} sceneId={SceneId} providerCode={ProviderCode} modelName={ModelName} referenceMediaId={ReferenceMediaId} reason=provider_requires_http_reference_url",
+                context.ProjectId, context.SceneId, option.ProviderCode, option.ModelName, context.CharacterReferenceMediaId);
+        }
+
+        var hasReference = references.Length > 0 || referenceMediaIds.Length > 0;
 
         _logger.LogInformation(
             "SCENE_IMAGE_PROVIDER_RERENDER_START projectId={ProjectId} sceneId={SceneId} sceneIndex={SceneIndex} characterId={CharacterId} providerCapabilityId={ProviderCapabilityId} providerCode={ProviderCode} modelName={ModelName} hasReference={HasReference}",
             context.ProjectId, context.SceneId, context.SceneIndex, context.CharacterId,
-            option.ProviderCapabilityId, option.ProviderCode, option.ModelName, references.Length > 0);
+            option.ProviderCapabilityId, option.ProviderCode, option.ModelName, hasReference);
 
         var requestId = string.IsNullOrWhiteSpace(context.LogicalRequestId)
             ? BuildLogicalRequestId(featureCode, context.SceneId, context.RenderJobId)
@@ -242,6 +378,7 @@ public sealed class SceneImageRenderService : ISceneImageRenderService
             FromUser = false,
             Prompt = context.Prompt,
             ReferenceImageUrls = references,
+            ReferenceMediaIds = referenceMediaIds,
             AspectRatio = NormalizeAspectRatio(context.AspectRatio),
             OutputFormat = "png",
             Quality = "high",
@@ -272,41 +409,31 @@ public sealed class SceneImageRenderService : ISceneImageRenderService
                 render.ErrorMessage ?? "Render lại ảnh scene thất bại.", QuotaError: false);
         }
 
-        // Persist provider output immediately; YEScale CDN URLs are temporary and must not be used as final scene URLs.
-        var imageUrl = render.ImageUrl;
-        var objectKey = render.ObjectKey;
-        Guid? resultMediaId = null;
-        if (render.ImageBytes is { Length: > 0 })
+        var source = ProviderImageOutputClassification.Classify(render.ImageBytes, render.ResultMediaId, render.ObjectKey, render.ImageUrl);
+        _logger.LogInformation(
+            "SCENE_IMAGE_PROVIDER_OUTPUT_CLASSIFIED projectId={ProjectId} sceneId={SceneId} renderJobId={RenderJobId} providerCode={ProviderCode} providerCapabilityId={ProviderCapabilityId} modelName={ModelName} providerTaskId={ProviderTaskId} hasImageBytes={HasImageBytes} rawImageUrl={RawImageUrl} objectKey={ObjectKey} resultMediaId={ResultMediaId} sourceType={SourceType}",
+            context.ProjectId, context.SceneId, context.RenderJobId, render.ProviderCode, render.ProviderCapabilityId, render.ModelName, render.ProviderTaskId,
+            render.ImageBytes is { Length: > 0 }, render.ImageUrl, render.ObjectKey, render.ResultMediaId, source.SourceType);
+
+        var persisted = await PersistProviderImageOutputAsync(context, render, source, ct);
+        if (!persisted.Success)
         {
-            await _tenant.EnsureLoadedAsync(ct);
-            var media = string.IsNullOrWhiteSpace(context.OutputObjectKey)
-                ? await _media.SaveAsync(render.ImageBytes,
-                    $"scene_{context.SceneIndex:00}_{DateTime.UtcNow:yyyyMMddHHmmss}.png",
-                    render.MimeType ?? "image/png", "video_scene_image",
-                    context.UserId, context.CustomerId, _tenant.TenantId, ct)
-                : await _media.SaveAtObjectKeyAsync(render.ImageBytes,
-                    context.OutputObjectKey,
-                    $"scene_{context.SceneIndex:00}.png",
-                    render.MimeType ?? "image/png", "video_scene_image",
-                    context.UserId, context.CustomerId, _tenant.TenantId, ct);
-            resultMediaId = media.Id;
-            imageUrl = media.PublicUrl ?? media.FileUrl;
-            objectKey = media.ObjectKey;
-        }
-        else if (!string.IsNullOrWhiteSpace(render.ImageUrl))
-        {
-            await _tenant.EnsureLoadedAsync(ct);
-            var media = string.IsNullOrWhiteSpace(context.OutputObjectKey)
-                ? await _media.DownloadAndSaveImageAsync(render.ImageUrl,
-                    "video_scene_image", context.UserId, context.CustomerId, _tenant.TenantId, ct)
-                : await _media.DownloadAndSaveImageAtObjectKeyAsync(render.ImageUrl, context.OutputObjectKey,
-                    "video_scene_image", context.UserId, context.CustomerId, _tenant.TenantId, ct);
-            resultMediaId = media.Id;
-            imageUrl = media.PublicUrl ?? media.FileUrl;
-            objectKey = media.ObjectKey;
+            return new SceneImageRenderOutcome(false, null, null, render.ProviderCode,
+                render.ModelName, render.ProviderCapabilityId, null,
+                persisted.ErrorMessage, QuotaError: false)
+            {
+                ProviderTaskId = render.ProviderTaskId,
+                BillingLogicalRequestId = render.BillingLogicalRequestId,
+                EstimatedUsd = render.EstimatedUsd,
+                ActualUsd = render.ActualUsd,
+                ChargedPoints = render.ChargedPoints,
+                RefundedPoints = render.RefundedPoints,
+                CostSource = render.CostSource,
+                ProviderUsageJson = render.UsageJson
+            };
         }
 
-        if (string.IsNullOrWhiteSpace(imageUrl))
+        if (string.IsNullOrWhiteSpace(persisted.ImageUrl))
         {
             return new SceneImageRenderOutcome(false, null, null, render.ProviderCode,
                 render.ModelName, render.ProviderCapabilityId, null,
@@ -314,13 +441,14 @@ public sealed class SceneImageRenderService : ISceneImageRenderService
         }
 
         _logger.LogInformation(
-            "SCENE_IMAGE_PROVIDER_RERENDER_DONE projectId={ProjectId} sceneId={SceneId} sceneIndex={SceneIndex} providerCapabilityId={ProviderCapabilityId} providerCode={ProviderCode} modelName={ModelName} imageUrl={ImageUrl}",
-            context.ProjectId, context.SceneId, context.SceneIndex, render.ProviderCapabilityId, render.ProviderCode, render.ModelName, imageUrl);
-        return new SceneImageRenderOutcome(true, imageUrl, objectKey, render.ProviderCode,
+            "SCENE_IMAGE_PROVIDER_RERENDER_DONE projectId={ProjectId} sceneId={SceneId} sceneIndex={SceneIndex} renderJobId={RenderJobId} providerCapabilityId={ProviderCapabilityId} providerCode={ProviderCode} modelName={ModelName} providerTaskId={ProviderTaskId} imageUrl={ImageUrl} objectKey={ObjectKey} resultMediaId={ResultMediaId} sourceType={SourceType}",
+            context.ProjectId, context.SceneId, context.SceneIndex, context.RenderJobId, render.ProviderCapabilityId, render.ProviderCode, render.ModelName,
+            render.ProviderTaskId, persisted.ImageUrl, persisted.ObjectKey, persisted.MediaId, source.SourceType);
+        return new SceneImageRenderOutcome(true, persisted.ImageUrl, persisted.ObjectKey, render.ProviderCode,
             render.ModelName, render.ProviderCapabilityId, null, null, QuotaError: false)
         {
             ProviderTaskId = render.ProviderTaskId,
-            ResultMediaId = resultMediaId,
+            ResultMediaId = persisted.MediaId,
             BillingLogicalRequestId = render.BillingLogicalRequestId,
             EstimatedUsd = render.EstimatedUsd,
             ActualUsd = render.ActualUsd,
@@ -329,6 +457,67 @@ public sealed class SceneImageRenderService : ISceneImageRenderService
             CostSource = render.CostSource,
             ProviderUsageJson = render.UsageJson
         };
+    }
+
+    private async Task<PersistedProviderImageOutput> PersistProviderImageOutputAsync(
+        SceneImageRenderContext context,
+        AiImageRenderResult render,
+        ProviderImageOutputClassification source,
+        CancellationToken ct)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        switch (source.SourceType)
+        {
+            case ProviderImageSourceType.Bytes:
+                {
+                    var media = string.IsNullOrWhiteSpace(context.OutputObjectKey)
+                        ? await _media.SaveAsync(render.ImageBytes!,
+                            $"scene_{context.SceneIndex:00}_{DateTime.UtcNow:yyyyMMddHHmmss}.png",
+                            render.MimeType ?? "image/png", "video_scene_image",
+                            context.UserId, context.CustomerId, _tenant.TenantId, ct)
+                        : await _media.SaveAtObjectKeyAsync(render.ImageBytes!,
+                            context.OutputObjectKey,
+                            $"scene_{context.SceneIndex:00}.png",
+                            render.MimeType ?? "image/png", "video_scene_image",
+                            context.UserId, context.CustomerId, _tenant.TenantId, ct);
+                    return PersistedProviderImageOutput.Ok(media.PublicUrl ?? media.FileUrl, media.ObjectKey, media.Id);
+                }
+
+            case ProviderImageSourceType.ExistingMedia:
+            case ProviderImageSourceType.LocalPublicPath:
+                {
+                    var media = source.MediaId is Guid mediaId
+                        ? await _media.GetAsync(mediaId, ct)
+                        : null;
+
+                    if (media is null && !string.IsNullOrWhiteSpace(source.ObjectKey))
+                    {
+                        media = await _media.GetByObjectKeyAsync(source.ObjectKey!, ct);
+                    }
+
+                    if (media is null && !string.IsNullOrWhiteSpace(source.ImageUrl))
+                    {
+                        media = await _media.GetByPublicUrlAsync(source.ImageUrl!, ct);
+                    }
+
+                    return media is null
+                        ? PersistedProviderImageOutput.Fail($"Không tìm thấy media nội bộ cho ảnh scene. sourceType={source.SourceType}; providerCode={render.ProviderCode}; modelName={render.ModelName}; taskId={render.ProviderTaskId}")
+                        : PersistedProviderImageOutput.Ok(media.PublicUrl ?? media.FileUrl, media.ObjectKey, media.Id);
+                }
+
+            case ProviderImageSourceType.PublicHttpUrl:
+                {
+                    var media = string.IsNullOrWhiteSpace(context.OutputObjectKey)
+                        ? await _media.DownloadAndSaveImageAsync(source.ImageUrl!,
+                            "video_scene_image", context.UserId, context.CustomerId, _tenant.TenantId, ct)
+                        : await _media.DownloadAndSaveImageAtObjectKeyAsync(source.ImageUrl!, context.OutputObjectKey,
+                            "video_scene_image", context.UserId, context.CustomerId, _tenant.TenantId, ct);
+                    return PersistedProviderImageOutput.Ok(media.PublicUrl ?? media.FileUrl, media.ObjectKey, media.Id);
+                }
+
+            default:
+                return PersistedProviderImageOutput.Fail($"{source.Error ?? "Đường dẫn ảnh đầu ra của provider không hợp lệ."} sourceType={source.SourceType}; providerCode={render.ProviderCode}; modelName={render.ModelName}; taskId={render.ProviderTaskId}");
+        }
     }
 
     private static bool IsSucceededStatus(string? status)
@@ -353,5 +542,14 @@ public sealed class SceneImageRenderService : ISceneImageRenderService
         var bytes = id.Value.ToByteArray();
         var value = BitConverter.ToInt64(bytes, 0);
         return value == long.MinValue ? long.MaxValue : Math.Abs(value);
+    }
+
+    private sealed record PersistedProviderImageOutput(bool Success, string? ImageUrl, string? ObjectKey, Guid? MediaId, string? ErrorMessage)
+    {
+        public static PersistedProviderImageOutput Ok(string? imageUrl, string? objectKey, Guid? mediaId)
+            => new(true, imageUrl, objectKey, mediaId, null);
+
+        public static PersistedProviderImageOutput Fail(string message)
+            => new(false, null, null, null, message);
     }
 }

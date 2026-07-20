@@ -1,4 +1,6 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
+using System.Text.Encodings.Web;
 using Dapper;
 using TodoX.Web.Data;
 using TodoX.Web.Models;
@@ -185,6 +187,39 @@ public sealed class FinalVideoVersionItemDto
     public Guid? SourceImageVersionId { get; set; }
 }
 
+public sealed class SceneRenderErrorDetailDto
+{
+    public long ProjectId { get; set; }
+    public string? JobTitle { get; set; }
+    public long SceneId { get; set; }
+    public int SceneIndex { get; set; }
+    public string? SceneTitle { get; set; }
+    public string TaskType { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public string ErrorStage { get; set; } = "UNKNOWN";
+    public string? ErrorCode { get; set; }
+    public string? ErrorMessage { get; set; }
+    public string? ProviderName { get; set; }
+    public string? ProviderCode { get; set; }
+    public string? ProviderModel { get; set; }
+    public string? ProviderMode { get; set; }
+    public string? ProviderStatus { get; set; }
+    public string? ProviderTaskId { get; set; }
+    public int? HttpStatus { get; set; }
+    public int? RetryCount { get; set; }
+    public int? PollCount { get; set; }
+    public DateTimeOffset? SubmittedAt { get; set; }
+    public DateTimeOffset? LastPollAt { get; set; }
+    public DateTimeOffset? UpdatedAt { get; set; }
+    public string? RequestJson { get; set; }
+    public string? ResponseJson { get; set; }
+    public string? ErrorJson { get; set; }
+    public string? Prompt { get; set; }
+    public string? ImageUrl { get; set; }
+    public string? SourceVideoUrl { get; set; }
+    public string? ProviderVideoUrl { get; set; }
+}
+
 public interface ISceneMediaVersioningService
 {
     Task<bool> IsEnabledAsync(string settingKey, CancellationToken ct = default);
@@ -215,6 +250,7 @@ public interface ISceneMediaVersioningService
     Task<IReadOnlyList<FinalVideoVersionItemDto>> ListFinalVideoVersionItemsAsync(Guid finalVersionId, CurrentUserSession user, CancellationToken ct = default);
     Task SelectFinalVideoVersionAsync(long projectId, Guid versionId, Guid? selectedBy, CancellationToken ct = default);
     Task SelectFinalVideoVersionAsync(long projectId, Guid versionId, CurrentUserSession user, CancellationToken ct = default);
+    Task<SceneRenderErrorDetailDto?> GetSceneRenderErrorDetailAsync(long sceneId, string taskType, CurrentUserSession user, CancellationToken ct = default);
 }
 
 public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
@@ -1015,6 +1051,329 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
         await SelectFinalVideoVersionAsync(projectId, versionId, user.UserId, ct);
     }
 
+    public async Task<SceneRenderErrorDetailDto?> GetSceneRenderErrorDetailAsync(long sceneId, string taskType, CurrentUserSession user, CancellationToken ct = default)
+    {
+        await EnsureSceneAccessAsync(sceneId, user, ct);
+        await _tenant.EnsureLoadedAsync(ct);
+
+        var normalizedTaskType = string.Equals(taskType, "video", StringComparison.OrdinalIgnoreCase) ? "video" : "image";
+        using var conn = await _factory.OpenAsync(ct);
+        var row = normalizedTaskType == "video"
+            ? await conn.QuerySingleOrDefaultAsync<SceneErrorDetailRow>(
+                SceneVideoErrorDetailSql,
+                new { sceneId, tenant = _tenant.TenantId })
+            : await conn.QuerySingleOrDefaultAsync<SceneErrorDetailRow>(
+                SceneImageErrorDetailSql,
+                new { sceneId, tenant = _tenant.TenantId });
+
+        return row is null ? null : BuildErrorDetail(row, normalizedTaskType);
+    }
+
+    private static SceneRenderErrorDetailDto BuildErrorDetail(SceneErrorDetailRow row, string taskType)
+    {
+        var requestJson = PrettyRedactedJson(row.RenderConfigJson);
+        var responseSource = FirstNonBlank(row.ProviderUsageJson, row.UsageMetadataJson);
+        var responseJson = PrettyRedactedJson(responseSource);
+        var errorJson = PrettyRedactedJson(BuildErrorJson(row.ErrorCode, row.ErrorMessage, responseSource));
+
+        var (jsonErrorCode, jsonErrorMessage) = ExtractError(responseSource);
+        var errorCode = FirstNonBlank(jsonErrorCode, row.ErrorCode, row.UsageErrorMessage);
+        var errorMessage = FirstNonBlank(jsonErrorMessage, row.ErrorMessage, row.UsageErrorMessage)
+            ?? "Không tìm thấy nội dung lỗi chi tiết";
+
+        return new SceneRenderErrorDetailDto
+        {
+            ProjectId = row.ProjectId,
+            JobTitle = row.JobTitle,
+            SceneId = row.SceneId,
+            SceneIndex = row.SceneIndex,
+            SceneTitle = row.SceneTitle,
+            TaskType = taskType,
+            Status = row.Status,
+            ErrorStage = ResolveErrorStage(row, responseSource),
+            ErrorCode = errorCode,
+            ErrorMessage = errorMessage,
+            ProviderName = FirstNonBlank(row.ProviderName, row.ProviderCode),
+            ProviderCode = row.ProviderCode,
+            ProviderModel = row.ModelName,
+            ProviderMode = FirstNonBlank(ReadJsonString(row.RenderConfigJson, "mode"), ReadJsonString(row.RenderConfigJson, "pricingMode"), ReadNestedJsonString(responseSource, "mode")),
+            ProviderStatus = FirstNonBlank(ReadNestedJsonString(responseSource, "status"), row.UsageStatus, row.Status),
+            ProviderTaskId = row.ProviderTaskId,
+            HttpStatus = ReadNestedJsonInt(responseSource, "http_status") ?? ReadNestedJsonInt(responseSource, "httpStatus") ?? ReadNestedJsonInt(responseSource, "status_code") ?? ReadNestedJsonInt(responseSource, "statusCode"),
+            RetryCount = ReadNestedJsonInt(responseSource, "retry_count") ?? ReadNestedJsonInt(responseSource, "retryCount"),
+            PollCount = ReadNestedJsonInt(responseSource, "poll_count") ?? ReadNestedJsonInt(responseSource, "pollCount"),
+            SubmittedAt = row.SubmittedAt,
+            LastPollAt = row.UpdatedAt,
+            UpdatedAt = row.UpdatedAt,
+            RequestJson = requestJson,
+            ResponseJson = responseJson,
+            ErrorJson = errorJson,
+            Prompt = FirstNonBlank(row.CompiledImagePromptSnapshot, row.ImagePromptSnapshot, row.VideoPromptSnapshot),
+            ImageUrl = FirstNonBlank(row.PublicUrl, ReadJsonString(row.SceneSnapshotJson, "sourceImageUrl"), ReadJsonString(row.RenderConfigJson, "sourceImageUrl")),
+            SourceVideoUrl = ReadNestedJsonString(responseSource, "sourceVideoUrl"),
+            ProviderVideoUrl = FirstNonBlank(row.PublicUrl, ReadNestedJsonString(responseSource, "video_url"), ReadNestedJsonString(responseSource, "videoUrl"))
+        };
+    }
+
+    private static string ResolveErrorStage(SceneErrorDetailRow row, string? responseJson)
+    {
+        var explicitStage = FirstNonBlank(ReadNestedJsonString(responseJson, "errorStage"), ReadNestedJsonString(responseJson, "stage"));
+        if (!string.IsNullOrWhiteSpace(explicitStage))
+        {
+            return NormalizeStage(explicitStage);
+        }
+
+        if (string.IsNullOrWhiteSpace(row.ProviderTaskId))
+        {
+            return string.IsNullOrWhiteSpace(row.ProviderCode) ? "PREPARE" : "SUBMIT";
+        }
+
+        var status = FirstNonBlank(ReadNestedJsonString(responseJson, "status"), row.Status);
+        if (IsErrorStatus(status))
+        {
+            return "POLL";
+        }
+
+        return "UNKNOWN";
+    }
+
+    private static string NormalizeStage(string value)
+    {
+        var stage = value.Trim().ToUpperInvariant();
+        return stage is "PREPARE" or "SUBMIT" or "POLL" or "DOWNLOAD" or "UPLOAD_MINIO" or "FINALIZE"
+            ? stage
+            : "UNKNOWN";
+    }
+
+    private static bool IsErrorStatus(string? status)
+        => status?.Trim().ToUpperInvariant() is "FAILED" or "FAILURE" or "ERROR" or "CANCELLED" or "CANCELED" or "EXPIRED";
+
+    private static string? BuildErrorJson(string? errorCode, string? errorMessage, string? responseJson)
+    {
+        if (!string.IsNullOrWhiteSpace(responseJson))
+        {
+            var errReason = ReadNestedJsonNode(responseJson, "err_reason") ?? ReadNestedJsonNode(responseJson, "error");
+            if (errReason is not null)
+            {
+                return errReason.ToJsonString(JsonOptions);
+            }
+        }
+
+        return string.IsNullOrWhiteSpace(errorCode) && string.IsNullOrWhiteSpace(errorMessage)
+            ? null
+            : JsonSerializer.Serialize(new { code = errorCode, message = errorMessage }, JsonOptions);
+    }
+
+    private static (string? Code, string? Message) ExtractError(string? json)
+    {
+        var errReason = ReadNestedJsonNode(json, "err_reason");
+        if (errReason is JsonObject errObject)
+        {
+            return (ReadObjectString(errObject, "code") ?? ReadObjectString(errObject, "error_code"), ReadObjectString(errObject, "message") ?? ReadObjectString(errObject, "detail"));
+        }
+
+        var error = ReadNestedJsonNode(json, "error");
+        if (error is JsonObject errorObject)
+        {
+            return (ReadObjectString(errorObject, "code") ?? ReadObjectString(errorObject, "error_code"), ReadObjectString(errorObject, "message") ?? ReadObjectString(errorObject, "detail"));
+        }
+
+        if (error is JsonValue errorValue && errorValue.TryGetValue<string>(out var errorText))
+        {
+            return (null, errorText);
+        }
+
+        return (null, null);
+    }
+
+    private static string? PrettyRedactedJson(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return null;
+        }
+
+        try
+        {
+            var node = JsonNode.Parse(json);
+            if (node is null)
+            {
+                return null;
+            }
+
+            RedactSensitiveJson(node);
+            return node.ToJsonString(new JsonSerializerOptions(JsonSerializerDefaults.Web)
+            {
+                WriteIndented = true,
+                Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+            });
+        }
+        catch (JsonException)
+        {
+            return JsonSerializer.Serialize(RedactSensitiveText(json), new JsonSerializerOptions(JsonSerializerDefaults.Web)
+            {
+                Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+            });
+        }
+    }
+
+    private static void RedactSensitiveJson(JsonNode node)
+    {
+        if (node is JsonObject obj)
+        {
+            foreach (var property in obj.ToList())
+            {
+                if (IsSensitiveKey(property.Key))
+                {
+                    obj[property.Key] = "***REDACTED***";
+                }
+                else if (property.Value is not null)
+                {
+                    RedactSensitiveJson(property.Value);
+                }
+            }
+        }
+        else if (node is JsonArray array)
+        {
+            foreach (var item in array)
+            {
+                if (item is not null)
+                {
+                    RedactSensitiveJson(item);
+                }
+            }
+        }
+    }
+
+    private static bool IsSensitiveKey(string key)
+    {
+        var normalized = key.Trim().ToLowerInvariant();
+        return normalized.Contains("api_key", StringComparison.Ordinal)
+               || normalized.Contains("authorization", StringComparison.Ordinal)
+               || normalized.Contains("token", StringComparison.Ordinal)
+               || normalized.Contains("secret", StringComparison.Ordinal)
+               || normalized.Contains("password", StringComparison.Ordinal)
+               || normalized.Contains("access_key", StringComparison.Ordinal);
+    }
+
+    private static string RedactSensitiveText(string value)
+        => value
+            .Replace("api_key", "***REDACTED***", StringComparison.OrdinalIgnoreCase)
+            .Replace("authorization", "***REDACTED***", StringComparison.OrdinalIgnoreCase)
+            .Replace("token", "***REDACTED***", StringComparison.OrdinalIgnoreCase)
+            .Replace("secret", "***REDACTED***", StringComparison.OrdinalIgnoreCase)
+            .Replace("password", "***REDACTED***", StringComparison.OrdinalIgnoreCase)
+            .Replace("access_key", "***REDACTED***", StringComparison.OrdinalIgnoreCase);
+
+    private static string? ReadJsonString(string? json, string name)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            return doc.RootElement.ValueKind == JsonValueKind.Object
+                   && doc.RootElement.TryGetProperty(name, out var value)
+                   && value.ValueKind == JsonValueKind.String
+                ? value.GetString()
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static string? ReadNestedJsonString(string? json, string name)
+    {
+        var node = ReadNestedJsonNode(json, name);
+        return node is JsonValue value && value.TryGetValue<string>(out var text) ? text : null;
+    }
+
+    private static int? ReadNestedJsonInt(string? json, string name)
+    {
+        var node = ReadNestedJsonNode(json, name);
+        if (node is not JsonValue value)
+        {
+            return null;
+        }
+
+        if (value.TryGetValue<int>(out var number))
+        {
+            return number;
+        }
+
+        return value.TryGetValue<string>(out var text) && int.TryParse(text, out number) ? number : null;
+    }
+
+    private static JsonNode? ReadNestedJsonNode(string? json, string name)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return null;
+        }
+
+        try
+        {
+            var root = JsonNode.Parse(json);
+            return root is null ? null : FindJsonNode(root, name);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static JsonNode? FindJsonNode(JsonNode node, string name)
+    {
+        if (node is JsonObject obj)
+        {
+            foreach (var property in obj)
+            {
+                if (string.Equals(property.Key, name, StringComparison.OrdinalIgnoreCase))
+                {
+                    return property.Value;
+                }
+
+                if (property.Value is not null)
+                {
+                    var found = FindJsonNode(property.Value, name);
+                    if (found is not null)
+                    {
+                        return found;
+                    }
+                }
+            }
+        }
+        else if (node is JsonArray array)
+        {
+            foreach (var item in array)
+            {
+                if (item is not null)
+                {
+                    var found = FindJsonNode(item, name);
+                    if (found is not null)
+                    {
+                        return found;
+                    }
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static string? ReadObjectString(JsonObject obj, string name)
+        => obj.TryGetPropertyValue(name, out var node) && node is JsonValue value && value.TryGetValue<string>(out var text)
+            ? text
+            : null;
+
+    private static string? FirstNonBlank(params string?[] values)
+        => values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim();
+
     private async Task EnsureSceneAccessAsync(long sceneId, CurrentUserSession user, CancellationToken ct)
     {
         await _tenant.EnsureLoadedAsync(ct);
@@ -1173,6 +1532,96 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
           FROM video_render.final_video_versions
         """;
 
+    private const string SceneImageErrorDetailSql =
+        """
+        SELECT p.id AS ProjectId,
+               p.title AS JobTitle,
+               s.id AS SceneId,
+               s.scene_index AS SceneIndex,
+               s.title AS SceneTitle,
+               v.status AS Status,
+               v.error_code AS ErrorCode,
+               v.error_message AS ErrorMessage,
+               v.provider_code AS ProviderCode,
+               ap.provider_name AS ProviderName,
+               v.actual_model AS ModelName,
+               v.provider_task_id AS ProviderTaskId,
+               v.submitted_at AS SubmittedAt,
+               v.updated_at AS UpdatedAt,
+               v.image_prompt_snapshot AS ImagePromptSnapshot,
+               v.compiled_image_prompt_snapshot AS CompiledImagePromptSnapshot,
+               v.video_prompt_snapshot AS VideoPromptSnapshot,
+               v.public_url AS PublicUrl,
+               v.scene_snapshot_json::text AS SceneSnapshotJson,
+               v.render_config_json::text AS RenderConfigJson,
+               v.provider_usage_json::text AS ProviderUsageJson,
+               u.metadata_json::text AS UsageMetadataJson,
+               u.error_message AS UsageErrorMessage,
+               u.status AS UsageStatus
+          FROM video_render.scene_image_versions v
+          JOIN video_render.video_project_scenes s ON s.id = v.scene_id AND s.tenant_id = v.tenant_id
+          JOIN video_render.video_projects p ON p.id = v.project_id AND p.tenant_id = v.tenant_id
+          LEFT JOIN public.todox_ai_provider ap ON ap.provider_code = v.provider_code
+          LEFT JOIN LATERAL (
+                SELECT metadata_json, error_message, status
+                  FROM public.todox_ai_provider_usage_log
+                 WHERE request_id = v.logical_request_id
+                 ORDER BY created_at DESC, id DESC
+                 LIMIT 1
+          ) u ON true
+         WHERE v.scene_id = @sceneId
+           AND v.tenant_id = @tenant
+           AND (lower(v.status) IN ('failed','failure','error','cancelled','canceled','expired')
+                OR v.error_message IS NOT NULL)
+         ORDER BY v.is_selected DESC, v.updated_at DESC, v.version_number DESC
+         LIMIT 1;
+        """;
+
+    private const string SceneVideoErrorDetailSql =
+        """
+        SELECT p.id AS ProjectId,
+               p.title AS JobTitle,
+               s.id AS SceneId,
+               s.scene_index AS SceneIndex,
+               s.title AS SceneTitle,
+               v.status AS Status,
+               v.error_code AS ErrorCode,
+               v.error_message AS ErrorMessage,
+               v.provider_code AS ProviderCode,
+               ap.provider_name AS ProviderName,
+               v.actual_model AS ModelName,
+               v.provider_task_id AS ProviderTaskId,
+               v.submitted_at AS SubmittedAt,
+               v.updated_at AS UpdatedAt,
+               v.image_prompt_snapshot AS ImagePromptSnapshot,
+               NULL::text AS CompiledImagePromptSnapshot,
+               v.video_prompt_snapshot AS VideoPromptSnapshot,
+               v.public_url AS PublicUrl,
+               v.scene_snapshot_json::text AS SceneSnapshotJson,
+               v.render_config_json::text AS RenderConfigJson,
+               NULL::text AS ProviderUsageJson,
+               u.metadata_json::text AS UsageMetadataJson,
+               u.error_message AS UsageErrorMessage,
+               u.status AS UsageStatus
+          FROM video_render.scene_video_versions v
+          JOIN video_render.video_project_scenes s ON s.id = v.scene_id AND s.tenant_id = v.tenant_id
+          JOIN video_render.video_projects p ON p.id = v.project_id AND p.tenant_id = v.tenant_id
+          LEFT JOIN public.todox_ai_provider ap ON ap.provider_code = v.provider_code
+          LEFT JOIN LATERAL (
+                SELECT metadata_json, error_message, status
+                  FROM public.todox_ai_provider_usage_log
+                 WHERE request_id = v.logical_request_id
+                 ORDER BY created_at DESC, id DESC
+                 LIMIT 1
+          ) u ON true
+         WHERE v.scene_id = @sceneId
+           AND v.tenant_id = @tenant
+           AND (lower(v.status) IN ('failed','failure','error','cancelled','canceled','expired')
+                OR v.error_message IS NOT NULL)
+         ORDER BY v.is_selected DESC, v.updated_at DESC, v.version_number DESC
+         LIMIT 1;
+        """;
+
     private sealed class SceneLockRow
     {
         public long SceneId { get; init; }
@@ -1184,6 +1633,34 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
         public long SceneId { get; init; }
         public int SceneIndex { get; init; }
         public Guid? SceneVideoVersionId { get; init; }
+    }
+
+    private sealed class SceneErrorDetailRow
+    {
+        public long ProjectId { get; init; }
+        public string? JobTitle { get; init; }
+        public long SceneId { get; init; }
+        public int SceneIndex { get; init; }
+        public string? SceneTitle { get; init; }
+        public string Status { get; init; } = string.Empty;
+        public string? ErrorCode { get; init; }
+        public string? ErrorMessage { get; init; }
+        public string? ProviderCode { get; init; }
+        public string? ProviderName { get; init; }
+        public string? ModelName { get; init; }
+        public string? ProviderTaskId { get; init; }
+        public DateTimeOffset? SubmittedAt { get; init; }
+        public DateTimeOffset? UpdatedAt { get; init; }
+        public string? ImagePromptSnapshot { get; init; }
+        public string? CompiledImagePromptSnapshot { get; init; }
+        public string? VideoPromptSnapshot { get; init; }
+        public string? PublicUrl { get; init; }
+        public string? SceneSnapshotJson { get; init; }
+        public string? RenderConfigJson { get; init; }
+        public string? ProviderUsageJson { get; init; }
+        public string? UsageMetadataJson { get; init; }
+        public string? UsageErrorMessage { get; init; }
+        public string? UsageStatus { get; init; }
     }
 }
 

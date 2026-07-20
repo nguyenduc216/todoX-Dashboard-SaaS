@@ -1,0 +1,119 @@
+@using TodoX.Web.Services.VideoRender
+@inject IJSRuntime JS
+
+<MudDialog Class="scene-error-dialog">
+    <TitleContent>
+        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="scene-error-title">
+            <MudStack Spacing="0">
+                <MudText Typo="Typo.h6">Chi tiết lỗi Scene @Detail.SceneIndex.ToString("00")</MudText>
+                <MudText Typo="Typo.caption">@Detail.JobTitle</MudText>
+            </MudStack>
+            <MudChip T="string" Color="Color.Error" Size="Size.Small">@Detail.Status</MudChip>
+        </MudStack>
+    </TitleContent>
+
+    <DialogContent>
+        <MudStack Spacing="3" Class="scene-error-content">
+            <MudGrid>
+                <MudItem xs="12" sm="6"><MudText Typo="Typo.body2"><b>Scene:</b> @Detail.SceneIndex.ToString("00") - @Detail.SceneTitle</MudText></MudItem>
+                <MudItem xs="12" sm="6"><MudText Typo="Typo.body2"><b>Tác vụ:</b> @TaskTypeLabel</MudText></MudItem>
+                <MudItem xs="12" sm="6"><MudText Typo="Typo.body2"><b>Provider:</b> @Fallback(Detail.ProviderName)</MudText></MudItem>
+                <MudItem xs="12" sm="6"><MudText Typo="Typo.body2"><b>Model:</b> @Fallback(Detail.ProviderModel)</MudText></MudItem>
+                <MudItem xs="12" sm="6"><MudText Typo="Typo.body2"><b>Mode:</b> @Fallback(Detail.ProviderMode)</MudText></MudItem>
+                <MudItem xs="12" sm="6"><MudText Typo="Typo.body2"><b>Task ID:</b> @Fallback(Detail.ProviderTaskId)</MudText></MudItem>
+                <MudItem xs="12" sm="6"><MudText Typo="Typo.body2"><b>Submitted:</b> @FormatTime(Detail.SubmittedAt)</MudText></MudItem>
+                <MudItem xs="12" sm="6"><MudText Typo="Typo.body2"><b>Updated:</b> @FormatTime(Detail.UpdatedAt)</MudText></MudItem>
+                <MudItem xs="12" sm="6"><MudText Typo="Typo.body2"><b>Retry/Poll:</b> @RetryPollText</MudText></MudItem>
+                <MudItem xs="12" sm="6"><MudText Typo="Typo.body2"><b>Provider status:</b> @Fallback(Detail.ProviderStatus)</MudText></MudItem>
+            </MudGrid>
+
+            <MudAlert Severity="Severity.Error" Dense="true">
+                <MudText Typo="Typo.subtitle2">Mã lỗi: @Fallback(Detail.ErrorCode)</MudText>
+                <MudText Typo="Typo.body2">Chi tiết: @Fallback(Detail.ErrorMessage)</MudText>
+                <MudText Typo="Typo.caption">Bước lỗi: @Detail.ErrorStage · HTTP: @(Detail.HttpStatus?.ToString() ?? "N/A")</MudText>
+            </MudAlert>
+
+            @if (!string.IsNullOrWhiteSpace(Detail.Prompt))
+            {
+                <MudPaper Class="scene-error-section pa-3" Outlined="true">
+                    <MudText Typo="Typo.subtitle2">Prompt</MudText>
+                    <pre class="scene-error-pre">@Detail.Prompt</pre>
+                </MudPaper>
+            }
+
+            <MudExpansionPanels MultiExpansion="true" Dense="true">
+                <MudExpansionPanel Text="Provider Request">
+                    <MudStack Spacing="2">
+                        <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.ContentCopy" Disabled="@string.IsNullOrWhiteSpace(Detail.RequestJson)" OnClick="@(() => CopyAsync(Detail.RequestJson, "Đã copy Request JSON."))">Copy JSON</MudButton>
+                        @RenderJsonBlock(Detail.RequestJson)
+                    </MudStack>
+                </MudExpansionPanel>
+                <MudExpansionPanel Text="Provider Response">
+                    <MudStack Spacing="2">
+                        <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.ContentCopy" Disabled="@string.IsNullOrWhiteSpace(Detail.ResponseJson)" OnClick="@(() => CopyAsync(Detail.ResponseJson, "Đã copy Response JSON."))">Copy JSON</MudButton>
+                        @RenderJsonBlock(Detail.ResponseJson)
+                    </MudStack>
+                </MudExpansionPanel>
+                <MudExpansionPanel Text="Provider Error">
+                    @RenderJsonBlock(Detail.ErrorJson)
+                </MudExpansionPanel>
+            </MudExpansionPanels>
+        </MudStack>
+    </DialogContent>
+
+    <DialogActions>
+        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.ContentCopy" OnClick="@(() => CopyAsync(BuildCopyText(), "Đã copy lỗi."))">Copy lỗi</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Close">Đóng</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public SceneRenderErrorDetailDto Detail { get; set; } = new();
+
+    private string TaskTypeLabel => string.Equals(Detail.TaskType, "video", StringComparison.OrdinalIgnoreCase) ? "Video Render" : "Image Render";
+    private string RetryPollText => $"{Detail.RetryCount?.ToString() ?? "N/A"} / {Detail.PollCount?.ToString() ?? "N/A"}";
+
+    private RenderFragment RenderJsonBlock(string? json) => @<div>
+        @if (string.IsNullOrWhiteSpace(json))
+        {
+            <MudAlert Severity="Severity.Info" Dense="true">Không có dữ liệu JSON.</MudAlert>
+        }
+        else
+        {
+            <pre class="scene-error-json">@json</pre>
+        }
+    </div>;
+
+    private static string Fallback(string? value) => string.IsNullOrWhiteSpace(value) ? "N/A" : value;
+
+    private static string FormatTime(DateTimeOffset? value)
+        => value.HasValue ? value.Value.ToLocalTime().ToString("dd/MM/yyyy HH:mm:ss") : "N/A";
+
+    private string BuildCopyText()
+        => $"""
+        Job: {Detail.JobTitle}
+        Scene: {Detail.SceneIndex:00} - {Detail.SceneTitle}
+        Task type: {TaskTypeLabel}
+        Provider: {Detail.ProviderName}
+        Model: {Detail.ProviderModel}
+        Mode: {Detail.ProviderMode}
+        Status: {Detail.Status}
+        Error code: {Detail.ErrorCode}
+        Error message: {Detail.ErrorMessage}
+        Task ID: {Detail.ProviderTaskId}
+        Updated at: {FormatTime(Detail.UpdatedAt)}
+        """;
+
+    private async Task CopyAsync(string? text, string successMessage)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return;
+        }
+
+        await JS.InvokeVoidAsync("navigator.clipboard.writeText", text);
+    }
+
+    private void Close() => MudDialog.Close();
+}

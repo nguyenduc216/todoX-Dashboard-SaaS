@@ -16,6 +16,7 @@ public sealed class AiImageRenderRequest
     public bool FromUser { get; set; }
     public string Prompt { get; set; } = string.Empty;
     public string[] ReferenceImageUrls { get; set; } = Array.Empty<string>();
+    public Guid[] ReferenceMediaIds { get; set; } = Array.Empty<Guid>();
     public string AspectRatio { get; set; } = "1:1";
     public string OutputFormat { get; set; } = "png";
     public string Quality { get; set; } = "high";
@@ -37,6 +38,7 @@ public sealed class AiImageRenderResult
     public byte[]? ImageBytes { get; set; }
     public string? ImageUrl { get; set; }
     public string? ObjectKey { get; set; }
+    public Guid? ResultMediaId { get; set; }
     public string? MimeType { get; set; }
     public string? ProviderCode { get; set; }
     public long? ProviderId { get; set; }
@@ -197,6 +199,7 @@ public sealed class AiImageRenderRouter : IAiImageRenderRouter
                 Count = 1,
                 FileCategory = request.FileCategory,
                 ReferenceImageUrls = request.ReferenceImageUrls,
+                ReferenceMediaIds = request.ReferenceMediaIds,
                 BaseUrlOverride = detail?.BaseUrl,
                 EndpointPath = capability?.EndpointPath,
                 ApiKeyConfigName = detail?.ApiKeyConfigName,
@@ -309,6 +312,7 @@ public sealed class AiImageRenderRouter : IAiImageRenderRouter
             ImageBytes = response.ImageBytes,
             ImageUrl = response.ImageUrl,
             ObjectKey = response.ObjectKey,
+            ResultMediaId = response.ResultMediaId,
             MimeType = response.MimeType,
             ProviderCode = option.ProviderCode,
             ProviderId = option.ProviderId,

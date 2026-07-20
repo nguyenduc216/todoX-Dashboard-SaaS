@@ -39,8 +39,11 @@ public sealed class TodoXImageProviderService : ITodoXImageProviderService
         try
         {
             _logger.LogInformation(
-                "TODOX_IMAGE_PROVIDER_REQUEST model={Model} aspect={Aspect} outputFormat={OutputFormat} quality={Quality} resolution={Resolution} seed={Seed} fileCategory={FileCategory} referenceCount={ReferenceCount}",
-                request.Model, request.AspectRatio, request.OutputFormat, request.Quality, request.Resolution, request.Seed, request.FileCategory, request.ReferenceImageUrls?.Length ?? 0);
+                "TODOX_IMAGE_PROVIDER_REQUEST model={Model} aspect={Aspect} outputFormat={OutputFormat} quality={Quality} resolution={Resolution} seed={Seed} fileCategory={FileCategory} referenceCount={ReferenceCount} referenceMediaCount={ReferenceMediaCount}",
+                request.Model, request.AspectRatio, request.OutputFormat, request.Quality, request.Resolution, request.Seed, request.FileCategory, request.ReferenceImageUrls?.Length ?? 0, request.ReferenceMediaIds?.Length ?? 0);
+
+            var avatarMediaId = request.ReferenceMediaIds?.FirstOrDefault(id => id != Guid.Empty);
+            var hasReference = avatarMediaId is Guid referenceMediaId && referenceMediaId != Guid.Empty;
 
             var render = await _creativeRender.RenderAsync(new ImageAICreativeRenderRequest
             {
@@ -59,8 +62,9 @@ public sealed class TodoXImageProviderService : ITodoXImageProviderService
                 AspectRatio = request.AspectRatio,
                 FileCategory = string.IsNullOrWhiteSpace(request.FileCategory) ? "ai_character" : request.FileCategory,
                 PreserveFixedAssets = false,
-                RequireReferenceImages = false,
-                SkipReferenceOwnershipCheck = true
+                AvatarMediaId = hasReference ? avatarMediaId : null,
+                RequireReferenceImages = hasReference,
+                SkipReferenceOwnershipCheck = false
             }, cancellationToken);
 
             _logger.LogInformation(
@@ -72,7 +76,8 @@ public sealed class TodoXImageProviderService : ITodoXImageProviderService
                 _logger.LogInformation("TODOX_IMAGE_PROVIDER_RENDER_LOGS {@Logs}", render.Logs);
             }
 
-            var first = render.Images.FirstOrDefault(x => x.Status != "failed" && !string.IsNullOrWhiteSpace(x.Url));
+            var first = render.Images.FirstOrDefault(x => x.Status != "failed" && x.MediaId is not null)
+                        ?? render.Images.FirstOrDefault(x => x.Status != "failed" && !string.IsNullOrWhiteSpace(x.Url));
             var renderCompleted = IsSuccessfulRenderStatus(render.Status);
             if (!renderCompleted || first is null)
             {
@@ -101,11 +106,13 @@ public sealed class TodoXImageProviderService : ITodoXImageProviderService
             }
 
             var media = first.MediaId is Guid mediaId ? await _media.GetAsync(mediaId, cancellationToken) : null;
+            var imageUrl = media?.PublicUrl ?? media?.FileUrl ?? first.Url;
             return new OpenRouterImageResponse
             {
                 Success = true,
-                ImageUrl = first.Url ?? media?.PublicUrl ?? media?.FileUrl,
+                ImageUrl = imageUrl,
                 ObjectKey = media?.ObjectKey,
+                ResultMediaId = media?.Id ?? first.MediaId,
                 MimeType = media?.MimeType ?? "image/png",
                 ProviderCode = "todox_image",
                 ModelName = render.RenderEngineMode,

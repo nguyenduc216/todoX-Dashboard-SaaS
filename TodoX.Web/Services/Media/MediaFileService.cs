@@ -36,6 +36,10 @@ public interface IMediaFileService
 
     Task<MediaFileDto?> GetAsync(Guid id, CancellationToken ct = default);
 
+    Task<MediaFileDto?> GetByObjectKeyAsync(string objectKey, CancellationToken ct = default);
+
+    Task<MediaFileDto?> GetByPublicUrlAsync(string publicUrl, CancellationToken ct = default);
+
     /// <summary>Read raw bytes for a media file (used to pass reference images to the render API).</summary>
     Task<byte[]?> ReadBytesAsync(Guid id, CancellationToken ct = default);
 
@@ -277,6 +281,40 @@ public sealed class MediaFileService : IMediaFileService
             """, new { id });
     }
 
+    public async Task<MediaFileDto?> GetByObjectKeyAsync(string objectKey, CancellationToken ct = default)
+    {
+        objectKey = NormalizeObjectKey(objectKey);
+        using var conn = await _factory.OpenAsync(ct);
+        return await conn.QuerySingleOrDefaultAsync<MediaFileDto>(
+            """
+            SELECT id AS Id, user_id AS UserId, customer_id AS CustomerId, file_category AS FileCategory,
+                   file_name AS FileName, mime_type AS MimeType, file_size_bytes AS FileSizeBytes,
+                   storage_provider AS StorageProvider, object_key AS ObjectKey, file_url AS FileUrl,
+                   public_url AS PublicUrl, is_active AS IsActive, created_at AS CreatedAt
+              FROM media.media_files
+             WHERE object_key=@objectKey
+             ORDER BY created_at DESC
+             LIMIT 1;
+            """, new { objectKey });
+    }
+
+    public async Task<MediaFileDto?> GetByPublicUrlAsync(string publicUrl, CancellationToken ct = default)
+    {
+        var normalized = publicUrl.Trim();
+        using var conn = await _factory.OpenAsync(ct);
+        return await conn.QuerySingleOrDefaultAsync<MediaFileDto>(
+            """
+            SELECT id AS Id, user_id AS UserId, customer_id AS CustomerId, file_category AS FileCategory,
+                   file_name AS FileName, mime_type AS MimeType, file_size_bytes AS FileSizeBytes,
+                   storage_provider AS StorageProvider, object_key AS ObjectKey, file_url AS FileUrl,
+                   public_url AS PublicUrl, is_active AS IsActive, created_at AS CreatedAt
+              FROM media.media_files
+             WHERE public_url=@normalized OR file_url=@normalized
+             ORDER BY created_at DESC
+             LIMIT 1;
+            """, new { normalized });
+    }
+
     public async Task<byte[]?> ReadBytesAsync(Guid id, CancellationToken ct = default)
     {
         var media = await GetAsync(id, ct);
@@ -385,7 +423,7 @@ public sealed class MediaFileService : IMediaFileService
         var (bytes, contentType, fileName, uri) = await DownloadImageBytesAsync(imageUrl, ct);
         var saved = await SaveAsync(bytes, fileName, contentType, fileCategory,
             userId, customerId, tenantId, ct);
-        _logger.LogInformation("PRODUCT_IMAGE_URL_DOWNLOAD_SUCCESS url={Url} mediaId={MediaId} mime={MimeType} size={Size}",
+        _logger.LogInformation("MEDIA_IMAGE_URL_DOWNLOAD_SUCCESS url={Url} mediaId={MediaId} mime={MimeType} size={Size}",
             uri, saved.Id, saved.MimeType, saved.FileSizeBytes);
         return saved;
     }
@@ -396,7 +434,7 @@ public sealed class MediaFileService : IMediaFileService
         var (bytes, contentType, fileName, uri) = await DownloadImageBytesAsync(imageUrl, ct);
         var saved = await SaveAtObjectKeyAsync(bytes, objectKey, fileName, contentType, fileCategory,
             userId, customerId, tenantId, ct);
-        _logger.LogInformation("PRODUCT_IMAGE_URL_DOWNLOAD_SUCCESS url={Url} mediaId={MediaId} mime={MimeType} size={Size}",
+        _logger.LogInformation("MEDIA_IMAGE_URL_DOWNLOAD_SUCCESS url={Url} mediaId={MediaId} mime={MimeType} size={Size}",
             uri, saved.Id, saved.MimeType, saved.FileSizeBytes);
         return saved;
     }
@@ -418,7 +456,7 @@ public sealed class MediaFileService : IMediaFileService
     private async Task<(byte[] Bytes, string ContentType, string FileName, Uri Uri)> DownloadImageBytesAsync(string imageUrl, CancellationToken ct)
     {
         var uri = ValidatePublicImageUri(imageUrl);
-        _logger.LogInformation("PRODUCT_IMAGE_URL_DOWNLOAD_START url={Url}", uri);
+        _logger.LogInformation("MEDIA_IMAGE_URL_DOWNLOAD_START url={Url}", uri);
 
         var client = _httpClientFactory.CreateClient();
         client.Timeout = TimeSpan.FromSeconds(12);
@@ -430,7 +468,7 @@ public sealed class MediaFileService : IMediaFileService
         using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
         if (!response.IsSuccessStatusCode)
         {
-            throw new InvalidOperationException($"Khong tai duoc anh san pham tu URL. HTTP {(int)response.StatusCode}.");
+            throw new InvalidOperationException($"Khong tai duoc media tu URL. HTTP {(int)response.StatusCode}.");
         }
 
         var contentType = NormalizeMimeType(response.Content.Headers.ContentType?.MediaType, uri.AbsolutePath);
@@ -442,7 +480,7 @@ public sealed class MediaFileService : IMediaFileService
         var length = response.Content.Headers.ContentLength;
         if (length.HasValue && length.Value > GetMaxImageBytes())
         {
-            throw new InvalidOperationException("Anh san pham tu URL vuot qua 10MB.");
+            throw new InvalidOperationException("Media tu URL vuot qua 10MB.");
         }
 
         await using var stream = await response.Content.ReadAsStreamAsync(ct);
@@ -454,13 +492,13 @@ public sealed class MediaFileService : IMediaFileService
             ms.Write(buffer, 0, read);
             if (ms.Length > GetMaxImageBytes())
             {
-                throw new InvalidOperationException("Anh san pham tu URL vuot qua 10MB.");
+                throw new InvalidOperationException("Media tu URL vuot qua 10MB.");
             }
         }
 
         if (ms.Length == 0)
         {
-            throw new InvalidOperationException("URL anh san pham tra ve tep rong.");
+            throw new InvalidOperationException("URL media tra ve tep rong.");
         }
 
         var fileName = Path.GetFileName(uri.AbsolutePath);
@@ -767,7 +805,7 @@ public sealed class MediaFileService : IMediaFileService
         if (!Uri.TryCreate(imageUrl.Trim(), UriKind.Absolute, out var uri)
             || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
         {
-            throw new InvalidOperationException("URL anh san pham phai la http/https hop le.");
+            throw new InvalidOperationException("URL media dau ra phai la dia chi http/https hop le.");
         }
 
         if (uri.IsLoopback || uri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase))
