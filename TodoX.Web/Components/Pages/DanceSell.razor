@@ -1,0 +1,593 @@
+@page "/dance-sell"
+@using System.Text.Json
+@using Microsoft.AspNetCore.Components.Forms
+@using TodoX.Web.Services.DanceSell
+@inject AuthStateService AuthState
+@inject AccountService Accounts
+@inject IDanceSellPhase2Service DanceSellService
+@inject IDanceSellReferenceImageService References
+@inject IDanceSellRepository DanceRepo
+@inject ISnackbar Snackbar
+@implements IDisposable
+
+<PageTitle>Nhảy bán hàng</PageTitle>
+
+<MudStack Spacing="3">
+    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-3">
+        <div>
+            <MudText Typo="Typo.h4" Class="todox-page-title">Nhảy bán hàng</MudText>
+            <MudText Typo="Typo.body1" Class="todox-page-subtitle">Tạo video motion-control từ ảnh nhân vật, ảnh sản phẩm và video chuyển động đã staging.</MudText>
+        </div>
+        <MudStack Row="true" Spacing="2" Class="flex-wrap gap-2">
+            <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Refresh" OnClick="ReloadAsync">Refresh</MudButton>
+            <MudButton Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.RestartAlt" OnClick="ResetFormAsync">Reset</MudButton>
+        </MudStack>
+    </MudStack>
+
+    @if (!AuthState.IsInitialized)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+    }
+    else if (AuthState.CurrentUser is null)
+    {
+        <MudAlert Severity="Severity.Warning">Vui lòng đăng nhập.</MudAlert>
+    }
+    else
+    {
+        <MudGrid>
+            <MudItem xs="12" lg="7">
+                <MudPaper Class="todox-panel pa-4" rounded="true">
+                    <MudTabs Rounded="true" Elevation="0" @bind-ActivePanelIndex="_activeTab">
+                        <MudTabPanel Text="Form" Icon="@Icons.Material.Filled.Edit">
+                            <MudStack Spacing="3" Class="mt-3">
+                                <MudTextField T="string" Label="Tên job" Variant="Variant.Outlined" @bind-Value="_request.Title" />
+                                <MudSelect T="string" Label="Product placement" Variant="Variant.Outlined" Value="_request.PlacementMode" ValueChanged="OnPlacementChanged">
+                                    <MudSelectItem Value="@DanceSellPlacementModes.HoldProduct">Cầm sản phẩm</MudSelectItem>
+                                    <MudSelectItem Value="@DanceSellPlacementModes.WearProduct">Mặc/đeo sản phẩm</MudSelectItem>
+                                    <MudSelectItem Value="@DanceSellPlacementModes.DisplayProduct">Trưng bày sản phẩm</MudSelectItem>
+                                    <MudSelectItem Value="@DanceSellPlacementModes.UseProduct">Sử dụng sản phẩm</MudSelectItem>
+                                    <MudSelectItem Value="@DanceSellPlacementModes.Custom">Tùy chỉnh</MudSelectItem>
+                                </MudSelect>
+                                @if (_request.PlacementMode == DanceSellPlacementModes.Custom)
+                                {
+                                    <MudTextField T="string" Label="Instruction tùy chỉnh" Variant="Variant.Outlined" Lines="2" @bind-Value="_request.CustomPlacementInstruction" />
+                                }
+                                <MudTextField T="string" Label="Prompt" Variant="Variant.Outlined" Lines="6" @bind-Value="_request.Prompt" Immediate="true" />
+                                <MudText Typo="Typo.caption">@_request.Prompt.Length ký tự</MudText>
+                                <MudGrid>
+                                    <MudItem xs="12" sm="6">
+                                        <MudSelect T="string" Label="Mode" Variant="Variant.Outlined" @bind-Value="_request.Mode">
+                                            @foreach (var mode in _capability.Modes)
+                                            {
+                                                <MudSelectItem Value="@mode">@mode</MudSelectItem>
+                                            }
+                                        </MudSelect>
+                                    </MudItem>
+                                    <MudItem xs="12" sm="6">
+                                        <MudSelect T="string" Label="Character orientation" Variant="Variant.Outlined" @bind-Value="_request.CharacterOrientation">
+                                            @foreach (var orientation in _capability.CharacterOrientations)
+                                            {
+                                                <MudSelectItem Value="@orientation">@orientation</MudSelectItem>
+                                            }
+                                        </MudSelect>
+                                    </MudItem>
+                                </MudGrid>
+
+                                <MudGrid>
+                                    <MudItem xs="12" md="6">@UploadBlock("Ảnh nhân vật", _job?.CharacterImageUrl, "image/png,image/jpeg,image/webp", OnCharacterSelected)</MudItem>
+                                    <MudItem xs="12" md="6">@UploadBlock("Ảnh sản phẩm", _job?.ProductImageUrl, "image/png,image/jpeg,image/webp", OnProductSelected)</MudItem>
+                                </MudGrid>
+
+                                <MudRadioGroup T="string" @bind-Value="_motionSourceType">
+                                    <MudRadio Value="@DanceSellMotionSourceTypes.Upload" Color="Color.Warning">Upload video</MudRadio>
+                                    <MudRadio Value="@DanceSellMotionSourceTypes.TikTok" Color="Color.Warning">TikTok URL</MudRadio>
+                                </MudRadioGroup>
+                                @if (_motionSourceType == DanceSellMotionSourceTypes.Upload)
+                                {
+                                    @UploadBlock("Video chuyển động", _job?.MotionVideoUrl, "video/mp4", OnMotionSelected, isVideo: true)
+                                }
+                                else
+                                {
+                                    <MudStack Row="true" AlignItems="AlignItems.End" Class="flex-wrap gap-2">
+                                        <MudTextField T="string" Label="TikTok URL" Variant="Variant.Outlined" @bind-Value="_tiktokUrl" Class="flex-grow-1" />
+                                        <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.CloudDownload" Disabled="@_busy" OnClick="StageTikTokAsync">Tải và kiểm tra</MudButton>
+                                    </MudStack>
+                                }
+
+                                <MudStack Row="true" Spacing="2" Class="flex-wrap gap-2">
+                                    <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.ImageSearch" Disabled="@_busy" OnClick="GenerateReferenceAsync">Tạo ảnh tham chiếu</MudButton>
+                                    <MudButton Variant="Variant.Outlined" Color="Color.Success" StartIcon="@Icons.Material.Filled.CheckCircle" Disabled="@(_busy || _latestReference is null)" OnClick="ApproveLatestReferenceAsync">Duyệt ảnh tham chiếu</MudButton>
+                                    <MudButton Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.MovieCreation" Disabled="@(_busy || !CanRender)" OnClick="QueueRenderAsync">Tạo video</MudButton>
+                                </MudStack>
+                            </MudStack>
+                        </MudTabPanel>
+                        <MudTabPanel Text="JSON" Icon="@Icons.Material.Filled.DataObject">
+                            <MudStack Spacing="2" Class="mt-3">
+                                <MudTextField T="string" Label="Business JSON" Variant="Variant.Outlined" Lines="18" @bind-Value="_jsonText" />
+                                <MudStack Row="true" Spacing="2">
+                                    <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Sync" OnClick="SyncJsonFromForm">Form → JSON</MudButton>
+                                    <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Done" OnClick="ApplyJsonToForm">JSON → Form</MudButton>
+                                </MudStack>
+                                @if (!string.IsNullOrWhiteSpace(_jsonError))
+                                {
+                                    <MudAlert Severity="Severity.Error">@_jsonError</MudAlert>
+                                }
+                            </MudStack>
+                        </MudTabPanel>
+                    </MudTabs>
+                </MudPaper>
+            </MudItem>
+
+            <MudItem xs="12" lg="5">
+                <MudPaper Class="todox-panel pa-4" rounded="true">
+                    <MudText Typo="Typo.h6" Class="mb-3">Preview</MudText>
+                    <MudStack Spacing="2">
+                        @PreviewImage("Nhân vật", _job?.CharacterImageUrl)
+                        @PreviewImage("Sản phẩm", _job?.ProductImageUrl)
+                        @PreviewVideo("Chuyển động", _job?.MotionVideoUrl)
+                        @PreviewImage("Reference đã chuẩn bị", _job?.PreparedReferenceUrl)
+                        <MudChip T="string" Size="Size.Small" Color="@ReferenceColor">@(_job?.PreparedReferenceStatus ?? DanceSellReferenceStatuses.NotCreated)</MudChip>
+                        <MudText Typo="Typo.body2">Mode: @_request.Mode · Orientation: @_request.CharacterOrientation · Placement: @_request.PlacementMode</MudText>
+                        <MudText Typo="Typo.caption">@_request.Prompt</MudText>
+                        @if (!string.IsNullOrWhiteSpace(_job?.ResultVideoUrl))
+                        {
+                            @PreviewVideo("Kết quả", _job.ResultVideoUrl)
+                            <MudButton Variant="Variant.Text" Color="Color.Warning" StartIcon="@Icons.Material.Filled.OpenInNew" Href="@_job.ResultVideoUrl" Target="_blank">Mở video</MudButton>
+                        }
+                        @if (!string.IsNullOrWhiteSpace(_job?.ErrorMessage))
+                        {
+                            <MudAlert Severity="Severity.Error">@_job.ErrorCode - @_job.ErrorMessage</MudAlert>
+                        }
+                    </MudStack>
+                </MudPaper>
+            </MudItem>
+        </MudGrid>
+
+        <MudPaper Class="todox-table-card pa-4" rounded="true">
+            <MudText Typo="Typo.h6" Class="mb-3">Lịch sử job</MudText>
+            <MudTable Items="@_jobs" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm">
+                <HeaderContent>
+                    <MudTh>Reference</MudTh>
+                    <MudTh>Tiêu đề</MudTh>
+                    <MudTh>Trạng thái</MudTh>
+                    <MudTh>Mode</MudTh>
+                    <MudTh>Nguồn</MudTh>
+                    <MudTh>Kết quả</MudTh>
+                    <MudTh>Tạo lúc</MudTh>
+                    <MudTh></MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd DataLabel="Reference"><div class="dance-sell-thumb">@if (!string.IsNullOrWhiteSpace(context.PreparedReferenceUrl)) { <img src="@context.PreparedReferenceUrl" /> }</div></MudTd>
+                    <MudTd DataLabel="Tiêu đề">@(context.Title ?? context.Id.ToString("N")[..8])</MudTd>
+                    <MudTd DataLabel="Trạng thái"><MudChip T="string" Size="Size.Small" Color="@StatusColor(context.Status)">@context.Status</MudChip></MudTd>
+                    <MudTd DataLabel="Mode">@context.Mode</MudTd>
+                    <MudTd DataLabel="Nguồn">@(context.MotionSourceType ?? "-")</MudTd>
+                    <MudTd DataLabel="Kết quả">@(!string.IsNullOrWhiteSpace(context.ResultVideoUrl) ? "ready" : "-")</MudTd>
+                    <MudTd DataLabel="Tạo lúc">@context.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</MudTd>
+                    <MudTd>
+                        <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Warning" OnClick="@(() => OpenJobAsync(context.Id))">Mở</MudButton>
+                        <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Warning" Disabled="@(context.Status is not (DanceSellJobStatuses.Failed or DanceSellJobStatuses.Timeout))" OnClick="@(() => RetryAsync(context.Id))">Retry</MudButton>
+                    </MudTd>
+                </RowTemplate>
+            </MudTable>
+        </MudPaper>
+    }
+</MudStack>
+
+@code {
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web) { WriteIndented = true };
+    private DanceSellCapabilityDto _capability = new(new[] { "720p" }, new[] { "image" }, "720p", "image");
+    private DanceSellCreateJobRequest _request = NewRequest();
+    private DanceSellJobDto? _job;
+    private DanceSellReferenceVersionDto? _latestReference;
+    private IReadOnlyList<DanceSellJobDto> _jobs = Array.Empty<DanceSellJobDto>();
+    private string _motionSourceType = DanceSellMotionSourceTypes.Upload;
+    private string _tiktokUrl = string.Empty;
+    private string _jsonText = string.Empty;
+    private string? _jsonError;
+    private bool _busy;
+    private int _activeTab;
+    private PeriodicTimer? _timer;
+    private CancellationTokenSource? _timerCts;
+
+    private bool CanRender
+        => _job is not null
+           && _job.SourceStageStatus == DanceSellSourceStageStatuses.Ready
+           && _job.PreparedReferenceStatus == DanceSellReferenceStatuses.Approved
+           && !string.IsNullOrWhiteSpace(_request.Prompt);
+
+    private Color ReferenceColor => (_job?.PreparedReferenceStatus) switch
+    {
+        DanceSellReferenceStatuses.Approved => Color.Success,
+        DanceSellReferenceStatuses.Ready => Color.Info,
+        DanceSellReferenceStatuses.Generating => Color.Warning,
+        DanceSellReferenceStatuses.Failed => Color.Error,
+        _ => Color.Default
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        AuthState.OnChange += HandleAuth;
+        if (!AuthState.IsInitialized)
+        {
+            await AuthState.InitializeAsync(id => Accounts.RehydrateSessionAsync(id));
+        }
+
+        _capability = DanceSellService.GetCapability();
+        _request.Mode = _capability.DefaultMode;
+        _request.CharacterOrientation = _capability.DefaultCharacterOrientation;
+        SyncJsonFromForm();
+        await ReloadAsync();
+        StartPolling();
+    }
+
+    public void Dispose()
+    {
+        AuthState.OnChange -= HandleAuth;
+        _timerCts?.Cancel();
+        _timer?.Dispose();
+        _timerCts?.Dispose();
+    }
+
+    private void HandleAuth() => _ = InvokeAsync(ReloadAsync);
+
+    private async Task EnsureDraftAsync()
+    {
+        if (_job is not null || AuthState.CurrentUser is null) return;
+        _job = await DanceSellService.CreateJobAsync(_request, AuthState.CurrentUser);
+        Snackbar.Add("Đã tạo draft Nhảy bán hàng.", Severity.Success);
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        if (AuthState.CurrentUser is null) return;
+        _jobs = await DanceSellService.ListAsync(AuthState.CurrentUser, 50);
+        if (_job is not null)
+        {
+            _job = await DanceSellService.GetAsync(_job.Id, AuthState.CurrentUser);
+            var versions = await DanceRepo.ListReferenceVersionsAsync(_job.Id);
+            _latestReference = versions.FirstOrDefault(x => x.Status == DanceSellReferenceStatuses.Ready) ?? versions.FirstOrDefault();
+        }
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task ResetFormAsync()
+    {
+        _job = null;
+        _latestReference = null;
+        _request = NewRequest();
+        _request.Mode = _capability.DefaultMode;
+        _request.CharacterOrientation = _capability.DefaultCharacterOrientation;
+        _motionSourceType = DanceSellMotionSourceTypes.Upload;
+        _tiktokUrl = string.Empty;
+        SyncJsonFromForm();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task OnCharacterSelected(InputFileChangeEventArgs e) => await UploadAsync(e, (bytes, f, u) => DanceSellService.UploadCharacterAsync(u.Id, bytes, f.Name, f.ContentType, AuthState.CurrentUser!));
+    private async Task OnProductSelected(InputFileChangeEventArgs e) => await UploadAsync(e, (bytes, f, u) => DanceSellService.UploadProductAsync(u.Id, bytes, f.Name, f.ContentType, AuthState.CurrentUser!));
+    private async Task OnMotionSelected(InputFileChangeEventArgs e) => await UploadAsync(e, (bytes, f, u) => DanceSellService.UploadMotionAsync(u.Id, bytes, f.Name, f.ContentType, AuthState.CurrentUser!));
+
+    private async Task UploadAsync(InputFileChangeEventArgs e, Func<byte[], IBrowserFile, DanceSellJobDto, Task<DanceSellJobDto>> upload)
+    {
+        if (AuthState.CurrentUser is null) return;
+        _busy = true;
+        try
+        {
+            await EnsureDraftAsync();
+            var file = e.File;
+            await using var stream = file.OpenReadStream(600L * 1024 * 1024);
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms);
+            _job = await upload(ms.ToArray(), file, _job!);
+            Snackbar.Add("Upload thành công.", Severity.Success);
+            SyncJsonFromForm();
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task StageTikTokAsync()
+    {
+        if (AuthState.CurrentUser is null) return;
+        _busy = true;
+        try
+        {
+            await EnsureDraftAsync();
+            _job = await DanceSellService.StageTikTokAsync(_job!.Id, _tiktokUrl, AuthState.CurrentUser);
+            Snackbar.Add("Đã staging TikTok thành MP4.", Severity.Success);
+            SyncJsonFromForm();
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task GenerateReferenceAsync()
+    {
+        if (AuthState.CurrentUser is null) return;
+        _busy = true;
+        try
+        {
+            await EnsureDraftAsync();
+            await DanceSellService.UpdateBusinessAsync(_job!.Id, ToUpdateRequest(), AuthState.CurrentUser);
+            _latestReference = await References.GenerateAsync(_job.Id, AuthState.CurrentUser);
+            Snackbar.Add("Đã tạo ảnh tham chiếu.", Severity.Success);
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task ApproveLatestReferenceAsync()
+    {
+        if (AuthState.CurrentUser is null || _job is null || _latestReference is null) return;
+        _busy = true;
+        try
+        {
+            _job = await References.ApproveAsync(_job.Id, _latestReference.Id, AuthState.CurrentUser);
+            Snackbar.Add("Đã duyệt ảnh tham chiếu.", Severity.Success);
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task QueueRenderAsync()
+    {
+        if (AuthState.CurrentUser is null || _job is null) return;
+        _busy = true;
+        try
+        {
+            await DanceSellService.UpdateBusinessAsync(_job.Id, ToUpdateRequest(), AuthState.CurrentUser);
+            _job = await DanceSellService.QueueRenderAsync(_job.Id, AuthState.CurrentUser);
+            Snackbar.Add("Đã đưa job vào hàng đợi render.", Severity.Success);
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task RetryAsync(Guid id)
+    {
+        if (AuthState.CurrentUser is null) return;
+        try
+        {
+            _job = await DanceSellService.RetryAsync(id, AuthState.CurrentUser);
+            Snackbar.Add("Đã tạo retry job.", Severity.Success);
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+    }
+
+    private async Task OpenJobAsync(Guid id)
+    {
+        if (AuthState.CurrentUser is null) return;
+        _job = await DanceSellService.GetAsync(id, AuthState.CurrentUser);
+        _request = new DanceSellCreateJobRequest
+        {
+            Title = _job.Title,
+            Prompt = _job.Prompt,
+            PlacementMode = _job.PlacementMode ?? DanceSellPlacementModes.HoldProduct,
+            CustomPlacementInstruction = _job.CustomPlacementInstruction,
+            Mode = _job.Mode,
+            CharacterOrientation = _job.CharacterOrientation
+        };
+        _motionSourceType = _job.MotionSourceType ?? DanceSellMotionSourceTypes.Upload;
+        _tiktokUrl = _job.MotionSourceType == DanceSellMotionSourceTypes.TikTok ? _job.MotionSourceUrl ?? string.Empty : string.Empty;
+        SyncJsonFromForm();
+        await ReloadAsync();
+    }
+
+    private void SyncJsonFromForm()
+    {
+        _jsonError = null;
+        _jsonText = JsonSerializer.Serialize(new DanceSellJsonBusinessRequest
+        {
+            Title = _request.Title,
+            CharacterMediaId = _job?.CharacterMediaId,
+            ProductMediaId = _job?.ProductMediaId,
+            MotionSourceType = _motionSourceType,
+            MotionVideoMediaId = _job?.MotionVideoMediaId,
+            TiktokUrl = string.IsNullOrWhiteSpace(_tiktokUrl) ? null : _tiktokUrl,
+            PlacementMode = _request.PlacementMode,
+            CustomPlacementInstruction = _request.CustomPlacementInstruction,
+            Prompt = _request.Prompt,
+            Mode = _request.Mode,
+            CharacterOrientation = _request.CharacterOrientation
+        }, JsonOptions);
+    }
+
+    private void ApplyJsonToForm()
+    {
+        try
+        {
+            var parsed = JsonSerializer.Deserialize<DanceSellJsonBusinessRequest>(_jsonText, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            if (parsed is null) throw new InvalidOperationException("JSON rỗng.");
+            if (string.IsNullOrWhiteSpace(parsed.Prompt)) throw new InvalidOperationException("prompt bắt buộc.");
+            if (!DanceSellPlacementModes.All.Contains(parsed.PlacementMode)) throw new InvalidOperationException("placementMode không hợp lệ.");
+            if (!_capability.Modes.Contains(parsed.Mode, StringComparer.OrdinalIgnoreCase)) throw new InvalidOperationException("mode không hợp lệ.");
+            if (!_capability.CharacterOrientations.Contains(parsed.CharacterOrientation, StringComparer.OrdinalIgnoreCase)) throw new InvalidOperationException("characterOrientation không hợp lệ.");
+            _request = new DanceSellCreateJobRequest
+            {
+                Title = parsed.Title,
+                Prompt = parsed.Prompt,
+                PlacementMode = parsed.PlacementMode,
+                CustomPlacementInstruction = parsed.CustomPlacementInstruction,
+                Mode = parsed.Mode,
+                CharacterOrientation = parsed.CharacterOrientation
+            };
+            _motionSourceType = parsed.MotionSourceType == DanceSellMotionSourceTypes.TikTok ? DanceSellMotionSourceTypes.TikTok : DanceSellMotionSourceTypes.Upload;
+            _tiktokUrl = parsed.TiktokUrl ?? string.Empty;
+            _jsonError = null;
+            Snackbar.Add("Đã áp dụng JSON vào form.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            _jsonError = ex.Message;
+        }
+    }
+
+    private Task OnPlacementChanged(string value)
+    {
+        _request.PlacementMode = value;
+        if (string.IsNullOrWhiteSpace(_request.Prompt) || _request.Prompt == DefaultPrompt())
+        {
+            _request.Prompt = BuildPrompt(value, _request.CustomPlacementInstruction);
+        }
+        SyncJsonFromForm();
+        return Task.CompletedTask;
+    }
+
+    private DanceSellUpdateBusinessRequest ToUpdateRequest() => new()
+    {
+        Title = _request.Title,
+        Prompt = _request.Prompt,
+        PlacementMode = _request.PlacementMode,
+        CustomPlacementInstruction = _request.CustomPlacementInstruction,
+        Mode = _request.Mode,
+        CharacterOrientation = _request.CharacterOrientation
+    };
+
+    private RenderFragment UploadBlock(string label, string? url, string accept, Func<InputFileChangeEventArgs, Task> changed, bool isVideo = false) => @<div class="dance-sell-upload">
+        <div class="dance-sell-upload-preview">
+            @if (!string.IsNullOrWhiteSpace(url) && isVideo)
+            {
+                <video src="@url" controls muted playsinline></video>
+            }
+            else if (!string.IsNullOrWhiteSpace(url))
+            {
+                <img src="@url" alt="@label" />
+            }
+            else
+            {
+                <MudIcon Icon="@(isVideo ? Icons.Material.Filled.Movie : Icons.Material.Filled.Image)" Size="Size.Large" />
+            }
+        </div>
+        <label class="dance-sell-upload-button">
+            <MudIcon Icon="@Icons.Material.Filled.Upload" Size="Size.Small" />
+            <span>@label</span>
+            <InputFile class="dance-sell-hidden-input" OnChange="@changed" accept="@accept" disabled="@_busy" />
+        </label>
+    </div>;
+
+    private RenderFragment PreviewImage(string label, string? url) => @<div class="dance-sell-preview-row">
+        <span>@label</span>
+        @if (!string.IsNullOrWhiteSpace(url))
+        {
+            <img src="@url" alt="@label" />
+        }
+        else
+        {
+            <em>chưa có</em>
+        }
+    </div>;
+
+    private RenderFragment PreviewVideo(string label, string? url) => @<div class="dance-sell-preview-row">
+        <span>@label</span>
+        @if (!string.IsNullOrWhiteSpace(url))
+        {
+            <video src="@url" controls muted playsinline></video>
+        }
+        else
+        {
+            <em>chưa có</em>
+        }
+    </div>;
+
+    private void StartPolling()
+    {
+        _timerCts = new CancellationTokenSource();
+        _timer = new PeriodicTimer(TimeSpan.FromSeconds(5));
+        _ = Task.Run(async () =>
+        {
+            while (_timer is not null && await _timer.WaitForNextTickAsync(_timerCts.Token))
+            {
+                if (_job?.Status is DanceSellJobStatuses.Queued or DanceSellJobStatuses.Submitted or DanceSellJobStatuses.Rendering)
+                {
+                    await InvokeAsync(ReloadAsync);
+                }
+            }
+        });
+    }
+
+    private static Color StatusColor(string status) => status switch
+    {
+        DanceSellJobStatuses.Completed => Color.Success,
+        DanceSellJobStatuses.Failed or DanceSellJobStatuses.Timeout => Color.Error,
+        DanceSellJobStatuses.Queued or DanceSellJobStatuses.Submitted or DanceSellJobStatuses.Rendering => Color.Warning,
+        _ => Color.Default
+    };
+
+    private static DanceSellCreateJobRequest NewRequest() => new()
+    {
+        PlacementMode = DanceSellPlacementModes.HoldProduct,
+        Prompt = DefaultPrompt(),
+        Mode = "720p",
+        CharacterOrientation = "image"
+    };
+
+    private static string DefaultPrompt()
+        => "Create a realistic commercial dance video using the prepared reference image. Preserve the character identity, face, hairstyle, body proportions and product appearance. Follow the motion and timing of the reference video naturally. Keep the product visible and consistent throughout the video. Avoid distorted hands, duplicated objects, altered logos, extra limbs, text overlays and watermarks.";
+
+    private static string BuildPrompt(string placementMode, string? custom)
+    {
+        var extra = placementMode switch
+        {
+            DanceSellPlacementModes.HoldProduct => "The character must hold the product naturally and keep it clearly visible.",
+            DanceSellPlacementModes.WearProduct => "The character must wear the product correctly and preserve its design.",
+            DanceSellPlacementModes.DisplayProduct => "The character must present the product prominently during the motion.",
+            DanceSellPlacementModes.UseProduct => "The character must use the product naturally while following the reference motion.",
+            DanceSellPlacementModes.Custom => custom ?? string.Empty,
+            _ => string.Empty
+        };
+        return $"{DefaultPrompt()} {extra}".Trim();
+    }
+}
+
+<style>
+    .dance-sell-upload { display: grid; gap: 10px; }
+    .dance-sell-upload-preview { aspect-ratio: 16 / 10; border: 1px solid rgba(255,255,255,.14); border-radius: 8px; display: grid; place-items: center; overflow: hidden; background: rgba(255,255,255,.04); }
+    .dance-sell-upload-preview img, .dance-sell-upload-preview video, .dance-sell-preview-row img, .dance-sell-preview-row video { width: 100%; height: 100%; object-fit: contain; }
+    .dance-sell-upload-button { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; color: #ffb700; }
+    .dance-sell-hidden-input { display: none; }
+    .dance-sell-preview-row { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 10px; align-items: center; min-height: 72px; }
+    .dance-sell-preview-row img, .dance-sell-preview-row video { max-height: 140px; border-radius: 8px; background: rgba(255,255,255,.04); }
+    .dance-sell-thumb { width: 72px; height: 54px; border-radius: 6px; background: rgba(255,255,255,.06); overflow: hidden; }
+    .dance-sell-thumb img { width: 100%; height: 100%; object-fit: cover; }
+</style>

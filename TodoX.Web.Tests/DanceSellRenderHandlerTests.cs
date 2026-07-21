@@ -214,8 +214,21 @@ public sealed class DanceSellRenderHandlerTests
         }
 
         public Task<DanceSellJobDto> CreateAsync(DanceSellJobCreateRequest request, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<DanceSellJobDto> CreateDraftAsync(DanceSellDraftCreateRequest request, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<IReadOnlyList<DanceSellJobDto>> ListAsync(Guid? customerId = null, int limit = 20, int offset = 0, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<DanceSellJobDto?> GetByRenderJobIdAsync(Guid renderJobId, CancellationToken ct = default) => throw new NotImplementedException();
         public Task SetRenderJobIdAsync(Guid id, Guid renderJobId, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task QueueForRenderAsync(Guid id, Guid renderJobId, string logicalRequestId, string preparedReferenceUrl, string motionVideoUrl, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task UpdateBusinessAsync(Guid id, DanceSellUpdateBusinessRequest request, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task UpdateCharacterAsync(Guid id, Guid mediaId, string objectKey, string publicUrl, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task UpdateProductAsync(Guid id, Guid mediaId, string objectKey, string publicUrl, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task UpdateMotionUploadAsync(Guid id, Guid mediaId, string objectKey, string publicUrl, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task UpdateMotionTikTokAsync(Guid id, string sourceUrl, Guid mediaId, string objectKey, string publicUrl, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task UpdateReferenceStatusAsync(Guid id, string status, string? error = null, Guid? mediaId = null, string? objectKey = null, string? publicUrl = null, DateTime? approvedAt = null, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<IReadOnlyList<DanceSellReferenceVersionDto>> ListReferenceVersionsAsync(Guid danceSellJobId, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<DanceSellReferenceVersionDto?> GetReferenceVersionAsync(Guid versionId, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<DanceSellReferenceVersionDto> CreateReferenceVersionAsync(DanceSellReferenceVersionDto version, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<bool> SelectReferenceVersionAsync(Guid danceSellJobId, Guid versionId, CancellationToken ct = default) => throw new NotImplementedException();
         public Task UpdateSubmittedAsync(Guid id, string requestJson, string providerTaskId, string submitResponseJson, CancellationToken ct = default) => throw new NotImplementedException();
         public Task UpdatePollingAsync(Guid id, string providerStatus, string pollResponseJson, int pollCount, DateTime nextPollAtUtc, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<bool> UpdateFailedAsync(Guid id, string status, string? providerStatus, string? responseJson, string errorCode, string errorMessage, CancellationToken ct = default)

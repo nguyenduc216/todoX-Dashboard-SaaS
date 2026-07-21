@@ -76,6 +76,7 @@ builder.Services.AddHttpClient<IOpenRouterImageService, OpenRouterImageService>(
 builder.Services.Configure<TodoX.Web.Services.AiProviders.YEScaleOptions>(builder.Configuration.GetSection("AiProviders:YEScale"));
 builder.Services.AddHttpClient<TodoX.Web.Services.AiProviders.IYEScaleTaskClient, TodoX.Web.Services.AiProviders.YEScaleTaskClient>();
 builder.Services.Configure<KieOptions>(builder.Configuration.GetSection(KieOptions.SectionName));
+builder.Services.Configure<DanceSellPhase2Options>(builder.Configuration.GetSection(DanceSellPhase2Options.SectionName));
 builder.Services.PostConfigure<KieOptions>(options =>
 {
     ApplyEnv("KIE_API_BASE_URL", value => options.ApiBaseUrl = value);
@@ -115,6 +116,9 @@ builder.Services.AddScoped<TodoX.Web.Services.VideoRender.ISceneMediaVersioningS
 builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IYEScaleVideoPricingResolver, TodoX.Web.Services.VideoRender.YEScaleVideoPricingResolver>();
 builder.Services.AddScoped<IDanceSellRepository, DanceSellRepository>();
 builder.Services.AddScoped<IDanceSellCompletionService, DanceSellCompletionService>();
+builder.Services.AddScoped<IDanceSellMotionSourceService, DanceSellMotionSourceService>();
+builder.Services.AddScoped<IDanceSellReferenceImageService, DanceSellReferenceImageService>();
+builder.Services.AddScoped<IDanceSellPhase2Service, DanceSellPhase2Service>();
 builder.Services.AddScoped<IRenderJobHandler, TodoX.Web.Services.VideoRender.SceneVideoRenderHandler>();
 builder.Services.AddScoped<IRenderJobHandler, TodoX.Web.Services.VideoRender.SceneVideoWorkerHandler>();
 builder.Services.AddScoped<IRenderJobHandler, TodoX.Web.Services.VideoRender.VideoRenderMergeHandler>();
@@ -342,6 +346,7 @@ extensionApi.MapGet("/download", async (
 });
 
 app.MapDanceSellPhase1Endpoints();
+app.MapDanceSellPhase2Endpoints();
 
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
