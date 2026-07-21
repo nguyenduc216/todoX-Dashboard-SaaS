@@ -152,12 +152,12 @@ public static class DanceSellPhase1Endpoints
         IOptionsMonitor<KieOptions> options,
         CancellationToken ct)
     {
-        if (!IsCallbackConfigured(options.CurrentValue.CallbackSecret))
+        var authorization = GetCallbackAuthorizationStatus(request, options.CurrentValue.CallbackSecret);
+        if (authorization == KieCallbackAuthorizationStatus.NotConfigured)
         {
             return Results.Json(new { success = false, message = "KIE callback secret is not configured." }, statusCode: StatusCodes.Status503ServiceUnavailable);
         }
-
-        if (!IsCallbackAuthorized(request, options.CurrentValue.CallbackSecret))
+        if (authorization is KieCallbackAuthorizationStatus.MissingSecret or KieCallbackAuthorizationStatus.InvalidSecret)
         {
             return Results.Json(new { success = false, message = "Invalid callback secret." }, statusCode: StatusCodes.Status401Unauthorized);
         }
@@ -205,6 +205,21 @@ public static class DanceSellPhase1Endpoints
                 Source = "callback"
             }, ct);
         }
+        else if (errorCode is not null)
+        {
+            await completion.FailAsync(new DanceSellFailureRequest
+            {
+                DanceJob = job,
+                ProviderTaskId = callback.TaskId,
+                ProviderStatus = callback.ProviderState ?? callback.Status,
+                ResponseJson = raw,
+                Status = DanceSellJobStatuses.Failed,
+                ErrorCode = errorCode,
+                ErrorMessage = errorMessage,
+                Permanent = true,
+                Source = "callback"
+            }, ct);
+        }
 
         await danceSellJobs.UpdateCallbackAsync(callback.TaskId, KieJsonRedactor.Redact(raw) ?? "{}", callback.ProviderState ?? callback.Status, resultUrl, errorCode, errorMessage, ct);
 
@@ -215,13 +230,33 @@ public static class DanceSellPhase1Endpoints
         => user?.IsAuthenticated == true
            && (user.IsRoot || user.Role is TodoXUserRole.Admin or TodoXUserRole.SystemOperator);
 
-    private static bool IsCallbackAuthorized(HttpRequest request, string? configuredSecret)
+    public static KieCallbackAuthorizationStatus GetCallbackAuthorizationStatus(HttpRequest request, string? configuredSecret)
     {
+        if (string.IsNullOrWhiteSpace(configuredSecret))
+        {
+            return KieCallbackAuthorizationStatus.NotConfigured;
+        }
+
         var provided = request.Headers["X-KIE-CALLBACK-SECRET"].FirstOrDefault()
                        ?? request.Query["secret"].FirstOrDefault();
-        return string.Equals(provided, configuredSecret, StringComparison.Ordinal);
+        if (string.IsNullOrWhiteSpace(provided))
+        {
+            return KieCallbackAuthorizationStatus.MissingSecret;
+        }
+
+        return string.Equals(provided, configuredSecret, StringComparison.Ordinal)
+            ? KieCallbackAuthorizationStatus.Authorized
+            : KieCallbackAuthorizationStatus.InvalidSecret;
     }
 
     public static bool IsCallbackConfigured(string? configuredSecret)
         => !string.IsNullOrWhiteSpace(configuredSecret);
+}
+
+public enum KieCallbackAuthorizationStatus
+{
+    NotConfigured,
+    MissingSecret,
+    InvalidSecret,
+    Authorized
 }

@@ -77,6 +77,48 @@ public sealed class KieClientTests
     }
 
     [Fact]
+    public async Task CreateTaskAsync_MapsRetryAfterDelta()
+    {
+        var response = new HttpResponseMessage(HttpStatusCode.TooManyRequests)
+        {
+            Content = new StringContent("""{"error":"rate"}""")
+        };
+        response.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(TimeSpan.FromSeconds(7));
+        var client = CreateClient(new FakeHttpMessageHandler(_ => response));
+
+        var ex = await Assert.ThrowsAsync<KieProviderException>(() => client.CreateTaskAsync(new KieMotionControlRequest
+        {
+            Model = "kling-2.6/motion-control",
+            Input = new KieMotionControlInput { Prompt = "Dance." }
+        }, CancellationToken.None));
+
+        Assert.Equal(KieErrorCodes.RateLimited, ex.ErrorCode);
+        Assert.Equal(TimeSpan.FromSeconds(7), ex.RetryAfter);
+    }
+
+    [Fact]
+    public async Task CreateTaskAsync_MapsRetryAfterDate()
+    {
+        var retryAt = DateTimeOffset.UtcNow.AddSeconds(30);
+        var response = new HttpResponseMessage(HttpStatusCode.TooManyRequests)
+        {
+            Content = new StringContent("""{"error":"rate"}""")
+        };
+        response.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(retryAt);
+        var client = CreateClient(new FakeHttpMessageHandler(_ => response));
+
+        var ex = await Assert.ThrowsAsync<KieProviderException>(() => client.CreateTaskAsync(new KieMotionControlRequest
+        {
+            Model = "kling-2.6/motion-control",
+            Input = new KieMotionControlInput { Prompt = "Dance." }
+        }, CancellationToken.None));
+
+        Assert.Equal(KieErrorCodes.RateLimited, ex.ErrorCode);
+        Assert.True(ex.RetryAfter >= TimeSpan.FromSeconds(1));
+        Assert.True(ex.RetryAfter <= TimeSpan.FromSeconds(30));
+    }
+
+    [Fact]
     public async Task CreateTaskAsync_InternalTimeoutMapsToTransientProviderUnavailable()
     {
         var handler = new FakeHttpMessageHandler(async (_, ct) =>

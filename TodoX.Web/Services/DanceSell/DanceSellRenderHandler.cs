@@ -204,10 +204,18 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
 
     private async Task FailAsync(RenderJobDto renderJob, DanceSellJobDto danceJob, string errorCode, string errorMessage, string? rawResponse, bool permanent, CancellationToken ct, string status = DanceSellJobStatuses.Failed)
     {
-        await _repo.UpdateFailedAsync(danceJob.Id, status, null, BuildErrorJson(errorCode, errorMessage, rawResponse), errorCode, errorMessage, ct);
-        await _renderJobs.AddEventAsync(renderJob.Id, "KIE_TASK_FAILED", errorMessage,
-            new { danceSellJobId = danceJob.Id, danceJob.ProviderTaskId, errorCode, permanent }, "error", ct);
-        await LogUsageAsync(danceJob, renderJob, "failed", danceJob.ProviderTaskId, danceJob.ProviderStatus, null, errorMessage, ct);
+        await _completion.FailAsync(new DanceSellFailureRequest
+        {
+            DanceJob = danceJob,
+            ProviderTaskId = danceJob.ProviderTaskId,
+            ProviderStatus = danceJob.ProviderStatus,
+            ResponseJson = BuildErrorJson(errorCode, errorMessage, rawResponse),
+            Status = status,
+            ErrorCode = errorCode,
+            ErrorMessage = errorMessage,
+            Permanent = permanent,
+            Source = "poll"
+        }, ct);
     }
 
     private async Task LogUsageAsync(DanceSellJobDto danceJob, RenderJobDto renderJob, string status, string? taskId, string? providerStatus, int? resultUrlCount, string? errorMessage, CancellationToken ct)

@@ -18,6 +18,7 @@ public sealed class KieOptions
     public int MaxPollCount { get; set; } = 120;
     public int SubmitMaxRetry { get; set; } = 3;
     public int RateLimitRequestsPer10S { get; set; } = 20;
+    // Phase 1 stores this for the future distributed/concurrent-task limiter; it is not currently enforced.
     public int MaxConcurrentTasks { get; set; } = 100;
     public string[] AllowedModes { get; set; } = new[] { "720p" };
     public string[] AllowedCharacterOrientations { get; set; } = new[] { "image" };

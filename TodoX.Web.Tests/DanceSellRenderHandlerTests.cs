@@ -111,6 +111,60 @@ public sealed class DanceSellRenderHandlerTests
         Assert.Equal(1, providers.LogUsageCallCount);
     }
 
+    [Fact]
+    public async Task FailAsync_FirstTerminalUpdateUpdatesDanceJobRenderJobEventAndUsageOnce()
+    {
+        var repo = new FakeDanceSellRepository(CreateJob(status: DanceSellJobStatuses.Rendering));
+        var renderJobs = new FakeRenderJobService();
+        var providers = new CapturingProviderService();
+        var service = new DanceSellCompletionService(repo, renderJobs, providers);
+
+        var result = await service.FailAsync(new DanceSellFailureRequest
+        {
+            DanceJob = repo.Job,
+            ProviderTaskId = repo.Job.ProviderTaskId,
+            ProviderStatus = "fail",
+            ResponseJson = """{"failCode":"bad_input"}""",
+            ErrorCode = "bad_input",
+            ErrorMessage = "Bad input.",
+            Source = "callback"
+        });
+
+        Assert.True(result.FailedNow);
+        Assert.Equal(1, repo.UpdateFailedCallCount);
+        Assert.Equal(DanceSellJobStatuses.Failed, repo.Job.Status);
+        Assert.Equal(1, renderJobs.MarkStatusCallCount);
+        Assert.Equal(1, renderJobs.AddEventCallCount);
+        Assert.Equal(1, providers.LogUsageCallCount);
+        Assert.Equal("failed", providers.LastUsage?.Status);
+    }
+
+    [Fact]
+    public async Task FailAsync_DuplicateCallbackDoesNotDuplicateRenderEventOrUsage()
+    {
+        var repo = new FakeDanceSellRepository(CreateJob(status: DanceSellJobStatuses.Failed));
+        var renderJobs = new FakeRenderJobService();
+        var providers = new CapturingProviderService();
+        var service = new DanceSellCompletionService(repo, renderJobs, providers);
+
+        var result = await service.FailAsync(new DanceSellFailureRequest
+        {
+            DanceJob = repo.Job,
+            ProviderTaskId = repo.Job.ProviderTaskId,
+            ProviderStatus = "fail",
+            ErrorCode = "bad_input",
+            ErrorMessage = "Bad input.",
+            Source = "callback"
+        });
+
+        Assert.True(result.Found);
+        Assert.False(result.FailedNow);
+        Assert.Equal(0, repo.UpdateFailedCallCount);
+        Assert.Equal(0, renderJobs.MarkStatusCallCount);
+        Assert.Equal(0, renderJobs.AddEventCallCount);
+        Assert.Equal(0, providers.LogUsageCallCount);
+    }
+
     private static DanceSellJobDto CreateJob(string status, Guid? customerId = null)
         => new()
         {
@@ -135,6 +189,7 @@ public sealed class DanceSellRenderHandlerTests
 
         public DanceSellJobDto Job { get; }
         public int UpdateCompletedCallCount { get; private set; }
+        public int UpdateFailedCallCount { get; private set; }
 
         public Task<DanceSellJobDto?> GetByIdAsync(Guid id, CancellationToken ct = default)
             => Task.FromResult<DanceSellJobDto?>(Job.Id == id ? Job : null);
@@ -163,7 +218,22 @@ public sealed class DanceSellRenderHandlerTests
         public Task SetRenderJobIdAsync(Guid id, Guid renderJobId, CancellationToken ct = default) => throw new NotImplementedException();
         public Task UpdateSubmittedAsync(Guid id, string requestJson, string providerTaskId, string submitResponseJson, CancellationToken ct = default) => throw new NotImplementedException();
         public Task UpdatePollingAsync(Guid id, string providerStatus, string pollResponseJson, int pollCount, DateTime nextPollAtUtc, CancellationToken ct = default) => throw new NotImplementedException();
-        public Task UpdateFailedAsync(Guid id, string status, string? providerStatus, string? responseJson, string errorCode, string errorMessage, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<bool> UpdateFailedAsync(Guid id, string status, string? providerStatus, string? responseJson, string errorCode, string errorMessage, CancellationToken ct = default)
+        {
+            UpdateFailedCallCount++;
+            if (Job.Status is DanceSellJobStatuses.Completed or DanceSellJobStatuses.Failed or DanceSellJobStatuses.Timeout)
+            {
+                return Task.FromResult(false);
+            }
+
+            Job.Status = status;
+            Job.ProviderStatus = providerStatus ?? Job.ProviderStatus;
+            Job.ErrorJson = responseJson;
+            Job.ErrorCode = errorCode;
+            Job.ErrorMessage = errorMessage;
+            Job.CompletedAt ??= DateTime.UtcNow;
+            return Task.FromResult(true);
+        }
         public Task UpdateCallbackAsync(string providerTaskId, string callbackJson, string providerStatus, string? resultVideoUrl, string? errorCode, string? errorMessage, CancellationToken ct = default) => throw new NotImplementedException();
     }
 

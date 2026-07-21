@@ -14,7 +14,7 @@ public interface IDanceSellRepository
     Task UpdateSubmittedAsync(Guid id, string requestJson, string providerTaskId, string submitResponseJson, CancellationToken ct = default);
     Task UpdatePollingAsync(Guid id, string providerStatus, string pollResponseJson, int pollCount, DateTime nextPollAtUtc, CancellationToken ct = default);
     Task<bool> UpdateCompletedAsync(Guid id, string providerStatus, string pollResponseJson, string resultVideoUrl, CancellationToken ct = default);
-    Task UpdateFailedAsync(Guid id, string status, string? providerStatus, string? responseJson, string errorCode, string errorMessage, CancellationToken ct = default);
+    Task<bool> UpdateFailedAsync(Guid id, string status, string? providerStatus, string? responseJson, string errorCode, string errorMessage, CancellationToken ct = default);
     Task UpdateCallbackAsync(string providerTaskId, string callbackJson, string providerStatus, string? resultVideoUrl, string? errorCode, string? errorMessage, CancellationToken ct = default);
 }
 
@@ -166,23 +166,27 @@ public sealed class DanceSellRepository : IDanceSellRepository
         return changed > 0;
     }
 
-    public async Task UpdateFailedAsync(Guid id, string status, string? providerStatus, string? responseJson, string errorCode, string errorMessage, CancellationToken ct = default)
+    public const string UpdateFailedSql =
+        """
+        UPDATE dance_sell.dance_sell_jobs
+           SET status=@status,
+               provider_status=COALESCE(@providerStatus, provider_status),
+               error_json=CASE WHEN @responseJson IS NULL THEN error_json ELSE CAST(@responseJson AS jsonb) END,
+               error_code=@errorCode,
+               error_message=@errorMessage,
+               completed_at=COALESCE(completed_at, now()),
+               updated_at=now()
+         WHERE id=@id
+           AND status NOT IN ('completed','failed','timeout');
+        """;
+
+    public async Task<bool> UpdateFailedAsync(Guid id, string status, string? providerStatus, string? responseJson, string errorCode, string errorMessage, CancellationToken ct = default)
     {
         using var conn = await _factory.OpenAsync(ct);
-        await conn.ExecuteAsync(
-            """
-            UPDATE dance_sell.dance_sell_jobs
-               SET status=@status,
-                   provider_status=COALESCE(@providerStatus, provider_status),
-                   error_json=CASE WHEN @responseJson IS NULL THEN error_json ELSE CAST(@responseJson AS jsonb) END,
-                   error_code=@errorCode,
-                   error_message=@errorMessage,
-                   completed_at=COALESCE(completed_at, now()),
-                   updated_at=now()
-             WHERE id=@id
-               AND status NOT IN ('completed','failed','timeout');
-            """,
+        var changed = await conn.ExecuteAsync(
+            UpdateFailedSql,
             new { id, status, providerStatus, responseJson, errorCode, errorMessage });
+        return changed > 0;
     }
 
     public async Task UpdateCallbackAsync(string providerTaskId, string callbackJson, string providerStatus, string? resultVideoUrl, string? errorCode, string? errorMessage, CancellationToken ct = default)

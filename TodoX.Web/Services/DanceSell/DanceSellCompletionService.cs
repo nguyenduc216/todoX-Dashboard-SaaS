@@ -9,6 +9,7 @@ namespace TodoX.Web.Services.DanceSell;
 public interface IDanceSellCompletionService
 {
     Task<DanceSellCompletionResult> CompleteAsync(DanceSellCompletionRequest request, CancellationToken ct = default);
+    Task<DanceSellCompletionResult> FailAsync(DanceSellFailureRequest request, CancellationToken ct = default);
 }
 
 public sealed class DanceSellCompletionService : IDanceSellCompletionService
@@ -111,6 +112,95 @@ public sealed class DanceSellCompletionService : IDanceSellCompletionService
         return DanceSellCompletionResult.Completed(danceJob);
     }
 
+    public async Task<DanceSellCompletionResult> FailAsync(DanceSellFailureRequest request, CancellationToken ct = default)
+    {
+        var danceJob = request.DanceJob
+            ?? (request.ProviderTaskId is null ? null : await _repo.GetByProviderTaskIdAsync(request.ProviderTaskId, ct));
+        if (danceJob is null)
+        {
+            return DanceSellCompletionResult.NotFound();
+        }
+
+        if (danceJob.Status is DanceSellJobStatuses.Completed or DanceSellJobStatuses.Failed or DanceSellJobStatuses.Timeout)
+        {
+            return DanceSellCompletionResult.AlreadyTerminal(danceJob);
+        }
+
+        var responseJson = KieJsonRedactor.Redact(request.ResponseJson);
+        var providerStatus = string.IsNullOrWhiteSpace(request.ProviderStatus)
+            ? KieTaskStatuses.Failed
+            : request.ProviderStatus.Trim();
+        var status = string.IsNullOrWhiteSpace(request.Status)
+            ? DanceSellJobStatuses.Failed
+            : request.Status.Trim();
+        var errorCode = string.IsNullOrWhiteSpace(request.ErrorCode)
+            ? KieErrorCodes.TaskFailed
+            : request.ErrorCode.Trim();
+        var errorMessage = string.IsNullOrWhiteSpace(request.ErrorMessage)
+            ? "KIE task failed."
+            : request.ErrorMessage.Trim();
+
+        var changed = await _repo.UpdateFailedAsync(danceJob.Id, status, providerStatus, responseJson, errorCode, errorMessage, ct);
+        if (!changed)
+        {
+            var current = request.ProviderTaskId is null
+                ? await _repo.GetByIdAsync(danceJob.Id, ct)
+                : await _repo.GetByProviderTaskIdAsync(request.ProviderTaskId, ct);
+            return DanceSellCompletionResult.AlreadyTerminal(current ?? danceJob);
+        }
+
+        if (danceJob.RenderJobId is Guid renderJobId)
+        {
+            await _renderJobs.MarkStatusAsync(renderJobId, RenderJobStatuses.Failed,
+                errorCode: errorCode,
+                errorMessage: errorMessage,
+                ct: ct);
+
+            await _renderJobs.AddEventAsync(renderJobId, "KIE_TASK_FAILED", errorMessage,
+                new
+                {
+                    danceSellJobId = danceJob.Id,
+                    providerTaskId = request.ProviderTaskId ?? danceJob.ProviderTaskId,
+                    providerStatus,
+                    errorCode,
+                    source = request.Source,
+                    permanent = request.Permanent
+                },
+                "error",
+                ct);
+        }
+
+        await _providers.LogUsageAsync(new AiProviderUsageLog
+        {
+            CustomerId = ToBigIntCustomerId(danceJob.CustomerId),
+            ProviderCode = DanceSellConstants.ProviderCode,
+            CapabilityCode = DanceSellConstants.CapabilityCode,
+            FeatureCode = DanceSellConstants.FeatureCode,
+            ModelName = DanceSellConstants.Model,
+            RequestId = danceJob.LogicalRequestId,
+            JobId = danceJob.RenderJobId?.ToString("N"),
+            Quantity = 1,
+            UnitType = "request",
+            UnitCostPoints = 0,
+            TotalPoints = 0,
+            ProviderRawCost = null,
+            Status = "failed",
+            ErrorMessage = errorMessage,
+            MetadataJson = JsonSerializer.Serialize(new
+            {
+                danceSellJobId = danceJob.Id,
+                providerTaskId = request.ProviderTaskId ?? danceJob.ProviderTaskId,
+                providerStatus,
+                errorCode,
+                source = request.Source,
+                permanent = request.Permanent,
+                phase = "phase1_no_billing"
+            }, KieJson.Options)
+        }, ct);
+
+        return DanceSellCompletionResult.Failed(danceJob);
+    }
+
     public static long? ToBigIntCustomerId(Guid? id)
     {
         if (id is null) return null;
@@ -131,9 +221,26 @@ public sealed class DanceSellCompletionRequest
     public string Source { get; set; } = "poll";
 }
 
-public sealed record DanceSellCompletionResult(bool Found, bool CompletedNow, DanceSellJobDto? Job)
+public sealed class DanceSellFailureRequest
 {
-    public static DanceSellCompletionResult NotFound() => new(false, false, null);
-    public static DanceSellCompletionResult AlreadyCompleted(DanceSellJobDto job) => new(true, false, job);
-    public static DanceSellCompletionResult Completed(DanceSellJobDto job) => new(true, true, job);
+    public DanceSellJobDto? DanceJob { get; set; }
+    public string? ProviderTaskId { get; set; }
+    public string? ProviderStatus { get; set; }
+    public string? ResponseJson { get; set; }
+    public string Status { get; set; } = DanceSellJobStatuses.Failed;
+    public string? ErrorCode { get; set; }
+    public string? ErrorMessage { get; set; }
+    public bool Permanent { get; set; } = true;
+    public string Source { get; set; } = "poll";
+}
+
+public sealed record DanceSellCompletionResult(bool Found, bool CompletedNow, bool FailedNow, DanceSellJobDto? Job)
+{
+    public bool TerminalNow => CompletedNow || FailedNow;
+
+    public static DanceSellCompletionResult NotFound() => new(false, false, false, null);
+    public static DanceSellCompletionResult AlreadyCompleted(DanceSellJobDto job) => new(true, false, false, job);
+    public static DanceSellCompletionResult AlreadyTerminal(DanceSellJobDto job) => new(true, false, false, job);
+    public static DanceSellCompletionResult Completed(DanceSellJobDto job) => new(true, true, false, job);
+    public static DanceSellCompletionResult Failed(DanceSellJobDto job) => new(true, false, true, job);
 }
