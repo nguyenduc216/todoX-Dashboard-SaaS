@@ -10,7 +10,7 @@ namespace TodoX.Web.Tests;
 public sealed class DanceSellRenderHandlerTests
 {
     [Fact]
-    public async Task CompleteAsync_LogsCustomerIdFromDanceJob()
+    public async Task CompleteAsync_LogsCustomerGuidFromDanceJob()
     {
         var customerId = Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
         var repo = new FakeDanceSellRepository(CreateJob(status: DanceSellJobStatuses.Rendering, customerId: customerId));
@@ -29,7 +29,8 @@ public sealed class DanceSellRenderHandlerTests
             Source = "poll"
         });
 
-        Assert.Equal(DanceSellCompletionService.ToBigIntCustomerId(customerId), providers.LastUsage?.CustomerId);
+        Assert.Equal(customerId, providers.LastUsage?.CustomerGuid);
+        Assert.Null(providers.LastUsage?.CustomerId);
     }
 
     [Fact]

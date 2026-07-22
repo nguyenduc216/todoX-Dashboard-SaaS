@@ -23,11 +23,13 @@ public interface IAiProviderService
 public sealed class AiProviderService : IAiProviderService
 {
     private readonly AiProviderRepository _repo;
+    private readonly IAiProviderUsageService _usage;
     private readonly ILogger<AiProviderService> _logger;
 
-    public AiProviderService(AiProviderRepository repo, ILogger<AiProviderService> logger)
+    public AiProviderService(AiProviderRepository repo, IAiProviderUsageService usage, ILogger<AiProviderService> logger)
     {
         _repo = repo;
+        _usage = usage;
         _logger = logger;
     }
 
@@ -169,8 +171,8 @@ public sealed class AiProviderService : IAiProviderService
             ("capability_code", log.CapabilityCode),
             ("feature_code", log.FeatureCode),
             ("model_name", log.ModelName),
-            ("request_id", log.RequestId),
-            ("job_id", log.JobId),
+            ("logical_request_id", log.RequestId),
+            ("render_job_id", log.RenderJobId?.ToString("N") ?? log.JobId),
             ("status", log.Status));
 
         // Defensively clip string fields to their column limits before writing.
@@ -178,16 +180,16 @@ public sealed class AiProviderService : IAiProviderService
         log.CapabilityCode = DbDiagnostics.Clip(_logger, table, "capability_code", log.CapabilityCode);
         log.FeatureCode = DbDiagnostics.Clip(_logger, table, "feature_code", log.FeatureCode);
         log.ModelName = DbDiagnostics.Clip(_logger, table, "model_name", log.ModelName);
-        log.RequestId = DbDiagnostics.Clip(_logger, table, "request_id", log.RequestId);
-        log.JobId = DbDiagnostics.Clip(_logger, table, "job_id", log.JobId);
+        log.RequestId = DbDiagnostics.Clip(_logger, table, "logical_request_id", log.RequestId);
         log.UnitType = DbDiagnostics.Clip(_logger, table, "unit_type", log.UnitType);
         log.Status = DbDiagnostics.Clip(_logger, table, "status", log.Status);
+        log.ErrorCode = DbDiagnostics.Clip(_logger, table, "error_code", log.ErrorCode);
         log.ErrorMessage = DbDiagnostics.Clip(_logger, table, "error_message", log.ErrorMessage);
         log.CreatedBy = DbDiagnostics.Clip(_logger, table, "created_by", log.CreatedBy);
 
         try
         {
-            await _repo.InsertUsageLogAsync(log, ct);
+            await _usage.RecordAsync(log, ct);
         }
         catch (Exception ex)
         {

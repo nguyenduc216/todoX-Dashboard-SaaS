@@ -1,0 +1,9 @@
+file,line,symbol_or_query,feature,provider,runtime_category,current_behavior,target_behavior,risk,status
+TodoX.Web/Services/AiProviders/AiImageBillingService.cs,118,IAiImageBillingService,shared,image/video,billing,image-oriented contract owns reserve/complete/reconcile,generic IAiBillingService added with compatibility adapter,medium,adapter retained
+TodoX.Web/Services/AiProviders/AiProviderService.cs,162,LogUsageAsync,shared,all,usage,facade previously inserted legacy request_id/job_id,generic usage service records logical_request_id/render_job_id with idempotency,high,updated
+TodoX.Web/Services/AiProviders/AiProviderUsageService.cs,1,IAiProviderUsageService,shared,all,usage,missing generic service,new generic usage service and repository added,high,added
+TodoX.Web/Services/AiProviders/AiImageRenderRouter.cs,339,AiProviderUsageLog,image,YEScale/OpenRouter/Vertex,usage,usage omitted generic render/task/currency fields,logs customer UUID/render job/provider task/raw JSON when available,medium,updated
+TodoX.Web/Services/DanceSell/DanceSellCompletionService.cs,88,AiProviderUsageLog,Dance Sell,KIE,usage,customer was hashed bigint,customer_id now uses danceJob.CustomerId UUID,high,updated
+TodoX.Web/Services/DanceSell/DanceSellRenderHandler.cs,312,AiProviderUsageLog,Dance Sell,KIE,usage,poll usage used hashed bigint,usage now carries UUID/render_job_id/provider_task_id,high,updated
+database/manual/ai-core-reset/35_task4_billing_contract_fixes.sql,1,billing.ai_billing_records,shared,all,database,generic compatibility columns/checks incomplete,contract columns/checks/indexes added non-destructively,high,executed
+database/manual/ai-core-reset/36_task4_usage_contract_fixes.sql,1,todox_ai_provider_usage_log,shared,all,database,idempotency indexes needed,idempotency/render/provider task indexes added,high,executed

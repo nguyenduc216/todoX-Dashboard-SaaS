@@ -1,0 +1,8 @@
+script,result,notes
+database/manual/ai-core-reset/35_task4_billing_contract_fixes.sql,success,Added billing compatibility columns/state checks/indexes; updated 0 existing rows
+database/manual/ai-core-reset/36_task4_usage_contract_fixes.sql,success,Added usage idempotency/render/provider-task contract; existing columns already present; updated 0 rows
+database/manual/ai-core-reset/37_verify_task4_runtime.sql,success,Task 4 runtime verification passed
+database/manual/ai-core-reset/30_verify_schema.sql,success,19 required tables exist
+database/manual/ai-core-reset/31_verify_provider_seed.sql,success,5 providers; KIE account rate limit provisional/null
+database/manual/ai-core-reset/32_verify_runtime_contract.sql,success,6 removed tables absent
+database/manual/ai-core-reset/34_verify_task3_runtime.sql,success,11/11 checks; capability count 36

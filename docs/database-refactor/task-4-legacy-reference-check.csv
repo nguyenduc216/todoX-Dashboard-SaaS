@@ -1,0 +1,6 @@
+scope,check,result
+database,removed legacy tables absent,passed
+runtime,Task 3 source check for removed tables,passed
+usage,legacy request_id/job_id insert path removed from IAiProviderService runtime,passed
+billing,image-only interfaces still present as compatibility adapters,known limitation
+secrets,provider JSON key dirty local file excluded from staging,passed

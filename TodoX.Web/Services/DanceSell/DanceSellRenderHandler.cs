@@ -311,12 +311,15 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
     {
         await _providers.LogUsageAsync(new AiProviderUsageLog
         {
-            CustomerId = DanceSellCompletionService.ToBigIntCustomerId(danceJob.CustomerId),
+            CustomerGuid = danceJob.CustomerId,
             ProviderCode = danceJob.MotionProviderCode ?? danceJob.ProviderCode,
             CapabilityCode = DanceSellConstants.CapabilityCode,
             FeatureCode = DanceSellConstants.FeatureCode,
+            OperationType = DanceSellOperationTypes.MotionVideo,
             ModelName = danceJob.MotionProviderModel ?? danceJob.ProviderModel,
+            ProviderTaskId = taskId,
             RequestId = danceJob.LogicalRequestId,
+            RenderJobId = renderJob.Id,
             JobId = renderJob.Id.ToString("N"),
             Quantity = 1,
             UnitType = "request",

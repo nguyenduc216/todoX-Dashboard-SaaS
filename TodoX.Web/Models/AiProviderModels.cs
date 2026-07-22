@@ -49,22 +49,36 @@ public sealed class AiProviderUsageLog
 {
     public long Id { get; set; }
     public long? CustomerId { get; set; }
+    public Guid? CustomerGuid { get; set; }
+    public Guid? UserId { get; set; }
     public long? ProviderId { get; set; }
     public long? ProviderCapabilityId { get; set; }
+    public Guid? ProviderAccountId { get; set; }
     public string? ProviderCode { get; set; }
     public string? CapabilityCode { get; set; }
     public string? FeatureCode { get; set; }
+    public string? OperationType { get; set; }
     public string? ModelName { get; set; }
+    public string? ProviderTaskId { get; set; }
+    public int AttemptNo { get; set; } = 1;
     public string? RequestId { get; set; }
     public string? JobId { get; set; }
+    public Guid? RenderJobId { get; set; }
     public decimal Quantity { get; set; } = 1;
     public string? UnitType { get; set; }
     public decimal? UnitCostPoints { get; set; }
     public decimal? TotalPoints { get; set; }
     public decimal? ProviderRawCost { get; set; }
+    public string? ProviderCostCurrency { get; set; }
+    public string? UsageSource { get; set; }
+    public string? ProviderUsageJson { get; set; }
+    public string? IdempotencyKey { get; set; }
     public string? Status { get; set; }
+    public string? ErrorCode { get; set; }
     public string? ErrorMessage { get; set; }
     public string? MetadataJson { get; set; }
+    public string? RequestJson { get; set; }
+    public string? ResponseJson { get; set; }
     public string? CreatedBy { get; set; }
     public DateTime CreatedAt { get; set; }
 }

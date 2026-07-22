@@ -87,15 +87,18 @@ public sealed class DanceSellCompletionService : IDanceSellCompletionService
 
         await _providers.LogUsageAsync(new AiProviderUsageLog
         {
-            CustomerId = ToBigIntCustomerId(danceJob.CustomerId),
+            CustomerGuid = danceJob.CustomerId,
             ProviderCode = danceJob.MotionProviderCode ?? danceJob.ProviderCode,
             CapabilityCode = DanceSellConstants.CapabilityCode,
             FeatureCode = DanceSellConstants.FeatureCode,
+            OperationType = DanceSellOperationTypes.MotionVideo,
             ModelName = danceJob.MotionProviderModel ?? danceJob.ProviderModel,
+            ProviderTaskId = request.ProviderTaskId ?? danceJob.ProviderTaskId,
             RequestId = danceJob.LogicalRequestId,
+            RenderJobId = danceJob.RenderJobId,
             JobId = danceJob.RenderJobId?.ToString("N"),
             Quantity = 1,
-            UnitType = "request",
+            UnitType = request.CreditsConsumed is null ? "request" : "credits",
             UnitCostPoints = 0,
             TotalPoints = 0,
             ProviderRawCost = null,
@@ -177,12 +180,15 @@ public sealed class DanceSellCompletionService : IDanceSellCompletionService
 
         await _providers.LogUsageAsync(new AiProviderUsageLog
         {
-            CustomerId = ToBigIntCustomerId(danceJob.CustomerId),
+            CustomerGuid = danceJob.CustomerId,
             ProviderCode = danceJob.MotionProviderCode ?? danceJob.ProviderCode,
             CapabilityCode = DanceSellConstants.CapabilityCode,
             FeatureCode = DanceSellConstants.FeatureCode,
+            OperationType = DanceSellOperationTypes.MotionVideo,
             ModelName = danceJob.MotionProviderModel ?? danceJob.ProviderModel,
+            ProviderTaskId = request.ProviderTaskId ?? danceJob.ProviderTaskId,
             RequestId = danceJob.LogicalRequestId,
+            RenderJobId = danceJob.RenderJobId,
             JobId = danceJob.RenderJobId?.ToString("N"),
             Quantity = 1,
             UnitType = "request",

@@ -1,0 +1,6 @@
+feature_code,capability_code,operation_type,job_type,usage_unit,billing_policy,artifact_type,logical_request_id_format,status
+dance_sell,dance_sell_motion_video,motion_video,dance_sell,credits/request,generic usage plus existing Dance Sell billing fields,video,dance sell logical_request_id,updated
+avatar_builder,avatar_generation,ai_image,ai_image,image,generic billing adapter plus generic usage,image,caller request id,compatible
+render_job_scene_image,scene_image_generation,scene_image_batch,scene_image,image,generic billing adapter plus generic usage,image,render job logical id,compatible
+render_job_scene_video,scene_video_generation,scene_video,scene_video,video_seconds/request,generic billing adapter plus generic usage,video,render job logical id,compatible
+service_thumbnail,thumbnail_generation,thumbnail,ai_image,image,generic billing adapter plus generic usage,image,caller request id,compatible
