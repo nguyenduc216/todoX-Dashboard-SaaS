@@ -277,6 +277,7 @@ public sealed class AiBillingRepository : IAiBillingRepository
               FROM claimed
              WHERE b.id=claimed.id
              RETURNING b.id AS Id,
+                       b.provider_account_id AS ProviderAccountId,
                        b.logical_request_id AS LogicalRequestId,
                        b.status AS Status,
                        b.requested_model AS RequestedModel,
@@ -500,7 +501,7 @@ public sealed class AiBillingRepository : IAiBillingRepository
             """
             INSERT INTO billing.ai_billing_records
                 (id, tenant_id, logical_request_id, render_job_id, customer_id, user_id, wallet_id,
-                 payer_type, payer_customer_id, payer_wallet_id, provider_id, provider_capability_id,
+                 payer_type, payer_customer_id, payer_wallet_id, provider_id, provider_capability_id, provider_account_id,
                  provider_code, capability_code, feature_code, requested_model, status, billing_status, refund_status,
                  estimated_points, reserved_points, charged_points, refunded_points,
                  customer_charged_points, system_charged_points, provider_estimated_cost, provider_estimated_cost_usd,
@@ -509,7 +510,7 @@ public sealed class AiBillingRepository : IAiBillingRepository
                  reservation_transaction_id, wallet_transaction_id, reserved_until, created_at, updated_at)
             VALUES
                 (gen_random_uuid(), @tenant, @LogicalRequestId, @renderJobId, @CustomerId, @UserId, @walletId,
-                 @PayerType, @PayerCustomerId, @walletId, @ProviderId, @ProviderCapabilityId,
+                 @PayerType, @PayerCustomerId, @walletId, @ProviderId, @ProviderCapabilityId, @ProviderAccountId,
                  @ProviderCode, @CapabilityCode, @FeatureCode, @RequestedModel, @status, @billingStatus, 'none',
                  @reservedPoints, @reservedPoints, 0, 0,
                  @customerPoints, @systemPoints, @ProviderEstimatedCostUsd, @ProviderEstimatedCostUsd,
@@ -530,6 +531,7 @@ public sealed class AiBillingRepository : IAiBillingRepository
                 PayerCustomerId = payer.PayerCustomerId,
                 request.ProviderId,
                 request.ProviderCapabilityId,
+                request.ProviderAccountId,
                 request.ProviderCode,
                 request.CapabilityCode,
                 request.FeatureCode,

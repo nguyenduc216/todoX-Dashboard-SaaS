@@ -2,17 +2,28 @@
 
 ## Executive Decision
 
-NO-GO.
+GO for local source/database hardening completion. HOLD for production deployment until non-paid environment smoke, YEScale MCP verification, and approved paid provider smoke are completed.
 
 ## Branch And Commit
 
 - Branch: `refactor/ai-core-reset`
 - Base commit: `9cfb89e757c04b23e03791e892508d6c816a107f`
-- New commit: `3cec38973d439b99fe570225bb3fe29698c18204`
+- New commit: see final handoff and `git log -1 --format=%H` after this report is committed.
 
 ## Database Migration Status
 
-Standalone SQL scripts `43`, `44`, and `45` were created. They were not executed because `psql` is unavailable in PATH.
+Standalone SQL scripts `43`, `44`, and `45` were executed on `todo_saas` using a temporary Npgsql runner because `psql` is unavailable in PATH.
+
+Output file:
+
+- `docs/database-refactor/phase-5-1-sql-43-45-output.txt`
+
+Result:
+
+- `43_phase5_1_billing_hardening.sql`: OK.
+- `44_phase5_1_completion_hardening.sql`: OK.
+- `45_verify_phase5_1_prod_readiness.sql`: OK.
+- Verification notice: `Phase 5.1 production-readiness SQL verification passed.`
 
 ## Generic Billing Ownership
 
@@ -24,23 +35,23 @@ Refund and reconciliation moved into `AiBillingRepository` with transaction scop
 
 ## Provider Coverage Matrix
 
-Provider coverage is blocked. See `phase-5-1-provider-coverage.csv`.
+Provider source/DB hardening coverage is complete for the requested credential resolver paths. See `phase-5-1-provider-coverage.csv`.
 
 ## Credential Access Review
 
-Credential access is blocked for production because KIE, YEScale, OpenRouter, and Vertex still have global/direct credential paths.
+KIE, YEScale, OpenRouter, and Vertex direct credential paths were migrated to provider account resolver usage. Source scan found no remaining direct production credential path in source/config files under review.
 
 ## Lease And Concurrency Verification
 
-Source-level lease patterns exist, but DB integration verification is skipped. NO-GO.
+PostgreSQL integration test `ProviderAccountConcurrencyIntegration_SkipLockedAndLeaseLimits` is enabled and passing.
 
 ## Wallet Locking Verification
 
-Source-level wallet locks exist in generic billing repository. Real concurrent DB test is skipped. NO-GO.
+PostgreSQL integration test `WalletLockingIntegration_ConcurrentSameLogicalRequest` is enabled and passing.
 
 ## Callback/Poll Race Verification
 
-Shared completion service has source-level idempotency markers. Real callback/poll DB race test is skipped. NO-GO.
+PostgreSQL integration test `CallbackPollRaceIntegration_CompletesExactlyOnce` is enabled and passing.
 
 ## Operation Logs
 
@@ -60,14 +71,15 @@ Paid provider smoke: NOT EXECUTED - awaiting explicit user approval.
 
 ## Build/Test/Publish
 
-- Restore: passed.
-- Build: passed.
-- Tests: passed with 4 skipped.
-- Publish: passed to `artifacts\publish\phase5-1-prod-hardening`.
+- Build: `dotnet build TodoX.Dashboard.sln -c Release` passed with 0 warnings and 0 errors.
+- Phase 5.1 integration tests: `dotnet test TodoX.Dashboard.sln -c Release --no-build --filter "FullyQualifiedName~AiCoreRuntimePhase51Tests"` passed with 7 passed, 0 skipped, 0 failed.
+- Full tests: `dotnet test TodoX.Dashboard.sln -c Release --no-build` passed with 253 passed, 1 skipped, 0 failed.
+- Lint/check: `git diff --check` passed; only line-ending warnings were printed.
+- Publish: `dotnet publish TodoX.Web\TodoX.Web.csproj -c Release --no-restore -o artifacts\publish\phase5-1-prod-hardening` passed.
 
 ## Configuration Readiness
 
-Not production-ready. Several credential references are unverified and several active providers still use direct/global config paths.
+Provider credential direct paths are removed from source/config. Remaining deployment config checks still need to be verified in the target runtime without printing secret values.
 
 ## Security Review
 
@@ -75,19 +87,16 @@ No new secret values were added to source reports. Pre-existing local key file r
 
 ## Known Risks
 
-- SQL hardening not executed.
-- DB integration tests skipped.
-- Provider account lease coverage not complete.
-- Direct/global credential paths remain.
+- YEScale MCP is unavailable: `yescale_get_current_user` returned `YEScale request failed: fetch failed`.
+- Paid provider smoke was not executed.
+- MinIO/public callback URL/worker runtime settings were not live-smoked in this turn.
 - Dashboard naming still references image billing adapter for read-only compatibility.
 
 ## Required Manual Actions
 
-1. Install PostgreSQL CLI or provide Testcontainers/disposable PostgreSQL for integration tests.
-2. Execute SQL `43`, `44`, then `45` against `todo_saas`.
-3. Migrate all provider clients to account credential resolver.
-4. Run DB concurrency/race tests and live non-paid smoke.
-5. Approve and run one low-cost paid smoke only after the above passes.
+1. Restore YEScale MCP connectivity and reverify YEScale metadata from the authoritative live source.
+2. Run target-environment non-paid smoke for provider diagnostics, operation logs, callback URL, and worker settings.
+3. Approve and run one low-cost paid smoke after non-paid smoke passes.
 
 ## Deployment Plan
 
@@ -99,4 +108,4 @@ Use `phase-5-1-rollback-checklist.md`.
 
 ## Final Decision
 
-NO-GO.
+Local Phase 5.1 hardening: GO. Production deployment: HOLD pending live config/MCP/smoke gates.

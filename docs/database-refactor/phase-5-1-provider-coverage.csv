@@ -1,17 +1,17 @@
 workflow,status,evidence,blocker
-KIE reference image,blocked,Kie client exists and Dance Sell generated reference uses provider flow,KieOptions still allows direct KIE_API_KEY before full account credential injection is proven
-KIE motion/video,blocked,DanceSellRenderHandler and KieClient exist,full lease-first submission not proven by DB integration test
-YEScale image,blocked,YEScaleImageService and task client exist,YEScaleTaskClient still uses YEScaleOptions global access key
-YEScale video,blocked,SceneVideoWorkerHandler uses YEScale pricing/client path,lease-first and credential resolver coverage not fully proven
-OpenRouter,blocked,OpenRouterImageService supports provider api_key_config_name,service still falls back to OpenRouter:ApiKey
-Vertex image,blocked,VertexClient uses service-account/token configuration directly,not migrated to provider account credential resolver
-scene image,blocked,SceneImageBatchRenderHandler exists,active path still includes Vertex/direct provider services
-scene video,blocked,SceneVideoWorkerHandler exists,uses obsolete image billing adapter and needs lease-first proof
-avatar,blocked,Avatar/Gemini services exist,credential/account lease routing not proven
-avatar builder,blocked,Avatar builder feature exists,provider account routing not proven
-character,blocked,AiCharacter/OpenRouter services exist,OpenRouter fallback secret path remains
-creative image,blocked,ImageAICreative path exists,provider account lease coverage not proven
-thumbnail/poster,blocked,thumbnail/render services exist,provider account lease coverage not proven
-Dance Sell direct reference,blocked,DanceSell phase 2 services exist,full DB race integration skipped
-Dance Sell generated reference,blocked,generated reference workflow exists,full approval to motion chain not smoke tested
-Dance Sell motion,blocked,DanceSellRenderHandler and completion service exist,callback/poll DB race integration skipped
+KIE reference image,complete,Kie client requires ResolvedAiProviderCredential and Dance Sell generated reference resolves provider account credential before submit,paid smoke not executed
+KIE motion/video,complete,DanceSellRenderHandler resolves provider account credential for submit and poll; callback/poll race integration passes,paid smoke not executed
+YEScale image,complete,AiImageRenderRouter claims provider account lease and passes resolved API key to YEScale request,YEScale MCP unavailable for live metadata verification
+YEScale video,complete,SceneVideoWorkerHandler claims provider account lease and passes resolved API key to submit/poll,YEScale MCP unavailable for live metadata verification
+OpenRouter,complete,OpenRouterImageService requires caller-supplied account-resolved API key and no longer falls back to OpenRouter:ApiKey,paid smoke not executed
+Vertex image,complete,VertexClient requires provider-account service-account JSON credential and no longer reads ServiceAccountKeyPath,paid smoke not executed
+scene image,complete,AiImageRenderRouter enforces lease-first for external image providers and integration tests cover provider lease concurrency,remaining unrelated skipped scene rerender test
+scene video,complete,SceneVideoWorkerHandler uses provider account lease and generic billing adapter path with resolved YEScale credential,YEScale MCP unavailable for live metadata verification
+avatar,partial,GeminiPromptService resolves google-vertex-ai default provider credential,live UI smoke not executed
+avatar builder,partial,Vertex/Gemini credential path now resolver-based where used,live UI smoke not executed
+character,complete,AiCharacter/OpenRouter service no longer has global OpenRouter API key fallback,paid smoke not executed
+creative image,complete,AiImageRenderRouter routes provider account credential into external image providers,paid smoke not executed
+thumbnail/poster,partial,Shared image route is lease-first for external providers,live UI smoke not executed
+Dance Sell direct reference,complete,DanceSell phase 2 direct reference stores provider account and PostgreSQL callback/poll race test passes,paid smoke not executed
+Dance Sell generated reference,partial,generated reference provider credential path migrated; approval-to-motion chain not paid-smoked,paid smoke not executed
+Dance Sell motion,complete,DanceSellRenderHandler and shared completion service have duplicate callback and poll-after-callback coverage,paid smoke not executed

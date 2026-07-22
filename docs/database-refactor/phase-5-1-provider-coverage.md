@@ -1,13 +1,18 @@
 # Phase 5.1 Provider Coverage
 
-No active provider workflow is reported as `complete` for production readiness. Several paths compile and have source-level coverage, but Phase 5.1 requires proof that every active submission path is account-lease-first, credential-resolver-first, idempotent, and DB-race-tested.
+Active KIE, YEScale, OpenRouter, and Vertex credential submission paths now use provider account credential resolution instead of global/direct application secrets.
 
-Main blockers:
+Coverage completed:
 
-- `YEScaleTaskClient` still reads global `YEScaleOptions.AccessKey`.
-- `KieClient` can still use `KieOptions.ApiKey`/`KIE_API_KEY` directly.
-- `OpenRouterImageService` still falls back to `OpenRouter:ApiKey`.
-- `VertexClient` still uses Vertex configuration/service-account token flow directly.
-- DB integration suites for wallet locking, provider leases, and callback/poll races are skipped.
+- KIE Dance Sell reference and motion paths resolve provider account credentials before client calls.
+- YEScale image and scene video paths claim provider account leases and pass resolved API keys to submit/poll.
+- OpenRouter image path receives the resolved API key from the image render router.
+- Vertex image, Gemini prompt, and marketing brief analyzer paths resolve default provider account credentials.
+- PostgreSQL integration tests for wallet locking, provider leases, and callback/poll races are enabled and passing.
 
-Final provider coverage status: `blocked`.
+Limitations:
+
+- YEScale MCP was unavailable (`fetch failed`), so live YEScale metadata was not reverified in this task.
+- Paid provider smoke was not executed.
+
+Final provider coverage status: `source-and-db-hardening-complete; live-paid-smoke-pending`.

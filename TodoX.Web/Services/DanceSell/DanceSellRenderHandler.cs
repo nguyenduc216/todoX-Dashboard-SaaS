@@ -18,6 +18,7 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
     private readonly IDanceSellCompletionService _completion;
     private readonly IAiProviderService _providers;
     private readonly IDanceSellOperationRepository _operations;
+    private readonly IAiProviderCredentialResolver _credentials;
     private readonly IOptionsMonitor<KieOptions> _options;
     private readonly ILogger<DanceSellRenderHandler> _logger;
 
@@ -32,6 +33,7 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
         IDanceSellCompletionService completion,
         IAiProviderService providers,
         IDanceSellOperationRepository operations,
+        IAiProviderCredentialResolver credentials,
         IOptionsMonitor<KieOptions> options,
         ILogger<DanceSellRenderHandler> logger)
     {
@@ -43,6 +45,7 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
         _completion = completion;
         _providers = providers;
         _operations = operations;
+        _credentials = credentials;
         _options = options;
         _logger = logger;
     }
@@ -105,7 +108,8 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
         var sw = Stopwatch.StartNew();
         try
         {
-            var submitted = await _client.CreateTaskAsync(payload, ct);
+            var credential = await ResolveCredentialAsync(danceJob.MotionProviderAccountId, ct);
+            var submitted = await _client.CreateTaskAsync(payload, credential, ct);
             sw.Stop();
             var responseJson = KieJsonRedactor.Redact(submitted.RawResponse) ?? "{}";
             await _repo.UpdateSubmittedAsync(danceJob.Id, requestJson, submitted.TaskId!, responseJson, ct);
@@ -174,7 +178,8 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
 
         try
         {
-            var detail = await _client.GetTaskDetailAsync(danceJob.ProviderTaskId!, ct);
+            var credential = await ResolveCredentialAsync(danceJob.MotionProviderAccountId, ct);
+            var detail = await _client.GetTaskDetailAsync(danceJob.ProviderTaskId!, credential, ct);
             var responseJson = KieJsonRedactor.Redact(detail.RawResponse) ?? "{}";
             if (detail.Status == KieTaskStatuses.Completed)
             {
@@ -289,6 +294,16 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
     {
         await _renderJobs.ScheduleRetryAsync(renderJob.Id, _options.CurrentValue.PollInterval, "KIE_POLL_SCHEDULED", message, ct);
         throw new RenderJobDeferredException(message);
+    }
+
+    private async Task<ResolvedAiProviderCredential> ResolveCredentialAsync(Guid? providerAccountId, CancellationToken ct)
+    {
+        if (providerAccountId is not Guid id)
+        {
+            throw new KieProviderException("KIE provider account is required before submit/poll.", KieErrorCodes.Unauthorized, transient: false);
+        }
+
+        return await _credentials.ResolveAsync(id, ct: ct);
     }
 
     private async Task FailAsync(RenderJobDto renderJob, DanceSellJobDto danceJob, string errorCode, string errorMessage, string? rawResponse, bool permanent, CancellationToken ct, string status = DanceSellJobStatuses.Failed)

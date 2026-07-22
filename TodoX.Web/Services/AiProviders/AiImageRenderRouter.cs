@@ -78,6 +78,8 @@ public sealed class AiImageRenderRouter : IAiImageRenderRouter
     private readonly AiProviderRepository _repo;
     private readonly IAiImageProviderFactory _imageProviders;
     private readonly IAiImageBillingService _billing;
+    private readonly IAiProviderAccountRepository _accounts;
+    private readonly IAiProviderCredentialResolver _credentials;
     private readonly ILogger<AiImageRenderRouter> _logger;
 
     public AiImageRenderRouter(
@@ -85,12 +87,16 @@ public sealed class AiImageRenderRouter : IAiImageRenderRouter
         AiProviderRepository repo,
         IAiImageProviderFactory imageProviders,
         IAiImageBillingService billing,
+        IAiProviderAccountRepository accounts,
+        IAiProviderCredentialResolver credentials,
         ILogger<AiImageRenderRouter> logger)
     {
         _providers = providers;
         _repo = repo;
         _imageProviders = imageProviders;
         _billing = billing;
+        _accounts = accounts;
+        _credentials = credentials;
         _logger = logger;
     }
 
@@ -115,6 +121,12 @@ public sealed class AiImageRenderRouter : IAiImageRenderRouter
         var logicalRequestId = ResolveLogicalRequestId(request);
         request.RequestId ??= logicalRequestId;
         request.JobId ??= request.RenderJobId;
+        var providerAccount = await ClaimProviderAccountAsync(request, option, cancellationToken);
+        ResolvedAiProviderCredential? credential = null;
+        if (providerAccount.ProviderAccountId is Guid providerAccountId)
+        {
+            credential = await _credentials.ResolveAsync(providerAccountId, ct: cancellationToken);
+        }
         var billingCost = _billing.BuildConfiguredCost(unitCost, quantity);
         var tariffSnapshotJson = BuildTariffSnapshotJson(detail?.Capabilities, option.CapabilityCode, billingCost.ExchangeRateVndPerUsd, billingCost.TodoXVndPerPoint);
         ValidateYEScaleTariffCoverage(factoryKey, option.ModelName, detail?.ConfigJson, capability?.ConfigJson, tariffSnapshotJson);
@@ -131,6 +143,7 @@ public sealed class AiImageRenderRouter : IAiImageRenderRouter
             UserId = request.UserId,
             ProviderId = option.ProviderId,
             ProviderCapabilityId = option.ProviderCapabilityId,
+            ProviderAccountId = providerAccount.ProviderAccountId,
             ProviderCode = option.ProviderCode,
             CapabilityCode = option.CapabilityCode,
             FeatureCode = request.FeatureCode,
@@ -144,6 +157,7 @@ public sealed class AiImageRenderRouter : IAiImageRenderRouter
 
         if (!reservation.Ok || !reservation.ShouldSubmitProvider)
         {
+            await ReleaseProviderAccountAsync(providerAccount, reservation.Ok ? "already_reserved" : "billing_blocked", CancellationToken.None);
             _logger.LogWarning(
                 "AI_IMAGE_BILLING_BLOCKED capability={CapabilityCode} feature={FeatureCode} logicalRequestId={LogicalRequestId} status={Status} error={Error}",
                 request.CapabilityCode, request.FeatureCode, logicalRequestId, reservation.Status, reservation.ErrorMessage);
@@ -203,12 +217,15 @@ public sealed class AiImageRenderRouter : IAiImageRenderRouter
                 BaseUrlOverride = detail?.BaseUrl,
                 EndpointPath = capability?.EndpointPath,
                 ApiKeyConfigName = detail?.ApiKeyConfigName,
+                ProviderAccountId = providerAccount.ProviderAccountId,
+                ApiKey = credential?.SecretValue,
                 ProviderConfigJson = detail?.ConfigJson,
                 CapabilityConfigJson = capability?.ConfigJson
             }, cancellationToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            await ReleaseProviderAccountAsync(providerAccount, "submit_failed", CancellationToken.None);
             await _billing.CompleteAsync(new AiImageBillingCompleteRequest
             {
                 LogicalRequestId = logicalRequestId,
@@ -220,6 +237,7 @@ public sealed class AiImageRenderRouter : IAiImageRenderRouter
         }
         catch (OperationCanceledException ex)
         {
+            await ReleaseProviderAccountAsync(providerAccount, "cancelled", CancellationToken.None);
             if (providerSubmitted)
             {
                 await _billing.MarkPendingReconciliationAsync(new AiImageBillingPendingReconciliationRequest
@@ -277,6 +295,7 @@ public sealed class AiImageRenderRouter : IAiImageRenderRouter
         }
         if (!billingCompletion.Ok)
         {
+            await ReleaseProviderAccountAsync(providerAccount, "billing_completion_failed", CancellationToken.None);
             _logger.LogError(
                 "AI_IMAGE_BILLING_COMPLETE_FAILED capability={CapabilityCode} feature={FeatureCode} logicalRequestId={LogicalRequestId} status={Status} error={Error}",
                 request.CapabilityCode, request.FeatureCode, logicalRequestId, billingCompletion.Status, billingCompletion.ErrorMessage);
@@ -343,6 +362,7 @@ public sealed class AiImageRenderRouter : IAiImageRenderRouter
             UserId = request.UserId,
             ProviderId = option.ProviderId,
             ProviderCapabilityId = option.ProviderCapabilityId,
+            ProviderAccountId = providerAccount.ProviderAccountId,
             ProviderCode = option.ProviderCode,
             CapabilityCode = option.CapabilityCode,
             FeatureCode = request.FeatureCode,
@@ -386,7 +406,49 @@ public sealed class AiImageRenderRouter : IAiImageRenderRouter
             CreatedBy = request.CreatedBy
         }, cancellationToken);
 
+        await ReleaseProviderAccountAsync(providerAccount, response.Success ? "completed" : "failed", CancellationToken.None);
+
         return result;
+    }
+
+    private async Task<AiProviderAccountSelectionResult> ClaimProviderAccountAsync(
+        AiImageRenderRequest request,
+        ProviderOptionDto option,
+        CancellationToken ct)
+    {
+        var factoryKey = ProviderCodeMap.ToFactoryKey(option.ProviderCode);
+        if (factoryKey.Equals("todox_image", StringComparison.OrdinalIgnoreCase))
+        {
+            return new AiProviderAccountSelectionResult(false, null, null, option.ProviderId, option.ProviderCapabilityId, option.ProviderCode, null, null, "LOCAL_PROVIDER_NO_LEASE_REQUIRED");
+        }
+
+        if (!Guid.TryParse(request.RenderJobId ?? request.JobId, out var renderJobId))
+        {
+            throw new InvalidOperationException("AI_PROVIDER_RENDER_JOB_REQUIRED_FOR_ACCOUNT_LEASE");
+        }
+
+        var claim = await _accounts.ClaimAccountAsync(new AiProviderAccountSelectionRequest(
+            renderJobId,
+            option.ProviderCode,
+            option.CapabilityCode,
+            request.FileCategory,
+            option.ModelName,
+            "ai-image-router",
+            TimeSpan.FromMinutes(15)), ct);
+        if (!claim.Claimed || claim.ProviderAccountId is null)
+        {
+            throw new InvalidOperationException(claim.Reason ?? "AI_PROVIDER_ACCOUNT_CLAIM_FAILED");
+        }
+
+        return claim;
+    }
+
+    private async Task ReleaseProviderAccountAsync(AiProviderAccountSelectionResult claim, string reason, CancellationToken ct)
+    {
+        if (claim.LeaseId is Guid leaseId)
+        {
+            await _accounts.ReleaseLeaseAsync(leaseId, "ai-image-router", reason, ct);
+        }
     }
 
     private static string? SerializeMetadata(object? metadata, string? providerUsageJson)

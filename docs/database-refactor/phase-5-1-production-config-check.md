@@ -5,10 +5,10 @@ Values were not printed or recorded.
 | Config item | Status |
 | --- | --- |
 | Database connection | present |
-| KIE_API_KEY | not verified |
-| YEScale credential reference | not verified |
-| OpenRouter credential reference | not verified |
-| Vertex credential reference/service-account location | present but production-blocking until account resolver migration |
+| KIE provider account credential reference | resolved through provider account resolver; secret value not printed |
+| YEScale provider account credential reference | resolved through provider account resolver; YEScale MCP unavailable for live metadata |
+| OpenRouter provider account credential reference | resolved through provider account resolver; global `OpenRouter:ApiKey` fallback removed |
+| Vertex provider account service-account JSON reference | resolved through provider account resolver; `Vertex:ServiceAccountKeyPath` removed |
 | MinIO endpoint/bucket/public base URL | not verified |
 | Callback public base URL | not verified |
 | Render worker settings | present |
@@ -19,4 +19,4 @@ Values were not printed or recorded.
 | Billing feature flags | not verified |
 | Point deduction feature flag | not verified |
 
-Readiness impact: NO-GO until all active provider credentials are account-scoped and config references are verified without exposing values.
+Readiness impact: provider credential access is now account-scoped in source. External service live smoke and remaining deployment config verification are still required before production deployment.

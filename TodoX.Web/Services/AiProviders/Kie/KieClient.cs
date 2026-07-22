@@ -3,14 +3,15 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
+using TodoX.Web.Services.AiProviders;
 
 namespace TodoX.Web.Services.AiProviders.Kie;
 
 public interface IKieClient
 {
-    Task<KieCreateTaskResult> CreateTaskAsync(KieMotionControlRequest request, CancellationToken cancellationToken);
-    Task<KieCreateTaskResult> CreateTaskAsync<TRequest>(TRequest request, CancellationToken cancellationToken);
-    Task<KieTaskDetailResult> GetTaskDetailAsync(string taskId, CancellationToken cancellationToken);
+    Task<KieCreateTaskResult> CreateTaskAsync(KieMotionControlRequest request, ResolvedAiProviderCredential credential, CancellationToken cancellationToken);
+    Task<KieCreateTaskResult> CreateTaskAsync<TRequest>(TRequest request, ResolvedAiProviderCredential credential, CancellationToken cancellationToken);
+    Task<KieTaskDetailResult> GetTaskDetailAsync(string taskId, ResolvedAiProviderCredential credential, CancellationToken cancellationToken);
     KieCallbackResult ParseCallback(string rawJson);
 }
 
@@ -30,17 +31,17 @@ public sealed class KieClient : IKieClient
         _logger = logger;
     }
 
-    public async Task<KieCreateTaskResult> CreateTaskAsync(KieMotionControlRequest request, CancellationToken cancellationToken)
+    public async Task<KieCreateTaskResult> CreateTaskAsync(KieMotionControlRequest request, ResolvedAiProviderCredential credential, CancellationToken cancellationToken)
     {
-        return await CreateTaskAsyncInternal(request, cancellationToken);
+        return await CreateTaskAsyncInternal(request, credential, cancellationToken);
     }
 
-    public async Task<KieCreateTaskResult> CreateTaskAsync<TRequest>(TRequest request, CancellationToken cancellationToken)
+    public async Task<KieCreateTaskResult> CreateTaskAsync<TRequest>(TRequest request, ResolvedAiProviderCredential credential, CancellationToken cancellationToken)
     {
-        return await CreateTaskAsyncInternal(request, cancellationToken);
+        return await CreateTaskAsyncInternal(request, credential, cancellationToken);
     }
 
-    public async Task<KieTaskDetailResult> GetTaskDetailAsync(string taskId, CancellationToken cancellationToken)
+    public async Task<KieTaskDetailResult> GetTaskDetailAsync(string taskId, ResolvedAiProviderCredential credential, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(taskId))
         {
@@ -52,7 +53,7 @@ public sealed class KieClient : IKieClient
         timeout.CancelAfter(options.HttpTimeout);
 
         var path = $"{RecordInfoPath}?taskId={Uri.EscapeDataString(taskId.Trim())}";
-        using var message = BuildMessage(HttpMethod.Get, BuildUrl(options, path), options, body: null);
+        using var message = BuildMessage(HttpMethod.Get, BuildUrl(options, path), credential, body: null);
         using var response = await SendAsync(message, timeout.Token, cancellationToken);
         var raw = await ReadContentAsync(response, timeout.Token, cancellationToken);
         if (!IsSuccess(response.StatusCode))
@@ -117,10 +118,14 @@ public sealed class KieClient : IKieClient
         }
     }
 
-    private static HttpRequestMessage BuildMessage(HttpMethod method, Uri uri, KieOptions options, string? body)
+    private static HttpRequestMessage BuildMessage(HttpMethod method, Uri uri, ResolvedAiProviderCredential credential, string? body)
     {
         var message = new HttpRequestMessage(method, uri);
-        message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", options.GetApiKeyOrThrow());
+        if (string.IsNullOrWhiteSpace(credential.SecretValue))
+        {
+            throw new KieProviderException("KIE provider account credential is missing.", KieErrorCodes.Unauthorized, transient: false);
+        }
+        message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", credential.SecretValue);
         if (body is not null)
         {
             message.Content = new StringContent(body, Encoding.UTF8, "application/json");
@@ -138,14 +143,14 @@ public sealed class KieClient : IKieClient
 
     private static bool IsSuccess(HttpStatusCode statusCode) => (int)statusCode is >= 200 and <= 299;
 
-    private async Task<KieCreateTaskResult> CreateTaskAsyncInternal<TRequest>(TRequest request, CancellationToken cancellationToken)
+    private async Task<KieCreateTaskResult> CreateTaskAsyncInternal<TRequest>(TRequest request, ResolvedAiProviderCredential credential, CancellationToken cancellationToken)
     {
         var options = _options.CurrentValue;
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(options.HttpTimeout);
 
         var body = JsonSerializer.Serialize(request, KieJson.Options);
-        using var message = BuildMessage(HttpMethod.Post, BuildUrl(options, CreateTaskPath), options, body);
+        using var message = BuildMessage(HttpMethod.Post, BuildUrl(options, CreateTaskPath), credential, body);
         using var response = await SendAsync(message, timeout.Token, cancellationToken);
         var raw = await ReadContentAsync(response, timeout.Token, cancellationToken);
         if (!IsSuccess(response.StatusCode))

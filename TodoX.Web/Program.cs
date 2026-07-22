@@ -80,7 +80,6 @@ builder.Services.Configure<DanceSellPhase2Options>(builder.Configuration.GetSect
 builder.Services.PostConfigure<KieOptions>(options =>
 {
     ApplyEnv("KIE_API_BASE_URL", value => options.ApiBaseUrl = value);
-    ApplyEnv("KIE_API_KEY", value => options.ApiKey = value);
     ApplyEnv("KIE_CALLBACK_URL", value => options.CallbackUrl = value);
     ApplyEnv("KIE_CALLBACK_SECRET", value => options.CallbackSecret = value);
     ApplyEnv("KIE_MOTION_CONTROL_MODEL", value => options.MotionControlModel = value);

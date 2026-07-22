@@ -1,12 +1,13 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using TodoX.Web.Services.AiProviders;
 
 namespace TodoX.Web.Services.ImageRender;
 
 /// <summary>
 /// Thin client for Google Vertex AI Imagen (predict). Authenticates with the service-account
-/// JSON key at Vertex:ServiceAccountKeyPath by signing a JWT (RS256) and exchanging it for an
+/// JSON key resolved from a provider account credential by signing a JWT (RS256) and exchanging it for an
 /// access token at oauth2.googleapis.com — mirroring the proven PowerShell test script.
 /// Throws on any failure so the caller can decide how to handle it.
 /// </summary>
@@ -18,6 +19,7 @@ public sealed class VertexClient
     private readonly ILogger<VertexClient> _logger;
 
     private ServiceAccountKey? _sa;
+    private string? _saReference;
     private string? _cachedToken;
     private DateTimeOffset _tokenExpiry;
     public string? LastModelUsed { get; private set; }
@@ -40,10 +42,10 @@ public sealed class VertexClient
     }
 
     public Task<List<byte[]>> GenerateImagesAsync(string prompt, int count, string aspectRatio, CancellationToken ct)
-        => GenerateImagesAsync(prompt, Array.Empty<ReferenceImage>(), count, aspectRatio, ct);
+        => GenerateImagesAsync(prompt, Array.Empty<ReferenceImage>(), count, aspectRatio, credential: null, ct);
 
     public async Task<List<byte[]>> GenerateImagesAsync(string prompt, IReadOnlyList<ReferenceImage> referenceImages,
-        int count, string aspectRatio, CancellationToken ct = default)
+        int count, string aspectRatio, ResolvedAiProviderCredential? credential = null, CancellationToken ct = default)
     {
         var project = _config["Vertex:ProjectId"] ?? throw new InvalidOperationException("Missing Vertex:ProjectId");
         var location = _config["Vertex:Location"] ?? "us-central1";
@@ -60,7 +62,7 @@ public sealed class VertexClient
         var hydratedReferences = await HydrateReferenceImagesAsync(referenceImages, ct);
         var refs = NormalizeReferenceImages(hydratedReferences);
         var hasReferences = refs.Count > 0;
-        var token = await GetAccessTokenAsync(ct);
+        var token = await GetAccessTokenAsync(credential, ct);
 
         if (hasReferences)
         {
@@ -590,15 +592,22 @@ public sealed class VertexClient
             || model.Contains("imagegeneration@006", StringComparison.OrdinalIgnoreCase);
     }
 
-    private async Task<string> GetAccessTokenAsync(CancellationToken ct)
+    private async Task<string> GetAccessTokenAsync(ResolvedAiProviderCredential? credential, CancellationToken ct)
     {
+        if (credential is null || string.IsNullOrWhiteSpace(credential.SecretValue))
+        {
+            throw new InvalidOperationException("VERTEX_PROVIDER_ACCOUNT_CREDENTIAL_REQUIRED");
+        }
+
         // Reuse a cached token until shortly before expiry.
-        if (_cachedToken is not null && DateTimeOffset.UtcNow < _tokenExpiry.AddMinutes(-5))
+        if (_cachedToken is not null
+            && string.Equals(_saReference, credential.ReferenceName, StringComparison.Ordinal)
+            && DateTimeOffset.UtcNow < _tokenExpiry.AddMinutes(-5))
         {
             return _cachedToken;
         }
 
-        var sa = LoadServiceAccount();
+        var sa = LoadServiceAccount(credential);
         var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
         var exp = now + 3600;
 
@@ -647,20 +656,20 @@ public sealed class VertexClient
     }
 
     /// <summary>Exposed for other Vertex callers (e.g. Gemini text) to reuse the SA credential.</summary>
-    public Task<string> AcquireAccessTokenAsync(CancellationToken ct = default) => GetAccessTokenAsync(ct);
+    public Task<string> AcquireAccessTokenAsync(ResolvedAiProviderCredential credential, CancellationToken ct = default) => GetAccessTokenAsync(credential, ct);
 
-    private ServiceAccountKey LoadServiceAccount()
+    private ServiceAccountKey LoadServiceAccount(ResolvedAiProviderCredential credential)
     {
-        if (_sa is not null) return _sa;
-        var rel = _config["Vertex:ServiceAccountKeyPath"] ?? "keys/todox-vertex-sa.json";
-        var path = Path.IsPathRooted(rel) ? rel : Path.Combine(_env.ContentRootPath, rel);
-        if (!File.Exists(path))
+        if (_sa is not null && string.Equals(_saReference, credential.ReferenceName, StringComparison.Ordinal))
         {
-            throw new FileNotFoundException($"Vertex service account key not found at {rel}");
+            return _sa;
         }
-        var json = File.ReadAllText(path);
-        _sa = JsonSerializer.Deserialize<ServiceAccountKey>(json)
+
+        _sa = JsonSerializer.Deserialize<ServiceAccountKey>(credential.SecretValue)
             ?? throw new InvalidOperationException("Invalid service account JSON.");
+        _saReference = credential.ReferenceName;
+        _cachedToken = null;
+        _tokenExpiry = default;
         return _sa;
     }
 

@@ -47,6 +47,7 @@ public sealed class AiImageBillingReserveRequest
     public Guid? UserId { get; set; }
     public long ProviderId { get; set; }
     public long ProviderCapabilityId { get; set; }
+    public Guid? ProviderAccountId { get; set; }
     public string ProviderCode { get; set; } = string.Empty;
     public string CapabilityCode { get; set; } = string.Empty;
     public string FeatureCode { get; set; } = string.Empty;
@@ -104,6 +105,7 @@ public sealed record AiImageBillingCompletion(
 public sealed class AiImageBillingReconciliationItem
 {
     public Guid Id { get; init; }
+    public Guid? ProviderAccountId { get; init; }
     public string LogicalRequestId { get; init; } = string.Empty;
     public string Status { get; init; } = string.Empty;
     public string? RequestedModel { get; init; }
@@ -155,6 +157,7 @@ public sealed class AiImageBillingService : IAiImageBillingService
             UserId = request.UserId,
             ProviderId = request.ProviderId,
             ProviderCapabilityId = request.ProviderCapabilityId,
+            ProviderAccountId = request.ProviderAccountId,
             ProviderCode = request.ProviderCode,
             CapabilityCode = request.CapabilityCode,
             FeatureCode = request.FeatureCode,
@@ -208,6 +211,7 @@ public sealed class AiImageBillingService : IAiImageBillingService
         return rows.Select(r => new AiImageBillingReconciliationItem
         {
             Id = r.Id,
+            ProviderAccountId = r.ProviderAccountId,
             LogicalRequestId = r.LogicalRequestId,
             Status = r.Status,
             RequestedModel = r.RequestedModel,

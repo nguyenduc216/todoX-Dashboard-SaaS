@@ -9,6 +9,7 @@ public sealed class OpenRouterImageRequest
 {
     public Guid? UserId { get; set; }
     public Guid? CustomerId { get; set; }
+    public Guid? ProviderAccountId { get; set; }
     public string Model { get; set; } = string.Empty;
     public string Prompt { get; set; } = string.Empty;
     public string AspectRatio { get; set; } = "1:1";
@@ -29,6 +30,9 @@ public sealed class OpenRouterImageRequest
 
     /// <summary>Config key name for the API key (from provider.api_key_config_name), e.g. "OpenRouter__ApiKey".</summary>
     public string? ApiKeyConfigName { get; set; }
+
+    /// <summary>Resolved provider-account secret. Must be supplied by the caller after account selection.</summary>
+    public string? ApiKey { get; set; }
 
     /// <summary>Raw provider config JSON from todox_ai_provider.config_json. Never contains secrets.</summary>
     public string? ProviderConfigJson { get; set; }
@@ -95,10 +99,10 @@ public sealed class OpenRouterImageService : IOpenRouterImageService
             return Fail("OpenRouter image provider is disabled.");
         }
 
-        var apiKey = ResolveApiKey(request.ApiKeyConfigName);
+        var apiKey = request.ApiKey;
         if (string.IsNullOrWhiteSpace(apiKey))
         {
-            return Fail("Chưa cấu hình OpenRouter API key. Kiểm tra biến môi trường OpenRouter__ApiKey hoặc api_key_config_name của provider.");
+            return Fail("OPENROUTER_PROVIDER_ACCOUNT_CREDENTIAL_REQUIRED");
         }
 
         var baseUrl = (FirstNonBlank(request.BaseUrlOverride, _config["OpenRouter:BaseUrl"]) ?? "https://openrouter.ai/api/v1").TrimEnd('/');
@@ -322,33 +326,6 @@ public sealed class OpenRouterImageService : IOpenRouterImageService
 
         return Uri.TryCreate(url, UriKind.Absolute, out var absolute)
             && (absolute.Scheme == Uri.UriSchemeHttp || absolute.Scheme == Uri.UriSchemeHttps);
-    }
-
-    /// <summary>
-    /// Resolves the OpenRouter API key. Prefers the provider's configured key name
-    /// (api_key_config_name), tolerating both "OpenRouter__ApiKey" (env style) and the
-    /// "OpenRouter:ApiKey" section form. Falls back to "OpenRouter:ApiKey". Never logs the key.
-    /// </summary>
-    private string? ResolveApiKey(string? apiKeyConfigName)
-    {
-        if (!string.IsNullOrWhiteSpace(apiKeyConfigName))
-        {
-            var configName = apiKeyConfigName.Trim();
-            // Direct lookup by the configured name (handles "OpenRouter__ApiKey" and any custom name).
-            var direct = _config[configName];
-            if (!string.IsNullOrWhiteSpace(direct)) return direct;
-
-            // Also try the ":" section form for the same name (e.g. "OpenRouter__ApiKey" -> "OpenRouter:ApiKey").
-            var sectionForm = configName.Replace("__", ":", StringComparison.Ordinal);
-            if (!sectionForm.Equals(configName, StringComparison.Ordinal))
-            {
-                var viaSection = _config[sectionForm];
-                if (!string.IsNullOrWhiteSpace(viaSection)) return viaSection;
-            }
-        }
-
-        // Fallback: the default OpenRouter section key.
-        return _config["OpenRouter:ApiKey"];
     }
 
     private static string NormalizeEndpoint(string? endpointPath)

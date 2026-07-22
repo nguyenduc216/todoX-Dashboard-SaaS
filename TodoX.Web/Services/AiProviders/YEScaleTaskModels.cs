@@ -5,6 +5,9 @@ namespace TodoX.Web.Services.AiProviders;
 
 public sealed class YEScaleTaskSubmitRequest
 {
+    [JsonIgnore]
+    public string? ApiKey { get; set; }
+
     [JsonPropertyName("model")]
     public string Model { get; set; } = string.Empty;
 

@@ -271,7 +271,8 @@ public sealed class DanceSellReferenceImageService : IDanceSellReferenceImageSer
                     Prompt = string.IsNullOrWhiteSpace(job.ImagePrompt) ? job.Prompt : job.ImagePrompt,
                     CharacterImageUrl = job.CharacterImageUrl,
                     ProductImageUrl = job.ProductImageUrl!,
-                    AspectRatio = ReadConfigString(route.ConfigJson, "aspect_ratio")
+                    AspectRatio = ReadConfigString(route.ConfigJson, "aspect_ratio"),
+                    ProviderAccountId = route.ProviderAccountId
                 }, ct);
 
                 if (operation is not null)

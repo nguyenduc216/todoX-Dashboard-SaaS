@@ -52,6 +52,7 @@ public sealed class AiImageBillingReconciliationWorker : BackgroundService
         using var scope = _scopeFactory.CreateScope();
         var billing = scope.ServiceProvider.GetRequiredService<IAiImageBillingService>();
         var tasks = scope.ServiceProvider.GetRequiredService<IYEScaleTaskClient>();
+        var credentials = scope.ServiceProvider.GetRequiredService<IAiProviderCredentialResolver>();
 
         var batchSize = Math.Clamp(_config.GetValue("AiImageBilling:ReconciliationBatchSize", 10), 1, 100);
         var lockMinutes = Math.Clamp(_config.GetValue("AiImageBilling:ReconciliationLockMinutes", 5), 1, 60);
@@ -66,13 +67,14 @@ public sealed class AiImageBillingReconciliationWorker : BackgroundService
 
         foreach (var item in claimed)
         {
-            await ReconcileItemAsync(billing, tasks, item, maxAttempts, ct);
+            await ReconcileItemAsync(billing, tasks, credentials, item, maxAttempts, ct);
         }
     }
 
     private async Task ReconcileItemAsync(
         IAiImageBillingService billing,
         IYEScaleTaskClient tasks,
+        IAiProviderCredentialResolver credentials,
         AiImageBillingReconciliationItem item,
         int maxAttempts,
         CancellationToken ct)
@@ -89,7 +91,15 @@ public sealed class AiImageBillingReconciliationWorker : BackgroundService
 
         try
         {
-            var status = await tasks.GetStatusAsync(item.ProviderTaskId, ct);
+            if (item.ProviderAccountId is not Guid providerAccountId)
+            {
+                await billing.MarkManualReviewAsync(item.LogicalRequestId, "YEScale reconciliation cannot resolve credentials because provider_account_id is missing.", ct);
+                _logger.LogWarning("AI_IMAGE_RECONCILIATION_MANUAL_REVIEW logicalRequestId={LogicalRequestId} reason=missing_provider_account_id", item.LogicalRequestId);
+                return;
+            }
+
+            var credential = await credentials.ResolveAsync(providerAccountId, ct: ct);
+            var status = await tasks.GetStatusAsync(item.ProviderTaskId, credential.SecretValue, ct);
             var usageJson = JsonSerializer.Serialize(new
             {
                 taskId = item.ProviderTaskId,

@@ -2,13 +2,14 @@
 
 Commands:
 
-- `git diff --check`: passed.
-- `dotnet restore TodoX.Dashboard.sln`: passed, all projects up-to-date.
-- `dotnet build TodoX.Dashboard.sln -c Release --no-restore`: passed, 0 warnings, 0 errors on final run.
-- `dotnet test TodoX.Dashboard.sln -c Release --no-build`: passed; 250 passed, 4 skipped, 0 failed.
+- `dotnet build TodoX.Dashboard.sln -c Release`: passed, 0 warnings, 0 errors.
+- `dotnet test TodoX.Dashboard.sln -c Release --no-build --filter "FullyQualifiedName~AiCoreRuntimePhase51Tests"`: passed; 7 passed, 0 skipped, 0 failed.
+- `dotnet test TodoX.Dashboard.sln -c Release --no-build`: passed; 253 passed, 1 skipped, 0 failed.
+- `git diff --check`: passed; only Git line-ending warnings were printed.
 - `dotnet publish TodoX.Web\TodoX.Web.csproj -c Release --no-restore -o artifacts\publish\phase5-1-prod-hardening`: passed.
 
 Notes:
 
-- An earlier parallel build/test attempt produced a stale test failure because test executed against the previous binary while `testhost` still held the DLL. The sequential rerun passed.
+- Remaining skipped test is `SceneImageRenderServiceTests.Rerender_Throws_WhenResolvedProviderIsNotRoutedImageProvider`, unrelated to the three Phase 5.1 PostgreSQL integration tests.
+- Publish output directory: `artifacts\publish\phase5-1-prod-hardening`.
 - Publish output was not staged for git.

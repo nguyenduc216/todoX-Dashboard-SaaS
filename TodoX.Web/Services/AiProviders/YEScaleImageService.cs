@@ -7,7 +7,7 @@ namespace TodoX.Web.Services.AiProviders;
 
 public interface IYEScaleImageService : IAiImageProviderService
 {
-    Task<OpenRouterImageResponse> RecoverImageAsync(string taskId, string model, CancellationToken cancellationToken = default);
+    Task<OpenRouterImageResponse> RecoverImageAsync(string taskId, string model, string apiKey, CancellationToken cancellationToken = default);
 }
 
 public sealed class YEScaleImageService : IYEScaleImageService
@@ -50,6 +50,7 @@ public sealed class YEScaleImageService : IYEScaleImageService
             var model = models[i];
             var modelConfig = YEScaleImageModelMapper.ForModel(config, model);
             var submitRequest = YEScaleImageModelMapper.BuildSubmitRequest(request, model, modelConfig);
+            submitRequest.ApiKey = request.ApiKey;
             var requestJson = JsonSerializer.Serialize(submitRequest, JsonOptions());
             try
             {
@@ -121,14 +122,14 @@ public sealed class YEScaleImageService : IYEScaleImageService
         return Fail("YEScale image fallback chain exhausted.");
     }
 
-    public async Task<OpenRouterImageResponse> RecoverImageAsync(string taskId, string model, CancellationToken cancellationToken = default)
+    public async Task<OpenRouterImageResponse> RecoverImageAsync(string taskId, string model, string apiKey, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(taskId))
         {
             return Fail("Thiếu provider task_id để khôi phục ảnh YEScale.");
         }
 
-        var status = await _tasks.GetStatusAsync(taskId, cancellationToken);
+        var status = await _tasks.GetStatusAsync(taskId, apiKey, cancellationToken);
         var responseJson = JsonSerializer.Serialize(status, JsonOptions());
         if (!status.IsSuccess)
         {

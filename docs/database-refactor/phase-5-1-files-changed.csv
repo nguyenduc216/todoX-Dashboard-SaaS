@@ -1,11 +1,32 @@
 path,change_type,notes
-TodoX.Web/Program.cs,modified,registered IAiBillingRepository
-TodoX.Web/Services/AiProviders/AiBillingService.cs,modified,generic service delegates write operations to repository
-TodoX.Web/Services/AiProviders/AiBillingRepository.cs,added,transaction-safe generic billing repository
-TodoX.Web/Services/AiProviders/AiImageBillingService.cs,modified,obsolete compatibility adapter with no SQL/write logic
-TodoX.Web.Tests/AiCoreRuntimePhase51Tests.cs,added,source contract tests and explicit skipped DB integration placeholders
-database/manual/ai-core-reset/43_phase5_1_billing_hardening.sql,added,billing and ledger idempotency hardening
-database/manual/ai-core-reset/44_phase5_1_completion_hardening.sql,added,completion/artifact/usage/lease indexes
-database/manual/ai-core-reset/45_verify_phase5_1_prod_readiness.sql,added,production readiness verification SQL
-docs/database-refactor/phase-5-1-*.md,added,Phase 5.1 reports
-docs/database-refactor/phase-5-1-*.csv,added,Phase 5.1 evidence matrices
+TodoX.Web/Program.cs,modified,removed KIE_API_KEY startup mapping
+TodoX.Web/appsettings.json,modified,removed OpenRouter global API key and Vertex service-account file path entries
+TodoX.Web/Services/AiProviders/Kie/KieClient.cs,modified,requires ResolvedAiProviderCredential for submit and poll
+TodoX.Web/Services/AiProviders/Kie/KieOptions.cs,modified,removed direct KIE API key option and fallback
+TodoX.Web/Services/AiProviders/YEScaleTaskClient.cs,modified,requires caller-supplied provider account API key for submit and status
+TodoX.Web/Services/AiProviders/YEScaleTaskModels.cs,modified,keeps runtime API key off serialized submit payload
+TodoX.Web/Services/AiProviders/YEScaleOptions.cs,modified,removed direct YEScale access key option
+TodoX.Web/Services/AiProviders/YEScaleImageService.cs,modified,propagates provider account API key through submit and recovery paths
+TodoX.Web/Services/AiCharacters/OpenRouterImageService.cs,modified,requires account-resolved API key and removes OpenRouter:ApiKey fallback
+TodoX.Web/Services/ImageRender/VertexClient.cs,modified,loads service-account JSON from provider account credential
+TodoX.Web/Services/ImageRender/VertexImageRenderService.cs,modified,resolves google-vertex-ai provider account credential
+TodoX.Web/Services/ImageRender/MarketingBriefAnalyzer.cs,modified,resolves google-vertex-ai provider account credential
+TodoX.Web/Services/Profile/GeminiPromptService.cs,modified,resolves google-vertex-ai provider account credential
+TodoX.Web/Services/AiProviders/AiImageRenderRouter.cs,modified,claims provider account lease and injects resolved credential into external image providers
+TodoX.Web/Services/AiProviders/AiProviderAccountRuntime.cs,modified,fixes atomic account claim query with active lease count
+TodoX.Web/Services/VideoRender/SceneVideoWorkerHandler.cs,modified,claims YEScale account lease and passes resolved credential to submit and poll
+TodoX.Web/Services/DanceSell/DanceSellAiOperations.cs,modified,resolves KIE account credential for generated reference provider
+TodoX.Web/Services/DanceSell/DanceSellPhase2Services.cs,modified,persists selected provider account for Dance Sell operations
+TodoX.Web/Services/DanceSell/DanceSellRenderHandler.cs,modified,resolves KIE account credential for submit and poll
+TodoX.Web/Services/AiProviders/AiBillingRepository.cs,modified,aligns generic billing usage/reconciliation SQL with live schema
+TodoX.Web/Services/AiProviders/AiBillingService.cs,modified,preserves generic billing ownership updates
+TodoX.Web/Services/AiProviders/AiImageBillingReconciliationWorker.cs,modified,resolves provider account credentials during reconciliation
+TodoX.Web/Services/AiProviders/AiImageBillingService.cs,modified,preserves adapter propagation of provider account fields
+TodoX.Web/Services/AiProviders/AiRenderRuntimeServices.cs,modified,aligns completion event/artifact writes with live generated columns and artifact constraints
+TodoX.Web.Tests/AiCoreRuntimePhase51Tests.cs,modified,enables three PostgreSQL integration tests and supporting setup
+TodoX.Web.Tests/DanceSellAiOperationsTests.cs,modified,updates fake credential resolver and KIE client contracts
+TodoX.Web.Tests/KieClientTests.cs,modified,uses ResolvedAiProviderCredential in KIE client tests
+TodoX.Web.Tests/YEScaleImageProviderTests.cs,modified,uses provider account API key in YEScale submit tests
+docs/database-refactor/phase-5-1-*.md,modified,updates Phase 5.1 reports with executed SQL/test/publish evidence
+docs/database-refactor/phase-5-1-*.csv,modified,updates Phase 5.1 evidence matrices
+docs/database-refactor/phase-5-1-sql-43-45-output.txt,added,real SQL 43-45 execution output from todo_saas

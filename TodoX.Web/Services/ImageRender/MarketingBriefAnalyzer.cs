@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using TodoX.Web.Services.AiProviders;
 
 namespace TodoX.Web.Services.ImageRender;
 
@@ -22,14 +23,16 @@ public sealed class GeminiMarketingBriefAnalyzer : IMarketingBriefAnalyzer
 {
     private readonly HttpClient _http;
     private readonly VertexClient _vertex;
+    private readonly IAiProviderCredentialResolver _credentials;
     private readonly IConfiguration _config;
     private readonly ILogger<GeminiMarketingBriefAnalyzer> _logger;
 
-    public GeminiMarketingBriefAnalyzer(HttpClient http, VertexClient vertex, IConfiguration config,
+    public GeminiMarketingBriefAnalyzer(HttpClient http, VertexClient vertex, IAiProviderCredentialResolver credentials, IConfiguration config,
         ILogger<GeminiMarketingBriefAnalyzer> logger)
     {
         _http = http;
         _vertex = vertex;
+        _credentials = credentials;
         _config = config;
         _logger = logger;
     }
@@ -39,7 +42,8 @@ public sealed class GeminiMarketingBriefAnalyzer : IMarketingBriefAnalyzer
         var project = _config["Vertex:ProjectId"] ?? throw new InvalidOperationException("Missing Vertex:ProjectId");
         var location = _config["Vertex:Location"] ?? "us-central1";
         var model = _config["Vertex:GeminiModel"] ?? "gemini-2.5-flash";
-        var token = await _vertex.AcquireAccessTokenAsync(ct);
+        var credential = await _credentials.ResolveDefaultAsync("google-vertex-ai", ct: ct);
+        var token = await _vertex.AcquireAccessTokenAsync(credential, ct);
         var prompt = BuildInstruction(request);
         var url = $"https://{location}-aiplatform.googleapis.com/v1/projects/{project}/locations/{location}/publishers/google/models/{model}:generateContent";
         var payload = new

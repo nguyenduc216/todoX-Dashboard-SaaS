@@ -11,6 +11,7 @@ public interface IYEScaleTaskClient
 {
     Task<YEScaleTaskSubmitResponse> SubmitAsync(YEScaleTaskSubmitRequest request, CancellationToken ct = default);
     Task<YEScaleTaskStatusResponse> GetStatusAsync(string taskId, CancellationToken ct = default);
+    Task<YEScaleTaskStatusResponse> GetStatusAsync(string taskId, string? apiKey, CancellationToken ct = default);
     Task<YEScaleTaskResult> SubmitAndWaitAsync(YEScaleTaskSubmitRequest request, CancellationToken ct = default);
 }
 
@@ -38,7 +39,7 @@ public sealed class YEScaleTaskClient : IYEScaleTaskClient
         var options = _options.CurrentValue;
         options.EnsureEnabled();
         using var response = await SendWithRetriesAsync(
-            () => BuildMessage(HttpMethod.Post, BuildUrl(options, options.TaskSubmitPath), options, JsonSerializer.Serialize(request, JsonOptions)),
+            () => BuildMessage(HttpMethod.Post, BuildUrl(options, options.TaskSubmitPath), request.ApiKey, JsonSerializer.Serialize(request, JsonOptions)),
             "submit",
             request.Model,
             taskId: null,
@@ -60,6 +61,9 @@ public sealed class YEScaleTaskClient : IYEScaleTaskClient
     }
 
     public async Task<YEScaleTaskStatusResponse> GetStatusAsync(string taskId, CancellationToken ct = default)
+        => await GetStatusAsync(taskId, apiKey: null, ct);
+
+    public async Task<YEScaleTaskStatusResponse> GetStatusAsync(string taskId, string? apiKey, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(taskId))
         {
@@ -70,7 +74,7 @@ public sealed class YEScaleTaskClient : IYEScaleTaskClient
         options.EnsureEnabled();
         var path = options.TaskStatusPathTemplate.Replace("{task_id}", Uri.EscapeDataString(taskId), StringComparison.Ordinal);
         using var response = await SendWithRetriesAsync(
-            () => BuildMessage(HttpMethod.Get, BuildUrl(options, path), options, body: null),
+            () => BuildMessage(HttpMethod.Get, BuildUrl(options, path), apiKey, body: null),
             "poll",
             model: null,
             taskId,
@@ -112,7 +116,7 @@ public sealed class YEScaleTaskClient : IYEScaleTaskClient
             while (true)
             {
                 timeout.Token.ThrowIfCancellationRequested();
-                var status = await GetStatusAsync(taskId, timeout.Token);
+                var status = await GetStatusAsync(taskId, request.ApiKey, timeout.Token);
                 _logger.LogInformation("YESCALE_TASK_STATUS model={Model} taskId={TaskId} status={Status}", request.Model, taskId, status.Status);
 
                 if (status.IsSuccess || status.IsFailure)
@@ -206,10 +210,15 @@ public sealed class YEScaleTaskClient : IYEScaleTaskClient
         throw new YEScaleTaskException("YEScale transient request failed after retries.", transient: true, taskId: taskId, innerException: lastException);
     }
 
-    private static HttpRequestMessage BuildMessage(HttpMethod method, Uri uri, YEScaleOptions options, string? body)
+    private static HttpRequestMessage BuildMessage(HttpMethod method, Uri uri, string? apiKey, string? body)
     {
+        if (string.IsNullOrWhiteSpace(apiKey))
+        {
+            throw new InvalidOperationException("YESCALE_PROVIDER_ACCOUNT_CREDENTIAL_REQUIRED");
+        }
+
         var message = new HttpRequestMessage(method, uri);
-        message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", options.GetAccessKeyOrThrow());
+        message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
         if (body is not null)
         {
             message.Content = new StringContent(body, Encoding.UTF8, "application/json");

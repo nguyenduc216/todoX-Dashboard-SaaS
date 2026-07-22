@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
+using TodoX.Web.Services.AiProviders;
 using TodoX.Web.Services.AiProviders.Kie;
 using TodoX.Web.Services.DanceSell;
 using Xunit;
@@ -87,7 +88,8 @@ public sealed class DanceSellAiOperationsTests
     public async Task KieReferenceProvider_SubmitsRealImageToImagePayload()
     {
         var client = new CapturingKieClient();
-        var provider = new KieDanceSellReferenceProvider(client, new StaticOptionsMonitor<KieOptions>(new KieOptions()));
+        var providerAccountId = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+        var provider = new KieDanceSellReferenceProvider(client, new StaticOptionsMonitor<KieOptions>(new KieOptions()), new StaticCredentialResolver(providerAccountId));
         var route = new DanceSellProviderRouteDto
         {
             ProviderCode = "kie",
@@ -98,6 +100,7 @@ public sealed class DanceSellAiOperationsTests
         var result = await provider.SubmitAsync(new DanceSellReferenceProviderRequest
         {
             Route = route,
+            ProviderAccountId = providerAccountId,
             Prompt = "Place product naturally.",
             CharacterImageUrl = "https://cdn.example/character.png",
             ProductImageUrl = "https://cdn.example/product.png",
@@ -216,10 +219,10 @@ public sealed class DanceSellAiOperationsTests
     {
         public object? LastRequest { get; private set; }
 
-        public Task<KieCreateTaskResult> CreateTaskAsync(KieMotionControlRequest request, CancellationToken cancellationToken)
-            => CreateTaskAsync<KieMotionControlRequest>(request, cancellationToken);
+        public Task<KieCreateTaskResult> CreateTaskAsync(KieMotionControlRequest request, ResolvedAiProviderCredential credential, CancellationToken cancellationToken)
+            => CreateTaskAsync<KieMotionControlRequest>(request, credential, cancellationToken);
 
-        public Task<KieCreateTaskResult> CreateTaskAsync<TRequest>(TRequest request, CancellationToken cancellationToken)
+        public Task<KieCreateTaskResult> CreateTaskAsync<TRequest>(TRequest request, ResolvedAiProviderCredential credential, CancellationToken cancellationToken)
         {
             LastRequest = request;
             return Task.FromResult(new KieCreateTaskResult
@@ -230,11 +233,27 @@ public sealed class DanceSellAiOperationsTests
             });
         }
 
-        public Task<KieTaskDetailResult> GetTaskDetailAsync(string taskId, CancellationToken cancellationToken)
+        public Task<KieTaskDetailResult> GetTaskDetailAsync(string taskId, ResolvedAiProviderCredential credential, CancellationToken cancellationToken)
             => throw new NotImplementedException();
 
         public KieCallbackResult ParseCallback(string rawJson)
             => throw new NotImplementedException();
+    }
+
+    private sealed class StaticCredentialResolver : IAiProviderCredentialResolver
+    {
+        private readonly Guid _providerAccountId;
+
+        public StaticCredentialResolver(Guid providerAccountId)
+        {
+            _providerAccountId = providerAccountId;
+        }
+
+        public Task<ResolvedAiProviderCredential> ResolveAsync(Guid providerAccountId, string role = "api_key", CancellationToken ct = default)
+            => Task.FromResult(new ResolvedAiProviderCredential(providerAccountId, role, "KIE_API_KEY", "test-key"));
+
+        public Task<ResolvedAiProviderCredential> ResolveDefaultAsync(string providerCode, string? role = null, CancellationToken ct = default)
+            => ResolveAsync(_providerAccountId, role ?? "api_key", ct);
     }
 
     private sealed class StaticOptionsMonitor<T> : IOptionsMonitor<T>

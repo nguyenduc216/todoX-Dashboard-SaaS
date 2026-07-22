@@ -2,6 +2,7 @@
 using System.Text.Json;
 using Dapper;
 using TodoX.Web.Data;
+using TodoX.Web.Services.AiProviders;
 using TodoX.Web.Services.Media;
 using TodoX.Web.Services.Settings;
 
@@ -23,12 +24,13 @@ public sealed class VertexImageRenderService : IImageRenderService
     private readonly IMediaFileService _media;
     private readonly TenantContext _tenant;
     private readonly VertexClient _vertex;
+    private readonly IAiProviderCredentialResolver _credentials;
     private readonly IBrandAssetCompositeService _brandComposite;
     private readonly IConfiguration _config;
     private readonly ILogger<VertexImageRenderService> _logger;
 
     public VertexImageRenderService(TodoXConnectionFactory factory, SettingsApiRepository settings,
-        IMediaFileService media, TenantContext tenant, VertexClient vertex, IBrandAssetCompositeService brandComposite, IConfiguration config,
+        IMediaFileService media, TenantContext tenant, VertexClient vertex, IAiProviderCredentialResolver credentials, IBrandAssetCompositeService brandComposite, IConfiguration config,
         ILogger<VertexImageRenderService> logger)
     {
         _factory = factory;
@@ -36,6 +38,7 @@ public sealed class VertexImageRenderService : IImageRenderService
         _media = media;
         _tenant = tenant;
         _vertex = vertex;
+        _credentials = credentials;
         _brandComposite = brandComposite;
         _config = config;
         _logger = logger;
@@ -178,6 +181,7 @@ public sealed class VertexImageRenderService : IImageRenderService
         {
             try
             {
+                var credential = await _credentials.ResolveDefaultAsync(providerCode, ct: ct);
                 if (useFixedAssetPipeline)
                 {
                     if (fixedAssets.Count == 0)
@@ -213,7 +217,7 @@ public sealed class VertexImageRenderService : IImageRenderService
                     _logger.LogInformation("IMAGE_RENDER_BACKGROUND_REQUEST correlationId={CorrelationId} requestId={RequestId} model={Model} count={Count} aspect={Aspect} referenceCount={ReferenceCount} roles={Roles}",
                         correlationId, requestId, modelCode, count, request.AspectRatio, modelReferences.Count, modelReferences.Where(HasReferencePayload).Select(x => x.Role ?? "reference").ToArray());
 
-                    var backgroundImages = await _vertex.GenerateImagesAsync(backgroundPrompt, modelReferences, count, request.AspectRatio, ct);
+                    var backgroundImages = await _vertex.GenerateImagesAsync(backgroundPrompt, modelReferences, count, request.AspectRatio, credential, ct);
                     result.Model = _vertex.LastModelUsed ?? modelCode;
                     modelCode = result.Model;
                     result.UsedFallback = false;
@@ -278,7 +282,7 @@ public sealed class VertexImageRenderService : IImageRenderService
                     AddLog("GEMINI_IMAGE_REQUEST", "Calling Vertex image render.", new { model = modelCode, count, request.AspectRatio, referenceCount = modelReferences.Count, mode = configuredMode });
                     _logger.LogInformation("IMAGE_RENDER_VERTEX_REQUEST correlationId={CorrelationId} requestId={RequestId} model={Model} count={Count} aspect={Aspect} referenceCount={ReferenceCount} mode={Mode}",
                         correlationId, requestId, modelCode, count, request.AspectRatio, modelReferences.Count, configuredMode);
-                    images = await _vertex.GenerateImagesAsync(request.Prompt, modelReferences, count, request.AspectRatio, ct);
+                    images = await _vertex.GenerateImagesAsync(request.Prompt, modelReferences, count, request.AspectRatio, credential, ct);
                     result.Model = _vertex.LastModelUsed ?? modelCode;
                     modelCode = result.Model;
                     result.UsedFallback = false;

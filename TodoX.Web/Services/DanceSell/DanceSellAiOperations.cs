@@ -2,6 +2,7 @@ using System.Text.Json;
 using Dapper;
 using Npgsql;
 using TodoX.Web.Data;
+using TodoX.Web.Services.AiProviders;
 using TodoX.Web.Services.AiProviders.Kie;
 using Microsoft.Extensions.Options;
 
@@ -37,6 +38,7 @@ public sealed class DanceSellReferenceProviderRequest
     public string ProductImageUrl { get; set; } = string.Empty;
     public string? AspectRatio { get; set; }
     public string? CallbackUrl { get; set; }
+    public Guid? ProviderAccountId { get; set; }
 }
 
 public sealed class ProviderTaskSubmitResult
@@ -78,11 +80,13 @@ public sealed class KieDanceSellReferenceProvider : IDanceSellReferenceProvider
 {
     private readonly IKieClient _client;
     private readonly IOptionsMonitor<KieOptions> _options;
+    private readonly IAiProviderCredentialResolver _credentials;
 
-    public KieDanceSellReferenceProvider(IKieClient client, IOptionsMonitor<KieOptions> options)
+    public KieDanceSellReferenceProvider(IKieClient client, IOptionsMonitor<KieOptions> options, IAiProviderCredentialResolver credentials)
     {
         _client = client;
         _options = options;
+        _credentials = credentials;
     }
 
     public bool Supports(DanceSellProviderRouteDto route)
@@ -114,7 +118,8 @@ public sealed class KieDanceSellReferenceProvider : IDanceSellReferenceProvider
             }
         };
         var requestJson = KieJsonRedactor.Redact(JsonSerializer.Serialize(payload, KieJson.Options)) ?? "{}";
-        var submit = await _client.CreateTaskAsync(payload, ct);
+        var credential = await ResolveCredentialAsync(request.ProviderAccountId, ct);
+        var submit = await _client.CreateTaskAsync(payload, credential, ct);
         return new ProviderTaskSubmitResult
         {
             ProviderCode = request.Route.ProviderCode,
@@ -126,7 +131,17 @@ public sealed class KieDanceSellReferenceProvider : IDanceSellReferenceProvider
     }
 
     public async Task<KieTaskDetailResult> GetTaskAsync(string taskId, CancellationToken ct)
-        => await _client.GetTaskDetailAsync(taskId, ct);
+        => throw new InvalidOperationException("KIE_REFERENCE_PROVIDER_ACCOUNT_REQUIRED");
+
+    private async Task<ResolvedAiProviderCredential> ResolveCredentialAsync(Guid? providerAccountId, CancellationToken ct)
+    {
+        if (providerAccountId is not Guid id)
+        {
+            throw new InvalidOperationException("KIE_PROVIDER_ACCOUNT_REQUIRED");
+        }
+
+        return await _credentials.ResolveAsync(id, ct: ct);
+    }
 }
 
 public sealed class DanceSellProviderCatalog : IDanceSellProviderCatalog

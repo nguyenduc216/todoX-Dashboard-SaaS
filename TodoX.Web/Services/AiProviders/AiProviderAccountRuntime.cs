@@ -86,10 +86,17 @@ public sealed class AiProviderAccountRepository : IAiProviderAccountRepository
                    a.account_code,
                    a.max_concurrency,
                    c.id AS provider_capability_id,
-                   COUNT(l.id) FILTER (WHERE l.lease_status = 'active' AND l.lease_until > now()) AS active_lease_count
+                   COALESCE(active.active_lease_count, 0) AS active_lease_count
               FROM public.todox_ai_provider_account a
               JOIN public.todox_ai_provider p ON p.id = a.provider_id AND p.enabled = true
               JOIN public.todox_ai_provider_capability c ON c.provider_id = p.id
+              LEFT JOIN LATERAL (
+                    SELECT COUNT(*) AS active_lease_count
+                      FROM public.todox_ai_provider_account_lease l
+                     WHERE l.provider_account_id = a.id
+                       AND l.lease_status = 'active'
+                       AND l.lease_until > now()
+              ) active ON true
              WHERE a.provider_code = @ProviderCode
                AND a.enabled = true
                AND c.enabled = true
@@ -101,12 +108,10 @@ public sealed class AiProviderAccountRepository : IAiProviderAccountRepository
                AND (@MinimumKnownBalance IS NULL
                     OR a.last_known_balance IS NULL
                     OR a.last_known_balance >= GREATEST(COALESCE(a.minimum_balance_threshold, 0), @MinimumKnownBalance))
-             GROUP BY a.id, a.provider_id, a.provider_code, a.account_code, a.priority, a.weight,
-                      a.max_concurrency, a.last_selected_at, a.health_status, c.id
-            HAVING COUNT(l.id) FILTER (WHERE l.lease_status = 'active' AND l.lease_until > now()) < a.max_concurrency
+               AND COALESCE(active.active_lease_count, 0) < a.max_concurrency
              ORDER BY a.priority ASC,
                       CASE a.health_status WHEN 'healthy' THEN 0 WHEN 'unknown' THEN 1 WHEN 'degraded' THEN 2 ELSE 3 END,
-                      (COUNT(l.id) FILTER (WHERE l.lease_status = 'active' AND l.lease_until > now())::numeric / a.max_concurrency) ASC,
+                      (COALESCE(active.active_lease_count, 0)::numeric / a.max_concurrency) ASC,
                       a.last_selected_at NULLS FIRST,
                       a.weight DESC,
                       a.account_code ASC
@@ -313,6 +318,7 @@ public sealed class AiProviderAccountRepository : IAiProviderAccountRepository
 public interface IAiProviderCredentialResolver
 {
     Task<ResolvedAiProviderCredential> ResolveAsync(Guid providerAccountId, string role = "api_key", CancellationToken ct = default);
+    Task<ResolvedAiProviderCredential> ResolveDefaultAsync(string providerCode, string? role = null, CancellationToken ct = default);
 }
 
 public sealed class AiProviderCredentialResolver : IAiProviderCredentialResolver
@@ -347,6 +353,29 @@ public sealed class AiProviderCredentialResolver : IAiProviderCredentialResolver
         }
 
         return new ResolvedAiProviderCredential(providerAccountId, credential.CredentialRole, reference, value);
+    }
+
+    public async Task<ResolvedAiProviderCredential> ResolveDefaultAsync(string providerCode, string? role = null, CancellationToken ct = default)
+    {
+        var accounts = await _accounts.ListAccountsAsync(providerCode, ct);
+        var account = accounts
+            .Where(x => x.Enabled && !string.Equals(x.HealthStatus, "disabled", StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(x => x.IsDefault)
+            .ThenBy(x => x.Priority)
+            .ThenBy(x => x.AccountCode)
+            .FirstOrDefault()
+            ?? throw new InvalidOperationException("AI_PROVIDER_DEFAULT_ACCOUNT_MISSING");
+
+        if (!string.IsNullOrWhiteSpace(role))
+        {
+            return await ResolveAsync(account.Id, role, ct);
+        }
+
+        var credentials = await _accounts.ListCredentialsAsync(account.Id, ct);
+        var credential = credentials.FirstOrDefault(x => x.Enabled)
+            ?? throw new InvalidOperationException("AI_PROVIDER_CREDENTIAL_REFERENCE_MISSING");
+
+        return await ResolveAsync(account.Id, credential.CredentialRole, ct);
     }
 }
 

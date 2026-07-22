@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using TodoX.Web.Services.AiProviders;
 using TodoX.Web.Services.ImageRender;
 
 namespace TodoX.Web.Services.Profile;
@@ -12,14 +13,16 @@ public sealed class GeminiPromptService
 {
     private readonly HttpClient _http;
     private readonly VertexClient _vertex;
+    private readonly IAiProviderCredentialResolver _credentials;
     private readonly IConfiguration _config;
     private readonly ILogger<GeminiPromptService> _logger;
 
-    public GeminiPromptService(HttpClient http, VertexClient vertex, IConfiguration config,
+    public GeminiPromptService(HttpClient http, VertexClient vertex, IAiProviderCredentialResolver credentials, IConfiguration config,
         ILogger<GeminiPromptService> logger)
     {
         _http = http;
         _vertex = vertex;
+        _credentials = credentials;
         _config = config;
         _logger = logger;
     }
@@ -35,7 +38,8 @@ public sealed class GeminiPromptService
         var project = _config["Vertex:ProjectId"] ?? throw new InvalidOperationException("Missing Vertex:ProjectId");
         var location = _config["Vertex:Location"] ?? "us-central1";
         var model = ModelCode;
-        var token = await _vertex.AcquireAccessTokenAsync(ct);
+        var credential = await _credentials.ResolveDefaultAsync("google-vertex-ai", ct: ct);
+        var token = await _vertex.AcquireAccessTokenAsync(credential, ct);
 
         var instruction =
             $"You are a prompt engineer for an AI image generator (Imagen). Based on the base prompt below, " +

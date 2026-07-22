@@ -226,7 +226,7 @@ public sealed class AiRenderCompletionService : IAiRenderCompletionService
             request.ErrorMessage
         });
 
-        var artifactType = string.IsNullOrWhiteSpace(request.ArtifactType) ? "result" : request.ArtifactType.Trim();
+        var artifactType = string.IsNullOrWhiteSpace(request.ArtifactType) ? "other" : request.ArtifactType.Trim();
         foreach (var url in request.OutputUrls.Where(u => !string.IsNullOrWhiteSpace(u)).Distinct(StringComparer.OrdinalIgnoreCase))
         {
             await conn.ExecuteAsync(
@@ -340,10 +340,10 @@ public sealed class AiRenderCompletionService : IAiRenderCompletionService
         await conn.ExecuteAsync(
             """
             INSERT INTO render.render_job_events
-                (job_id, render_job_id, tenant_id, event_type, level, message, data_json,
+                (job_id, tenant_id, event_type, level, message, data_json,
                  provider_code, model_code, provider_account_id, provider_task_id, created_at)
             VALUES
-                (@RenderJobId, @RenderJobId, NULL, @eventType, @level, @message, CAST(@data AS jsonb),
+                (@RenderJobId, NULL, @eventType, @level, @message, CAST(@data AS jsonb),
                  @ProviderCode, @ModelName, @ProviderAccountId, @ProviderTaskId, now());
             """,
             new
@@ -405,4 +405,3 @@ public sealed class AiRenderCompletionService : IAiRenderCompletionService
         public string? PointStatus { get; init; }
     }
 }
-

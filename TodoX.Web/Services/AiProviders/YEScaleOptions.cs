@@ -4,7 +4,6 @@ public sealed class YEScaleOptions
 {
     public bool Enabled { get; set; }
     public string BaseUrl { get; set; } = "https://api.yescale.io";
-    public string? AccessKey { get; set; }
     public string TaskSubmitPath { get; set; } = "/task/submit";
     public string TaskStatusPathTemplate { get; set; } = "/task/{task_id}";
     public int RequestTimeoutSeconds { get; set; } = 120;
@@ -29,16 +28,6 @@ public sealed class YEScaleOptions
         {
             throw new InvalidOperationException("YEScale đang bị tắt trong cấu hình hệ thống.");
         }
-    }
-
-    public string GetAccessKeyOrThrow()
-    {
-        if (string.IsNullOrWhiteSpace(AccessKey))
-        {
-            throw new InvalidOperationException("Chưa cấu hình access key YEScale. Hãy đặt biến môi trường AiProviders__YEScale__AccessKey.");
-        }
-
-        return AccessKey;
     }
 
     public TimeSpan RequestTimeout => TimeSpan.FromSeconds(Math.Clamp(RequestTimeoutSeconds, 1, 600));

@@ -25,6 +25,7 @@ public sealed class SceneVideoRenderWorkItemInput
     public string? Voice { get; set; }
     public string? VoiceInstruction { get; set; }
     public long ProviderId { get; set; }
+    public Guid? ProviderAccountId { get; set; }
     public string ProviderCode { get; set; } = string.Empty;
     public string? ProviderConfigJson { get; set; }
     public long ProviderCapabilityId { get; set; }
@@ -53,6 +54,8 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
     private readonly ISceneMediaVersioningService _versions;
     private readonly IAiImageBillingService _billing;
     private readonly IAiProviderService _providers;
+    private readonly IAiProviderAccountRepository _accounts;
+    private readonly IAiProviderCredentialResolver _credentials;
     private readonly IYEScaleTaskClient _tasks;
     private readonly IMediaFileService _media;
     private readonly IVideoPromptValidator _promptValidator;
@@ -68,6 +71,8 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         ISceneMediaVersioningService versions,
         IAiImageBillingService billing,
         IAiProviderService providers,
+        IAiProviderAccountRepository accounts,
+        IAiProviderCredentialResolver credentials,
         IYEScaleTaskClient tasks,
         IMediaFileService media,
         IVideoPromptValidator promptValidator,
@@ -80,6 +85,8 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         _versions = versions;
         _billing = billing;
         _providers = providers;
+        _accounts = accounts;
+        _credentials = credentials;
         _tasks = tasks;
         _media = media;
         _promptValidator = promptValidator;
@@ -167,6 +174,10 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
             }, JsonOptions)
             : input.TariffSnapshotJson;
 
+        var accountClaim = await ClaimProviderAccountAsync(job.Id, input, ct);
+        input.ProviderAccountId = accountClaim.ProviderAccountId;
+        var credential = await _credentials.ResolveAsync(accountClaim.ProviderAccountId!.Value, ct: ct);
+
         var reservation = await _billing.ReserveAsync(new AiImageBillingReserveRequest
         {
             LogicalRequestId = input.LogicalRequestId,
@@ -175,6 +186,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
             UserId = input.UserId,
             ProviderId = input.ProviderId,
             ProviderCapabilityId = input.ProviderCapabilityId,
+            ProviderAccountId = input.ProviderAccountId,
             ProviderCode = input.ProviderCode,
             CapabilityCode = input.CapabilityCode,
             FeatureCode = "render_job_scene_video",
@@ -197,6 +209,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
 
         if (!reservation.Ok)
         {
+            await ReleaseProviderAccountAsync(accountClaim, "billing_blocked", CancellationToken.None);
             await FailAsync(project.Id, scene, version.Id, reservation.Status, reservation.ErrorMessage ?? "Unable to reserve billing.", ct);
             throw new RenderJobTerminalFailureException(reservation.ErrorMessage ?? "Unable to reserve billing.");
         }
@@ -226,6 +239,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                     providerConfigJson: input.ProviderConfigJson,
                     capabilityConfigJson: input.CapabilityConfigJson);
 
+                payload.ApiKey = credential.SecretValue;
                 var submit = await _tasks.SubmitAsync(payload, ct);
                 taskId = string.IsNullOrWhiteSpace(submit.TaskId) ? null : submit.TaskId.Trim();
                 if (string.IsNullOrWhiteSpace(taskId))
@@ -248,7 +262,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                 }
             }
 
-            var terminal = await PollTerminalStatusAsync(taskId!, input.ModelName, ct);
+            var terminal = await PollTerminalStatusAsync(taskId!, input.ModelName, credential.SecretValue, ct);
             var responseJson = JsonSerializer.Serialize(terminal, JsonOptions);
 
             if (!terminal.IsSuccess)
@@ -266,6 +280,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                 }, ct);
                 await LogUsageAsync(input, job, reservation.ChargedPoints, responseJson, false, failure, taskId, ct);
                 await FailAsync(project.Id, scene, version.Id, "provider_failure", failure, ct);
+                await ReleaseProviderAccountAsync(accountClaim, "failed", CancellationToken.None);
                 throw new RenderJobTerminalFailureException(failure);
             }
 
@@ -316,19 +331,27 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
             await _repo.AddProjectEventAsync(project.Id, "SCENE_VIDEO_READY", "info",
                 $"Scene {input.SceneIndex} rendered successfully.",
                 new { jobId = job.Id, input.SceneId, input.SceneIndex, taskId, videoUrl = saved.PublicUrl ?? saved.FileUrl }, ct);
+            await ReleaseProviderAccountAsync(accountClaim, "completed", CancellationToken.None);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
+            await ReleaseProviderAccountAsync(accountClaim, "cancelled", CancellationToken.None);
             throw;
         }
         catch (YEScaleTaskException ex) when (ex.IsTransient && !string.IsNullOrWhiteSpace(taskId))
         {
             await MarkPendingReconciliationAsync(input, version.Id, tariffSnapshot, ex.ErrorCode ?? ex.GetType().Name, ex.Message, CancellationToken.None, taskId);
+            await ReleaseProviderAccountAsync(accountClaim, "pending_reconciliation", CancellationToken.None);
             throw new RenderJobPendingReconciliationException(ex.Message);
+        }
+        catch
+        {
+            await ReleaseProviderAccountAsync(accountClaim, "failed", CancellationToken.None);
+            throw;
         }
     }
 
-    private async Task<YEScaleTaskStatusResponse> PollTerminalStatusAsync(string taskId, string? modelName, CancellationToken ct)
+    private async Task<YEScaleTaskStatusResponse> PollTerminalStatusAsync(string taskId, string? modelName, string apiKey, CancellationToken ct)
     {
         var deadline = DateTimeOffset.UtcNow.AddMinutes(Math.Max(1, _options.MaxPollDurationMinutes));
         var consecutiveErrors = 0;
@@ -338,7 +361,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
             ct.ThrowIfCancellationRequested();
             try
             {
-                var status = await _tasks.GetStatusAsync(taskId, ct);
+                var status = await _tasks.GetStatusAsync(taskId, apiKey, ct);
                 consecutiveErrors = 0;
                 var normalized = status.Status?.Trim().ToUpperInvariant();
                 if (normalized is "SUCCESS" or "FAILURE" or "CANCELLED" or "EXPIRED")
@@ -367,6 +390,33 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         }
 
         throw new YEScaleTaskException("YEScale poll timed out.", transient: true, taskId: taskId);
+    }
+
+    private async Task<AiProviderAccountSelectionResult> ClaimProviderAccountAsync(Guid renderJobId, SceneVideoRenderWorkItemInput input, CancellationToken ct)
+    {
+        var claim = await _accounts.ClaimAccountAsync(new AiProviderAccountSelectionRequest(
+            renderJobId,
+            input.ProviderCode,
+            input.CapabilityCode,
+            "scene_video",
+            input.ModelName,
+            "scene-video-worker",
+            TimeSpan.FromMinutes(30)), ct);
+
+        if (!claim.Claimed || claim.ProviderAccountId is null)
+        {
+            throw new InvalidOperationException(claim.Reason ?? "AI_PROVIDER_ACCOUNT_CLAIM_FAILED");
+        }
+
+        return claim;
+    }
+
+    private async Task ReleaseProviderAccountAsync(AiProviderAccountSelectionResult claim, string reason, CancellationToken ct)
+    {
+        if (claim.LeaseId is Guid leaseId)
+        {
+            await _accounts.ReleaseLeaseAsync(leaseId, "scene-video-worker", reason, ct);
+        }
     }
 
     private async Task MarkPendingReconciliationAsync(
@@ -401,9 +451,10 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
     {
         await _providers.LogUsageAsync(new AiProviderUsageLog
         {
-            CustomerId = null,
+            CustomerGuid = input.CustomerId,
             ProviderId = input.ProviderId,
             ProviderCapabilityId = input.ProviderCapabilityId,
+            ProviderAccountId = input.ProviderAccountId,
             ProviderCode = input.ProviderCode,
             CapabilityCode = input.CapabilityCode,
             FeatureCode = "render_job_scene_video",

@@ -1,0 +1,18 @@
+started_at_utc=2026-07-22T14:06:02.4994819+00:00
+database=todo_saas
+user=postgres
+version=PostgreSQL 17.10 on x86_64-windows, compiled by msvc-19.44.35226, 64-bit
+notice=column "reservation_transaction_id" of relation "ai_billing_records" already exists, skipping
+notice=column "charge_transaction_id" of relation "ai_billing_records" already exists, skipping
+notice=column "refund_transaction_id" of relation "ai_billing_records" already exists, skipping
+notice=column "wallet_transaction_id" of relation "ai_billing_records" already exists, skipping
+notice=column "refunded_points" of relation "ai_billing_records" already exists, skipping
+notice=column "pending_reconciliation_at" of relation "ai_billing_records" already exists, skipping
+notice=column "reconciliation_lock_owner" of relation "ai_billing_records" already exists, skipping
+notice=column "reconciliation_lock_until" of relation "ai_billing_records" already exists, skipping
+notice=relation "ai_billing_records_logical_request_uk" already exists, skipping
+43_phase5_1_billing_hardening.sql=OK elapsed_ms=25
+44_phase5_1_completion_hardening.sql=OK elapsed_ms=57
+notice=Phase 5.1 production-readiness SQL verification passed.
+45_verify_phase5_1_prod_readiness.sql=OK elapsed_ms=15
+finished_at_utc=2026-07-22T14:06:02.9398232+00:00

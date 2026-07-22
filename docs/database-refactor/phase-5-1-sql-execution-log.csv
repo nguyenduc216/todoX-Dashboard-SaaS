@@ -1,4 +1,4 @@
 script,created,executed,result,notes
-43_phase5_1_billing_hardening.sql,yes,no,not_executed,psql not available in PATH; prepared for manual execution against todo_saas
-44_phase5_1_completion_hardening.sql,yes,no,not_executed,psql not available in PATH; prepared for manual execution against todo_saas
-45_verify_phase5_1_prod_readiness.sql,yes,no,not_executed,psql not available in PATH; run after 43 and 44
+43_phase5_1_billing_hardening.sql,yes,yes,OK,executed on todo_saas via temporary Npgsql runner because psql is unavailable in PATH
+44_phase5_1_completion_hardening.sql,yes,yes,OK,executed on todo_saas via temporary Npgsql runner after SQL 43
+45_verify_phase5_1_prod_readiness.sql,yes,yes,OK,verification notice: Phase 5.1 production-readiness SQL verification passed

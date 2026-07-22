@@ -8,7 +8,6 @@ public sealed class KieOptions
     public const string DefaultModeValue = "720p";
 
     public string ApiBaseUrl { get; set; } = DefaultBaseUrl;
-    public string? ApiKey { get; set; }
     public string? CallbackUrl { get; set; }
     public string? CallbackSecret { get; set; }
     public string MotionControlModel { get; set; } = DefaultModel;
@@ -32,22 +31,6 @@ public sealed class KieOptions
         }
 
         return uri;
-    }
-
-    public string GetApiKeyOrThrow()
-    {
-        var key = ApiKey;
-        if (string.IsNullOrWhiteSpace(key))
-        {
-            key = Environment.GetEnvironmentVariable("KIE_API_KEY");
-        }
-
-        if (string.IsNullOrWhiteSpace(key))
-        {
-            throw new KieProviderException("KIE API key is missing.", KieErrorCodes.ConfigMissing, transient: false);
-        }
-
-        return key.Trim();
     }
 
     public Uri? GetCallbackUriOrNull()

@@ -88,6 +88,7 @@ public class YEScaleImageProviderTests
 
         var result = await client.SubmitAndWaitAsync(new YEScaleTaskSubmitRequest
         {
+            ApiKey = "test-key",
             Model = "nano-banana-2",
             Prompt = "hello",
             Config = new YEScaleImageTaskConfig { Size = "1K" }
@@ -109,6 +110,7 @@ public class YEScaleImageProviderTests
 
         var ex = await Assert.ThrowsAsync<YEScaleTaskException>(() => client.SubmitAndWaitAsync(new YEScaleTaskSubmitRequest
         {
+            ApiKey = "test-key",
             Model = "nano-banana-2",
             Prompt = "hello",
             Config = new YEScaleImageTaskConfig { Size = "1K" }
@@ -126,6 +128,7 @@ public class YEScaleImageProviderTests
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => client.SubmitAsync(new YEScaleTaskSubmitRequest
         {
+            ApiKey = "test-key",
             Model = "nano-banana-2",
             Prompt = "hello",
             Config = new YEScaleImageTaskConfig { Size = "1K" }
@@ -136,10 +139,10 @@ public class YEScaleImageProviderTests
     }
 
     [Fact]
-    public async Task TaskClient_MissingAccessKey_DoesNotSendHttpRequest()
+    public async Task TaskClient_MissingProviderAccountCredential_DoesNotSendHttpRequest()
     {
         var handler = new QueueHandler(Json(HttpStatusCode.OK, """{"task_id":"should-not-send"}"""));
-        var client = CreateClient(handler, accessKey: null);
+        var client = CreateClient(handler);
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => client.SubmitAsync(new YEScaleTaskSubmitRequest
         {
@@ -148,7 +151,7 @@ public class YEScaleImageProviderTests
             Config = new YEScaleImageTaskConfig { Size = "1K" }
         }));
 
-        Assert.Contains("Chưa cấu hình access key YEScale", ex.Message);
+        Assert.Contains("YESCALE_PROVIDER_ACCOUNT_CREDENTIAL_REQUIRED", ex.Message);
         Assert.Empty(handler.Requests);
     }
 
@@ -162,6 +165,7 @@ public class YEScaleImageProviderTests
 
         var result = await client.SubmitAndWaitAsync(new YEScaleTaskSubmitRequest
         {
+            ApiKey = "test-key",
             Model = "gpt-image",
             Prompt = "hello",
             Config = new YEScaleImageTaskConfig { Size = "1024x1024" }
@@ -182,6 +186,7 @@ public class YEScaleImageProviderTests
 
         var result = await client.SubmitAndWaitAsync(new YEScaleTaskSubmitRequest
         {
+            ApiKey = "test-key",
             Model = "seedream-5",
             Prompt = "hello",
             Config = new YEScaleImageTaskConfig { Size = "2K" }
@@ -203,6 +208,7 @@ public class YEScaleImageProviderTests
 
         await Assert.ThrowsAsync<YEScaleTaskException>(() => client.SubmitAsync(new YEScaleTaskSubmitRequest
         {
+            ApiKey = "test-key",
             Model = "nano-banana-2",
             Prompt = "hello",
             Config = new YEScaleImageTaskConfig { Size = "1K" }
@@ -219,6 +225,7 @@ public class YEScaleImageProviderTests
 
         var result = await client.SubmitAsync(new YEScaleTaskSubmitRequest
         {
+            ApiKey = "test-key",
             Model = "nano-banana-2",
             Prompt = "hello",
             Config = new YEScaleImageTaskConfig { Size = "1K" }
@@ -239,6 +246,7 @@ public class YEScaleImageProviderTests
 
         var result = await client.SubmitAsync(new YEScaleTaskSubmitRequest
         {
+            ApiKey = "test-key",
             Model = "nano-banana-2",
             Prompt = "hello",
             Config = new YEScaleImageTaskConfig { Size = "1K" }
@@ -257,6 +265,7 @@ public class YEScaleImageProviderTests
 
         var ex = await Assert.ThrowsAsync<YEScaleTaskException>(() => client.SubmitAndWaitAsync(new YEScaleTaskSubmitRequest
         {
+            ApiKey = "test-key",
             Model = "nano-banana-2",
             Prompt = "hello",
             Config = new YEScaleImageTaskConfig { Size = "1K" }
@@ -602,8 +611,8 @@ public class YEScaleImageProviderTests
         var fake = new FakeTaskClient(Status(json), Status(json));
         var service = new YEScaleImageService(fake, NullLogger<YEScaleImageService>.Instance);
 
-        var first = await service.RecoverImageAsync("task-recover", "nano-banana-2");
-        var second = await service.RecoverImageAsync("task-recover", "nano-banana-2");
+        var first = await service.RecoverImageAsync("task-recover", "nano-banana-2", "test-key");
+        var second = await service.RecoverImageAsync("task-recover", "nano-banana-2", "test-key");
 
         Assert.True(first.Success);
         Assert.True(second.Success);
@@ -625,14 +634,13 @@ public class YEScaleImageProviderTests
             CapabilityConfigJson = capabilityConfigJson
         };
 
-    private static YEScaleTaskClient CreateClient(HttpMessageHandler handler, int retryCount = 0, int requestTimeoutSeconds = 15, int pollTimeoutSeconds = 30, bool enabled = true, string? accessKey = "test-key")
+    private static YEScaleTaskClient CreateClient(HttpMessageHandler handler, int retryCount = 0, int requestTimeoutSeconds = 15, int pollTimeoutSeconds = 30, bool enabled = true)
         => new(
             new HttpClient(handler),
             new StaticOptionsMonitor<YEScaleOptions>(new YEScaleOptions
             {
                 Enabled = enabled,
                 BaseUrl = "https://api.yescale.io",
-                AccessKey = accessKey,
                 PollIntervalSeconds = 1,
                 PollTimeoutSeconds = pollTimeoutSeconds,
                 RequestTimeoutSeconds = requestTimeoutSeconds,
@@ -757,6 +765,9 @@ public class YEScaleImageProviderTests
             => throw new NotSupportedException();
 
         public Task<YEScaleTaskStatusResponse> GetStatusAsync(string taskId, CancellationToken ct = default)
+            => GetStatusAsync(taskId, apiKey: "test-key", ct);
+
+        public Task<YEScaleTaskStatusResponse> GetStatusAsync(string taskId, string? apiKey, CancellationToken ct = default)
         {
             GetStatusCalls++;
             var next = _results.Dequeue();

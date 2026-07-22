@@ -1,5 +1,6 @@
 using System.Net;
 using Microsoft.Extensions.Logging.Abstractions;
+using TodoX.Web.Services.AiProviders;
 using TodoX.Web.Services.AiProviders.Kie;
 using Xunit;
 
@@ -7,6 +8,8 @@ namespace TodoX.Web.Tests;
 
 public sealed class KieClientTests
 {
+    private static readonly ResolvedAiProviderCredential TestCredential = new(Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"), "api_key", "KIE_API_KEY", "test-key");
+
     [Fact]
     public async Task CreateTaskAsync_PostsToExpectedEndpoint()
     {
@@ -27,7 +30,7 @@ public sealed class KieClientTests
                 Mode = "720p",
                 CharacterOrientation = "image"
             }
-        }, CancellationToken.None);
+        }, TestCredential, CancellationToken.None);
 
         Assert.Equal("task-123", result.TaskId);
         Assert.Equal(HttpMethod.Post, handler.LastRequest?.Method);
@@ -44,7 +47,7 @@ public sealed class KieClientTests
         });
         var client = CreateClient(handler);
 
-        var result = await client.GetTaskDetailAsync("task-123", CancellationToken.None);
+        var result = await client.GetTaskDetailAsync("task-123", TestCredential, CancellationToken.None);
 
         Assert.Equal(KieTaskStatuses.Rendering, result.Status);
         Assert.Equal(HttpMethod.Get, handler.LastRequest?.Method);
@@ -69,7 +72,7 @@ public sealed class KieClientTests
         {
             Model = "kling-2.6/motion-control",
             Input = new KieMotionControlInput { Prompt = "Dance." }
-        }, CancellationToken.None));
+        }, TestCredential, CancellationToken.None));
 
         Assert.Equal(errorCode, ex.ErrorCode);
         Assert.Equal(transient, ex.IsTransient);
@@ -90,7 +93,7 @@ public sealed class KieClientTests
         {
             Model = "kling-2.6/motion-control",
             Input = new KieMotionControlInput { Prompt = "Dance." }
-        }, CancellationToken.None));
+        }, TestCredential, CancellationToken.None));
 
         Assert.Equal(KieErrorCodes.RateLimited, ex.ErrorCode);
         Assert.Equal(TimeSpan.FromSeconds(7), ex.RetryAfter);
@@ -111,7 +114,7 @@ public sealed class KieClientTests
         {
             Model = "kling-2.6/motion-control",
             Input = new KieMotionControlInput { Prompt = "Dance." }
-        }, CancellationToken.None));
+        }, TestCredential, CancellationToken.None));
 
         Assert.Equal(KieErrorCodes.RateLimited, ex.ErrorCode);
         Assert.True(ex.RetryAfter >= TimeSpan.FromSeconds(1));
@@ -126,13 +129,13 @@ public sealed class KieClientTests
             await Task.Delay(TimeSpan.FromSeconds(5), ct);
             return new HttpResponseMessage(HttpStatusCode.OK);
         });
-        var client = CreateClient(handler, new KieOptions { ApiKey = "test-key", HttpTimeoutSeconds = 1 });
+        var client = CreateClient(handler, new KieOptions { HttpTimeoutSeconds = 1 });
 
         var ex = await Assert.ThrowsAsync<KieProviderException>(() => client.CreateTaskAsync(new KieMotionControlRequest
         {
             Model = "kling-2.6/motion-control",
             Input = new KieMotionControlInput { Prompt = "Dance." }
-        }, CancellationToken.None));
+        }, TestCredential, CancellationToken.None));
 
         Assert.Equal(KieErrorCodes.ProviderUnavailable, ex.ErrorCode);
         Assert.True(ex.IsTransient);
@@ -154,13 +157,13 @@ public sealed class KieClientTests
         {
             Model = "kling-2.6/motion-control",
             Input = new KieMotionControlInput { Prompt = "Dance." }
-        }, cts.Token));
+        }, TestCredential, cts.Token));
     }
 
     private static KieClient CreateClient(HttpMessageHandler handler, KieOptions? options = null)
         => new(
             new HttpClient(handler),
-            new StaticOptionsMonitor<KieOptions>(options ?? new KieOptions { ApiKey = "test-key" }),
+            new StaticOptionsMonitor<KieOptions>(options ?? new KieOptions()),
             NullLogger<KieClient>.Instance);
 
     private sealed class FakeHttpMessageHandler : HttpMessageHandler

@@ -63,6 +63,7 @@ public sealed class AiBillingReservationRequest
     public Guid? UserId { get; set; }
     public long ProviderId { get; set; }
     public long ProviderCapabilityId { get; set; }
+    public Guid? ProviderAccountId { get; set; }
     public string ProviderCode { get; set; } = string.Empty;
     public string CapabilityCode { get; set; } = string.Empty;
     public string FeatureCode { get; set; } = string.Empty;
@@ -120,6 +121,7 @@ public sealed class AiBillingProviderAttempt
 public sealed class AiBillingReconciliationItem
 {
     public Guid Id { get; init; }
+    public Guid? ProviderAccountId { get; init; }
     public string LogicalRequestId { get; init; } = string.Empty;
     public string Status { get; init; } = string.Empty;
     public string? RequestedModel { get; init; }
