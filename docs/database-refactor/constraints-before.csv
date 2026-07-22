@@ -1,0 +1,138 @@
+﻿schema_name,table_name,constraint_name,constraint_type,definition
+billing,ai_image_billing_records,ai_image_billing_records_cost_ck,c,CHECK (((provider_estimated_cost_usd >= (0)::numeric) AND (total_provider_estimated_cost_usd >= (0)::numeric) AND ((provider_actual_cost_usd IS NULL) OR (provider_actual_cost_usd >= (0)::numeric)) AND ((total_provider_actual_cost_usd IS NULL) OR (total_provider_actual_cost_usd >= (0)::numeric))))
+billing,ai_image_billing_records,ai_image_billing_records_logical_request_uk,u,UNIQUE (logical_request_id)
+billing,ai_image_billing_records,ai_image_billing_records_payer_ck,c,CHECK ((((payer_type = 'customer'::text) AND (payer_customer_id IS NOT NULL) AND (customer_charged_points >= (0)::numeric) AND (system_charged_points = (0)::numeric)) OR ((payer_type = 'system'::text) AND (payer_customer_id IS NULL) AND (system_charged_points >= (0)::numeric) AND (customer_charged_points = (0)::numeric))))
+billing,ai_image_billing_records,ai_image_billing_records_pkey,p,PRIMARY KEY (id)
+billing,ai_image_billing_records,ai_image_billing_records_points_ck,c,CHECK (((provider_cost_points >= (0)::numeric) AND (customer_charged_points >= (0)::numeric) AND (system_charged_points >= (0)::numeric)))
+billing,ai_image_billing_records,ai_image_billing_records_status_ck,c,"CHECK ((status = ANY (ARRAY['reserved'::text, 'completed'::text, 'released'::text, 'pending_reconciliation'::text, 'manual_review'::text, 'insufficient'::text, 'missing_payer'::text, 'missing_customer'::text, 'failed'::text, 'invalid'::text])))"
+billing,ai_image_provider_attempts,ai_image_provider_attempts_attempt_ck,c,CHECK ((attempt_number > 0))
+billing,ai_image_provider_attempts,ai_image_provider_attempts_billing_record_id_fkey,f,FOREIGN KEY (billing_record_id) REFERENCES billing.ai_image_billing_records(id) ON DELETE RESTRICT
+billing,ai_image_provider_attempts,ai_image_provider_attempts_cost_ck,c,CHECK ((((provider_estimated_cost_usd IS NULL) OR (provider_estimated_cost_usd >= (0)::numeric)) AND ((provider_actual_cost_usd IS NULL) OR (provider_actual_cost_usd >= (0)::numeric))))
+billing,ai_image_provider_attempts,ai_image_provider_attempts_pkey,p,PRIMARY KEY (id)
+billing,token_transactions,token_transactions_pkey,p,PRIMARY KEY (id)
+billing,token_transactions,token_transactions_tenant_id_fkey,f,FOREIGN KEY (tenant_id) REFERENCES system.tenants(id)
+billing,token_transactions,token_transactions_wallet_id_fkey,f,FOREIGN KEY (wallet_id) REFERENCES billing.token_wallets(id) ON DELETE CASCADE
+billing,token_usage_logs,token_usage_logs_customer_id_fkey,f,FOREIGN KEY (customer_id) REFERENCES crm.customers(id)
+billing,token_usage_logs,token_usage_logs_pkey,p,PRIMARY KEY (id)
+billing,token_usage_logs,token_usage_logs_tenant_id_fkey,f,FOREIGN KEY (tenant_id) REFERENCES system.tenants(id)
+billing,token_usage_logs,token_usage_logs_user_id_fkey,f,FOREIGN KEY (user_id) REFERENCES auth.app_users(id)
+billing,token_wallets,token_wallets_customer_id_fkey,f,FOREIGN KEY (customer_id) REFERENCES crm.customers(id) ON DELETE CASCADE
+billing,token_wallets,token_wallets_pkey,p,PRIMARY KEY (id)
+billing,token_wallets,token_wallets_tenant_id_fkey,f,FOREIGN KEY (tenant_id) REFERENCES system.tenants(id)
+dance_sell,dance_sell_jobs,dance_sell_jobs_customer_id_fkey,f,FOREIGN KEY (customer_id) REFERENCES crm.customers(id) ON DELETE SET NULL
+dance_sell,dance_sell_jobs,dance_sell_jobs_logical_request_uk,u,UNIQUE (logical_request_id)
+dance_sell,dance_sell_jobs,dance_sell_jobs_mode_ck,c,"CHECK ((mode = ANY (ARRAY['720p'::text, '1080p'::text])))"
+dance_sell,dance_sell_jobs,dance_sell_jobs_orientation_ck,c,"CHECK ((character_orientation = ANY (ARRAY['image'::text, 'video'::text])))"
+dance_sell,dance_sell_jobs,dance_sell_jobs_pkey,p,PRIMARY KEY (id)
+dance_sell,dance_sell_jobs,dance_sell_jobs_poll_count_ck,c,CHECK ((poll_count >= 0))
+dance_sell,dance_sell_jobs,dance_sell_jobs_render_job_id_fkey,f,FOREIGN KEY (render_job_id) REFERENCES render.render_jobs(id) ON DELETE SET NULL
+dance_sell,dance_sell_jobs,dance_sell_jobs_status_ck,c,"CHECK ((status = ANY (ARRAY['queued'::text, 'submitted'::text, 'rendering'::text, 'completed'::text, 'failed'::text, 'timeout'::text])))"
+dance_sell,dance_sell_jobs,dance_sell_jobs_tenant_id_fkey,f,FOREIGN KEY (tenant_id) REFERENCES system.tenants(id)
+dance_sell,dance_sell_jobs,dance_sell_jobs_user_id_fkey,f,FOREIGN KEY (user_id) REFERENCES auth.app_users(id) ON DELETE SET NULL
+public,app_users,app_users_pkey,p,PRIMARY KEY (id)
+public,app_users,app_users_username_key,u,UNIQUE (username)
+public,customer_accounts,customer_accounts_customer_id_fkey,f,FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
+public,customer_accounts,customer_accounts_pkey,p,PRIMARY KEY (id)
+public,customer_accounts,customer_accounts_username_key,u,UNIQUE (username)
+public,customers,customers_code_key,u,UNIQUE (code)
+public,customers,customers_pkey,p,PRIMARY KEY (id)
+public,render_orders,render_orders_customer_id_fkey,f,FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
+public,render_orders,render_orders_order_code_key,u,UNIQUE (order_code)
+public,render_orders,render_orders_pkey,p,PRIMARY KEY (id)
+public,render_orders,render_orders_service_package_id_fkey,f,FOREIGN KEY (service_package_id) REFERENCES service_packages(id)
+public,service_packages,service_packages_code_key,u,UNIQUE (code)
+public,service_packages,service_packages_pkey,p,PRIMARY KEY (id)
+public,todox_ai_character,chk_todox_ai_character_aspect_ratio,c,"CHECK (((aspect_ratio IS NULL) OR ((aspect_ratio)::text = ANY ((ARRAY['1:1'::character varying, '9:16'::character varying, '16:9'::character varying, '4:5'::character varying, '3:4'::character varying])::text[]))))"
+public,todox_ai_character,chk_todox_ai_character_gender,c,"CHECK (((gender IS NULL) OR ((gender)::text = ANY (ARRAY[('male'::character varying)::text, ('female'::character varying)::text, ('neutral'::character varying)::text, ('not_specified'::character varying)::text]))))"
+public,todox_ai_character,chk_todox_ai_character_status,c,"CHECK (((status)::text = ANY (ARRAY[('active'::character varying)::text, ('inactive'::character varying)::text])))"
+public,todox_ai_character,chk_todox_ai_character_style_preset,c,"CHECK (((style_preset IS NULL) OR ((style_preset)::text = ANY ((ARRAY['3d_chibi'::character varying, 'realistic'::character varying, 'anime'::character varying, 'cartoon'::character varying, 'corporate_mascot'::character varying, 'koc_ai'::character varying])::text[]))))"
+public,todox_ai_character,todox_ai_character_character_code_key,u,UNIQUE (character_code)
+public,todox_ai_character,todox_ai_character_pkey,p,PRIMARY KEY (id)
+public,todox_ai_character_reference,chk_todox_ai_character_reference_type,c,"CHECK (((reference_type)::text = ANY ((ARRAY['master'::character varying, 'variant'::character varying, 'product'::character varying, 'style'::character varying, 'other'::character varying])::text[])))"
+public,todox_ai_character_reference,todox_ai_character_reference_character_id_fkey,f,FOREIGN KEY (character_id) REFERENCES todox_ai_character(id) ON DELETE CASCADE
+public,todox_ai_character_reference,todox_ai_character_reference_pkey,p,PRIMARY KEY (id)
+public,todox_ai_character_render,chk_todox_ai_character_render_aspect_ratio,c,"CHECK (((aspect_ratio IS NULL) OR ((aspect_ratio)::text = ANY (ARRAY[('1:1'::character varying)::text, ('9:16'::character varying)::text, ('16:9'::character varying)::text, ('4:5'::character varying)::text, ('3:4'::character varying)::text]))))"
+public,todox_ai_character_render,chk_todox_ai_character_render_status,c,"CHECK (((status)::text = ANY (ARRAY[('success'::character varying)::text, ('failed'::character varying)::text, ('processing'::character varying)::text])))"
+public,todox_ai_character_render,todox_ai_character_render_character_id_fkey,f,FOREIGN KEY (character_id) REFERENCES todox_ai_character(id) ON DELETE CASCADE
+public,todox_ai_character_render,todox_ai_character_render_pkey,p,PRIMARY KEY (id)
+public,todox_ai_character_render,todox_ai_character_render_render_code_key,u,UNIQUE (render_code)
+public,todox_ai_provider,ck_todox_ai_provider_auth_type,c,"CHECK (((auth_type IS NULL) OR ((auth_type)::text = ANY (ARRAY[('none'::character varying)::text, ('bearer'::character varying)::text, ('api_key'::character varying)::text, ('basic'::character varying)::text, ('custom'::character varying)::text]))))"
+public,todox_ai_provider,ck_todox_ai_provider_provider_code_not_blank,c,CHECK ((length(TRIM(BOTH FROM provider_code)) > 0))
+public,todox_ai_provider,ck_todox_ai_provider_provider_type,c,"CHECK (((provider_type)::text = ANY (ARRAY[('external_api'::character varying)::text, ('internal_api'::character varying)::text, ('local_api'::character varying)::text, ('router'::character varying)::text, ('custom'::character varying)::text])))"
+public,todox_ai_provider,todox_ai_provider_pkey,p,PRIMARY KEY (id)
+public,todox_ai_provider,todox_ai_provider_provider_code_key,u,UNIQUE (provider_code)
+public,todox_ai_provider_capability,ck_todox_ai_provider_capability_code_not_blank,c,CHECK ((length(TRIM(BOTH FROM capability_code)) > 0))
+public,todox_ai_provider_capability,ck_todox_ai_provider_capability_cost_non_negative,c,CHECK (((unit_cost_points >= (0)::numeric) AND (minimum_points >= (0)::numeric)))
+public,todox_ai_provider_capability,ck_todox_ai_provider_capability_quantity,c,CHECK ((((max_quantity IS NULL) OR (max_quantity >= (0)::numeric)) AND ((min_quantity IS NULL) OR (min_quantity >= (0)::numeric)) AND ((max_quantity IS NULL) OR (min_quantity IS NULL) OR (max_quantity >= min_quantity))))
+public,todox_ai_provider_capability,ck_todox_ai_provider_capability_unit_type,c,"CHECK (((unit_type)::text = ANY (ARRAY[('image'::character varying)::text, ('second'::character varying)::text, ('minute'::character varying)::text, ('request'::character varying)::text, ('scene'::character varying)::text, ('character_1000'::character varying)::text, ('token_1000'::character varying)::text])))"
+public,todox_ai_provider_capability,todox_ai_provider_capability_pkey,p,PRIMARY KEY (id)
+public,todox_ai_provider_capability,todox_ai_provider_capability_provider_id_fkey,f,FOREIGN KEY (provider_id) REFERENCES todox_ai_provider(id) ON DELETE CASCADE
+public,todox_ai_provider_capability,uq_todox_ai_provider_capability,u,"UNIQUE (provider_id, capability_code, model_name)"
+public,todox_ai_provider_usage_log,ck_todox_ai_provider_usage_log_numbers,c,CHECK (((quantity >= (0)::numeric) AND (unit_cost_points >= (0)::numeric) AND (total_points >= (0)::numeric)))
+public,todox_ai_provider_usage_log,ck_todox_ai_provider_usage_log_status,c,"CHECK (((status)::text = ANY (ARRAY[('pending'::character varying)::text, ('success'::character varying)::text, ('failed'::character varying)::text, ('cancelled'::character varying)::text, ('refunded'::character varying)::text])))"
+public,todox_ai_provider_usage_log,ck_todox_ai_provider_usage_log_unit_type,c,"CHECK (((unit_type)::text = ANY (ARRAY[('image'::character varying)::text, ('second'::character varying)::text, ('minute'::character varying)::text, ('request'::character varying)::text, ('scene'::character varying)::text, ('character_1000'::character varying)::text, ('token_1000'::character varying)::text])))"
+public,todox_ai_provider_usage_log,todox_ai_provider_usage_log_pkey,p,PRIMARY KEY (id)
+public,todox_ai_provider_usage_log,todox_ai_provider_usage_log_provider_capability_id_fkey,f,FOREIGN KEY (provider_capability_id) REFERENCES todox_ai_provider_capability(id) ON DELETE SET NULL
+public,todox_ai_provider_usage_log,todox_ai_provider_usage_log_provider_id_fkey,f,FOREIGN KEY (provider_id) REFERENCES todox_ai_provider(id) ON DELETE SET NULL
+public,todox_customer_credit_transaction,ck_todox_customer_credit_transaction_type,c,"CHECK (((transaction_type)::text = ANY ((ARRAY['topup'::character varying, 'charge'::character varying, 'refund'::character varying, 'adjustment'::character varying, 'expire'::character varying, 'bonus'::character varying])::text[])))"
+public,todox_customer_credit_transaction,todox_customer_credit_transaction_pkey,p,PRIMARY KEY (id)
+public,token_transactions,token_transactions_customer_id_fkey,f,FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
+public,token_transactions,token_transactions_pkey,p,PRIMARY KEY (id)
+public,token_wallets,token_wallets_customer_id_fkey,f,FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
+public,token_wallets,token_wallets_customer_id_key,u,UNIQUE (customer_id)
+public,token_wallets,token_wallets_pkey,p,PRIMARY KEY (id)
+render,image_render_requests,image_render_requests_customer_id_fkey,f,FOREIGN KEY (customer_id) REFERENCES crm.customers(id)
+render,image_render_requests,image_render_requests_pkey,p,PRIMARY KEY (id)
+render,image_render_requests,image_render_requests_tenant_id_fkey,f,FOREIGN KEY (tenant_id) REFERENCES system.tenants(id)
+render,image_render_requests,image_render_requests_user_id_fkey,f,FOREIGN KEY (user_id) REFERENCES auth.app_users(id)
+render,marketing_image_render_logs,marketing_image_render_logs_pkey,p,PRIMARY KEY (id)
+render,render_artifacts,render_artifacts_pkey,p,PRIMARY KEY (id)
+render,render_artifacts,render_artifacts_render_job_id_fkey,f,FOREIGN KEY (render_job_id) REFERENCES render.render_jobs(id) ON DELETE CASCADE
+render,render_artifacts,render_artifacts_scene_id_fkey,f,FOREIGN KEY (scene_id) REFERENCES render.render_scenes(id) ON DELETE SET NULL
+render,render_events,render_events_pkey,p,PRIMARY KEY (id)
+render,render_events,render_events_render_job_id_fkey,f,FOREIGN KEY (render_job_id) REFERENCES render.render_jobs(id) ON DELETE CASCADE
+render,render_events,render_events_scene_id_fkey,f,FOREIGN KEY (scene_id) REFERENCES render.render_scenes(id) ON DELETE SET NULL
+render,render_events,render_events_tenant_id_fkey,f,FOREIGN KEY (tenant_id) REFERENCES system.tenants(id)
+render,render_job_events,ck_render_job_events_level,c,"CHECK (((level)::text = ANY ((ARRAY['debug'::character varying, 'info'::character varying, 'warning'::character varying, 'error'::character varying])::text[])))"
+render,render_job_events,render_job_events_job_id_fkey,f,FOREIGN KEY (job_id) REFERENCES render.render_jobs(id) ON DELETE CASCADE
+render,render_job_events,render_job_events_pkey,p,PRIMARY KEY (id)
+render,render_job_events,render_job_events_tenant_id_fkey,f,FOREIGN KEY (tenant_id) REFERENCES system.tenants(id)
+render,render_job_inputs,render_job_inputs_pkey,p,PRIMARY KEY (id)
+render,render_job_inputs,render_job_inputs_render_job_id_fkey,f,FOREIGN KEY (render_job_id) REFERENCES render.render_jobs(id) ON DELETE CASCADE
+render,render_job_snapshots,render_job_snapshots_job_id_fkey,f,FOREIGN KEY (job_id) REFERENCES render.render_jobs(id) ON DELETE CASCADE
+render,render_job_snapshots,render_job_snapshots_pkey,p,PRIMARY KEY (id)
+render,render_job_snapshots,render_job_snapshots_tenant_id_fkey,f,FOREIGN KEY (tenant_id) REFERENCES system.tenants(id)
+render,render_job_snapshots,ux_render_job_snapshots_job,u,UNIQUE (job_id)
+render,render_job_steps,render_job_steps_pkey,p,PRIMARY KEY (id)
+render,render_job_steps,render_job_steps_render_job_id_fkey,f,FOREIGN KEY (render_job_id) REFERENCES render.render_jobs(id) ON DELETE CASCADE
+render,render_job_steps,render_job_steps_render_job_id_step_key_key,u,"UNIQUE (render_job_id, step_key)"
+render,render_jobs,fk_render_jobs_retry_of_job_id,f,FOREIGN KEY (retry_of_job_id) REFERENCES render.render_jobs(id) ON DELETE SET NULL NOT VALID
+render,render_jobs,render_jobs_customer_id_fkey,f,FOREIGN KEY (customer_id) REFERENCES crm.customers(id)
+render,render_jobs,render_jobs_customer_user_id_fkey,f,FOREIGN KEY (customer_user_id) REFERENCES auth.app_users(id)
+render,render_jobs,render_jobs_job_code_key,u,UNIQUE (job_code)
+render,render_jobs,render_jobs_pkey,p,PRIMARY KEY (id)
+render,render_jobs,render_jobs_pricing_tier_id_fkey,f,FOREIGN KEY (pricing_tier_id) REFERENCES catalog.service_pricing_tiers(id)
+render,render_jobs,render_jobs_service_id_fkey,f,FOREIGN KEY (service_id) REFERENCES catalog.services(id)
+render,render_jobs,render_jobs_tenant_id_fkey,f,FOREIGN KEY (tenant_id) REFERENCES system.tenants(id)
+render,render_scenes,render_scenes_pkey,p,PRIMARY KEY (id)
+render,render_scenes,render_scenes_render_job_id_fkey,f,FOREIGN KEY (render_job_id) REFERENCES render.render_jobs(id) ON DELETE CASCADE
+render,render_scenes,render_scenes_render_job_id_scene_index_version_key,u,"UNIQUE (render_job_id, scene_index, version)"
+system,api_providers,api_providers_pkey,p,PRIMARY KEY (id)
+system,api_providers,api_providers_provider_key_key,u,UNIQUE (provider_key)
+system,app_settings,app_settings_pkey,p,PRIMARY KEY (id)
+system,app_settings,app_settings_setting_key_key,u,UNIQUE (setting_key)
+system,database_versions,database_versions_pkey,p,PRIMARY KEY (id)
+system,database_versions,database_versions_version_code_key,u,UNIQUE (version_code)
+system,foundation_versions,foundation_versions_pkey,p,PRIMARY KEY (id)
+system,foundation_versions,foundation_versions_version_code_key,u,UNIQUE (version_code)
+system,navigation_menu_groups,navigation_menu_groups_code_key,u,UNIQUE (code)
+system,navigation_menu_groups,navigation_menu_groups_pkey,p,PRIMARY KEY (id)
+system,navigation_menu_items,navigation_menu_items_code_key,u,UNIQUE (code)
+system,navigation_menu_items,navigation_menu_items_group_id_fkey,f,FOREIGN KEY (group_id) REFERENCES system.navigation_menu_groups(id) ON DELETE CASCADE
+system,navigation_menu_items,navigation_menu_items_pkey,p,PRIMARY KEY (id)
+system,navigation_menu_items,navigation_menu_items_visibility_policy_check,c,"CHECK (((visibility_policy)::text = ANY ((ARRAY['always'::character varying, 'any_module'::character varying, 'admin_avatar_manager'::character varying])::text[])))"
+system,provider_credentials,provider_credentials_credential_key_key,u,UNIQUE (credential_key)
+system,provider_credentials,provider_credentials_pkey,p,PRIMARY KEY (id)
+system,provider_credentials,provider_credentials_provider_id_fkey,f,FOREIGN KEY (provider_id) REFERENCES system.api_providers(id) ON DELETE CASCADE
+system,tenants,tenants_pkey,p,PRIMARY KEY (id)
+system,tenants,tenants_tenant_code_key,u,UNIQUE (tenant_code)

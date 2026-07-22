@@ -1,0 +1,321 @@
+﻿table_schema,table_name,column_name,data_type,is_nullable,column_default
+billing,ai_image_billing_records,id,uuid,NO,gen_random_uuid()
+billing,ai_image_billing_records,tenant_id,uuid,NO,
+billing,ai_image_billing_records,logical_request_id,text,NO,
+billing,ai_image_billing_records,render_job_id,text,YES,
+billing,ai_image_billing_records,customer_id,uuid,YES,
+billing,ai_image_billing_records,user_id,uuid,YES,
+billing,ai_image_billing_records,wallet_id,uuid,YES,
+billing,ai_image_billing_records,payer_type,text,NO,'customer'::text
+billing,ai_image_billing_records,payer_customer_id,uuid,YES,
+billing,ai_image_billing_records,payer_wallet_id,uuid,YES,
+billing,ai_image_billing_records,provider_id,bigint,NO,
+billing,ai_image_billing_records,provider_capability_id,bigint,NO,
+billing,ai_image_billing_records,provider_code,text,NO,
+billing,ai_image_billing_records,capability_code,text,NO,
+billing,ai_image_billing_records,feature_code,text,NO,
+billing,ai_image_billing_records,requested_model,text,YES,
+billing,ai_image_billing_records,actual_model,text,YES,
+billing,ai_image_billing_records,provider_task_id,text,YES,
+billing,ai_image_billing_records,provider_estimated_cost_usd,numeric,NO,0
+billing,ai_image_billing_records,total_provider_estimated_cost_usd,numeric,NO,0
+billing,ai_image_billing_records,provider_actual_cost_usd,numeric,YES,
+billing,ai_image_billing_records,total_provider_actual_cost_usd,numeric,YES,
+billing,ai_image_billing_records,actual_cost_incomplete,boolean,NO,false
+billing,ai_image_billing_records,provider_cost_source,text,NO,'configured_tariff'::text
+billing,ai_image_billing_records,tariff_snapshot_json,jsonb,YES,
+billing,ai_image_billing_records,exchange_rate_vnd_per_usd,numeric,NO,8000
+billing,ai_image_billing_records,todox_vnd_per_point,numeric,NO,10000
+billing,ai_image_billing_records,provider_cost_points,numeric,NO,0
+billing,ai_image_billing_records,customer_charged_points,numeric,NO,0
+billing,ai_image_billing_records,system_charged_points,numeric,NO,0
+billing,ai_image_billing_records,billing_exempt,boolean,NO,false
+billing,ai_image_billing_records,exemption_reason,text,YES,
+billing,ai_image_billing_records,wallet_transaction_id,uuid,YES,
+billing,ai_image_billing_records,status,text,NO,
+billing,ai_image_billing_records,error_message,text,YES,
+billing,ai_image_billing_records,metadata_json,jsonb,YES,
+billing,ai_image_billing_records,created_by,text,YES,
+billing,ai_image_billing_records,reserved_until,timestamp with time zone,YES,
+billing,ai_image_billing_records,pending_reconciliation_at,timestamp with time zone,YES,
+billing,ai_image_billing_records,reconciliation_attempt_count,integer,NO,0
+billing,ai_image_billing_records,reconciliation_lock_owner,text,YES,
+billing,ai_image_billing_records,reconciliation_lock_until,timestamp with time zone,YES,
+billing,ai_image_billing_records,created_at,timestamp with time zone,NO,now()
+billing,ai_image_billing_records,updated_at,timestamp with time zone,NO,now()
+billing,ai_image_billing_records,completed_at,timestamp with time zone,YES,
+billing,ai_image_billing_records,failed_at,timestamp with time zone,YES,
+billing,ai_image_provider_attempts,id,uuid,NO,gen_random_uuid()
+billing,ai_image_provider_attempts,billing_record_id,uuid,NO,
+billing,ai_image_provider_attempts,attempt_number,integer,NO,
+billing,ai_image_provider_attempts,model_name,text,YES,
+billing,ai_image_provider_attempts,provider_task_id,text,YES,
+billing,ai_image_provider_attempts,success,boolean,NO,false
+billing,ai_image_provider_attempts,provider_estimated_cost_usd,numeric,YES,
+billing,ai_image_provider_attempts,provider_actual_cost_usd,numeric,YES,
+billing,ai_image_provider_attempts,cost_source,text,YES,
+billing,ai_image_provider_attempts,error_code,text,YES,
+billing,ai_image_provider_attempts,error_message,text,YES,
+billing,ai_image_provider_attempts,raw_usage_json,jsonb,YES,
+billing,ai_image_provider_attempts,started_at,timestamp with time zone,YES,
+billing,ai_image_provider_attempts,completed_at,timestamp with time zone,YES,
+billing,ai_image_provider_attempts,created_at,timestamp with time zone,NO,now()
+billing,token_transactions,id,uuid,NO,gen_random_uuid()
+billing,token_transactions,tenant_id,uuid,NO,
+billing,token_transactions,wallet_id,uuid,NO,
+billing,token_transactions,transaction_type,character varying,NO,
+billing,token_transactions,amount,numeric,NO,
+billing,token_transactions,balance_before,numeric,NO,
+billing,token_transactions,balance_after,numeric,NO,
+billing,token_transactions,reference_type,character varying,YES,
+billing,token_transactions,reference_id,uuid,YES,
+billing,token_transactions,description,text,YES,
+billing,token_transactions,created_at,timestamp with time zone,NO,now()
+billing,token_transactions,created_by,uuid,YES,
+billing,token_usage_logs,id,uuid,NO,gen_random_uuid()
+billing,token_usage_logs,tenant_id,uuid,YES,
+billing,token_usage_logs,user_id,uuid,YES,
+billing,token_usage_logs,customer_id,uuid,YES,
+billing,token_usage_logs,provider_code,character varying,YES,
+billing,token_usage_logs,model_code,character varying,YES,
+billing,token_usage_logs,operation,character varying,NO,
+billing,token_usage_logs,quantity,integer,NO,1
+billing,token_usage_logs,unit,character varying,YES,'image'::character varying
+billing,token_usage_logs,token_cost,numeric,NO,0
+billing,token_usage_logs,charged,boolean,NO,false
+billing,token_usage_logs,reference_type,character varying,YES,
+billing,token_usage_logs,reference_id,uuid,YES,
+billing,token_usage_logs,endpoint_code,character varying,YES,
+billing,token_usage_logs,status,character varying,NO,'success'::character varying
+billing,token_usage_logs,metadata,jsonb,YES,'{}'::jsonb
+billing,token_usage_logs,created_at,timestamp with time zone,NO,now()
+billing,token_wallets,id,uuid,NO,gen_random_uuid()
+billing,token_wallets,tenant_id,uuid,NO,
+billing,token_wallets,customer_id,uuid,YES,
+billing,token_wallets,balance,numeric,NO,0
+billing,token_wallets,locked_balance,numeric,NO,0
+billing,token_wallets,status,character varying,NO,'active'::character varying
+billing,token_wallets,created_at,timestamp with time zone,NO,now()
+billing,token_wallets,updated_at,timestamp with time zone,YES,
+billing,token_wallets,wallet_scope,text,NO,'customer'::text
+billing,token_wallets,wallet_code,text,YES,
+billing,token_wallets,overdraft_limit,numeric,NO,0
+billing,token_wallets,low_balance_threshold,numeric,NO,0
+dance_sell,dance_sell_jobs,id,uuid,NO,gen_random_uuid()
+dance_sell,dance_sell_jobs,tenant_id,uuid,YES,
+dance_sell,dance_sell_jobs,customer_id,uuid,YES,
+dance_sell,dance_sell_jobs,user_id,uuid,YES,
+dance_sell,dance_sell_jobs,render_job_id,uuid,YES,
+dance_sell,dance_sell_jobs,logical_request_id,text,NO,
+dance_sell,dance_sell_jobs,status,text,NO,'queued'::text
+dance_sell,dance_sell_jobs,prompt,text,NO,
+dance_sell,dance_sell_jobs,character_image_url,text,NO,
+dance_sell,dance_sell_jobs,motion_video_url,text,NO,
+dance_sell,dance_sell_jobs,mode,text,NO,'720p'::text
+dance_sell,dance_sell_jobs,character_orientation,text,NO,'image'::text
+dance_sell,dance_sell_jobs,provider_code,text,NO,'kie'::text
+dance_sell,dance_sell_jobs,provider_model,text,NO,'kling-2.6/motion-control'::text
+dance_sell,dance_sell_jobs,provider_task_id,text,YES,
+dance_sell,dance_sell_jobs,provider_status,text,YES,
+dance_sell,dance_sell_jobs,request_json,jsonb,NO,'{}'::jsonb
+dance_sell,dance_sell_jobs,submit_response_json,jsonb,YES,
+dance_sell,dance_sell_jobs,poll_response_json,jsonb,YES,
+dance_sell,dance_sell_jobs,callback_json,jsonb,YES,
+dance_sell,dance_sell_jobs,error_json,jsonb,YES,
+dance_sell,dance_sell_jobs,result_video_url,text,YES,
+dance_sell,dance_sell_jobs,poll_count,integer,NO,0
+dance_sell,dance_sell_jobs,next_poll_at,timestamp with time zone,YES,
+dance_sell,dance_sell_jobs,submitted_at,timestamp with time zone,YES,
+dance_sell,dance_sell_jobs,last_polled_at,timestamp with time zone,YES,
+dance_sell,dance_sell_jobs,completed_at,timestamp with time zone,YES,
+dance_sell,dance_sell_jobs,created_at,timestamp with time zone,NO,now()
+dance_sell,dance_sell_jobs,updated_at,timestamp with time zone,NO,now()
+dance_sell,dance_sell_jobs,error_code,text,YES,
+dance_sell,dance_sell_jobs,error_message,text,YES,
+public,todox_ai_provider,id,bigint,NO,nextval('todox_ai_provider_id_seq'::regclass)
+public,todox_ai_provider,provider_code,character varying,NO,
+public,todox_ai_provider,provider_name,character varying,NO,
+public,todox_ai_provider,provider_type,character varying,NO,'external_api'::character varying
+public,todox_ai_provider,base_url,text,YES,
+public,todox_ai_provider,api_key_config_name,character varying,YES,
+public,todox_ai_provider,auth_type,character varying,YES,'bearer'::character varying
+public,todox_ai_provider,enabled,boolean,NO,true
+public,todox_ai_provider,is_system,boolean,NO,false
+public,todox_ai_provider,priority,integer,NO,100
+public,todox_ai_provider,description,text,YES,
+public,todox_ai_provider,config_json,jsonb,YES,
+public,todox_ai_provider,created_by,character varying,YES,
+public,todox_ai_provider,updated_by,character varying,YES,
+public,todox_ai_provider,created_at,timestamp without time zone,NO,now()
+public,todox_ai_provider,updated_at,timestamp without time zone,NO,now()
+public,todox_ai_provider_capability,id,bigint,NO,nextval('todox_ai_provider_capability_id_seq'::regclass)
+public,todox_ai_provider_capability,provider_id,bigint,NO,
+public,todox_ai_provider_capability,capability_code,character varying,NO,
+public,todox_ai_provider_capability,display_name,character varying,NO,
+public,todox_ai_provider_capability,description,text,YES,
+public,todox_ai_provider_capability,model_name,character varying,YES,
+public,todox_ai_provider_capability,model_display_name,character varying,YES,
+public,todox_ai_provider_capability,model_version,character varying,YES,
+public,todox_ai_provider_capability,unit_type,character varying,NO,'request'::character varying
+public,todox_ai_provider_capability,unit_cost_points,numeric,NO,0
+public,todox_ai_provider_capability,minimum_points,numeric,NO,0
+public,todox_ai_provider_capability,is_default,boolean,NO,false
+public,todox_ai_provider_capability,allow_user_select,boolean,NO,true
+public,todox_ai_provider_capability,enabled,boolean,NO,true
+public,todox_ai_provider_capability,priority,integer,NO,100
+public,todox_ai_provider_capability,max_quantity,numeric,YES,
+public,todox_ai_provider_capability,min_quantity,numeric,YES,
+public,todox_ai_provider_capability,config_json,jsonb,YES,
+public,todox_ai_provider_capability,pricing_json,jsonb,YES,
+public,todox_ai_provider_capability,created_by,character varying,YES,
+public,todox_ai_provider_capability,updated_by,character varying,YES,
+public,todox_ai_provider_capability,created_at,timestamp without time zone,NO,now()
+public,todox_ai_provider_capability,updated_at,timestamp without time zone,NO,now()
+public,todox_ai_provider_capability,endpoint_path,text,YES,
+public,todox_ai_provider_capability,provider_code,character varying,YES,
+public,todox_ai_provider_usage_log,id,bigint,NO,nextval('todox_ai_provider_usage_log_id_seq'::regclass)
+public,todox_ai_provider_usage_log,customer_id,bigint,NO,
+public,todox_ai_provider_usage_log,provider_id,bigint,YES,
+public,todox_ai_provider_usage_log,provider_capability_id,bigint,YES,
+public,todox_ai_provider_usage_log,provider_code,character varying,NO,
+public,todox_ai_provider_usage_log,capability_code,character varying,NO,
+public,todox_ai_provider_usage_log,feature_code,character varying,YES,
+public,todox_ai_provider_usage_log,model_name,character varying,YES,
+public,todox_ai_provider_usage_log,request_id,character varying,YES,
+public,todox_ai_provider_usage_log,job_id,character varying,YES,
+public,todox_ai_provider_usage_log,related_entity_type,character varying,YES,
+public,todox_ai_provider_usage_log,related_entity_id,bigint,YES,
+public,todox_ai_provider_usage_log,quantity,numeric,NO,1
+public,todox_ai_provider_usage_log,unit_type,character varying,NO,'request'::character varying
+public,todox_ai_provider_usage_log,unit_cost_points,numeric,NO,0
+public,todox_ai_provider_usage_log,total_points,numeric,NO,0
+public,todox_ai_provider_usage_log,provider_raw_cost,numeric,YES,
+public,todox_ai_provider_usage_log,provider_cost_currency,character varying,YES,
+public,todox_ai_provider_usage_log,usage_json,jsonb,YES,
+public,todox_ai_provider_usage_log,status,character varying,NO,'success'::character varying
+public,todox_ai_provider_usage_log,error_message,text,YES,
+public,todox_ai_provider_usage_log,request_json,jsonb,YES,
+public,todox_ai_provider_usage_log,response_json,jsonb,YES,
+public,todox_ai_provider_usage_log,created_by,character varying,YES,
+public,todox_ai_provider_usage_log,created_at,timestamp without time zone,NO,now()
+public,token_transactions,id,uuid,NO,gen_random_uuid()
+public,token_transactions,customer_id,uuid,NO,
+public,token_transactions,transaction_type,character varying,NO,
+public,token_transactions,amount,numeric,NO,
+public,token_transactions,balance_after,numeric,NO,
+public,token_transactions,reference_type,character varying,YES,
+public,token_transactions,reference_id,uuid,YES,
+public,token_transactions,note,text,YES,
+public,token_transactions,created_at,timestamp with time zone,NO,now()
+public,token_wallets,id,uuid,NO,gen_random_uuid()
+public,token_wallets,customer_id,uuid,NO,
+public,token_wallets,balance,numeric,NO,0
+public,token_wallets,reserved_balance,numeric,NO,0
+public,token_wallets,updated_at,timestamp with time zone,NO,now()
+render,render_artifacts,id,uuid,NO,gen_random_uuid()
+render,render_artifacts,render_job_id,uuid,NO,
+render,render_artifacts,scene_id,uuid,YES,
+render,render_artifacts,artifact_type,character varying,NO,
+render,render_artifacts,format,character varying,NO,
+render,render_artifacts,storage_provider,character varying,NO,'minio'::character varying
+render,render_artifacts,bucket,character varying,YES,
+render,render_artifacts,object_key,text,YES,
+render,render_artifacts,public_url,text,YES,
+render,render_artifacts,console_url,text,YES,
+render,render_artifacts,size_bytes,bigint,YES,
+render,render_artifacts,checksum,character varying,YES,
+render,render_artifacts,metadata,jsonb,NO,'{}'::jsonb
+render,render_artifacts,created_at,timestamp with time zone,NO,now()
+render,render_job_events,id,uuid,NO,gen_random_uuid()
+render,render_job_events,job_id,uuid,NO,
+render,render_job_events,tenant_id,uuid,YES,
+render,render_job_events,event_type,character varying,NO,
+render,render_job_events,level,character varying,NO,'info'::character varying
+render,render_job_events,message,text,YES,
+render,render_job_events,data_json,jsonb,NO,'{}'::jsonb
+render,render_job_events,provider_code,character varying,YES,
+render,render_job_events,model_code,character varying,YES,
+render,render_job_events,created_at,timestamp with time zone,NO,now()
+render,render_job_inputs,id,uuid,NO,gen_random_uuid()
+render,render_job_inputs,render_job_id,uuid,NO,
+render,render_job_inputs,input_type,character varying,NO,
+render,render_job_inputs,input_text,text,YES,
+render,render_job_inputs,input_url,text,YES,
+render,render_job_inputs,input_json,jsonb,YES,
+render,render_job_inputs,created_at,timestamp with time zone,NO,now()
+render,render_job_steps,id,uuid,NO,gen_random_uuid()
+render,render_job_steps,render_job_id,uuid,NO,
+render,render_job_steps,step_key,character varying,NO,
+render,render_job_steps,step_name,character varying,YES,
+render,render_job_steps,status,character varying,NO,'pending'::character varying
+render,render_job_steps,attempt,integer,NO,0
+render,render_job_steps,input_json,jsonb,YES,
+render,render_job_steps,output_json,jsonb,YES,
+render,render_job_steps,error_json,jsonb,YES,
+render,render_job_steps,started_at,timestamp with time zone,YES,
+render,render_job_steps,finished_at,timestamp with time zone,YES,
+render,render_job_steps,created_at,timestamp with time zone,NO,now()
+render,render_jobs,id,uuid,NO,gen_random_uuid()
+render,render_jobs,tenant_id,uuid,NO,
+render,render_jobs,customer_id,uuid,YES,
+render,render_jobs,customer_user_id,uuid,YES,
+render,render_jobs,service_id,uuid,YES,
+render,render_jobs,pricing_tier_id,uuid,YES,
+render,render_jobs,job_code,character varying,YES,
+render,render_jobs,job_type,character varying,NO,'video_from_prompt'::character varying
+render,render_jobs,title,character varying,YES,
+render,render_jobs,prompt,text,YES,
+render,render_jobs,source_type,character varying,YES,'prompt'::character varying
+render,render_jobs,source_url,text,YES,
+render,render_jobs,target_duration_sec,integer,YES,
+render,render_jobs,scene_count,integer,YES,
+render,render_jobs,status,character varying,NO,'draft'::character varying
+render,render_jobs,progress_percent,integer,NO,0
+render,render_jobs,token_cost,numeric,YES,0
+render,render_jobs,token_transaction_id,uuid,YES,
+render,render_jobs,minio_prefix,text,YES,
+render,render_jobs,options,jsonb,NO,'{}'::jsonb
+render,render_jobs,error_message,text,YES,
+render,render_jobs,created_at,timestamp with time zone,NO,now()
+render,render_jobs,started_at,timestamp with time zone,YES,
+render,render_jobs,completed_at,timestamp with time zone,YES,
+render,render_jobs,updated_at,timestamp with time zone,YES,
+render,render_jobs,user_id,uuid,YES,
+render,render_jobs,attempt_count,integer,NO,0
+render,render_jobs,cancel_reason,text,YES,
+render,render_jobs,cancelled_at,timestamp with time zone,YES,
+render,render_jobs,error_code,character varying,YES,
+render,render_jobs,input_json,jsonb,NO,'{}'::jsonb
+render,render_jobs,log_code,character varying,YES,
+render,render_jobs,max_attempts,integer,NO,1
+render,render_jobs,model_code,character varying,YES,
+render,render_jobs,output_json,jsonb,NO,'[]'::jsonb
+render,render_jobs,point_cost_charged,numeric,NO,0
+render,render_jobs,point_cost_estimate,numeric,NO,0
+render,render_jobs,point_status,character varying,NO,'not_required'::character varying
+render,render_jobs,priority,integer,NO,100
+render,render_jobs,prompt_json,jsonb,NO,'{}'::jsonb
+render,render_jobs,provider_code,character varying,YES,
+render,render_jobs,queued_at,timestamp with time zone,NO,now()
+render,render_jobs,reference_json,jsonb,NO,'[]'::jsonb
+render,render_jobs,retry_after,timestamp with time zone,YES,
+render,render_jobs,retry_of_job_id,uuid,YES,
+render,render_jobs,worker_key,character varying,YES,
+render,render_jobs,lock_owner,character varying,YES,
+render,render_jobs,lock_until,timestamp with time zone,YES,
+system,provider_credentials,id,uuid,NO,gen_random_uuid()
+system,provider_credentials,provider_id,uuid,YES,
+system,provider_credentials,credential_key,character varying,NO,
+system,provider_credentials,credential_name,character varying,NO,
+system,provider_credentials,credential_type,character varying,NO,'api_key'::character varying
+system,provider_credentials,secret_value,text,YES,
+system,provider_credentials,secret_json,jsonb,YES,
+system,provider_credentials,is_encrypted,boolean,NO,false
+system,provider_credentials,status,character varying,NO,'active'::character varying
+system,provider_credentials,last_tested_at,timestamp with time zone,YES,
+system,provider_credentials,last_test_status,character varying,YES,
+system,provider_credentials,last_test_message,text,YES,
+system,provider_credentials,created_at,timestamp with time zone,NO,now()
+system,provider_credentials,created_by,uuid,YES,
+system,provider_credentials,updated_at,timestamp with time zone,YES,
+system,provider_credentials,updated_by,uuid,YES,
