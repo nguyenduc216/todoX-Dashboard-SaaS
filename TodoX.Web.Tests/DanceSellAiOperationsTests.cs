@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Options;
 using TodoX.Web.Services.AiProviders.Kie;
 using TodoX.Web.Services.DanceSell;
 using Xunit;
@@ -61,6 +62,56 @@ public sealed class DanceSellAiOperationsTests
     }
 
     [Fact]
+    public void KieParser_ReadsResultJsonWhenItIsObject()
+    {
+        var raw = """
+        {
+          "data": {
+            "taskId": "task-object-result",
+            "state": "success",
+            "resultJson": { "resultUrls": ["https://cdn.example/reference.png"] },
+            "creditsConsumed": "6"
+          }
+        }
+        """;
+
+        var parsed = KieResponseParser.ParseTaskDetail(raw, 200);
+
+        Assert.Equal("task-object-result", parsed.TaskId);
+        Assert.Equal(6, parsed.CreditsConsumed);
+        Assert.Single(parsed.ResultUrls);
+        Assert.Equal("https://cdn.example/reference.png", parsed.ResultUrls[0]);
+    }
+
+    [Fact]
+    public async Task KieReferenceProvider_SubmitsRealImageToImagePayload()
+    {
+        var client = new CapturingKieClient();
+        var provider = new KieDanceSellReferenceProvider(client, new StaticOptionsMonitor<KieOptions>(new KieOptions()));
+        var route = new DanceSellProviderRouteDto
+        {
+            ProviderCode = "kie",
+            ModelName = "gpt-image-2-image-to-image",
+            OperationType = DanceSellOperationTypes.ReferenceImage
+        };
+
+        var result = await provider.SubmitAsync(new DanceSellReferenceProviderRequest
+        {
+            Route = route,
+            Prompt = "Place product naturally.",
+            CharacterImageUrl = "https://cdn.example/character.png",
+            ProductImageUrl = "https://cdn.example/product.png",
+            AspectRatio = "1:1"
+        }, CancellationToken.None);
+
+        Assert.Equal("task-image", result.TaskId);
+        var payload = Assert.IsType<KieImageToImageRequest>(client.LastRequest);
+        Assert.Equal("gpt-image-2-image-to-image", payload.Model);
+        Assert.Equal(2, payload.Input.InputUrls.Count);
+        Assert.Equal("1:1", payload.Input.AspectRatio);
+    }
+
+    [Fact]
     public void KieCallback_ReadsCreditsConsumed()
     {
         var raw = """
@@ -114,14 +165,12 @@ public sealed class DanceSellAiOperationsTests
     public async Task BillingDisabled_DoesNotChargeRealPoints()
     {
         var billing = new AiOperationBillingService(new ConfigurationBuilder().Build());
-        var operation = await billing.ChargeAsync(new DanceSellProviderOperationDto
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => billing.ChargeAsync(new DanceSellProviderOperationDto
         {
             TodoxPointsEstimated = 10,
             BillingStatus = DanceSellBillingStatuses.Estimated
-        });
-
-        Assert.Equal(DanceSellBillingStatuses.NotRequired, operation.BillingStatus);
-        Assert.Null(operation.TodoxPointsCharged);
+        }));
+        Assert.Equal("DANCE_SELL_BILLING_DISABLED", ex.Message);
     }
 
     [Fact]
@@ -132,6 +181,21 @@ public sealed class DanceSellAiOperationsTests
         Assert.DoesNotContain("Bearer abc", redacted);
         Assert.DoesNotContain("secret", redacted);
         Assert.Contains("[redacted]", redacted);
+    }
+
+    [Fact]
+    public void OperationSqlFolder_ContainsHardeningAndRuntimeVerifyScripts()
+    {
+        var root = FindRepoRoot();
+        var folder = Path.Combine(root, "database/manual/ai-operation-logs");
+        var harden = File.ReadAllText(Path.Combine(folder, "10_harden_ai_operation_logs.sql"));
+        var verify = File.ReadAllText(Path.Combine(folder, "11_verify_runtime_contract.sql"));
+
+        Assert.Contains("todox_ai_operation_billing_transactions", harden);
+        Assert.Contains("dance_sell_provider_operations_status_ck", harden);
+        Assert.Contains("dance_sell_provider_operations_usage_unit_ck", harden);
+        Assert.Contains("dance_sell_reference_versions", verify);
+        Assert.Contains("gpt-image-2-image-to-image", File.ReadAllText(Path.Combine(folder, "08_seed_dance_sell_routes.sql")));
     }
 
     private static string FindRepoRoot()
@@ -147,5 +211,39 @@ public sealed class DanceSellAiOperationsTests
         }
 
         throw new InvalidOperationException("Repository root not found.");
+    }
+
+    private sealed class CapturingKieClient : IKieClient
+    {
+        public object? LastRequest { get; private set; }
+
+        public Task<KieCreateTaskResult> CreateTaskAsync(KieMotionControlRequest request, CancellationToken cancellationToken)
+            => CreateTaskAsync<KieMotionControlRequest>(request, cancellationToken);
+
+        public Task<KieCreateTaskResult> CreateTaskAsync<TRequest>(TRequest request, CancellationToken cancellationToken)
+        {
+            LastRequest = request;
+            return Task.FromResult(new KieCreateTaskResult
+            {
+                TaskId = "task-image",
+                HttpStatus = 200,
+                RawResponse = """{"data":{"taskId":"task-image"}}"""
+            });
+        }
+
+        public Task<KieTaskDetailResult> GetTaskDetailAsync(string taskId, CancellationToken cancellationToken)
+            => throw new NotImplementedException();
+
+        public KieCallbackResult ParseCallback(string rawJson)
+            => throw new NotImplementedException();
+    }
+
+    private sealed class StaticOptionsMonitor<T> : IOptionsMonitor<T>
+        where T : class
+    {
+        public StaticOptionsMonitor(T value) => CurrentValue = value;
+        public T CurrentValue { get; }
+        public T Get(string? name) => CurrentValue;
+        public IDisposable? OnChange(Action<T, string?> listener) => null;
     }
 }

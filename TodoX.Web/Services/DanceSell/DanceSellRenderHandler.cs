@@ -66,14 +66,14 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
 
         if (string.IsNullOrWhiteSpace(danceJob.ProviderTaskId))
         {
-            await SubmitAsync(job, danceJob, ct);
+            await SubmitAsync(job, danceJob, input.OperationId, ct);
             return;
         }
 
-        await PollAsync(job, danceJob, ct);
+        await PollAsync(job, danceJob, input.OperationId, ct);
     }
 
-    private async Task SubmitAsync(RenderJobDto renderJob, DanceSellJobDto danceJob, CancellationToken ct)
+    private async Task SubmitAsync(RenderJobDto renderJob, DanceSellJobDto danceJob, Guid? operationId, CancellationToken ct)
     {
         var permit = await _rateLimiter.AcquireSubmitPermitAsync(DanceSellConstants.ProviderCode, ct);
         if (!permit.Allowed)
@@ -109,31 +109,35 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
             sw.Stop();
             var responseJson = KieJsonRedactor.Redact(submitted.RawResponse) ?? "{}";
             await _repo.UpdateSubmittedAsync(danceJob.Id, requestJson, submitted.TaskId!, responseJson, ct);
-            var operation = await _operations.UpsertOperationAsync(new DanceSellProviderOperationDto
+            if (operationId is Guid existingOperationId)
             {
-                Id = Guid.NewGuid(),
-                DanceSellJobId = danceJob.Id,
-                RenderJobId = renderJob.Id,
-                OperationType = DanceSellOperationTypes.MotionVideo,
-                AttemptNo = 1,
-                ReferenceMode = danceJob.ReferenceMode,
-                ProviderCode = danceJob.MotionProviderCode ?? danceJob.ProviderCode,
-                ProviderCapabilityId = danceJob.MotionProviderCapabilityId,
-                ProviderAccountId = danceJob.MotionProviderAccountId,
-                ProviderModel = danceJob.MotionProviderModel ?? danceJob.ProviderModel,
-                ProviderTaskId = submitted.TaskId,
-                Status = DanceSellOperationStatuses.Submitted,
-                BillingStatus = danceJob.BillingStatus,
-                RefundStatus = danceJob.RefundStatus,
-                RequestJson = requestJson,
-                ResponseJson = responseJson,
-                CreatedAt = DateTime.UtcNow,
-                StartedAt = DateTime.UtcNow,
-                SubmittedAt = DateTime.UtcNow
-            }, ct);
-            if (operation is not null)
+                await _operations.MarkSubmittedAsync(existingOperationId, submitted.TaskId!, responseJson, ct);
+            }
+            else
             {
-                await _operations.MarkSubmittedAsync(operation.Id, submitted.TaskId!, responseJson, ct);
+                var attemptNo = await _operations.GetNextAttemptNoAsync(danceJob.Id, DanceSellOperationTypes.MotionVideo, ct);
+                await _operations.UpsertOperationAsync(new DanceSellProviderOperationDto
+                {
+                    Id = Guid.NewGuid(),
+                    DanceSellJobId = danceJob.Id,
+                    RenderJobId = renderJob.Id,
+                    OperationType = DanceSellOperationTypes.MotionVideo,
+                    AttemptNo = attemptNo,
+                    ReferenceMode = danceJob.ReferenceMode,
+                    ProviderCode = danceJob.MotionProviderCode ?? danceJob.ProviderCode,
+                    ProviderCapabilityId = danceJob.MotionProviderCapabilityId,
+                    ProviderAccountId = danceJob.MotionProviderAccountId,
+                    ProviderModel = danceJob.MotionProviderModel ?? danceJob.ProviderModel,
+                    ProviderTaskId = submitted.TaskId,
+                    Status = DanceSellOperationStatuses.Submitted,
+                    BillingStatus = danceJob.BillingStatus,
+                    RefundStatus = danceJob.RefundStatus,
+                    RequestJson = requestJson,
+                    ResponseJson = responseJson,
+                    CreatedAt = DateTime.UtcNow,
+                    StartedAt = DateTime.UtcNow,
+                    SubmittedAt = DateTime.UtcNow
+                }, ct);
             }
             await _renderJobs.AddEventAsync(renderJob.Id, "KIE_TASK_SUBMITTED", "KIE Motion Control task submitted.",
                 new { danceSellJobId = danceJob.Id, taskId = submitted.TaskId, durationMs = sw.ElapsedMilliseconds },
@@ -160,7 +164,7 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
         }
     }
 
-    private async Task PollAsync(RenderJobDto renderJob, DanceSellJobDto danceJob, CancellationToken ct)
+    private async Task PollAsync(RenderJobDto renderJob, DanceSellJobDto danceJob, Guid? operationId, CancellationToken ct)
     {
         if (danceJob.PollCount >= Math.Max(1, _options.CurrentValue.MaxPollCount))
         {
@@ -198,42 +202,59 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
                     CreditsConsumed = detail.CreditsConsumed,
                     Source = "poll"
                 }, ct);
-                var operation = await _operations.UpsertOperationAsync(new DanceSellProviderOperationDto
+                if (operationId is Guid existingOperationId)
                 {
-                    Id = Guid.NewGuid(),
-                    DanceSellJobId = danceJob.Id,
-                    RenderJobId = renderJob.Id,
-                    OperationType = DanceSellOperationTypes.MotionVideo,
-                    AttemptNo = 1,
-                    ReferenceMode = danceJob.ReferenceMode,
-                    ProviderCode = danceJob.MotionProviderCode ?? danceJob.ProviderCode,
-                    ProviderCapabilityId = danceJob.MotionProviderCapabilityId,
-                    ProviderAccountId = danceJob.MotionProviderAccountId,
-                    ProviderModel = danceJob.MotionProviderModel ?? danceJob.ProviderModel,
-                    ProviderTaskId = danceJob.ProviderTaskId,
-                    Status = DanceSellOperationStatuses.Completed,
-                    BillingStatus = danceJob.BillingStatus,
-                    RefundStatus = danceJob.RefundStatus,
-                    ResponseJson = responseJson,
-                    CreditsConsumed = detail.CreditsConsumed,
-                    UsageQuantity = detail.CreditsConsumed,
-                    UsageUnit = detail.CreditsConsumed is null ? null : "credits",
-                    CostSource = detail.CreditsConsumed is null ? "estimated" : "provider_response",
-                    CreatedAt = DateTime.UtcNow,
-                    CompletedAt = DateTime.UtcNow
-                }, ct);
-                if (operation is not null)
-                {
-                    await _operations.MarkCompletedAsync(operation.Id, detail.ProviderState ?? detail.Status, responseJson, detail.CreditsConsumed, resultUrl, ct);
+                    await _operations.MarkCompletedAsync(existingOperationId, detail.ProviderState ?? detail.Status, responseJson, detail.CreditsConsumed, resultUrl, ct);
                     await _operations.UpsertAssetAsync(new AiOperationAssetDto
                     {
-                        OperationId = operation.Id,
+                        OperationId = existingOperationId,
                         AssetRole = DanceSellAssetRoles.VideoOutput,
                         PublicUrl = resultUrl,
                         ProviderUrl = resultUrl,
                         MimeType = "video/mp4",
                         MetadataJson = DanceSellRepository.ToJson(new { source = "poll", resultUrlCount = detail.ResultUrls.Count })
                     }, ct);
+                }
+                else
+                {
+                    var attemptNo = await _operations.GetNextAttemptNoAsync(danceJob.Id, DanceSellOperationTypes.MotionVideo, ct);
+                    var operation = await _operations.UpsertOperationAsync(new DanceSellProviderOperationDto
+                    {
+                        Id = Guid.NewGuid(),
+                        DanceSellJobId = danceJob.Id,
+                        RenderJobId = renderJob.Id,
+                        OperationType = DanceSellOperationTypes.MotionVideo,
+                        AttemptNo = attemptNo,
+                        ReferenceMode = danceJob.ReferenceMode,
+                        ProviderCode = danceJob.MotionProviderCode ?? danceJob.ProviderCode,
+                        ProviderCapabilityId = danceJob.MotionProviderCapabilityId,
+                        ProviderAccountId = danceJob.MotionProviderAccountId,
+                        ProviderModel = danceJob.MotionProviderModel ?? danceJob.ProviderModel,
+                        ProviderTaskId = danceJob.ProviderTaskId,
+                        Status = DanceSellOperationStatuses.Completed,
+                        BillingStatus = danceJob.BillingStatus,
+                        RefundStatus = danceJob.RefundStatus,
+                        ResponseJson = responseJson,
+                        CreditsConsumed = detail.CreditsConsumed,
+                        UsageQuantity = detail.CreditsConsumed,
+                        UsageUnit = detail.CreditsConsumed is null ? null : "credits",
+                        CostSource = detail.CreditsConsumed is null ? "estimated" : "provider_response",
+                        CreatedAt = DateTime.UtcNow,
+                        CompletedAt = DateTime.UtcNow
+                    }, ct);
+                    if (operation is not null)
+                    {
+                        await _operations.MarkCompletedAsync(operation.Id, detail.ProviderState ?? detail.Status, responseJson, detail.CreditsConsumed, resultUrl, ct);
+                        await _operations.UpsertAssetAsync(new AiOperationAssetDto
+                        {
+                            OperationId = operation.Id,
+                            AssetRole = DanceSellAssetRoles.VideoOutput,
+                            PublicUrl = resultUrl,
+                            ProviderUrl = resultUrl,
+                            MimeType = "video/mp4",
+                            MetadataJson = DanceSellRepository.ToJson(new { source = "poll", resultUrlCount = detail.ResultUrls.Count })
+                        }, ct);
+                    }
                 }
                 return;
             }

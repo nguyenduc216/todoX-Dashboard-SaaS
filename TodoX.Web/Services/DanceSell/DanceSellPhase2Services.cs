@@ -176,6 +176,7 @@ public sealed class DanceSellReferenceImageService : IDanceSellReferenceImageSer
     private readonly IMediaFileService _media;
     private readonly IDanceSellMotionSourceService _urls;
     private readonly IDanceSellProviderCatalog _catalog;
+    private readonly IDanceSellReferenceProviderFactory _referenceProviders;
     private readonly IDanceSellOperationRepository _operations;
     private readonly IDanceSellCostEstimator _costs;
     private readonly TenantContext _tenant;
@@ -185,6 +186,7 @@ public sealed class DanceSellReferenceImageService : IDanceSellReferenceImageSer
         IMediaFileService media,
         IDanceSellMotionSourceService urls,
         IDanceSellProviderCatalog catalog,
+        IDanceSellReferenceProviderFactory referenceProviders,
         IDanceSellOperationRepository operations,
         IDanceSellCostEstimator costs,
         TenantContext tenant)
@@ -193,6 +195,7 @@ public sealed class DanceSellReferenceImageService : IDanceSellReferenceImageSer
         _media = media;
         _urls = urls;
         _catalog = catalog;
+        _referenceProviders = referenceProviders;
         _operations = operations;
         _costs = costs;
         _tenant = tenant;
@@ -206,14 +209,15 @@ public sealed class DanceSellReferenceImageService : IDanceSellReferenceImageSer
             throw new InvalidOperationException("DANCE_SELL_REFERENCE_GENERATION_NOT_REQUIRED");
         }
 
-        if (job.CharacterMediaId is null) throw new InvalidOperationException("DANCE_SELL_INVALID_CHARACTER");
-        if (job.ProductMediaId is null) throw new InvalidOperationException("DANCE_SELL_INVALID_PRODUCT");
+        if (job.CharacterMediaId is null || string.IsNullOrWhiteSpace(job.CharacterImageUrl)) throw new InvalidOperationException("DANCE_SELL_INVALID_CHARACTER");
+        if (job.ProductMediaId is null || string.IsNullOrWhiteSpace(job.ProductImageUrl)) throw new InvalidOperationException("DANCE_SELL_INVALID_PRODUCT");
 
         await _repo.UpdateReferenceStatusAsync(job.Id, DanceSellReferenceStatuses.Generating, ct: ct);
         var route = await _catalog.ResolveAsync(DanceSellOperationTypes.ReferenceImage, job.ReferenceProviderCode, job.ReferenceProviderModel, ct);
         var estimate = await _costs.EstimateAsync(route, job.Mode, null, ct);
         var versions = await _repo.ListReferenceVersionsAsync(job.Id, ct);
         var versionNo = versions.Count == 0 ? 1 : versions.Max(x => x.VersionNo) + 1;
+        var attemptNo = await _operations.GetNextAttemptNoAsync(job.Id, DanceSellOperationTypes.ReferenceImage, ct);
         var requestJson = DanceSellRepository.ToJson(new
         {
             job.Id,
@@ -225,16 +229,16 @@ public sealed class DanceSellReferenceImageService : IDanceSellReferenceImageSer
             job.Prompt,
             provider = route.ProviderCode,
             model = route.ModelName,
-            note = route.ProviderCode.Equals("local_composite", StringComparison.OrdinalIgnoreCase)
-                ? "development placeholder composite"
-                : "KIE image-generation contract is not confirmed locally; operation is logged while reference output uses the existing safe staging fallback."
+            runtime = route.ProviderCode.Equals("local_composite", StringComparison.OrdinalIgnoreCase)
+                ? "local_composite"
+                : "provider_task_submit"
         });
         var operation = await _operations.UpsertOperationAsync(new DanceSellProviderOperationDto
         {
             Id = Guid.NewGuid(),
             DanceSellJobId = job.Id,
             OperationType = DanceSellOperationTypes.ReferenceImage,
-            AttemptNo = versionNo,
+            AttemptNo = attemptNo,
             ReferenceMode = job.ReferenceMode,
             ProviderCode = route.ProviderCode,
             ProviderCapabilityId = route.ProviderCapabilityId,
@@ -258,6 +262,44 @@ public sealed class DanceSellReferenceImageService : IDanceSellReferenceImageSer
 
         try
         {
+            if (!route.ProviderCode.Equals("local_composite", StringComparison.OrdinalIgnoreCase))
+            {
+                var provider = _referenceProviders.Resolve(route);
+                var submitted = await provider.SubmitAsync(new DanceSellReferenceProviderRequest
+                {
+                    Route = route,
+                    Prompt = string.IsNullOrWhiteSpace(job.ImagePrompt) ? job.Prompt : job.ImagePrompt,
+                    CharacterImageUrl = job.CharacterImageUrl,
+                    ProductImageUrl = job.ProductImageUrl!,
+                    AspectRatio = ReadConfigString(route.ConfigJson, "aspect_ratio")
+                }, ct);
+
+                if (operation is not null)
+                {
+                    await _operations.MarkSubmittedAsync(operation.Id, submitted.TaskId, submitted.ResponseJson, ct);
+                }
+
+                return await _repo.CreateReferenceVersionAsync(new DanceSellReferenceVersionDto
+                {
+                    Id = Guid.NewGuid(),
+                    DanceSellJobId = job.Id,
+                    VersionNo = versionNo,
+                    CharacterMediaId = job.CharacterMediaId,
+                    ProductMediaId = job.ProductMediaId,
+                    PlacementMode = job.PlacementMode ?? DanceSellPlacementModes.HoldProduct,
+                    CustomInstruction = job.CustomPlacementInstruction,
+                    Prompt = job.Prompt,
+                    ProviderCode = route.ProviderCode,
+                    ProviderModel = route.ModelName,
+                    RequestJson = submitted.RequestJson,
+                    ResponseJson = DanceSellRepository.ToJson(new { submitted.TaskId, submitted.ResponseJson }),
+                    Status = DanceSellReferenceStatuses.Generating,
+                    IsSelected = false,
+                    CreatedBy = user.UserId,
+                    CreatedAt = DateTime.UtcNow
+                }, ct);
+            }
+
             var character = await _media.ReadBytesAsync(job.CharacterMediaId.Value, ct) ?? throw new InvalidOperationException("DANCE_SELL_INVALID_CHARACTER");
             var product = await _media.ReadBytesAsync(job.ProductMediaId.Value, ct) ?? throw new InvalidOperationException("DANCE_SELL_INVALID_PRODUCT");
             var bytes = await BuildCompositeAsync(character, product, ct);
@@ -337,6 +379,26 @@ public sealed class DanceSellReferenceImageService : IDanceSellReferenceImageSer
         }
     }
 
+    private static string? ReadConfigString(string? rawJson, string propertyName)
+    {
+        if (string.IsNullOrWhiteSpace(rawJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(rawJson);
+            return doc.RootElement.TryGetProperty(propertyName, out var value) && value.ValueKind == JsonValueKind.String
+                ? value.GetString()
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
     public async Task<DanceSellJobDto> ApproveAsync(Guid jobId, Guid versionId, CurrentUserSession user, CancellationToken ct = default)
     {
         var job = await RequireOwnedJobAsync(jobId, user, ct);
@@ -401,6 +463,7 @@ public interface IDanceSellPhase2Service
 {
     DanceSellCapabilityDto GetCapability();
     Task<IReadOnlyList<DanceSellProviderRouteDto>> GetProvidersAsync(string operationType, CurrentUserSession user, CancellationToken ct = default);
+    Task<DanceSellCapabilityDto> GetProviderCapabilityAsync(Guid routeId, CurrentUserSession user, CancellationToken ct = default);
     Task<DanceSellJobDto> CreateJobAsync(DanceSellCreateJobRequest request, CurrentUserSession user, CancellationToken ct = default);
     Task<DanceSellJobDto> UpdateBusinessAsync(Guid id, DanceSellUpdateBusinessRequest request, CurrentUserSession user, CancellationToken ct = default);
     Task<DanceSellJobDto> UploadCharacterAsync(Guid id, byte[] content, string fileName, string contentType, CurrentUserSession user, CancellationToken ct = default);
@@ -469,10 +532,19 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
         return await _catalog.GetRoutesAsync(operationType, userSelectableOnly: !DanceSellSecurity.IsAdmin(user), ct);
     }
 
+    public async Task<DanceSellCapabilityDto> GetProviderCapabilityAsync(Guid routeId, CurrentUserSession user, CancellationToken ct = default)
+    {
+        EnsureAuthenticatedCustomer(user);
+        var routes = (await _catalog.GetRoutesAsync(DanceSellOperationTypes.MotionVideo, userSelectableOnly: !DanceSellSecurity.IsAdmin(user), ct))
+            .Concat(await _catalog.GetRoutesAsync(DanceSellOperationTypes.ReferenceImage, userSelectableOnly: !DanceSellSecurity.IsAdmin(user), ct));
+        var route = routes.FirstOrDefault(x => x.Id == routeId) ?? throw new InvalidOperationException("DANCE_SELL_PROVIDER_ROUTE_INVALID");
+        return BuildCapability(route);
+    }
+
     public async Task<DanceSellJobDto> CreateJobAsync(DanceSellCreateJobRequest request, CurrentUserSession user, CancellationToken ct = default)
     {
         EnsureAuthenticatedCustomer(user);
-        ValidateBusiness(request.Prompt, request.Mode, request.CharacterOrientation, request.PlacementMode);
+        ValidatePromptPlacement(request.Prompt, request.PlacementMode);
         if (!DanceSellReferenceModes.All.Contains(request.ReferenceMode))
         {
             throw new InvalidOperationException("DANCE_SELL_INVALID_REFERENCE_MODE");
@@ -480,6 +552,7 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
 
         var referenceRoute = await _catalog.ResolveAsync(DanceSellOperationTypes.ReferenceImage, request.ReferenceProviderCode, request.ReferenceProviderModel, ct);
         var motionRoute = await _catalog.ResolveAsync(DanceSellOperationTypes.MotionVideo, request.MotionProviderCode, request.MotionProviderModel, ct);
+        ValidateCapability(request.Mode, request.CharacterOrientation, motionRoute);
         await _tenant.EnsureLoadedAsync(ct);
         return await _repo.CreateDraftAsync(new DanceSellDraftCreateRequest
         {
@@ -504,14 +577,15 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
     public async Task<DanceSellJobDto> UpdateBusinessAsync(Guid id, DanceSellUpdateBusinessRequest request, CurrentUserSession user, CancellationToken ct = default)
     {
         var job = await RequireOwnedJobAsync(id, user, ct);
-        ValidateBusiness(request.Prompt, request.Mode, request.CharacterOrientation, request.PlacementMode);
+        ValidatePromptPlacement(request.Prompt, request.PlacementMode);
         if (!DanceSellReferenceModes.All.Contains(request.ReferenceMode))
         {
             throw new InvalidOperationException("DANCE_SELL_INVALID_REFERENCE_MODE");
         }
 
         await _catalog.ResolveAsync(DanceSellOperationTypes.ReferenceImage, request.ReferenceProviderCode, request.ReferenceProviderModel, ct);
-        await _catalog.ResolveAsync(DanceSellOperationTypes.MotionVideo, request.MotionProviderCode, request.MotionProviderModel, ct);
+        var motionRoute = await _catalog.ResolveAsync(DanceSellOperationTypes.MotionVideo, request.MotionProviderCode, request.MotionProviderModel, ct);
+        ValidateCapability(request.Mode, request.CharacterOrientation, motionRoute);
         await _repo.UpdateBusinessAsync(job.Id, request, ct);
         return await _repo.GetByIdAsync(job.Id, ct) ?? job;
     }
@@ -559,38 +633,6 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
         var media = await _media.SaveAsync(content, fileName, contentType, "dance_sell_direct_reference", user.UserId, user.CustomerId, _tenant.TenantId, ct);
         var providerUrl = _motion.ToProviderUrl(media.PublicUrl ?? media.FileUrl);
         await _repo.UpdateDirectReferenceAsync(job.Id, media.Id, media.ObjectKey ?? string.Empty, providerUrl, ct);
-        var route = await _catalog.ResolveAsync(DanceSellOperationTypes.MotionVideo, job.MotionProviderCode, job.MotionProviderModel, ct);
-        var operation = await _operations.UpsertOperationAsync(new DanceSellProviderOperationDto
-        {
-            Id = Guid.NewGuid(),
-            DanceSellJobId = job.Id,
-            OperationType = DanceSellOperationTypes.OutputStage,
-            AttemptNo = 1,
-            ReferenceMode = job.ReferenceMode,
-            ProviderCode = route.ProviderCode,
-            ProviderModel = route.ModelName,
-            Status = DanceSellOperationStatuses.Completed,
-            BillingStatus = DanceSellBillingStatuses.NotRequired,
-            RefundStatus = DanceSellRefundStatuses.NotRequired,
-            RequestJson = DanceSellRepository.ToJson(new { media.Id, media.ObjectKey, providerUrl }),
-            ResponseJson = DanceSellRepository.ToJson(new { publicUrl = providerUrl }),
-            CreatedAt = DateTime.UtcNow,
-            CompletedAt = DateTime.UtcNow
-        }, ct);
-        if (operation is not null)
-        {
-            await _operations.UpsertAssetAsync(new AiOperationAssetDto
-            {
-                OperationId = operation.Id,
-                AssetRole = DanceSellAssetRoles.DirectReferenceInput,
-                MediaId = media.Id,
-                ObjectKey = media.ObjectKey,
-                PublicUrl = providerUrl,
-                MimeType = contentType,
-                MetadataJson = "{}"
-            }, ct);
-        }
-
         return await _repo.GetByIdAsync(job.Id, ct) ?? job;
     }
 
@@ -622,12 +664,13 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
         var logicalRequestId = string.IsNullOrWhiteSpace(job.LogicalRequestId) ? $"dance-sell-{Guid.NewGuid():N}" : job.LogicalRequestId;
         var motionRoute = await _catalog.ResolveAsync(DanceSellOperationTypes.MotionVideo, job.MotionProviderCode, job.MotionProviderModel, ct);
         var estimate = await _costs.EstimateAsync(motionRoute, job.Mode, null, ct);
+        var attemptNo = await _operations.GetNextAttemptNoAsync(job.Id, DanceSellOperationTypes.MotionVideo, ct);
         var operation = await _operations.UpsertOperationAsync(new DanceSellProviderOperationDto
         {
             Id = Guid.NewGuid(),
             DanceSellJobId = job.Id,
             OperationType = DanceSellOperationTypes.MotionVideo,
-            AttemptNo = Math.Max(1, job.PollCount + 1),
+            AttemptNo = attemptNo,
             ReferenceMode = job.ReferenceMode,
             ProviderCode = motionRoute.ProviderCode,
             ProviderCapabilityId = motionRoute.ProviderCapabilityId,
@@ -647,6 +690,19 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
             PricingSnapshotJson = DanceSellRepository.ToJson(estimate),
             CreatedAt = DateTime.UtcNow
         }, ct);
+        if (operation is not null && job.ReferenceMode == DanceSellReferenceModes.DirectReference)
+        {
+            await _operations.UpsertAssetAsync(new AiOperationAssetDto
+            {
+                OperationId = operation.Id,
+                AssetRole = DanceSellAssetRoles.DirectReferenceInput,
+                MediaId = job.DirectReferenceMediaId,
+                ObjectKey = job.DirectReferenceObjectKey,
+                PublicUrl = job.DirectReferenceUrl,
+                MimeType = "image/*",
+                MetadataJson = "{}"
+            }, ct);
+        }
 
         var renderJob = await _renderJobs.EnqueueAsync(new RenderJobCreateModel
         {
@@ -654,7 +710,7 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
             CustomerId = user.CustomerId,
             JobType = RenderJobTypes.DanceSell,
             Priority = 50,
-            Input = new DanceSellRenderInput { DanceSellJobId = job.Id, LogicalRequestId = logicalRequestId },
+            Input = new DanceSellRenderInput { DanceSellJobId = job.Id, LogicalRequestId = logicalRequestId, OperationId = operation?.Id },
             Prompt = new { job.Prompt, job.PlacementMode, job.Mode, job.CharacterOrientation },
             References = new { referenceUrl = job.PreparedReferenceUrl!, motionVideoUrl = job.MotionVideoUrl, operationId = operation?.Id },
             ProviderCode = motionRoute.ProviderCode,
@@ -714,12 +770,77 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
         }
     }
 
-    private void ValidateBusiness(string prompt, string mode, string orientation, string placementMode)
+    private static void ValidatePromptPlacement(string prompt, string placementMode)
     {
         if (string.IsNullOrWhiteSpace(prompt)) throw new InvalidOperationException("DANCE_SELL_PROMPT_REQUIRED");
-        if (!GetCapability().Modes.Contains(mode, StringComparer.OrdinalIgnoreCase)) throw new InvalidOperationException("DANCE_SELL_INVALID_MODE");
-        if (!GetCapability().CharacterOrientations.Contains(orientation, StringComparer.OrdinalIgnoreCase)) throw new InvalidOperationException("DANCE_SELL_INVALID_ORIENTATION");
         if (!DanceSellPlacementModes.All.Contains(placementMode)) throw new InvalidOperationException("DANCE_SELL_INVALID_PLACEMENT");
+    }
+
+    private void ValidateCapability(string mode, string orientation, DanceSellProviderRouteDto route)
+    {
+        var capability = BuildCapability(route);
+        if (!capability.Modes.Contains(mode, StringComparer.OrdinalIgnoreCase)) throw new InvalidOperationException("DANCE_SELL_INVALID_MODE");
+        if (!capability.CharacterOrientations.Contains(orientation, StringComparer.OrdinalIgnoreCase)) throw new InvalidOperationException("DANCE_SELL_INVALID_ORIENTATION");
+    }
+
+    private DanceSellCapabilityDto BuildCapability(DanceSellProviderRouteDto route)
+    {
+        var modes = ReadStringArray(route.ConfigJson, "allowedModes")
+                    ?? ReadStringArray(route.ConfigJson, "allowed_modes")
+                    ?? (_kie.CurrentValue.AllowedModes.Length > 0 ? _kie.CurrentValue.AllowedModes : new[] { _options.CurrentValue.DefaultMode });
+        var orientations = ReadStringArray(route.ConfigJson, "allowedCharacterOrientations")
+                           ?? ReadStringArray(route.ConfigJson, "allowed_character_orientations")
+                           ?? (_kie.CurrentValue.AllowedCharacterOrientations.Length > 0 ? _kie.CurrentValue.AllowedCharacterOrientations : new[] { _options.CurrentValue.DefaultOrientation });
+        var defaultMode = ReadConfigString(route.ConfigJson, "defaultMode") ?? ReadConfigString(route.ConfigJson, "default_mode") ?? modes[0];
+        var defaultOrientation = ReadConfigString(route.ConfigJson, "defaultOrientation") ?? ReadConfigString(route.ConfigJson, "default_orientation") ?? orientations[0];
+        return new DanceSellCapabilityDto(modes, orientations, defaultMode, defaultOrientation);
+    }
+
+    private static string[]? ReadStringArray(string? rawJson, string propertyName)
+    {
+        if (string.IsNullOrWhiteSpace(rawJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(rawJson);
+            if (!doc.RootElement.TryGetProperty(propertyName, out var value) || value.ValueKind != JsonValueKind.Array)
+            {
+                return null;
+            }
+
+            var items = value.EnumerateArray()
+                .Where(x => x.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(x.GetString()))
+                .Select(x => x.GetString()!.Trim())
+                .ToArray();
+            return items.Length == 0 ? null : items;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static string? ReadConfigString(string? rawJson, string propertyName)
+    {
+        if (string.IsNullOrWhiteSpace(rawJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(rawJson);
+            return doc.RootElement.TryGetProperty(propertyName, out var value) && value.ValueKind == JsonValueKind.String
+                ? value.GetString()
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     private static void ValidateReadyForRender(DanceSellJobDto job)

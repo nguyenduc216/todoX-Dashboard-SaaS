@@ -9,6 +9,7 @@ public static class DanceSellConstants
     public const string Model = "kling-2.6/motion-control";
     public const string ReferenceModel = "gpt-image-2-image-to-image";
     public const string BillingEnabledConfigKey = "dance_sell_billing_enabled";
+    public const string AllowCodeProviderFallbackConfigKey = "dance_sell_allow_code_provider_fallback";
 }
 
 public static class DanceSellReferenceModes
@@ -264,6 +265,7 @@ public sealed class DanceSellRenderInput
 {
     public Guid DanceSellJobId { get; set; }
     public string LogicalRequestId { get; set; } = string.Empty;
+    public Guid? OperationId { get; set; }
 }
 
 public sealed class DanceSellReferenceVersionDto
@@ -505,10 +507,15 @@ public sealed class DanceSellCostEstimate
     public decimal? ProviderUnitPrice { get; set; }
     public decimal? EstimatedProviderCost { get; set; }
     public string Currency { get; set; } = "USD";
+    public decimal? ExchangeRate { get; set; }
     public decimal? ProviderCostVnd { get; set; }
     public decimal? EstimatedTodoxPoints { get; set; }
     public string PricingSource { get; set; } = "estimated";
     public string? Warning { get; set; }
+    public string? PricingUnit { get; set; }
+    public decimal? Markup { get; set; }
+    public string? RoundingRule { get; set; }
+    public decimal? TodoXVndPerPoint { get; set; }
 }
 
 public sealed class ProviderBalanceResult

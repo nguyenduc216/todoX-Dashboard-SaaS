@@ -34,6 +34,32 @@ public sealed class KieMotionControlInput
     public string CharacterOrientation { get; set; } = "image";
 }
 
+public sealed class KieImageToImageRequest
+{
+    [JsonPropertyName("model")]
+    public string Model { get; set; } = string.Empty;
+
+    [JsonPropertyName("callBackUrl")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CallBackUrl { get; set; }
+
+    [JsonPropertyName("input")]
+    public KieImageToImageInput Input { get; set; } = new();
+}
+
+public sealed class KieImageToImageInput
+{
+    [JsonPropertyName("prompt")]
+    public string Prompt { get; set; } = string.Empty;
+
+    [JsonPropertyName("input_urls")]
+    public List<string> InputUrls { get; set; } = new();
+
+    [JsonPropertyName("aspect_ratio")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? AspectRatio { get; set; }
+}
+
 public sealed class KieEnvelope<T>
 {
     [JsonPropertyName("code")]

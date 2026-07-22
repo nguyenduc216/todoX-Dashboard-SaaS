@@ -12,6 +12,7 @@ public static class DanceSellPhase2Endpoints
 
         group.MapGet("/capabilities", (IDanceSellPhase2Service service) => Results.Json(service.GetCapability()));
         group.MapGet("/providers", GetProvidersAsync);
+        group.MapGet("/providers/{routeId:guid}/capability", GetProviderCapabilityAsync);
         group.MapGet("/jobs", ListJobsAsync);
         group.MapPost("/jobs", CreateJobAsync).DisableAntiforgery();
         group.MapGet("/jobs/{id:guid}", GetJobAsync);
@@ -40,6 +41,9 @@ public static class DanceSellPhase2Endpoints
 
     private static async Task<IResult> GetProvidersAsync(string operationType, AuthStateService auth, IDanceSellPhase2Service service, CancellationToken ct)
         => await ExecuteAsync(auth, user => service.GetProvidersAsync(operationType, user, ct));
+
+    private static async Task<IResult> GetProviderCapabilityAsync(Guid routeId, AuthStateService auth, IDanceSellPhase2Service service, CancellationToken ct)
+        => await ExecuteAsync(auth, user => service.GetProviderCapabilityAsync(routeId, user, ct));
 
     private static async Task<IResult> ListJobsAsync(AuthStateService auth, IDanceSellPhase2Service service, CancellationToken ct)
         => await ExecuteAsync(auth, user => service.ListAsync(user, 50, 0, ct));
@@ -174,7 +178,13 @@ public static class DanceSellPhase2Endpoints
         }
         catch (InvalidOperationException ex)
         {
-            var status = ex.Message == "DANCE_SELL_OPERATION_NOT_FOUND" ? StatusCodes.Status404NotFound : StatusCodes.Status400BadRequest;
+            var status = ex.Message switch
+            {
+                "DANCE_SELL_OPERATION_NOT_FOUND" => StatusCodes.Status404NotFound,
+                "DANCE_SELL_BILLING_DISABLED" => StatusCodes.Status409Conflict,
+                "DANCE_SELL_DATABASE_SCHEMA_NOT_READY" => StatusCodes.Status503ServiceUnavailable,
+                _ => StatusCodes.Status400BadRequest
+            };
             return Results.Json(new { success = false, errorCode = ex.Message, message = ex.Message }, statusCode: status);
         }
     }

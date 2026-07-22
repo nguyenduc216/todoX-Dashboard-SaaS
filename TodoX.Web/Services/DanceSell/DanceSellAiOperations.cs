@@ -3,6 +3,7 @@ using Dapper;
 using Npgsql;
 using TodoX.Web.Data;
 using TodoX.Web.Services.AiProviders.Kie;
+using Microsoft.Extensions.Options;
 
 namespace TodoX.Web.Services.DanceSell;
 
@@ -13,13 +14,132 @@ public interface IDanceSellProviderCatalog
     Task<DanceSellProviderRouteDto> ResolveAsync(string operationType, string? providerCode, string? modelName, CancellationToken ct = default);
 }
 
+public sealed class DanceSellSchemaException : InvalidOperationException
+{
+    public DanceSellSchemaException(string message, string? sqlState = null, string? table = null, string? column = null)
+        : base(message)
+    {
+        SqlState = sqlState;
+        Table = table;
+        Column = column;
+    }
+
+    public string? SqlState { get; }
+    public string? Table { get; }
+    public string? Column { get; }
+}
+
+public sealed class DanceSellReferenceProviderRequest
+{
+    public DanceSellProviderRouteDto Route { get; set; } = new();
+    public string Prompt { get; set; } = string.Empty;
+    public string CharacterImageUrl { get; set; } = string.Empty;
+    public string ProductImageUrl { get; set; } = string.Empty;
+    public string? AspectRatio { get; set; }
+    public string? CallbackUrl { get; set; }
+}
+
+public sealed class ProviderTaskSubmitResult
+{
+    public string ProviderCode { get; set; } = string.Empty;
+    public string ModelName { get; set; } = string.Empty;
+    public string TaskId { get; set; } = string.Empty;
+    public string RequestJson { get; set; } = "{}";
+    public string ResponseJson { get; set; } = "{}";
+}
+
+public interface IDanceSellReferenceProvider
+{
+    bool Supports(DanceSellProviderRouteDto route);
+    Task<ProviderTaskSubmitResult> SubmitAsync(DanceSellReferenceProviderRequest request, CancellationToken ct);
+    Task<KieTaskDetailResult> GetTaskAsync(string taskId, CancellationToken ct);
+}
+
+public interface IDanceSellReferenceProviderFactory
+{
+    IDanceSellReferenceProvider Resolve(DanceSellProviderRouteDto route);
+}
+
+public sealed class DanceSellReferenceProviderFactory : IDanceSellReferenceProviderFactory
+{
+    private readonly IEnumerable<IDanceSellReferenceProvider> _providers;
+
+    public DanceSellReferenceProviderFactory(IEnumerable<IDanceSellReferenceProvider> providers)
+    {
+        _providers = providers;
+    }
+
+    public IDanceSellReferenceProvider Resolve(DanceSellProviderRouteDto route)
+        => _providers.FirstOrDefault(x => x.Supports(route))
+           ?? throw new InvalidOperationException("DANCE_SELL_REFERENCE_PROVIDER_NOT_SUPPORTED");
+}
+
+public sealed class KieDanceSellReferenceProvider : IDanceSellReferenceProvider
+{
+    private readonly IKieClient _client;
+    private readonly IOptionsMonitor<KieOptions> _options;
+
+    public KieDanceSellReferenceProvider(IKieClient client, IOptionsMonitor<KieOptions> options)
+    {
+        _client = client;
+        _options = options;
+    }
+
+    public bool Supports(DanceSellProviderRouteDto route)
+        => route.ProviderCode.Equals(DanceSellConstants.ProviderCode, StringComparison.OrdinalIgnoreCase);
+
+    public async Task<ProviderTaskSubmitResult> SubmitAsync(DanceSellReferenceProviderRequest request, CancellationToken ct)
+    {
+        var prompt = request.Prompt.Trim();
+        if (string.IsNullOrWhiteSpace(prompt))
+        {
+            throw new KieProviderException("Reference image prompt is required.", KieErrorCodes.Unknown, transient: false);
+        }
+
+        var characterUrl = KiePayloadBuilder.ValidatePublicHttpsUrl(request.CharacterImageUrl, "input_urls[0]");
+        var productUrl = KiePayloadBuilder.ValidatePublicHttpsUrl(request.ProductImageUrl, "input_urls[1]");
+        var callback = string.IsNullOrWhiteSpace(request.CallbackUrl)
+            ? _options.CurrentValue.GetCallbackUriOrNull()?.ToString()
+            : request.CallbackUrl;
+
+        var payload = new KieImageToImageRequest
+        {
+            Model = request.Route.ModelName,
+            CallBackUrl = callback,
+            Input = new KieImageToImageInput
+            {
+                Prompt = prompt,
+                InputUrls = new List<string> { characterUrl, productUrl },
+                AspectRatio = string.IsNullOrWhiteSpace(request.AspectRatio) ? null : request.AspectRatio.Trim()
+            }
+        };
+        var requestJson = KieJsonRedactor.Redact(JsonSerializer.Serialize(payload, KieJson.Options)) ?? "{}";
+        var submit = await _client.CreateTaskAsync(payload, ct);
+        return new ProviderTaskSubmitResult
+        {
+            ProviderCode = request.Route.ProviderCode,
+            ModelName = request.Route.ModelName,
+            TaskId = submit.TaskId!,
+            RequestJson = requestJson,
+            ResponseJson = KieJsonRedactor.Redact(submit.RawResponse) ?? "{}"
+        };
+    }
+
+    public async Task<KieTaskDetailResult> GetTaskAsync(string taskId, CancellationToken ct)
+        => await _client.GetTaskDetailAsync(taskId, ct);
+}
+
 public sealed class DanceSellProviderCatalog : IDanceSellProviderCatalog
 {
     private readonly TodoXConnectionFactory _factory;
+    private readonly IConfiguration _configuration;
+    private readonly ILogger<DanceSellProviderCatalog> _logger;
 
-    public DanceSellProviderCatalog(TodoXConnectionFactory factory)
+    public DanceSellProviderCatalog(TodoXConnectionFactory factory, IConfiguration configuration, ILogger<DanceSellProviderCatalog> logger)
     {
         _factory = factory;
+        _configuration = configuration;
+        _logger = logger;
     }
 
     public async Task<IReadOnlyList<DanceSellProviderRouteDto>> GetRoutesAsync(string operationType, bool userSelectableOnly = false, CancellationToken ct = default)
@@ -43,11 +163,30 @@ public sealed class DanceSellProviderCatalog : IDanceSellProviderCatalog
                 """,
                 new { featureCode = DanceSellConstants.FeatureCode, operationType, userSelectableOnly });
             var list = rows.ToList();
-            return list.Count == 0 ? new[] { Fallback(operationType) } : list;
+            if (list.Count > 0)
+            {
+                return list;
+            }
+
+            if (AllowCodeFallback)
+            {
+                _logger.LogWarning("DANCE_SELL_PROVIDER_ROUTE_NOT_CONFIGURED operationType={OperationType}; using code fallback because AllowCodeProviderFallback is enabled.", operationType);
+                return new[] { Fallback(operationType) };
+            }
+
+            throw new InvalidOperationException("DANCE_SELL_PROVIDER_ROUTE_NOT_CONFIGURED");
         }
         catch (PostgresException ex) when (IsSchemaMissing(ex))
         {
-            return new[] { Fallback(operationType) };
+            _logger.LogError(ex,
+                "DANCE_SELL_DATABASE_SCHEMA_NOT_READY sqlState={SqlState} table={Table} column={Column}",
+                ex.SqlState, ex.TableName, ex.ColumnName);
+            if (AllowCodeFallback)
+            {
+                return new[] { Fallback(operationType) };
+            }
+
+            throw new DanceSellSchemaException("DANCE_SELL_DATABASE_SCHEMA_NOT_READY", ex.SqlState, ex.TableName, ex.ColumnName);
         }
     }
 
@@ -99,11 +238,19 @@ public sealed class DanceSellProviderCatalog : IDanceSellProviderCatalog
 
     private static bool IsSchemaMissing(PostgresException ex)
         => ex.SqlState is PostgresErrorCodes.UndefinedTable or PostgresErrorCodes.UndefinedColumn;
+
+    private bool AllowCodeFallback
+        => ReadBool($"DanceSell:{DanceSellConstants.AllowCodeProviderFallbackConfigKey}")
+           || ReadBool("DanceSell:AllowCodeProviderFallback");
+
+    private bool ReadBool(string key)
+        => bool.TryParse(_configuration[key], out var value) && value;
 }
 
 public interface IDanceSellOperationRepository
 {
     Task<DanceSellProviderOperationDto?> UpsertOperationAsync(DanceSellProviderOperationDto operation, CancellationToken ct = default);
+    Task<int> GetNextAttemptNoAsync(Guid danceSellJobId, string operationType, CancellationToken ct = default);
     Task MarkSubmittedAsync(Guid operationId, string providerTaskId, string responseJson, CancellationToken ct = default);
     Task MarkCompletedAsync(Guid operationId, string providerStatus, string responseJson, decimal? creditsConsumed, string? resultUrl, CancellationToken ct = default);
     Task MarkFailedAsync(Guid operationId, string providerStatus, string? responseJson, string errorCode, string errorMessage, CancellationToken ct = default);
@@ -115,10 +262,12 @@ public interface IDanceSellOperationRepository
 public sealed class DanceSellOperationRepository : IDanceSellOperationRepository
 {
     private readonly TodoXConnectionFactory _factory;
+    private readonly ILogger<DanceSellOperationRepository> _logger;
 
-    public DanceSellOperationRepository(TodoXConnectionFactory factory)
+    public DanceSellOperationRepository(TodoXConnectionFactory factory, ILogger<DanceSellOperationRepository> logger)
     {
         _factory = factory;
+        _logger = logger;
     }
 
     public async Task<DanceSellProviderOperationDto?> UpsertOperationAsync(DanceSellProviderOperationDto operation, CancellationToken ct = default)
@@ -181,7 +330,27 @@ public sealed class DanceSellOperationRepository : IDanceSellOperationRepository
         }
         catch (PostgresException ex) when (IsSchemaMissing(ex))
         {
-            return null;
+            throw SchemaNotReady(ex);
+        }
+    }
+
+    public async Task<int> GetNextAttemptNoAsync(Guid danceSellJobId, string operationType, CancellationToken ct = default)
+    {
+        try
+        {
+            using var conn = await _factory.OpenAsync(ct);
+            return await conn.ExecuteScalarAsync<int>(
+                """
+                SELECT COALESCE(MAX(attempt_no), 0) + 1
+                  FROM dance_sell.dance_sell_provider_operations
+                 WHERE dance_sell_job_id = @danceSellJobId
+                   AND operation_type = @operationType;
+                """,
+                new { danceSellJobId, operationType });
+        }
+        catch (PostgresException ex) when (IsSchemaMissing(ex))
+        {
+            throw SchemaNotReady(ex);
         }
     }
 
@@ -285,7 +454,7 @@ public sealed class DanceSellOperationRepository : IDanceSellOperationRepository
         }
         catch (PostgresException ex) when (IsSchemaMissing(ex))
         {
-            return new PagedResult<DanceSellOperationLogItemDto>(Array.Empty<DanceSellOperationLogItemDto>(), page, pageSize, 0);
+            throw SchemaNotReady(ex);
         }
     }
 
@@ -334,9 +503,7 @@ public sealed class DanceSellOperationRepository : IDanceSellOperationRepository
         }
         catch (PostgresException ex) when (IsSchemaMissing(ex))
         {
-            return result.Items.FirstOrDefault(x => x.Id == id) is { } item
-                ? new DanceSellOperationLogDetailDto { Operation = item }
-                : null;
+            throw SchemaNotReady(ex);
         }
     }
 
@@ -349,6 +516,7 @@ public sealed class DanceSellOperationRepository : IDanceSellOperationRepository
         }
         catch (PostgresException ex) when (IsSchemaMissing(ex))
         {
+            throw SchemaNotReady(ex);
         }
     }
 
@@ -401,6 +569,14 @@ public sealed class DanceSellOperationRepository : IDanceSellOperationRepository
 
     private static bool IsSchemaMissing(PostgresException ex)
         => ex.SqlState is PostgresErrorCodes.UndefinedTable or PostgresErrorCodes.UndefinedColumn or PostgresErrorCodes.InvalidColumnReference;
+
+    private DanceSellSchemaException SchemaNotReady(PostgresException ex)
+    {
+        _logger.LogError(ex,
+            "DANCE_SELL_DATABASE_SCHEMA_NOT_READY sqlState={SqlState} table={Table} column={Column}",
+            ex.SqlState, ex.TableName, ex.ColumnName);
+        return new DanceSellSchemaException("DANCE_SELL_DATABASE_SCHEMA_NOT_READY", ex.SqlState, ex.TableName, ex.ColumnName);
+    }
 }
 
 public interface IDanceSellCostEstimator
@@ -419,32 +595,102 @@ public sealed class DanceSellCostEstimator : IDanceSellCostEstimator
 
     public Task<DanceSellCostEstimate> EstimateAsync(DanceSellProviderRouteDto route, string mode, TimeSpan? duration, CancellationToken ct = default)
     {
-        var exchangeRate = ReadDecimal("DanceSell:ExchangeRateVndPerUsd");
-        var vndPerPoint = ReadDecimal("AiImageBilling:TodoXVndPerPoint");
-        decimal? unitPrice = ReadDecimal($"DanceSell:Pricing:{route.ProviderCode}:{route.ModelName}:UsdPerRequest");
-        var providerCost = unitPrice;
+        using var configDoc = TryParseJson(route.ConfigJson);
+        var pricingUnit = ReadString(configDoc, "pricingUnit")
+                          ?? ReadString(configDoc, "pricing_unit")
+                          ?? ReadString(configDoc, "usageUnit")
+                          ?? "request";
+        var estimatedUsage = ReadDecimal(configDoc, "estimatedUsage")
+                             ?? ReadDecimal(configDoc, "estimated_usage")
+                             ?? pricingUnit switch
+                             {
+                                 "fixed" => 0,
+                                 "video_second" or "second" when duration is not null => (decimal)duration.Value.TotalSeconds,
+                                 _ => 1
+                             };
+        var unitPrice = ReadDecimal(configDoc, "providerUnitPrice")
+                        ?? ReadDecimal(configDoc, "provider_unit_price")
+                        ?? ReadDecimal(configDoc, "usdPerRequest")
+                        ?? ReadDecimal($"DanceSell:Pricing:{route.ProviderCode}:{route.ModelName}:UsdPerRequest");
+        var exchangeRate = ReadDecimal(configDoc, "exchangeRate")
+                           ?? ReadDecimal(configDoc, "exchange_rate")
+                           ?? ReadDecimal("DanceSell:ExchangeRateVndPerUsd");
+        var vndPerPoint = ReadDecimal(configDoc, "todoxVndPerPoint")
+                          ?? ReadDecimal(configDoc, "todox_vnd_per_point")
+                          ?? ReadDecimal("AiImageBilling:TodoXVndPerPoint");
+        var providerCost = unitPrice * estimatedUsage;
         var vnd = providerCost * exchangeRate;
         var points = vndPerPoint is > 0 ? vnd / vndPerPoint : null;
+        var source = unitPrice is not null && configDoc is not null ? "route_config"
+            : unitPrice is not null ? "configuration"
+            : "missing_config";
 
         return Task.FromResult(new DanceSellCostEstimate
         {
             OperationType = route.OperationType,
             ProviderCode = route.ProviderCode,
             ModelName = route.ModelName,
-            UsageUnit = "credits",
-            EstimatedUsage = 1,
+            UsageUnit = pricingUnit,
+            PricingUnit = pricingUnit,
+            EstimatedUsage = estimatedUsage,
             ProviderUnitPrice = unitPrice,
             EstimatedProviderCost = providerCost,
-            Currency = "USD",
+            Currency = ReadString(configDoc, "currency") ?? "USD",
+            ExchangeRate = exchangeRate,
             ProviderCostVnd = vnd,
             EstimatedTodoxPoints = points,
-            PricingSource = unitPrice is null ? "missing_config" : "config",
+            TodoXVndPerPoint = vndPerPoint,
+            PricingSource = source,
             Warning = unitPrice is null ? "Chua cau hinh don gia provider cho model nay." : null
         });
     }
 
     private decimal? ReadDecimal(string key)
         => decimal.TryParse(_configuration[key], out var parsed) ? parsed : null;
+
+    private static JsonDocument? TryParseJson(string? rawJson)
+    {
+        if (string.IsNullOrWhiteSpace(rawJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonDocument.Parse(rawJson);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static string? ReadString(JsonDocument? doc, string propertyName)
+        => doc is not null
+           && doc.RootElement.ValueKind == JsonValueKind.Object
+           && doc.RootElement.TryGetProperty(propertyName, out var value)
+           && value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : null;
+
+    private static decimal? ReadDecimal(JsonDocument? doc, string propertyName)
+    {
+        if (doc is null
+            || doc.RootElement.ValueKind != JsonValueKind.Object
+            || !doc.RootElement.TryGetProperty(propertyName, out var value))
+        {
+            return null;
+        }
+
+        if (value.ValueKind == JsonValueKind.Number && value.TryGetDecimal(out var number))
+        {
+            return number;
+        }
+
+        return value.ValueKind == JsonValueKind.String && decimal.TryParse(value.GetString(), out var parsed)
+            ? parsed
+            : null;
+    }
 }
 
 public interface IAiOperationBillingService
@@ -475,36 +721,52 @@ public sealed class AiOperationBillingService : IAiOperationBillingService
 
     public Task<DanceSellProviderOperationDto> ReserveAsync(DanceSellProviderOperationDto operation, CancellationToken ct = default)
     {
+        EnsureBillingEnabled();
         operation.BillingStatus = IsBillingEnabled() ? DanceSellBillingStatuses.Reserved : DanceSellBillingStatuses.NotRequired;
         return Task.FromResult(operation);
     }
 
     public Task<DanceSellProviderOperationDto> ChargeAsync(DanceSellProviderOperationDto operation, CancellationToken ct = default)
     {
+        EnsureBillingEnabled();
         operation.BillingStatus = IsBillingEnabled() ? DanceSellBillingStatuses.Reconciliation : DanceSellBillingStatuses.NotRequired;
         return Task.FromResult(operation);
     }
 
     public Task<DanceSellProviderOperationDto> RefundAsync(Guid operationId, decimal points, string reason, Guid? actorId, CancellationToken ct = default)
-        => Task.FromResult(new DanceSellProviderOperationDto
+    {
+        EnsureBillingEnabled();
+        return Task.FromResult(new DanceSellProviderOperationDto
         {
             Id = operationId,
-            BillingStatus = DanceSellBillingStatuses.NotRequired,
-            RefundStatus = IsBillingEnabled() ? DanceSellRefundStatuses.ManualReview : DanceSellRefundStatuses.NotRequired,
-            TodoxPointsRefunded = 0,
-            ErrorMessage = IsBillingEnabled()
-                ? "Refund requires wallet integration policy confirmation."
-                : "Dance Sell billing is disabled; no real points were charged."
+            RefundStatus = DanceSellRefundStatuses.ManualReview,
+            ErrorMessage = "Refund requires wallet integration policy confirmation."
         });
+    }
 
     public Task<DanceSellProviderOperationDto> RetryChargeAsync(Guid operationId, string reason, Guid? actorId, CancellationToken ct = default)
-        => Task.FromResult(new DanceSellProviderOperationDto { Id = operationId, BillingStatus = DanceSellBillingStatuses.Reconciliation });
+    {
+        EnsureBillingEnabled();
+        return Task.FromResult(new DanceSellProviderOperationDto { Id = operationId, BillingStatus = DanceSellBillingStatuses.Reconciliation });
+    }
 
     public Task<DanceSellProviderOperationDto> RetryRefundAsync(Guid operationId, string reason, Guid? actorId, CancellationToken ct = default)
-        => Task.FromResult(new DanceSellProviderOperationDto { Id = operationId, RefundStatus = DanceSellRefundStatuses.ManualReview });
+    {
+        EnsureBillingEnabled();
+        return Task.FromResult(new DanceSellProviderOperationDto { Id = operationId, RefundStatus = DanceSellRefundStatuses.ManualReview });
+    }
 
     private bool IsBillingEnabled()
-        => bool.TryParse(_configuration[$"DanceSell:{DanceSellConstants.BillingEnabledConfigKey}"], out var enabled) && enabled;
+        => bool.TryParse(_configuration[$"DanceSell:{DanceSellConstants.BillingEnabledConfigKey}"], out var enabled) && enabled
+           || bool.TryParse(_configuration["DanceSell:BillingEnabled"], out var enabledAlias) && enabledAlias;
+
+    private void EnsureBillingEnabled()
+    {
+        if (!IsBillingEnabled())
+        {
+            throw new InvalidOperationException("DANCE_SELL_BILLING_DISABLED");
+        }
+    }
 }
 
 public interface IAiProviderBalanceClient

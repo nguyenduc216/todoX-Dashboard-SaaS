@@ -9,6 +9,7 @@ namespace TodoX.Web.Services.AiProviders.Kie;
 public interface IKieClient
 {
     Task<KieCreateTaskResult> CreateTaskAsync(KieMotionControlRequest request, CancellationToken cancellationToken);
+    Task<KieCreateTaskResult> CreateTaskAsync<TRequest>(TRequest request, CancellationToken cancellationToken);
     Task<KieTaskDetailResult> GetTaskDetailAsync(string taskId, CancellationToken cancellationToken);
     KieCallbackResult ParseCallback(string rawJson);
 }
@@ -31,27 +32,12 @@ public sealed class KieClient : IKieClient
 
     public async Task<KieCreateTaskResult> CreateTaskAsync(KieMotionControlRequest request, CancellationToken cancellationToken)
     {
-        var options = _options.CurrentValue;
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(options.HttpTimeout);
+        return await CreateTaskAsyncInternal(request, cancellationToken);
+    }
 
-        var body = JsonSerializer.Serialize(request, KieJson.Options);
-        using var message = BuildMessage(HttpMethod.Post, BuildUrl(options, CreateTaskPath), options, body);
-        using var response = await SendAsync(message, timeout.Token, cancellationToken);
-        var raw = await ReadContentAsync(response, timeout.Token, cancellationToken);
-        if (!IsSuccess(response.StatusCode))
-        {
-            throw BuildException(response, raw, operation: "submit");
-        }
-
-        var parsed = KieResponseParser.ParseCreateTask(raw, (int)response.StatusCode);
-        if (string.IsNullOrWhiteSpace(parsed.TaskId))
-        {
-            throw new KieProviderException("KIE submit response missing data.taskId.", KieErrorCodes.TaskIdMissing,
-                transient: false, statusCode: (int)response.StatusCode, rawResponse: raw);
-        }
-
-        return parsed;
+    public async Task<KieCreateTaskResult> CreateTaskAsync<TRequest>(TRequest request, CancellationToken cancellationToken)
+    {
+        return await CreateTaskAsyncInternal(request, cancellationToken);
     }
 
     public async Task<KieTaskDetailResult> GetTaskDetailAsync(string taskId, CancellationToken cancellationToken)
@@ -151,6 +137,31 @@ public sealed class KieClient : IKieClient
     }
 
     private static bool IsSuccess(HttpStatusCode statusCode) => (int)statusCode is >= 200 and <= 299;
+
+    private async Task<KieCreateTaskResult> CreateTaskAsyncInternal<TRequest>(TRequest request, CancellationToken cancellationToken)
+    {
+        var options = _options.CurrentValue;
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(options.HttpTimeout);
+
+        var body = JsonSerializer.Serialize(request, KieJson.Options);
+        using var message = BuildMessage(HttpMethod.Post, BuildUrl(options, CreateTaskPath), options, body);
+        using var response = await SendAsync(message, timeout.Token, cancellationToken);
+        var raw = await ReadContentAsync(response, timeout.Token, cancellationToken);
+        if (!IsSuccess(response.StatusCode))
+        {
+            throw BuildException(response, raw, operation: "submit");
+        }
+
+        var parsed = KieResponseParser.ParseCreateTask(raw, (int)response.StatusCode);
+        if (string.IsNullOrWhiteSpace(parsed.TaskId))
+        {
+            throw new KieProviderException("KIE submit response missing data.taskId.", KieErrorCodes.TaskIdMissing,
+                transient: false, statusCode: (int)response.StatusCode, rawResponse: raw);
+        }
+
+        return parsed;
+    }
 
     private static KieProviderException BuildException(HttpResponseMessage response, string raw, string operation)
     {
