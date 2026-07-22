@@ -111,6 +111,7 @@ builder.Services.AddScoped<TodoX.Web.Services.AiProviders.IAiProviderBalanceServ
 builder.Services.AddScoped<TodoX.Web.Services.AiProviders.IAiOperationLogService, TodoX.Web.Services.AiProviders.AiOperationLogService>();
 builder.Services.AddScoped<TodoX.Web.Services.AiProviders.IAiBillingPayerResolver, TodoX.Web.Services.AiProviders.AiBillingPayerResolver>();
 builder.Services.AddScoped<TodoX.Web.Services.AiProviders.IAiRenderCompletionService, TodoX.Web.Services.AiProviders.AiRenderCompletionService>();
+builder.Services.AddScoped<TodoX.Web.Services.AiProviders.IAiBillingRepository, TodoX.Web.Services.AiProviders.AiBillingRepository>();
 builder.Services.AddScoped<TodoX.Web.Services.AiProviders.IAiImageBillingService, TodoX.Web.Services.AiProviders.AiImageBillingService>();
 builder.Services.AddScoped<TodoX.Web.Services.AiProviders.IAiBillingService, TodoX.Web.Services.AiProviders.AiBillingService>();
 builder.Services.AddScoped<TodoX.Web.Services.AiProviders.IAiImageBillingDashboardService, TodoX.Web.Services.AiProviders.AiImageBillingDashboardService>();

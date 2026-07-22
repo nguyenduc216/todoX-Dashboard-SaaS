@@ -1,0 +1,17 @@
+workflow,status,evidence,blocker
+KIE reference image,blocked,Kie client exists and Dance Sell generated reference uses provider flow,KieOptions still allows direct KIE_API_KEY before full account credential injection is proven
+KIE motion/video,blocked,DanceSellRenderHandler and KieClient exist,full lease-first submission not proven by DB integration test
+YEScale image,blocked,YEScaleImageService and task client exist,YEScaleTaskClient still uses YEScaleOptions global access key
+YEScale video,blocked,SceneVideoWorkerHandler uses YEScale pricing/client path,lease-first and credential resolver coverage not fully proven
+OpenRouter,blocked,OpenRouterImageService supports provider api_key_config_name,service still falls back to OpenRouter:ApiKey
+Vertex image,blocked,VertexClient uses service-account/token configuration directly,not migrated to provider account credential resolver
+scene image,blocked,SceneImageBatchRenderHandler exists,active path still includes Vertex/direct provider services
+scene video,blocked,SceneVideoWorkerHandler exists,uses obsolete image billing adapter and needs lease-first proof
+avatar,blocked,Avatar/Gemini services exist,credential/account lease routing not proven
+avatar builder,blocked,Avatar builder feature exists,provider account routing not proven
+character,blocked,AiCharacter/OpenRouter services exist,OpenRouter fallback secret path remains
+creative image,blocked,ImageAICreative path exists,provider account lease coverage not proven
+thumbnail/poster,blocked,thumbnail/render services exist,provider account lease coverage not proven
+Dance Sell direct reference,blocked,DanceSell phase 2 services exist,full DB race integration skipped
+Dance Sell generated reference,blocked,generated reference workflow exists,full approval to motion chain not smoke tested
+Dance Sell motion,blocked,DanceSellRenderHandler and completion service exist,callback/poll DB race integration skipped

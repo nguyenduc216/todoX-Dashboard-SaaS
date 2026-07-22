@@ -1,0 +1,11 @@
+path,change_type,notes
+TodoX.Web/Program.cs,modified,registered IAiBillingRepository
+TodoX.Web/Services/AiProviders/AiBillingService.cs,modified,generic service delegates write operations to repository
+TodoX.Web/Services/AiProviders/AiBillingRepository.cs,added,transaction-safe generic billing repository
+TodoX.Web/Services/AiProviders/AiImageBillingService.cs,modified,obsolete compatibility adapter with no SQL/write logic
+TodoX.Web.Tests/AiCoreRuntimePhase51Tests.cs,added,source contract tests and explicit skipped DB integration placeholders
+database/manual/ai-core-reset/43_phase5_1_billing_hardening.sql,added,billing and ledger idempotency hardening
+database/manual/ai-core-reset/44_phase5_1_completion_hardening.sql,added,completion/artifact/usage/lease indexes
+database/manual/ai-core-reset/45_verify_phase5_1_prod_readiness.sql,added,production readiness verification SQL
+docs/database-refactor/phase-5-1-*.md,added,Phase 5.1 reports
+docs/database-refactor/phase-5-1-*.csv,added,Phase 5.1 evidence matrices
