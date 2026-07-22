@@ -147,21 +147,52 @@ public sealed class DanceSellProviderCatalog : IDanceSellProviderCatalog
         try
         {
             using var conn = await _factory.OpenAsync(ct);
+            var capabilityCode = CapabilityCodeFor(operationType);
             var rows = await conn.QueryAsync<DanceSellProviderRouteDto>(
                 """
-                SELECT id AS Id, feature_code AS FeatureCode, operation_type AS OperationType,
-                       provider_code AS ProviderCode, provider_capability_id AS ProviderCapabilityId,
-                       provider_account_id AS ProviderAccountId, model_name AS ModelName, priority AS Priority,
-                       is_default AS IsDefault, enabled AS Enabled, allow_user_select AS AllowUserSelect,
+                WITH route_source AS (
+                    SELECT c.id AS provider_capability_id,
+                           c.provider_code,
+                           c.model_name,
+                           c.is_default,
+                           c.enabled,
+                           c.allow_user_select,
+                           c.config_json,
+                           c.capability_code,
+                           p.priority,
+                           a.id AS provider_account_id,
+                           md5(c.provider_code || ':' || c.capability_code || ':' || c.model_name) AS route_hash
+                      FROM public.todox_ai_provider_capability c
+                      JOIN public.todox_ai_provider p ON p.id = c.provider_id
+                      LEFT JOIN LATERAL (
+                            SELECT id
+                              FROM public.todox_ai_provider_account
+                             WHERE provider_id = p.id
+                               AND enabled = true
+                             ORDER BY is_default DESC, priority, account_code
+                             LIMIT 1
+                      ) a ON true
+                     WHERE c.capability_code = @capabilityCode
+                       AND c.enabled = true
+                       AND p.enabled = true
+                       AND (@userSelectableOnly = false OR c.allow_user_select = true)
+                )
+                SELECT (substr(route_hash,1,8) || '-' || substr(route_hash,9,4) || '-' || substr(route_hash,13,4) || '-' || substr(route_hash,17,4) || '-' || substr(route_hash,21,12))::uuid AS Id,
+                       @featureCode AS FeatureCode,
+                       @operationType AS OperationType,
+                       provider_code AS ProviderCode,
+                       provider_capability_id AS ProviderCapabilityId,
+                       provider_account_id AS ProviderAccountId,
+                       model_name AS ModelName,
+                       priority AS Priority,
+                       is_default AS IsDefault,
+                       enabled AS Enabled,
+                       allow_user_select AS AllowUserSelect,
                        config_json::text AS ConfigJson
-                  FROM public.todox_ai_feature_provider_route
-                 WHERE feature_code = @featureCode
-                   AND operation_type = @operationType
-                   AND enabled = true
-                   AND (@userSelectableOnly = false OR allow_user_select = true)
+                  FROM route_source
                  ORDER BY is_default DESC, priority, provider_code, model_name;
                 """,
-                new { featureCode = DanceSellConstants.FeatureCode, operationType, userSelectableOnly });
+                new { featureCode = DanceSellConstants.FeatureCode, operationType, capabilityCode, userSelectableOnly });
             var list = rows.ToList();
             if (list.Count > 0)
             {
@@ -236,6 +267,11 @@ public sealed class DanceSellProviderCatalog : IDanceSellProviderCatalog
             }, KieJson.Options)
         };
 
+    private static string CapabilityCodeFor(string operationType)
+        => operationType == DanceSellOperationTypes.ReferenceImage
+            ? DanceSellConstants.ReferenceCapabilityCode
+            : DanceSellConstants.CapabilityCode;
+
     private static bool IsSchemaMissing(PostgresException ex)
         => ex.SqlState is PostgresErrorCodes.UndefinedTable or PostgresErrorCodes.UndefinedColumn;
 
@@ -272,61 +308,122 @@ public sealed class DanceSellOperationRepository : IDanceSellOperationRepository
 
     public async Task<DanceSellProviderOperationDto?> UpsertOperationAsync(DanceSellProviderOperationDto operation, CancellationToken ct = default)
     {
-        operation.Id = operation.Id == Guid.Empty ? Guid.NewGuid() : operation.Id;
+        operation.Id = operation.RenderJobId ?? (operation.Id == Guid.Empty ? Guid.NewGuid() : operation.Id);
+        operation.RenderJobId = operation.Id;
         operation.RequestJson = KieJsonRedactor.Redact(operation.RequestJson) ?? "{}";
         operation.ResponseJson = KieJsonRedactor.Redact(operation.ResponseJson);
         operation.CallbackJson = KieJsonRedactor.Redact(operation.CallbackJson);
         operation.ErrorJson = KieJsonRedactor.Redact(operation.ErrorJson);
+        var jobType = operation.OperationType == DanceSellOperationTypes.ReferenceImage
+            ? "dance_sell_reference_image"
+            : "dance_sell_motion_video";
+        var renderStatus = NormalizeRenderStatus(operation.Status);
+        var inputJson = DanceSellRepository.ToJson(new { operation.DanceSellJobId, operation.ReferenceMode });
+        var optionsJson = DanceSellRepository.ToJson(new
+        {
+            operation.ReferenceMode,
+            pricingSnapshotJson = operation.PricingSnapshotJson,
+            costSource = operation.CostSource,
+            legacyAdapter = "render.render_jobs"
+        });
 
         try
         {
             using var conn = await _factory.OpenAsync(ct);
             return await conn.QuerySingleAsync<DanceSellProviderOperationDto>(
                 """
-                INSERT INTO dance_sell.dance_sell_provider_operations
-                    (id, dance_sell_job_id, render_job_id, parent_operation_id, operation_type, attempt_no,
-                     reference_mode, provider_code, provider_capability_id, provider_account_id, provider_model,
-                     provider_task_id, status, provider_status, billing_status, refund_status, request_json,
-                     response_json, callback_json, error_json, provider_usage_json, pricing_snapshot_json,
-                     usage_quantity, usage_unit, credits_estimated, credits_consumed, provider_cost,
-                     provider_currency, provider_cost_vnd, exchange_rate, todox_points_estimated,
-                     todox_points_reserved, todox_points_charged, todox_points_refunded, balance_before,
-                     balance_after, cost_source, error_code, error_message, created_at, started_at, submitted_at,
-                     completed_at, failed_at, refunded_at, updated_at)
+                INSERT INTO render.render_jobs
+                    (id, job_type, operation_type, business_entity_type, business_entity_id,
+                     parent_render_job_id, status, provider_code, provider_capability_id,
+                     provider_account_id, model_code, provider_task_id, provider_status,
+                     provider_request_json, provider_response_json, last_provider_response_json,
+                     provider_usage_json, usage_quantity, usage_unit, provider_cost,
+                     provider_currency, point_cost_estimate, point_cost_charged, point_status,
+                     error_code, error_message, input_json, options, started_at, completed_at,
+                     created_at, updated_at)
                 VALUES
-                    (@Id, @DanceSellJobId, @RenderJobId, @ParentOperationId, @OperationType, @AttemptNo,
-                     @ReferenceMode, @ProviderCode, @ProviderCapabilityId, @ProviderAccountId, @ProviderModel,
-                     @ProviderTaskId, @Status, @ProviderStatus, @BillingStatus, @RefundStatus, CAST(@RequestJson AS jsonb),
-                     CAST(@ResponseJson AS jsonb), CAST(@CallbackJson AS jsonb), CAST(@ErrorJson AS jsonb),
-                     CAST(@ProviderUsageJson AS jsonb), CAST(@PricingSnapshotJson AS jsonb), @UsageQuantity,
-                     @UsageUnit, @CreditsEstimated, @CreditsConsumed, @ProviderCost, @ProviderCurrency,
-                     @ProviderCostVnd, @ExchangeRate, @TodoxPointsEstimated, @TodoxPointsReserved,
-                     @TodoxPointsCharged, @TodoxPointsRefunded, @BalanceBefore, @BalanceAfter,
-                     @CostSource, @ErrorCode, @ErrorMessage, COALESCE(@CreatedAt, now()), @StartedAt,
-                     @SubmittedAt, @CompletedAt, @FailedAt, @RefundedAt, now())
-                ON CONFLICT (dance_sell_job_id, operation_type, attempt_no)
-                DO UPDATE SET updated_at = now()
-                RETURNING id AS Id, dance_sell_job_id AS DanceSellJobId, render_job_id AS RenderJobId,
-                          parent_operation_id AS ParentOperationId, operation_type AS OperationType, attempt_no AS AttemptNo,
-                          reference_mode AS ReferenceMode, provider_code AS ProviderCode,
-                          provider_capability_id AS ProviderCapabilityId, provider_account_id AS ProviderAccountId,
-                          provider_model AS ProviderModel, provider_task_id AS ProviderTaskId, status AS Status,
-                          provider_status AS ProviderStatus, billing_status AS BillingStatus, refund_status AS RefundStatus,
-                          request_json::text AS RequestJson, response_json::text AS ResponseJson,
-                          callback_json::text AS CallbackJson, error_json::text AS ErrorJson,
-                          provider_usage_json::text AS ProviderUsageJson, pricing_snapshot_json::text AS PricingSnapshotJson,
-                          usage_quantity AS UsageQuantity, usage_unit AS UsageUnit, credits_estimated AS CreditsEstimated,
-                          credits_consumed AS CreditsConsumed, provider_cost AS ProviderCost,
-                          provider_currency AS ProviderCurrency, provider_cost_vnd AS ProviderCostVnd,
-                          exchange_rate AS ExchangeRate, todox_points_estimated AS TodoxPointsEstimated,
-                          todox_points_reserved AS TodoxPointsReserved, todox_points_charged AS TodoxPointsCharged,
-                          todox_points_refunded AS TodoxPointsRefunded, balance_before AS BalanceBefore,
-                          balance_after AS BalanceAfter, cost_source AS CostSource, error_code AS ErrorCode,
-                          error_message AS ErrorMessage, created_at AS CreatedAt, started_at AS StartedAt,
-                          submitted_at AS SubmittedAt, completed_at AS CompletedAt, failed_at AS FailedAt,
-                          refunded_at AS RefundedAt, updated_at AS UpdatedAt;
+                    (@Id, @jobType, @OperationType, 'dance_sell_job', @DanceSellJobId,
+                     @ParentOperationId, @renderStatus, @ProviderCode, @ProviderCapabilityId,
+                     @ProviderAccountId, @ProviderModel, @ProviderTaskId, @ProviderStatus,
+                     CAST(@RequestJson AS jsonb), CAST(COALESCE(@ResponseJson, '{}') AS jsonb), CAST(COALESCE(@ResponseJson, '{}') AS jsonb),
+                     CAST(COALESCE(@ProviderUsageJson, '{}') AS jsonb), @UsageQuantity, @UsageUnit, @ProviderCost,
+                     @ProviderCurrency, COALESCE(@TodoxPointsEstimated,0), COALESCE(@TodoxPointsCharged,0), @pointStatus,
+                     @ErrorCode, @ErrorMessage, CAST(@inputJson AS jsonb), CAST(@optionsJson AS jsonb),
+                     @StartedAt, @CompletedAt, COALESCE(@CreatedAt, now()), now())
+                ON CONFLICT (id)
+                DO UPDATE SET status=EXCLUDED.status,
+                              provider_code=COALESCE(EXCLUDED.provider_code, render.render_jobs.provider_code),
+                              provider_capability_id=COALESCE(EXCLUDED.provider_capability_id, render.render_jobs.provider_capability_id),
+                              provider_account_id=COALESCE(EXCLUDED.provider_account_id, render.render_jobs.provider_account_id),
+                              model_code=COALESCE(EXCLUDED.model_code, render.render_jobs.model_code),
+                              provider_task_id=COALESCE(EXCLUDED.provider_task_id, render.render_jobs.provider_task_id),
+                              provider_status=COALESCE(EXCLUDED.provider_status, render.render_jobs.provider_status),
+                              provider_request_json=EXCLUDED.provider_request_json,
+                              provider_response_json=EXCLUDED.provider_response_json,
+                              last_provider_response_json=EXCLUDED.last_provider_response_json,
+                              provider_usage_json=EXCLUDED.provider_usage_json,
+                              usage_quantity=COALESCE(EXCLUDED.usage_quantity, render.render_jobs.usage_quantity),
+                              usage_unit=COALESCE(EXCLUDED.usage_unit, render.render_jobs.usage_unit),
+                              provider_cost=COALESCE(EXCLUDED.provider_cost, render.render_jobs.provider_cost),
+                              provider_currency=COALESCE(EXCLUDED.provider_currency, render.render_jobs.provider_currency),
+                              point_cost_estimate=GREATEST(render.render_jobs.point_cost_estimate, EXCLUDED.point_cost_estimate),
+                              point_cost_charged=GREATEST(render.render_jobs.point_cost_charged, EXCLUDED.point_cost_charged),
+                              error_code=COALESCE(EXCLUDED.error_code, render.render_jobs.error_code),
+                              error_message=COALESCE(EXCLUDED.error_message, render.render_jobs.error_message),
+                              updated_at=now()
+                RETURNING id AS Id, business_entity_id AS DanceSellJobId, id AS RenderJobId,
+                          parent_render_job_id AS ParentOperationId, operation_type AS OperationType,
+                          GREATEST(attempt_count, 1) AS AttemptNo, options->>'ReferenceMode' AS ReferenceMode,
+                          provider_code AS ProviderCode, provider_capability_id AS ProviderCapabilityId,
+                          provider_account_id AS ProviderAccountId, model_code AS ProviderModel,
+                          provider_task_id AS ProviderTaskId, status AS Status, provider_status AS ProviderStatus,
+                          point_status AS BillingStatus, 'not_required' AS RefundStatus,
+                          provider_request_json::text AS RequestJson, provider_response_json::text AS ResponseJson,
+                          '{}' AS CallbackJson, '{}' AS ErrorJson, provider_usage_json::text AS ProviderUsageJson,
+                          options->>'pricingSnapshotJson' AS PricingSnapshotJson, usage_quantity AS UsageQuantity,
+                          usage_unit AS UsageUnit, NULL::numeric AS CreditsEstimated, usage_quantity AS CreditsConsumed,
+                          provider_cost AS ProviderCost, provider_currency AS ProviderCurrency,
+                          NULL::numeric AS ProviderCostVnd, NULL::numeric AS ExchangeRate,
+                          point_cost_estimate AS TodoxPointsEstimated, NULL::numeric AS TodoxPointsReserved,
+                          point_cost_charged AS TodoxPointsCharged, NULL::numeric AS TodoxPointsRefunded,
+                          NULL::numeric AS BalanceBefore, NULL::numeric AS BalanceAfter,
+                          options->>'costSource' AS CostSource, error_code AS ErrorCode, error_message AS ErrorMessage,
+                          created_at AS CreatedAt, started_at AS StartedAt, started_at AS SubmittedAt,
+                          completed_at AS CompletedAt, completed_at AS FailedAt, NULL::timestamptz AS RefundedAt,
+                          updated_at AS UpdatedAt;
                 """,
-                operation);
+                new
+                {
+                    operation.Id,
+                    operation.DanceSellJobId,
+                    operation.ParentOperationId,
+                    operation.OperationType,
+                    operation.ProviderCode,
+                    operation.ProviderCapabilityId,
+                    operation.ProviderAccountId,
+                    operation.ProviderModel,
+                    operation.ProviderTaskId,
+                    operation.ProviderStatus,
+                    operation.RequestJson,
+                    operation.ResponseJson,
+                    operation.ProviderUsageJson,
+                    operation.UsageQuantity,
+                    operation.UsageUnit,
+                    operation.ProviderCost,
+                    operation.ProviderCurrency,
+                    operation.TodoxPointsEstimated,
+                    operation.TodoxPointsCharged,
+                    operation.ErrorCode,
+                    operation.ErrorMessage,
+                    operation.StartedAt,
+                    operation.CompletedAt,
+                    CreatedAt = operation.CreatedAt == default ? (DateTime?)null : operation.CreatedAt,
+                    jobType,
+                    renderStatus,
+                    pointStatus = ToPointStatus(operation.BillingStatus),
+                    inputJson,
+                    optionsJson
+                });
         }
         catch (PostgresException ex) when (IsSchemaMissing(ex))
         {
@@ -341,9 +438,10 @@ public sealed class DanceSellOperationRepository : IDanceSellOperationRepository
             using var conn = await _factory.OpenAsync(ct);
             return await conn.ExecuteScalarAsync<int>(
                 """
-                SELECT COALESCE(MAX(attempt_no), 0) + 1
-                  FROM dance_sell.dance_sell_provider_operations
-                 WHERE dance_sell_job_id = @danceSellJobId
+                SELECT COALESCE(MAX(attempt_count), 0) + 1
+                  FROM render.render_jobs
+                 WHERE business_entity_type = 'dance_sell_job'
+                   AND business_entity_id = @danceSellJobId
                    AND operation_type = @operationType;
                 """,
                 new { danceSellJobId, operationType });
@@ -358,10 +456,11 @@ public sealed class DanceSellOperationRepository : IDanceSellOperationRepository
     {
         await ExecuteOptionalAsync(
             """
-            UPDATE dance_sell.dance_sell_provider_operations
-               SET status='submitted', provider_task_id=COALESCE(provider_task_id, @providerTaskId),
-                   provider_status='submitted', response_json=CAST(@responseJson AS jsonb),
-                   submitted_at=COALESCE(submitted_at, now()), updated_at=now()
+            UPDATE render.render_jobs
+               SET status='rendering', provider_task_id=COALESCE(provider_task_id, @providerTaskId),
+                   provider_status='submitted', provider_response_json=CAST(@responseJson AS jsonb),
+                   last_provider_response_json=CAST(@responseJson AS jsonb),
+                   started_at=COALESCE(started_at, now()), updated_at=now()
              WHERE id=@operationId AND status NOT IN ('completed','failed','timeout','cancelled');
             """,
             new { operationId, providerTaskId, responseJson = KieJsonRedactor.Redact(responseJson) ?? "{}" },
@@ -372,14 +471,14 @@ public sealed class DanceSellOperationRepository : IDanceSellOperationRepository
     {
         await ExecuteOptionalAsync(
             """
-            UPDATE dance_sell.dance_sell_provider_operations
+            UPDATE render.render_jobs
                SET status='completed', provider_status=@providerStatus,
-                   response_json=COALESCE(CAST(@responseJson AS jsonb), response_json),
+                   provider_response_json=COALESCE(CAST(@responseJson AS jsonb), provider_response_json),
+                   last_provider_response_json=COALESCE(CAST(@responseJson AS jsonb), last_provider_response_json),
                    usage_quantity=COALESCE(@creditsConsumed, usage_quantity),
                    usage_unit=CASE WHEN @creditsConsumed IS NULL THEN usage_unit ELSE 'credits' END,
-                   credits_consumed=COALESCE(@creditsConsumed, credits_consumed),
-                   cost_source=CASE WHEN @creditsConsumed IS NULL THEN COALESCE(cost_source, 'estimated') ELSE 'provider_response' END,
-                   provider_usage_json=COALESCE(provider_usage_json, jsonb_build_object('creditsConsumed', @creditsConsumed, 'resultUrl', @resultUrl)),
+                   provider_usage_json=jsonb_strip_nulls(jsonb_build_object('creditsConsumed', @creditsConsumed, 'resultUrl', @resultUrl)),
+                   output_json=CASE WHEN @resultUrl IS NULL THEN output_json ELSE jsonb_build_array(jsonb_build_object('url', @resultUrl)) END,
                    completed_at=COALESCE(completed_at, now()), updated_at=now()
              WHERE id=@operationId AND status NOT IN ('completed','failed','timeout','cancelled');
             """,
@@ -391,10 +490,12 @@ public sealed class DanceSellOperationRepository : IDanceSellOperationRepository
     {
         await ExecuteOptionalAsync(
             """
-            UPDATE dance_sell.dance_sell_provider_operations
-               SET status='failed', provider_status=@providerStatus, error_json=CAST(@responseJson AS jsonb),
+            UPDATE render.render_jobs
+               SET status='failed', provider_status=@providerStatus,
+                   provider_response_json=CAST(@responseJson AS jsonb),
+                   last_provider_response_json=CAST(@responseJson AS jsonb),
                    error_code=@errorCode, error_message=@errorMessage,
-                   failed_at=COALESCE(failed_at, now()), updated_at=now()
+                   completed_at=COALESCE(completed_at, now()), updated_at=now()
              WHERE id=@operationId AND status NOT IN ('completed','failed','timeout','cancelled');
             """,
             new { operationId, providerStatus, responseJson = KieJsonRedactor.Redact(responseJson) ?? "{}", errorCode, errorMessage },
@@ -406,15 +507,25 @@ public sealed class DanceSellOperationRepository : IDanceSellOperationRepository
         asset.Id = asset.Id == Guid.Empty ? Guid.NewGuid() : asset.Id;
         await ExecuteOptionalAsync(
             """
-            INSERT INTO public.todox_ai_operation_assets
-                (id, operation_id, asset_role, media_id, object_key, public_url, provider_url, mime_type, metadata_json, created_at)
+            INSERT INTO render.render_artifacts
+                (id, render_job_id, artifact_type, media_id, object_key, public_url, provider_url, mime_type, metadata_json, created_at)
             VALUES
-                (@Id, @OperationId, @AssetRole, @MediaId, @ObjectKey, @PublicUrl, @ProviderUrl, @MimeType,
+                (@Id, @OperationId, @ArtifactType, @MediaId, @ObjectKey, @PublicUrl, @ProviderUrl, @MimeType,
                  CAST(@MetadataJson AS jsonb), now())
-            ON CONFLICT (operation_id, asset_role, COALESCE(media_id, '00000000-0000-0000-0000-000000000000'::uuid), COALESCE(public_url, ''), COALESCE(provider_url, ''))
-            DO NOTHING;
+            ON CONFLICT DO NOTHING;
             """,
-            asset,
+            new
+            {
+                asset.Id,
+                asset.OperationId,
+                ArtifactType = ToArtifactType(asset.AssetRole),
+                asset.MediaId,
+                asset.ObjectKey,
+                asset.PublicUrl,
+                asset.ProviderUrl,
+                asset.MimeType,
+                MetadataJson = KieJsonRedactor.Redact(asset.MetadataJson) ?? "{}"
+            },
             ct);
     }
 
@@ -429,21 +540,21 @@ public sealed class DanceSellOperationRepository : IDanceSellOperationRepository
             var total = await conn.ExecuteScalarAsync<long>($"SELECT COUNT(*) {where.Sql}", where.Args);
             var rows = await conn.QueryAsync<DanceSellOperationLogItemDto>(
                 $"""
-                SELECT o.id AS Id, o.dance_sell_job_id AS DanceSellJobId, o.render_job_id AS RenderJobId,
-                       o.parent_operation_id AS ParentOperationId, o.operation_type AS OperationType, o.attempt_no AS AttemptNo,
-                       o.reference_mode AS ReferenceMode, o.provider_code AS ProviderCode,
+                SELECT o.id AS Id, o.business_entity_id AS DanceSellJobId, o.id AS RenderJobId,
+                       o.parent_render_job_id AS ParentOperationId, o.operation_type AS OperationType, GREATEST(o.attempt_count, 1) AS AttemptNo,
+                       o.options->>'ReferenceMode' AS ReferenceMode, o.provider_code AS ProviderCode,
                        o.provider_capability_id AS ProviderCapabilityId, o.provider_account_id AS ProviderAccountId,
-                       o.provider_model AS ProviderModel, o.provider_task_id AS ProviderTaskId, o.status AS Status,
-                       o.provider_status AS ProviderStatus, o.billing_status AS BillingStatus, o.refund_status AS RefundStatus,
-                       o.usage_quantity AS UsageQuantity, o.usage_unit AS UsageUnit, o.credits_consumed AS CreditsConsumed,
+                       o.model_code AS ProviderModel, o.provider_task_id AS ProviderTaskId, o.status AS Status,
+                       o.provider_status AS ProviderStatus, o.point_status AS BillingStatus, 'not_required' AS RefundStatus,
+                       o.usage_quantity AS UsageQuantity, o.usage_unit AS UsageUnit, o.usage_quantity AS CreditsConsumed,
                        o.provider_cost AS ProviderCost, o.provider_currency AS ProviderCurrency,
-                       o.provider_cost_vnd AS ProviderCostVnd, o.todox_points_estimated AS TodoxPointsEstimated,
-                       o.todox_points_charged AS TodoxPointsCharged, o.todox_points_refunded AS TodoxPointsRefunded,
-                       o.cost_source AS CostSource, o.error_code AS ErrorCode, o.error_message AS ErrorMessage,
-                       o.created_at AS CreatedAt, o.started_at AS StartedAt, o.submitted_at AS SubmittedAt,
-                       o.completed_at AS CompletedAt, o.failed_at AS FailedAt, o.updated_at AS UpdatedAt,
+                       NULL::numeric AS ProviderCostVnd, o.point_cost_estimate AS TodoxPointsEstimated,
+                       o.point_cost_charged AS TodoxPointsCharged, NULL::numeric AS TodoxPointsRefunded,
+                       o.options->>'costSource' AS CostSource, o.error_code AS ErrorCode, o.error_message AS ErrorMessage,
+                       o.created_at AS CreatedAt, o.started_at AS StartedAt, o.started_at AS SubmittedAt,
+                       o.completed_at AS CompletedAt, o.completed_at AS FailedAt, o.updated_at AS UpdatedAt,
                        j.title AS Title, j.customer_id AS CustomerId, j.user_id AS UserId,
-                       j.current_stage AS CurrentStage, j.result_video_url AS ResultUrl,
+                       j.current_stage AS CurrentStage, j.result_url AS ResultUrl,
                        COALESCE(a.asset_count, 0) AS AssetCount
                   {where.Sql}
                  ORDER BY o.created_at DESC
@@ -460,30 +571,30 @@ public sealed class DanceSellOperationRepository : IDanceSellOperationRepository
 
     public async Task<DanceSellOperationLogDetailDto?> GetLogDetailAsync(Guid id, CancellationToken ct = default)
     {
-        var result = await SearchLogsAsync(new DanceSellOperationLogFilter { Page = 1, PageSize = 1 }, ct);
         try
         {
             using var conn = await _factory.OpenAsync(ct);
             var operation = await conn.QuerySingleOrDefaultAsync<DanceSellOperationLogItemDto>(
                 """
-                SELECT o.id AS Id, o.dance_sell_job_id AS DanceSellJobId, o.render_job_id AS RenderJobId,
-                       o.operation_type AS OperationType, o.attempt_no AS AttemptNo, o.reference_mode AS ReferenceMode,
-                       o.provider_code AS ProviderCode, o.provider_model AS ProviderModel, o.provider_task_id AS ProviderTaskId,
-                       o.status AS Status, o.provider_status AS ProviderStatus, o.billing_status AS BillingStatus,
-                       o.refund_status AS RefundStatus, o.request_json::text AS RequestJson, o.response_json::text AS ResponseJson,
-                       o.callback_json::text AS CallbackJson, o.error_json::text AS ErrorJson, o.provider_usage_json::text AS ProviderUsageJson,
-                       o.pricing_snapshot_json::text AS PricingSnapshotJson, o.usage_quantity AS UsageQuantity, o.usage_unit AS UsageUnit,
-                       o.credits_consumed AS CreditsConsumed, o.provider_cost AS ProviderCost, o.provider_currency AS ProviderCurrency,
-                       o.provider_cost_vnd AS ProviderCostVnd, o.exchange_rate AS ExchangeRate,
-                       o.todox_points_estimated AS TodoxPointsEstimated, o.todox_points_charged AS TodoxPointsCharged,
-                       o.todox_points_refunded AS TodoxPointsRefunded, o.balance_before AS BalanceBefore, o.balance_after AS BalanceAfter,
-                       o.cost_source AS CostSource, o.error_code AS ErrorCode, o.error_message AS ErrorMessage,
-                       o.created_at AS CreatedAt, o.started_at AS StartedAt, o.submitted_at AS SubmittedAt,
-                       o.completed_at AS CompletedAt, o.failed_at AS FailedAt, o.updated_at AS UpdatedAt,
+                SELECT o.id AS Id, o.business_entity_id AS DanceSellJobId, o.id AS RenderJobId,
+                       o.operation_type AS OperationType, GREATEST(o.attempt_count, 1) AS AttemptNo, o.options->>'ReferenceMode' AS ReferenceMode,
+                       o.provider_code AS ProviderCode, o.model_code AS ProviderModel, o.provider_task_id AS ProviderTaskId,
+                       o.status AS Status, o.provider_status AS ProviderStatus, o.point_status AS BillingStatus,
+                       'not_required' AS RefundStatus, o.provider_request_json::text AS RequestJson,
+                       o.provider_response_json::text AS ResponseJson, '{}' AS CallbackJson, '{}' AS ErrorJson,
+                       o.provider_usage_json::text AS ProviderUsageJson, o.options->>'pricingSnapshotJson' AS PricingSnapshotJson,
+                       o.usage_quantity AS UsageQuantity, o.usage_unit AS UsageUnit,
+                       o.usage_quantity AS CreditsConsumed, o.provider_cost AS ProviderCost, o.provider_currency AS ProviderCurrency,
+                       NULL::numeric AS ProviderCostVnd, NULL::numeric AS ExchangeRate,
+                       o.point_cost_estimate AS TodoxPointsEstimated, o.point_cost_charged AS TodoxPointsCharged,
+                       NULL::numeric AS TodoxPointsRefunded, NULL::numeric AS BalanceBefore, NULL::numeric AS BalanceAfter,
+                       o.options->>'costSource' AS CostSource, o.error_code AS ErrorCode, o.error_message AS ErrorMessage,
+                       o.created_at AS CreatedAt, o.started_at AS StartedAt, o.started_at AS SubmittedAt,
+                       o.completed_at AS CompletedAt, o.completed_at AS FailedAt, o.updated_at AS UpdatedAt,
                        j.title AS Title, j.customer_id AS CustomerId, j.user_id AS UserId,
-                       j.current_stage AS CurrentStage, j.result_video_url AS ResultUrl
-                  FROM dance_sell.dance_sell_provider_operations o
-                  LEFT JOIN dance_sell.dance_sell_jobs j ON j.id = o.dance_sell_job_id
+                       j.current_stage AS CurrentStage, j.result_url AS ResultUrl
+                  FROM render.render_jobs o
+                  LEFT JOIN dance_sell.dance_sell_jobs j ON j.id = o.business_entity_id
                  WHERE o.id=@id;
                 """,
                 new { id });
@@ -491,11 +602,11 @@ public sealed class DanceSellOperationRepository : IDanceSellOperationRepository
 
             var assets = (await conn.QueryAsync<AiOperationAssetDto>(
                 """
-                SELECT id AS Id, operation_id AS OperationId, asset_role AS AssetRole, media_id AS MediaId,
+                SELECT id AS Id, render_job_id AS OperationId, artifact_type AS AssetRole, media_id AS MediaId,
                        object_key AS ObjectKey, public_url AS PublicUrl, provider_url AS ProviderUrl,
                        mime_type AS MimeType, metadata_json::text AS MetadataJson, created_at AS CreatedAt
-                  FROM public.todox_ai_operation_assets
-                 WHERE operation_id=@id
+                  FROM render.render_artifacts
+                 WHERE render_job_id=@id
                  ORDER BY created_at;
                 """,
                 new { id })).ToList();
@@ -530,42 +641,76 @@ public sealed class DanceSellOperationRepository : IDanceSellOperationRepository
             args.Add(name, value);
         }
 
-        if (filter.DanceSellJobId is Guid jobId) Add("o.dance_sell_job_id=@danceSellJobId", "danceSellJobId", jobId);
-        if (filter.RenderJobId is Guid renderJobId) Add("o.render_job_id=@renderJobId", "renderJobId", renderJobId);
+        if (filter.DanceSellJobId is Guid jobId) Add("o.business_entity_id=@danceSellJobId", "danceSellJobId", jobId);
+        if (filter.RenderJobId is Guid renderJobId) Add("o.id=@renderJobId", "renderJobId", renderJobId);
         if (!string.IsNullOrWhiteSpace(filter.ProviderTaskId)) Add("o.provider_task_id ILIKE @providerTaskId", "providerTaskId", $"%{filter.ProviderTaskId.Trim()}%");
         if (filter.CustomerId is Guid customerId) Add("j.customer_id=@customerId", "customerId", customerId);
         if (filter.UserId is Guid userId) Add("j.user_id=@userId", "userId", userId);
         if (!string.IsNullOrWhiteSpace(filter.ProviderCode)) Add("o.provider_code=@providerCode", "providerCode", filter.ProviderCode.Trim());
         if (filter.ProviderAccountId is Guid accountId) Add("o.provider_account_id=@providerAccountId", "providerAccountId", accountId);
-        if (!string.IsNullOrWhiteSpace(filter.ModelName)) Add("o.provider_model ILIKE @modelName", "modelName", $"%{filter.ModelName.Trim()}%");
+        if (!string.IsNullOrWhiteSpace(filter.ModelName)) Add("o.model_code ILIKE @modelName", "modelName", $"%{filter.ModelName.Trim()}%");
         if (!string.IsNullOrWhiteSpace(filter.OperationType)) Add("o.operation_type=@operationType", "operationType", filter.OperationType.Trim());
         if (!string.IsNullOrWhiteSpace(filter.Status)) Add("o.status=@status", "status", filter.Status.Trim());
-        if (!string.IsNullOrWhiteSpace(filter.BillingStatus)) Add("o.billing_status=@billingStatus", "billingStatus", filter.BillingStatus.Trim());
-        if (!string.IsNullOrWhiteSpace(filter.RefundStatus)) Add("o.refund_status=@refundStatus", "refundStatus", filter.RefundStatus.Trim());
+        if (!string.IsNullOrWhiteSpace(filter.BillingStatus)) Add("o.point_status=@billingStatus", "billingStatus", filter.BillingStatus.Trim());
         if (!string.IsNullOrWhiteSpace(filter.ErrorCode)) Add("o.error_code=@errorCode", "errorCode", filter.ErrorCode.Trim());
         if (filter.FromUtc is DateTime from) Add("o.created_at>=@fromUtc", "fromUtc", from);
         if (filter.ToUtc is DateTime to) Add("o.created_at<@toUtc", "toUtc", to);
         if (!string.IsNullOrWhiteSpace(filter.Search))
         {
             Add(
-                "(o.id::text ILIKE @search OR o.dance_sell_job_id::text ILIKE @search OR COALESCE(o.provider_task_id,'') ILIKE @search OR COALESCE(j.title,'') ILIKE @search OR COALESCE(o.provider_model,'') ILIKE @search)",
+                "(o.id::text ILIKE @search OR o.business_entity_id::text ILIKE @search OR COALESCE(o.provider_task_id,'') ILIKE @search OR COALESCE(j.title,'') ILIKE @search OR COALESCE(o.model_code,'') ILIKE @search)",
                 "search",
                 $"%{filter.Search.Trim()}%");
         }
 
         var sql =
             $"""
-              FROM dance_sell.dance_sell_provider_operations o
-              LEFT JOIN dance_sell.dance_sell_jobs j ON j.id = o.dance_sell_job_id
+              FROM render.render_jobs o
+              LEFT JOIN dance_sell.dance_sell_jobs j ON j.id = o.business_entity_id
               LEFT JOIN (
-                    SELECT operation_id, COUNT(*) AS asset_count
-                      FROM public.todox_ai_operation_assets
-                     GROUP BY operation_id
-              ) a ON a.operation_id = o.id
+                    SELECT render_job_id, COUNT(*) AS asset_count
+                      FROM render.render_artifacts
+                     GROUP BY render_job_id
+              ) a ON a.render_job_id = o.id
              WHERE {string.Join(" AND ", clauses)}
+               AND o.business_entity_type = 'dance_sell_job'
+               AND o.operation_type IN ('reference_image','motion_video')
             """;
         return (sql, args);
     }
+
+    private static string NormalizeRenderStatus(string status)
+        => status switch
+        {
+            DanceSellOperationStatuses.Draft => "draft",
+            DanceSellOperationStatuses.Queued => "queued",
+            DanceSellOperationStatuses.Submitted => "rendering",
+            DanceSellOperationStatuses.Generating => "rendering",
+            DanceSellOperationStatuses.Completed => "completed",
+            DanceSellOperationStatuses.Failed => "failed",
+            DanceSellOperationStatuses.Timeout => "timeout",
+            DanceSellOperationStatuses.Cancelled => "cancelled",
+            _ => "queued"
+        };
+
+    private static string ToPointStatus(string billingStatus)
+        => billingStatus switch
+        {
+            DanceSellBillingStatuses.Reserved => "pending",
+            DanceSellBillingStatuses.Charged => "charged",
+            DanceSellBillingStatuses.Refunded => "refunded",
+            DanceSellBillingStatuses.ChargeFailed => "insufficient",
+            _ => "not_required"
+        };
+
+    private static string ToArtifactType(string assetRole)
+        => assetRole switch
+        {
+            DanceSellAssetRoles.ReferenceOutput => "reference_image",
+            DanceSellAssetRoles.VideoOutput => "final_video",
+            DanceSellAssetRoles.ProviderRawOutput => "provider_raw_output",
+            _ => "other"
+        };
 
     private static bool IsSchemaMissing(PostgresException ex)
         => ex.SqlState is PostgresErrorCodes.UndefinedTable or PostgresErrorCodes.UndefinedColumn or PostgresErrorCodes.InvalidColumnReference;

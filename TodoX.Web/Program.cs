@@ -102,6 +102,8 @@ builder.Services.AddScoped<AiCharacterRepository>();
 builder.Services.AddScoped<IAiCharacterService, AiCharacterService>();
 builder.Services.AddScoped<TodoX.Web.Services.AiProviders.AiProviderRepository>();
 builder.Services.AddScoped<TodoX.Web.Services.AiProviders.IAiProviderService, TodoX.Web.Services.AiProviders.AiProviderService>();
+builder.Services.AddScoped<TodoX.Web.Services.AiProviders.IAiProviderAccountRepository, TodoX.Web.Services.AiProviders.AiProviderAccountRepository>();
+builder.Services.AddScoped<TodoX.Web.Services.AiProviders.IAiProviderCredentialResolver, TodoX.Web.Services.AiProviders.AiProviderCredentialResolver>();
 builder.Services.AddScoped<TodoX.Web.Services.AiProviders.IAiBillingPayerResolver, TodoX.Web.Services.AiProviders.AiBillingPayerResolver>();
 builder.Services.AddScoped<TodoX.Web.Services.AiProviders.IAiImageBillingService, TodoX.Web.Services.AiProviders.AiImageBillingService>();
 builder.Services.AddScoped<TodoX.Web.Services.AiProviders.IAiImageBillingDashboardService, TodoX.Web.Services.AiProviders.AiImageBillingDashboardService>();

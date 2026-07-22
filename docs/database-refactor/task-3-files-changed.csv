@@ -1,0 +1,22 @@
+path,change_type,notes
+TodoX.Web/Program.cs,modified,register provider account repository and credential resolver
+TodoX.Web/Services/AiProviders/AiProviderAccountRuntime.cs,added,provider account models repository credential resolver and shared secret redactor
+TodoX.Web/Services/AiProviders/AiImageBillingDashboardService.cs,modified,use generic billing table name
+TodoX.Web/Services/AiProviders/AiImageBillingService.cs,modified,use generic billing and provider attempt table names
+TodoX.Web/Services/DanceSell/DanceSellAiOperations.cs,modified,route from provider capability and adapt operation logs/assets to render core
+TodoX.Web/Services/DanceSell/DanceSellModels.cs,modified,use Dance Sell capability codes and bigint provider capability ids
+TodoX.Web/Services/DanceSell/DanceSellRenderHandler.cs,modified,use shared secret redactor
+TodoX.Web/Services/Render/RenderJobService.cs,modified,replace dropped snapshot table write with render event
+TodoX.Web.Tests/AiCoreRuntimeTask3Tests.cs,added,regression coverage for claim SQL redaction and legacy runtime absence
+TodoX.Web.Tests/DanceSellAiOperationsTests.cs,modified,update hardening assertions to Task 3 schema and redaction behavior
+database/manual/ai-core-reset/33_task3_runtime_contract_fixes.sql,added,set KIE rate limit fields to NULL/provisional
+database/manual/ai-core-reset/34_verify_task3_runtime.sql,added,verify KIE account credential lease indexes generic billing orphans and capability count
+docs/database-refactor/task-3-precheck.md,added,precheck report
+docs/database-refactor/task-3-capability-reconciliation.csv,added,capability reconciliation export
+docs/database-refactor/task-3-capability-reconciliation.md,added,capability reconciliation report
+docs/database-refactor/task-3-runtime-impact.csv,added,runtime impact replacement report
+docs/database-refactor/task-3-runtime-impact.md,added,runtime impact summary
+docs/database-refactor/task-3-legacy-reference-check.csv,added,legacy reference classification
+docs/database-refactor/task-3-legacy-reference-check.md,added,legacy reference summary
+docs/database-refactor/task-3-test-result.md,added,validation and publish result
+docs/database-refactor/task-3-result.md,added,final Task 3 report

@@ -1,0 +1,8 @@
+object,remaining_count,locations,status
+public.todox_ai_feature_provider_route,1,TodoX.Web.Tests/AiCoreRuntimeTask3Tests.cs,allowed_test_asserting_absence
+dance_sell.dance_sell_provider_operations,1,TodoX.Web.Tests/AiCoreRuntimeTask3Tests.cs,allowed_test_asserting_absence
+public.todox_ai_operation_assets,1,TodoX.Web.Tests/AiCoreRuntimeTask3Tests.cs,allowed_test_asserting_absence
+public.todox_ai_operation_billing_transactions,1,TodoX.Web.Tests/AiCoreRuntimeTask3Tests.cs,allowed_test_asserting_absence
+billing.ai_image_billing_records,4,TodoX.Web/docs/kie-dance-sell-phase-0.md; TodoX.Web.Tests/AiCoreRuntimeTask3Tests.cs,allowed_historical_doc_or_absence_test
+billing.ai_image_provider_attempts,3,TodoX.Web/docs/kie-dance-sell-phase-0.md; TodoX.Web.Tests/AiCoreRuntimeTask3Tests.cs,allowed_historical_doc_or_absence_test
+runtime_code,0,TodoX.Web runtime source excluding docs/bin/obj,passed

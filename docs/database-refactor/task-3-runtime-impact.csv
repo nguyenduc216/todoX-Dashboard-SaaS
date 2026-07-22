@@ -1,0 +1,7 @@
+object,file,line,category,access,replacement,status
+public.todox_ai_feature_provider_route,TodoX.Web/Services/DanceSell/DanceSellAiOperations.cs,provider catalog,runtime,read,public.todox_ai_provider_capability + public.todox_ai_provider_account,fixed
+dance_sell.dance_sell_provider_operations,TodoX.Web/Services/DanceSell/DanceSellAiOperations.cs,operation repository,runtime,read/write,render.render_jobs,fixed
+public.todox_ai_operation_assets,TodoX.Web/Services/DanceSell/DanceSellAiOperations.cs,operation assets,runtime,read/write,render.render_artifacts,fixed
+billing.ai_image_billing_records,TodoX.Web/Services/AiProviders/AiImageBillingService.cs,billing service,runtime,read/write,billing.ai_billing_records,fixed
+billing.ai_image_provider_attempts,TodoX.Web/Services/AiProviders/AiImageBillingService.cs,billing attempt service,runtime,read/write,billing.ai_provider_attempts,fixed
+render.render_job_snapshots,TodoX.Web/Services/Render/RenderJobService.cs,snapshot helper,runtime,write,render.render_job_events,fixed

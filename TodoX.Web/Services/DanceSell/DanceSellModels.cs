@@ -3,8 +3,8 @@ namespace TodoX.Web.Services.DanceSell;
 public static class DanceSellConstants
 {
     public const string ProviderCode = "kie";
-    public const string CapabilityCode = "motion_control_video";
-    public const string ReferenceCapabilityCode = "reference_image_generation";
+    public const string CapabilityCode = "dance_sell_motion_video";
+    public const string ReferenceCapabilityCode = "dance_sell_reference_image";
     public const string FeatureCode = "dance_sell";
     public const string Model = "kling-2.6/motion-control";
     public const string ReferenceModel = "gpt-image-2-image-to-image";
@@ -212,11 +212,11 @@ public sealed class DanceSellJobDto
     public string? DirectReferenceUrl { get; set; }
     public string? ReferenceProviderCode { get; set; }
     public string? ReferenceProviderModel { get; set; }
-    public Guid? ReferenceProviderCapabilityId { get; set; }
+    public long? ReferenceProviderCapabilityId { get; set; }
     public Guid? ReferenceProviderAccountId { get; set; }
     public string? MotionProviderCode { get; set; }
     public string? MotionProviderModel { get; set; }
-    public Guid? MotionProviderCapabilityId { get; set; }
+    public long? MotionProviderCapabilityId { get; set; }
     public Guid? MotionProviderAccountId { get; set; }
     public string? ImagePrompt { get; set; }
     public DateTime? ReferenceApprovedAt { get; set; }
@@ -364,7 +364,7 @@ public sealed class DanceSellProviderRouteDto
     public string FeatureCode { get; set; } = DanceSellConstants.FeatureCode;
     public string OperationType { get; set; } = DanceSellOperationTypes.MotionVideo;
     public string ProviderCode { get; set; } = DanceSellConstants.ProviderCode;
-    public Guid? ProviderCapabilityId { get; set; }
+    public long? ProviderCapabilityId { get; set; }
     public Guid? ProviderAccountId { get; set; }
     public string ModelName { get; set; } = DanceSellConstants.Model;
     public int Priority { get; set; } = 100;
@@ -403,7 +403,7 @@ public class DanceSellProviderOperationDto
     public int AttemptNo { get; set; } = 1;
     public string? ReferenceMode { get; set; }
     public string ProviderCode { get; set; } = DanceSellConstants.ProviderCode;
-    public Guid? ProviderCapabilityId { get; set; }
+    public long? ProviderCapabilityId { get; set; }
     public Guid? ProviderAccountId { get; set; }
     public string ProviderModel { get; set; } = DanceSellConstants.Model;
     public string? ProviderTaskId { get; set; }

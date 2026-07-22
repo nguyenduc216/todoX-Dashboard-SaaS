@@ -76,7 +76,7 @@ public sealed class AiImageBillingDashboardService : IAiImageBillingDashboardSer
                    count(*) FILTER (WHERE status IN ('failed','released'))::int AS FailedCount,
                    count(*)::int AS TotalCount,
                    max(completed_at) FILTER (WHERE provider_code='yescale_task_image' AND status='completed') AS LastSuccessfulYEScaleTaskAt
-              FROM billing.ai_image_billing_records
+              FROM billing.ai_billing_records
              WHERE tenant_id=@tenant
                AND created_at >= @fromUtc
                AND created_at < @toUtc;
@@ -113,7 +113,7 @@ public sealed class AiImageBillingDashboardService : IAiImageBillingDashboardSer
                    count(*)::int AS TotalCount,
                    COALESCE(sum(total_provider_estimated_cost_usd),0) AS EstimatedUsd,
                    COALESCE(sum(total_provider_actual_cost_usd),0) AS ActualUsd
-              FROM billing.ai_image_billing_records
+              FROM billing.ai_billing_records
              WHERE tenant_id=@tenant
                AND created_at >= @fromUtc
                AND created_at < @toUtc

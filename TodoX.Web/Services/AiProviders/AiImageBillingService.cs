@@ -316,7 +316,7 @@ public sealed class AiImageBillingService : IAiImageBillingService
 
         await conn.ExecuteAsync(
             """
-            UPDATE billing.ai_image_billing_records
+            UPDATE billing.ai_billing_records
                SET status = 'completed',
                    actual_model = @model,
                    provider_task_id = @taskId,
@@ -361,7 +361,7 @@ public sealed class AiImageBillingService : IAiImageBillingService
 
         await conn.ExecuteAsync(
             """
-            UPDATE billing.ai_image_billing_records
+            UPDATE billing.ai_billing_records
                SET status = 'pending_reconciliation',
                    actual_model = COALESCE(@model, actual_model),
                    provider_task_id = COALESCE(@taskId, provider_task_id),
@@ -392,7 +392,7 @@ public sealed class AiImageBillingService : IAiImageBillingService
             """
             WITH claimed AS (
                 SELECT id
-                  FROM billing.ai_image_billing_records
+                  FROM billing.ai_billing_records
                  WHERE status IN ('reserved','pending_reconciliation')
                    AND COALESCE(reconciliation_attempt_count, 0) < @maxAttempts
                    AND (reconciliation_lock_until IS NULL OR reconciliation_lock_until < now())
@@ -404,7 +404,7 @@ public sealed class AiImageBillingService : IAiImageBillingService
                  FOR UPDATE SKIP LOCKED
                  LIMIT @batchSize
             )
-            UPDATE billing.ai_image_billing_records r
+            UPDATE billing.ai_billing_records r
                SET reconciliation_lock_owner = @workerKey,
                    reconciliation_lock_until = now() + (@lockSeconds || ' seconds')::interval,
                    reconciliation_attempt_count = COALESCE(reconciliation_attempt_count, 0) + 1,
@@ -440,7 +440,7 @@ public sealed class AiImageBillingService : IAiImageBillingService
         using var conn = await _factory.OpenAsync(ct);
         await conn.ExecuteAsync(
             """
-            UPDATE billing.ai_image_billing_records
+            UPDATE billing.ai_billing_records
                SET status = 'manual_review',
                    error_message = @errorMessage,
                    reconciliation_lock_owner = NULL,
@@ -458,7 +458,7 @@ public sealed class AiImageBillingService : IAiImageBillingService
         using var conn = await _factory.OpenAsync(ct);
         await conn.ExecuteAsync(
             """
-            UPDATE billing.ai_image_billing_records
+            UPDATE billing.ai_billing_records
                SET status = 'pending_reconciliation',
                    error_message = @errorMessage,
                    pending_reconciliation_at = now() + (@delaySeconds || ' seconds')::interval,
@@ -585,7 +585,7 @@ public sealed class AiImageBillingService : IAiImageBillingService
 
         return await conn.ExecuteScalarAsync<Guid>(
             """
-            INSERT INTO billing.ai_image_billing_records
+            INSERT INTO billing.ai_billing_records
                 (id, tenant_id, logical_request_id, render_job_id, customer_id, user_id, wallet_id,
                  payer_type, payer_customer_id, payer_wallet_id, system_charged_points,
                  provider_id, provider_capability_id, provider_code, capability_code, feature_code,
@@ -653,7 +653,7 @@ public sealed class AiImageBillingService : IAiImageBillingService
                    system_charged_points AS SystemChargedPoints,
                    status AS Status,
                    created_by AS CreatedBy
-              FROM billing.ai_image_billing_records
+              FROM billing.ai_billing_records
              WHERE logical_request_id = @logicalRequestId
              FOR UPDATE;
             """,
@@ -663,7 +663,7 @@ public sealed class AiImageBillingService : IAiImageBillingService
     {
         await conn.ExecuteAsync(
             """
-            UPDATE billing.ai_image_billing_records
+            UPDATE billing.ai_billing_records
                SET status = 'completed',
                    actual_model = @model,
                    provider_task_id = @taskId,
@@ -708,7 +708,7 @@ public sealed class AiImageBillingService : IAiImageBillingService
 
         await conn.ExecuteAsync(
             """
-            UPDATE billing.ai_image_billing_records
+            UPDATE billing.ai_billing_records
                SET status = @status,
                    actual_model = @model,
                    provider_task_id = @taskId,
@@ -741,7 +741,7 @@ public sealed class AiImageBillingService : IAiImageBillingService
         {
             await conn.ExecuteAsync(
                 """
-                INSERT INTO billing.ai_image_provider_attempts
+                INSERT INTO billing.ai_provider_attempts
                     (id, billing_record_id, attempt_number, model_name, provider_task_id, success,
                      provider_estimated_cost_usd, provider_actual_cost_usd, cost_source, error_code, error_message,
                      raw_usage_json, started_at, completed_at, created_at)
@@ -751,7 +751,7 @@ public sealed class AiImageBillingService : IAiImageBillingService
                      CAST(@RawUsageJson AS jsonb), @StartedAt, @CompletedAt, now())
                 ON CONFLICT (billing_record_id, attempt_number) DO UPDATE
                     SET model_name = EXCLUDED.model_name,
-                        provider_task_id = COALESCE(EXCLUDED.provider_task_id, billing.ai_image_provider_attempts.provider_task_id),
+                        provider_task_id = COALESCE(EXCLUDED.provider_task_id, billing.ai_provider_attempts.provider_task_id),
                         success = EXCLUDED.success,
                         provider_estimated_cost_usd = EXCLUDED.provider_estimated_cost_usd,
                         provider_actual_cost_usd = EXCLUDED.provider_actual_cost_usd,
@@ -781,7 +781,7 @@ public sealed class AiImageBillingService : IAiImageBillingService
 
         await conn.ExecuteAsync(
             """
-            UPDATE billing.ai_image_billing_records
+            UPDATE billing.ai_billing_records
                SET total_provider_estimated_cost_usd = @totalEstimatedUsd,
                    total_provider_actual_cost_usd = @totalActualUsd,
                    actual_cost_incomplete = @actualIncomplete,

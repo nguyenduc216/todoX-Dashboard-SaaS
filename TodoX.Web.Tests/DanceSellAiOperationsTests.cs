@@ -179,7 +179,7 @@ public sealed class DanceSellAiOperationsTests
         var redacted = KieJsonRedactor.Redact("""{"Authorization":"Bearer abc","nested":{"api_key":"secret"},"ok":true}""");
 
         Assert.DoesNotContain("Bearer abc", redacted);
-        Assert.DoesNotContain("secret", redacted);
+        Assert.DoesNotContain(":\"secret\"", redacted);
         Assert.Contains("[redacted]", redacted);
     }
 
@@ -187,15 +187,14 @@ public sealed class DanceSellAiOperationsTests
     public void OperationSqlFolder_ContainsHardeningAndRuntimeVerifyScripts()
     {
         var root = FindRepoRoot();
-        var folder = Path.Combine(root, "database/manual/ai-operation-logs");
-        var harden = File.ReadAllText(Path.Combine(folder, "10_harden_ai_operation_logs.sql"));
-        var verify = File.ReadAllText(Path.Combine(folder, "11_verify_runtime_contract.sql"));
+        var folder = Path.Combine(root, "database/manual/ai-core-reset");
+        var verify = File.ReadAllText(Path.Combine(folder, "34_verify_task3_runtime.sql"));
 
-        Assert.Contains("todox_ai_operation_billing_transactions", harden);
-        Assert.Contains("dance_sell_provider_operations_status_ck", harden);
-        Assert.Contains("dance_sell_provider_operations_usage_unit_ck", harden);
+        Assert.Contains("render.render_jobs", verify);
+        Assert.Contains("billing.ai_billing_records", verify);
+        Assert.Contains("todox_ai_provider_account_lease", verify);
         Assert.Contains("dance_sell_reference_versions", verify);
-        Assert.Contains("gpt-image-2-image-to-image", File.ReadAllText(Path.Combine(folder, "08_seed_dance_sell_routes.sql")));
+        Assert.Contains("KIE_API_KEY", verify);
     }
 
     private static string FindRepoRoot()

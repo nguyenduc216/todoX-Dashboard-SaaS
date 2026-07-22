@@ -351,54 +351,6 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
 
 public static class KieJsonRedactor
 {
-    private static readonly string[] SecretKeys = new[]
-    {
-        "authorization", "apiKey", "api_key", "token", "accessToken", "secret", "password", "KIE_API_KEY"
-    };
-
     public static string? Redact(string? raw)
-    {
-        if (string.IsNullOrWhiteSpace(raw))
-        {
-            return raw;
-        }
-
-        try
-        {
-            using var doc = JsonDocument.Parse(raw);
-            var redacted = RedactElement(doc.RootElement);
-            return JsonSerializer.Serialize(redacted, KieJson.Options);
-        }
-        catch (JsonException)
-        {
-            var text = raw;
-            foreach (var key in SecretKeys)
-            {
-                text = text.Replace(key, "[redacted-key]", StringComparison.OrdinalIgnoreCase);
-            }
-
-            return text;
-        }
-    }
-
-    private static object? RedactElement(JsonElement element)
-    {
-        return element.ValueKind switch
-        {
-            JsonValueKind.Object => element.EnumerateObject().ToDictionary(
-                p => p.Name,
-                p => IsSecretKey(p.Name) ? (object?)"[redacted]" : RedactElement(p.Value),
-                StringComparer.OrdinalIgnoreCase),
-            JsonValueKind.Array => element.EnumerateArray().Select(RedactElement).ToArray(),
-            JsonValueKind.String => element.GetString(),
-            JsonValueKind.Number when element.TryGetInt64(out var l) => l,
-            JsonValueKind.Number when element.TryGetDecimal(out var d) => d,
-            JsonValueKind.True => true,
-            JsonValueKind.False => false,
-            _ => null
-        };
-    }
-
-    private static bool IsSecretKey(string key)
-        => SecretKeys.Any(x => key.Equals(x, StringComparison.OrdinalIgnoreCase));
+        => AiSecretRedactor.Redact(raw);
 }
