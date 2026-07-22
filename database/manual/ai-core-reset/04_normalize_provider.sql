@@ -21,4 +21,25 @@ FROM public.todox_ai_provider p
 WHERE p.id = c.provider_id
   AND c.provider_code IS NULL;
 
+UPDATE public.todox_ai_provider_capability
+SET operation_type = COALESCE(
+        operation_type,
+        config_json->>'operation_type',
+        CASE
+            WHEN capability_code IN ('text_to_video','image_to_video','motion_control_video','dance_sell_motion_video') THEN 'video'
+            WHEN capability_code LIKE '%image%' OR capability_code LIKE '%avatar%' OR capability_code LIKE '%character%' OR capability_code LIKE '%poster%' OR capability_code LIKE '%thumbnail%' THEN 'image'
+            ELSE capability_code
+        END
+    ),
+    feature_codes = CASE
+        WHEN feature_codes <> ARRAY[]::text[] THEN feature_codes
+        WHEN config_json ? 'feature_code' THEN ARRAY[config_json->>'feature_code']
+        ELSE ARRAY[capability_code]
+    END,
+    runtime_config_json = CASE
+        WHEN runtime_config_json <> '{}'::jsonb THEN runtime_config_json
+        ELSE COALESCE(config_json, '{}'::jsonb)
+    END,
+    pricing_unit = COALESCE(pricing_unit, unit_type);
+
 COMMIT;

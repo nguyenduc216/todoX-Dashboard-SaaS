@@ -1,0 +1,7 @@
+﻿"schema_name","object_name","object_kind"
+"billing","ai_image_billing_records","r"
+"billing","ai_image_provider_attempts","r"
+"public","todox_ai_provider_usage_log_id_seq","S"
+"render","render_events","r"
+"render","render_job_snapshots","r"
+"render","render_scenes","r"

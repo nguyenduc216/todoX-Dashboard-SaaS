@@ -10,9 +10,9 @@ Run order:
 4. `04_normalize_provider.sql`
 5. `05_create_provider_accounts.sql`
 6. `06_create_provider_account_credentials.sql`
-7. `07_create_provider_account_leases.sql`
-8. `08_create_provider_balance_ledger.sql`
-9. `09_rebuild_render_core.sql`
+7. `09_rebuild_render_core.sql`
+8. `07_create_provider_account_leases.sql`
+9. `08_create_provider_balance_ledger.sql`
 10. `10_rebuild_provider_usage.sql`
 11. `11_rebuild_ai_billing.sql`
 12. `12_rebuild_dance_sell.sql`

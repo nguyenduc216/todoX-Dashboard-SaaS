@@ -1,0 +1,2 @@
+﻿id,provider_code,account_code,account_name,environment,enabled,is_default,priority,weight,max_concurrency,rate_limit_count,rate_limit_window_seconds,balance_unit,health_status,credential_role,credential_key,credential_enabled
+243c2d8b-f69d-4f87-b945-1164f560ae56,kie,kie-default,KIE Default,production,t,t,100,100,1,20,10,credits,unknown,api_key,KIE_API_KEY,t

@@ -3,7 +3,9 @@ WITH removed_objects(object_name) AS (
     ('public.todox_ai_feature_provider_route'),
     ('dance_sell.dance_sell_provider_operations'),
     ('public.todox_ai_operation_assets'),
-    ('public.todox_ai_operation_billing_transactions')
+    ('public.todox_ai_operation_billing_transactions'),
+    ('billing.ai_image_billing_records'),
+    ('billing.ai_image_provider_attempts')
 )
 SELECT object_name, to_regclass(object_name) IS NULL AS removed
 FROM removed_objects;

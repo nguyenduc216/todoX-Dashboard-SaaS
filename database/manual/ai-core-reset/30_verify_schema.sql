@@ -8,6 +8,7 @@ WITH required_tables(schema_name, table_name) AS (
     ('public','todox_ai_provider_balance_ledger'),
     ('public','todox_ai_provider_usage_log'),
     ('render','render_jobs'),
+    ('render','render_job_steps'),
     ('render','render_job_inputs'),
     ('render','render_job_events'),
     ('render','render_artifacts'),

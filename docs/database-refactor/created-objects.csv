@@ -1,0 +1,8 @@
+﻿"schema_name","object_name","object_kind"
+"billing","ai_billing_records","r"
+"billing","ai_provider_attempts","r"
+"dance_sell","dance_sell_reference_versions","r"
+"public","todox_ai_provider_account","r"
+"public","todox_ai_provider_account_credential","r"
+"public","todox_ai_provider_account_lease","r"
+"public","todox_ai_provider_balance_ledger","r"

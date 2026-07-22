@@ -1,0 +1,135 @@
+﻿schemaname,tablename,indexname,indexdef
+billing,ai_billing_records,ai_billing_records_logical_request_uk,CREATE UNIQUE INDEX ai_billing_records_logical_request_uk ON billing.ai_billing_records USING btree (logical_request_id)
+billing,ai_billing_records,ai_billing_records_pkey,CREATE UNIQUE INDEX ai_billing_records_pkey ON billing.ai_billing_records USING btree (id)
+billing,ai_billing_records,ai_billing_records_provider_task_ix,CREATE INDEX ai_billing_records_provider_task_ix ON billing.ai_billing_records USING btree (provider_task_id) WHERE (provider_task_id IS NOT NULL)
+billing,ai_billing_records,ai_billing_records_reconciliation_ix,"CREATE INDEX ai_billing_records_reconciliation_ix ON billing.ai_billing_records USING btree (status, next_reconciliation_at, reconciliation_attempt_count)"
+billing,ai_provider_attempts,ai_provider_attempts_pkey,CREATE UNIQUE INDEX ai_provider_attempts_pkey ON billing.ai_provider_attempts USING btree (id)
+billing,ai_provider_attempts,ai_provider_attempts_render_attempt_uk,"CREATE UNIQUE INDEX ai_provider_attempts_render_attempt_uk ON billing.ai_provider_attempts USING btree (render_job_id, attempt_no)"
+billing,ai_provider_attempts,ai_provider_attempts_task_ix,CREATE INDEX ai_provider_attempts_task_ix ON billing.ai_provider_attempts USING btree (provider_task_id) WHERE (provider_task_id IS NOT NULL)
+billing,token_transactions,ix_token_tx_tenant,CREATE INDEX ix_token_tx_tenant ON billing.token_transactions USING btree (tenant_id)
+billing,token_transactions,ix_token_tx_wallet,CREATE INDEX ix_token_tx_wallet ON billing.token_transactions USING btree (wallet_id)
+billing,token_transactions,token_transactions_pkey,CREATE UNIQUE INDEX token_transactions_pkey ON billing.token_transactions USING btree (id)
+billing,token_usage_logs,idx_token_usage_created,CREATE INDEX idx_token_usage_created ON billing.token_usage_logs USING btree (created_at)
+billing,token_usage_logs,idx_token_usage_customer,CREATE INDEX idx_token_usage_customer ON billing.token_usage_logs USING btree (customer_id)
+billing,token_usage_logs,idx_token_usage_user,CREATE INDEX idx_token_usage_user ON billing.token_usage_logs USING btree (user_id)
+billing,token_usage_logs,token_usage_logs_pkey,CREATE UNIQUE INDEX token_usage_logs_pkey ON billing.token_usage_logs USING btree (id)
+billing,token_wallets,ix_wallet_tenant,CREATE INDEX ix_wallet_tenant ON billing.token_wallets USING btree (tenant_id)
+billing,token_wallets,token_wallets_customer_scope_uk,"CREATE UNIQUE INDEX token_wallets_customer_scope_uk ON billing.token_wallets USING btree (tenant_id, customer_id) WHERE ((wallet_scope = 'customer'::text) AND (customer_id IS NOT NULL))"
+billing,token_wallets,token_wallets_pkey,CREATE UNIQUE INDEX token_wallets_pkey ON billing.token_wallets USING btree (id)
+billing,token_wallets,token_wallets_system_code_uk,"CREATE UNIQUE INDEX token_wallets_system_code_uk ON billing.token_wallets USING btree (tenant_id, wallet_code) WHERE ((wallet_scope = 'system'::text) AND (wallet_code IS NOT NULL))"
+billing,token_wallets,ux_wallet_customer,CREATE UNIQUE INDEX ux_wallet_customer ON billing.token_wallets USING btree (customer_id)
+dance_sell,dance_sell_jobs,dance_sell_jobs_customer_created_ix,"CREATE INDEX dance_sell_jobs_customer_created_ix ON dance_sell.dance_sell_jobs USING btree (customer_id, created_at DESC)"
+dance_sell,dance_sell_jobs,dance_sell_jobs_motion_render_ix,CREATE INDEX dance_sell_jobs_motion_render_ix ON dance_sell.dance_sell_jobs USING btree (motion_render_job_id)
+dance_sell,dance_sell_jobs,dance_sell_jobs_pkey,CREATE UNIQUE INDEX dance_sell_jobs_pkey ON dance_sell.dance_sell_jobs USING btree (id)
+dance_sell,dance_sell_jobs,dance_sell_jobs_reference_render_ix,CREATE INDEX dance_sell_jobs_reference_render_ix ON dance_sell.dance_sell_jobs USING btree (reference_render_job_id)
+dance_sell,dance_sell_reference_versions,dance_sell_reference_versions_job_version_uk,"CREATE UNIQUE INDEX dance_sell_reference_versions_job_version_uk ON dance_sell.dance_sell_reference_versions USING btree (dance_sell_job_id, version_no)"
+dance_sell,dance_sell_reference_versions,dance_sell_reference_versions_one_selected_uk,CREATE UNIQUE INDEX dance_sell_reference_versions_one_selected_uk ON dance_sell.dance_sell_reference_versions USING btree (dance_sell_job_id) WHERE is_selected
+dance_sell,dance_sell_reference_versions,dance_sell_reference_versions_pkey,CREATE UNIQUE INDEX dance_sell_reference_versions_pkey ON dance_sell.dance_sell_reference_versions USING btree (id)
+public,app_users,app_users_pkey,CREATE UNIQUE INDEX app_users_pkey ON public.app_users USING btree (id)
+public,app_users,app_users_username_key,CREATE UNIQUE INDEX app_users_username_key ON public.app_users USING btree (username)
+public,customer_accounts,customer_accounts_pkey,CREATE UNIQUE INDEX customer_accounts_pkey ON public.customer_accounts USING btree (id)
+public,customer_accounts,customer_accounts_username_key,CREATE UNIQUE INDEX customer_accounts_username_key ON public.customer_accounts USING btree (username)
+public,customer_accounts,ix_customer_accounts_customer_id,CREATE INDEX ix_customer_accounts_customer_id ON public.customer_accounts USING btree (customer_id)
+public,customers,customers_code_key,CREATE UNIQUE INDEX customers_code_key ON public.customers USING btree (code)
+public,customers,customers_pkey,CREATE UNIQUE INDEX customers_pkey ON public.customers USING btree (id)
+public,render_orders,ix_render_orders_customer_id_created_at,"CREATE INDEX ix_render_orders_customer_id_created_at ON public.render_orders USING btree (customer_id, created_at DESC)"
+public,render_orders,render_orders_order_code_key,CREATE UNIQUE INDEX render_orders_order_code_key ON public.render_orders USING btree (order_code)
+public,render_orders,render_orders_pkey,CREATE UNIQUE INDEX render_orders_pkey ON public.render_orders USING btree (id)
+public,service_packages,service_packages_code_key,CREATE UNIQUE INDEX service_packages_code_key ON public.service_packages USING btree (code)
+public,service_packages,service_packages_pkey,CREATE UNIQUE INDEX service_packages_pkey ON public.service_packages USING btree (id)
+public,todox_ai_character,idx_todox_ai_character_created_at,CREATE INDEX idx_todox_ai_character_created_at ON public.todox_ai_character USING btree (created_at DESC)
+public,todox_ai_character,idx_todox_ai_character_customer_id,CREATE INDEX idx_todox_ai_character_customer_id ON public.todox_ai_character USING btree (customer_id)
+public,todox_ai_character,idx_todox_ai_character_customer_status,"CREATE INDEX idx_todox_ai_character_customer_status ON public.todox_ai_character USING btree (customer_id, status)"
+public,todox_ai_character,idx_todox_ai_character_status,CREATE INDEX idx_todox_ai_character_status ON public.todox_ai_character USING btree (status)
+public,todox_ai_character,todox_ai_character_character_code_key,CREATE UNIQUE INDEX todox_ai_character_character_code_key ON public.todox_ai_character USING btree (character_code)
+public,todox_ai_character,todox_ai_character_pkey,CREATE UNIQUE INDEX todox_ai_character_pkey ON public.todox_ai_character USING btree (id)
+public,todox_ai_character_reference,idx_todox_ai_character_reference_character_id,CREATE INDEX idx_todox_ai_character_reference_character_id ON public.todox_ai_character_reference USING btree (character_id)
+public,todox_ai_character_reference,idx_todox_ai_character_reference_customer_id,CREATE INDEX idx_todox_ai_character_reference_customer_id ON public.todox_ai_character_reference USING btree (customer_id)
+public,todox_ai_character_reference,idx_todox_ai_character_reference_type,CREATE INDEX idx_todox_ai_character_reference_type ON public.todox_ai_character_reference USING btree (reference_type)
+public,todox_ai_character_reference,todox_ai_character_reference_pkey,CREATE UNIQUE INDEX todox_ai_character_reference_pkey ON public.todox_ai_character_reference USING btree (id)
+public,todox_ai_character_render,idx_todox_ai_character_render_character_id,CREATE INDEX idx_todox_ai_character_render_character_id ON public.todox_ai_character_render USING btree (character_id)
+public,todox_ai_character_render,idx_todox_ai_character_render_customer_created_at,"CREATE INDEX idx_todox_ai_character_render_customer_created_at ON public.todox_ai_character_render USING btree (customer_id, created_at DESC)"
+public,todox_ai_character_render,idx_todox_ai_character_render_customer_id,CREATE INDEX idx_todox_ai_character_render_customer_id ON public.todox_ai_character_render USING btree (customer_id)
+public,todox_ai_character_render,idx_todox_ai_character_render_status,CREATE INDEX idx_todox_ai_character_render_status ON public.todox_ai_character_render USING btree (status)
+public,todox_ai_character_render,todox_ai_character_render_pkey,CREATE UNIQUE INDEX todox_ai_character_render_pkey ON public.todox_ai_character_render USING btree (id)
+public,todox_ai_character_render,todox_ai_character_render_render_code_key,CREATE UNIQUE INDEX todox_ai_character_render_render_code_key ON public.todox_ai_character_render USING btree (render_code)
+public,todox_ai_provider,idx_todox_ai_provider_enabled,CREATE INDEX idx_todox_ai_provider_enabled ON public.todox_ai_provider USING btree (enabled)
+public,todox_ai_provider,idx_todox_ai_provider_type,CREATE INDEX idx_todox_ai_provider_type ON public.todox_ai_provider USING btree (provider_type)
+public,todox_ai_provider,todox_ai_provider_pkey,CREATE UNIQUE INDEX todox_ai_provider_pkey ON public.todox_ai_provider USING btree (id)
+public,todox_ai_provider,todox_ai_provider_provider_code_key,CREATE UNIQUE INDEX todox_ai_provider_provider_code_key ON public.todox_ai_provider USING btree (provider_code)
+public,todox_ai_provider_account,todox_ai_provider_account_code_uk,"CREATE UNIQUE INDEX todox_ai_provider_account_code_uk ON public.todox_ai_provider_account USING btree (provider_id, account_code, environment)"
+public,todox_ai_provider_account,todox_ai_provider_account_default_uk,"CREATE UNIQUE INDEX todox_ai_provider_account_default_uk ON public.todox_ai_provider_account USING btree (provider_code, environment) WHERE is_default"
+public,todox_ai_provider_account,todox_ai_provider_account_pkey,CREATE UNIQUE INDEX todox_ai_provider_account_pkey ON public.todox_ai_provider_account USING btree (id)
+public,todox_ai_provider_account,todox_ai_provider_account_select_ix,"CREATE INDEX todox_ai_provider_account_select_ix ON public.todox_ai_provider_account USING btree (provider_code, enabled, priority, health_status, cooldown_until)"
+public,todox_ai_provider_account_credential,todox_ai_provider_account_credential_active_uk,"CREATE UNIQUE INDEX todox_ai_provider_account_credential_active_uk ON public.todox_ai_provider_account_credential USING btree (provider_account_id, credential_role, COALESCE((credential_id)::text, credential_key, credential_config_name)) WHERE enabled"
+public,todox_ai_provider_account_credential,todox_ai_provider_account_credential_pkey,CREATE UNIQUE INDEX todox_ai_provider_account_credential_pkey ON public.todox_ai_provider_account_credential USING btree (id)
+public,todox_ai_provider_account_lease,todox_ai_provider_account_lease_account_active_ix,"CREATE INDEX todox_ai_provider_account_lease_account_active_ix ON public.todox_ai_provider_account_lease USING btree (provider_account_id, lease_status, lease_until)"
+public,todox_ai_provider_account_lease,todox_ai_provider_account_lease_expired_ix,"CREATE INDEX todox_ai_provider_account_lease_expired_ix ON public.todox_ai_provider_account_lease USING btree (lease_status, lease_until) WHERE (lease_status = 'active'::text)"
+public,todox_ai_provider_account_lease,todox_ai_provider_account_lease_pkey,CREATE UNIQUE INDEX todox_ai_provider_account_lease_pkey ON public.todox_ai_provider_account_lease USING btree (id)
+public,todox_ai_provider_account_lease,todox_ai_provider_account_lease_render_active_uk,CREATE UNIQUE INDEX todox_ai_provider_account_lease_render_active_uk ON public.todox_ai_provider_account_lease USING btree (render_job_id) WHERE (lease_status = 'active'::text)
+public,todox_ai_provider_account_lease,todox_ai_provider_account_lease_render_ix,CREATE INDEX todox_ai_provider_account_lease_render_ix ON public.todox_ai_provider_account_lease USING btree (render_job_id)
+public,todox_ai_provider_account_lease,todox_ai_provider_account_lease_worker_ix,"CREATE INDEX todox_ai_provider_account_lease_worker_ix ON public.todox_ai_provider_account_lease USING btree (worker_key, lease_status)"
+public,todox_ai_provider_balance_ledger,todox_ai_provider_balance_ledger_account_created_ix,"CREATE INDEX todox_ai_provider_balance_ledger_account_created_ix ON public.todox_ai_provider_balance_ledger USING btree (provider_account_id, created_at DESC)"
+public,todox_ai_provider_balance_ledger,todox_ai_provider_balance_ledger_idem_uk,"CREATE UNIQUE INDEX todox_ai_provider_balance_ledger_idem_uk ON public.todox_ai_provider_balance_ledger USING btree (provider_account_id, idempotency_key)"
+public,todox_ai_provider_balance_ledger,todox_ai_provider_balance_ledger_pkey,CREATE UNIQUE INDEX todox_ai_provider_balance_ledger_pkey ON public.todox_ai_provider_balance_ledger USING btree (id)
+public,todox_ai_provider_capability,idx_todox_ai_provider_capability_code,CREATE INDEX idx_todox_ai_provider_capability_code ON public.todox_ai_provider_capability USING btree (capability_code)
+public,todox_ai_provider_capability,idx_todox_ai_provider_capability_default,"CREATE INDEX idx_todox_ai_provider_capability_default ON public.todox_ai_provider_capability USING btree (capability_code, is_default) WHERE ((is_default = true) AND (enabled = true))"
+public,todox_ai_provider_capability,idx_todox_ai_provider_capability_enabled,CREATE INDEX idx_todox_ai_provider_capability_enabled ON public.todox_ai_provider_capability USING btree (enabled)
+public,todox_ai_provider_capability,idx_todox_ai_provider_capability_provider_id,CREATE INDEX idx_todox_ai_provider_capability_provider_id ON public.todox_ai_provider_capability USING btree (provider_id)
+public,todox_ai_provider_capability,todox_ai_provider_capability_default_uk,"CREATE UNIQUE INDEX todox_ai_provider_capability_default_uk ON public.todox_ai_provider_capability USING btree (provider_id, capability_code) WHERE (enabled AND is_default)"
+public,todox_ai_provider_capability,todox_ai_provider_capability_operation_ix,"CREATE INDEX todox_ai_provider_capability_operation_ix ON public.todox_ai_provider_capability USING btree (provider_code, operation_type, enabled, priority)"
+public,todox_ai_provider_capability,todox_ai_provider_capability_pkey,CREATE UNIQUE INDEX todox_ai_provider_capability_pkey ON public.todox_ai_provider_capability USING btree (id)
+public,todox_ai_provider_capability,uq_todox_ai_provider_capability,"CREATE UNIQUE INDEX uq_todox_ai_provider_capability ON public.todox_ai_provider_capability USING btree (provider_id, capability_code, model_name)"
+public,todox_ai_provider_usage_log,todox_ai_provider_usage_log_account_created_ix,"CREATE INDEX todox_ai_provider_usage_log_account_created_ix ON public.todox_ai_provider_usage_log USING btree (provider_account_id, created_at DESC)"
+public,todox_ai_provider_usage_log,todox_ai_provider_usage_log_idem_uk,CREATE UNIQUE INDEX todox_ai_provider_usage_log_idem_uk ON public.todox_ai_provider_usage_log USING btree (idempotency_key) WHERE (idempotency_key IS NOT NULL)
+public,todox_ai_provider_usage_log,todox_ai_provider_usage_log_pkey,CREATE UNIQUE INDEX todox_ai_provider_usage_log_pkey ON public.todox_ai_provider_usage_log USING btree (id)
+public,todox_ai_provider_usage_log,todox_ai_provider_usage_log_render_ix,CREATE INDEX todox_ai_provider_usage_log_render_ix ON public.todox_ai_provider_usage_log USING btree (render_job_id)
+public,todox_ai_provider_usage_log,todox_ai_provider_usage_log_task_attempt_uk,"CREATE UNIQUE INDEX todox_ai_provider_usage_log_task_attempt_uk ON public.todox_ai_provider_usage_log USING btree (provider_code, provider_task_id, attempt_no) WHERE (provider_task_id IS NOT NULL)"
+public,todox_customer_credit_transaction,idx_todox_customer_credit_transaction_created_at,CREATE INDEX idx_todox_customer_credit_transaction_created_at ON public.todox_customer_credit_transaction USING btree (created_at)
+public,todox_customer_credit_transaction,idx_todox_customer_credit_transaction_customer_id,CREATE INDEX idx_todox_customer_credit_transaction_customer_id ON public.todox_customer_credit_transaction USING btree (customer_id)
+public,todox_customer_credit_transaction,idx_todox_customer_credit_transaction_source,"CREATE INDEX idx_todox_customer_credit_transaction_source ON public.todox_customer_credit_transaction USING btree (source_type, source_id)"
+public,todox_customer_credit_transaction,todox_customer_credit_transaction_pkey,CREATE UNIQUE INDEX todox_customer_credit_transaction_pkey ON public.todox_customer_credit_transaction USING btree (id)
+public,token_transactions,ix_token_transactions_customer_id_created_at,"CREATE INDEX ix_token_transactions_customer_id_created_at ON public.token_transactions USING btree (customer_id, created_at DESC)"
+public,token_transactions,token_transactions_pkey,CREATE UNIQUE INDEX token_transactions_pkey ON public.token_transactions USING btree (id)
+public,token_wallets,token_wallets_customer_id_key,CREATE UNIQUE INDEX token_wallets_customer_id_key ON public.token_wallets USING btree (customer_id)
+public,token_wallets,token_wallets_pkey,CREATE UNIQUE INDEX token_wallets_pkey ON public.token_wallets USING btree (id)
+render,image_render_requests,image_render_requests_pkey,CREATE UNIQUE INDEX image_render_requests_pkey ON render.image_render_requests USING btree (id)
+render,image_render_requests,ix_image_render_requests_user,"CREATE INDEX ix_image_render_requests_user ON render.image_render_requests USING btree (user_id, created_at DESC)"
+render,marketing_image_render_logs,marketing_image_render_logs_pkey,CREATE UNIQUE INDEX marketing_image_render_logs_pkey ON render.marketing_image_render_logs USING btree (id)
+render,render_artifacts,render_artifacts_pkey,CREATE UNIQUE INDEX render_artifacts_pkey ON render.render_artifacts USING btree (id)
+render,render_artifacts,render_artifacts_unique_ix,"CREATE UNIQUE INDEX render_artifacts_unique_ix ON render.render_artifacts USING btree (render_job_id, artifact_type, COALESCE((media_id)::text, object_key, public_url, provider_url, checksum, ''::text))"
+render,render_job_events,render_job_events_job_created_ix,"CREATE INDEX render_job_events_job_created_ix ON render.render_job_events USING btree (job_id, created_at)"
+render,render_job_events,render_job_events_pkey,CREATE UNIQUE INDEX render_job_events_pkey ON render.render_job_events USING btree (id)
+render,render_job_events,render_job_events_task_ix,CREATE INDEX render_job_events_task_ix ON render.render_job_events USING btree (provider_task_id) WHERE (provider_task_id IS NOT NULL)
+render,render_job_inputs,render_job_inputs_pkey,CREATE UNIQUE INDEX render_job_inputs_pkey ON render.render_job_inputs USING btree (id)
+render,render_job_inputs,render_job_inputs_unique_ix,"CREATE UNIQUE INDEX render_job_inputs_unique_ix ON render.render_job_inputs USING btree (render_job_id, input_type, COALESCE((media_id)::text, object_key, public_url, provider_url, input_text, ''::text))"
+render,render_job_steps,render_job_steps_job_step_uk,"CREATE UNIQUE INDEX render_job_steps_job_step_uk ON render.render_job_steps USING btree (render_job_id, step_key)"
+render,render_job_steps,render_job_steps_pkey,CREATE UNIQUE INDEX render_job_steps_pkey ON render.render_job_steps USING btree (id)
+render,render_jobs,render_jobs_account_status_ix,"CREATE INDEX render_jobs_account_status_ix ON render.render_jobs USING btree (provider_account_id, status, queued_at)"
+render,render_jobs,render_jobs_business_entity_ix,"CREATE INDEX render_jobs_business_entity_ix ON render.render_jobs USING btree (business_entity_type, business_entity_id)"
+render,render_jobs,render_jobs_claim_ix,"CREATE INDEX render_jobs_claim_ix ON render.render_jobs USING btree (status, retry_after, priority, queued_at) WHERE (status = ANY (ARRAY['queued'::text, 'preparing'::text]))"
+render,render_jobs,render_jobs_job_code_key,CREATE UNIQUE INDEX render_jobs_job_code_key ON render.render_jobs USING btree (job_code)
+render,render_jobs,render_jobs_parent_ix,"CREATE INDEX render_jobs_parent_ix ON render.render_jobs USING btree (parent_job_id, parent_render_job_id)"
+render,render_jobs,render_jobs_pkey,CREATE UNIQUE INDEX render_jobs_pkey ON render.render_jobs USING btree (id)
+render,render_jobs,render_jobs_provider_task_ix,"CREATE INDEX render_jobs_provider_task_ix ON render.render_jobs USING btree (provider_code, provider_task_id) WHERE (provider_task_id IS NOT NULL)"
+render,render_jobs,render_jobs_retry_ix,CREATE INDEX render_jobs_retry_ix ON render.render_jobs USING btree (retry_of_job_id)
+system,api_providers,api_providers_pkey,CREATE UNIQUE INDEX api_providers_pkey ON system.api_providers USING btree (id)
+system,api_providers,api_providers_provider_key_key,CREATE UNIQUE INDEX api_providers_provider_key_key ON system.api_providers USING btree (provider_key)
+system,app_settings,app_settings_pkey,CREATE UNIQUE INDEX app_settings_pkey ON system.app_settings USING btree (id)
+system,app_settings,app_settings_setting_key_key,CREATE UNIQUE INDEX app_settings_setting_key_key ON system.app_settings USING btree (setting_key)
+system,database_versions,database_versions_pkey,CREATE UNIQUE INDEX database_versions_pkey ON system.database_versions USING btree (id)
+system,database_versions,database_versions_version_code_key,CREATE UNIQUE INDEX database_versions_version_code_key ON system.database_versions USING btree (version_code)
+system,foundation_versions,foundation_versions_pkey,CREATE UNIQUE INDEX foundation_versions_pkey ON system.foundation_versions USING btree (id)
+system,foundation_versions,foundation_versions_version_code_key,CREATE UNIQUE INDEX foundation_versions_version_code_key ON system.foundation_versions USING btree (version_code)
+system,navigation_menu_groups,ix_navigation_menu_groups_active_order,"CREATE INDEX ix_navigation_menu_groups_active_order ON system.navigation_menu_groups USING btree (is_active, sort_order, title)"
+system,navigation_menu_groups,navigation_menu_groups_code_key,CREATE UNIQUE INDEX navigation_menu_groups_code_key ON system.navigation_menu_groups USING btree (code)
+system,navigation_menu_groups,navigation_menu_groups_pkey,CREATE UNIQUE INDEX navigation_menu_groups_pkey ON system.navigation_menu_groups USING btree (id)
+system,navigation_menu_items,ix_navigation_menu_items_group_active_order,"CREATE INDEX ix_navigation_menu_items_group_active_order ON system.navigation_menu_items USING btree (group_id, is_active, sort_order, title)"
+system,navigation_menu_items,ix_navigation_menu_items_module_keys_gin,CREATE INDEX ix_navigation_menu_items_module_keys_gin ON system.navigation_menu_items USING gin (module_keys)
+system,navigation_menu_items,navigation_menu_items_code_key,CREATE UNIQUE INDEX navigation_menu_items_code_key ON system.navigation_menu_items USING btree (code)
+system,navigation_menu_items,navigation_menu_items_pkey,CREATE UNIQUE INDEX navigation_menu_items_pkey ON system.navigation_menu_items USING btree (id)
+system,provider_credentials,ix_provider_credentials_provider,CREATE INDEX ix_provider_credentials_provider ON system.provider_credentials USING btree (provider_id)
+system,provider_credentials,provider_credentials_credential_key_key,CREATE UNIQUE INDEX provider_credentials_credential_key_key ON system.provider_credentials USING btree (credential_key)
+system,provider_credentials,provider_credentials_pkey,CREATE UNIQUE INDEX provider_credentials_pkey ON system.provider_credentials USING btree (id)
+system,tenants,tenants_pkey,CREATE UNIQUE INDEX tenants_pkey ON system.tenants USING btree (id)
+system,tenants,tenants_tenant_code_key,CREATE UNIQUE INDEX tenants_tenant_code_key ON system.tenants USING btree (tenant_code)
