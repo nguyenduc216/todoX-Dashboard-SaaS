@@ -34,6 +34,14 @@ public static class KieResponseParser
             ResultParseError = parseError,
             FailCode = data.FailCode,
             FailMsg = data.FailMsg,
+            Model = data.Model,
+            ParamJson = data.Param?.GetRawText(),
+            CostTime = data.CostTime,
+            CompleteTime = FromUnixMilliseconds(data.CompleteTime),
+            CreateTime = FromUnixMilliseconds(data.CreateTime),
+            UpdateTime = FromUnixMilliseconds(data.UpdateTime),
+            Progress = data.Progress,
+            CreditsConsumed = data.CreditsConsumed,
             HttpStatus = httpStatus,
             RawResponse = rawResponse
         };
@@ -61,7 +69,15 @@ public static class KieResponseParser
             ResultUrls = urls,
             ResultParseError = parseError,
             FailCode = ReadString(data, "failCode") ?? ReadString(root, "failCode"),
-            FailMsg = ReadString(data, "failMsg") ?? ReadString(root, "failMsg")
+            FailMsg = ReadString(data, "failMsg") ?? ReadString(root, "failMsg"),
+            Model = ReadString(data, "model") ?? ReadString(root, "model"),
+            ParamJson = ReadRawJson(data, "param") ?? ReadRawJson(root, "param"),
+            CostTime = ReadDecimal(data, "costTime") ?? ReadDecimal(root, "costTime"),
+            CompleteTime = FromUnixMilliseconds(ReadLong(data, "completeTime") ?? ReadLong(root, "completeTime")),
+            CreateTime = FromUnixMilliseconds(ReadLong(data, "createTime") ?? ReadLong(root, "createTime")),
+            UpdateTime = FromUnixMilliseconds(ReadLong(data, "updateTime") ?? ReadLong(root, "updateTime")),
+            Progress = ReadDecimal(data, "progress") ?? ReadDecimal(root, "progress"),
+            CreditsConsumed = ReadDecimal(data, "creditsConsumed") ?? ReadDecimal(root, "creditsConsumed")
         };
     }
 
@@ -101,4 +117,68 @@ public static class KieResponseParser
            && value.ValueKind == JsonValueKind.String
             ? value.GetString()
             : null;
+
+    private static string? ReadRawJson(JsonElement element, string propertyName)
+        => element.ValueKind == JsonValueKind.Object
+           && element.TryGetProperty(propertyName, out var value)
+           && value.ValueKind is not JsonValueKind.Null and not JsonValueKind.Undefined
+            ? value.GetRawText()
+            : null;
+
+    private static decimal? ReadDecimal(JsonElement element, string propertyName)
+    {
+        if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty(propertyName, out var value))
+        {
+            return null;
+        }
+
+        if (value.ValueKind == JsonValueKind.Number && value.TryGetDecimal(out var number))
+        {
+            return number;
+        }
+
+        if (value.ValueKind == JsonValueKind.String && decimal.TryParse(value.GetString(), out var parsed))
+        {
+            return parsed;
+        }
+
+        return null;
+    }
+
+    private static long? ReadLong(JsonElement element, string propertyName)
+    {
+        if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty(propertyName, out var value))
+        {
+            return null;
+        }
+
+        if (value.ValueKind == JsonValueKind.Number && value.TryGetInt64(out var number))
+        {
+            return number;
+        }
+
+        if (value.ValueKind == JsonValueKind.String && long.TryParse(value.GetString(), out var parsed))
+        {
+            return parsed;
+        }
+
+        return null;
+    }
+
+    private static DateTimeOffset? FromUnixMilliseconds(long? value)
+    {
+        if (value is null or <= 0)
+        {
+            return null;
+        }
+
+        try
+        {
+            return DateTimeOffset.FromUnixTimeMilliseconds(value.Value);
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            return null;
+        }
+    }
 }

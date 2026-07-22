@@ -17,6 +17,7 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
     private readonly IRenderJobService _renderJobs;
     private readonly IDanceSellCompletionService _completion;
     private readonly IAiProviderService _providers;
+    private readonly IDanceSellOperationRepository _operations;
     private readonly IOptionsMonitor<KieOptions> _options;
     private readonly ILogger<DanceSellRenderHandler> _logger;
 
@@ -30,6 +31,7 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
         IRenderJobService renderJobs,
         IDanceSellCompletionService completion,
         IAiProviderService providers,
+        IDanceSellOperationRepository operations,
         IOptionsMonitor<KieOptions> options,
         ILogger<DanceSellRenderHandler> logger)
     {
@@ -40,6 +42,7 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
         _renderJobs = renderJobs;
         _completion = completion;
         _providers = providers;
+        _operations = operations;
         _options = options;
         _logger = logger;
     }
@@ -88,7 +91,8 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
                 CharacterImageUrl = danceJob.CharacterImageUrl,
                 MotionVideoUrl = danceJob.MotionVideoUrl,
                 Mode = danceJob.Mode,
-                CharacterOrientation = danceJob.CharacterOrientation
+                CharacterOrientation = danceJob.CharacterOrientation,
+                ModelName = danceJob.MotionProviderModel ?? danceJob.ProviderModel
             });
         }
         catch (KieProviderException ex)
@@ -105,6 +109,32 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
             sw.Stop();
             var responseJson = KieJsonRedactor.Redact(submitted.RawResponse) ?? "{}";
             await _repo.UpdateSubmittedAsync(danceJob.Id, requestJson, submitted.TaskId!, responseJson, ct);
+            var operation = await _operations.UpsertOperationAsync(new DanceSellProviderOperationDto
+            {
+                Id = Guid.NewGuid(),
+                DanceSellJobId = danceJob.Id,
+                RenderJobId = renderJob.Id,
+                OperationType = DanceSellOperationTypes.MotionVideo,
+                AttemptNo = 1,
+                ReferenceMode = danceJob.ReferenceMode,
+                ProviderCode = danceJob.MotionProviderCode ?? danceJob.ProviderCode,
+                ProviderCapabilityId = danceJob.MotionProviderCapabilityId,
+                ProviderAccountId = danceJob.MotionProviderAccountId,
+                ProviderModel = danceJob.MotionProviderModel ?? danceJob.ProviderModel,
+                ProviderTaskId = submitted.TaskId,
+                Status = DanceSellOperationStatuses.Submitted,
+                BillingStatus = danceJob.BillingStatus,
+                RefundStatus = danceJob.RefundStatus,
+                RequestJson = requestJson,
+                ResponseJson = responseJson,
+                CreatedAt = DateTime.UtcNow,
+                StartedAt = DateTime.UtcNow,
+                SubmittedAt = DateTime.UtcNow
+            }, ct);
+            if (operation is not null)
+            {
+                await _operations.MarkSubmittedAsync(operation.Id, submitted.TaskId!, responseJson, ct);
+            }
             await _renderJobs.AddEventAsync(renderJob.Id, "KIE_TASK_SUBMITTED", "KIE Motion Control task submitted.",
                 new { danceSellJobId = danceJob.Id, taskId = submitted.TaskId, durationMs = sw.ElapsedMilliseconds },
                 ct: ct);
@@ -165,8 +195,46 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
                     ResponseJson = responseJson,
                     ResultVideoUrl = resultUrl,
                     ResultUrlCount = detail.ResultUrls.Count,
+                    CreditsConsumed = detail.CreditsConsumed,
                     Source = "poll"
                 }, ct);
+                var operation = await _operations.UpsertOperationAsync(new DanceSellProviderOperationDto
+                {
+                    Id = Guid.NewGuid(),
+                    DanceSellJobId = danceJob.Id,
+                    RenderJobId = renderJob.Id,
+                    OperationType = DanceSellOperationTypes.MotionVideo,
+                    AttemptNo = 1,
+                    ReferenceMode = danceJob.ReferenceMode,
+                    ProviderCode = danceJob.MotionProviderCode ?? danceJob.ProviderCode,
+                    ProviderCapabilityId = danceJob.MotionProviderCapabilityId,
+                    ProviderAccountId = danceJob.MotionProviderAccountId,
+                    ProviderModel = danceJob.MotionProviderModel ?? danceJob.ProviderModel,
+                    ProviderTaskId = danceJob.ProviderTaskId,
+                    Status = DanceSellOperationStatuses.Completed,
+                    BillingStatus = danceJob.BillingStatus,
+                    RefundStatus = danceJob.RefundStatus,
+                    ResponseJson = responseJson,
+                    CreditsConsumed = detail.CreditsConsumed,
+                    UsageQuantity = detail.CreditsConsumed,
+                    UsageUnit = detail.CreditsConsumed is null ? null : "credits",
+                    CostSource = detail.CreditsConsumed is null ? "estimated" : "provider_response",
+                    CreatedAt = DateTime.UtcNow,
+                    CompletedAt = DateTime.UtcNow
+                }, ct);
+                if (operation is not null)
+                {
+                    await _operations.MarkCompletedAsync(operation.Id, detail.ProviderState ?? detail.Status, responseJson, detail.CreditsConsumed, resultUrl, ct);
+                    await _operations.UpsertAssetAsync(new AiOperationAssetDto
+                    {
+                        OperationId = operation.Id,
+                        AssetRole = DanceSellAssetRoles.VideoOutput,
+                        PublicUrl = resultUrl,
+                        ProviderUrl = resultUrl,
+                        MimeType = "video/mp4",
+                        MetadataJson = DanceSellRepository.ToJson(new { source = "poll", resultUrlCount = detail.ResultUrls.Count })
+                    }, ct);
+                }
                 return;
             }
 
@@ -223,10 +291,10 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
         await _providers.LogUsageAsync(new AiProviderUsageLog
         {
             CustomerId = DanceSellCompletionService.ToBigIntCustomerId(danceJob.CustomerId),
-            ProviderCode = DanceSellConstants.ProviderCode,
+            ProviderCode = danceJob.MotionProviderCode ?? danceJob.ProviderCode,
             CapabilityCode = DanceSellConstants.CapabilityCode,
             FeatureCode = DanceSellConstants.FeatureCode,
-            ModelName = DanceSellConstants.Model,
+            ModelName = danceJob.MotionProviderModel ?? danceJob.ProviderModel,
             RequestId = danceJob.LogicalRequestId,
             JobId = renderJob.Id.ToString("N"),
             Quantity = 1,

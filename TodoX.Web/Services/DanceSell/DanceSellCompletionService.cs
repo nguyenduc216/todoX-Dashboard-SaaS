@@ -17,15 +17,18 @@ public sealed class DanceSellCompletionService : IDanceSellCompletionService
     private readonly IDanceSellRepository _repo;
     private readonly IRenderJobService _renderJobs;
     private readonly IAiProviderService _providers;
+    private readonly IDanceSellOperationRepository _operations;
 
     public DanceSellCompletionService(
         IDanceSellRepository repo,
         IRenderJobService renderJobs,
-        IAiProviderService providers)
+        IAiProviderService providers,
+        IDanceSellOperationRepository operations)
     {
         _repo = repo;
         _renderJobs = renderJobs;
         _providers = providers;
+        _operations = operations;
     }
 
     public async Task<DanceSellCompletionResult> CompleteAsync(DanceSellCompletionRequest request, CancellationToken ct = default)
@@ -85,10 +88,10 @@ public sealed class DanceSellCompletionService : IDanceSellCompletionService
         await _providers.LogUsageAsync(new AiProviderUsageLog
         {
             CustomerId = ToBigIntCustomerId(danceJob.CustomerId),
-            ProviderCode = DanceSellConstants.ProviderCode,
+            ProviderCode = danceJob.MotionProviderCode ?? danceJob.ProviderCode,
             CapabilityCode = DanceSellConstants.CapabilityCode,
             FeatureCode = DanceSellConstants.FeatureCode,
-            ModelName = DanceSellConstants.Model,
+            ModelName = danceJob.MotionProviderModel ?? danceJob.ProviderModel,
             RequestId = danceJob.LogicalRequestId,
             JobId = danceJob.RenderJobId?.ToString("N"),
             Quantity = 1,
@@ -105,7 +108,9 @@ public sealed class DanceSellCompletionService : IDanceSellCompletionService
                 providerStatus,
                 resultUrlCount = request.ResultUrlCount,
                 source = request.Source,
-                phase = "phase1_no_billing"
+                creditsConsumed = request.CreditsConsumed,
+                usageUnit = request.CreditsConsumed is null ? "request" : "credits",
+                billingStatus = danceJob.BillingStatus
             }, KieJson.Options)
         }, ct);
 
@@ -173,10 +178,10 @@ public sealed class DanceSellCompletionService : IDanceSellCompletionService
         await _providers.LogUsageAsync(new AiProviderUsageLog
         {
             CustomerId = ToBigIntCustomerId(danceJob.CustomerId),
-            ProviderCode = DanceSellConstants.ProviderCode,
+            ProviderCode = danceJob.MotionProviderCode ?? danceJob.ProviderCode,
             CapabilityCode = DanceSellConstants.CapabilityCode,
             FeatureCode = DanceSellConstants.FeatureCode,
-            ModelName = DanceSellConstants.Model,
+            ModelName = danceJob.MotionProviderModel ?? danceJob.ProviderModel,
             RequestId = danceJob.LogicalRequestId,
             JobId = danceJob.RenderJobId?.ToString("N"),
             Quantity = 1,
@@ -194,7 +199,7 @@ public sealed class DanceSellCompletionService : IDanceSellCompletionService
                 errorCode,
                 source = request.Source,
                 permanent = request.Permanent,
-                phase = "phase1_no_billing"
+                billingStatus = danceJob.BillingStatus
             }, KieJson.Options)
         }, ct);
 
@@ -218,6 +223,7 @@ public sealed class DanceSellCompletionRequest
     public string? ResponseJson { get; set; }
     public string? ResultVideoUrl { get; set; }
     public int ResultUrlCount { get; set; }
+    public decimal? CreditsConsumed { get; set; }
     public string Source { get; set; } = "poll";
 }
 

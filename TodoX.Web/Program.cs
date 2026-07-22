@@ -119,6 +119,12 @@ builder.Services.AddScoped<IDanceSellCompletionService, DanceSellCompletionServi
 builder.Services.AddScoped<IDanceSellMotionSourceService, DanceSellMotionSourceService>();
 builder.Services.AddScoped<IDanceSellReferenceImageService, DanceSellReferenceImageService>();
 builder.Services.AddScoped<IDanceSellPhase2Service, DanceSellPhase2Service>();
+builder.Services.AddScoped<IDanceSellProviderCatalog, DanceSellProviderCatalog>();
+builder.Services.AddScoped<IDanceSellOperationRepository, DanceSellOperationRepository>();
+builder.Services.AddScoped<IDanceSellCostEstimator, DanceSellCostEstimator>();
+builder.Services.AddScoped<IAiOperationBillingService, AiOperationBillingService>();
+builder.Services.AddScoped<IAiProviderBalanceClient, KieBalanceClient>();
+builder.Services.AddScoped<IAiProviderBalanceClientFactory, AiProviderBalanceClientFactory>();
 builder.Services.AddScoped<IRenderJobHandler, TodoX.Web.Services.VideoRender.SceneVideoRenderHandler>();
 builder.Services.AddScoped<IRenderJobHandler, TodoX.Web.Services.VideoRender.SceneVideoWorkerHandler>();
 builder.Services.AddScoped<IRenderJobHandler, TodoX.Web.Services.VideoRender.VideoRenderMergeHandler>();

@@ -71,6 +71,30 @@ public sealed class KieTaskDetailData
 
     [JsonPropertyName("failMsg")]
     public string? FailMsg { get; set; }
+
+    [JsonPropertyName("model")]
+    public string? Model { get; set; }
+
+    [JsonPropertyName("param")]
+    public JsonElement? Param { get; set; }
+
+    [JsonPropertyName("costTime")]
+    public decimal? CostTime { get; set; }
+
+    [JsonPropertyName("completeTime")]
+    public long? CompleteTime { get; set; }
+
+    [JsonPropertyName("createTime")]
+    public long? CreateTime { get; set; }
+
+    [JsonPropertyName("updateTime")]
+    public long? UpdateTime { get; set; }
+
+    [JsonPropertyName("progress")]
+    public decimal? Progress { get; set; }
+
+    [JsonPropertyName("creditsConsumed")]
+    public decimal? CreditsConsumed { get; set; }
 }
 
 public sealed class KieCreateTaskResult
@@ -91,6 +115,14 @@ public sealed class KieTaskDetailResult
     public string? ResultParseError { get; set; }
     public string? FailCode { get; set; }
     public string? FailMsg { get; set; }
+    public string? Model { get; set; }
+    public string? ParamJson { get; set; }
+    public decimal? CostTime { get; set; }
+    public DateTimeOffset? CompleteTime { get; set; }
+    public DateTimeOffset? CreateTime { get; set; }
+    public DateTimeOffset? UpdateTime { get; set; }
+    public decimal? Progress { get; set; }
+    public decimal? CreditsConsumed { get; set; }
     public int HttpStatus { get; set; }
     public string RawResponse { get; set; } = string.Empty;
     public bool IsTerminal => KieTaskStatusMapper.IsTerminal(Status);
@@ -109,6 +141,14 @@ public sealed class KieCallbackResult
     public string? ResultParseError { get; set; }
     public string? FailCode { get; set; }
     public string? FailMsg { get; set; }
+    public string? Model { get; set; }
+    public string? ParamJson { get; set; }
+    public decimal? CostTime { get; set; }
+    public DateTimeOffset? CompleteTime { get; set; }
+    public DateTimeOffset? CreateTime { get; set; }
+    public DateTimeOffset? UpdateTime { get; set; }
+    public decimal? Progress { get; set; }
+    public decimal? CreditsConsumed { get; set; }
 }
 
 public sealed class KieProviderError

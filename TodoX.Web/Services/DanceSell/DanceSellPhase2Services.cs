@@ -175,27 +175,43 @@ public sealed class DanceSellReferenceImageService : IDanceSellReferenceImageSer
     private readonly IDanceSellRepository _repo;
     private readonly IMediaFileService _media;
     private readonly IDanceSellMotionSourceService _urls;
+    private readonly IDanceSellProviderCatalog _catalog;
+    private readonly IDanceSellOperationRepository _operations;
+    private readonly IDanceSellCostEstimator _costs;
     private readonly TenantContext _tenant;
 
     public DanceSellReferenceImageService(
         IDanceSellRepository repo,
         IMediaFileService media,
         IDanceSellMotionSourceService urls,
+        IDanceSellProviderCatalog catalog,
+        IDanceSellOperationRepository operations,
+        IDanceSellCostEstimator costs,
         TenantContext tenant)
     {
         _repo = repo;
         _media = media;
         _urls = urls;
+        _catalog = catalog;
+        _operations = operations;
+        _costs = costs;
         _tenant = tenant;
     }
 
     public async Task<DanceSellReferenceVersionDto> GenerateAsync(Guid jobId, CurrentUserSession user, CancellationToken ct = default)
     {
         var job = await RequireOwnedJobAsync(jobId, user, ct);
+        if (job.ReferenceMode == DanceSellReferenceModes.DirectReference)
+        {
+            throw new InvalidOperationException("DANCE_SELL_REFERENCE_GENERATION_NOT_REQUIRED");
+        }
+
         if (job.CharacterMediaId is null) throw new InvalidOperationException("DANCE_SELL_INVALID_CHARACTER");
         if (job.ProductMediaId is null) throw new InvalidOperationException("DANCE_SELL_INVALID_PRODUCT");
 
         await _repo.UpdateReferenceStatusAsync(job.Id, DanceSellReferenceStatuses.Generating, ct: ct);
+        var route = await _catalog.ResolveAsync(DanceSellOperationTypes.ReferenceImage, job.ReferenceProviderCode, job.ReferenceProviderModel, ct);
+        var estimate = await _costs.EstimateAsync(route, job.Mode, null, ct);
         var versions = await _repo.ListReferenceVersionsAsync(job.Id, ct);
         var versionNo = versions.Count == 0 ? 1 : versions.Max(x => x.VersionNo) + 1;
         var requestJson = DanceSellRepository.ToJson(new
@@ -205,9 +221,40 @@ public sealed class DanceSellReferenceImageService : IDanceSellReferenceImageSer
             job.ProductMediaId,
             placementMode = job.PlacementMode,
             job.CustomPlacementInstruction,
+            imagePrompt = string.IsNullOrWhiteSpace(job.ImagePrompt) ? job.Prompt : job.ImagePrompt,
             job.Prompt,
-            phase = "phase2_local_composite_no_billing"
+            provider = route.ProviderCode,
+            model = route.ModelName,
+            note = route.ProviderCode.Equals("local_composite", StringComparison.OrdinalIgnoreCase)
+                ? "development placeholder composite"
+                : "KIE image-generation contract is not confirmed locally; operation is logged while reference output uses the existing safe staging fallback."
         });
+        var operation = await _operations.UpsertOperationAsync(new DanceSellProviderOperationDto
+        {
+            Id = Guid.NewGuid(),
+            DanceSellJobId = job.Id,
+            OperationType = DanceSellOperationTypes.ReferenceImage,
+            AttemptNo = versionNo,
+            ReferenceMode = job.ReferenceMode,
+            ProviderCode = route.ProviderCode,
+            ProviderCapabilityId = route.ProviderCapabilityId,
+            ProviderAccountId = route.ProviderAccountId,
+            ProviderModel = route.ModelName,
+            Status = DanceSellOperationStatuses.Generating,
+            BillingStatus = DanceSellBillingStatuses.Estimated,
+            RefundStatus = DanceSellRefundStatuses.NotCharged,
+            RequestJson = requestJson,
+            UsageUnit = estimate.UsageUnit,
+            CreditsEstimated = estimate.EstimatedUsage,
+            ProviderCost = estimate.EstimatedProviderCost,
+            ProviderCurrency = estimate.Currency,
+            ProviderCostVnd = estimate.ProviderCostVnd,
+            TodoxPointsEstimated = estimate.EstimatedTodoxPoints,
+            CostSource = estimate.PricingSource,
+            PricingSnapshotJson = DanceSellRepository.ToJson(estimate),
+            CreatedAt = DateTime.UtcNow,
+            StartedAt = DateTime.UtcNow
+        }, ct);
 
         try
         {
@@ -228,8 +275,8 @@ public sealed class DanceSellReferenceImageService : IDanceSellReferenceImageSer
                 PlacementMode = job.PlacementMode ?? DanceSellPlacementModes.HoldProduct,
                 CustomInstruction = job.CustomPlacementInstruction,
                 Prompt = job.Prompt,
-                ProviderCode = "local_composite",
-                ProviderModel = "imagesharp-v1",
+                ProviderCode = route.ProviderCode,
+                ProviderModel = route.ModelName,
                 RequestJson = requestJson,
                 ResponseJson = DanceSellRepository.ToJson(new { saved.Id, saved.ObjectKey, publicUrl = providerUrl }),
                 ErrorJson = null,
@@ -244,6 +291,20 @@ public sealed class DanceSellReferenceImageService : IDanceSellReferenceImageSer
             }, ct);
 
             await _repo.UpdateReferenceStatusAsync(job.Id, DanceSellReferenceStatuses.Ready, null, saved.Id, saved.ObjectKey, providerUrl, ct: ct);
+            if (operation is not null)
+            {
+                await _operations.MarkCompletedAsync(operation.Id, "ready", version.ResponseJson ?? "{}", null, providerUrl, ct);
+                await _operations.UpsertAssetAsync(new AiOperationAssetDto
+                {
+                    OperationId = operation.Id,
+                    AssetRole = DanceSellAssetRoles.ReferenceOutput,
+                    MediaId = saved.Id,
+                    ObjectKey = saved.ObjectKey,
+                    PublicUrl = providerUrl,
+                    MimeType = "image/png",
+                    MetadataJson = DanceSellRepository.ToJson(new { versionId = version.Id })
+                }, ct);
+            }
             return version;
         }
         catch (Exception ex)
@@ -259,8 +320,8 @@ public sealed class DanceSellReferenceImageService : IDanceSellReferenceImageSer
                 PlacementMode = job.PlacementMode ?? DanceSellPlacementModes.HoldProduct,
                 CustomInstruction = job.CustomPlacementInstruction,
                 Prompt = job.Prompt,
-                ProviderCode = "local_composite",
-                ProviderModel = "imagesharp-v1",
+                ProviderCode = route.ProviderCode,
+                ProviderModel = route.ModelName,
                 RequestJson = requestJson,
                 ErrorJson = DanceSellRepository.ToJson(new { error = ex.Message }),
                 Status = DanceSellReferenceStatuses.Failed,
@@ -268,6 +329,10 @@ public sealed class DanceSellReferenceImageService : IDanceSellReferenceImageSer
                 CreatedAt = DateTime.UtcNow,
                 CompletedAt = DateTime.UtcNow
             }, ct);
+            if (operation is not null)
+            {
+                await _operations.MarkFailedAsync(operation.Id, "failed", DanceSellRepository.ToJson(new { error = ex.Message }), "DANCE_SELL_REFERENCE_FAILED", ex.Message, ct);
+            }
             throw;
         }
     }
@@ -335,10 +400,12 @@ public sealed class DanceSellReferenceImageService : IDanceSellReferenceImageSer
 public interface IDanceSellPhase2Service
 {
     DanceSellCapabilityDto GetCapability();
+    Task<IReadOnlyList<DanceSellProviderRouteDto>> GetProvidersAsync(string operationType, CurrentUserSession user, CancellationToken ct = default);
     Task<DanceSellJobDto> CreateJobAsync(DanceSellCreateJobRequest request, CurrentUserSession user, CancellationToken ct = default);
     Task<DanceSellJobDto> UpdateBusinessAsync(Guid id, DanceSellUpdateBusinessRequest request, CurrentUserSession user, CancellationToken ct = default);
     Task<DanceSellJobDto> UploadCharacterAsync(Guid id, byte[] content, string fileName, string contentType, CurrentUserSession user, CancellationToken ct = default);
     Task<DanceSellJobDto> UploadProductAsync(Guid id, byte[] content, string fileName, string contentType, CurrentUserSession user, CancellationToken ct = default);
+    Task<DanceSellJobDto> UploadDirectReferenceAsync(Guid id, byte[] content, string fileName, string contentType, CurrentUserSession user, CancellationToken ct = default);
     Task<DanceSellJobDto> UploadMotionAsync(Guid id, byte[] content, string fileName, string contentType, CurrentUserSession user, CancellationToken ct = default);
     Task<DanceSellJobDto> StageTikTokAsync(Guid id, string sourceUrl, CurrentUserSession user, CancellationToken ct = default);
     Task<DanceSellJobDto> QueueRenderAsync(Guid id, CurrentUserSession user, CancellationToken ct = default);
@@ -353,6 +420,9 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
     private readonly IMediaFileService _media;
     private readonly IDanceSellMotionSourceService _motion;
     private readonly IRenderJobService _renderJobs;
+    private readonly IDanceSellProviderCatalog _catalog;
+    private readonly IDanceSellOperationRepository _operations;
+    private readonly IDanceSellCostEstimator _costs;
     private readonly IOptionsMonitor<KieOptions> _kie;
     private readonly IOptionsMonitor<DanceSellPhase2Options> _options;
     private readonly TenantContext _tenant;
@@ -362,6 +432,9 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
         IMediaFileService media,
         IDanceSellMotionSourceService motion,
         IRenderJobService renderJobs,
+        IDanceSellProviderCatalog catalog,
+        IDanceSellOperationRepository operations,
+        IDanceSellCostEstimator costs,
         IOptionsMonitor<KieOptions> kie,
         IOptionsMonitor<DanceSellPhase2Options> options,
         TenantContext tenant)
@@ -370,6 +443,9 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
         _media = media;
         _motion = motion;
         _renderJobs = renderJobs;
+        _catalog = catalog;
+        _operations = operations;
+        _costs = costs;
         _kie = kie;
         _options = options;
         _tenant = tenant;
@@ -382,10 +458,28 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
             _kie.CurrentValue.DefaultMode,
             _options.CurrentValue.DefaultOrientation);
 
+    public async Task<IReadOnlyList<DanceSellProviderRouteDto>> GetProvidersAsync(string operationType, CurrentUserSession user, CancellationToken ct = default)
+    {
+        EnsureAuthenticatedCustomer(user);
+        if (!DanceSellOperationTypes.All.Contains(operationType))
+        {
+            throw new InvalidOperationException("DANCE_SELL_INVALID_OPERATION_TYPE");
+        }
+
+        return await _catalog.GetRoutesAsync(operationType, userSelectableOnly: !DanceSellSecurity.IsAdmin(user), ct);
+    }
+
     public async Task<DanceSellJobDto> CreateJobAsync(DanceSellCreateJobRequest request, CurrentUserSession user, CancellationToken ct = default)
     {
         EnsureAuthenticatedCustomer(user);
         ValidateBusiness(request.Prompt, request.Mode, request.CharacterOrientation, request.PlacementMode);
+        if (!DanceSellReferenceModes.All.Contains(request.ReferenceMode))
+        {
+            throw new InvalidOperationException("DANCE_SELL_INVALID_REFERENCE_MODE");
+        }
+
+        var referenceRoute = await _catalog.ResolveAsync(DanceSellOperationTypes.ReferenceImage, request.ReferenceProviderCode, request.ReferenceProviderModel, ct);
+        var motionRoute = await _catalog.ResolveAsync(DanceSellOperationTypes.MotionVideo, request.MotionProviderCode, request.MotionProviderModel, ct);
         await _tenant.EnsureLoadedAsync(ct);
         return await _repo.CreateDraftAsync(new DanceSellDraftCreateRequest
         {
@@ -393,11 +487,17 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
             CustomerId = user.CustomerId,
             UserId = user.UserId,
             Title = request.Title ?? string.Empty,
+            ReferenceMode = request.ReferenceMode,
             Prompt = request.Prompt,
             Mode = request.Mode,
             CharacterOrientation = request.CharacterOrientation,
             PlacementMode = request.PlacementMode,
-            CustomPlacementInstruction = request.CustomPlacementInstruction
+            CustomPlacementInstruction = request.CustomPlacementInstruction,
+            ImagePrompt = request.ImagePrompt,
+            ReferenceProviderCode = referenceRoute.ProviderCode,
+            ReferenceProviderModel = referenceRoute.ModelName,
+            MotionProviderCode = motionRoute.ProviderCode,
+            MotionProviderModel = motionRoute.ModelName
         }, ct);
     }
 
@@ -405,6 +505,13 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
     {
         var job = await RequireOwnedJobAsync(id, user, ct);
         ValidateBusiness(request.Prompt, request.Mode, request.CharacterOrientation, request.PlacementMode);
+        if (!DanceSellReferenceModes.All.Contains(request.ReferenceMode))
+        {
+            throw new InvalidOperationException("DANCE_SELL_INVALID_REFERENCE_MODE");
+        }
+
+        await _catalog.ResolveAsync(DanceSellOperationTypes.ReferenceImage, request.ReferenceProviderCode, request.ReferenceProviderModel, ct);
+        await _catalog.ResolveAsync(DanceSellOperationTypes.MotionVideo, request.MotionProviderCode, request.MotionProviderModel, ct);
         await _repo.UpdateBusinessAsync(job.Id, request, ct);
         return await _repo.GetByIdAsync(job.Id, ct) ?? job;
     }
@@ -412,6 +519,10 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
     public async Task<DanceSellJobDto> UploadCharacterAsync(Guid id, byte[] content, string fileName, string contentType, CurrentUserSession user, CancellationToken ct = default)
     {
         var job = await RequireOwnedJobAsync(id, user, ct);
+        if (job.ReferenceMode == DanceSellReferenceModes.DirectReference)
+        {
+            throw new InvalidOperationException("DANCE_SELL_DIRECT_REFERENCE_ONLY");
+        }
         ValidateImage(content, fileName, contentType);
         await _tenant.EnsureLoadedAsync(ct);
         var media = await _media.SaveAsync(content, fileName, contentType, "dance_sell_character", user.UserId, user.CustomerId, _tenant.TenantId, ct);
@@ -423,11 +534,63 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
     public async Task<DanceSellJobDto> UploadProductAsync(Guid id, byte[] content, string fileName, string contentType, CurrentUserSession user, CancellationToken ct = default)
     {
         var job = await RequireOwnedJobAsync(id, user, ct);
+        if (job.ReferenceMode == DanceSellReferenceModes.DirectReference)
+        {
+            throw new InvalidOperationException("DANCE_SELL_DIRECT_REFERENCE_ONLY");
+        }
         ValidateImage(content, fileName, contentType);
         await _tenant.EnsureLoadedAsync(ct);
         var media = await _media.SaveAsync(content, fileName, contentType, "dance_sell_product", user.UserId, user.CustomerId, _tenant.TenantId, ct);
         await _repo.UpdateProductAsync(job.Id, media.Id, media.ObjectKey ?? string.Empty, _motion.ToProviderUrl(media.PublicUrl ?? media.FileUrl), ct);
         await _repo.UpdateReferenceStatusAsync(job.Id, DanceSellReferenceStatuses.NotCreated, ct: ct);
+        return await _repo.GetByIdAsync(job.Id, ct) ?? job;
+    }
+
+    public async Task<DanceSellJobDto> UploadDirectReferenceAsync(Guid id, byte[] content, string fileName, string contentType, CurrentUserSession user, CancellationToken ct = default)
+    {
+        var job = await RequireOwnedJobAsync(id, user, ct);
+        if (job.ReferenceMode != DanceSellReferenceModes.DirectReference)
+        {
+            throw new InvalidOperationException("DANCE_SELL_DIRECT_REFERENCE_NOT_ALLOWED");
+        }
+
+        ValidateImage(content, fileName, contentType);
+        await _tenant.EnsureLoadedAsync(ct);
+        var media = await _media.SaveAsync(content, fileName, contentType, "dance_sell_direct_reference", user.UserId, user.CustomerId, _tenant.TenantId, ct);
+        var providerUrl = _motion.ToProviderUrl(media.PublicUrl ?? media.FileUrl);
+        await _repo.UpdateDirectReferenceAsync(job.Id, media.Id, media.ObjectKey ?? string.Empty, providerUrl, ct);
+        var route = await _catalog.ResolveAsync(DanceSellOperationTypes.MotionVideo, job.MotionProviderCode, job.MotionProviderModel, ct);
+        var operation = await _operations.UpsertOperationAsync(new DanceSellProviderOperationDto
+        {
+            Id = Guid.NewGuid(),
+            DanceSellJobId = job.Id,
+            OperationType = DanceSellOperationTypes.OutputStage,
+            AttemptNo = 1,
+            ReferenceMode = job.ReferenceMode,
+            ProviderCode = route.ProviderCode,
+            ProviderModel = route.ModelName,
+            Status = DanceSellOperationStatuses.Completed,
+            BillingStatus = DanceSellBillingStatuses.NotRequired,
+            RefundStatus = DanceSellRefundStatuses.NotRequired,
+            RequestJson = DanceSellRepository.ToJson(new { media.Id, media.ObjectKey, providerUrl }),
+            ResponseJson = DanceSellRepository.ToJson(new { publicUrl = providerUrl }),
+            CreatedAt = DateTime.UtcNow,
+            CompletedAt = DateTime.UtcNow
+        }, ct);
+        if (operation is not null)
+        {
+            await _operations.UpsertAssetAsync(new AiOperationAssetDto
+            {
+                OperationId = operation.Id,
+                AssetRole = DanceSellAssetRoles.DirectReferenceInput,
+                MediaId = media.Id,
+                ObjectKey = media.ObjectKey,
+                PublicUrl = providerUrl,
+                MimeType = contentType,
+                MetadataJson = "{}"
+            }, ct);
+        }
+
         return await _repo.GetByIdAsync(job.Id, ct) ?? job;
     }
 
@@ -457,6 +620,34 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
         }
 
         var logicalRequestId = string.IsNullOrWhiteSpace(job.LogicalRequestId) ? $"dance-sell-{Guid.NewGuid():N}" : job.LogicalRequestId;
+        var motionRoute = await _catalog.ResolveAsync(DanceSellOperationTypes.MotionVideo, job.MotionProviderCode, job.MotionProviderModel, ct);
+        var estimate = await _costs.EstimateAsync(motionRoute, job.Mode, null, ct);
+        var operation = await _operations.UpsertOperationAsync(new DanceSellProviderOperationDto
+        {
+            Id = Guid.NewGuid(),
+            DanceSellJobId = job.Id,
+            OperationType = DanceSellOperationTypes.MotionVideo,
+            AttemptNo = Math.Max(1, job.PollCount + 1),
+            ReferenceMode = job.ReferenceMode,
+            ProviderCode = motionRoute.ProviderCode,
+            ProviderCapabilityId = motionRoute.ProviderCapabilityId,
+            ProviderAccountId = motionRoute.ProviderAccountId,
+            ProviderModel = motionRoute.ModelName,
+            Status = DanceSellOperationStatuses.Queued,
+            BillingStatus = estimate.EstimatedTodoxPoints is null ? DanceSellBillingStatuses.Reconciliation : DanceSellBillingStatuses.Estimated,
+            RefundStatus = DanceSellRefundStatuses.NotCharged,
+            RequestJson = DanceSellRepository.ToJson(new { job.Id, job.PreparedReferenceUrl, job.MotionVideoUrl, job.Prompt, job.Mode, job.CharacterOrientation }),
+            UsageUnit = estimate.UsageUnit,
+            CreditsEstimated = estimate.EstimatedUsage,
+            ProviderCost = estimate.EstimatedProviderCost,
+            ProviderCurrency = estimate.Currency,
+            ProviderCostVnd = estimate.ProviderCostVnd,
+            TodoxPointsEstimated = estimate.EstimatedTodoxPoints,
+            CostSource = estimate.PricingSource,
+            PricingSnapshotJson = DanceSellRepository.ToJson(estimate),
+            CreatedAt = DateTime.UtcNow
+        }, ct);
+
         var renderJob = await _renderJobs.EnqueueAsync(new RenderJobCreateModel
         {
             UserId = user.UserId,
@@ -465,15 +656,15 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
             Priority = 50,
             Input = new DanceSellRenderInput { DanceSellJobId = job.Id, LogicalRequestId = logicalRequestId },
             Prompt = new { job.Prompt, job.PlacementMode, job.Mode, job.CharacterOrientation },
-            References = new[] { job.PreparedReferenceUrl!, job.MotionVideoUrl },
-            ProviderCode = DanceSellConstants.ProviderCode,
-            ModelCode = _kie.CurrentValue.MotionControlModel,
-            PointCostEstimate = 0,
-            PointStatus = RenderPointStatuses.NotRequired,
+            References = new { referenceUrl = job.PreparedReferenceUrl!, motionVideoUrl = job.MotionVideoUrl, operationId = operation?.Id },
+            ProviderCode = motionRoute.ProviderCode,
+            ModelCode = motionRoute.ModelName,
+            PointCostEstimate = estimate.EstimatedTodoxPoints ?? 0,
+            PointStatus = estimate.EstimatedTodoxPoints is null ? RenderPointStatuses.NotRequired : RenderPointStatuses.Pending,
             MaxAttempts = Math.Max(3, _kie.CurrentValue.MaxPollCount + _kie.CurrentValue.SubmitMaxRetry + 5)
         }, ct);
 
-        await _repo.QueueForRenderAsync(job.Id, renderJob.Id, logicalRequestId, job.PreparedReferenceUrl!, job.MotionVideoUrl, ct);
+        await _repo.QueueForRenderAsync(job.Id, renderJob.Id, logicalRequestId, job.PreparedReferenceUrl!, job.MotionVideoUrl, motionRoute, ct);
         return await _repo.GetByIdAsync(job.Id, ct) ?? job;
     }
 
@@ -533,8 +724,15 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
 
     private static void ValidateReadyForRender(DanceSellJobDto job)
     {
-        if (job.CharacterMediaId is null || string.IsNullOrWhiteSpace(job.CharacterImageUrl)) throw new InvalidOperationException("DANCE_SELL_INVALID_CHARACTER");
-        if (job.ProductMediaId is null || string.IsNullOrWhiteSpace(job.ProductImageUrl)) throw new InvalidOperationException("DANCE_SELL_INVALID_PRODUCT");
+        if (job.ReferenceMode == DanceSellReferenceModes.DirectReference)
+        {
+            if (job.DirectReferenceMediaId is null || string.IsNullOrWhiteSpace(job.DirectReferenceUrl)) throw new InvalidOperationException("DANCE_SELL_INVALID_DIRECT_REFERENCE");
+        }
+        else
+        {
+            if (job.CharacterMediaId is null || string.IsNullOrWhiteSpace(job.CharacterImageUrl)) throw new InvalidOperationException("DANCE_SELL_INVALID_CHARACTER");
+            if (job.ProductMediaId is null || string.IsNullOrWhiteSpace(job.ProductImageUrl)) throw new InvalidOperationException("DANCE_SELL_INVALID_PRODUCT");
+        }
         if (job.MotionVideoMediaId is null || string.IsNullOrWhiteSpace(job.MotionVideoUrl) || job.SourceStageStatus != DanceSellSourceStageStatuses.Ready) throw new InvalidOperationException("DANCE_SELL_INVALID_MOTION");
         if (job.PreparedReferenceStatus != DanceSellReferenceStatuses.Approved || string.IsNullOrWhiteSpace(job.PreparedReferenceUrl)) throw new InvalidOperationException("DANCE_SELL_REFERENCE_NOT_APPROVED");
     }
@@ -550,6 +748,10 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
 
 public static class DanceSellSecurity
 {
+    public static bool IsAdmin(CurrentUserSession user)
+        => user.IsAuthenticated
+           && (user.IsRoot || user.Role is TodoXUserRole.Admin or TodoXUserRole.SystemOperator);
+
     public static bool CanAccess(CurrentUserSession user, DanceSellJobDto job)
         => user.IsAuthenticated
            && (user.IsRoot

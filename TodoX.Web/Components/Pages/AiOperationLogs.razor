@@ -1,0 +1,244 @@
+@page "/admin/ai-operation-logs"
+@using TodoX.Web.Services.DanceSell
+@inject AuthStateService AuthState
+@inject AccountService Accounts
+@inject IDanceSellOperationRepository Logs
+@inject IAiOperationBillingService Billing
+@inject ISnackbar Snackbar
+
+<PageTitle>AI operation logs</PageTitle>
+
+<MudStack Spacing="3">
+    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-3">
+        <div>
+            <MudText Typo="Typo.h4" Class="todox-page-title">Nháº­t kÃ½ váº­n hÃ nh AI</MudText>
+            <MudText Typo="Typo.body1" Class="todox-page-subtitle">Theo dÃµi provider operation, usage, cost, billing vÃ  assets cá»§a Dance Sell.</MudText>
+        </div>
+        <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Refresh" OnClick="LoadAsync">Refresh</MudButton>
+    </MudStack>
+
+    @if (!_ready)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+    }
+    else if (!CanView)
+    {
+        <MudAlert Severity="Severity.Error">Admin permission required.</MudAlert>
+    }
+    else
+    {
+        <MudPaper Class="todox-panel pa-4" rounded="true">
+            <MudGrid>
+                <MudItem xs="12" md="5">
+                    <MudTextField T="string" Label="Search" Variant="Variant.Outlined" @bind-Value="_filter.Search" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" />
+                </MudItem>
+                <MudItem xs="12" sm="6" md="2">
+                    <MudSelect T="string" Label="Operation" Variant="Variant.Outlined" @bind-Value="_filter.OperationType">
+                        <MudSelectItem Value="@string.Empty">All</MudSelectItem>
+                        <MudSelectItem Value="@DanceSellOperationTypes.ReferenceImage">reference_image</MudSelectItem>
+                        <MudSelectItem Value="@DanceSellOperationTypes.MotionVideo">motion_video</MudSelectItem>
+                        <MudSelectItem Value="@DanceSellOperationTypes.OutputStage">output_stage</MudSelectItem>
+                    </MudSelect>
+                </MudItem>
+                <MudItem xs="12" sm="6" md="2">
+                    <MudTextField T="string" Label="Status" Variant="Variant.Outlined" @bind-Value="_filter.Status" />
+                </MudItem>
+                <MudItem xs="12" md="3">
+                    <MudStack Row="true" Spacing="2">
+                        <MudButton Color="Color.Warning" Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.Search" OnClick="SearchAsync">Search</MudButton>
+                        <MudButton Variant="Variant.Outlined" Color="Color.Default" OnClick="ClearAsync">Clear</MudButton>
+                    </MudStack>
+                </MudItem>
+            </MudGrid>
+        </MudPaper>
+
+        <MudGrid>
+            <MudItem xs="12" lg="8">
+                <MudPaper Class="todox-table-card pa-4" rounded="true">
+                    <MudTable Items="@_items" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm">
+                        <HeaderContent>
+                            <MudTh>Operation</MudTh>
+                            <MudTh>Job</MudTh>
+                            <MudTh>Provider</MudTh>
+                            <MudTh>Status</MudTh>
+                            <MudTh>Usage</MudTh>
+                            <MudTh>Billing</MudTh>
+                            <MudTh>Created</MudTh>
+                            <MudTh></MudTh>
+                        </HeaderContent>
+                        <RowTemplate>
+                            <MudTd DataLabel="Operation">
+                                <MudText Typo="Typo.body2">@context.OperationType</MudText>
+                                <MudText Typo="Typo.caption">@context.Id</MudText>
+                            </MudTd>
+                            <MudTd DataLabel="Job">
+                                <MudText Typo="Typo.body2">@(context.Title ?? context.DanceSellJobId.ToString("N")[..8])</MudText>
+                                <MudText Typo="Typo.caption">@context.ReferenceMode</MudText>
+                            </MudTd>
+                            <MudTd DataLabel="Provider">@context.ProviderCode / @context.ProviderModel</MudTd>
+                            <MudTd DataLabel="Status"><MudChip T="string" Size="Size.Small" Color="@StatusColor(context.Status)">@context.Status</MudChip></MudTd>
+                            <MudTd DataLabel="Usage">@((context.UsageQuantity ?? context.CreditsConsumed)?.ToString("0.####") ?? "-") @(context.UsageUnit ?? "")</MudTd>
+                            <MudTd DataLabel="Billing">@context.BillingStatus / @context.RefundStatus</MudTd>
+                            <MudTd DataLabel="Created">@context.CreatedAt.ToLocalTime().ToString("dd/MM HH:mm")</MudTd>
+                            <MudTd><MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Warning" OnClick="@(() => OpenDetailAsync(context.Id))">Detail</MudButton></MudTd>
+                        </RowTemplate>
+                    </MudTable>
+                    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="mt-3">
+                        <MudText Typo="Typo.caption">Total @_total</MudText>
+                        <MudStack Row="true" Spacing="1">
+                            <MudButton Size="Size.Small" Disabled="@(_filter.Page <= 1)" OnClick="PrevAsync">Prev</MudButton>
+                            <MudText Typo="Typo.body2">Page @_filter.Page</MudText>
+                            <MudButton Size="Size.Small" Disabled="@(_filter.Page * _filter.PageSize >= _total)" OnClick="NextAsync">Next</MudButton>
+                        </MudStack>
+                    </MudStack>
+                </MudPaper>
+            </MudItem>
+            <MudItem xs="12" lg="4">
+                <MudPaper Class="todox-panel pa-4" rounded="true">
+                    <MudText Typo="Typo.h6">Detail</MudText>
+                    @if (_detail is null)
+                    {
+                        <MudText Typo="Typo.body2" Class="mt-3">Chá»n má»™t operation Ä‘á»ƒ xem chi tiáº¿t.</MudText>
+                    }
+                    else
+                    {
+                        <MudTabs Rounded="true" Elevation="0" Class="mt-3">
+                            <MudTabPanel Text="Overview">
+                                <MudStack Spacing="1">
+                                    <MudText Typo="Typo.body2">@_detail.Operation.ProviderCode / @_detail.Operation.ProviderModel</MudText>
+                                    <MudText Typo="Typo.caption">Task: @(_detail.Operation.ProviderTaskId ?? "-")</MudText>
+                                    <MudText Typo="Typo.caption">Cost: @((_detail.Operation.ProviderCost ?? 0).ToString("0.####")) @_detail.Operation.ProviderCurrency</MudText>
+                                    <MudText Typo="Typo.caption">Points: charged @((_detail.Operation.TodoxPointsCharged ?? 0).ToString("0.##")), refunded @((_detail.Operation.TodoxPointsRefunded ?? 0).ToString("0.##"))</MudText>
+                                </MudStack>
+                            </MudTabPanel>
+                            <MudTabPanel Text="Assets">
+                                @foreach (var asset in _detail.Assets)
+                                {
+                                    <MudPaper Class="pa-2 mb-2" Outlined="true">
+                                        <MudText Typo="Typo.caption">@asset.AssetRole</MudText>
+                                        @if (!string.IsNullOrWhiteSpace(asset.PublicUrl) && asset.MimeType?.StartsWith("video/", StringComparison.OrdinalIgnoreCase) == true)
+                                        {
+                                            <video src="@asset.PublicUrl" controls muted playsinline style="width:100%;max-height:220px"></video>
+                                        }
+                                        else if (!string.IsNullOrWhiteSpace(asset.PublicUrl))
+                                        {
+                                            <img src="@asset.PublicUrl" style="width:100%;max-height:220px;object-fit:contain" />
+                                        }
+                                    </MudPaper>
+                                }
+                            </MudTabPanel>
+                            <MudTabPanel Text="JSON">
+                                <MudTextField T="string" Lines="16" ReadOnly="true" Variant="Variant.Outlined" Value="@BuildJsonDetail()" />
+                            </MudTabPanel>
+                            <MudTabPanel Text="Actions">
+                                <MudTextField T="string" Label="Reason" Variant="Variant.Outlined" @bind-Value="_reason" />
+                                <MudTextField T="decimal" Label="Refund points" Variant="Variant.Outlined" @bind-Value="_refundPoints" />
+                                <MudStack Row="true" Class="flex-wrap gap-2">
+                                    <MudButton Variant="Variant.Outlined" Color="Color.Warning" OnClick="RefundAsync">HoÃ n Ä‘iá»ƒm</MudButton>
+                                    <MudButton Variant="Variant.Outlined" Color="Color.Info" OnClick="RetryChargeAsync">Trá»« Ä‘iá»ƒm láº¡i</MudButton>
+                                    <MudButton Variant="Variant.Outlined" Color="Color.Info" OnClick="RetryRefundAsync">Retry refund</MudButton>
+                                </MudStack>
+                            </MudTabPanel>
+                        </MudTabs>
+                    }
+                </MudPaper>
+            </MudItem>
+        </MudGrid>
+    }
+</MudStack>
+
+@code {
+    private bool _ready;
+    private DanceSellOperationLogFilter _filter = new() { Page = 1, PageSize = 25 };
+    private IReadOnlyList<DanceSellOperationLogItemDto> _items = Array.Empty<DanceSellOperationLogItemDto>();
+    private long _total;
+    private DanceSellOperationLogDetailDto? _detail;
+    private string _reason = string.Empty;
+    private decimal _refundPoints;
+
+    private bool CanView => AuthState.CurrentUser is not null && DanceSellSecurity.IsAdmin(AuthState.CurrentUser);
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!AuthState.IsInitialized)
+        {
+            await AuthState.InitializeAsync(id => Accounts.RehydrateSessionAsync(id));
+        }
+
+        _ready = true;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        if (!CanView) return;
+        var page = await Logs.SearchLogsAsync(_filter);
+        _items = page.Items;
+        _total = page.Total;
+        StateHasChanged();
+    }
+
+    private async Task SearchAsync()
+    {
+        _filter.Page = 1;
+        await LoadAsync();
+    }
+
+    private async Task ClearAsync()
+    {
+        _filter = new DanceSellOperationLogFilter { Page = 1, PageSize = 25 };
+        _detail = null;
+        await LoadAsync();
+    }
+
+    private async Task PrevAsync()
+    {
+        _filter.Page = Math.Max(1, _filter.Page - 1);
+        await LoadAsync();
+    }
+
+    private async Task NextAsync()
+    {
+        _filter.Page++;
+        await LoadAsync();
+    }
+
+    private async Task OpenDetailAsync(Guid id)
+    {
+        _detail = await Logs.GetLogDetailAsync(id);
+        StateHasChanged();
+    }
+
+    private async Task RefundAsync()
+    {
+        if (_detail is null) return;
+        var result = await Billing.RefundAsync(_detail.Operation.Id, _refundPoints, _reason, AuthState.CurrentUser?.UserId);
+        Snackbar.Add(result.ErrorMessage ?? "Refund request recorded.", Severity.Info);
+        await OpenDetailAsync(_detail.Operation.Id);
+    }
+
+    private async Task RetryChargeAsync()
+    {
+        if (_detail is null) return;
+        await Billing.RetryChargeAsync(_detail.Operation.Id, _reason, AuthState.CurrentUser?.UserId);
+        Snackbar.Add("Retry charge request recorded.", Severity.Info);
+    }
+
+    private async Task RetryRefundAsync()
+    {
+        if (_detail is null) return;
+        await Billing.RetryRefundAsync(_detail.Operation.Id, _reason, AuthState.CurrentUser?.UserId);
+        Snackbar.Add("Retry refund request recorded.", Severity.Info);
+    }
+
+    private string BuildJsonDetail()
+        => _detail is null ? "{}" : System.Text.Json.JsonSerializer.Serialize(_detail.Operation, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web) { WriteIndented = true });
+
+    private static Color StatusColor(string status) => status switch
+    {
+        DanceSellOperationStatuses.Completed => Color.Success,
+        DanceSellOperationStatuses.Failed or DanceSellOperationStatuses.Timeout => Color.Error,
+        DanceSellOperationStatuses.Queued or DanceSellOperationStatuses.Submitted or DanceSellOperationStatuses.Generating => Color.Warning,
+        _ => Color.Default
+    };
+}

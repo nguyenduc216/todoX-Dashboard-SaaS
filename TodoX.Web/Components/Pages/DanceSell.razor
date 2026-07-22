@@ -40,6 +40,10 @@
                     <MudTabs Rounded="true" Elevation="0" @bind-ActivePanelIndex="_activeTab">
                         <MudTabPanel Text="Form" Icon="@Icons.Material.Filled.Edit">
                             <MudStack Spacing="3" Class="mt-3">
+                                <MudSelect T="string" Label="Reference mode" Variant="Variant.Outlined" Value="_request.ReferenceMode" ValueChanged="OnReferenceModeChanged">
+                                    <MudSelectItem Value="@DanceSellReferenceModes.DirectReference">DIRECT_REFERENCE</MudSelectItem>
+                                    <MudSelectItem Value="@DanceSellReferenceModes.GenerateReference">GENERATE_REFERENCE</MudSelectItem>
+                                </MudSelect>
                                 <MudTextField T="string" Label="Tên job" Variant="Variant.Outlined" @bind-Value="_request.Title" />
                                 <MudSelect T="string" Label="Product placement" Variant="Variant.Outlined" Value="_request.PlacementMode" ValueChanged="OnPlacementChanged">
                                     <MudSelectItem Value="@DanceSellPlacementModes.HoldProduct">Cầm sản phẩm</MudSelectItem>
@@ -54,6 +58,11 @@
                                 }
                                 <MudTextField T="string" Label="Prompt" Variant="Variant.Outlined" Lines="6" @bind-Value="_request.Prompt" Immediate="true" />
                                 <MudText Typo="Typo.caption">@_request.Prompt.Length ký tự</MudText>
+                                @if (_request.ReferenceMode == DanceSellReferenceModes.GenerateReference)
+                                {
+                                    <MudTextField T="string" Label="Image prompt" Variant="Variant.Outlined" Lines="3" @bind-Value="_request.ImagePrompt" Immediate="true" />
+                                }
+
                                 <MudGrid>
                                     <MudItem xs="12" sm="6">
                                         <MudSelect T="string" Label="Mode" Variant="Variant.Outlined" @bind-Value="_request.Mode">
@@ -77,6 +86,25 @@
                                     <MudItem xs="12" md="6">@UploadBlock("Ảnh nhân vật", _job?.CharacterImageUrl, "image/png,image/jpeg,image/webp", OnCharacterSelected)</MudItem>
                                     <MudItem xs="12" md="6">@UploadBlock("Ảnh sản phẩm", _job?.ProductImageUrl, "image/png,image/jpeg,image/webp", OnProductSelected)</MudItem>
                                 </MudGrid>
+
+                                @if (_request.ReferenceMode == DanceSellReferenceModes.DirectReference)
+                                {
+                                    @UploadBlock("Direct reference image", _job?.DirectReferenceUrl, "image/png,image/jpeg,image/webp", OnDirectReferenceSelected)
+                                }
+
+                                <MudSelect T="string" Label="Image provider/model" Variant="Variant.Outlined" Value="@ReferenceRouteKey" ValueChanged="OnReferenceProviderChanged" Disabled="@(_request.ReferenceMode == DanceSellReferenceModes.DirectReference)">
+                                    @foreach (var route in _referenceRoutes)
+                                    {
+                                        <MudSelectItem Value="@RouteKey(route)">@route.DisplayName</MudSelectItem>
+                                    }
+                                </MudSelect>
+
+                                <MudSelect T="string" Label="Motion provider/model" Variant="Variant.Outlined" Value="@MotionRouteKey" ValueChanged="OnMotionProviderChanged">
+                                    @foreach (var route in _motionRoutes)
+                                    {
+                                        <MudSelectItem Value="@RouteKey(route)">@route.DisplayName</MudSelectItem>
+                                    }
+                                </MudSelect>
 
                                 <MudRadioGroup T="string" @bind-Value="_motionSourceType">
                                     <MudRadio Value="@DanceSellMotionSourceTypes.Upload" Color="Color.Warning">Upload video</MudRadio>
@@ -181,6 +209,8 @@
     private DanceSellJobDto? _job;
     private DanceSellReferenceVersionDto? _latestReference;
     private IReadOnlyList<DanceSellJobDto> _jobs = Array.Empty<DanceSellJobDto>();
+    private IReadOnlyList<DanceSellProviderRouteDto> _referenceRoutes = Array.Empty<DanceSellProviderRouteDto>();
+    private IReadOnlyList<DanceSellProviderRouteDto> _motionRoutes = Array.Empty<DanceSellProviderRouteDto>();
     private string _motionSourceType = DanceSellMotionSourceTypes.Upload;
     private string _tiktokUrl = string.Empty;
     private string _jsonText = string.Empty;
@@ -189,6 +219,9 @@
     private int _activeTab;
     private PeriodicTimer? _timer;
     private CancellationTokenSource? _timerCts;
+
+    private string ReferenceRouteKey => BuildSelectedRouteKey(_request.ReferenceProviderCode, _request.ReferenceProviderModel, _referenceRoutes);
+    private string MotionRouteKey => BuildSelectedRouteKey(_request.MotionProviderCode, _request.MotionProviderModel, _motionRoutes);
 
     private bool CanRender
         => _job is not null
@@ -214,8 +247,10 @@
         }
 
         _capability = DanceSellService.GetCapability();
+        await LoadProviderRoutesAsync();
         _request.Mode = _capability.DefaultMode;
         _request.CharacterOrientation = _capability.DefaultCharacterOrientation;
+        ApplyDefaultRoutes();
         SyncJsonFromForm();
         await ReloadAsync();
         StartPolling();
@@ -243,6 +278,7 @@
     {
         if (AuthState.CurrentUser is null) return;
         _jobs = await DanceSellService.ListAsync(AuthState.CurrentUser, 50);
+        await LoadProviderRoutesAsync();
         if (_job is not null)
         {
             _job = await DanceSellService.GetAsync(_job.Id, AuthState.CurrentUser);
@@ -259,6 +295,7 @@
         _request = NewRequest();
         _request.Mode = _capability.DefaultMode;
         _request.CharacterOrientation = _capability.DefaultCharacterOrientation;
+        ApplyDefaultRoutes();
         _motionSourceType = DanceSellMotionSourceTypes.Upload;
         _tiktokUrl = string.Empty;
         SyncJsonFromForm();
@@ -267,6 +304,7 @@
 
     private async Task OnCharacterSelected(InputFileChangeEventArgs e) => await UploadAsync(e, (bytes, f, u) => DanceSellService.UploadCharacterAsync(u.Id, bytes, f.Name, f.ContentType, AuthState.CurrentUser!));
     private async Task OnProductSelected(InputFileChangeEventArgs e) => await UploadAsync(e, (bytes, f, u) => DanceSellService.UploadProductAsync(u.Id, bytes, f.Name, f.ContentType, AuthState.CurrentUser!));
+    private async Task OnDirectReferenceSelected(InputFileChangeEventArgs e) => await UploadAsync(e, (bytes, f, u) => DanceSellService.UploadDirectReferenceAsync(u.Id, bytes, f.Name, f.ContentType, AuthState.CurrentUser!));
     private async Task OnMotionSelected(InputFileChangeEventArgs e) => await UploadAsync(e, (bytes, f, u) => DanceSellService.UploadMotionAsync(u.Id, bytes, f.Name, f.ContentType, AuthState.CurrentUser!));
 
     private async Task UploadAsync(InputFileChangeEventArgs e, Func<byte[], IBrowserFile, DanceSellJobDto, Task<DanceSellJobDto>> upload)
@@ -402,11 +440,17 @@
         _request = new DanceSellCreateJobRequest
         {
             Title = _job.Title,
+            ReferenceMode = _job.ReferenceMode,
             Prompt = _job.Prompt,
             PlacementMode = _job.PlacementMode ?? DanceSellPlacementModes.HoldProduct,
             CustomPlacementInstruction = _job.CustomPlacementInstruction,
             Mode = _job.Mode,
-            CharacterOrientation = _job.CharacterOrientation
+            CharacterOrientation = _job.CharacterOrientation,
+            ImagePrompt = _job.ImagePrompt,
+            ReferenceProviderCode = _job.ReferenceProviderCode,
+            ReferenceProviderModel = _job.ReferenceProviderModel,
+            MotionProviderCode = _job.MotionProviderCode,
+            MotionProviderModel = _job.MotionProviderModel
         };
         _motionSourceType = _job.MotionSourceType ?? DanceSellMotionSourceTypes.Upload;
         _tiktokUrl = _job.MotionSourceType == DanceSellMotionSourceTypes.TikTok ? _job.MotionSourceUrl ?? string.Empty : string.Empty;
@@ -420,8 +464,10 @@
         _jsonText = JsonSerializer.Serialize(new DanceSellJsonBusinessRequest
         {
             Title = _request.Title,
+            ReferenceMode = _request.ReferenceMode,
             CharacterMediaId = _job?.CharacterMediaId,
             ProductMediaId = _job?.ProductMediaId,
+            DirectReferenceMediaId = _job?.DirectReferenceMediaId,
             MotionSourceType = _motionSourceType,
             MotionVideoMediaId = _job?.MotionVideoMediaId,
             TiktokUrl = string.IsNullOrWhiteSpace(_tiktokUrl) ? null : _tiktokUrl,
@@ -429,7 +475,12 @@
             CustomPlacementInstruction = _request.CustomPlacementInstruction,
             Prompt = _request.Prompt,
             Mode = _request.Mode,
-            CharacterOrientation = _request.CharacterOrientation
+            CharacterOrientation = _request.CharacterOrientation,
+            ImagePrompt = _request.ImagePrompt,
+            ReferenceProviderCode = _request.ReferenceProviderCode,
+            ReferenceProviderModel = _request.ReferenceProviderModel,
+            MotionProviderCode = _request.MotionProviderCode,
+            MotionProviderModel = _request.MotionProviderModel
         }, JsonOptions);
     }
 
@@ -446,11 +497,17 @@
             _request = new DanceSellCreateJobRequest
             {
                 Title = parsed.Title,
+                ReferenceMode = parsed.ReferenceMode,
                 Prompt = parsed.Prompt,
                 PlacementMode = parsed.PlacementMode,
                 CustomPlacementInstruction = parsed.CustomPlacementInstruction,
                 Mode = parsed.Mode,
-                CharacterOrientation = parsed.CharacterOrientation
+                CharacterOrientation = parsed.CharacterOrientation,
+                ImagePrompt = parsed.ImagePrompt,
+                ReferenceProviderCode = parsed.ReferenceProviderCode,
+                ReferenceProviderModel = parsed.ReferenceProviderModel,
+                MotionProviderCode = parsed.MotionProviderCode,
+                MotionProviderModel = parsed.MotionProviderModel
             };
             _motionSourceType = parsed.MotionSourceType == DanceSellMotionSourceTypes.TikTok ? DanceSellMotionSourceTypes.TikTok : DanceSellMotionSourceTypes.Upload;
             _tiktokUrl = parsed.TiktokUrl ?? string.Empty;
@@ -474,15 +531,90 @@
         return Task.CompletedTask;
     }
 
+    private Task OnReferenceModeChanged(string value)
+    {
+        _request.ReferenceMode = value;
+        SyncJsonFromForm();
+        return Task.CompletedTask;
+    }
+
+    private Task OnReferenceProviderChanged(string value)
+    {
+        ApplyRouteSelection(value, _referenceRoutes, (provider, model) =>
+        {
+            _request.ReferenceProviderCode = provider;
+            _request.ReferenceProviderModel = model;
+        });
+        SyncJsonFromForm();
+        return Task.CompletedTask;
+    }
+
+    private Task OnMotionProviderChanged(string value)
+    {
+        ApplyRouteSelection(value, _motionRoutes, (provider, model) =>
+        {
+            _request.MotionProviderCode = provider;
+            _request.MotionProviderModel = model;
+        });
+        SyncJsonFromForm();
+        return Task.CompletedTask;
+    }
+
     private DanceSellUpdateBusinessRequest ToUpdateRequest() => new()
     {
         Title = _request.Title,
+        ReferenceMode = _request.ReferenceMode,
         Prompt = _request.Prompt,
         PlacementMode = _request.PlacementMode,
         CustomPlacementInstruction = _request.CustomPlacementInstruction,
         Mode = _request.Mode,
-        CharacterOrientation = _request.CharacterOrientation
+        CharacterOrientation = _request.CharacterOrientation,
+        ImagePrompt = _request.ImagePrompt,
+        ReferenceProviderCode = _request.ReferenceProviderCode,
+        ReferenceProviderModel = _request.ReferenceProviderModel,
+        MotionProviderCode = _request.MotionProviderCode,
+        MotionProviderModel = _request.MotionProviderModel
     };
+
+    private async Task LoadProviderRoutesAsync()
+    {
+        if (AuthState.CurrentUser is null) return;
+        _referenceRoutes = await DanceSellService.GetProvidersAsync(DanceSellOperationTypes.ReferenceImage, AuthState.CurrentUser);
+        _motionRoutes = await DanceSellService.GetProvidersAsync(DanceSellOperationTypes.MotionVideo, AuthState.CurrentUser);
+        ApplyDefaultRoutes();
+    }
+
+    private void ApplyDefaultRoutes()
+    {
+        var reference = _referenceRoutes.FirstOrDefault(x => x.IsDefault) ?? _referenceRoutes.FirstOrDefault();
+        var motion = _motionRoutes.FirstOrDefault(x => x.IsDefault) ?? _motionRoutes.FirstOrDefault();
+        _request.ReferenceProviderCode ??= reference?.ProviderCode;
+        _request.ReferenceProviderModel ??= reference?.ModelName;
+        _request.MotionProviderCode ??= motion?.ProviderCode;
+        _request.MotionProviderModel ??= motion?.ModelName;
+    }
+
+    private static string RouteKey(DanceSellProviderRouteDto route) => $"{route.ProviderCode}|{route.ModelName}";
+
+    private static string BuildSelectedRouteKey(string? provider, string? model, IReadOnlyList<DanceSellProviderRouteDto> routes)
+    {
+        if (!string.IsNullOrWhiteSpace(provider) && !string.IsNullOrWhiteSpace(model))
+        {
+            return $"{provider}|{model}";
+        }
+
+        var route = routes.FirstOrDefault(x => x.IsDefault) ?? routes.FirstOrDefault();
+        return route is null ? string.Empty : RouteKey(route);
+    }
+
+    private static void ApplyRouteSelection(string value, IReadOnlyList<DanceSellProviderRouteDto> routes, Action<string, string> apply)
+    {
+        var route = routes.FirstOrDefault(x => RouteKey(x).Equals(value, StringComparison.OrdinalIgnoreCase));
+        if (route is not null)
+        {
+            apply(route.ProviderCode, route.ModelName);
+        }
+    }
 
     private RenderFragment UploadBlock(string label, string? url, string accept, Func<InputFileChangeEventArgs, Task> changed, bool isVideo = false) => @<div class="dance-sell-upload">
         <div class="dance-sell-upload-preview">
@@ -557,6 +689,7 @@
     private static DanceSellCreateJobRequest NewRequest() => new()
     {
         PlacementMode = DanceSellPlacementModes.HoldProduct,
+        ReferenceMode = DanceSellReferenceModes.GenerateReference,
         Prompt = DefaultPrompt(),
         Mode = "720p",
         CharacterOrientation = "image"

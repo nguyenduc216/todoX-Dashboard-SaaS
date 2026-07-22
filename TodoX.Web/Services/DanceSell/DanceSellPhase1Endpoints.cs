@@ -202,6 +202,7 @@ public static class DanceSellPhase1Endpoints
                 ResponseJson = raw,
                 ResultVideoUrl = resultUrl,
                 ResultUrlCount = callback.ResultUrls.Count,
+                CreditsConsumed = callback.CreditsConsumed,
                 Source = "callback"
             }, ct);
         }

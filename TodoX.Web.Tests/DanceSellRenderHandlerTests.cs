@@ -16,7 +16,7 @@ public sealed class DanceSellRenderHandlerTests
         var repo = new FakeDanceSellRepository(CreateJob(status: DanceSellJobStatuses.Rendering, customerId: customerId));
         var renderJobs = new FakeRenderJobService();
         var providers = new CapturingProviderService();
-        var service = new DanceSellCompletionService(repo, renderJobs, providers);
+        var service = new DanceSellCompletionService(repo, renderJobs, providers, new FakeOperationRepository());
 
         await service.CompleteAsync(new DanceSellCompletionRequest
         {
@@ -38,7 +38,7 @@ public sealed class DanceSellRenderHandlerTests
         var repo = new FakeDanceSellRepository(CreateJob(status: DanceSellJobStatuses.Completed));
         var renderJobs = new FakeRenderJobService();
         var providers = new CapturingProviderService();
-        var service = new DanceSellCompletionService(repo, renderJobs, providers);
+        var service = new DanceSellCompletionService(repo, renderJobs, providers, new FakeOperationRepository());
 
         var result = await service.CompleteAsync(new DanceSellCompletionRequest
         {
@@ -64,7 +64,7 @@ public sealed class DanceSellRenderHandlerTests
         var repo = new FakeDanceSellRepository(CreateJob(status: DanceSellJobStatuses.Completed));
         var renderJobs = new FakeRenderJobService();
         var providers = new CapturingProviderService();
-        var service = new DanceSellCompletionService(repo, renderJobs, providers);
+        var service = new DanceSellCompletionService(repo, renderJobs, providers, new FakeOperationRepository());
 
         var result = await service.CompleteAsync(new DanceSellCompletionRequest
         {
@@ -90,7 +90,7 @@ public sealed class DanceSellRenderHandlerTests
         var repo = new FakeDanceSellRepository(CreateJob(status: DanceSellJobStatuses.Rendering));
         var renderJobs = new FakeRenderJobService();
         var providers = new CapturingProviderService();
-        var service = new DanceSellCompletionService(repo, renderJobs, providers);
+        var service = new DanceSellCompletionService(repo, renderJobs, providers, new FakeOperationRepository());
 
         var result = await service.CompleteAsync(new DanceSellCompletionRequest
         {
@@ -117,7 +117,7 @@ public sealed class DanceSellRenderHandlerTests
         var repo = new FakeDanceSellRepository(CreateJob(status: DanceSellJobStatuses.Rendering));
         var renderJobs = new FakeRenderJobService();
         var providers = new CapturingProviderService();
-        var service = new DanceSellCompletionService(repo, renderJobs, providers);
+        var service = new DanceSellCompletionService(repo, renderJobs, providers, new FakeOperationRepository());
 
         var result = await service.FailAsync(new DanceSellFailureRequest
         {
@@ -145,7 +145,7 @@ public sealed class DanceSellRenderHandlerTests
         var repo = new FakeDanceSellRepository(CreateJob(status: DanceSellJobStatuses.Failed));
         var renderJobs = new FakeRenderJobService();
         var providers = new CapturingProviderService();
-        var service = new DanceSellCompletionService(repo, renderJobs, providers);
+        var service = new DanceSellCompletionService(repo, renderJobs, providers, new FakeOperationRepository());
 
         var result = await service.FailAsync(new DanceSellFailureRequest
         {
@@ -218,10 +218,11 @@ public sealed class DanceSellRenderHandlerTests
         public Task<IReadOnlyList<DanceSellJobDto>> ListAsync(Guid? customerId = null, int limit = 20, int offset = 0, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<DanceSellJobDto?> GetByRenderJobIdAsync(Guid renderJobId, CancellationToken ct = default) => throw new NotImplementedException();
         public Task SetRenderJobIdAsync(Guid id, Guid renderJobId, CancellationToken ct = default) => throw new NotImplementedException();
-        public Task QueueForRenderAsync(Guid id, Guid renderJobId, string logicalRequestId, string preparedReferenceUrl, string motionVideoUrl, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task QueueForRenderAsync(Guid id, Guid renderJobId, string logicalRequestId, string preparedReferenceUrl, string motionVideoUrl, DanceSellProviderRouteDto motionRoute, CancellationToken ct = default) => throw new NotImplementedException();
         public Task UpdateBusinessAsync(Guid id, DanceSellUpdateBusinessRequest request, CancellationToken ct = default) => throw new NotImplementedException();
         public Task UpdateCharacterAsync(Guid id, Guid mediaId, string objectKey, string publicUrl, CancellationToken ct = default) => throw new NotImplementedException();
         public Task UpdateProductAsync(Guid id, Guid mediaId, string objectKey, string publicUrl, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task UpdateDirectReferenceAsync(Guid id, Guid mediaId, string objectKey, string publicUrl, CancellationToken ct = default) => throw new NotImplementedException();
         public Task UpdateMotionUploadAsync(Guid id, Guid mediaId, string objectKey, string publicUrl, CancellationToken ct = default) => throw new NotImplementedException();
         public Task UpdateMotionTikTokAsync(Guid id, string sourceUrl, Guid mediaId, string objectKey, string publicUrl, CancellationToken ct = default) => throw new NotImplementedException();
         public Task UpdateReferenceStatusAsync(Guid id, string status, string? error = null, Guid? mediaId = null, string? objectKey = null, string? publicUrl = null, DateTime? approvedAt = null, CancellationToken ct = default) => throw new NotImplementedException();
@@ -248,6 +249,21 @@ public sealed class DanceSellRenderHandlerTests
             return Task.FromResult(true);
         }
         public Task UpdateCallbackAsync(string providerTaskId, string callbackJson, string providerStatus, string? resultVideoUrl, string? errorCode, string? errorMessage, CancellationToken ct = default) => throw new NotImplementedException();
+    }
+
+    private sealed class FakeOperationRepository : IDanceSellOperationRepository
+    {
+        public Task<DanceSellProviderOperationDto?> UpsertOperationAsync(DanceSellProviderOperationDto operation, CancellationToken ct = default)
+            => Task.FromResult<DanceSellProviderOperationDto?>(operation);
+
+        public Task MarkSubmittedAsync(Guid operationId, string providerTaskId, string responseJson, CancellationToken ct = default) => Task.CompletedTask;
+        public Task MarkCompletedAsync(Guid operationId, string providerStatus, string responseJson, decimal? creditsConsumed, string? resultUrl, CancellationToken ct = default) => Task.CompletedTask;
+        public Task MarkFailedAsync(Guid operationId, string providerStatus, string? responseJson, string errorCode, string errorMessage, CancellationToken ct = default) => Task.CompletedTask;
+        public Task UpsertAssetAsync(AiOperationAssetDto asset, CancellationToken ct = default) => Task.CompletedTask;
+        public Task<PagedResult<DanceSellOperationLogItemDto>> SearchLogsAsync(DanceSellOperationLogFilter filter, CancellationToken ct = default)
+            => Task.FromResult(new PagedResult<DanceSellOperationLogItemDto>(Array.Empty<DanceSellOperationLogItemDto>(), filter.Page, filter.PageSize, 0));
+        public Task<DanceSellOperationLogDetailDto?> GetLogDetailAsync(Guid id, CancellationToken ct = default)
+            => Task.FromResult<DanceSellOperationLogDetailDto?>(null);
     }
 
     private sealed class FakeRenderJobService : IRenderJobService

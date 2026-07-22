@@ -328,6 +328,17 @@
             }
         }
 
+        if (!existingCodes.Contains("ai_operation_logs"))
+        {
+            var logsItem = BuildAiOperationLogsItem();
+            var aiStudio = list.FirstOrDefault(g => g.Code.Equals("ai_studio", StringComparison.OrdinalIgnoreCase));
+            if (aiStudio is not null)
+            {
+                logsItem.GroupId = aiStudio.Id;
+                aiStudio.Items.Add(logsItem);
+            }
+        }
+
         return list;
     }
 
@@ -343,6 +354,20 @@
             VisibilityPolicy = "admin_avatar_manager",
             MatchAll = false,
             SortOrder = 35
+        };
+
+    private static NavigationMenuItemDto BuildAiOperationLogsItem()
+        => new()
+        {
+            Id = Guid.NewGuid(),
+            Code = "ai_operation_logs",
+            Title = "AI operation logs",
+            Href = "/admin/ai-operation-logs",
+            IconKey = "Article",
+            ModuleKeys = new[] { "settings", "services", "api_providers" },
+            VisibilityPolicy = "admin_avatar_manager",
+            MatchAll = false,
+            SortOrder = 36
         };
 
     private static NavigationMenuGroupDto CloneGroup(NavigationMenuGroupDto group)

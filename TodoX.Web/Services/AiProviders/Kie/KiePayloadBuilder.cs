@@ -11,6 +11,7 @@ public sealed class KieMotionControlBuildRequest
     public string? Mode { get; set; }
     public string? CharacterOrientation { get; set; }
     public string? CallbackUrl { get; set; }
+    public string? ModelName { get; set; }
 }
 
 public interface IKiePayloadBuilder
@@ -58,7 +59,9 @@ public sealed class KiePayloadBuilder : IKiePayloadBuilder
 
         return new KieMotionControlRequest
         {
-            Model = string.IsNullOrWhiteSpace(options.MotionControlModel) ? KieOptions.DefaultModel : options.MotionControlModel.Trim(),
+            Model = string.IsNullOrWhiteSpace(request.ModelName)
+                ? (string.IsNullOrWhiteSpace(options.MotionControlModel) ? KieOptions.DefaultModel : options.MotionControlModel.Trim())
+                : request.ModelName.Trim(),
             CallBackUrl = callback,
             Input = new KieMotionControlInput
             {
