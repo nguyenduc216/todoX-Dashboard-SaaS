@@ -1,0 +1,11 @@
+feature,handler,provider,capability,account_claim,credential_resolution,heartbeat,release_success,release_failure,release_cancel,shared_completion,status
+Dance Sell motion,DanceSellRenderHandler,KIE,dance_sell_motion_video,yes,yes,yes,yes,yes,watchdog/shared,yes,complete for KIE runtime
+Dance Sell reference,DanceSellReferenceImageService,KIE,dance_sell_reference_image,partial,partial,partial,partial,partial,watchdog,partial with reference provider factory migration remaining
+YEScale image,AiImageRenderRouter/YEScaleImageService,yescale_task_image,image capabilities,partial,partial,no,shared completion available,shared completion available,watchdog,partial with provider client adapter remaining
+YEScale video,SceneVideoWorkerHandler,yescale_task_video,image_to_video,partial,partial,no,shared completion available,shared completion available,watchdog,partial with provider client adapter remaining
+OpenRouter,OpenRouterImageService,openrouter,character/image capabilities,not proven,not proven,no,no,no,watchdog,not active in shared completion
+Vertex image,VertexImageRenderService,google_vertex,image_ai_creative_render,not proven,global client path,no,no,no,watchdog,partial blocker
+Scene image,SceneImageBatchRenderHandler,routed image provider,scene image,partial,partial,no,shared completion available,shared completion available,watchdog,partial
+Scene video,SceneVideoWorkerHandler,YEScale,video,partial,partial,no,shared completion available,shared completion available,watchdog,partial
+Avatar builder,AvatarTemplateService/AiImageRenderRouter,routed image provider,avatar_generation,partial,partial,no,shared completion available,shared completion available,watchdog,partial
+Thumbnail/poster,ServiceThumbnailRenderService,routed image provider,thumbnail_generation,partial,partial,no,shared completion available,shared completion available,watchdog,partial

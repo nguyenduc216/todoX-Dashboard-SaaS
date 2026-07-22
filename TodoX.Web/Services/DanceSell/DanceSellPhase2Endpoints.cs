@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 using TodoX.Web.Models;
+using TodoX.Web.Services.AiProviders;
 
 namespace TodoX.Web.Services.DanceSell;
 
@@ -115,8 +116,8 @@ public static class DanceSellPhase2Endpoints
     private static async Task<IResult> RetryChargeAsync(Guid id, DanceSellReasonRequest request, AuthStateService auth, IAiOperationBillingService billing, CancellationToken ct)
         => await ExecuteAdminAsync(auth, () => billing.RetryChargeAsync(id, request.Reason, auth.CurrentUser?.UserId, ct));
 
-    private static Task<IResult> ListProviderAccountsAsync(AuthStateService auth)
-        => ExecuteAdminAsync(auth, () => Task.FromResult<IReadOnlyList<ProviderAccountDto>>(Array.Empty<ProviderAccountDto>()));
+    private static Task<IResult> ListProviderAccountsAsync(AuthStateService auth, IAiProviderDiagnosticsService diagnostics, string? providerCode = null)
+        => ExecuteAdminAsync(auth, () => diagnostics.ListAccountsAsync(providerCode));
 
     private static async Task<IResult> ExecuteFileAsync<T>(HttpRequest request, AuthStateService auth, Func<CurrentUserSession, IFormFile, byte[], Task<T>> action, CancellationToken ct)
     {

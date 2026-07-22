@@ -1,0 +1,11 @@
+scope,symbol_or_table,classification,status
+runtime removed tables,public.todox_ai_feature_provider_route,removed,absent
+runtime removed tables,dance_sell.dance_sell_provider_operations,removed,absent
+runtime removed tables,public.todox_ai_operation_assets,removed,absent
+runtime removed tables,public.todox_ai_operation_billing_transactions,removed,absent
+runtime removed tables,billing.ai_image_billing_records,removed,absent
+runtime removed tables,billing.ai_image_provider_attempts,removed,absent
+image billing symbols,IAiImageBillingService,obsolete adapter target,active compatibility
+image billing symbols,AiImageBillingService,active blocker,still contains legacy logic and must be removed in follow-up
+generic billing,IAiBillingService,active,refund added but reserve/complete still delegate
+provider keys,global provider clients,active blocker,not fully audited/migrated

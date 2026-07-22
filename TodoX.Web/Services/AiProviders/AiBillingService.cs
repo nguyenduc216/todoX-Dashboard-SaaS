@@ -1,3 +1,5 @@
+using Dapper;
+using TodoX.Web.Data;
 using TodoX.Web.Models;
 
 namespace TodoX.Web.Services.AiProviders;
@@ -145,6 +147,7 @@ public interface IAiBillingService
     Task<AiBillingCompletion> CompleteAsync(AiBillingCompletionRequest request, CancellationToken ct = default);
     Task<AiBillingCompletion> MarkPendingReconciliationAsync(AiBillingCompletionRequest request, CancellationToken ct = default);
     Task<IReadOnlyList<AiBillingReconciliationItem>> ClaimReconciliationBatchAsync(string workerKey, int batchSize, TimeSpan lockFor, int maxAttempts, CancellationToken ct = default);
+    Task<AiBillingRefundResult> RefundAsync(AiBillingRefundRequest request, CancellationToken ct = default);
     Task MarkManualReviewAsync(string logicalRequestId, string errorMessage, CancellationToken ct = default);
     Task RescheduleReconciliationAsync(string logicalRequestId, string? errorMessage, TimeSpan delay, CancellationToken ct = default);
 }
@@ -152,10 +155,14 @@ public interface IAiBillingService
 public sealed class AiBillingService : IAiBillingService
 {
     private readonly IAiImageBillingService _adapter;
+    private readonly TodoXConnectionFactory _factory;
+    private readonly TenantContext _tenant;
 
-    public AiBillingService(IAiImageBillingService adapter)
+    public AiBillingService(IAiImageBillingService adapter, TodoXConnectionFactory factory, TenantContext tenant)
     {
         _adapter = adapter;
+        _factory = factory;
+        _tenant = tenant;
     }
 
     public AiBillingEstimateResult Estimate(AiBillingEstimateRequest request)
@@ -240,6 +247,134 @@ public sealed class AiBillingService : IAiBillingService
 
     public Task RescheduleReconciliationAsync(string logicalRequestId, string? errorMessage, TimeSpan delay, CancellationToken ct = default)
         => _adapter.RescheduleReconciliationAsync(logicalRequestId, errorMessage, delay, ct);
+
+    public async Task<AiBillingRefundResult> RefundAsync(AiBillingRefundRequest request, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(request.LogicalRequestId))
+        {
+            return new AiBillingRefundResult(false, "invalid", 0, "Missing logical_request_id.");
+        }
+
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        using var tx = conn.BeginTransaction();
+
+        await conn.ExecuteAsync(
+            "SELECT pg_advisory_xact_lock(hashtextextended(@lockName, 0));",
+            new { lockName = $"{_tenant.TenantId:N}:{request.LogicalRequestId}:refund" },
+            tx);
+
+        var record = await conn.QuerySingleOrDefaultAsync<RefundRecord>(
+            """
+            SELECT id AS Id,
+                   logical_request_id AS LogicalRequestId,
+                   COALESCE(payer_wallet_id, wallet_id) AS WalletId,
+                   COALESCE(charged_points, customer_charged_points + system_charged_points, 0) AS ChargedPoints,
+                   COALESCE(refunded_points, 0) AS RefundedPoints,
+                   refund_status AS RefundStatus,
+                   refund_transaction_id AS RefundTransactionId,
+                   created_by AS CreatedBy
+              FROM billing.ai_billing_records
+             WHERE logical_request_id=@LogicalRequestId
+             FOR UPDATE;
+            """,
+            new { request.LogicalRequestId },
+            tx);
+        if (record is null)
+        {
+            tx.Commit();
+            return new AiBillingRefundResult(false, "missing_record", 0, "Billing record was not found.");
+        }
+
+        var refundable = Math.Max(0, record.ChargedPoints - record.RefundedPoints);
+        var refund = Math.Min(Math.Max(0, request.Points), refundable);
+        if (refund <= 0 || record.RefundStatus is "completed" or "refunded")
+        {
+            tx.Commit();
+            return new AiBillingRefundResult(true, record.RefundStatus ?? "none", record.RefundedPoints, null);
+        }
+
+        if (record.WalletId is not Guid walletId)
+        {
+            await conn.ExecuteAsync(
+                """
+                UPDATE billing.ai_billing_records
+                   SET refund_status='manual_review',
+                       error_message=COALESCE(error_message, 'Missing wallet id for refund.'),
+                       updated_at=now()
+                 WHERE id=@id;
+                """,
+                new { id = record.Id },
+                tx);
+            tx.Commit();
+            return new AiBillingRefundResult(false, "manual_review", record.RefundedPoints, "Missing wallet id for refund.");
+        }
+
+        var wallet = await conn.QuerySingleAsync<WalletSnapshot>(
+            "SELECT id AS Id, balance AS Balance FROM billing.token_wallets WHERE id=@walletId FOR UPDATE;",
+            new { walletId },
+            tx);
+        var txId = record.RefundTransactionId ?? Guid.NewGuid();
+        await conn.ExecuteAsync(
+            """
+            INSERT INTO billing.token_transactions
+                (id, tenant_id, wallet_id, transaction_type, amount, balance_before, balance_after,
+                 reference_type, reference_id, description, created_at, created_by)
+            VALUES
+                (@txId, @tenant, @walletId, 'refund', @refund, @before, @after,
+                 'ai_billing_refund', @recordId, @description, now(), @createdBy)
+            ON CONFLICT DO NOTHING;
+            """,
+            new
+            {
+                txId,
+                tenant = _tenant.TenantId,
+                walletId,
+                refund,
+                before = wallet.Balance,
+                after = wallet.Balance + refund,
+                recordId = record.Id,
+                description = request.Reason ?? $"AI billing refund {record.LogicalRequestId}",
+                createdBy = record.CreatedBy
+            },
+            tx);
+        await conn.ExecuteAsync(
+            "UPDATE billing.token_wallets SET balance = balance + @refund, updated_at=now() WHERE id=@walletId;",
+            new { refund, walletId },
+            tx);
+        await conn.ExecuteAsync(
+            """
+            UPDATE billing.ai_billing_records
+               SET refunded_points = COALESCE(refunded_points, 0) + @refund,
+                   refund_status = CASE WHEN COALESCE(refunded_points, 0) + @refund >= charged_points THEN 'completed' ELSE 'pending' END,
+                   refund_transaction_id = @txId,
+                   updated_at=now()
+             WHERE id=@recordId;
+            """,
+            new { refund, txId, recordId = record.Id },
+            tx);
+
+        tx.Commit();
+        return new AiBillingRefundResult(true, "completed", record.RefundedPoints + refund, null);
+    }
+
+    private sealed class RefundRecord
+    {
+        public Guid Id { get; init; }
+        public string LogicalRequestId { get; init; } = string.Empty;
+        public Guid? WalletId { get; init; }
+        public decimal ChargedPoints { get; init; }
+        public decimal RefundedPoints { get; init; }
+        public string? RefundStatus { get; init; }
+        public Guid? RefundTransactionId { get; init; }
+        public string? CreatedBy { get; init; }
+    }
+
+    private sealed class WalletSnapshot
+    {
+        public Guid Id { get; init; }
+        public decimal Balance { get; init; }
+    }
 
     private static AiImageBillingCompleteRequest ToImageComplete(AiBillingCompletionRequest request)
         => new()

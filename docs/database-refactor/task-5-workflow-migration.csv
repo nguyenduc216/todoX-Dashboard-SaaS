@@ -1,0 +1,10 @@
+feature,handler,provider,capability,model,render_job,events,steps,inputs,artifacts,account_claim,credential_resolver,usage_service,billing_service,shared_completion,status
+Dance Sell direct reference,DanceSellPhase2Service/DanceSellRenderHandler,KIE,dance_sell_motion_video,kling-2.6/motion-control,yes,yes,yes,yes,yes,yes,yes,yes,generic plus adapter,yes,complete except live smoke
+Dance Sell generated reference,DanceSellReferenceImageService,KIE,dance_sell_reference_image,gpt-image-2-image-to-image,yes,partial,partial,yes,yes,partial,partial,partial,generic plus adapter,partial,partial with provider adapter migration remaining
+TikTok staging,DanceSellMotionSourceService,Tikwm/local storage,n/a,n/a,n/a,event pending,n/a,n/a,media artifact via storage,n/a,n/a,n/a,n/a,n/a,complete local resolver path
+Scene image,SceneImageBatchRenderHandler,routed image providers,multiple,data-driven,yes,partial,partial,yes,yes,partial,partial,yes,generic plus adapter,available,partial
+Scene video,SceneVideoWorkerHandler,YEScale,image_to_video,data-driven,yes,partial,partial,yes,yes,partial,partial,yes,generic plus adapter,available,partial
+Avatar builder,AvatarTemplateService,routed image providers,avatar_generation,data-driven,indirect,partial,partial,yes,yes,partial,partial,yes,generic plus adapter,available,partial
+Character image,AiCharacterService/OpenRouter image,OpenRouter,image,configured,legacy/indirect,partial,partial,yes,yes,not proven,not proven,partial,partial,not wired,partial blocker
+Provider diagnostics,AiProviderDiagnosticsService,all,all,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,complete backend
+Operation logs,AiOperationLogService,all,all,n/a,yes,yes,yes,yes,yes,n/a,n/a,yes,yes,n/a,complete backend

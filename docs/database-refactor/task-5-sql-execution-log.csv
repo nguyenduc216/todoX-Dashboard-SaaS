@@ -1,0 +1,9 @@
+script,result,notes
+database/manual/ai-core-reset/39_task5_render_event_contract.sql,success,Added/verified event columns and render event/step/artifact indexes; initial generated-column update removed after schema check
+database/manual/ai-core-reset/40_task5_provider_diagnostics_contract.sql,success,Added/verified account health/lease/balance ledger indexes
+database/manual/ai-core-reset/42_verify_task5_runtime.sql,success,Task 5 runtime verification passed
+database/manual/ai-core-reset/30_verify_schema.sql,success,Precheck
+database/manual/ai-core-reset/31_verify_provider_seed.sql,success,Precheck
+database/manual/ai-core-reset/32_verify_runtime_contract.sql,success,Precheck
+database/manual/ai-core-reset/34_verify_task3_runtime.sql,success,Precheck
+database/manual/ai-core-reset/37_verify_task4_runtime.sql,success,Precheck
