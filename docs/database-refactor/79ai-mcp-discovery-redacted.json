@@ -1,0 +1,102 @@
+{
+  "provider": "79AI",
+  "requestedUrl": "https://79ai.net/mcp#connect",
+  "checkedAtLocal": "2026-07-22",
+  "sourceDiscovery": {
+    "page": {
+      "url": "https://79ai.net/mcp#connect",
+      "httpStatus": 200,
+      "contentType": "text/html; charset=UTF-8",
+      "finding": "The public page is a SPA route, not a direct MCP JSON-RPC endpoint."
+    },
+    "bundle": {
+      "url": "https://79ai.net/assets/index-270fb8b23ec29b72.js",
+      "finding": "The public bundle contains MCP management UI code that posts form-encoded requests to https://api.gommo.net/api/v2/mcp with action and access_token fields.",
+      "secretHandling": "No access token was present in the local environment or saved output."
+    },
+    "manifest": {
+      "url": "https://79ai.net/manifest.json",
+      "finding": "79AI/Auto AI is described as a creative platform for video, image and voiceover."
+    }
+  },
+  "environmentCredentialCheck": {
+    "searchedVariablePatterns": [
+      "79",
+      "SEVENTY",
+      "GOMMO",
+      "MCP",
+      "AUTOAI"
+    ],
+    "credentialFound": false,
+    "valuesPrinted": false
+  },
+  "mcpHandshakeAttempts": [
+    {
+      "url": "https://79ai.net/mcp",
+      "method": "POST",
+      "contentType": "application/json",
+      "accept": "application/json, text/event-stream",
+      "jsonRpcMethod": "initialize",
+      "httpStatus": 200,
+      "responseContentType": "text/html; charset=UTF-8",
+      "result": "Not an MCP JSON-RPC response; returned SPA HTML."
+    },
+    {
+      "url": "https://api.gommo.net/mcp",
+      "method": "POST",
+      "contentType": "application/json",
+      "accept": "application/json, text/event-stream",
+      "jsonRpcMethod": "initialize",
+      "httpStatus": 404,
+      "result": "Endpoint not found."
+    },
+    {
+      "url": "https://api.gommo.net/api/v2/mcp",
+      "method": "POST",
+      "contentType": "application/json",
+      "accept": "application/json, text/event-stream",
+      "jsonRpcMethod": "initialize",
+      "httpStatus": 200,
+      "responseContentType": "application/json; charset=utf-8",
+      "result": "Returned application API error requiring access_token, not MCP initialize result.",
+      "responseRedacted": {
+        "error": 100,
+        "message": "The access_token not work. Please check again",
+        "runtime": 0
+      }
+    }
+  ],
+  "managementApiAttempts": [
+    {
+      "url": "https://api.gommo.net/api/v2/mcp",
+      "method": "POST",
+      "contentType": "application/x-www-form-urlencoded;charset=UTF-8",
+      "actionsTried": [
+        "server_list",
+        "server_tools",
+        "tools_list",
+        "tool_list",
+        "list_tools",
+        "discover",
+        "discovery",
+        "server_preview",
+        "server_get"
+      ],
+      "httpStatus": 200,
+      "result": "All attempts returned the same authentication error.",
+      "responseRedacted": {
+        "error": 100,
+        "message": "The access_token not work. Please check again",
+        "runtime": 0
+      }
+    }
+  ],
+  "mcpDiscoveryResult": {
+    "handshakeSucceeded": false,
+    "toolsListSucceeded": false,
+    "resourcesListSucceeded": false,
+    "promptsListSucceeded": false,
+    "videoToolsVerified": false,
+    "blocker": "79AI/Gommo access token or documented MCP server endpoint is required before tools/list and schema discovery can be performed."
+  }
+}

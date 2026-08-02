@@ -75,6 +75,7 @@ builder.Services.AddScoped<ITodoXImageProviderService, TodoXImageProviderService
 builder.Services.AddHttpClient<IOpenRouterImageService, OpenRouterImageService>();
 builder.Services.Configure<TodoX.Web.Services.AiProviders.YEScaleOptions>(builder.Configuration.GetSection("AiProviders:YEScale"));
 builder.Services.AddHttpClient<TodoX.Web.Services.AiProviders.IYEScaleTaskClient, TodoX.Web.Services.AiProviders.YEScaleTaskClient>();
+builder.Services.AddSeventyNineAiProvider();
 builder.Services.Configure<KieOptions>(builder.Configuration.GetSection(KieOptions.SectionName));
 builder.Services.Configure<DanceSellPhase2Options>(builder.Configuration.GetSection(DanceSellPhase2Options.SectionName));
 builder.Services.PostConfigure<KieOptions>(options =>
@@ -117,6 +118,9 @@ builder.Services.AddScoped<TodoX.Web.Services.AiProviders.IAiImageBillingDashboa
 builder.Services.AddScoped<TodoX.Web.Services.AiProviders.IAiBillingDashboardService, TodoX.Web.Services.AiProviders.AiBillingDashboardService>();
 builder.Services.AddSingleton<TodoX.Web.Services.AiProviders.IYEScaleAccountService, TodoX.Web.Services.AiProviders.YEScaleAccountService>();
 builder.Services.AddScoped<TodoX.Web.Services.AiProviders.IAiImageRenderRouter, TodoX.Web.Services.AiProviders.AiImageRenderRouter>();
+builder.Services.AddScoped<TodoX.Web.Services.AiProviders.IAiProviderCredentialStore, TodoX.Web.Services.AiProviders.AiProviderCredentialStore>();
+builder.Services.AddSingleton<TodoX.Web.Services.AiProviders.IAiVideoRenderProviderClient, TodoX.Web.Services.AiProviders.YEScaleVideoRenderProviderClient>();
+builder.Services.AddSingleton<TodoX.Web.Services.AiProviders.IAiVideoRenderProviderResolver, TodoX.Web.Services.AiProviders.AiVideoRenderProviderResolver>();
 builder.Services.AddHostedService<TodoX.Web.Services.AiProviders.AiImageBillingReconciliationWorker>();
 builder.Services.Configure<TodoX.Web.Services.VideoRender.VideoRenderOptions>(builder.Configuration.GetSection("VideoRender"));
 builder.Services.AddSingleton<TodoX.Web.Services.VideoRender.ITodoXVideoPromptParser, TodoX.Web.Services.VideoRender.TodoXVideoPromptParser>();

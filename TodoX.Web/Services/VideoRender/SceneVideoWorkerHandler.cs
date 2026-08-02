@@ -56,7 +56,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
     private readonly IAiProviderService _providers;
     private readonly IAiProviderAccountRepository _accounts;
     private readonly IAiProviderCredentialResolver _credentials;
-    private readonly IYEScaleTaskClient _tasks;
+    private readonly IAiVideoRenderProviderResolver _videoProviders;
     private readonly IMediaFileService _media;
     private readonly IVideoPromptValidator _promptValidator;
     private readonly TenantContext _tenant;
@@ -73,7 +73,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         IAiProviderService providers,
         IAiProviderAccountRepository accounts,
         IAiProviderCredentialResolver credentials,
-        IYEScaleTaskClient tasks,
+        IAiVideoRenderProviderResolver videoProviders,
         IMediaFileService media,
         IVideoPromptValidator promptValidator,
         TenantContext tenant,
@@ -87,7 +87,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         _providers = providers;
         _accounts = accounts;
         _credentials = credentials;
-        _tasks = tasks;
+        _videoProviders = videoProviders;
         _media = media;
         _promptValidator = promptValidator;
         _tenant = tenant;
@@ -229,27 +229,29 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                 await _repo.UpdateSceneAsync(scene.Id, VideoSceneStatuses.VideoRendering,
                     errorMessage: null, title: scene.Title, scenePrompt: scene.ScenePrompt, imagePrompt: scene.ImagePrompt, videoPrompt: scene.VideoPrompt, ct: ct);
 
-                var payload = YEScaleVideoModelMapper.BuildSubmitRequest(
-                    input.ModelName ?? string.Empty,
-                    input.VideoPrompt,
-                    input.SourceImageUrl,
-                    input.AspectRatio,
-                    input.Resolution,
-                    input.DurationSeconds,
-                    providerConfigJson: input.ProviderConfigJson,
-                    capabilityConfigJson: input.CapabilityConfigJson);
-
-                payload.ApiKey = credential.SecretValue;
-                var submit = await _tasks.SubmitAsync(payload, ct);
-                taskId = string.IsNullOrWhiteSpace(submit.TaskId) ? null : submit.TaskId.Trim();
+                var providerClient = _videoProviders.Resolve(input.ProviderCode);
+                var submit = await providerClient.SubmitAsync(new ProviderVideoRenderRequest
+                {
+                    ProviderCode = input.ProviderCode,
+                    ModelName = input.ModelName ?? string.Empty,
+                    Prompt = input.VideoPrompt ?? string.Empty,
+                    SourceImageUrl = input.SourceImageUrl ?? string.Empty,
+                    AspectRatio = input.AspectRatio,
+                    Resolution = input.Resolution,
+                    DurationSeconds = input.DurationSeconds,
+                    ProviderConfigJson = input.ProviderConfigJson,
+                    CapabilityConfigJson = input.CapabilityConfigJson,
+                    CredentialSecret = credential.SecretValue
+                }, ct);
+                taskId = string.IsNullOrWhiteSpace(submit.ProviderTaskId) ? null : submit.ProviderTaskId.Trim();
                 if (string.IsNullOrWhiteSpace(taskId))
                 {
-                    throw new InvalidOperationException("YEScale submit response is missing task_id.");
+                    throw new InvalidOperationException($"{providerClient.ProviderCode} submit response is missing provider_task_id.");
                 }
 
                 await _versions.MarkSceneVideoVersionSubmittedAsync(version.Id, input.ProviderCode, input.ModelName, input.ProviderCapabilityId, taskId, ct);
                 await _repo.AddProjectEventAsync(project.Id, "SCENE_VIDEO_PROVIDER_SUBMITTED", "info",
-                    $"Scene {input.SceneIndex} submitted to YEScale.",
+                    $"Scene {input.SceneIndex} submitted to {providerClient.ProviderCode}.",
                     new { jobId = job.Id, input.SceneId, input.SceneIndex, taskId, input.ModelName }, ct);
             }
             else
@@ -262,12 +264,13 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                 }
             }
 
-            var terminal = await PollTerminalStatusAsync(taskId!, input.ModelName, credential.SecretValue, ct);
+            var pollProviderClient = _videoProviders.Resolve(input.ProviderCode);
+            var terminal = await PollTerminalStatusAsync(pollProviderClient, taskId!, input.ModelName, credential.SecretValue, input.SourceImageUrl, ct);
             var responseJson = JsonSerializer.Serialize(terminal, JsonOptions);
 
             if (!terminal.IsSuccess)
             {
-                var failure = ExtractFailureMessage(terminal);
+                var failure = terminal.ErrorMessage ?? ExtractFailureMessage(terminal.ProviderStatus);
                 await _billing.CompleteAsync(new AiImageBillingCompleteRequest
                 {
                     LogicalRequestId = input.LogicalRequestId,
@@ -284,8 +287,8 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                 throw new RenderJobTerminalFailureException(failure);
             }
 
-            var outputUrl = ExtractVideoUrl(terminal, input.SourceImageUrl)
-                ?? throw new InvalidOperationException($"YEScale returned SUCCESS but no output video URL. task_id={taskId}");
+            var outputUrl = terminal.ResultUrl
+                ?? throw new InvalidOperationException($"{pollProviderClient.ProviderCode} returned success but no output video URL. provider_task_id={taskId}");
 
             await _tenant.EnsureLoadedAsync(ct);
             var objectKey = version.StorageKey ?? SceneMediaStorageKeys.SceneVideoOutput(_tenant.TenantId, project.Id, scene.Id, version.Id);
@@ -338,7 +341,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
             await ReleaseProviderAccountAsync(accountClaim, "cancelled", CancellationToken.None);
             throw;
         }
-        catch (YEScaleTaskException ex) when (ex.IsTransient && !string.IsNullOrWhiteSpace(taskId))
+        catch (ProviderVideoRenderException ex) when (ex.IsTransient && !string.IsNullOrWhiteSpace(taskId))
         {
             await MarkPendingReconciliationAsync(input, version.Id, tariffSnapshot, ex.ErrorCode ?? ex.GetType().Name, ex.Message, CancellationToken.None, taskId);
             await ReleaseProviderAccountAsync(accountClaim, "pending_reconciliation", CancellationToken.None);
@@ -351,7 +354,13 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         }
     }
 
-    private async Task<YEScaleTaskStatusResponse> PollTerminalStatusAsync(string taskId, string? modelName, string apiKey, CancellationToken ct)
+    private async Task<ProviderVideoStatusResult> PollTerminalStatusAsync(
+        IAiVideoRenderProviderClient providerClient,
+        string taskId,
+        string? modelName,
+        string apiKey,
+        string? sourceImageUrl,
+        CancellationToken ct)
     {
         var deadline = DateTimeOffset.UtcNow.AddMinutes(Math.Max(1, _options.MaxPollDurationMinutes));
         var consecutiveErrors = 0;
@@ -361,22 +370,28 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
             ct.ThrowIfCancellationRequested();
             try
             {
-                var status = await _tasks.GetStatusAsync(taskId, apiKey, ct);
+                var status = await providerClient.GetStatusAsync(new ProviderVideoStatusRequest
+                {
+                    ProviderCode = providerClient.ProviderCode,
+                    ProviderTaskId = taskId,
+                    ModelName = modelName,
+                    CredentialSecret = apiKey,
+                    SourceImageUrl = sourceImageUrl
+                }, ct);
                 consecutiveErrors = 0;
-                var normalized = status.Status?.Trim().ToUpperInvariant();
-                if (normalized is "SUCCESS" or "FAILURE" or "CANCELLED" or "EXPIRED")
+                if (status.IsTerminal)
                 {
                     return status;
                 }
 
-                if (normalized is not "QUEUED" and not "PENDING" and not "SUBMITTED" and not "PROCESSING" and not "RUNNING")
+                if (status.State is not ProviderVideoTaskState.Submitted and not ProviderVideoTaskState.Processing)
                 {
-                    throw new YEScaleTaskException($"YEScale returned unsupported status: {status.Status}", errorCode: "unknown_status", taskId: taskId);
+                    throw new ProviderVideoRenderException($"Provider returned unsupported status: {status.ProviderStatus}", providerClient.ProviderCode, errorCode: "unknown_status", taskId: taskId);
                 }
 
                 await Task.Delay(TimeSpan.FromSeconds(Math.Max(1, _options.PollIntervalSeconds)), ct);
             }
-            catch (YEScaleTaskException ex) when (ex.StatusCode is 429 or >= 500)
+            catch (ProviderVideoRenderException ex) when (ex.IsTransient && (ex.StatusCode is null || ex.StatusCode is 429 || ex.StatusCode >= 500))
             {
                 consecutiveErrors++;
                 if (consecutiveErrors >= Math.Max(1, _options.MaxConsecutivePollErrors))
@@ -384,12 +399,12 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                     throw;
                 }
 
-                _logger.LogWarning(ex, "YEScale transient poll error model={ModelName} taskId={TaskId} consecutiveErrors={Errors}", modelName, taskId, consecutiveErrors);
+                _logger.LogWarning(ex, "{ProviderCode} transient poll error model={ModelName} taskId={TaskId} consecutiveErrors={Errors}", providerClient.ProviderCode, modelName, taskId, consecutiveErrors);
                 await Task.Delay(TimeSpan.FromSeconds(Math.Max(1, _options.PollIntervalSeconds)), ct);
             }
         }
 
-        throw new YEScaleTaskException("YEScale poll timed out.", transient: true, taskId: taskId);
+        throw new ProviderVideoRenderException($"{providerClient.ProviderCode} poll timed out.", providerClient.ProviderCode, transient: true, taskId: taskId);
     }
 
     private async Task<AiProviderAccountSelectionResult> ClaimProviderAccountAsync(Guid renderJobId, SceneVideoRenderWorkItemInput input, CancellationToken ct)
@@ -533,91 +548,8 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
             new { sceneId = scene.Id, scene.SceneIndex, errorCode, error = errorMessage }, ct);
     }
 
-    private static string? ExtractVideoUrl(YEScaleTaskStatusResponse response, string? sourceImageUrl)
-    {
-        if (response.Extra is null)
-        {
-            return null;
-        }
-
-        foreach (var branchName in new[] { "task_result", "output", "result" })
-        {
-            if (response.Extra.TryGetValue(branchName, out var branch))
-            {
-                var value = ExtractVideoUrl(branch, sourceImageUrl);
-                if (!string.IsNullOrWhiteSpace(value))
-                {
-                    return value;
-                }
-            }
-        }
-
-        return null;
-    }
-
-    private static string? ExtractVideoUrl(JsonElement element, string? sourceImageUrl)
-    {
-        if (element.ValueKind == JsonValueKind.Object)
-        {
-            foreach (var key in new[] { "video_url", "videoUrl", "url", "output_url", "outputUrl" })
-            {
-                if (element.TryGetProperty(key, out var value)
-                    && value.ValueKind == JsonValueKind.String
-                    && Uri.TryCreate(value.GetString(), UriKind.Absolute, out var uri))
-                {
-                    var candidate = uri.ToString();
-                    if (!string.Equals(candidate, sourceImageUrl, StringComparison.OrdinalIgnoreCase))
-                    {
-                        return candidate;
-                    }
-                }
-            }
-
-            foreach (var property in element.EnumerateObject())
-            {
-                var nested = ExtractVideoUrl(property.Value, sourceImageUrl);
-                if (!string.IsNullOrWhiteSpace(nested))
-                {
-                    return nested;
-                }
-            }
-        }
-
-        if (element.ValueKind == JsonValueKind.Array)
-        {
-            foreach (var item in element.EnumerateArray())
-            {
-                var nested = ExtractVideoUrl(item, sourceImageUrl);
-                if (!string.IsNullOrWhiteSpace(nested))
-                {
-                    return nested;
-                }
-            }
-        }
-
-        return null;
-    }
-
-    private static string ExtractFailureMessage(YEScaleTaskStatusResponse response)
-    {
-        if (response.Error is JsonElement error)
-        {
-            if (error.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(error.GetString()))
-            {
-                return error.GetString()!;
-            }
-
-            if (error.ValueKind == JsonValueKind.Object
-                && error.TryGetProperty("message", out var message)
-                && message.ValueKind == JsonValueKind.String
-                && !string.IsNullOrWhiteSpace(message.GetString()))
-            {
-                return message.GetString()!;
-            }
-        }
-
-        return $"YEScale video task failed with status {response.Status ?? "unknown"}.";
-    }
+    private static string ExtractFailureMessage(string? status)
+        => $"Provider video task failed with status {status ?? "unknown"}.";
 
     private string ResolvePhysicalPath(string? objectKey)
     {
