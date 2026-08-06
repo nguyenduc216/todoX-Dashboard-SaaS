@@ -7,6 +7,7 @@ using TodoX.Web.Services.Reup;
 using TodoX.Web.Services.AiCharacters;
 using TodoX.Web.Services.AiProviders.Kie;
 using TodoX.Web.Services.DanceSell;
+using TodoX.Web.Services.Landing;
 using MudBlazor.Services;
 using Microsoft.Extensions.FileProviders;
 
@@ -35,6 +36,7 @@ builder.Services.AddScoped<AccountRepository>();
 builder.Services.AddScoped<CustomerRepository>();
 builder.Services.AddScoped<PermissionRepository>();
 builder.Services.AddScoped<NavigationMenuRepository>();
+builder.Services.AddScoped<LandingContactLeadRepository>();
 builder.Services.AddScoped<AuditRepository>();
 builder.Services.AddScoped<BillingRepository>();
 builder.Services.AddScoped<CatalogRepository>();

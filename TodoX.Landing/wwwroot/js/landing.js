@@ -379,11 +379,14 @@ AOS.init({
           need: formData.get("need") || "",
           message: formData.get("message") || "",
           sourceUrl: window.location.href,
+          referrerUrl: document.referrer || "",
           utmSource: getUtmValue("utm_source"),
           utmMedium: getUtmValue("utm_medium"),
           utmCampaign: getUtmValue("utm_campaign"),
           utmContent: getUtmValue("utm_content"),
           utmTerm: getUtmValue("utm_term"),
+          consentAccepted: formData.get("consentAccepted") === "on",
+          website: formData.get("website") || "",
           submittedAt: new Date().toISOString()
         };
 

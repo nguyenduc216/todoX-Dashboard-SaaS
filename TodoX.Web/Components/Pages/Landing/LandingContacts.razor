@@ -1,0 +1,340 @@
+@page "/landing/contacts"
+@using System.Text
+@using TodoX.Web.Models.Landing
+@using TodoX.Web.Services.Landing
+@inject AuthStateService AuthState
+@inject AccountService Accounts
+@inject LandingContactLeadRepository Leads
+@inject ISnackbar Snackbar
+@inject IJSRuntime JS
+
+<PageTitle>Liên hệ tư vấn Landing</PageTitle>
+
+<MudStack Spacing="3">
+    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-3">
+        <div>
+            <MudText Typo="Typo.h4" Class="todox-page-title">Liên hệ tư vấn</MudText>
+            <MudText Typo="Typo.body1" Class="todox-page-subtitle">Quản lý lead gửi từ landing page todox.vn.</MudText>
+        </div>
+        <MudStack Row="true" Spacing="2">
+            <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Refresh" OnClick="LoadAsync">Refresh</MudButton>
+            <MudButton Variant="Variant.Outlined" Color="Color.Info" StartIcon="@Icons.Material.Filled.Download" Disabled="@(!CanExport)" OnClick="ExportAsync">CSV</MudButton>
+        </MudStack>
+    </MudStack>
+
+    @if (!_ready)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+    }
+    else if (!CanView)
+    {
+        <MudAlert Severity="Severity.Error">Bạn không có quyền truy cập phân hệ Landing Page.</MudAlert>
+    }
+    else if (!_schemaReady)
+    {
+        <MudAlert Severity="Severity.Warning">Chưa cập nhật database cho phân hệ Landing Page.</MudAlert>
+    }
+    else
+    {
+        <MudGrid>
+            <MudItem xs="12" sm="6" md="3"><MudPaper Class="todox-panel pa-4"><MudText Typo="Typo.caption">Mới</MudText><MudText Typo="Typo.h5">@_summary.NewCount</MudText></MudPaper></MudItem>
+            <MudItem xs="12" sm="6" md="3"><MudPaper Class="todox-panel pa-4"><MudText Typo="Typo.caption">Đang tư vấn</MudText><MudText Typo="Typo.h5">@_summary.ConsultingCount</MudText></MudPaper></MudItem>
+            <MudItem xs="12" sm="6" md="3"><MudPaper Class="todox-panel pa-4"><MudText Typo="Typo.caption">Theo dõi hôm nay</MudText><MudText Typo="Typo.h5">@_summary.FollowUpTodayCount</MudText></MudPaper></MudItem>
+            <MudItem xs="12" sm="6" md="3"><MudPaper Class="todox-panel pa-4"><MudText Typo="Typo.caption">Đã chuyển đổi</MudText><MudText Typo="Typo.h5">@_summary.ConvertedCount</MudText></MudPaper></MudItem>
+        </MudGrid>
+
+        <MudPaper Class="todox-panel pa-4">
+            <MudGrid>
+                <MudItem xs="12" md="4"><MudTextField T="string" Label="Tìm lead, tên, phone, email, công ty" Variant="Variant.Outlined" @bind-Value="_filter.Search" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" /></MudItem>
+                <MudItem xs="12" sm="6" md="2">
+                    <MudSelect T="string" Label="Trạng thái" Variant="Variant.Outlined" @bind-Value="_filter.Status">
+                        <MudSelectItem Value="@string.Empty">Tất cả</MudSelectItem>
+                        @foreach (var status in LandingLeadStatuses.All)
+                        {
+                            <MudSelectItem Value="@status">@LandingLeadStatuses.Label(status)</MudSelectItem>
+                        }
+                    </MudSelect>
+                </MudItem>
+                <MudItem xs="12" sm="6" md="2">
+                    <MudSelect T="string" Label="Ưu tiên" Variant="Variant.Outlined" @bind-Value="_filter.Priority">
+                        <MudSelectItem Value="@string.Empty">Tất cả</MudSelectItem>
+                        @foreach (var priority in LandingLeadPriorities.All)
+                        {
+                            <MudSelectItem Value="@priority">@LandingLeadPriorities.Label(priority)</MudSelectItem>
+                        }
+                    </MudSelect>
+                </MudItem>
+                <MudItem xs="12" sm="6" md="2">
+                    <MudSelect T="Guid?" Label="Phụ trách" Variant="Variant.Outlined" @bind-Value="_filter.AssignedUserId">
+                        <MudSelectItem T="Guid?" Value="null">Tất cả</MudSelectItem>
+                        @foreach (var staff in _staff)
+                        {
+                            <MudSelectItem T="Guid?" Value="@staff.Id">@staff.DisplayName</MudSelectItem>
+                        }
+                    </MudSelect>
+                </MudItem>
+                <MudItem xs="12" sm="6" md="2"><MudTextField T="string" Label="UTM" Variant="Variant.Outlined" @bind-Value="_filter.Utm" /></MudItem>
+                <MudItem xs="12" sm="6" md="2"><MudTextField T="string" Label="Ngành" Variant="Variant.Outlined" @bind-Value="_filter.Industry" /></MudItem>
+                <MudItem xs="12" sm="6" md="2"><MudTextField T="string" Label="Nhu cầu" Variant="Variant.Outlined" @bind-Value="_filter.Need" /></MudItem>
+                <MudItem xs="12" sm="6" md="2"><MudDatePicker Label="Từ ngày" Variant="Variant.Outlined" @bind-Date="_filter.CreatedFrom" /></MudItem>
+                <MudItem xs="12" sm="6" md="2"><MudDatePicker Label="Đến ngày" Variant="Variant.Outlined" @bind-Date="_filter.CreatedTo" /></MudItem>
+                <MudItem xs="12" sm="6" md="2"><MudDatePicker Label="Follow-up" Variant="Variant.Outlined" @bind-Date="_filter.FollowUpDate" /></MudItem>
+                <MudItem xs="12" sm="6" md="2">
+                    <MudSelect T="int" Label="Page size" Variant="Variant.Outlined" Value="_filter.PageSize" ValueChanged="SetPageSizeAsync">
+                        <MudSelectItem Value="20">20</MudSelectItem>
+                        <MudSelectItem Value="50">50</MudSelectItem>
+                        <MudSelectItem Value="100">100</MudSelectItem>
+                    </MudSelect>
+                </MudItem>
+                <MudItem xs="12" md="4">
+                    <MudStack Row="true" Spacing="2" Class="flex-wrap gap-2">
+                        <MudButton Color="Color.Warning" Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.Search" OnClick="SearchAsync">Tìm</MudButton>
+                        <MudButton Variant="Variant.Outlined" OnClick="ClearAsync">Xóa lọc</MudButton>
+                        <MudCheckBox T="bool" Label="Hiển thị đã xóa" Disabled="@(!CanDelete)" @bind-Value="_filter.IncludeDeleted" />
+                    </MudStack>
+                </MudItem>
+            </MudGrid>
+        </MudPaper>
+
+        <MudGrid>
+            <MudItem xs="12" lg="8">
+                <MudPaper Class="todox-table-card pa-4">
+                    <MudTable Items="@_items" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Loading="_loading">
+                        <HeaderContent>
+                            <MudTh>Mã lead</MudTh><MudTh>Thời gian</MudTh><MudTh>Họ tên</MudTh><MudTh>Điện thoại</MudTh><MudTh>Công ty</MudTh><MudTh>Nhu cầu</MudTh><MudTh>Nguồn/UTM</MudTh><MudTh>Trạng thái</MudTh><MudTh>Ưu tiên</MudTh><MudTh>Phụ trách</MudTh><MudTh>Follow-up</MudTh><MudTh></MudTh>
+                        </HeaderContent>
+                        <RowTemplate>
+                            <MudTd DataLabel="Mã lead">@context.LeadCode</MudTd>
+                            <MudTd DataLabel="Thời gian">@Vn(context.CreatedAt)</MudTd>
+                            <MudTd DataLabel="Họ tên">@context.FullName</MudTd>
+                            <MudTd DataLabel="Điện thoại">@context.Phone</MudTd>
+                            <MudTd DataLabel="Công ty">@(context.CompanyName ?? "-")</MudTd>
+                            <MudTd DataLabel="Nhu cầu">@(context.InterestedProduct ?? "-")</MudTd>
+                            <MudTd DataLabel="Nguồn/UTM">@($"{context.UtmSource ?? "-"} / {context.UtmCampaign ?? "-"}")</MudTd>
+                            <MudTd DataLabel="Trạng thái"><MudChip T="string" Size="Size.Small" Color="@StatusColor(context.Status)">@LandingLeadStatuses.Label(context.Status)</MudChip></MudTd>
+                            <MudTd DataLabel="Ưu tiên"><MudChip T="string" Size="Size.Small" Color="@PriorityColor(context.Priority)">@LandingLeadPriorities.Label(context.Priority)</MudChip></MudTd>
+                            <MudTd DataLabel="Phụ trách">@(context.AssignedUserName ?? "Chưa phân công")</MudTd>
+                            <MudTd DataLabel="Follow-up">@(context.NextFollowUpAt is null ? "-" : Vn(context.NextFollowUpAt.Value))</MudTd>
+                            <MudTd><MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Warning" OnClick="@(() => OpenDetailAsync(context.Id))">Chi tiết</MudButton></MudTd>
+                        </RowTemplate>
+                        <NoRecordsContent><MudText Class="pa-4">Không có lead phù hợp.</MudText></NoRecordsContent>
+                    </MudTable>
+                    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="mt-3">
+                        <MudText Typo="Typo.caption">Tổng @_total</MudText>
+                        <MudStack Row="true" Spacing="1">
+                            <MudButton Size="Size.Small" Disabled="@(_filter.Page <= 1)" OnClick="PrevAsync">Trước</MudButton>
+                            <MudText Typo="Typo.body2">Trang @_filter.Page</MudText>
+                            <MudButton Size="Size.Small" Disabled="@(_filter.Page * _filter.PageSize >= _total)" OnClick="NextAsync">Sau</MudButton>
+                        </MudStack>
+                    </MudStack>
+                </MudPaper>
+            </MudItem>
+
+            <MudItem xs="12" lg="4">
+                <MudPaper Class="todox-panel pa-4">
+                    <MudText Typo="Typo.h6">Chi tiết</MudText>
+                    @if (_detail is null)
+                    {
+                        <MudText Typo="Typo.body2" Class="mt-3">Chọn một lead để xem và xử lý.</MudText>
+                    }
+                    else
+                    {
+                        <MudStack Spacing="2" Class="mt-3">
+                            <MudText Typo="Typo.subtitle1">@_detail.FullName</MudText>
+                            <MudText Typo="Typo.body2">@_detail.Phone · @(_detail.Email ?? "-")</MudText>
+                            <MudText Typo="Typo.body2">@(_detail.CompanyName ?? "-") · @(_detail.IndustryCode ?? "-")</MudText>
+                            <MudText Typo="Typo.body2">@(_detail.Message ?? "Không có nội dung")</MudText>
+                            <MudText Typo="Typo.caption">Source: @(_detail.SourceUrl ?? "-")</MudText>
+                            <MudText Typo="Typo.caption">Referrer: @(_detail.ReferrerUrl ?? "-")</MudText>
+                            <MudStack Row="true" Spacing="1" Class="flex-wrap gap-2">
+                                <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(() => CopyAsync(_detail.Phone))">Copy phone</MudButton>
+                                <MudButton Size="Size.Small" Variant="Variant.Outlined" Disabled="@string.IsNullOrWhiteSpace(_detail.Email)" OnClick="@(() => CopyAsync(_detail.Email))">Copy email</MudButton>
+                                <MudButton Size="Size.Small" Variant="Variant.Outlined" Disabled="@string.IsNullOrWhiteSpace(_detail.SourceUrl)" Href="@_detail.SourceUrl" Target="_blank">Mở source</MudButton>
+                            </MudStack>
+                            <MudDivider />
+                            <MudSelect T="string" Label="Trạng thái" Variant="Variant.Outlined" Disabled="@(!CanUpdate)" @bind-Value="_edit.Status">
+                                @foreach (var status in LandingLeadStatuses.All) { <MudSelectItem Value="@status">@LandingLeadStatuses.Label(status)</MudSelectItem> }
+                            </MudSelect>
+                            <MudSelect T="string" Label="Ưu tiên" Variant="Variant.Outlined" Disabled="@(!CanUpdate)" @bind-Value="_edit.Priority">
+                                @foreach (var priority in LandingLeadPriorities.All) { <MudSelectItem Value="@priority">@LandingLeadPriorities.Label(priority)</MudSelectItem> }
+                            </MudSelect>
+                            <MudSelect T="Guid?" Label="Phụ trách" Variant="Variant.Outlined" Disabled="@(!CanAssign)" @bind-Value="_edit.AssignedUserId">
+                                <MudSelectItem T="Guid?" Value="null">Chưa phân công</MudSelectItem>
+                                @foreach (var staff in _staff) { <MudSelectItem T="Guid?" Value="@staff.Id">@staff.DisplayName</MudSelectItem> }
+                            </MudSelect>
+                            <MudDatePicker Label="Theo dõi tiếp" Variant="Variant.Outlined" Disabled="@(!CanUpdate)" Date="@_followDate" DateChanged="SetFollowDate" />
+                            <MudTextField T="string" Label="Ghi chú / nội dung xử lý" Lines="3" Variant="Variant.Outlined" Disabled="@(!CanUpdate)" @bind-Value="_edit.Note" />
+                            <MudStack Row="true" Spacing="1" Class="flex-wrap gap-2">
+                                <MudButton Color="Color.Warning" Variant="Variant.Filled" Disabled="@(!CanUpdate)" OnClick="@(() => SaveActionAsync("note"))">Lưu</MudButton>
+                                <MudButton Variant="Variant.Outlined" Disabled="@(!CanUpdate)" OnClick="@(() => SaveActionAsync("phone_call"))">Gọi điện</MudButton>
+                                <MudButton Variant="Variant.Outlined" Disabled="@(!CanUpdate)" OnClick="@(() => SaveActionAsync("meeting"))">Meeting</MudButton>
+                                <MudButton Variant="Variant.Outlined" Disabled="@(!CanUpdate)" OnClick="@(() => SaveActionAsync("quotation"))">Báo giá</MudButton>
+                                @if (_detail.IsDeleted)
+                                {
+                                    <MudButton Variant="Variant.Outlined" Color="Color.Success" Disabled="@(!CanDelete)" OnClick="@(() => DeleteAsync(true))">Khôi phục</MudButton>
+                                }
+                                else
+                                {
+                                    <MudButton Variant="Variant.Outlined" Color="Color.Error" Disabled="@(!CanDelete)" OnClick="@(() => DeleteAsync(false))">Xóa mềm</MudButton>
+                                }
+                            </MudStack>
+                            <MudDivider />
+                            <MudText Typo="Typo.subtitle2">Activity</MudText>
+                            @foreach (var activity in _activities)
+                            {
+                                <MudPaper Outlined="true" Class="pa-2">
+                                    <MudText Typo="Typo.body2">@ActivityLabel(activity.ActivityType)</MudText>
+                                    <MudText Typo="Typo.caption">@Vn(activity.ActivityAt) · @(activity.CreatedByName ?? "-")</MudText>
+                                    @if (!string.IsNullOrWhiteSpace(activity.Content))
+                                    {
+                                        <MudText Typo="Typo.body2">@activity.Content</MudText>
+                                    }
+                                </MudPaper>
+                            }
+                        </MudStack>
+                    }
+                </MudPaper>
+            </MudItem>
+        </MudGrid>
+    }
+</MudStack>
+
+@code {
+    private bool _ready;
+    private bool _schemaReady;
+    private bool _loading;
+    private LandingContactLeadFilter _filter = new();
+    private LandingContactLeadSummary _summary = new();
+    private IReadOnlyList<LandingContactLeadListItem> _items = Array.Empty<LandingContactLeadListItem>();
+    private IReadOnlyList<LandingStaffOption> _staff = Array.Empty<LandingStaffOption>();
+    private IReadOnlyList<LandingContactLeadActivity> _activities = Array.Empty<LandingContactLeadActivity>();
+    private LandingContactLeadDetail? _detail;
+    private LandingLeadActionRequest _edit = new();
+    private DateTime? _followDate;
+    private long _total;
+
+    private bool CanView => AuthState.CurrentUser is not null && !AuthState.CurrentUser.IsCustomer && (AuthState.CurrentUser.IsRoot || AuthState.CurrentUser.Role is TodoXUserRole.Admin or TodoXUserRole.SystemOperator || AuthState.CurrentUser.Can(LandingContactPermissions.View));
+    private bool CanUpdate => AuthState.CurrentUser is not null && (AuthState.CurrentUser.IsRoot || AuthState.CurrentUser.Can(LandingContactPermissions.Update) || AuthState.CurrentUser.Role is TodoXUserRole.Admin or TodoXUserRole.SystemOperator);
+    private bool CanAssign => AuthState.CurrentUser is not null && (AuthState.CurrentUser.IsRoot || AuthState.CurrentUser.Can(LandingContactPermissions.Assign) || AuthState.CurrentUser.Role is TodoXUserRole.Admin);
+    private bool CanDelete => AuthState.CurrentUser is not null && (AuthState.CurrentUser.IsRoot || AuthState.CurrentUser.Can(LandingContactPermissions.Delete) || AuthState.CurrentUser.Role is TodoXUserRole.Admin);
+    private bool CanExport => AuthState.CurrentUser is not null && (AuthState.CurrentUser.IsRoot || AuthState.CurrentUser.Can(LandingContactPermissions.Export) || AuthState.CurrentUser.Role is TodoXUserRole.Admin);
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!AuthState.IsInitialized)
+        {
+            await AuthState.InitializeAsync(id => Accounts.RehydrateSessionAsync(id));
+        }
+        _ready = true;
+        if (!CanView) return;
+        _schemaReady = await Leads.IsReadyAsync();
+        if (!_schemaReady) return;
+        _staff = await Leads.GetStaffAsync();
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        if (!CanView || !_schemaReady) return;
+        try
+        {
+            _loading = true;
+            _summary = await Leads.GetSummaryAsync();
+            var page = await Leads.SearchAsync(_filter);
+            _items = page.Items;
+            _total = page.Total;
+        }
+        catch (LandingContactSchemaUnavailableException)
+        {
+            _schemaReady = false;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task SearchAsync() { _filter.Page = 1; await LoadAsync(); }
+    private async Task ClearAsync() { _filter = new LandingContactLeadFilter(); _detail = null; await LoadAsync(); }
+    private async Task PrevAsync() { _filter.Page = Math.Max(1, _filter.Page - 1); await LoadAsync(); }
+    private async Task NextAsync() { _filter.Page++; await LoadAsync(); }
+    private async Task SetPageSizeAsync(int value) { _filter.PageSize = value; _filter.Page = 1; await LoadAsync(); }
+
+    private async Task OpenDetailAsync(Guid id)
+    {
+        var result = await Leads.GetDetailAsync(id);
+        _detail = result.Lead;
+        _activities = result.Activities;
+        if (_detail is not null)
+        {
+            _edit = new LandingLeadActionRequest
+            {
+                Status = _detail.Status,
+                Priority = _detail.Priority,
+                AssignedUserId = _detail.AssignedUserId,
+                NextFollowUpAt = _detail.NextFollowUpAt
+            };
+            _followDate = _detail.NextFollowUpAt?.Date;
+        }
+    }
+
+    private void SetFollowDate(DateTime? date)
+    {
+        _followDate = date;
+        _edit.NextFollowUpAt = date is null ? null : new DateTimeOffset(DateTime.SpecifyKind(date.Value.Date.AddHours(9), DateTimeKind.Unspecified), TimeSpan.FromHours(7));
+    }
+
+    private async Task SaveActionAsync(string activityType)
+    {
+        if (_detail is null || AuthState.CurrentUser is null || !CanUpdate) return;
+        _edit.ActivityType = activityType;
+        await Leads.UpdateAsync(_detail.Id, _edit, AuthState.CurrentUser.UserId);
+        Snackbar.Add("Đã cập nhật lead.", Severity.Success);
+        await OpenDetailAsync(_detail.Id);
+        await LoadAsync();
+    }
+
+    private async Task DeleteAsync(bool restore)
+    {
+        if (_detail is null || AuthState.CurrentUser is null || !CanDelete) return;
+        await Leads.SoftDeleteAsync(_detail.Id, AuthState.CurrentUser.UserId, restore);
+        Snackbar.Add(restore ? "Đã khôi phục lead." : "Đã xóa mềm lead.", Severity.Success);
+        await OpenDetailAsync(_detail.Id);
+        await LoadAsync();
+    }
+
+    private async Task ExportAsync()
+    {
+        if (!CanExport) return;
+        var csv = await Leads.ExportCsvAsync(_filter);
+        var base64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(csv));
+        await JS.InvokeVoidAsync("eval", $"(()=>{{const a=document.createElement('a');a.href='data:text/csv;charset=utf-8;base64,{base64}';a.download='landing-contact-leads.csv';a.click();}})()");
+    }
+
+    private async Task CopyAsync(string? value)
+    {
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", value);
+            Snackbar.Add("Đã copy.", Severity.Info);
+        }
+    }
+
+    private static string Vn(DateTimeOffset value) => LandingContactLeadRepository.ToVietnamTime(value).ToString("dd/MM/yyyy HH:mm");
+    private static Color StatusColor(string status) => status is "converted" ? Color.Success : status is "new" ? Color.Warning : status is "closed" or "not_suitable" ? Color.Error : Color.Info;
+    private static Color PriorityColor(string priority) => priority is "urgent" ? Color.Error : priority is "high" ? Color.Warning : Color.Default;
+    private static string ActivityLabel(string type) => type switch
+    {
+        "created" => "Tiếp nhận",
+        "note" => "Ghi chú",
+        "status_changed" => "Đổi trạng thái",
+        "assigned" => "Phân công",
+        "phone_call" => "Gọi điện",
+        "meeting" => "Meeting",
+        "quotation" => "Báo giá",
+        "converted" => "Chuyển đổi",
+        "deleted" => "Xóa mềm",
+        "restored" => "Khôi phục",
+        _ => type
+    };
+}

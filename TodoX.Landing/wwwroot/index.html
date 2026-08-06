@@ -379,6 +379,8 @@
               <select name="need"><option>AI Video</option><option>ChatStaff</option><option>Video + ChatStaff</option><option>Giải pháp tùy chỉnh</option></select>
             </div>
             <div class="field full"><label>Nội dung cần tư vấn</label><textarea name="message" placeholder="Mô tả sản phẩm, mục tiêu hoặc vấn đề cần hỗ trợ..."></textarea></div>
+            <div class="field full lead-honeypot" aria-hidden="true"><label>Website</label><input name="website" tabindex="-1" autocomplete="off"></div>
+            <label class="field full consent-check"><input type="checkbox" name="consentAccepted" required> <span>Tôi đồng ý để TodoX liên hệ tư vấn theo thông tin đã cung cấp.</span></label>
             <div class="field full"><button class="btn btn-primary" type="submit">Gửi yêu cầu tư vấn <i class="fa-solid fa-arrow-right"></i></button></div>
           </form>
           <div id="leadFormStatus" class="form-status" role="status" aria-live="polite"></div>

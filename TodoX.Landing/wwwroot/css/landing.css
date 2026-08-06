@@ -757,6 +757,26 @@
 .form-status.is-error { color: #ff9d9d; }
 .form-status.is-success { color: var(--success); }
 .form-status.is-info { color: var(--gold-2); }
+.lead-honeypot {
+  position: absolute;
+  left: -10000px;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+.consent-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.consent-check input {
+  width: auto;
+  margin-top: 3px;
+  accent-color: var(--gold);
+}
 [data-dashboard-link] { white-space: nowrap; }
 @media (max-width: 430px) {
   .container { width: min(100% - 28px, 1180px); }
