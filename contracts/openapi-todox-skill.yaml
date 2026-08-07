@@ -1,0 +1,168 @@
+openapi: 3.1.0
+info:
+  title: TodoX Skill API
+  version: 1.0.0
+  description: Controlled diagnostic, reconcile, retry, resume and repair facade for TodoX render jobs.
+servers:
+  - url: https://skill.todox.vn
+security:
+  - SkillKey: []
+paths:
+  /health:
+    get:
+      security: []
+      operationId: health
+      responses:
+        '200':
+          description: Service health
+  /api/skill/v1/jobs/{jobId}:
+    get:
+      operationId: getRenderJob
+      parameters:
+        - $ref: '#/components/parameters/JobId'
+      responses:
+        '200': { description: Render job snapshot }
+        '404': { description: Job not found }
+  /api/skill/v1/jobs/{jobId}/diagnostic:
+    get:
+      operationId: diagnoseRenderJob
+      parameters:
+        - $ref: '#/components/parameters/JobId'
+      responses:
+        '200': { description: Diagnostic result }
+  /api/skill/v1/jobs/{jobId}/repair-plan:
+    post:
+      operationId: createRepairPlan
+      parameters:
+        - $ref: '#/components/parameters/JobId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200': { description: Proposed repair plan; no mutation performed }
+  /api/skill/v1/jobs/{jobId}/reconcile:
+    post:
+      operationId: reconcileRenderJob
+      parameters:
+        - $ref: '#/components/parameters/JobId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200': { description: Reconciled synchronously }
+        '202': { description: Reconcile action accepted }
+  /api/skill/v1/jobs/{jobId}/retry:
+    post:
+      operationId: retryRenderJob
+      parameters:
+        - $ref: '#/components/parameters/JobId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                sceneIndexes:
+                  type: array
+                  items: { type: integer, minimum: 1 }
+                failedOnly:
+                  type: boolean
+                  default: true
+              additionalProperties: true
+      responses:
+        '202': { description: Retry action accepted }
+  /api/skill/v1/jobs/{jobId}/resume:
+    post:
+      operationId: resumeRenderJob
+      parameters:
+        - $ref: '#/components/parameters/JobId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '202': { description: Resume action accepted }
+  /api/skill/v1/jobs/{jobId}/repair:
+    post:
+      operationId: repairRenderJob
+      parameters:
+        - $ref: '#/components/parameters/JobId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [confirm, actions]
+              properties:
+                confirm:
+                  type: boolean
+                  const: true
+                actions:
+                  type: array
+                  items:
+                    type: string
+                    enum:
+                      - RECONCILE_PROVIDER_TASK
+                      - MARK_TIMEOUT_SCENE_RETRYABLE
+                      - CLEAR_STALE_SCENE_LOCK
+                      - RESET_FAILED_SCENE_TO_QUEUED
+                      - REBUILD_JOB_SUMMARY
+                      - REQUEUE_VIDEO_WORKER
+                      - REQUEUE_FINALIZER
+                      - REQUEUE_MERGE
+                      - RECONCILE_BILLING
+              additionalProperties: true
+      responses:
+        '202': { description: Repair action accepted }
+        '400': { description: Confirmation/idempotency/action validation failed }
+  /api/skill/v1/actions/{actionId}:
+    get:
+      operationId: getSkillAction
+      parameters:
+        - name: actionId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: Action status }
+        '404': { description: Action not found }
+components:
+  securitySchemes:
+    SkillKey:
+      type: apiKey
+      in: header
+      name: X-TodoX-Skill-Key
+  parameters:
+    JobId:
+      name: jobId
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+    IdempotencyKey:
+      name: X-Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+        minLength: 8
+        maxLength: 160
