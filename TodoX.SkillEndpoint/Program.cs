@@ -1,32 +1,20 @@
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.Json;
 using TodoX.SkillEndpoint;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddOpenApi();
 builder.Services.Configure<SkillEndpointOptions>(builder.Configuration.GetSection(SkillEndpointOptions.SectionName));
-builder.Services.AddHttpClient<TodoXOperationsClient>((sp, client) =>
-{
-    var config = sp.GetRequiredService<IConfiguration>();
-    var baseUrl = config[$"{SkillEndpointOptions.SectionName}:TodoXOperationsBaseUrl"];
-    if (!string.IsNullOrWhiteSpace(baseUrl))
-    {
-        client.BaseAddress = new Uri(baseUrl.TrimEnd('/') + "/");
-    }
-    client.Timeout = TimeSpan.FromSeconds(90);
-});
 builder.Services.AddSingleton<SkillAuditLog>();
+builder.Services.AddSingleton<SkillDatabase>();
+builder.Services.AddScoped<SkillDiagnosticRepository>();
 
 var app = builder.Build();
 
 app.UseHttpsRedirection();
 
-if (app.Environment.IsDevelopment())
-{
-    app.MapOpenApi();
-}
+app.MapOpenApi();
 
 app.Use(async (context, next) =>
 {
@@ -58,46 +46,78 @@ app.Use(async (context, next) =>
     await next();
 });
 
-app.MapGet("/health", () => Results.Ok(new
+app.MapGet("/health", async (SkillDatabase db, CancellationToken ct) =>
 {
-    service = "todox-skill-endpoint",
-    status = "ok",
-    utc = DateTimeOffset.UtcNow
-}));
+    try
+    {
+        await using var cn = db.CreateConnection();
+        await cn.OpenAsync(ct);
+        await using var cmd = new Npgsql.NpgsqlCommand("select 1", cn);
+        await cmd.ExecuteScalarAsync(ct);
+        return Results.Ok(new
+        {
+            service = "todox-skill-endpoint",
+            status = "ok",
+            database = "ok",
+            version = "0.2.0",
+            utc = DateTimeOffset.UtcNow
+        });
+    }
+    catch (Exception ex)
+    {
+        return Results.Json(new
+        {
+            service = "todox-skill-endpoint",
+            status = "degraded",
+            database = "error",
+            error = ex.Message,
+            utc = DateTimeOffset.UtcNow
+        }, statusCode: StatusCodes.Status503ServiceUnavailable);
+    }
+});
 
 var api = app.MapGroup("/api/skill/v1")
     .WithTags("TodoX Skill API");
 
-api.MapGet("/jobs/{jobId:long}", async (long jobId, TodoXOperationsClient client, CancellationToken ct) =>
+api.MapGet("/jobs/{jobId}", async (string jobId, SkillDiagnosticRepository repo, CancellationToken ct) =>
 {
-    return await Proxy(() => client.GetJobAsync(jobId, ct));
+    var result = await repo.GetJobSnapshotAsync(jobId, ct);
+    return result is null
+        ? Results.NotFound(new { success = false, error = "JOB_NOT_FOUND", jobId })
+        : Results.Json(result);
 })
 .WithName("GetRenderJob")
-.WithSummary("Đọc snapshot đầy đủ của một render job và các scene.");
+.WithSummary("Đọc snapshot đầy đủ của job, scene, render task, queue và log.");
 
-api.MapGet("/jobs/{jobId:long}/diagnostic", async (long jobId, TodoXOperationsClient client, CancellationToken ct) =>
+api.MapGet("/jobs/{jobId}/diagnostic", async (string jobId, SkillDiagnosticRepository repo, CancellationToken ct) =>
 {
-    return await Proxy(() => client.DiagnoseJobAsync(jobId, ct));
+    var result = await repo.DiagnoseAsync(jobId, ct);
+    return result is null
+        ? Results.NotFound(new { success = false, error = "JOB_NOT_FOUND", jobId })
+        : Results.Json(result);
 })
 .WithName("DiagnoseRenderJob")
-.WithSummary("Chẩn đoán trạng thái job, scene, provider task, polling, retry và billing.");
+.WithSummary("Chẩn đoán failed/TIMEOUT_PENDING và state mismatch để xác định scene retryable.");
 
-api.MapPost("/jobs/{jobId:long}/repair-plan", async (
-    long jobId,
+api.MapPost("/jobs/{jobId}/repair-plan", async (
+    string jobId,
     RepairPlanRequest body,
-    TodoXOperationsClient client,
+    SkillDiagnosticRepository repo,
     CancellationToken ct) =>
 {
-    return await Proxy(() => client.CreateRepairPlanAsync(jobId, body, ct));
+    var result = await repo.BuildRepairPlanAsync(jobId, body, ct);
+    return result is null
+        ? Results.NotFound(new { success = false, error = "JOB_NOT_FOUND", jobId })
+        : Results.Json(result);
 })
 .WithName("CreateRepairPlan")
-.WithSummary("Tạo kế hoạch sửa job nhưng chưa thay đổi dữ liệu.");
+.WithSummary("Tạo kế hoạch sửa nhưng chưa thay đổi dữ liệu.");
 
-api.MapPost("/jobs/{jobId:long}/retry", async (
+api.MapPost("/jobs/{jobId}/retry", async (
     HttpContext http,
-    long jobId,
+    string jobId,
     RetryJobRequest body,
-    TodoXOperationsClient client,
+    SkillDiagnosticRepository repo,
     SkillAuditLog audit,
     CancellationToken ct) =>
 {
@@ -105,18 +125,22 @@ api.MapPost("/jobs/{jobId:long}/retry", async (
     if (idempotencyKey is null)
         return Results.BadRequest(new { success = false, error = "IDEMPOTENCY_KEY_REQUIRED" });
 
-    var result = await client.RetryJobAsync(jobId, body, idempotencyKey, ct);
-    await audit.WriteAsync(http, "retry_job", jobId, body, result.StatusCode, ct);
-    return ToResult(result);
+    var diagnostic = await repo.DiagnoseAsync(jobId, ct);
+    if (diagnostic is null)
+        return Results.NotFound(new { success = false, error = "JOB_NOT_FOUND", jobId });
+
+    var queued = await repo.EnqueueActionAsync(jobId, "retry", body, idempotencyKey, "skill-api", ct);
+    await audit.WriteAsync(http, "retry_job_queued", ParseNumericJobId(jobId), body, StatusCodes.Status202Accepted, ct);
+    return Results.Accepted(value: queued);
 })
 .WithName("RetryRenderJob")
-.WithSummary("Retry scene lỗi hoặc scene chỉ định; không retry scene đã thành công nếu không yêu cầu rõ.");
+.WithSummary("Đưa yêu cầu retry vào action queue; worker executor sẽ reconcile trước khi submit provider mới.");
 
-api.MapPost("/jobs/{jobId:long}/resume", async (
+api.MapPost("/jobs/{jobId}/resume", async (
     HttpContext http,
-    long jobId,
+    string jobId,
     ResumeJobRequest body,
-    TodoXOperationsClient client,
+    SkillDiagnosticRepository repo,
     SkillAuditLog audit,
     CancellationToken ct) =>
 {
@@ -124,47 +148,22 @@ api.MapPost("/jobs/{jobId:long}/resume", async (
     if (idempotencyKey is null)
         return Results.BadRequest(new { success = false, error = "IDEMPOTENCY_KEY_REQUIRED" });
 
-    var result = await client.ResumeJobAsync(jobId, body, idempotencyKey, ct);
-    await audit.WriteAsync(http, "resume_job", jobId, body, result.StatusCode, ct);
-    return ToResult(result);
+    var snapshot = await repo.GetJobSnapshotAsync(jobId, ct);
+    if (snapshot is null)
+        return Results.NotFound(new { success = false, error = "JOB_NOT_FOUND", jobId });
+
+    var queued = await repo.EnqueueActionAsync(jobId, "resume", body, idempotencyKey, "skill-api", ct);
+    await audit.WriteAsync(http, "resume_job_queued", ParseNumericJobId(jobId), body, StatusCodes.Status202Accepted, ct);
+    return Results.Accepted(value: queued);
 })
 .WithName("ResumeRenderJob")
-.WithSummary("Tiếp tục job từ trạng thái hiện tại mà không tạo lại media đã thành công.");
+.WithSummary("Đưa yêu cầu resume vào action queue, không tạo lại media đã success.");
 
-api.MapPost("/jobs/{jobId:long}/repair", async (
+api.MapPost("/jobs/{jobId}/reconcile", async (
     HttpContext http,
-    long jobId,
-    ExecuteRepairRequest body,
-    TodoXOperationsClient client,
-    SkillAuditLog audit,
-    CancellationToken ct) =>
-{
-    var idempotencyKey = RequireIdempotencyKey(http);
-    if (idempotencyKey is null)
-        return Results.BadRequest(new { success = false, error = "IDEMPOTENCY_KEY_REQUIRED" });
-
-    if (!body.Confirm)
-    {
-        return Results.BadRequest(new
-        {
-            success = false,
-            error = "CONFIRM_REQUIRED",
-            message = "Repair thay đổi dữ liệu nên confirm=true là bắt buộc."
-        });
-    }
-
-    var result = await client.ExecuteRepairAsync(jobId, body, idempotencyKey, ct);
-    await audit.WriteAsync(http, "repair_job", jobId, body, result.StatusCode, ct);
-    return ToResult(result);
-})
-.WithName("RepairRenderJob")
-.WithSummary("Sửa state job/scene bằng action đã whitelist; không cho chạy SQL tự do.");
-
-api.MapPost("/jobs/{jobId:long}/reconcile", async (
-    HttpContext http,
-    long jobId,
+    string jobId,
     ReconcileJobRequest body,
-    TodoXOperationsClient client,
+    SkillDiagnosticRepository repo,
     SkillAuditLog audit,
     CancellationToken ct) =>
 {
@@ -172,21 +171,66 @@ api.MapPost("/jobs/{jobId:long}/reconcile", async (
     if (idempotencyKey is null)
         return Results.BadRequest(new { success = false, error = "IDEMPOTENCY_KEY_REQUIRED" });
 
-    var result = await client.ReconcileJobAsync(jobId, body, idempotencyKey, ct);
-    await audit.WriteAsync(http, "reconcile_job", jobId, body, result.StatusCode, ct);
-    return ToResult(result);
+    var snapshot = await repo.GetJobSnapshotAsync(jobId, ct);
+    if (snapshot is null)
+        return Results.NotFound(new { success = false, error = "JOB_NOT_FOUND", jobId });
+
+    var queued = await repo.EnqueueActionAsync(jobId, "reconcile", body, idempotencyKey, "skill-api", ct);
+    await audit.WriteAsync(http, "reconcile_job_queued", ParseNumericJobId(jobId), body, StatusCodes.Status202Accepted, ct);
+    return Results.Accepted(value: queued);
 })
 .WithName("ReconcileRenderJob")
-.WithSummary("Đối soát lại provider task và đồng bộ trạng thái local khi polling bị timeout hoặc lệch state.");
+.WithSummary("Đưa yêu cầu đối soát provider/local state vào action queue.");
 
-api.MapGet("/actions/{actionId}", async (string actionId, TodoXOperationsClient client, CancellationToken ct) =>
+api.MapPost("/jobs/{jobId}/repair", async (
+    HttpContext http,
+    string jobId,
+    ExecuteRepairRequest body,
+    SkillDiagnosticRepository repo,
+    SkillAuditLog audit,
+    CancellationToken ct) =>
 {
-    return await Proxy(() => client.GetActionAsync(actionId, ct));
+    var idempotencyKey = RequireIdempotencyKey(http);
+    if (idempotencyKey is null)
+        return Results.BadRequest(new { success = false, error = "IDEMPOTENCY_KEY_REQUIRED" });
+    if (!body.Confirm)
+        return Results.BadRequest(new { success = false, error = "CONFIRM_REQUIRED" });
+    if (!AllowedRepairCodes.Contains(body.RepairCode))
+        return Results.BadRequest(new { success = false, error = "REPAIR_CODE_NOT_ALLOWED", allowed = AllowedRepairCodes });
+
+    var snapshot = await repo.GetJobSnapshotAsync(jobId, ct);
+    if (snapshot is null)
+        return Results.NotFound(new { success = false, error = "JOB_NOT_FOUND", jobId });
+
+    var queued = await repo.EnqueueActionAsync(jobId, "repair", body, idempotencyKey, "skill-api", ct);
+    await audit.WriteAsync(http, "repair_job_queued", ParseNumericJobId(jobId), body, StatusCodes.Status202Accepted, ct);
+    return Results.Accepted(value: queued);
+})
+.WithName("RepairRenderJob")
+.WithSummary("Đưa repair whitelist vào action queue; không cho arbitrary SQL.");
+
+api.MapGet("/actions/{actionId}", async (string actionId, SkillDiagnosticRepository repo, CancellationToken ct) =>
+{
+    var result = await repo.GetActionAsync(actionId, ct);
+    return result is null
+        ? Results.NotFound(new { success = false, error = "ACTION_NOT_FOUND", actionId })
+        : Results.Json(result);
 })
 .WithName("GetSkillAction")
-.WithSummary("Theo dõi action bất đồng bộ như retry, resume hoặc repair.");
+.WithSummary("Theo dõi trạng thái action retry/resume/reconcile/repair.");
 
 app.Run();
+
+static readonly HashSet<string> AllowedRepairCodes = new(StringComparer.OrdinalIgnoreCase)
+{
+    "MARK_TIMEOUT_SCENE_RETRYABLE",
+    "CLEAR_STALE_SCENE_LOCK",
+    "RESET_FAILED_SCENE_TO_QUEUED",
+    "REBUILD_JOB_SUMMARY",
+    "REQUEUE_VIDEO_WORKER",
+    "REQUEUE_FINALIZER",
+    "REQUEUE_MERGE"
+};
 
 static bool FixedTimeEquals(string expected, string actual)
 {
@@ -201,18 +245,4 @@ static string? RequireIdempotencyKey(HttpContext http)
     return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 }
 
-static async Task<IResult> Proxy(Func<Task<ProxyResponse>> action)
-{
-    var response = await action();
-    return ToResult(response);
-}
-
-static IResult ToResult(ProxyResponse response)
-{
-    if (response.Body.ValueKind == JsonValueKind.Undefined)
-    {
-        return Results.StatusCode(response.StatusCode);
-    }
-
-    return Results.Json(response.Body, statusCode: response.StatusCode);
-}
+static long ParseNumericJobId(string jobId) => long.TryParse(jobId, out var value) ? value : 0;
