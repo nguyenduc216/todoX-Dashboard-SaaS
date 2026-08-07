@@ -8,7 +8,8 @@ param(
     [string]$TodoXRoot = 'E:\N8N.ANHDUC\todoX',
     [switch]$SkipBackup,
     [switch]$SkipContract,
-    [switch]$SkipDoctor
+    [switch]$SkipDoctor,
+    [switch]$RequireContractSuccess
 )
 
 $ErrorActionPreference = 'Stop'
@@ -28,6 +29,10 @@ $logDir = Join-Path $repoRoot 'artifacts\skill-migration'
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 $logFile = Join-Path $logDir "skill-migration_$timestamp.log"
 Start-Transcript -Path $logFile -Force | Out-Null
+
+$migrationApplied = $false
+$contractOk = $null
+$doctorOk = $null
 
 try {
     Write-Host '1/6 Check PostgreSQL connection' -ForegroundColor Cyan
@@ -51,14 +56,25 @@ try {
     Write-Host '4/6 Validate migration' -ForegroundColor Cyan
     & $PsqlPath -h $PgHost -p $PgPort -U $User -d $Database -v ON_ERROR_STOP=1 -c "select to_regclass('public.todox_skill_actions'), to_regclass('public.todox_skill_audit_log');"
     if ($LASTEXITCODE -ne 0) { throw 'Migration validation failed.' }
+    $migrationApplied = $true
+    Write-Host 'Skill database migration is installed and validated.' -ForegroundColor Green
 
     if (-not $SkipContract) {
         Write-Host '5/6 Regenerate Database Contract when generator exists' -ForegroundColor Cyan
         $contract = Join-Path $TodoXRoot 'automation-api\todox_foundation_v36_api_v11\package1-database-contract\01-Generate-Database-Contract.ps1'
         if (Test-Path $contract) {
             & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $contract
-            if ($LASTEXITCODE -ne 0) { throw 'Database Contract generation failed.' }
+            if ($LASTEXITCODE -ne 0) {
+                $contractOk = $false
+                $message = 'Legacy Database Contract generator failed after the skill migration had already COMMITted successfully. This is a post-migration tooling error, not a rollback of the migration.'
+                if ($RequireContractSuccess) { throw $message }
+                Write-Warning $message
+                Write-Warning 'Continue to Doctor. Repair/regenerate the legacy contract generator separately.'
+            } else {
+                $contractOk = $true
+            }
         } else {
+            $contractOk = $false
             Write-Warning "Contract generator not found: $contract"
         }
     }
@@ -68,10 +84,25 @@ try {
         $doctor = Join-Path $TodoXRoot 'automation-api\todox_foundation_v36_api_v11\package2-doctor-v36\TodoX-Doctor-V3.6-RELEASE.ps1'
         if (Test-Path $doctor) {
             & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $doctor
-            if ($LASTEXITCODE -ne 0) { throw 'TodoX Doctor V3.6 reported failure.' }
+            if ($LASTEXITCODE -ne 0) {
+                $doctorOk = $false
+                throw 'TodoX Doctor V3.6 reported failure.'
+            }
+            $doctorOk = $true
         } else {
+            $doctorOk = $false
             Write-Warning "Doctor not found: $doctor"
         }
+    }
+
+    Write-Host ''
+    Write-Host '===== TodoX Skill migration summary =====' -ForegroundColor Cyan
+    Write-Host "Migration installed : $migrationApplied"
+    if (-not $SkipContract) { Write-Host "DB contract generated: $contractOk" }
+    if (-not $SkipDoctor) { Write-Host "Doctor passed        : $doctorOk" }
+
+    if ($migrationApplied -and $contractOk -eq $false) {
+        Write-Warning 'Database changes are already installed. Do NOT roll back or manually re-run SQL because of the contract-generator warning.'
     }
 
     Write-Host "Completed. Log: $logFile" -ForegroundColor Green
