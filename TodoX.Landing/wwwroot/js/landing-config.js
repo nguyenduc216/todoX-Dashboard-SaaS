@@ -16,7 +16,7 @@ window.TODOX_LANDING_CONFIG = {
 
   ensureAsset("link", {
     rel: "stylesheet",
-    href: "/css/landing-v2.css?v=20260809-2"
+    href: "/css/landing-v2.css?v=20260809-3"
   }, "todox-landing-v2-css");
 
   ensureAsset("script", {
