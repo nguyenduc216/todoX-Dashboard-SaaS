@@ -30,11 +30,30 @@
   }
 
   function applyVideoPresentation(item) {
-    // landing-patch.js creates/recreates this player when a card is clicked.
+    // landing-patch.js creates a second video element. The original HTML also contains
+    // #industryModalVideo, so selecting by global id can target the hidden/legacy player.
+    // Always scope the player lookup to the currently visible dynamic media container.
     window.setTimeout(() => {
-      const video = $('#industryModalVideo');
       const media = $('#industryVideoMedia');
+      const video = media ? $('video', media) : null;
       if (!video || !media) return;
+
+      // Stop any legacy/hidden player that may have received the source because of duplicate IDs.
+      $$('#industryModalVideo').forEach(legacy => {
+        if (legacy !== video) {
+          try { legacy.pause(); } catch {}
+          legacy.removeAttribute('src');
+          try { legacy.load(); } catch {}
+        }
+      });
+
+      const videoUrl = String(item?.videoUrl || '').trim();
+      if (videoUrl) {
+        if (video.getAttribute('src') !== videoUrl) {
+          video.src = videoUrl;
+          video.load();
+        }
+      }
 
       if (item?.thumbnailUrl) video.poster = item.thumbnailUrl;
       video.style.width = '100%';
@@ -47,15 +66,13 @@
         warning = document.createElement('div');
         warning.className = 'industry-codec-warning';
         warning.hidden = true;
-        warning.innerHTML = '<strong>Video chưa tương thích trình duyệt.</strong><span>Vui lòng dùng MP4 H.264 + AAC để hiển thị đầy đủ hình và tiếng trên Chrome, Edge, Safari và mobile.</span>';
+        warning.innerHTML = '<strong>Không thể hiển thị hình video.</strong><span>TodoX đã tải đúng player nhưng trình duyệt chưa giải mã được video. Hãy kiểm tra file H.264/AAC hoặc đường dẫn media.</span>';
         media.appendChild(warning);
       }
 
       const verifyVideoTrack = () => {
-        // Audio-only playback from an MP4 commonly means the video codec is not browser-decodable (e.g. HEVC on some clients).
         if (video.readyState >= 1 && video.videoWidth === 0 && video.videoHeight === 0) {
           warning.hidden = false;
-          video.pause();
         } else {
           warning.hidden = true;
         }
@@ -64,6 +81,10 @@
       video.addEventListener('loadedmetadata', verifyVideoTrack, { once: true });
       video.addEventListener('canplay', verifyVideoTrack, { once: true });
       video.addEventListener('error', () => { warning.hidden = false; }, { once: true });
+
+      // Start playback on the visible player only. Browsers may still require user gesture;
+      // this call happens immediately after the user's card click.
+      if (videoUrl) video.play().catch(() => {});
     }, 0);
   }
 
@@ -101,10 +122,9 @@
       message.dispatchEvent(new Event('input', { bubbles: true }));
     }
 
-    // Close the modal created by landing-patch.js.
     const modal = $('#industryVideoModal');
-    const player = $('#industryModalVideo');
-    player?.pause();
+    const visiblePlayer = $('#industryVideoMedia video');
+    try { visiblePlayer?.pause(); } catch {}
     modal?.classList.remove('is-open');
     modal?.setAttribute('aria-hidden', 'true');
     document.body.classList.remove('modal-open');
@@ -118,7 +138,6 @@
   }
 
   function bindFixes() {
-    // Capture the selected industry before landing-patch.js opens the modal.
     document.addEventListener('click', (event) => {
       const card = event.target.closest('.industry-card-v2');
       if (!card) return;
@@ -126,7 +145,6 @@
       applyVideoPresentation(currentIndustry);
     }, true);
 
-    // Make the CTA deterministic: close modal, preselect industry + AI Video, then scroll to Contact.
     document.addEventListener('click', (event) => {
       const button = event.target.closest('#industryVideoModal a.btn[href="#contact"], #industryModal a.btn[href="#contact"]');
       if (!button) return;
