@@ -1,8 +1,9 @@
 using System.Diagnostics;
 using System.Threading.RateLimiting;
-using Dapper;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.Extensions.FileProviders;
+using Microsoft.Extensions.Options;
 using TodoX.Landing.Data;
 using TodoX.Landing.Models;
 using TodoX.Landing.Services;
@@ -21,6 +22,8 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
 });
 builder.Services.AddSingleton<LandingConnectionFactory>();
 builder.Services.AddScoped<LandingContactRepository>();
+builder.Services.AddScoped<IndustrySolutionRepository>();
+builder.Services.Configure<SharedMediaOptions>(builder.Configuration.GetSection(SharedMediaOptions.SectionName));
 builder.Services.AddRateLimiter(options =>
 {
     options.AddPolicy("contact-leads", httpContext =>
@@ -77,51 +80,64 @@ app.UseStaticFiles(new StaticFileOptions
     }
 });
 
+var sharedMediaOptions = app.Services.GetRequiredService<IOptions<SharedMediaOptions>>().Value;
+var sharedMediaRoot = sharedMediaOptions.StorageRoot;
+if (!string.IsNullOrWhiteSpace(sharedMediaRoot))
+{
+    try
+    {
+        var physicalRoot = Path.GetFullPath(sharedMediaRoot);
+        Directory.CreateDirectory(physicalRoot);
+        app.UseStaticFiles(new StaticFileOptions
+        {
+            FileProvider = new PhysicalFileProvider(physicalRoot),
+            RequestPath = "/" + (sharedMediaOptions.RequestPath ?? "/media").Trim('/')
+        });
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "SharedMedia static file mapping is not ready.");
+    }
+}
+
 app.MapGet("/health", () => Results.Ok(new
 {
     service = "TodoX.Landing",
     status = "ok"
 }));
 
-app.MapGet("/health/ready", async (LandingContactRepository repository, CancellationToken ct) =>
+app.MapGet("/health/ready", async (
+    LandingContactRepository contacts,
+    IndustrySolutionRepository industries,
+    IOptions<SharedMediaOptions> mediaOptions,
+    CancellationToken ct) =>
 {
-    var ready = await repository.IsReadyAsync(ct);
-    return ready
-        ? Results.Ok(new { service = "TodoX.Landing", status = "ready" })
-        : Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+    var contactReady = await contacts.IsReadyAsync(ct);
+    var industryReady = await industries.IsReadyAsync(ct);
+    var mediaRoot = mediaOptions.Value.StorageRoot;
+    var mediaReady = !string.IsNullOrWhiteSpace(mediaRoot) && Directory.Exists(mediaRoot);
+    var ready = contactReady && industryReady && mediaReady;
+
+    var payload = new
+    {
+        service = "TodoX.Landing",
+        status = ready ? "ready" : "not-ready",
+        databaseReady = contactReady && industryReady,
+        contactReady,
+        industryReady,
+        sharedMedia = new
+        {
+            configured = !string.IsNullOrWhiteSpace(mediaRoot),
+            readable = mediaReady,
+            requestPath = mediaOptions.Value.RequestPath
+        }
+    };
+
+    return ready ? Results.Ok(payload) : Results.Json(payload, statusCode: StatusCodes.Status503ServiceUnavailable);
 });
 
-app.MapGet("/api/industry-solutions", async (LandingConnectionFactory factory, CancellationToken ct) =>
-{
-    try
-    {
-        using var connection = await factory.OpenAsync(ct);
-        const string sql = """
-            select
-                id,
-                slug,
-                title,
-                short_description as "shortDescription",
-                description,
-                thumbnail_url as "thumbnailUrl",
-                video_url as "videoUrl",
-                aspect_ratio as "aspectRatio",
-                display_order as "displayOrder"
-            from landing.industry_solutions
-            where is_active = true
-            order by display_order, title;
-            """;
-
-        var rows = await connection.QueryAsync(new CommandDefinition(sql, cancellationToken: ct));
-        return Results.Ok(rows);
-    }
-    catch (Npgsql.PostgresException ex) when (ex.SqlState == "42P01")
-    {
-        return Results.Problem(
-            title: "Industry solution schema is not ready.",
-            statusCode: StatusCodes.Status503ServiceUnavailable);
-    }
-});
+app.MapGet("/api/industry-solutions", async (IndustrySolutionRepository repository, CancellationToken ct) =>
+    Results.Ok(await repository.ListPublicAsync(ct)));
 
 app.MapPost("/api/contact-leads", async (
     HttpContext http,

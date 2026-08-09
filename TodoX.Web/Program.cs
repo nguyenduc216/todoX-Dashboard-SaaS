@@ -8,8 +8,10 @@ using TodoX.Web.Services.AiCharacters;
 using TodoX.Web.Services.AiProviders.Kie;
 using TodoX.Web.Services.DanceSell;
 using TodoX.Web.Services.Landing;
+using TodoX.Web.Services.SharedMedia;
 using MudBlazor.Services;
 using Microsoft.Extensions.FileProviders;
+using Microsoft.Extensions.Options;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -37,6 +39,10 @@ builder.Services.AddScoped<CustomerRepository>();
 builder.Services.AddScoped<PermissionRepository>();
 builder.Services.AddScoped<NavigationMenuRepository>();
 builder.Services.AddScoped<LandingContactLeadRepository>();
+builder.Services.AddScoped<LandingIndustrySolutionRepository>();
+builder.Services.AddScoped<LandingIndustryMediaService>();
+builder.Services.AddSingleton<SharedMediaPathService>();
+builder.Services.Configure<SharedMediaOptions>(builder.Configuration.GetSection(SharedMediaOptions.SectionName));
 builder.Services.AddScoped<AuditRepository>();
 builder.Services.AddScoped<BillingRepository>();
 builder.Services.AddScoped<CatalogRepository>();
@@ -207,6 +213,25 @@ app.UseCors();
 
 // Serve runtime-uploaded files (avatars, chibi, references) from wwwroot/uploads.
 app.UseStaticFiles();
+
+var sharedMediaOptions = app.Services.GetRequiredService<IOptions<SharedMediaOptions>>().Value;
+if (!string.IsNullOrWhiteSpace(sharedMediaOptions.StorageRoot))
+{
+    try
+    {
+        var physicalRoot = Path.GetFullPath(sharedMediaOptions.StorageRoot);
+        Directory.CreateDirectory(physicalRoot);
+        app.UseStaticFiles(new StaticFileOptions
+        {
+            FileProvider = new PhysicalFileProvider(physicalRoot),
+            RequestPath = "/" + (sharedMediaOptions.RequestPath ?? "/media").Trim('/')
+        });
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "SharedMedia static file mapping is not ready.");
+    }
+}
 
 var videoStorageRoot = app.Configuration["VideoRender:StorageRoot"];
 var videoPublicBase = app.Configuration["VideoRender:PublicBase"];

@@ -13,31 +13,239 @@ AOS.init({
       easing: "ease-out-cubic"
     });
 
-    const swiper = new Swiper(".industrySwiper", {
-      slidesPerView: 1.15,
-      spaceBetween: 18,
-      loop: true,
-      autoplay: { delay: 3200, disableOnInteraction: false },
-      pagination: { el: ".swiper-pagination", clickable: true },
-      navigation: { nextEl: ".swiper-button-next", prevEl: ".swiper-button-prev" },
-      breakpoints: {
-        700: { slidesPerView: 2.2 },
-        1050: { slidesPerView: 3.25 }
+    const industryWrapper = document.getElementById("industrySolutions");
+    const industryModal = document.getElementById("industryModal");
+    const industryModalVideo = document.getElementById("industryModalVideo");
+    const industryModalTitle = document.getElementById("industryModalTitle");
+    const industryModalDescription = document.getElementById("industryModalDescription");
+    const industryModalNotes = document.getElementById("industryModalNotes");
+    const industryMobileQuery = window.matchMedia("(max-width: 768px)");
+    let industrySwiper = null;
+    let industryItems = [];
+
+    const fallbackIndustries = [
+      {
+        slug: "suc-khoe",
+        title: "Sức khỏe",
+        shortDescription: "Video sản phẩm, thành phần, trải nghiệm và câu chuyện chăm sóc sức khỏe.",
+        description: "TodoX xây dựng video ngắn phù hợp cho sản phẩm sức khỏe, tập trung vào trải nghiệm và khả năng chuyển đổi.",
+        thumbnailUrl: "img/landing/sneakers.jpg",
+        aspectRatio: "9:16",
+        formatNote: "Video dọc ngắn cho TikTok, Reels, Shorts.",
+        goalNote: "Tăng niềm tin và chuyển đổi từ nội dung giáo dục.",
+        capabilityNote: "Kịch bản, AI presenter, voice, motion và dựng video."
+      },
+      {
+        slug: "my-pham",
+        title: "Mỹ phẩm",
+        shortDescription: "Review, skincare, sản phẩm cao cấp và video hình ảnh thương hiệu.",
+        description: "Giải pháp video mỹ phẩm có thể triển khai theo phong cách UGC, cinematic product, review skincare và social ads.",
+        thumbnailUrl: "img/landing/cosmetics.jpg",
+        aspectRatio: "9:16"
+      },
+      {
+        slug: "thoi-trang",
+        title: "Thời trang",
+        shortDescription: "Lookbook, catwalk, phối đồ và video chuyển động theo xu hướng.",
+        description: "TodoX hỗ trợ lookbook AI, catwalk, motion control, phối đồ và video social commerce.",
+        thumbnailUrl: "img/landing/fashion.jpg",
+        aspectRatio: "9:16"
+      },
+      {
+        slug: "xay-dung",
+        title: "Xây dựng",
+        shortDescription: "Construction timelapse, giới thiệu công trình và mô phỏng dự án.",
+        description: "Giải pháp cho ngành xây dựng gồm construction timelapse, before/after, mô phỏng tiến độ và project showcase.",
+        thumbnailUrl: "img/landing/construction.jpg",
+        aspectRatio: "16:9"
+      },
+      {
+        slug: "noi-that",
+        title: "Nội thất",
+        shortDescription: "Trình diễn không gian, vật liệu, showroom và phong cách sống.",
+        description: "TodoX triển khai interior walkthrough, before/after, showroom video và lifestyle visual.",
+        thumbnailUrl: "img/landing/interior.jpg",
+        aspectRatio: "9:16"
       }
+    ];
+
+    function escapeHtml(value) {
+      return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+
+    function renderIndustryCard(item, index) {
+      const hasVideo = Boolean(item.videoUrl);
+      const poster = item.thumbnailUrl
+        ? `<img src="${escapeHtml(item.thumbnailUrl)}" alt="${escapeHtml(item.title)}" loading="lazy" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'poster-placeholder',textContent:'TODOX'}))">`
+        : `<div class="poster-placeholder">TODOX</div>`;
+      const badge = hasVideo
+        ? `<span class="play-badge"><i class="fa-solid fa-play"></i> VIDEO DEMO</span>`
+        : `<span class="play-badge">Đang cập nhật video</span>`;
+
+      return `
+        <div class="swiper-slide">
+          <article class="industry-card ${hasVideo ? "" : "is-disabled"}" data-industry-index="${index}" tabindex="${hasVideo ? "0" : "-1"}">
+            ${poster}
+            ${badge}
+            <div class="content">
+              <h3>${escapeHtml(item.title)}</h3>
+              <p>${escapeHtml(item.shortDescription || item.description || "")}</p>
+            </div>
+          </article>
+        </div>`;
+    }
+
+    function destroyIndustrySwiper() {
+      if (industrySwiper) {
+        industrySwiper.destroy(true, true);
+        industrySwiper = null;
+      }
+    }
+
+    function syncIndustrySwiper() {
+      if (!industryWrapper) return;
+      if (industryMobileQuery.matches) {
+        if (!industrySwiper) {
+          industrySwiper = new Swiper(".industrySwiper", {
+            slidesPerView: 1.12,
+            spaceBetween: 16,
+            loop: industryItems.length > 2,
+            pagination: { el: ".swiper-pagination", clickable: true },
+            navigation: { nextEl: ".swiper-button-next", prevEl: ".swiper-button-prev" }
+          });
+        }
+      } else {
+        destroyIndustrySwiper();
+      }
+    }
+
+    function renderIndustries(items) {
+      if (!industryWrapper) return;
+      industryItems = items.length ? items : fallbackIndustries;
+      destroyIndustrySwiper();
+      industryWrapper.innerHTML = industryItems.map(renderIndustryCard).join("");
+      syncIndustrySwiper();
+    }
+
+    async function loadIndustries() {
+      if (!industryWrapper) return;
+      try {
+        const response = await fetch("/api/industry-solutions", { headers: { "Accept": "application/json" } });
+        const data = response.ok ? await response.json() : [];
+        renderIndustries(Array.isArray(data) && data.length ? data : fallbackIndustries);
+      } catch (error) {
+        console.warn("TodoX industry solutions fallback", error);
+        renderIndustries(fallbackIndustries);
+      }
+    }
+
+    function openIndustryModal(item) {
+      if (!industryModal || !industryModalVideo || !item?.videoUrl) return;
+      industryModalTitle.textContent = item.title || "";
+      industryModalDescription.textContent = item.description || item.shortDescription || "";
+      industryModalNotes.innerHTML = [
+        ["Định dạng phù hợp", item.formatNote],
+        ["Mục tiêu", item.goalNote],
+        ["TodoX có thể triển khai", item.capabilityNote]
+      ].filter(([, value]) => value).map(([label, value]) => `<div class="industry-modal__note"><strong>${escapeHtml(label)}</strong>${escapeHtml(value)}</div>`).join("");
+      industryModalVideo.src = item.videoUrl;
+      industryModal.querySelector(".industry-modal__dialog")?.classList.toggle("is-landscape", item.aspectRatio === "16:9");
+      industryModal.classList.add("is-open");
+      industryModal.setAttribute("aria-hidden", "false");
+      document.body.style.overflow = "hidden";
+    }
+
+    function closeIndustryModal() {
+      if (!industryModal || !industryModalVideo) return;
+      industryModalVideo.pause();
+      industryModalVideo.removeAttribute("src");
+      industryModalVideo.load();
+      industryModal.classList.remove("is-open");
+      industryModal.setAttribute("aria-hidden", "true");
+      document.body.style.overflow = "";
+    }
+
+    industryWrapper?.addEventListener("click", event => {
+      const card = event.target.closest(".industry-card[data-industry-index]");
+      if (!card) return;
+      const item = industryItems[Number(card.dataset.industryIndex)];
+      if (item?.videoUrl) openIndustryModal(item);
     });
+
+    industryWrapper?.addEventListener("keydown", event => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      const card = event.target.closest(".industry-card[data-industry-index]");
+      if (!card) return;
+      event.preventDefault();
+      const item = industryItems[Number(card.dataset.industryIndex)];
+      if (item?.videoUrl) openIndustryModal(item);
+    });
+
+    document.querySelectorAll("[data-industry-modal-close]").forEach(el => {
+      el.addEventListener("click", closeIndustryModal);
+    });
+
+    document.addEventListener("keydown", event => {
+      if (event.key === "Escape") closeIndustryModal();
+    });
+
+    if (industryMobileQuery.addEventListener) {
+      industryMobileQuery.addEventListener("change", syncIndustrySwiper);
+    } else {
+      industryMobileQuery.addListener(syncIndustrySwiper);
+    }
+
+    loadIndustries();
 
     const header = document.getElementById("header");
     const backTop = document.getElementById("backTop");
-    window.addEventListener("scroll", () => {
-      header.classList.toggle("scrolled", window.scrollY > 20);
-      backTop.classList.toggle("show", window.scrollY > 700);
-    });
     backTop.addEventListener("click", () => window.scrollTo({ top: 0, behavior: "smooth" }));
 
     const menuBtn = document.getElementById("menuBtn");
     const navLinks = document.getElementById("navLinks");
+    const sectionLinks = Array.from(navLinks.querySelectorAll('a[href^="#"]'));
+    const sectionTargets = sectionLinks
+      .map(link => ({ link, section: document.querySelector(link.getAttribute("href")) }))
+      .filter(item => item.section);
+
+    function fixedHeaderOffset() {
+      return (header?.offsetHeight || 78) + 14;
+    }
+
+    function setActiveNav() {
+      const currentY = window.scrollY + fixedHeaderOffset() + 24;
+      let active = sectionTargets[0]?.link;
+
+      for (const item of sectionTargets) {
+        if (item.section.offsetTop <= currentY) {
+          active = item.link;
+        }
+      }
+
+      sectionLinks.forEach(link => link.classList.toggle("active", link === active));
+    }
+
+    window.addEventListener("scroll", () => {
+      header.classList.toggle("scrolled", window.scrollY > 20);
+      backTop.classList.toggle("show", window.scrollY > 700);
+      setActiveNav();
+    }, { passive: true });
     menuBtn.addEventListener("click", () => navLinks.classList.toggle("open"));
-    navLinks.querySelectorAll("a").forEach(a => a.addEventListener("click", () => navLinks.classList.remove("open")));
+    sectionLinks.forEach(a => a.addEventListener("click", event => {
+      const target = document.querySelector(a.getAttribute("href"));
+      if (target) {
+        event.preventDefault();
+        window.scrollTo({ top: Math.max(0, target.offsetTop - fixedHeaderOffset()), behavior: "smooth" });
+      }
+      navLinks.classList.remove("open");
+      sectionLinks.forEach(link => link.classList.toggle("active", link === a));
+    }));
+    setActiveNav();
 
     const counters = document.querySelectorAll("[data-count]");
     const counterObserver = new IntersectionObserver(entries => {

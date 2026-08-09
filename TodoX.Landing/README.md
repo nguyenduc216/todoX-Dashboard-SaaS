@@ -43,6 +43,28 @@ Tạo IIS Site riêng:
 Dashboard tiếp tục dùng Site, physical path và Application Pool riêng.
 Kiểm tra sau khi binding xong tại `https://todox.vn/health`.
 
+## Shared media cho ngành nghề
+
+`TodoX.Web` upload thumbnail/video ngành nghề vào một thư mục dùng chung, còn `TodoX.Landing` serve thư mục đó qua `/media`.
+
+Cấu hình production có thể override bằng biến môi trường:
+
+```powershell
+SharedMedia__StorageRoot=D:\TodoXData\shared-media
+SharedMedia__RequestPath=/media
+SharedMedia__IndustrySolutions__RootSubfolder=landing\industries
+SharedMedia__IndustrySolutions__ThumbnailSubfolder=thumbnails
+SharedMedia__IndustrySolutions__VideoSubfolder=videos
+SharedMedia__IndustrySolutions__TempSubfolder=temp
+```
+
+Quyền IIS khuyến nghị:
+
+- `TodoX.Web` App Pool: Modify / Read / Write
+- `TodoX.Landing` App Pool: Read
+
+Database chỉ lưu URL public dạng `/media/landing/industries/...`, không lưu đường dẫn vật lý Windows.
+
 ## Cấu hình form tư vấn
 
 `wwwroot/js/landing-config.js` chứa `dashboardUrl`, `contactEndpoint` và môi trường.
