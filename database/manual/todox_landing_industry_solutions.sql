@@ -71,6 +71,7 @@ SET module = EXCLUDED.module,
     name = EXCLUDED.name,
     is_active = true;
 
+-- Canonical Landing Page group: both Landing features MUST live under this one group.
 INSERT INTO system.navigation_menu_groups
 (code, title, icon_key, sort_order, default_expanded, is_active, description)
 VALUES
@@ -85,6 +86,45 @@ SET title = EXCLUDED.title,
     description = EXCLUDED.description,
     updated_at = now();
 
+-- Put the existing contact item into the canonical Landing Page group.
+WITH g AS
+(
+    SELECT id FROM system.navigation_menu_groups WHERE code = 'landing_page'
+)
+UPDATE system.navigation_menu_items i
+SET group_id = g.id,
+    sort_order = 10,
+    is_active = true,
+    updated_at = now()
+FROM g
+WHERE i.code = 'landing_contacts'
+   OR i.href = '/landing/contacts';
+
+-- Ensure Contact item exists in the same group.
+WITH g AS
+(
+    SELECT id FROM system.navigation_menu_groups WHERE code = 'landing_page'
+)
+INSERT INTO system.navigation_menu_items
+(group_id, code, title, href, icon_key, module_keys, visibility_policy, match_all, sort_order, is_active, description)
+SELECT g.id, 'landing_contacts', 'Liên hệ tư vấn', '/landing/contacts', 'ContactMail',
+       ARRAY[]::text[], 'always', false, 10, true,
+       'Quản lý khách hàng đăng ký tư vấn từ todox.vn'
+FROM g
+ON CONFLICT (code) DO UPDATE
+SET group_id = EXCLUDED.group_id,
+    title = EXCLUDED.title,
+    href = EXCLUDED.href,
+    icon_key = EXCLUDED.icon_key,
+    module_keys = EXCLUDED.module_keys,
+    visibility_policy = EXCLUDED.visibility_policy,
+    match_all = EXCLUDED.match_all,
+    sort_order = EXCLUDED.sort_order,
+    is_active = true,
+    description = EXCLUDED.description,
+    updated_at = now();
+
+-- Ensure Industry item exists in the SAME group.
 WITH g AS
 (
     SELECT id FROM system.navigation_menu_groups WHERE code = 'landing_page'
@@ -107,5 +147,46 @@ SET group_id = EXCLUDED.group_id,
     is_active = true,
     description = EXCLUDED.description,
     updated_at = now();
+
+-- Clean up duplicated Landing Page groups created by older scripts.
+-- First move any Landing-related child items to the canonical group.
+WITH canonical AS (
+    SELECT id FROM system.navigation_menu_groups WHERE code = 'landing_page'
+), duplicate_groups AS (
+    SELECT id
+    FROM system.navigation_menu_groups
+    WHERE id <> (SELECT id FROM canonical)
+      AND (
+        lower(trim(title)) = 'landing page'
+        OR code IN ('landing', 'landing_industries', 'landing_contacts')
+      )
+)
+UPDATE system.navigation_menu_items i
+SET group_id = (SELECT id FROM canonical),
+    updated_at = now()
+WHERE i.group_id IN (SELECT id FROM duplicate_groups)
+  AND (
+      i.code IN ('landing_contacts', 'landing_industries')
+      OR i.href IN ('/landing/contacts', '/landing/industries')
+  );
+
+-- Deactivate empty duplicate groups instead of hard-deleting, to avoid FK/history issues.
+WITH canonical AS (
+    SELECT id FROM system.navigation_menu_groups WHERE code = 'landing_page'
+)
+UPDATE system.navigation_menu_groups g
+SET is_active = false,
+    updated_at = now()
+WHERE g.id <> (SELECT id FROM canonical)
+  AND (
+      lower(trim(g.title)) = 'landing page'
+      OR g.code IN ('landing', 'landing_industries', 'landing_contacts')
+  )
+  AND NOT EXISTS (
+      SELECT 1
+      FROM system.navigation_menu_items i
+      WHERE i.group_id = g.id
+        AND i.is_active = true
+  );
 
 COMMIT;
