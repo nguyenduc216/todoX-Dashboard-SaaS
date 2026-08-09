@@ -30,7 +30,7 @@ window.TODOX_LANDING_CONFIG = {
   }, "todox-landing-patch-js");
 
   ensureAsset("script", {
-    src: "/js/landing-industry-fix.js?v=20260810-1",
+    src: "/js/landing-industry-fix.js?v=20260810-2",
     defer: "defer"
   }, "todox-landing-industry-fix-js");
 
