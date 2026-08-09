@@ -29,6 +29,11 @@ window.TODOX_LANDING_CONFIG = {
     defer: "defer"
   }, "todox-landing-patch-js");
 
+  ensureAsset("script", {
+    src: "/js/landing-industry-fix.js?v=20260810-1",
+    defer: "defer"
+  }, "todox-landing-industry-fix-js");
+
   const applyFounderPhoto = () => {
     const founder = document.querySelector('.founder-image');
     if (!founder) return;
