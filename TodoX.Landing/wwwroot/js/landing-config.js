@@ -16,13 +16,18 @@ window.TODOX_LANDING_CONFIG = {
 
   ensureAsset("link", {
     rel: "stylesheet",
-    href: "/css/landing-v2.css?v=20260809-1"
+    href: "/css/landing-v2.css?v=20260809-2"
   }, "todox-landing-v2-css");
 
   ensureAsset("script", {
-    src: "/js/landing-industries.js?v=20260809-1",
+    src: "/js/landing-industries.js?v=20260809-2",
     defer: "defer"
   }, "todox-landing-industries-js");
+
+  ensureAsset("script", {
+    src: "/js/landing-patch.js?v=20260809-1",
+    defer: "defer"
+  }, "todox-landing-patch-js");
 
   const applyFounderPhoto = () => {
     const founder = document.querySelector('.founder-image');
