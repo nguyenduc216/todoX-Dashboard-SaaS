@@ -19,4 +19,15 @@ public sealed class IndustrySolutionMediaOptions
     public long MaxVideoBytes { get; set; } = 200L * 1024 * 1024;
     public string[] AllowedThumbnailExtensions { get; set; } = [".jpg", ".jpeg", ".png", ".webp"];
     public string[] AllowedVideoExtensions { get; set; } = [".mp4", ".webm"];
+    public VideoTranscodeOptions VideoTranscode { get; set; } = new();
+}
+
+public sealed class VideoTranscodeOptions
+{
+    public bool Enabled { get; set; } = true;
+    public string FfmpegPath { get; set; } = "ffmpeg";
+    public int TimeoutSeconds { get; set; } = 900;
+    public string Preset { get; set; } = "medium";
+    public int Crf { get; set; } = 23;
+    public int AudioBitrateKbps { get; set; } = 160;
 }
