@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Threading.RateLimiting;
+using Dapper;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
 using TodoX.Landing.Data;
@@ -55,7 +56,7 @@ app.Use(async (context, next) =>
     context.Response.Headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()";
     context.Response.Headers["Content-Security-Policy"] =
         "default-src 'self'; img-src 'self' data: https://todox.vn; " +
-        "style-src 'self' 'unsafe-inline'; script-src 'self'; " +
+        "media-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; " +
         "font-src 'self'; connect-src 'self'; frame-ancestors 'self'; base-uri 'self'; form-action 'self'";
 
     await next();
@@ -88,6 +89,38 @@ app.MapGet("/health/ready", async (LandingContactRepository repository, Cancella
     return ready
         ? Results.Ok(new { service = "TodoX.Landing", status = "ready" })
         : Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+});
+
+app.MapGet("/api/industry-solutions", async (LandingConnectionFactory factory, CancellationToken ct) =>
+{
+    try
+    {
+        using var connection = await factory.OpenAsync(ct);
+        const string sql = """
+            select
+                id,
+                slug,
+                title,
+                short_description as "shortDescription",
+                description,
+                thumbnail_url as "thumbnailUrl",
+                video_url as "videoUrl",
+                aspect_ratio as "aspectRatio",
+                display_order as "displayOrder"
+            from landing.industry_solutions
+            where is_active = true
+            order by display_order, title;
+            """;
+
+        var rows = await connection.QueryAsync(new CommandDefinition(sql, cancellationToken: ct));
+        return Results.Ok(rows);
+    }
+    catch (Npgsql.PostgresException ex) when (ex.SqlState == "42P01")
+    {
+        return Results.Problem(
+            title: "Industry solution schema is not ready.",
+            statusCode: StatusCodes.Status503ServiceUnavailable);
+    }
 });
 
 app.MapPost("/api/contact-leads", async (
