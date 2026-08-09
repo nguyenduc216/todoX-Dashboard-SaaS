@@ -1,0 +1,2 @@
+# Runtime uploads for Landing industry media are stored in this directory in development.
+# In production configure Dashboard: LandingIndustryMedia__RootPath to this site's physical wwwroot/media/industries folder.
