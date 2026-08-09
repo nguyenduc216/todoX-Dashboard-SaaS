@@ -58,17 +58,17 @@ CREATE TRIGGER trg_industry_solutions_updated_at
 BEFORE UPDATE ON landing.industry_solutions
 FOR EACH ROW EXECUTE FUNCTION landing.set_industry_solution_updated_at();
 
+-- auth.permissions.code is a GENERATED ALWAYS column: module || '.' || action.
+-- Therefore do NOT insert/update code directly.
 INSERT INTO auth.permissions
-(module, action, code, name, is_active)
+(module, action, name, is_active)
 VALUES
-('landing_industries', 'view', 'landing.industries.view', 'Xem giải pháp ngành nghề Landing', true),
-('landing_industries', 'create', 'landing.industries.create', 'Tạo giải pháp ngành nghề Landing', true),
-('landing_industries', 'update', 'landing.industries.update', 'Cập nhật giải pháp ngành nghề Landing', true),
-('landing_industries', 'delete', 'landing.industries.delete', 'Xóa mềm/khôi phục giải pháp ngành nghề Landing', true)
+('landing.industries', 'view',   'Xem giải pháp ngành nghề Landing', true),
+('landing.industries', 'create', 'Tạo giải pháp ngành nghề Landing', true),
+('landing.industries', 'update', 'Cập nhật giải pháp ngành nghề Landing', true),
+('landing.industries', 'delete', 'Xóa mềm/khôi phục giải pháp ngành nghề Landing', true)
 ON CONFLICT (code) DO UPDATE
-SET module = EXCLUDED.module,
-    action = EXCLUDED.action,
-    name = EXCLUDED.name,
+SET name = EXCLUDED.name,
     is_active = true;
 
 -- Canonical Landing Page group: both Landing features MUST live under this one group.
