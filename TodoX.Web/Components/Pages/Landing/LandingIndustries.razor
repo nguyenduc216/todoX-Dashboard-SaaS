@@ -49,130 +49,244 @@
             </MudAlert>
         }
 
-        <MudGrid>
-            <MudItem xs="12" xl="8">
-                <MudPaper Class="todox-table-card pa-4">
-                    <MudTable Items="@_items" Dense="true" Hover="true" Breakpoint="Breakpoint.Md" Loading="_loading">
-                        <HeaderContent>
-                            <MudTh>Thumbnail</MudTh>
-                            <MudTh>Tên ngành</MudTh>
-                            <MudTh>Slug</MudTh>
-                            <MudTh>Tỷ lệ</MudTh>
-                            <MudTh>Video</MudTh>
-                            <MudTh>Thứ tự</MudTh>
-                            <MudTh>Trạng thái</MudTh>
-                            <MudTh>Cập nhật</MudTh>
-                            <MudTh>Actions</MudTh>
-                        </HeaderContent>
-                        <RowTemplate>
-                            <MudTd DataLabel="Thumbnail">
-                                @if (!string.IsNullOrWhiteSpace(context.ThumbnailUrl))
-                                {
-                                    <img src="@context.ThumbnailUrl" alt="@context.Title" style="width:84px;height:54px;object-fit:cover;border-radius:8px;" />
-                                }
-                                else
-                                {
-                                    <MudAvatar Rounded="true" Color="Color.Dark" Style="width:84px;height:54px;">TX</MudAvatar>
-                                }
-                            </MudTd>
-                            <MudTd DataLabel="Tên ngành"><MudText Typo="Typo.subtitle2">@context.Title</MudText></MudTd>
-                            <MudTd DataLabel="Slug"><MudText Typo="Typo.caption">@context.Slug</MudText></MudTd>
-                            <MudTd DataLabel="Tỷ lệ"><MudChip T="string" Size="Size.Small" Color="Color.Warning">@context.AspectRatio</MudChip></MudTd>
-                            <MudTd DataLabel="Video">@(string.IsNullOrWhiteSpace(context.VideoUrl) ? "Đang cập nhật" : "Đã upload")</MudTd>
-                            <MudTd DataLabel="Thứ tự">
-                                <MudNumericField T="int" Value="@context.DisplayOrder" ValueChanged="@((int value) => ReorderAsync(context, value))" Min="0" Margin="Margin.Dense" Style="width:88px;" Disabled="@(!CanUpdate)" />
-                            </MudTd>
-                            <MudTd DataLabel="Trạng thái">
-                                @if (context.IsDeleted)
-                                {
-                                    <MudChip T="string" Size="Size.Small" Color="Color.Error">Đã xóa</MudChip>
-                                }
-                                else if (context.IsActive)
-                                {
-                                    <MudChip T="string" Size="Size.Small" Color="Color.Success">Hiển thị</MudChip>
-                                }
-                                else
-                                {
-                                    <MudChip T="string" Size="Size.Small" Color="Color.Default">Ẩn</MudChip>
-                                }
-                            </MudTd>
-                            <MudTd DataLabel="Cập nhật">@context.UpdatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</MudTd>
-                            <MudTd DataLabel="Actions">
-                                <MudStack Row="true" Spacing="1" Class="flex-wrap gap-1">
-                                    <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Warning" Disabled="@(!CanUpdate)" OnClick="@(() => EditAsync(context.Id))">Sửa</MudButton>
-                                    <MudButton Size="Size.Small" Variant="Variant.Text" Disabled="@string.IsNullOrWhiteSpace(context.VideoUrl)" OnClick="@(() => PreviewAsync(context))">Xem thử video</MudButton>
-                                    @if (context.IsDeleted)
-                                    {
-                                        <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Success" Disabled="@(!CanDelete)" OnClick="@(() => RestoreAsync(context.Id))">Khôi phục</MudButton>
-                                    }
-                                    else
-                                    {
-                                        <MudButton Size="Size.Small" Variant="Variant.Text" Disabled="@(!CanUpdate)" OnClick="@(() => ToggleActiveAsync(context))">@(context.IsActive ? "Ẩn" : "Hiện")</MudButton>
-                                        <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Error" Disabled="@(!CanDelete)" OnClick="@(() => DeleteAsync(context.Id))">Xóa mềm</MudButton>
-                                    }
-                                </MudStack>
-                            </MudTd>
-                        </RowTemplate>
-                        <NoRecordsContent><MudText Class="pa-4">Chưa có dữ liệu ngành nghề.</MudText></NoRecordsContent>
-                    </MudTable>
-                </MudPaper>
-            </MudItem>
-
-            <MudItem xs="12" xl="4">
-                <MudPaper Class="todox-panel pa-4">
-                    <MudStack Spacing="2">
-                        <MudText Typo="Typo.h6">@(_edit.Id is null ? "Thêm ngành nghề" : "Cập nhật ngành nghề")</MudText>
-                        <MudTextField T="string" Label="Tên ngành *" Variant="Variant.Outlined" @bind-Value="_edit.Title" OnBlur="EnsureSlug" />
-                        <MudTextField T="string" Label="Slug *" Variant="Variant.Outlined" @bind-Value="_edit.Slug" HelperText="Tự tạo từ tên ngành lần đầu, vẫn cho phép sửa tay." />
-                        <MudTextField T="string" Label="Mô tả ngắn" Lines="2" Variant="Variant.Outlined" @bind-Value="_edit.ShortDescription" Counter="500" MaxLength="500" />
-                        <MudTextField T="string" Label="Mô tả chi tiết" Lines="4" Variant="Variant.Outlined" @bind-Value="_edit.Description" />
-
-                        <MudGrid>
-                            <MudItem xs="6">
-                                <MudSelect T="string" Label="Tỷ lệ video" Variant="Variant.Outlined" @bind-Value="_edit.AspectRatio">
-                                    <MudSelectItem Value="@LandingIndustryAspectRatios.Portrait">9:16</MudSelectItem>
-                                    <MudSelectItem Value="@LandingIndustryAspectRatios.Landscape">16:9</MudSelectItem>
-                                </MudSelect>
-                            </MudItem>
-                            <MudItem xs="6">
-                                <MudNumericField T="int" Label="Thứ tự hiển thị" Variant="Variant.Outlined" @bind-Value="_edit.DisplayOrder" Min="0" />
-                            </MudItem>
-                        </MudGrid>
-
-                        <MudTextField T="string" Label="Định dạng phù hợp" Lines="2" Variant="Variant.Outlined" @bind-Value="_edit.FormatNote" />
-                        <MudTextField T="string" Label="Mục tiêu" Lines="2" Variant="Variant.Outlined" @bind-Value="_edit.GoalNote" />
-                        <MudTextField T="string" Label="TodoX có thể triển khai" Lines="2" Variant="Variant.Outlined" @bind-Value="_edit.CapabilityNote" />
-                        <MudSwitch T="bool" @bind-Value="_edit.IsActive" Color="Color.Success" Label="Hiển thị trên Landing Page" />
-
-                        <MudDivider />
-                        <MudText Typo="Typo.subtitle2">Thumbnail</MudText>
-                        @if (!string.IsNullOrWhiteSpace(_edit.ThumbnailUrl))
+        <MudPaper Class="todox-table-card pa-4">
+            <MudTable Items="@_items" Dense="true" Hover="true" Breakpoint="Breakpoint.Md" Loading="_loading">
+                <HeaderContent>
+                    <MudTh>Thumbnail</MudTh>
+                    <MudTh>Tên ngành</MudTh>
+                    <MudTh>Slug</MudTh>
+                    <MudTh>Tỷ lệ</MudTh>
+                    <MudTh>Video</MudTh>
+                    <MudTh>Thứ tự</MudTh>
+                    <MudTh>Trạng thái</MudTh>
+                    <MudTh>Cập nhật</MudTh>
+                    <MudTh>Actions</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd DataLabel="Thumbnail">
+                        @if (!string.IsNullOrWhiteSpace(context.ThumbnailUrl))
                         {
-                            <img src="@_edit.ThumbnailUrl" alt="Thumbnail" style="width:100%;max-height:210px;object-fit:cover;border-radius:12px;" />
+                            <img src="@context.ThumbnailUrl" alt="@context.Title" style="width:84px;height:54px;object-fit:cover;border-radius:8px;" />
                         }
-                        <InputFile OnChange="ThumbnailSelected" accept="image/jpeg,image/png,image/webp" />
-                        <MudText Typo="Typo.caption">JPG, JPEG, PNG, WEBP. Tối đa 5 MB.</MudText>
-
-                        <MudDivider />
-                        <MudText Typo="Typo.subtitle2">Video clip</MudText>
-                        @if (!string.IsNullOrWhiteSpace(_edit.VideoUrl))
+                        else
                         {
-                            <video src="@_edit.VideoUrl" controls preload="metadata" style="width:100%;max-height:320px;background:#000;border-radius:12px;"></video>
+                            <MudAvatar Rounded="true" Color="Color.Dark" Style="width:84px;height:54px;">TX</MudAvatar>
                         }
-                        <InputFile OnChange="VideoSelected" accept="video/mp4,video/webm" />
-                        <MudText Typo="Typo.caption">MP4 hoặc WEBM. Tối đa 200 MB.</MudText>
-
-                        <MudStack Row="true" Spacing="2" Class="flex-wrap gap-2">
-                            <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Save" Disabled="@(_saving || !CanSave)" OnClick="SaveAsync">Lưu</MudButton>
-                            <MudButton Variant="Variant.Outlined" OnClick="NewItem">Làm mới</MudButton>
+                    </MudTd>
+                    <MudTd DataLabel="Tên ngành"><MudText Typo="Typo.subtitle2">@context.Title</MudText></MudTd>
+                    <MudTd DataLabel="Slug"><MudText Typo="Typo.caption">@context.Slug</MudText></MudTd>
+                    <MudTd DataLabel="Tỷ lệ"><MudChip T="string" Size="Size.Small" Color="Color.Warning">@context.AspectRatio</MudChip></MudTd>
+                    <MudTd DataLabel="Video">@(string.IsNullOrWhiteSpace(context.VideoUrl) ? "Đang cập nhật" : "Đã upload")</MudTd>
+                    <MudTd DataLabel="Thứ tự">
+                        <MudNumericField T="int" Value="@context.DisplayOrder" ValueChanged="@((int value) => ReorderAsync(context, value))" Min="0" Margin="Margin.Dense" Style="width:88px;" Disabled="@(!CanUpdate)" />
+                    </MudTd>
+                    <MudTd DataLabel="Trạng thái">
+                        @if (context.IsDeleted)
+                        {
+                            <MudChip T="string" Size="Size.Small" Color="Color.Error">Đã xóa</MudChip>
+                        }
+                        else if (context.IsActive)
+                        {
+                            <MudChip T="string" Size="Size.Small" Color="Color.Success">Hiển thị</MudChip>
+                        }
+                        else
+                        {
+                            <MudChip T="string" Size="Size.Small" Color="Color.Default">Ẩn</MudChip>
+                        }
+                    </MudTd>
+                    <MudTd DataLabel="Cập nhật">@context.UpdatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</MudTd>
+                    <MudTd DataLabel="Actions">
+                        <MudStack Row="true" Spacing="1" Class="flex-wrap gap-1">
+                            <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Warning" Disabled="@(!CanUpdate)" OnClick="@(() => EditAsync(context.Id))">Sửa</MudButton>
+                            <MudButton Size="Size.Small" Variant="Variant.Text" Disabled="@string.IsNullOrWhiteSpace(context.VideoUrl)" OnClick="@(() => PreviewAsync(context))">Xem thử video</MudButton>
+                            @if (context.IsDeleted)
+                            {
+                                <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Success" Disabled="@(!CanDelete)" OnClick="@(() => RestoreAsync(context.Id))">Khôi phục</MudButton>
+                            }
+                            else
+                            {
+                                <MudButton Size="Size.Small" Variant="Variant.Text" Disabled="@(!CanUpdate)" OnClick="@(() => ToggleActiveAsync(context))">@(context.IsActive ? "Ẩn" : "Hiện")</MudButton>
+                                <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Error" Disabled="@(!CanDelete)" OnClick="@(() => DeleteAsync(context.Id))">Xóa mềm</MudButton>
+                            }
                         </MudStack>
-                    </MudStack>
-                </MudPaper>
-            </MudItem>
-        </MudGrid>
+                    </MudTd>
+                </RowTemplate>
+                <NoRecordsContent><MudText Class="pa-4">Chưa có dữ liệu ngành nghề.</MudText></NoRecordsContent>
+            </MudTable>
+        </MudPaper>
+    }
+</MudStack>
+
+@if (_editOpen)
+{
+    <div class="industry-edit-modal-backdrop" @onclick="CloseEditor">
+        <div class="industry-edit-modal" @onclick:stopPropagation="true">
+            <div class="industry-edit-modal-header">
+                <div>
+                    <MudText Typo="Typo.h5">@(_edit.Id is null ? "Thêm ngành nghề" : "Cập nhật ngành nghề")</MudText>
+                    <MudText Typo="Typo.body2" Color="Color.Secondary">Thông tin này sẽ được sử dụng trên Landing Page todox.vn.</MudText>
+                </div>
+                <MudIconButton Icon="@Icons.Material.Filled.Close" Color="Color.Default" OnClick="CloseEditor" />
+            </div>
+
+            <div class="industry-edit-modal-body">
+                <MudGrid Spacing="2">
+                    <MudItem xs="12" md="6">
+                        <MudTextField T="string" Label="Tên ngành *" Variant="Variant.Outlined" @bind-Value="_edit.Title" OnBlur="EnsureSlug" />
+                    </MudItem>
+                    <MudItem xs="12" md="6">
+                        <MudTextField T="string" Label="Slug *" Variant="Variant.Outlined" @bind-Value="_edit.Slug" HelperText="Tự tạo từ tên ngành lần đầu, vẫn cho phép sửa tay." />
+                    </MudItem>
+                    <MudItem xs="12" md="6">
+                        <MudTextField T="string" Label="Mô tả ngắn" Lines="3" Variant="Variant.Outlined" @bind-Value="_edit.ShortDescription" Counter="500" MaxLength="500" />
+                    </MudItem>
+                    <MudItem xs="12" md="6">
+                        <MudTextField T="string" Label="Mô tả chi tiết" Lines="3" Variant="Variant.Outlined" @bind-Value="_edit.Description" />
+                    </MudItem>
+                    <MudItem xs="12" sm="6" md="3">
+                        <MudSelect T="string" Label="Tỷ lệ video" Variant="Variant.Outlined" @bind-Value="_edit.AspectRatio">
+                            <MudSelectItem Value="@LandingIndustryAspectRatios.Portrait">9:16</MudSelectItem>
+                            <MudSelectItem Value="@LandingIndustryAspectRatios.Landscape">16:9</MudSelectItem>
+                        </MudSelect>
+                    </MudItem>
+                    <MudItem xs="12" sm="6" md="3">
+                        <MudNumericField T="int" Label="Thứ tự hiển thị" Variant="Variant.Outlined" @bind-Value="_edit.DisplayOrder" Min="0" />
+                    </MudItem>
+                    <MudItem xs="12" md="6" Class="d-flex align-center">
+                        <MudSwitch T="bool" @bind-Value="_edit.IsActive" Color="Color.Success" Label="Hiển thị trên Landing Page" />
+                    </MudItem>
+                    <MudItem xs="12" md="4">
+                        <MudTextField T="string" Label="Định dạng phù hợp" Lines="2" Variant="Variant.Outlined" @bind-Value="_edit.FormatNote" />
+                    </MudItem>
+                    <MudItem xs="12" md="4">
+                        <MudTextField T="string" Label="Mục tiêu" Lines="2" Variant="Variant.Outlined" @bind-Value="_edit.GoalNote" />
+                    </MudItem>
+                    <MudItem xs="12" md="4">
+                        <MudTextField T="string" Label="TodoX có thể triển khai" Lines="2" Variant="Variant.Outlined" @bind-Value="_edit.CapabilityNote" />
+                    </MudItem>
+
+                    <MudItem xs="12" md="6">
+                        <MudPaper Class="pa-3 industry-media-box" Outlined="true">
+                            <MudText Typo="Typo.subtitle2">Thumbnail</MudText>
+                            @if (!string.IsNullOrWhiteSpace(_edit.ThumbnailUrl))
+                            {
+                                <img src="@_edit.ThumbnailUrl" alt="Thumbnail" class="industry-thumb-preview" />
+                            }
+                            <InputFile OnChange="ThumbnailSelected" accept="image/jpeg,image/png,image/webp" />
+                            <MudText Typo="Typo.caption">JPG, JPEG, PNG, WEBP. Tối đa 5 MB.</MudText>
+                        </MudPaper>
+                    </MudItem>
+
+                    <MudItem xs="12" md="6">
+                        <MudPaper Class="pa-3 industry-media-box" Outlined="true">
+                            <MudText Typo="Typo.subtitle2">Video clip</MudText>
+                            @if (!string.IsNullOrWhiteSpace(_edit.VideoUrl))
+                            {
+                                <video src="@_edit.VideoUrl" controls preload="metadata" class="industry-video-preview"></video>
+                            }
+                            <InputFile OnChange="VideoSelected" accept="video/mp4,video/webm" />
+                            <MudText Typo="Typo.caption">MP4 hoặc WEBM. Tối đa 200 MB.</MudText>
+                        </MudPaper>
+                    </MudItem>
+                </MudGrid>
+            </div>
+
+            <div class="industry-edit-modal-footer">
+                <MudButton Variant="Variant.Text" Color="Color.Default" OnClick="CloseEditor">Hủy</MudButton>
+                <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Save" Disabled="@(_saving || !CanSave)" OnClick="SaveAsync">
+                    @(_saving ? "Đang lưu..." : "Lưu")
+                </MudButton>
+            </div>
+        </div>
+    </div>
+}
+
+<style>
+    .industry-edit-modal-backdrop {
+        position: fixed;
+        inset: 0;
+        z-index: 1400;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+        background: rgba(0,0,0,.72);
+        backdrop-filter: blur(5px);
     }
 
-</MudStack>
+    .industry-edit-modal {
+        width: min(1120px, 96vw);
+        max-height: 92vh;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        border-radius: 18px;
+        border: 1px solid rgba(255, 183, 0, .28);
+        background: #0d151f;
+        box-shadow: 0 28px 80px rgba(0,0,0,.55);
+    }
+
+    .industry-edit-modal-header,
+    .industry-edit-modal-footer {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        padding: 18px 22px;
+        background: #101a25;
+    }
+
+    .industry-edit-modal-header {
+        border-bottom: 1px solid rgba(255,255,255,.08);
+    }
+
+    .industry-edit-modal-footer {
+        justify-content: flex-end;
+        border-top: 1px solid rgba(255,255,255,.08);
+    }
+
+    .industry-edit-modal-body {
+        overflow-y: auto;
+        padding: 22px;
+        scrollbar-width: thin;
+        scrollbar-color: #ffb900 #111923;
+    }
+
+    .industry-edit-modal-body::-webkit-scrollbar { width: 8px; }
+    .industry-edit-modal-body::-webkit-scrollbar-track { background: #111923; }
+    .industry-edit-modal-body::-webkit-scrollbar-thumb { background: #ffb900; border-radius: 999px; }
+
+    .industry-media-box {
+        min-height: 210px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+    }
+
+    .industry-thumb-preview {
+        width: 100%;
+        max-height: 180px;
+        object-fit: cover;
+        border-radius: 10px;
+        background: #070a0d;
+    }
+
+    .industry-video-preview {
+        width: 100%;
+        max-height: 230px;
+        object-fit: contain;
+        background: #000;
+        border-radius: 10px;
+    }
+
+    @@media (max-width: 768px) {
+        .industry-edit-modal-backdrop { padding: 8px; align-items: flex-end; }
+        .industry-edit-modal { width: 100%; max-height: 94vh; border-radius: 16px 16px 0 0; }
+        .industry-edit-modal-header,
+        .industry-edit-modal-footer { padding: 14px 16px; }
+        .industry-edit-modal-body { padding: 16px; }
+    }
+</style>
 
 @code {
     private bool _ready;
@@ -180,6 +294,7 @@
     private bool _mediaReady;
     private bool _loading;
     private bool _saving;
+    private bool _editOpen;
     private IReadOnlyList<LandingIndustrySolution> _items = Array.Empty<LandingIndustrySolution>();
     private LandingIndustrySolutionEdit _edit = NewEdit();
     private IBrowserFile? _thumbnailFile;
@@ -223,11 +338,24 @@
         }
     }
 
-    private void NewItem()
+    private void ResetEditor()
     {
         _edit = NewEdit();
         _thumbnailFile = null;
         _videoFile = null;
+    }
+
+    private void NewItem()
+    {
+        ResetEditor();
+        _editOpen = true;
+    }
+
+    private void CloseEditor()
+    {
+        if (_saving) return;
+        _editOpen = false;
+        ResetEditor();
     }
 
     private async Task EditAsync(Guid id)
@@ -253,10 +381,12 @@
         };
         _thumbnailFile = null;
         _videoFile = null;
+        _editOpen = true;
     }
 
     private void ThumbnailSelected(InputFileChangeEventArgs e) => _thumbnailFile = e.File;
     private void VideoSelected(InputFileChangeEventArgs e) => _videoFile = e.File;
+
     private Task PreviewAsync(LandingIndustrySolution item)
     {
         var parameters = new DialogParameters
@@ -293,13 +423,14 @@
                 _edit.VideoUrl = await Media.SaveVideoAsync(_videoFile);
             }
 
-            var id = await Repository.UpsertAsync(_edit, AuthState.CurrentUser.UserId);
+            await Repository.UpsertAsync(_edit, AuthState.CurrentUser.UserId);
             if (_thumbnailFile is not null) Media.DeleteIfSharedMedia(oldThumbnail);
             if (_videoFile is not null) Media.DeleteIfSharedMedia(oldVideo);
 
             Snackbar.Add("Đã lưu giải pháp ngành nghề.", Severity.Success);
+            _editOpen = false;
+            ResetEditor();
             await LoadAsync();
-            await EditAsync(id);
         }
         catch (Exception ex)
         {
@@ -322,7 +453,7 @@
     {
         if (AuthState.CurrentUser is null || !CanDelete) return;
         await Repository.DeleteAsync(id, AuthState.CurrentUser.UserId);
-        NewItem();
+        if (_edit.Id == id) CloseEditor();
         await LoadAsync();
     }
 
