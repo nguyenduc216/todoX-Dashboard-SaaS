@@ -58,18 +58,57 @@ CREATE TRIGGER trg_industry_solutions_updated_at
 BEFORE UPDATE ON landing.industry_solutions
 FOR EACH ROW EXECUTE FUNCTION landing.set_industry_solution_updated_at();
 
--- auth.permissions.code is a GENERATED ALWAYS column: module || '.' || action.
--- Therefore do NOT insert/update code directly.
-INSERT INTO auth.permissions
-(module, action, name, is_active)
-VALUES
-('landing.industries', 'view',   'Xem giải pháp ngành nghề Landing', true),
-('landing.industries', 'create', 'Tạo giải pháp ngành nghề Landing', true),
-('landing.industries', 'update', 'Cập nhật giải pháp ngành nghề Landing', true),
-('landing.industries', 'delete', 'Xóa mềm/khôi phục giải pháp ngành nghề Landing', true)
-ON CONFLICT (code) DO UPDATE
-SET name = EXCLUDED.name,
-    is_active = true;
+-- auth.permissions.code is GENERATED ALWAYS as module || '.' || action.
+-- The current database has no UNIQUE constraint on code, so do NOT use ON CONFLICT.
+-- First update existing permission rows.
+UPDATE auth.permissions
+SET name = 'Xem giải pháp ngành nghề Landing',
+    is_active = true
+WHERE module = 'landing.industries' AND action = 'view';
+
+UPDATE auth.permissions
+SET name = 'Tạo giải pháp ngành nghề Landing',
+    is_active = true
+WHERE module = 'landing.industries' AND action = 'create';
+
+UPDATE auth.permissions
+SET name = 'Cập nhật giải pháp ngành nghề Landing',
+    is_active = true
+WHERE module = 'landing.industries' AND action = 'update';
+
+UPDATE auth.permissions
+SET name = 'Xóa mềm/khôi phục giải pháp ngành nghề Landing',
+    is_active = true
+WHERE module = 'landing.industries' AND action = 'delete';
+
+-- Then insert only rows that do not exist. code is generated automatically.
+INSERT INTO auth.permissions (module, action, name, is_active)
+SELECT 'landing.industries', 'view', 'Xem giải pháp ngành nghề Landing', true
+WHERE NOT EXISTS (
+    SELECT 1 FROM auth.permissions
+    WHERE module = 'landing.industries' AND action = 'view'
+);
+
+INSERT INTO auth.permissions (module, action, name, is_active)
+SELECT 'landing.industries', 'create', 'Tạo giải pháp ngành nghề Landing', true
+WHERE NOT EXISTS (
+    SELECT 1 FROM auth.permissions
+    WHERE module = 'landing.industries' AND action = 'create'
+);
+
+INSERT INTO auth.permissions (module, action, name, is_active)
+SELECT 'landing.industries', 'update', 'Cập nhật giải pháp ngành nghề Landing', true
+WHERE NOT EXISTS (
+    SELECT 1 FROM auth.permissions
+    WHERE module = 'landing.industries' AND action = 'update'
+);
+
+INSERT INTO auth.permissions (module, action, name, is_active)
+SELECT 'landing.industries', 'delete', 'Xóa mềm/khôi phục giải pháp ngành nghề Landing', true
+WHERE NOT EXISTS (
+    SELECT 1 FROM auth.permissions
+    WHERE module = 'landing.industries' AND action = 'delete'
+);
 
 -- Canonical Landing Page group: both Landing features MUST live under this one group.
 INSERT INTO system.navigation_menu_groups
