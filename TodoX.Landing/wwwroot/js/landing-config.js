@@ -1,10 +1,29 @@
 window.TODOX_LANDING_CONFIG = {
   dashboardUrl: "https://dashboard.todox.vn",
   contactEndpoint: "/api/contact-leads",
+  industryEndpoint: "/api/industry-solutions",
   environment: "production"
 };
 
 (() => {
+  const ensureAsset = (tag, attrs, id) => {
+    if (document.getElementById(id)) return;
+    const element = document.createElement(tag);
+    element.id = id;
+    Object.entries(attrs).forEach(([key, value]) => element.setAttribute(key, value));
+    document.head.appendChild(element);
+  };
+
+  ensureAsset("link", {
+    rel: "stylesheet",
+    href: "/css/landing-v2.css?v=20260809-1"
+  }, "todox-landing-v2-css");
+
+  ensureAsset("script", {
+    src: "/js/landing-industries.js?v=20260809-1",
+    defer: "defer"
+  }, "todox-landing-industries-js");
+
   const applyFounderPhoto = () => {
     const founder = document.querySelector('.founder-image');
     if (!founder) return;
