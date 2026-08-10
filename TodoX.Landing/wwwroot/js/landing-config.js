@@ -14,17 +14,17 @@ window.TODOX_LANDING_CONFIG = {
     document.head.appendChild(element);
   };
 
-  window.TODOX_LANDING_ASSET_VERSION = "20260810-5";
+  window.TODOX_LANDING_ASSET_VERSION = "20260810-6";
 
   // Industry cards and base modal lifecycle are owned by js/landing.js + css/landing.css.
   // These two small assets only tune presentation/UX; they do not create a second modal.
   ensureAsset("link", {
     rel: "stylesheet",
-    href: "/css/landing-industry-ux.css?v=20260810-1"
+    href: "/css/landing-industry-ux.css?v=20260810-2"
   }, "todox-landing-industry-ux-css");
 
   ensureAsset("script", {
-    src: "/js/landing-industry-ux.js?v=20260810-1",
+    src: "/js/landing-industry-ux.js?v=20260810-2",
     defer: "defer"
   }, "todox-landing-industry-ux-js");
 
