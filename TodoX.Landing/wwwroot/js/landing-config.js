@@ -14,7 +14,7 @@ window.TODOX_LANDING_CONFIG = {
     document.head.appendChild(element);
   };
 
-  window.TODOX_LANDING_ASSET_VERSION = "20260810-6";
+  window.TODOX_LANDING_ASSET_VERSION = "20260810-7";
 
   // Industry cards and base modal lifecycle are owned by js/landing.js + css/landing.css.
   // These two small assets only tune presentation/UX; they do not create a second modal.
@@ -27,6 +27,12 @@ window.TODOX_LANDING_CONFIG = {
     src: "/js/landing-industry-ux.js?v=20260810-2",
     defer: "defer"
   }, "todox-landing-industry-ux-js");
+
+  // Use a text-only TodoX wordmark in the visible Landing UI.
+  ensureAsset("link", {
+    rel: "stylesheet",
+    href: "/css/landing-brand.css?v=20260810-1"
+  }, "todox-landing-brand-css");
 
   const applyFounderPhoto = () => {
     const founder = document.querySelector('.founder-image');
