@@ -14,25 +14,11 @@ window.TODOX_LANDING_CONFIG = {
     document.head.appendChild(element);
   };
 
-  ensureAsset("link", {
-    rel: "stylesheet",
-    href: "/css/landing-v2.css?v=20260809-3"
-  }, "todox-landing-v2-css");
+  window.TODOX_LANDING_ASSET_VERSION = "20260810-4";
 
-  ensureAsset("script", {
-    src: "/js/landing-industries.js?v=20260809-2",
-    defer: "defer"
-  }, "todox-landing-industries-js");
-
-  ensureAsset("script", {
-    src: "/js/landing-patch.js?v=20260809-1",
-    defer: "defer"
-  }, "todox-landing-patch-js");
-
-  ensureAsset("script", {
-    src: "/js/landing-industry-fix.js?v=20260810-2",
-    defer: "defer"
-  }, "todox-landing-industry-fix-js");
+  // Industry cards and the video popup are now owned by js/landing.js + css/landing.css.
+  // Do not inject the legacy landing-industries/patch/fix bundle here; it creates
+  // competing modal markup and player lifecycles.
 
   const applyFounderPhoto = () => {
     const founder = document.querySelector('.founder-image');

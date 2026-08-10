@@ -14,6 +14,8 @@ AOS.init({
     });
 
     const industryWrapper = document.getElementById("industrySolutions");
+    const landingConfig = window.TODOX_LANDING_CONFIG || {};
+    const industryEndpoint = landingConfig.industryEndpoint || "/api/industry-solutions";
     const industryModal = document.getElementById("industryModal");
     const industryModalVideo = document.getElementById("industryModalVideo");
     const industryModalTitle = document.getElementById("industryModalTitle");
@@ -22,6 +24,7 @@ AOS.init({
     const industryMobileQuery = window.matchMedia("(max-width: 768px)");
     let industrySwiper = null;
     let industryItems = [];
+    let currentIndustry = null;
 
     const fallbackIndustries = [
       {
@@ -135,7 +138,7 @@ AOS.init({
     async function loadIndustries() {
       if (!industryWrapper) return;
       try {
-        const response = await fetch("/api/industry-solutions", { headers: { "Accept": "application/json" } });
+        const response = await fetch(industryEndpoint, { headers: { "Accept": "application/json" } });
         const data = response.ok ? await response.json() : [];
         renderIndustries(Array.isArray(data) && data.length ? data : fallbackIndustries);
       } catch (error) {
@@ -144,8 +147,27 @@ AOS.init({
       }
     }
 
+    function stopIndustryVideo(video) {
+      if (!video) return;
+
+      try { video.pause(); } catch {}
+
+      try {
+        video.muted = true;
+        video.currentTime = 0;
+        video.removeAttribute("src");
+
+        const source = video.querySelector("source");
+        if (source) source.removeAttribute("src");
+
+        video.load();
+      } catch {}
+    }
+
     function openIndustryModal(item) {
       if (!industryModal || !industryModalVideo || !item?.videoUrl) return;
+      currentIndustry = item;
+      stopIndustryVideo(industryModalVideo);
       industryModalTitle.textContent = item.title || "";
       industryModalDescription.textContent = item.description || item.shortDescription || "";
       industryModalNotes.innerHTML = [
@@ -153,21 +175,87 @@ AOS.init({
         ["Mục tiêu", item.goalNote],
         ["TodoX có thể triển khai", item.capabilityNote]
       ].filter(([, value]) => value).map(([label, value]) => `<div class="industry-modal__note"><strong>${escapeHtml(label)}</strong>${escapeHtml(value)}</div>`).join("");
+      if (item.thumbnailUrl) {
+        industryModalVideo.poster = item.thumbnailUrl;
+      } else {
+        industryModalVideo.removeAttribute("poster");
+      }
+      industryModalVideo.muted = false;
       industryModalVideo.src = item.videoUrl;
-      industryModal.querySelector(".industry-modal__dialog")?.classList.toggle("is-landscape", item.aspectRatio === "16:9");
+      industryModalVideo.load();
+      const dialog = industryModal.querySelector(".industry-modal__dialog");
+      dialog?.classList.toggle("is-landscape", item.aspectRatio === "16:9");
+      dialog?.classList.toggle("is-portrait", item.aspectRatio !== "16:9");
       industryModal.classList.add("is-open");
       industryModal.setAttribute("aria-hidden", "false");
-      document.body.style.overflow = "hidden";
+      document.body.classList.add("modal-open");
     }
 
     function closeIndustryModal() {
-      if (!industryModal || !industryModalVideo) return;
-      industryModalVideo.pause();
-      industryModalVideo.removeAttribute("src");
-      industryModalVideo.load();
-      industryModal.classList.remove("is-open");
-      industryModal.setAttribute("aria-hidden", "true");
-      document.body.style.overflow = "";
+      stopIndustryVideo(industryModalVideo);
+      industryModal?.classList.remove("is-open");
+      industryModal?.setAttribute("aria-hidden", "true");
+      industryModal?.querySelector(".industry-modal__dialog")?.classList.remove("is-landscape", "is-portrait");
+      document.body.classList.remove("modal-open");
+    }
+
+    function ensureIndustryOption(select, title) {
+      if (!select || !title) return;
+      const existing = Array.from(select.options)
+        .find(option => option.text.trim().toLowerCase() === title.trim().toLowerCase());
+
+      if (existing) {
+        select.value = existing.value;
+        return;
+      }
+
+      select.add(new Option(title, title, true, true));
+    }
+
+    function goToIndustryConsultation() {
+      const item = currentIndustry;
+      const form = document.getElementById("leadForm");
+      const contact = document.getElementById("contact");
+      if (!item || !form || !contact) {
+        closeIndustryModal();
+        return;
+      }
+
+      const industrySelect = form.querySelector('select[name="industry"]');
+      const needSelect = form.querySelector('select[name="need"]');
+      const message = form.querySelector('textarea[name="message"]');
+
+      closeIndustryModal();
+
+      ensureIndustryOption(industrySelect, item.title);
+      if (industrySelect) {
+        industrySelect.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+
+      if (needSelect) {
+        const aiVideoOption = Array.from(needSelect.options)
+          .find(option => option.text.trim().toLowerCase() === "ai video");
+        if (aiVideoOption) {
+          needSelect.value = aiVideoOption.value;
+        }
+        needSelect.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+
+      if (message && !message.value.trim()) {
+        message.value = `Tôi cần tư vấn giải pháp Video AI cho ngành ${item.title}.`;
+        message.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+
+      window.setTimeout(() => {
+        const headerHeight = document.getElementById("header")?.offsetHeight || 78;
+        window.scrollTo({
+          top: Math.max(0, contact.offsetTop - headerHeight - 12),
+          behavior: "smooth"
+        });
+        window.setTimeout(() => {
+          form.querySelector('input[name="fullName"]')?.focus({ preventScroll: true });
+        }, 450);
+      }, 30);
     }
 
     industryWrapper?.addEventListener("click", event => {
@@ -188,6 +276,11 @@ AOS.init({
 
     document.querySelectorAll("[data-industry-modal-close]").forEach(el => {
       el.addEventListener("click", closeIndustryModal);
+    });
+
+    document.querySelector("[data-industry-consult]")?.addEventListener("click", event => {
+      event.preventDefault();
+      goToIndustryConsultation();
     });
 
     document.addEventListener("keydown", event => {

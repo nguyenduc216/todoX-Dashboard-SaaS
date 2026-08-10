@@ -324,7 +324,8 @@
       inset: 0;
       z-index: 2000;
       display: none;
-      padding: 32px;
+      padding: 24px;
+      overflow: auto;
     }
     .industry-modal.is-open {
       display: grid;
@@ -339,15 +340,15 @@
     .industry-modal__dialog {
       position: relative;
       z-index: 1;
-      width: min(1080px, 100%);
+      width: min(1240px, 100%);
       max-height: 90vh;
       overflow: auto;
       display: grid;
       grid-template-columns: minmax(280px, .85fr) minmax(320px, 1fr);
       gap: 26px;
-      padding: 26px;
-      border-radius: 24px;
-      border: 1px solid rgba(255,189,34,.32);
+      padding: 28px;
+      border-radius: 26px;
+      border: 1px solid rgba(255,189,34,.4);
       background: linear-gradient(145deg, rgba(18,20,24,.98), rgba(7,8,10,.98));
       box-shadow: 0 35px 120px rgba(0,0,0,.65);
       scrollbar-color: var(--gold) #090a0d;
@@ -358,17 +359,74 @@
     .industry-modal__dialog::-webkit-scrollbar-thumb { background: var(--gold); border-radius: 999px; }
     .industry-modal__dialog.is-landscape {
       grid-template-columns: 1fr;
-      width: min(980px, 100%);
+      width: min(1120px, 100%);
+    }
+    .industry-modal__video {
+      position: relative;
+      width: 100%;
+      padding: 16px;
+      border: 1px solid rgba(255,189,34,.24);
+      border-radius: 22px;
+      background: #000;
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,.04), 0 18px 50px rgba(0,0,0,.3);
     }
     .industry-modal__video video {
+      display: block;
       width: 100%;
-      max-height: 78vh;
+      height: 100%;
       background: #000;
-      border-radius: 18px;
+      border-radius: 16px;
       object-fit: contain;
     }
     .industry-modal__dialog.is-landscape .industry-modal__video video {
+      aspect-ratio: 16 / 9;
       max-height: 54vh;
+    }
+    .industry-modal__dialog.is-portrait {
+      grid-template-columns: minmax(320px, 420px) minmax(320px, 1fr);
+      align-items: center;
+    }
+    .industry-modal__dialog.is-portrait .industry-modal__video {
+      width: min(380px, 100%);
+      aspect-ratio: 9 / 19.5;
+      justify-self: center;
+      padding: 14px;
+      border-radius: 42px;
+      border-color: rgba(255,255,255,.18);
+      background: linear-gradient(145deg, #34383f, #090a0d 32%, #15181d);
+      box-shadow: inset 0 0 0 2px rgba(255,255,255,.06), 0 24px 70px rgba(0,0,0,.55);
+    }
+    .industry-modal__dialog.is-portrait .industry-modal__video::before {
+      content: "";
+      position: absolute;
+      z-index: 2;
+      top: 21px;
+      left: 50%;
+      width: 34%;
+      height: 22px;
+      border-radius: 999px;
+      transform: translateX(-50%);
+      background: #030405;
+      box-shadow: inset 0 1px 2px rgba(255,255,255,.08);
+      pointer-events: none;
+    }
+    .industry-modal__dialog.is-portrait .industry-modal__video::after {
+      content: "";
+      position: absolute;
+      top: 92px;
+      right: -4px;
+      width: 4px;
+      height: 72px;
+      border-radius: 0 4px 4px 0;
+      background: #555a63;
+      box-shadow: 0 88px 0 #555a63;
+      pointer-events: none;
+    }
+    .industry-modal__dialog.is-portrait .industry-modal__video video {
+      height: 100%;
+      max-height: 78vh;
+      border-radius: 30px;
+      object-fit: contain;
     }
     .industry-modal__content {
       align-self: center;
@@ -405,14 +463,35 @@
       color: #fff;
       cursor: pointer;
     }
+    body.modal-open { overflow: hidden; }
     @media (max-width: 768px) {
-      .industry-modal { padding: 14px; }
+      .industry-modal { padding: 8px 10px; }
       .industry-modal__dialog {
         grid-template-columns: 1fr;
+        width: 100%;
+        max-height: calc(100vh - 16px);
         padding: 18px;
+        border-radius: 22px;
+        gap: 20px;
       }
-      .industry-modal__video video {
+      .industry-modal__dialog.is-landscape .industry-modal__video video {
         max-height: 60vh;
+      }
+      .industry-modal__dialog.is-portrait .industry-modal__video {
+        width: min(84vw, 350px);
+        max-width: 100%;
+      }
+      .industry-modal__dialog.is-portrait .industry-modal__video video {
+        max-height: 70vh;
+      }
+      .industry-modal__content {
+        align-self: start;
+        padding-top: 8px;
+      }
+      .industry-modal__close {
+        position: sticky;
+        top: 0;
+        margin: -8px -8px -40px auto;
       }
     }
 
