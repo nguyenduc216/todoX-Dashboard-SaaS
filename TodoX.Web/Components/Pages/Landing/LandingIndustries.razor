@@ -49,8 +49,8 @@
             </MudAlert>
         }
 
-        <MudPaper Class="todox-table-card pa-4">
-            <MudTable Items="@_items" Dense="true" Hover="true" Breakpoint="Breakpoint.Md" Loading="_loading">
+        <MudPaper Class="todox-table-card industry-admin-table-card pa-2">
+            <MudTable Items="@_items" Dense="true" Hover="true" Breakpoint="Breakpoint.None" Loading="_loading" Class="industry-admin-table">
                 <HeaderContent>
                     <MudTh>Thumbnail</MudTh>
                     <MudTh>Tên ngành</MudTh>
@@ -66,11 +66,11 @@
                     <MudTd DataLabel="Thumbnail">
                         @if (!string.IsNullOrWhiteSpace(context.ThumbnailUrl))
                         {
-                            <img src="@context.ThumbnailUrl" alt="@context.Title" style="width:84px;height:54px;object-fit:cover;border-radius:8px;" />
+                            <img src="@context.ThumbnailUrl" alt="@context.Title" style="width:64px;height:42px;object-fit:cover;border-radius:8px;" />
                         }
                         else
                         {
-                            <MudAvatar Rounded="true" Color="Color.Dark" Style="width:84px;height:54px;">TX</MudAvatar>
+                            <MudAvatar Rounded="true" Color="Color.Dark" Style="width:64px;height:42px;">TX</MudAvatar>
                         }
                     </MudTd>
                     <MudTd DataLabel="Tên ngành"><MudText Typo="Typo.subtitle2">@context.Title</MudText></MudTd>
@@ -78,7 +78,7 @@
                     <MudTd DataLabel="Tỷ lệ"><MudChip T="string" Size="Size.Small" Color="Color.Warning">@context.AspectRatio</MudChip></MudTd>
                     <MudTd DataLabel="Video">@(string.IsNullOrWhiteSpace(context.VideoUrl) ? "Đang cập nhật" : "Đã upload")</MudTd>
                     <MudTd DataLabel="Thứ tự">
-                        <MudNumericField T="int" Value="@context.DisplayOrder" ValueChanged="@((int value) => ReorderAsync(context, value))" Min="0" Margin="Margin.Dense" Style="width:88px;" Disabled="@(!CanUpdate)" />
+                        <MudNumericField T="int" Value="@context.DisplayOrder" ValueChanged="@((int value) => ReorderAsync(context, value))" Min="0" Margin="Margin.Dense" Style="width:72px;" Disabled="@(!CanUpdate)" />
                     </MudTd>
                     <MudTd DataLabel="Trạng thái">
                         @if (context.IsDeleted)
@@ -212,6 +212,21 @@
         padding: 24px;
         background: rgba(0,0,0,.72);
         backdrop-filter: blur(5px);
+    }
+
+    .industry-admin-table-card {
+        overflow-x: auto;
+    }
+
+    .industry-admin-table :deep(.mud-table-cell) {
+        padding: 8px 10px;
+        vertical-align: middle;
+    }
+
+    .industry-admin-table :deep(.mud-button-root) {
+        min-width: 0;
+        padding-inline: 7px;
+        font-size: .78rem;
     }
 
     .industry-edit-modal {

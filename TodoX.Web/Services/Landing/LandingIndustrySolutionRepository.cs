@@ -64,7 +64,7 @@ public sealed class LandingIndustrySolutionRepository
 
     public async Task<IReadOnlyList<LandingIndustrySolution>> ListAsync(bool includeInactive = true, bool includeDeleted = true, CancellationToken ct = default)
     {
-        using var connection = await _db.OpenAsync(ct);
+        using var connection = (NpgsqlConnection)await _db.OpenAsync(ct);
         const string sql = """
             select
                 id,
@@ -99,7 +99,7 @@ public sealed class LandingIndustrySolutionRepository
 
     public async Task<LandingIndustrySolution?> GetAsync(Guid id, CancellationToken ct = default)
     {
-        using var connection = await _db.OpenAsync(ct);
+        using var connection = (NpgsqlConnection)await _db.OpenAsync(ct);
         const string sql = """
             select
                 id,
@@ -128,7 +128,7 @@ public sealed class LandingIndustrySolutionRepository
     public async Task<Guid> CreateAsync(LandingIndustrySolutionEdit model, Guid actorUserId, CancellationToken ct = default)
     {
         Validate(model);
-        using var connection = await _db.OpenAsync(ct);
+        using var connection = (NpgsqlConnection)await _db.OpenAsync(ct);
         const string sql = """
             insert into landing.industry_solutions
             (
@@ -159,7 +159,7 @@ public sealed class LandingIndustrySolutionRepository
     public async Task UpdateAsync(Guid id, LandingIndustrySolutionEdit model, Guid actorUserId, CancellationToken ct = default)
     {
         Validate(model);
-        using var connection = await _db.OpenAsync(ct);
+        using var connection = (NpgsqlConnection)await _db.OpenAsync(ct);
         const string sql = """
             update landing.industry_solutions
             set slug = @Slug,
@@ -202,7 +202,7 @@ public sealed class LandingIndustrySolutionRepository
 
     public async Task UpdateMediaAsync(Guid id, string? thumbnailUrl, string? videoUrl, Guid actorUserId, CancellationToken ct = default)
     {
-        using var connection = await _db.OpenAsync(ct);
+        using var connection = (NpgsqlConnection)await _db.OpenAsync(ct);
         const string sql = """
             update landing.industry_solutions
             set thumbnail_url = coalesce(nullif(@thumbnailUrl, ''), thumbnail_url),
@@ -216,7 +216,7 @@ public sealed class LandingIndustrySolutionRepository
 
     public async Task SetActiveAsync(Guid id, bool active, Guid actorUserId, CancellationToken ct = default)
     {
-        using var connection = await _db.OpenAsync(ct);
+        using var connection = (NpgsqlConnection)await _db.OpenAsync(ct);
         const string sql = """
             update landing.industry_solutions
             set is_active = @active, updated_by = @actorUserId, updated_at = now()
@@ -227,7 +227,7 @@ public sealed class LandingIndustrySolutionRepository
 
     public async Task DeleteAsync(Guid id, Guid actorUserId, CancellationToken ct = default)
     {
-        using var connection = await _db.OpenAsync(ct);
+        using var connection = (NpgsqlConnection)await _db.OpenAsync(ct);
         const string sql = """
             update landing.industry_solutions
             set is_active = false, deleted_at = now(), deleted_by = @actorUserId,
@@ -239,7 +239,7 @@ public sealed class LandingIndustrySolutionRepository
 
     public async Task RestoreAsync(Guid id, Guid actorUserId, CancellationToken ct = default)
     {
-        using var connection = await _db.OpenAsync(ct);
+        using var connection = (NpgsqlConnection)await _db.OpenAsync(ct);
         const string sql = """
             update landing.industry_solutions
             set deleted_at = null, deleted_by = null, updated_by = @actorUserId, updated_at = now()
@@ -343,7 +343,7 @@ public sealed class LandingIndustrySolutionRepository
     public async Task<Guid> UpsertVideoAsync(LandingIndustryVideoEdit model, Guid actorUserId, CancellationToken ct = default)
     {
         ValidateVideo(model);
-        using var connection = await _db.OpenAsync(ct);
+        using var connection = (NpgsqlConnection)await _db.OpenAsync(ct);
         await using var tx = await connection.BeginTransactionAsync(ct);
 
         Guid id;
@@ -397,7 +397,7 @@ public sealed class LandingIndustrySolutionRepository
 
     public async Task SetPrimaryVideoAsync(Guid industrySolutionId, Guid videoId, Guid actorUserId, CancellationToken ct = default)
     {
-        using var connection = await _db.OpenAsync(ct);
+        using var connection = (NpgsqlConnection)await _db.OpenAsync(ct);
         await using var tx = await connection.BeginTransactionAsync(ct);
         await SetPrimaryInternalAsync(connection, tx, industrySolutionId, videoId, actorUserId, ct);
         await tx.CommitAsync(ct);
@@ -416,7 +416,7 @@ public sealed class LandingIndustrySolutionRepository
 
     public async Task DeleteVideoAsync(Guid id, Guid actorUserId, CancellationToken ct = default)
     {
-        using var connection = await _db.OpenAsync(ct);
+        using var connection = (NpgsqlConnection)await _db.OpenAsync(ct);
         await using var tx = await connection.BeginTransactionAsync(ct);
         var industryId = await connection.ExecuteScalarAsync<Guid?>(new CommandDefinition(
             "select industry_solution_id from landing.industry_solution_videos where id=@id", new { id }, tx, cancellationToken: ct));
@@ -434,7 +434,7 @@ public sealed class LandingIndustrySolutionRepository
 
     public async Task RestoreVideoAsync(Guid id, Guid actorUserId, CancellationToken ct = default)
     {
-        using var connection = await _db.OpenAsync(ct);
+        using var connection = (NpgsqlConnection)await _db.OpenAsync(ct);
         await using var tx = await connection.BeginTransactionAsync(ct);
         var industryId = await connection.ExecuteScalarAsync<Guid?>(new CommandDefinition(
             "select industry_solution_id from landing.industry_solution_videos where id=@id", new { id }, tx, cancellationToken: ct));

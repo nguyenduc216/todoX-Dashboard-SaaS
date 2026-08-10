@@ -57,14 +57,8 @@
   }
 
   function renderNotes(item) {
-    const pairs = [
-      ['Định dạng phù hợp', item?.formatNote],
-      ['Mục tiêu', item?.goalNote],
-      ['TodoX có thể triển khai', item?.capabilityNote]
-    ].filter(([, value]) => value);
-    notesEl.innerHTML = pairs.map(([label, value]) =>
-      `<div class="industry-modal__note"><strong>${escapeHtml(label)}</strong>${escapeHtml(value)}</div>`
-    ).join('');
+    notesEl.innerHTML = '';
+    notesEl.hidden = true;
   }
 
   function renderRelated() {
