@@ -1,0 +1,51 @@
+/* Dedicated Solutions section + nav section alignment */
+.todox-solutions-section{
+  position:relative;
+  overflow:hidden;
+  background:
+    radial-gradient(circle at 18% 20%,rgba(255,189,34,.09),transparent 26%),
+    radial-gradient(circle at 82% 72%,rgba(255,189,34,.055),transparent 30%);
+}
+.todox-solutions-section::before{
+  content:"";
+  position:absolute;
+  inset:8% 4%;
+  pointer-events:none;
+  opacity:.28;
+  background-image:linear-gradient(rgba(255,255,255,.018) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.018) 1px,transparent 1px);
+  background-size:42px 42px;
+  mask-image:linear-gradient(to bottom,transparent,black 18%,black 82%,transparent);
+}
+.todox-solutions-section .container{position:relative;z-index:1}
+.todox-solutions-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:18px}
+.todox-solution-card{
+  position:relative;
+  min-height:270px;
+  padding:26px 24px;
+  border:1px solid rgba(255,255,255,.08);
+  border-radius:22px;
+  background:linear-gradient(145deg,rgba(20,23,28,.94),rgba(7,8,11,.86));
+  box-shadow:0 22px 55px rgba(0,0,0,.22);
+  overflow:hidden;
+  transition:transform .25s ease,border-color .25s ease,box-shadow .25s ease;
+}
+.todox-solution-card::after{
+  content:"";
+  position:absolute;
+  inset:auto -40% -55% 20%;
+  height:180px;
+  background:radial-gradient(circle,rgba(255,189,34,.12),transparent 68%);
+  pointer-events:none;
+}
+.todox-solution-card:hover{transform:translateY(-6px);border-color:rgba(255,189,34,.30);box-shadow:0 28px 70px rgba(0,0,0,.32),0 0 34px rgba(255,189,34,.06)}
+.todox-solution-icon{width:54px;height:54px;border-radius:16px;display:grid;place-items:center;margin-bottom:34px;color:var(--gold);font-size:21px;background:rgba(255,189,34,.09);border:1px solid rgba(255,189,34,.28)}
+.todox-solution-no{position:absolute;top:24px;right:24px;color:rgba(255,216,107,.42);font-size:12px;font-weight:800;letter-spacing:.14em}
+.todox-solution-card h3{font-size:20px;margin-bottom:12px}
+.todox-solution-card p{font-size:13px;line-height:1.72;margin:0;color:#b5bac4}
+
+/* Anchor targets should clear the fixed header. */
+#solutions,#industries,#chatstaff,#about,#home,#workflow-section{scroll-margin-top:94px}
+#aiWorkflow{scroll-margin-top:94px}
+
+@media(max-width:1050px){.todox-solutions-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:620px){.todox-solutions-grid{grid-template-columns:1fr}.todox-solution-card{min-height:auto}.todox-solution-icon{margin-bottom:24px}}
