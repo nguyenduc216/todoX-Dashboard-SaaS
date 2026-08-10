@@ -57,6 +57,47 @@ public sealed class LandingIndustrySolutionEdit
     public bool IsActive { get; set; } = true;
 }
 
+public sealed class LandingIndustryVideo
+{
+    public Guid Id { get; set; }
+    public Guid IndustrySolutionId { get; set; }
+    public string Title { get; set; } = string.Empty;
+    public string? ShortDescription { get; set; }
+    public string? Description { get; set; }
+    public string? ThumbnailUrl { get; set; }
+    public string? VideoUrl { get; set; }
+    public string AspectRatio { get; set; } = LandingIndustryAspectRatios.Portrait;
+    public string? FormatNote { get; set; }
+    public string? GoalNote { get; set; }
+    public string? CapabilityNote { get; set; }
+    public int DisplayOrder { get; set; }
+    public bool IsPrimary { get; set; }
+    public bool IsActive { get; set; } = true;
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+    public DateTimeOffset? DeletedAt { get; set; }
+    public Guid? DeletedBy { get; set; }
+    public bool IsDeleted => DeletedAt is not null;
+}
+
+public sealed class LandingIndustryVideoEdit
+{
+    public Guid? Id { get; set; }
+    public Guid IndustrySolutionId { get; set; }
+    public string Title { get; set; } = string.Empty;
+    public string? ShortDescription { get; set; }
+    public string? Description { get; set; }
+    public string? ThumbnailUrl { get; set; }
+    public string? VideoUrl { get; set; }
+    public string AspectRatio { get; set; } = LandingIndustryAspectRatios.Portrait;
+    public string? FormatNote { get; set; }
+    public string? GoalNote { get; set; }
+    public string? CapabilityNote { get; set; }
+    public int DisplayOrder { get; set; }
+    public bool IsPrimary { get; set; }
+    public bool IsActive { get; set; } = true;
+}
+
 public sealed class LandingIndustrySolutionValidationException : Exception
 {
     public LandingIndustrySolutionValidationException(string message)
