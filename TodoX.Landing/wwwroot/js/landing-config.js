@@ -14,9 +14,8 @@ window.TODOX_LANDING_CONFIG = {
     document.head.appendChild(element);
   };
 
-  window.TODOX_LANDING_ASSET_VERSION = "20260810-8";
+  window.TODOX_LANDING_ASSET_VERSION = "20260810-9";
 
-  // Industry cards and base modal lifecycle are owned by js/landing.js + css/landing.css.
   ensureAsset("link", {
     rel: "stylesheet",
     href: "/css/landing-industry-ux.css?v=20260810-2"
@@ -27,13 +26,21 @@ window.TODOX_LANDING_CONFIG = {
     defer: "defer"
   }, "todox-landing-industry-ux-js");
 
-  // Text-only TodoX wordmark in the visible Landing UI.
+  ensureAsset("link", {
+    rel: "stylesheet",
+    href: "/css/landing-industry-multivideo.css?v=20260810-1"
+  }, "todox-landing-industry-multivideo-css");
+
+  ensureAsset("script", {
+    src: "/js/landing-industry-multivideo.js?v=20260810-1",
+    defer: "defer"
+  }, "todox-landing-industry-multivideo-js");
+
   ensureAsset("link", {
     rel: "stylesheet",
     href: "/css/landing-brand.css?v=20260810-1"
   }, "todox-landing-brand-css");
 
-  // Dedicated Solutions section + deterministic menu active state.
   ensureAsset("link", {
     rel: "stylesheet",
     href: "/css/landing-navigation-fix.css?v=20260810-1"
