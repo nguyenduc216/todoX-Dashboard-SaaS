@@ -14,7 +14,7 @@ window.TODOX_LANDING_CONFIG = {
     document.head.appendChild(element);
   };
 
-  window.TODOX_LANDING_ASSET_VERSION = "20260810-9";
+  window.TODOX_LANDING_ASSET_VERSION = "20260810-10";
 
   ensureAsset("link", {
     rel: "stylesheet",
@@ -28,11 +28,11 @@ window.TODOX_LANDING_CONFIG = {
 
   ensureAsset("link", {
     rel: "stylesheet",
-    href: "/css/landing-industry-multivideo.css?v=20260810-1"
+    href: "/css/landing-industry-multivideo.css?v=20260810-2"
   }, "todox-landing-industry-multivideo-css");
 
   ensureAsset("script", {
-    src: "/js/landing-industry-multivideo.js?v=20260810-1",
+    src: "/js/landing-industry-multivideo.js?v=20260810-2",
     defer: "defer"
   }, "todox-landing-industry-multivideo-js");
 
