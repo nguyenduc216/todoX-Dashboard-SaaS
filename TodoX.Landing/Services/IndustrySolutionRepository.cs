@@ -21,7 +21,7 @@ public sealed class IndustrySolutionRepository
         try
         {
             using var connection = await _db.OpenAsync(ct);
-            const string sql = """
+            const string industrySql = """
                 select
                     id,
                     slug,
@@ -41,8 +41,68 @@ public sealed class IndustrySolutionRepository
                 order by display_order, title;
                 """;
 
-            var rows = await connection.QueryAsync<IndustrySolution>(new CommandDefinition(sql, cancellationToken: ct));
-            return rows.AsList();
+            var industries = (await connection.QueryAsync<IndustrySolution>(
+                new CommandDefinition(industrySql, cancellationToken: ct))).AsList();
+
+            if (industries.Count == 0)
+                return industries;
+
+            var videoTableReady = await connection.ExecuteScalarAsync<bool>(new CommandDefinition(
+                "select to_regclass('landing.industry_solution_videos') is not null;",
+                cancellationToken: ct));
+
+            if (!videoTableReady)
+                return industries;
+
+            const string videoSql = """
+                select
+                    id,
+                    industry_solution_id as IndustrySolutionId,
+                    title,
+                    short_description as ShortDescription,
+                    description,
+                    thumbnail_url as ThumbnailUrl,
+                    video_url as VideoUrl,
+                    aspect_ratio as AspectRatio,
+                    format_note as FormatNote,
+                    goal_note as GoalNote,
+                    capability_note as CapabilityNote,
+                    display_order as DisplayOrder,
+                    is_primary as IsPrimary
+                from landing.industry_solution_videos
+                where is_active = true
+                  and deleted_at is null
+                  and industry_solution_id = any(@ids)
+                order by industry_solution_id, is_primary desc, display_order, created_at;
+                """;
+
+            var ids = industries.Select(x => x.Id).ToArray();
+            var videos = (await connection.QueryAsync<IndustrySolutionVideo>(
+                new CommandDefinition(videoSql, new { ids }, cancellationToken: ct))).AsList();
+            var grouped = videos.GroupBy(x => x.IndustrySolutionId)
+                .ToDictionary(x => x.Key, x => (IReadOnlyList<IndustrySolutionVideo>)x.ToList());
+
+            foreach (var industry in industries)
+            {
+                if (!grouped.TryGetValue(industry.Id, out var industryVideos))
+                    continue;
+
+                industry.Videos = industryVideos;
+                var primary = industryVideos.FirstOrDefault(x => x.IsPrimary)
+                              ?? industryVideos.FirstOrDefault();
+                if (primary is null)
+                    continue;
+
+                // Keep the existing top-level contract for cards/homepage.
+                // It now mirrors the selected representative video while Videos contains all clips.
+                industry.ThumbnailUrl = primary.ThumbnailUrl ?? industry.ThumbnailUrl;
+                industry.VideoUrl = primary.VideoUrl ?? industry.VideoUrl;
+                industry.AspectRatio = string.IsNullOrWhiteSpace(primary.AspectRatio)
+                    ? industry.AspectRatio
+                    : primary.AspectRatio;
+            }
+
+            return industries;
         }
         catch (LandingSchemaUnavailableException ex)
         {
