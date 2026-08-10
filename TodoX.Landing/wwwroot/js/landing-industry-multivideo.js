@@ -78,7 +78,7 @@
       </div>
       <div class="industry-related-videos__grid">
         ${list.map(item => `
-          <button type="button" class="industry-related-video" data-related-video-id="${escapeHtml(item.id)}">
+          <button type="button" class="industry-related-video" data-related-video-id="${escapeHtml(item.id)}" aria-label="Xem ${escapeHtml(item.title || activeIndustry.title)}">
             <span class="industry-related-video__media">
               ${item.thumbnailUrl
                 ? `<img src="${escapeHtml(item.thumbnailUrl)}" alt="${escapeHtml(item.title || activeIndustry.title)}" loading="lazy">`
@@ -87,7 +87,6 @@
             </span>
             <span class="industry-related-video__body">
               <span class="industry-related-video__title">${escapeHtml(item.title || activeIndustry.title)}</span>
-              <span class="industry-related-video__desc">${escapeHtml(item.shortDescription || item.description || '')}</span>
             </span>
           </button>`).join('')}
       </div>`;
