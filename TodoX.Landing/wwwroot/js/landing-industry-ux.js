@@ -1,6 +1,7 @@
 (() => {
   const modal = document.getElementById('industryModal');
   const video = document.getElementById('industryModalVideo');
+  const industryWrapper = document.getElementById('industrySolutions');
   if (!modal || !video) return;
 
   const media = video.closest('.industry-modal__video');
@@ -35,6 +36,25 @@
 
   ['play', 'playing'].forEach(name => video.addEventListener(name, syncOverlay));
   ['pause', 'ended', 'loadedmetadata', 'canplay', 'emptied'].forEach(name => video.addEventListener(name, syncOverlay));
+
+  const decorateIndustryCards = (root = document) => {
+    root.querySelectorAll?.('.industry-card:not(.is-disabled)').forEach(card => {
+      if (card.querySelector('.industry-card-play-overlay')) return;
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'industry-card-play-overlay';
+      button.setAttribute('aria-label', 'Xem video demo');
+      button.innerHTML = '<i class="fa-solid fa-play"></i>';
+      card.appendChild(button);
+    });
+  };
+
+  decorateIndustryCards();
+
+  if (industryWrapper) {
+    const cardObserver = new MutationObserver(() => decorateIndustryCards(industryWrapper));
+    cardObserver.observe(industryWrapper, { childList: true, subtree: true });
+  }
 
   const observer = new MutationObserver(syncOverlay);
   observer.observe(modal, { attributes: true, attributeFilter: ['class', 'aria-hidden'] });
