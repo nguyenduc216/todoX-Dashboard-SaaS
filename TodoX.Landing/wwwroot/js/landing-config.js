@@ -14,10 +14,9 @@ window.TODOX_LANDING_CONFIG = {
     document.head.appendChild(element);
   };
 
-  window.TODOX_LANDING_ASSET_VERSION = "20260810-7";
+  window.TODOX_LANDING_ASSET_VERSION = "20260810-8";
 
   // Industry cards and base modal lifecycle are owned by js/landing.js + css/landing.css.
-  // These two small assets only tune presentation/UX; they do not create a second modal.
   ensureAsset("link", {
     rel: "stylesheet",
     href: "/css/landing-industry-ux.css?v=20260810-2"
@@ -28,11 +27,22 @@ window.TODOX_LANDING_CONFIG = {
     defer: "defer"
   }, "todox-landing-industry-ux-js");
 
-  // Use a text-only TodoX wordmark in the visible Landing UI.
+  // Text-only TodoX wordmark in the visible Landing UI.
   ensureAsset("link", {
     rel: "stylesheet",
     href: "/css/landing-brand.css?v=20260810-1"
   }, "todox-landing-brand-css");
+
+  // Dedicated Solutions section + deterministic menu active state.
+  ensureAsset("link", {
+    rel: "stylesheet",
+    href: "/css/landing-navigation-fix.css?v=20260810-1"
+  }, "todox-landing-navigation-fix-css");
+
+  ensureAsset("script", {
+    src: "/js/landing-navigation-fix.js?v=20260810-1",
+    defer: "defer"
+  }, "todox-landing-navigation-fix-js");
 
   const applyFounderPhoto = () => {
     const founder = document.querySelector('.founder-image');
