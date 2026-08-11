@@ -1,0 +1,331 @@
+/* Compact spacing + mobile typography/layout refinements */
+
+/* Reduce oversized vertical gaps between main sections without changing their structure. */
+main > .section {
+  padding-top: 22px !important;
+  padding-bottom: 22px !important;
+}
+
+main > .section + .section {
+  margin-top: 10px !important;
+}
+
+.ai-workflow-section {
+  min-height: auto !important;
+}
+
+.ai-workflow-shell {
+  min-height: 720px !important;
+}
+
+/* Industry slider navigation is unnecessary on touch/mobile. */
+@media (max-width: 768px) {
+  .industrySwiper .swiper-button-prev,
+  .industrySwiper .swiper-button-next {
+    display: none !important;
+  }
+
+  main > .section {
+    padding-top: 10px !important;
+    padding-bottom: 10px !important;
+  }
+
+  main > .section + .section {
+    margin-top: 10px !important;
+  }
+
+  .container {
+    width: min(calc(100% - 24px), 1180px) !important;
+  }
+
+  .section-title {
+    margin-bottom: 18px !important;
+  }
+
+  .section-title h2,
+  .workflow-title h2,
+  .chat-grid h2,
+  .cta-card h2,
+  .founder-copy h2 {
+    font-size: clamp(27px, 8vw, 34px) !important;
+    line-height: 1.12 !important;
+    margin-bottom: 10px !important;
+  }
+
+  .section-title p,
+  .workflow-title p,
+  .chat-grid p,
+  .cta-card p,
+  .founder-copy p {
+    font-size: 13px !important;
+    line-height: 1.62 !important;
+    margin-bottom: 10px !important;
+  }
+
+  .eyebrow {
+    padding: 5px 9px !important;
+    font-size: 10px !important;
+  }
+
+  .hero {
+    padding-top: 92px !important;
+    padding-bottom: 18px !important;
+  }
+
+  .hero-grid {
+    gap: 20px !important;
+  }
+
+  .hero-copy h1 {
+    font-size: clamp(35px, 11vw, 46px) !important;
+    line-height: 1.03 !important;
+    margin-bottom: 12px !important;
+  }
+
+  .hero-copy p {
+    font-size: 13px !important;
+    line-height: 1.65 !important;
+  }
+
+  .hero-actions {
+    margin: 18px 0 20px !important;
+    gap: 9px !important;
+  }
+
+  .btn {
+    min-height: 42px !important;
+    padding-inline: 15px !important;
+    font-size: 13px !important;
+  }
+
+  .stats {
+    gap: 8px !important;
+  }
+
+  .stat {
+    padding: 12px 10px !important;
+  }
+
+  .stat strong {
+    font-size: 21px !important;
+  }
+
+  .stat span {
+    font-size: 10px !important;
+  }
+
+  .hero-visual {
+    min-height: 520px !important;
+  }
+
+  .feature-grid {
+    gap: 10px !important;
+    margin-top: 18px !important;
+  }
+
+  .feature-card {
+    padding: 17px !important;
+  }
+
+  .feature-card h3 {
+    font-size: 16px !important;
+    margin-bottom: 7px !important;
+  }
+
+  .feature-card p {
+    font-size: 12px !important;
+    line-height: 1.55 !important;
+    margin-bottom: 0 !important;
+  }
+
+  .icon-box {
+    width: 42px !important;
+    height: 42px !important;
+    margin-bottom: 12px !important;
+  }
+
+  .industry-card {
+    height: 415px !important;
+  }
+
+  .industry-card .content {
+    left: 18px !important;
+    right: 18px !important;
+    bottom: 16px !important;
+  }
+
+  .industry-card .content h3 {
+    font-size: 21px !important;
+    margin-bottom: 8px !important;
+  }
+
+  .industry-card .content p {
+    font-size: 12px !important;
+    line-height: 1.55 !important;
+  }
+
+  .industry-card .play-badge {
+    top: 12px !important;
+    right: 12px !important;
+    padding: 6px 9px !important;
+    font-size: 10px !important;
+  }
+
+  .industrySwiper .swiper-pagination {
+    position: relative !important;
+    bottom: auto !important;
+    margin-top: 8px !important;
+  }
+
+  .ai-workflow-shell {
+    min-height: 770px !important;
+    padding-top: 18px !important;
+    padding-bottom: 12px !important;
+    border-radius: 22px !important;
+  }
+
+  .workflow-title {
+    margin-bottom: 8px !important;
+    padding-inline: 12px !important;
+  }
+
+  .workflow-stage {
+    min-height: 650px !important;
+    margin: 0 8px !important;
+  }
+
+  .workflow-node {
+    grid-template-columns: minmax(0,1fr) 72px !important;
+    column-gap: 10px !important;
+  }
+
+  .workflow-node .node-core,
+  .workflow-node[data-step="3"] .node-core {
+    width: 64px !important;
+    height: 64px !important;
+    border-radius: 17px !important;
+  }
+
+  .workflow-node .node-copy {
+    padding: 7px 9px !important;
+  }
+
+  .workflow-node h3 {
+    font-size: 12px !important;
+  }
+
+  .workflow-node p {
+    font-size: 9px !important;
+    line-height: 1.38 !important;
+  }
+
+  .workflow-legend {
+    gap: 10px !important;
+    margin-top: 4px !important;
+    padding: 8px 10px 0 !important;
+    font-size: 9px !important;
+  }
+
+  .chat-grid {
+    gap: 16px !important;
+  }
+
+  .check-list {
+    gap: 8px !important;
+    margin: 14px 0 !important;
+  }
+
+  .check-item {
+    font-size: 12px !important;
+    gap: 8px !important;
+  }
+
+  .chat-demo {
+    padding: 12px !important;
+    gap: 10px !important;
+  }
+
+  .messages {
+    min-height: 220px !important;
+    padding: 12px !important;
+    gap: 8px !important;
+  }
+
+  .msg {
+    padding: 9px 11px !important;
+    font-size: 11px !important;
+  }
+
+  .lead-card {
+    padding: 14px !important;
+  }
+
+  .cta-card,
+  .founder-copy {
+    padding: 20px !important;
+  }
+
+  .cta-card {
+    gap: 18px !important;
+  }
+
+  .form-grid {
+    gap: 10px !important;
+  }
+
+  input,
+  select,
+  textarea {
+    padding: 11px 12px !important;
+    font-size: 13px !important;
+  }
+
+  textarea {
+    min-height: 88px !important;
+  }
+
+  footer {
+    padding-top: 24px !important;
+  }
+
+  .footer-grid {
+    gap: 20px !important;
+  }
+
+  .footer-grid h3 {
+    font-size: 17px !important;
+    margin-bottom: 8px !important;
+  }
+
+  .footer-links {
+    gap: 7px !important;
+    font-size: 12px !important;
+  }
+}
+
+@media (max-width: 430px) {
+  main > .section {
+    padding-top: 8px !important;
+    padding-bottom: 8px !important;
+  }
+
+  .section-title {
+    margin-bottom: 14px !important;
+  }
+
+  .industry-card {
+    height: 400px !important;
+  }
+
+  .hero-visual {
+    min-height: 490px !important;
+  }
+
+  .ai-workflow-shell {
+    min-height: 730px !important;
+  }
+
+  .workflow-stage {
+    min-height: 610px !important;
+  }
+}
