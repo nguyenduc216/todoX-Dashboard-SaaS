@@ -18,7 +18,11 @@
     }
 
     * { box-sizing: border-box; }
-    html { scroll-behavior: smooth; }
+    html {
+      scroll-behavior: smooth;
+      max-width: 100%;
+      overflow-x: hidden;
+    }
     body {
       margin: 0;
       font-family: "Be Vietnam Pro", sans-serif;
@@ -28,6 +32,12 @@
         var(--bg);
       color: var(--text);
       overflow-x: hidden;
+    }
+    @supports (overflow: clip) {
+      html,
+      body {
+        overflow-x: clip;
+      }
     }
 
     body::before {
@@ -480,48 +490,78 @@
     }
     body.modal-open { overflow: hidden; }
     @media (max-width: 768px) {
-      .industry-modal { padding: 8px 10px; }
+      .industry-modal {
+        padding: 6px;
+        place-items: stretch center;
+        overflow: hidden;
+      }
       .industry-modal__dialog {
         grid-template-columns: 1fr;
-        width: 100%;
-        max-height: calc(100dvh - 14px);
-        padding: 12px;
-        border-radius: 20px;
-        gap: 10px;
+        grid-template-rows: auto auto minmax(0, 1fr);
+        width: calc(100dvw - 12px);
+        max-width: calc(100dvw - 12px);
+        height: calc(100dvh - 12px);
+        max-height: calc(100dvh - 12px);
+        padding: 10px;
+        border-radius: 18px;
+        gap: 8px;
+        overflow: hidden;
       }
       .industry-modal__dialog .industry-modal__video,
       .industry-modal__dialog.is-portrait .industry-modal__video,
       .industry-modal__dialog.is-landscape .industry-modal__video {
         grid-column: auto;
         grid-row: auto;
-        width: 100%;
-        max-width: 100%;
-        padding: 10px;
-        border-radius: 18px;
+        justify-self: center;
+        width: min(100%, 100dvw - 32px);
+        max-width: min(100%, 100dvw - 32px);
+        padding: 8px;
+        border-radius: 16px;
+      }
+      .industry-modal__dialog.is-portrait .industry-modal__video {
+        width: auto;
+        height: min(42dvh, 340px);
+        aspect-ratio: 9 / 16;
       }
       .industry-modal__dialog .industry-modal__video video {
         width: 100%;
+        height: 100%;
         max-height: 40dvh;
-        border-radius: 14px;
+        border-radius: 12px;
       }
       .industry-modal__dialog .industry-related-videos,
       .industry-modal__dialog.is-portrait .industry-related-videos,
       .industry-modal__dialog.is-landscape .industry-related-videos {
         grid-column: auto;
         grid-row: auto;
-        margin-top: 4px;
-        padding-top: 10px;
+        min-width: 0;
+        margin-top: 0;
+        padding-top: 8px;
       }
       .industry-modal__content {
         grid-column: auto;
         grid-row: auto;
         align-self: start;
+        min-height: 0;
+        overflow: auto;
         padding-top: 0;
       }
       .industry-modal__close {
         position: sticky;
         top: 0;
-        margin: -2px -2px -34px auto;
+        margin: 0 0 -36px auto;
+      }
+    }
+
+    @media (max-width: 700px) {
+      header,
+      main,
+      footer,
+      .section,
+      .hero,
+      .hero-visual {
+        max-width: 100%;
+        overflow-x: hidden;
       }
     }
 
