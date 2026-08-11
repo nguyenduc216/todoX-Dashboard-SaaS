@@ -125,13 +125,13 @@
   .industry-modal__dialog.is-portrait .industry-modal__video{
     width:auto;
     max-width:calc(100dvw - 32px);
-    height:min(42dvh,340px);
-    aspect-ratio:9/16;
-    max-height:min(42dvh,340px);
+    height:min(44dvh,380px);
+    aspect-ratio:9 / 19.5;
+    max-height:min(44dvh,380px);
   }
   .industry-modal__dialog.is-portrait .industry-modal__video video{
     height:100%;
-    max-height:38dvh;
+    max-height:44dvh;
   }
 }
 

@@ -125,7 +125,7 @@
     .menu-btn { display: none; width: 44px; height: 44px; border: 1px solid var(--white-line); color: white; background: #111; border-radius: 12px; }
 
     /* Hero */
-    .hero { min-height: 940px; display: grid; align-items: center; padding: 140px 0 84px; overflow: hidden; }
+    .hero { min-height: 940px; display: grid; align-items: center; padding: 140px 0 84px; overflow-x: clip; overflow-y: visible; }
     .hero-grid { display: grid; grid-template-columns: 1.02fr .98fr; gap: 70px; align-items: center; }
     .hero-copy p { font-size: 17px; max-width: 660px; }
     .hero-actions { display: flex; gap: 14px; flex-wrap: wrap; margin: 30px 0 38px; }
@@ -138,7 +138,7 @@
     .stat strong { display:block; color: var(--gold); font-size: 27px; margin-bottom: 4px; }
     .stat span { color: #b9bdc5; font-size: 12px; }
 
-    .hero-visual { position: relative; min-height: 630px; }
+    .hero-visual { position: relative; min-height: 630px; overflow: visible; }
     .orbit {
       position: absolute; inset: 2% -5% 0 0; border-radius: 50%;
       border: 1px solid rgba(255,189,34,.18);
@@ -161,12 +161,13 @@
       background: linear-gradient(145deg, #11141a, #050607);
       box-shadow: var(--shadow), 0 0 60px rgba(255,189,34,.15);
       transform: perspective(1200px) rotateY(-7deg) rotateX(2deg);
+      overflow: visible;
     }
     .phone-screen {
       height: 100%; border-radius: 35px; overflow:hidden; position:relative;
       background:
         linear-gradient(to top, rgba(0,0,0,.85), rgba(0,0,0,.08) 50%),
-        url("../img/landing/ai-video-beauty.jpg") center/cover;
+        url("../img/landing/chatstaff-hero-phone.png") center/cover;
     }
     .phone-content { position:absolute; left: 24px; right: 24px; bottom: 26px; }
     .phone-content .mini-tag { color:#111; background:var(--gold); border-radius:999px; padding:7px 11px; font-size:11px; font-weight:800; display:inline-block; }
@@ -211,7 +212,7 @@
       border-radius: var(--radius);
       box-shadow: var(--shadow);
     }
-    .feature-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:18px; margin-top:38px; }
+    .feature-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:18px; margin-top:38px; }
     .feature-card { padding:26px; transition:.3s; }
     .feature-card:hover { transform:translateY(-8px); border-color:var(--line); }
     .icon-box {
@@ -1072,7 +1073,7 @@
       .hero-grid, .chat-grid, .cta-card, .founder-card { grid-template-columns:1fr; }
       .hero { min-height:auto; }
       .hero-visual { min-height:700px; }
-      .feature-grid { grid-template-columns:repeat(2,1fr); }
+      .feature-grid { grid-template-columns:repeat(3,1fr); }
       .process { grid-template-columns:repeat(2,1fr); }
       .process::before { display:none; }
       .founder-image { min-height:460px; }
@@ -1086,9 +1087,9 @@
       h1 { font-size:42px; }
       .hero { padding-top:116px; }
       .stats { grid-template-columns:repeat(2,1fr); }
-      .hero-visual { min-height:610px; }
+      .hero-visual { min-height:610px; overflow: visible; }
       .phone { left:0; width:305px; height:575px; }
-      .industry-pills { right:-35px; }
+      .industry-pills { right:-24px; z-index:3; }
       .industry-pill { width:155px; min-height:60px; }
       .industry-pill:nth-child(n+4) { display:none; }
       .feature-grid, .form-grid, .chat-demo, .footer-grid { grid-template-columns:1fr; }

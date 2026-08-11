@@ -219,13 +219,14 @@ main > .section + .section {
     justify-self: center !important;
     width: min(100%, 100dvw - 32px) !important;
     max-width: min(100%, 100dvw - 32px) !important;
-    aspect-ratio: 9 / 16 !important;
     align-self: start !important;
   }
 
   .industry-modal__dialog.is-portrait .industry-modal__video {
     width: auto !important;
-    height: min(42dvh, 340px) !important;
+    height: min(44dvh, 380px) !important;
+    aspect-ratio: 9 / 19.5 !important;
+    grid-row: 2 !important;
   }
 
   .industry-modal__dialog .industry-modal__video {
@@ -236,14 +237,24 @@ main > .section + .section {
   .industry-modal__dialog .industry-modal__video video {
     width: 100% !important;
     height: 100% !important;
-    max-height: 38dvh !important;
+    max-height: 44dvh !important;
     border-radius: 12px !important;
+  }
+
+  .industry-modal__dialog .industry-related-videos {
+    order: 2 !important;
+    grid-row: 1 !important;
+  }
+
+  .industry-modal__dialog .industry-modal__content {
+    order: 3 !important;
+    grid-row: 3 !important;
   }
 
   .industry-modal__dialog .industry-related-videos {
     min-width: 0 !important;
     margin-top: 0 !important;
-    padding-top: 8px !important;
+    padding-top: 4px !important;
   }
 
   .industry-modal__dialog.is-portrait .industry-modal__content,
@@ -311,10 +322,14 @@ main > .section + .section {
   main,
   footer,
   .section,
-  .hero,
-  .hero-visual {
+  .hero {
     max-width: 100% !important;
     overflow-x: hidden !important;
+  }
+
+  .hero-visual {
+    max-width: 100% !important;
+    overflow: visible !important;
   }
 
   .ai-workflow-shell {
@@ -429,7 +444,13 @@ main > .section + .section {
   }
 
   .footer-grid {
-    gap: 20px !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 20px 18px !important;
+  }
+
+  .footer-grid > :first-child,
+  .footer-grid > :last-child {
+    grid-column: 1 / -1 !important;
   }
 
   .footer-grid h3 {
@@ -458,7 +479,8 @@ main > .section + .section {
   }
 
   .hero-visual {
-    min-height: 490px !important;
+    min-height: 560px !important;
+    overflow: visible !important;
   }
 
   .ai-workflow-shell {
