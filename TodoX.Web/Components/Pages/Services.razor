@@ -1,5 +1,6 @@
 @page "/services"
 @using TodoX.Web.Components.Dialogs
+@using TodoX.Web.Models.Catalog
 @inject CatalogAdminRepository Catalog
 @inject IDialogService DialogService
 @inject ISnackbar Snackbar
@@ -12,9 +13,6 @@
             <MudText Typo="Typo.h4" Class="todox-page-title">Quản lý dịch vụ</MudText>
             <MudText Typo="Typo.body1" Class="todox-page-subtitle">Dịch vụ AI khách hàng có thể chọn: tên, nhóm, giá điểm, mô tả, hình minh họa.</MudText>
         </div>
-        <IfCan Permission="services.create">
-            <MudButton Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.Add" OnClick="OpenCreate">Thêm dịch vụ</MudButton>
-        </IfCan>
     </MudStack>
 
     @if (_loading)
@@ -26,7 +24,7 @@
         <MudPaper Class="todox-card pa-8" rounded="true">
             <MudStack AlignItems="AlignItems.Center" Spacing="2">
                 <MudIcon Icon="@Icons.Material.Filled.Category" Size="Size.Large" Class="todox-gold" />
-                <MudText Class="todox-page-subtitle">Chưa có dịch vụ nào. Bấm "Thêm dịch vụ" để tạo.</MudText>
+                <MudText Class="todox-page-subtitle">Chưa có dịch vụ nào. Chạy seed fixed service catalog để cập nhật danh sách.</MudText>
             </MudStack>
         </MudPaper>
     }
@@ -50,8 +48,8 @@
                             }
 
                             <MudChip T="string" Size="Size.Small" Class="todox-service-status"
-                                     Color="@(svc.Status == "active" ? Color.Success : Color.Default)">
-                                @(svc.Status == "active" ? "Đang bán" : "Ẩn")
+                                     Color="@(IsEnabled(svc) ? Color.Success : Color.Default)">
+                                @(IsEnabled(svc) ? "Enabled" : "Disabled")
                             </MudChip>
                         </div>
 
@@ -83,7 +81,6 @@
                                 <div class="todox-service-actions">
                                     <MudIconButton Icon="@Icons.Material.Filled.Sell" Size="Size.Small" title="Bảng giá" OnClick="@(() => OpenTiers(svc))" />
                                     <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" title="Sửa" OnClick="@(() => OpenEdit(svc))" />
-                                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small" title="Xóa" OnClick="@(() => Delete(svc))" />
                                 </div>
                             </MudStack>
                         </div>
@@ -112,23 +109,7 @@
     private static string? ImageUrl(ServiceDto s)
         => !string.IsNullOrWhiteSpace(s.ThumbnailUrl) ? s.ThumbnailUrl : s.CoverImageUrl;
 
-    private async Task OpenCreate()
-    {
-        var parameters = new DialogParameters<ServiceDialog> { { x => x.Categories, _categories } };
-        var dialog = await DialogService.ShowAsync<ServiceDialog>("Thêm dịch vụ", parameters);
-        var result = await dialog.Result;
-        if (result is not null && !result.Canceled && result.Data is ServiceDto model)
-        {
-            if (await Catalog.ServiceCodeExistsAsync(model.ServiceCode))
-            {
-                Snackbar.Add("Mã dịch vụ đã tồn tại.", Severity.Error);
-                return;
-            }
-            await Catalog.InsertServiceAsync(model);
-            Snackbar.Add("Đã thêm dịch vụ.", Severity.Success);
-            await Reload();
-        }
-    }
+    private static bool IsEnabled(ServiceDto s) => FixedTodoXServiceCatalog.IsEnabledStatus(s.Status);
 
     private async Task OpenEdit(ServiceDto svc)
     {
@@ -141,11 +122,6 @@
         var result = await dialog.Result;
         if (result is not null && !result.Canceled && result.Data is ServiceDto model)
         {
-            if (await Catalog.ServiceCodeExistsAsync(model.ServiceCode, model.Id))
-            {
-                Snackbar.Add("Mã dịch vụ đã tồn tại.", Severity.Error);
-                return;
-            }
             await Catalog.UpdateServiceAsync(model);
             Snackbar.Add("Đã cập nhật dịch vụ.", Severity.Success);
             await Reload();
@@ -158,18 +134,5 @@
         var options = new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true };
         await DialogService.ShowAsync<ServiceTiersDialog>($"Bảng giá · {svc.ServiceName}", parameters, options);
         await Reload();
-    }
-
-    private async Task Delete(ServiceDto svc)
-    {
-        var confirm = await DialogService.ShowMessageBoxAsync(
-            "Xóa dịch vụ", $"Xóa dịch vụ \"{svc.ServiceName}\" và toàn bộ bảng giá?",
-            yesText: "Xóa", cancelText: "Hủy");
-        if (confirm == true)
-        {
-            await Catalog.DeleteServiceAsync(svc.Id);
-            Snackbar.Add("Đã xóa dịch vụ.", Severity.Success);
-            await Reload();
-        }
     }
 }

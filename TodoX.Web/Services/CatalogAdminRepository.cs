@@ -1,5 +1,6 @@
 using Dapper;
 using TodoX.Web.Data;
+using TodoX.Web.Models.Catalog;
 
 namespace TodoX.Web.Services;
 
@@ -25,6 +26,7 @@ public sealed class ServiceDto
     public string? ShortDescription { get; set; }
     public string? ThumbnailUrl { get; set; }
     public string? CoverImageUrl { get; set; }
+    public string? WorkflowCode { get; set; }
     public string Status { get; set; } = "active";
     public int SortOrder { get; set; }
     public int TierCount { get; set; }
@@ -85,7 +87,7 @@ public sealed class CatalogAdminRepository
                    s.service_code AS ServiceCode, s.service_name AS ServiceName, s.service_type AS ServiceType,
                    s.description AS Description, s.short_description AS ShortDescription,
                    s.thumbnail_url AS ThumbnailUrl, s.cover_image_url AS CoverImageUrl,
-                   s.status AS Status, s.sort_order AS SortOrder,
+                   s.workflow_code AS WorkflowCode, s.status AS Status, s.sort_order AS SortOrder,
                    (SELECT count(*) FROM catalog.service_pricing_tiers t WHERE t.service_id = s.id) AS TierCount,
                    (SELECT min(token_cost) FROM catalog.service_pricing_tiers t WHERE t.service_id = s.id AND t.is_active) AS MinTokenCost
               FROM catalog.services s
@@ -105,42 +107,80 @@ public sealed class CatalogAdminRepository
 
     public async Task<Guid> InsertServiceAsync(ServiceDto s)
     {
+        ApplyFixedDefinition(s);
+
         using var conn = await _factory.OpenAsync();
         var id = Guid.NewGuid();
         await conn.ExecuteAsync(
             """
             INSERT INTO catalog.services
                 (id, category_id, service_code, service_name, service_type, description,
-                 short_description, thumbnail_url, cover_image_url, status, sort_order, created_at)
+                 short_description, thumbnail_url, cover_image_url, workflow_code, status, sort_order, created_at)
             VALUES
-                (@id, @cat, @code, @name, @type, @desc, @short, @thumb, @cover, @status, @sort, now());
+                (@id, @cat, @code, @name, @type, @desc, @short, @thumb, @cover, @workflow, @status, @sort, now());
             """,
             new
             {
-                id, cat = s.CategoryId, code = s.ServiceCode, name = s.ServiceName, type = s.ServiceType,
-                desc = s.Description, @short = s.ShortDescription, thumb = s.ThumbnailUrl,
-                cover = s.CoverImageUrl, status = s.Status, sort = s.SortOrder
+                id,
+                cat = s.CategoryId,
+                code = s.ServiceCode,
+                name = s.ServiceName,
+                type = s.ServiceType,
+                desc = s.Description,
+                @short = s.ShortDescription,
+                thumb = s.ThumbnailUrl,
+                cover = s.CoverImageUrl,
+                workflow = s.WorkflowCode,
+                status = s.Status,
+                sort = s.SortOrder
             });
         return id;
     }
 
     public async Task UpdateServiceAsync(ServiceDto s)
     {
+        ApplyFixedDefinition(s);
+
         using var conn = await _factory.OpenAsync();
         await conn.ExecuteAsync(
             """
             UPDATE catalog.services
-               SET category_id=@cat, service_code=@code, service_name=@name, service_type=@type,
+               SET category_id=@cat, service_name=@name, service_type=@type,
                    description=@desc, short_description=@short, thumbnail_url=@thumb,
-                   cover_image_url=@cover, status=@status, sort_order=@sort, updated_at=now()
+                   cover_image_url=@cover, workflow_code=@workflow, status=@status, sort_order=@sort, updated_at=now()
              WHERE id=@id;
             """,
             new
             {
-                id = s.Id, cat = s.CategoryId, code = s.ServiceCode, name = s.ServiceName, type = s.ServiceType,
-                desc = s.Description, @short = s.ShortDescription, thumb = s.ThumbnailUrl,
-                cover = s.CoverImageUrl, status = s.Status, sort = s.SortOrder
+                id = s.Id,
+                cat = s.CategoryId,
+                code = s.ServiceCode,
+                name = s.ServiceName,
+                type = s.ServiceType,
+                desc = s.Description,
+                @short = s.ShortDescription,
+                thumb = s.ThumbnailUrl,
+                cover = s.CoverImageUrl,
+                workflow = s.WorkflowCode,
+                status = s.Status,
+                sort = s.SortOrder
             });
+    }
+
+    private static void ApplyFixedDefinition(ServiceDto service)
+    {
+        if (!FixedTodoXServiceCatalog.TryGetByCode(service.ServiceCode, out var definition))
+        {
+            return;
+        }
+
+        service.ServiceCode = definition.ServiceCode;
+        service.ServiceName = definition.DisplayName;
+        service.ServiceType = definition.ServiceType;
+        service.WorkflowCode = definition.WorkflowCode;
+        service.Description = definition.Description;
+        service.ShortDescription = definition.Description;
+        service.SortOrder = definition.SortOrder;
     }
 
     public async Task DeleteServiceAsync(Guid id)
@@ -180,9 +220,15 @@ public sealed class CatalogAdminRepository
             """,
             new
             {
-                sid = t.ServiceId, code = t.TierCode, name = t.TierName, cost = t.TokenCost,
-                price = t.CurrencyPrice, dur = t.MaxDurationSec, scene = t.MaxSceneCount,
-                def = t.IsDefault, active = t.IsActive
+                sid = t.ServiceId,
+                code = t.TierCode,
+                name = t.TierName,
+                cost = t.TokenCost,
+                price = t.CurrencyPrice,
+                dur = t.MaxDurationSec,
+                scene = t.MaxSceneCount,
+                def = t.IsDefault,
+                active = t.IsActive
             });
     }
 
