@@ -1,0 +1,97 @@
+@page "/jobs"
+@implements IDisposable
+@using TodoX.Web.Models.Timelapse
+@using TodoX.Web.Services.Timelapse
+@inject AuthStateService AuthState
+@inject ITimelapseJobService Jobs
+@inject NavigationManager Navigation
+
+<PageTitle>Jobs của tôi</PageTitle>
+
+<MudStack Spacing="3">
+    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
+        <div>
+            <MudText Typo="Typo.h4" Class="todox-page-title">Jobs của tôi</MudText>
+            <MudText Typo="Typo.body1" Class="todox-page-subtitle">Các cấu hình video thuộc tài khoản của bạn.</MudText>
+        </div>
+        <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Add" OnClick="@(() => Navigation.NavigateTo("/create"))">
+            Tạo video
+        </MudButton>
+    </MudStack>
+
+    @if (!AuthState.IsInitialized)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+    }
+    else if (AuthState.CurrentUser is not { IsCustomer: true })
+    {
+        <MudAlert Severity="Severity.Warning">Vui lòng đăng nhập bằng tài khoản khách hàng.</MudAlert>
+    }
+    else if (_loading)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+    }
+    else if (_jobs.Count == 0)
+    {
+        <MudPaper Class="todox-card pa-6" rounded="true">
+            <MudStack AlignItems="AlignItems.Center" Spacing="2">
+                <MudIcon Icon="@Icons.Material.Filled.Movie" Size="Size.Large" Color="Color.Warning" />
+                <MudText>Chưa có job nào.</MudText>
+                <MudButton Variant="Variant.Outlined" Color="Color.Warning" OnClick="@(() => Navigation.NavigateTo("/create"))">Tạo job đầu tiên</MudButton>
+            </MudStack>
+        </MudPaper>
+    }
+    else
+    {
+        <MudTable Items="_jobs" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Class="todox-table">
+            <HeaderContent>
+                <MudTh>Tiêu đề</MudTh>
+                <MudTh>Dịch vụ</MudTh>
+                <MudTh>Ngày tạo</MudTh>
+                <MudTh>Trạng thái</MudTh>
+                <MudTh></MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="Tiêu đề">@context.Snapshot.Title</MudTd>
+                <MudTd DataLabel="Dịch vụ">Video Timelapse AI</MudTd>
+                <MudTd DataLabel="Ngày tạo">@context.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</MudTd>
+                <MudTd DataLabel="Trạng thái"><MudChip T="string" Size="Size.Small" Color="Color.Warning">@context.Status</MudChip></MudTd>
+                <MudTd DataLabel="Hành động">
+                    <MudIconButton Icon="@Icons.Material.Filled.Visibility" title="Xem" OnClick="@(() => Navigation.NavigateTo($"/jobs/timelapse/{context.Id}"))" />
+                </MudTd>
+            </RowTemplate>
+        </MudTable>
+    }
+</MudStack>
+
+@code {
+    private IReadOnlyList<TimelapseJobView> _jobs = Array.Empty<TimelapseJobView>();
+    private bool _loading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        AuthState.OnChange += HandleAuthChange;
+        await LoadJobsAsync();
+    }
+
+    public void Dispose() => AuthState.OnChange -= HandleAuthChange;
+
+    private void HandleAuthChange() => _ = InvokeAsync(async () =>
+    {
+        await LoadJobsAsync();
+        StateHasChanged();
+    });
+
+    private async Task LoadJobsAsync()
+    {
+        _loading = true;
+        _jobs = Array.Empty<TimelapseJobView>();
+        if (AuthState.CurrentUser is { IsCustomer: true } currentUser)
+        {
+            _jobs = await Jobs.ListOwnedAsync(currentUser);
+        }
+
+        _loading = false;
+        await InvokeAsync(StateHasChanged);
+    }
+}

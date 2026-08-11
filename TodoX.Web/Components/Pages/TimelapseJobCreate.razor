@@ -1,0 +1,189 @@
+@page "/jobs/timelapse/new"
+@implements IDisposable
+@using Microsoft.AspNetCore.Components.Forms
+@using TodoX.Web.Models.Timelapse
+@using TodoX.Web.Services.Timelapse
+@inject AuthStateService AuthState
+@inject ITimelapseProfileRepository Profiles
+@inject ITimelapseJobService Jobs
+@inject NavigationManager Navigation
+@inject ISnackbar Snackbar
+
+<PageTitle>Video Timelapse AI</PageTitle>
+
+<MudStack Spacing="3">
+    @if (!AuthState.IsInitialized)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+    }
+    else if (AuthState.CurrentUser is not { IsCustomer: true })
+    {
+        <MudAlert Severity="Severity.Warning">Vui lòng đăng nhập bằng tài khoản khách hàng.</MudAlert>
+    }
+    else
+    {
+        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="flex-wrap">
+            <MudIconButton Icon="@Icons.Material.Filled.ArrowBack" Color="Color.Default" OnClick="@(() => Navigation.NavigateTo("/create"))" />
+            <div>
+                <MudText Typo="Typo.h4" Class="todox-page-title">Video Timelapse AI</MudText>
+                <MudText Typo="Typo.body1" Class="todox-page-subtitle">Thiết lập yêu cầu trước khi bắt đầu render.</MudText>
+            </div>
+        </MudStack>
+
+        <MudTabs Rounded="true" KeepPanelsAlive="true">
+            <MudTabPanel Text="Yêu cầu">
+                <MudPaper Class="todox-card pa-4 mt-3" rounded="true">
+                    <MudStack Spacing="3">
+                        <MudTextField T="string" Label="Tên job" @bind-Value="_request.Title" Variant="Variant.Outlined" />
+
+                        <MudStack Spacing="1">
+                            <MudText Typo="Typo.subtitle2">Ảnh thành phẩm / ảnh tham chiếu</MudText>
+                            <InputFile OnChange="OnImageSelected" accept="image/png,image/jpeg,image/webp" disabled="@_busy" />
+                            @if (_selectedFile is not null)
+                            {
+                                <MudText Typo="Typo.caption" Color="Color.Success">@_selectedFile.Name</MudText>
+                            }
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">Một ảnh hoàn thiện, tối đa 10MB.</MudText>
+                        </MudStack>
+
+                        <MudSelect T="string" Label="Loại công trình" @bind-Value="_request.ProfileCode" Variant="Variant.Outlined" Required="true">
+                            @foreach (var profile in _profiles)
+                            {
+                                <MudSelectItem T="string" Value="@profile.ProfileCode">@profile.ProfileName</MudSelectItem>
+                            }
+                        </MudSelect>
+
+                        <MudStack Spacing="1">
+                            <MudText Typo="Typo.subtitle2">Số scene</MudText>
+                            <MudRadioGroup T="int" @bind-Value="_request.SceneCount">
+                                @foreach (var count in TimelapseRequestRules.AllowedSceneCounts)
+                                {
+                                    <MudRadio T="int" Value="@count" Color="Color.Warning">@count</MudRadio>
+                                }
+                            </MudRadioGroup>
+                        </MudStack>
+
+                        <MudStack Spacing="1">
+                            <MudText Typo="Typo.subtitle2">Chế độ</MudText>
+                            <MudRadioGroup T="string" @bind-Value="_request.VideoMode">
+                                <MudRadio T="string" Value="@TimelapseRequestRules.FastMode" Color="Color.Warning">Fast</MudRadio>
+                                <MudRadio T="string" Value="@TimelapseRequestRules.ProfessionalMode" Color="Color.Warning">Professional</MudRadio>
+                            </MudRadioGroup>
+                        </MudStack>
+
+                        <MudStack Spacing="1">
+                            <MudText Typo="Typo.subtitle2">Tỷ lệ</MudText>
+                            <MudRadioGroup T="string" @bind-Value="_request.Ratio">
+                                <MudRadio T="string" Value="@TimelapseRequestRules.LandscapeRatio" Color="Color.Warning">16:9</MudRadio>
+                                <MudRadio T="string" Value="@TimelapseRequestRules.PortraitRatio" Color="Color.Warning">9:16</MudRadio>
+                            </MudRadioGroup>
+                        </MudStack>
+
+                        @if (_profiles.Count == 0)
+                        {
+                            <MudAlert Severity="Severity.Warning">Không tải được profile Timelapse từ hệ thống workflow.</MudAlert>
+                        }
+
+                        <MudButton Class="todox-primary-btn"
+                                   Variant="Variant.Filled"
+                                   StartIcon="@Icons.Material.Filled.AddTask"
+                                   Disabled="@(_busy || _profiles.Count == 0)"
+                                   OnClick="CreateDraftAsync">
+                            Tạo Job
+                        </MudButton>
+                    </MudStack>
+                </MudPaper>
+            </MudTabPanel>
+            <MudTabPanel Text="Scene" Disabled="true">
+                <MudAlert Severity="Severity.Info" Class="mt-3">Scene sẽ được tạo khi bắt đầu render.</MudAlert>
+            </MudTabPanel>
+            <MudTabPanel Text="Kết quả" Disabled="true">
+                <MudAlert Severity="Severity.Info" Class="mt-3">Kết quả chưa có.</MudAlert>
+            </MudTabPanel>
+        </MudTabs>
+    }
+</MudStack>
+
+@code {
+    private TimelapseCreateRequest _request = new();
+    private IReadOnlyList<TimelapseProfileDto> _profiles = Array.Empty<TimelapseProfileDto>();
+    private IBrowserFile? _selectedFile;
+    private bool _busy;
+
+    protected override async Task OnInitializedAsync()
+    {
+        AuthState.OnChange += HandleAuthChange;
+        await LoadProfilesAsync();
+    }
+
+    public void Dispose() => AuthState.OnChange -= HandleAuthChange;
+
+    private void HandleAuthChange() => _ = InvokeAsync(async () =>
+    {
+        await LoadProfilesAsync();
+        StateHasChanged();
+    });
+
+    private async Task LoadProfilesAsync()
+    {
+        _profiles = Array.Empty<TimelapseProfileDto>();
+        if (AuthState.CurrentUser is not { IsCustomer: true })
+        {
+            return;
+        }
+
+        try
+        {
+            _profiles = await Profiles.GetEnabledProfilesAsync();
+            _request.ProfileCode = _profiles.FirstOrDefault()?.ProfileCode ?? string.Empty;
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Không tải được profile Timelapse: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private void OnImageSelected(InputFileChangeEventArgs args)
+        => _selectedFile = args.File;
+
+    private async Task CreateDraftAsync()
+    {
+        if (_selectedFile is null || AuthState.CurrentUser is null)
+        {
+            Snackbar.Add("Vui lòng chọn ảnh thành phẩm / ảnh tham chiếu.", Severity.Warning);
+            return;
+        }
+
+        var errors = TimelapseRequestRules.Validate(_request, true);
+        if (errors.Count > 0)
+        {
+            Snackbar.Add(errors[0], Severity.Warning);
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            await using var stream = _selectedFile.OpenReadStream(10 * 1024 * 1024);
+            await using var buffer = new MemoryStream();
+            await stream.CopyToAsync(buffer);
+
+            var job = await Jobs.CreateDraftAsync(
+                _request,
+                buffer.ToArray(),
+                _selectedFile.Name,
+                _selectedFile.ContentType,
+                AuthState.CurrentUser);
+
+            Navigation.NavigateTo($"/jobs/timelapse/{job.Id}");
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

@@ -306,6 +306,11 @@
             list.Add(BuildLandingPageGroup(existingCodes));
         }
 
+        if (!existingCodes.Contains("customer_create_video") || !existingCodes.Contains("customer_jobs"))
+        {
+            list.Add(BuildCustomerWorkspaceGroup(existingCodes));
+        }
+
         // Ensure "AI Providers" is always reachable even if the DB menu has not been seeded with it.
         if (!existingCodes.Contains("ai_providers"))
         {
@@ -397,6 +402,11 @@
         if (item.VisibilityPolicy.Equals("admin_avatar_manager", StringComparison.OrdinalIgnoreCase))
         {
             return CanAdminAvatarManager;
+        }
+
+        if (item.VisibilityPolicy.Equals("customer_only", StringComparison.OrdinalIgnoreCase))
+        {
+            return AuthState.CurrentUser?.IsCustomer == true;
         }
 
         if (item.ModuleKeys.Length == 0)
@@ -526,6 +536,57 @@
                     SortOrder = 10
                 }
             }
+        };
+    }
+
+    private static NavigationMenuGroupDto BuildCustomerWorkspaceGroup(ISet<string> existingCodes)
+    {
+        var groupId = Guid.NewGuid();
+        var items = new List<NavigationMenuItemDto>();
+
+        if (!existingCodes.Contains("customer_create_video"))
+        {
+            items.Add(new NavigationMenuItemDto
+            {
+                Id = Guid.NewGuid(),
+                GroupId = groupId,
+                Code = "customer_create_video",
+                Title = "Tạo video",
+                Href = "/create",
+                IconKey = "Movie",
+                ModuleKeys = Array.Empty<string>(),
+                VisibilityPolicy = "customer_only",
+                MatchAll = true,
+                SortOrder = 10
+            });
+        }
+
+        if (!existingCodes.Contains("customer_jobs"))
+        {
+            items.Add(new NavigationMenuItemDto
+            {
+                Id = Guid.NewGuid(),
+                GroupId = groupId,
+                Code = "customer_jobs",
+                Title = "Jobs của tôi",
+                Href = "/jobs",
+                IconKey = "VideoLibrary",
+                ModuleKeys = Array.Empty<string>(),
+                VisibilityPolicy = "customer_only",
+                MatchAll = false,
+                SortOrder = 20
+            });
+        }
+
+        return new NavigationMenuGroupDto
+        {
+            Id = groupId,
+            Code = "customer_workspace",
+            Title = "Video của tôi",
+            IconKey = "Movie",
+            SortOrder = 35,
+            DefaultExpanded = true,
+            Items = items
         };
     }
 

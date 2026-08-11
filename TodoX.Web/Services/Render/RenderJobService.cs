@@ -55,6 +55,7 @@ public sealed class RenderJobService : IRenderJobService
         }
 
         await _tenant.EnsureLoadedAsync(ct);
+        var initialStatus = NormalizeInitialStatus(model.InitialStatus);
         var inputJson = ToJson(model.Input ?? new { });
         var promptJson = ToJson(model.Prompt ?? new { });
         var referenceJson = ToJson(model.References ?? Array.Empty<object>());
@@ -75,6 +76,7 @@ public sealed class RenderJobService : IRenderJobService
                 user = model.UserId,
                 customer = model.CustomerId,
                 type = model.JobType.Trim(),
+                status = initialStatus,
                 priority = model.Priority,
                 input = inputJson,
                 prompt = promptJson,
@@ -99,9 +101,12 @@ public sealed class RenderJobService : IRenderJobService
                 + "Vui lòng chạy file SQL đồng bộ database do quản trị viên cung cấp.", ex);
         }
 
-        await AddEventAsync(job.Id, "JOB_QUEUED", "Render job queued.", new
+        var eventType = initialStatus == RenderJobStatuses.Draft ? "JOB_CREATED" : "JOB_QUEUED";
+        var eventMessage = initialStatus == RenderJobStatuses.Draft ? "Render job draft saved." : "Render job queued.";
+        await AddEventAsync(job.Id, eventType, eventMessage, new
         {
             job.JobType,
+            job.Status,
             job.Priority,
             job.PointCostEstimate,
             job.PointStatus
@@ -119,6 +124,7 @@ public sealed class RenderJobService : IRenderJobService
 
         await _tenant.EnsureLoadedAsync(ct);
         var jobType = model.JobType.Trim();
+        var initialStatus = NormalizeInitialStatus(model.InitialStatus);
 
         using var conn = await _factory.OpenAsync(ct);
         using var tx = conn.BeginTransaction();
@@ -163,6 +169,7 @@ public sealed class RenderJobService : IRenderJobService
                     user = model.UserId,
                     customer = model.CustomerId,
                     type = jobType,
+                    status = initialStatus,
                     priority = model.Priority,
                     input = inputJson,
                     prompt = promptJson,
@@ -189,9 +196,12 @@ public sealed class RenderJobService : IRenderJobService
 
         tx.Commit();
 
-        await AddEventAsync(job.Id, "JOB_QUEUED", "Render job queued.", new
+        var eventType = initialStatus == RenderJobStatuses.Draft ? "JOB_CREATED" : "JOB_QUEUED";
+        var eventMessage = initialStatus == RenderJobStatuses.Draft ? "Render job draft saved." : "Render job queued.";
+        await AddEventAsync(job.Id, eventType, eventMessage, new
         {
             job.JobType,
+            job.Status,
             job.Priority,
             job.PointCostEstimate,
             job.PointStatus
@@ -460,6 +470,22 @@ public sealed class RenderJobService : IRenderJobService
     private static string NormalizeStatus(string status)
         => status.Equals(RenderJobStatuses.Processing, StringComparison.OrdinalIgnoreCase) ? RenderJobStatuses.Rendering : status;
 
+    private static string NormalizeInitialStatus(string? status)
+    {
+        if (string.IsNullOrWhiteSpace(status)
+            || status.Equals(RenderJobStatuses.Queued, StringComparison.OrdinalIgnoreCase))
+        {
+            return RenderJobStatuses.Queued;
+        }
+
+        if (status.Equals(RenderJobStatuses.Draft, StringComparison.OrdinalIgnoreCase))
+        {
+            return RenderJobStatuses.Draft;
+        }
+
+        throw new ArgumentOutOfRangeException(nameof(status), "Only queued or draft may be used when creating a render job.");
+    }
+
     public static string BuildProjectJobLockName(string jobType, long projectId)
         => $"render.render_jobs:{jobType.Trim().ToLowerInvariant()}:{projectId}";
 
@@ -540,7 +566,7 @@ public sealed class RenderJobService : IRenderJobService
              point_cost_estimate, point_status, provider_code, model_code, max_attempts,
              queued_at, created_at)
         VALUES
-            (@tenant, @user, @customer, @type, 'queued', @priority,
+            (@tenant, @user, @customer, @type, @status, @priority,
              CAST(@input AS jsonb), CAST(@prompt AS jsonb), CAST(@refs AS jsonb), @logCode,
              @pointCost, @pointStatus, @provider, @model, @maxAttempts,
              now(), now())

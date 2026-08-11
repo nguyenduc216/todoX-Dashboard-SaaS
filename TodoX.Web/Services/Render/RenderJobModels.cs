@@ -2,6 +2,7 @@ namespace TodoX.Web.Services.Render;
 
 public static class RenderJobStatuses
 {
+    public const string Draft = "draft";
     public const string Queued = "queued";
     public const string Preparing = "preparing";
     public const string Rendering = "rendering";
@@ -28,6 +29,7 @@ public sealed class RenderJobCreateModel
     public Guid? UserId { get; set; }
     public Guid? CustomerId { get; set; }
     public string JobType { get; set; } = string.Empty;
+    public string InitialStatus { get; set; } = RenderJobStatuses.Queued;
     public int Priority { get; set; } = 100;
     public object? Input { get; set; }
     public object? Prompt { get; set; }
@@ -77,6 +79,7 @@ public sealed class RenderJobDto
 
 public static class RenderJobTypes
 {
+    public const string Timelapse = "timelapse";
     public const string RenderVideoBatch = "render_video_job";
     public const string RenderSceneVideo = "render_scene_video";
     public const string MergeProjectVideo = "merge_video_job";

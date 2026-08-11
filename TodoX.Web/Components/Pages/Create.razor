@@ -1,0 +1,145 @@
+@page "/create"
+@implements IDisposable
+@using TodoX.Web.Models.Catalog
+@using TodoX.Web.Models.Timelapse
+@inject AuthStateService AuthState
+@inject CatalogRepository Catalog
+@inject NavigationManager Navigation
+@inject ISnackbar Snackbar
+
+<PageTitle>Tạo video</PageTitle>
+
+<MudStack Spacing="3">
+    <div>
+        <MudText Typo="Typo.h4" Class="todox-page-title">Tạo video</MudText>
+        <MudText Typo="Typo.body1" Class="todox-page-subtitle">Chọn một dịch vụ todoX để bắt đầu.</MudText>
+    </div>
+
+    @if (!AuthState.IsInitialized)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+    }
+    else if (AuthState.CurrentUser is not { IsCustomer: true })
+    {
+        <MudAlert Severity="Severity.Warning">Vui lòng đăng nhập bằng tài khoản khách hàng.</MudAlert>
+    }
+    else if (_loading)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+    }
+    else if (!string.IsNullOrWhiteSpace(_error))
+    {
+        <MudAlert Severity="Severity.Error">@_error</MudAlert>
+    }
+    else
+    {
+        <MudGrid Class="todox-service-grid">
+            @foreach (var service in _services)
+            {
+                <MudItem xs="12" sm="6" md="4">
+                    <MudPaper Class="todox-card todox-service-card pa-4" rounded="true">
+                        <MudStack Spacing="2" Class="h-100">
+                            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                                <MudAvatar Color="Color.Warning" Variant="Variant.Filled">
+                                    <MudIcon Icon="@ServiceIcon(service.ServiceType)" />
+                                </MudAvatar>
+                                <MudStack Spacing="0">
+                                    <MudText Typo="Typo.h6">@service.DisplayName</MudText>
+                                    <MudText Typo="Typo.caption" Color="Color.Success">Sẵn sàng</MudText>
+                                </MudStack>
+                            </MudStack>
+
+                            <MudText Typo="Typo.body2" Color="Color.Secondary" Class="flex-grow-1">
+                                @service.Description
+                            </MudText>
+
+                            <MudButton Variant="Variant.Filled"
+                                       Color="Color.Warning"
+                                       FullWidth="true"
+                                       StartIcon="@Icons.Material.Filled.ArrowForward"
+                                       OnClick="@(() => OpenService(service))">
+                                Bắt đầu
+                            </MudButton>
+                        </MudStack>
+                    </MudPaper>
+                </MudItem>
+            }
+        </MudGrid>
+
+        @if (_services.Count == 0)
+        {
+            <MudAlert Severity="Severity.Info">Hiện chưa có dịch vụ khả dụng.</MudAlert>
+        }
+    }
+</MudStack>
+
+@code {
+    private IReadOnlyList<CatalogServiceView> _services = Array.Empty<CatalogServiceView>();
+    private bool _loading = true;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        AuthState.OnChange += HandleAuthChange;
+        await LoadServicesAsync();
+    }
+
+    public void Dispose() => AuthState.OnChange -= HandleAuthChange;
+
+    private void HandleAuthChange() => _ = InvokeAsync(async () =>
+    {
+        await LoadServicesAsync();
+        StateHasChanged();
+    });
+
+    private async Task LoadServicesAsync()
+    {
+        _error = null;
+        if (AuthState.CurrentUser is not { IsCustomer: true })
+        {
+            _services = Array.Empty<CatalogServiceView>();
+            _loading = false;
+            return;
+        }
+
+        _loading = true;
+        try
+        {
+            var active = await Catalog.GetActiveCatalogServicesAsync();
+            _services = active
+                .Where(x => FixedTodoXServiceCatalog.IsFixedServiceCode(x.ServiceCode))
+                .OrderBy(x => x.SortOrder)
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private void OpenService(CatalogServiceView service)
+    {
+        var route = CustomerServiceRouting.Resolve(service.ServiceCode);
+        if (route.Destination == CustomerServiceDestination.TimelapseCreator && route.Route is not null)
+        {
+            Navigation.NavigateTo(route.Route);
+            return;
+        }
+
+        Snackbar.Add(route.Message ?? "Dịch vụ hiện chưa khả dụng.", Severity.Info);
+    }
+
+    private static string ServiceIcon(string? serviceType)
+        => serviceType?.ToLowerInvariant() switch
+        {
+            "timelapse" => Icons.Material.Filled.Timeline,
+            "rvideo" => Icons.Material.Filled.VideoLibrary,
+            "rdance" => Icons.Material.Filled.AccessibilityNew,
+            _ => Icons.Material.Filled.Movie
+        };
+}

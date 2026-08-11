@@ -1,0 +1,133 @@
+@page "/jobs/timelapse/{JobId:guid}"
+@implements IDisposable
+@using TodoX.Web.Models.Timelapse
+@using TodoX.Web.Services.Timelapse
+@inject AuthStateService AuthState
+@inject ITimelapseJobService Jobs
+@inject NavigationManager Navigation
+
+<PageTitle>Timelapse Job</PageTitle>
+
+<MudStack Spacing="3">
+    @if (!AuthState.IsInitialized)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+    }
+    else if (AuthState.CurrentUser is not { IsCustomer: true })
+    {
+        <MudAlert Severity="Severity.Warning">Vui lòng đăng nhập bằng tài khoản khách hàng.</MudAlert>
+    }
+    else if (_loading)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+    }
+    else if (_job is null)
+    {
+        <MudAlert Severity="Severity.Error">Không tìm thấy job hoặc bạn không có quyền xem job này.</MudAlert>
+    }
+    else
+    {
+        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="flex-wrap">
+            <MudIconButton Icon="@Icons.Material.Filled.ArrowBack" OnClick="@(() => Navigation.NavigateTo("/jobs"))" />
+            <div>
+                <MudText Typo="Typo.h4" Class="todox-page-title">@_job.Snapshot.Title</MudText>
+                <MudText Typo="Typo.body2" Color="Color.Secondary">Job ID: @_job.Id</MudText>
+            </div>
+            <MudSpacer />
+            <MudChip T="string" Color="Color.Warning">@_job.Status</MudChip>
+        </MudStack>
+
+        <MudTabs Rounded="true" KeepPanelsAlive="true">
+            <MudTabPanel Text="Yêu cầu">
+                <MudPaper Class="todox-card pa-4 mt-3" rounded="true">
+                    <MudGrid>
+                        <MudItem xs="12" md="5">
+                            <MudStack Spacing="2">
+                                <MudText Typo="Typo.subtitle2">Ảnh thành phẩm / ảnh tham chiếu</MudText>
+                                @if (!string.IsNullOrWhiteSpace(_job.Snapshot.OriginalImage.PublicUrl))
+                                {
+                                    <img src="@_job.Snapshot.OriginalImage.PublicUrl" alt="Ảnh tham chiếu Timelapse" style="width:100%;max-height:360px;object-fit:contain;border-radius:12px;" />
+                                }
+                            </MudStack>
+                        </MudItem>
+                        <MudItem xs="12" md="7">
+                            <MudStack Spacing="2">
+                                <MudText Typo="Typo.body2"><b>Loại công trình:</b> @_job.Snapshot.ProfileName</MudText>
+                                <MudText Typo="Typo.body2"><b>Số scene:</b> @_job.Snapshot.SceneCount</MudText>
+                                <MudText Typo="Typo.body2"><b>Chế độ:</b> @FormatMode(_job.Snapshot.VideoMode)</MudText>
+                                <MudText Typo="Typo.body2"><b>Tỷ lệ:</b> @FormatRatio(_job.Snapshot.Ratio)</MudText>
+                                <MudText Typo="Typo.body2"><b>Tiến độ scene:</b> @string.Join(", ", _job.Snapshot.ProgressMapping)</MudText>
+                                <MudText Typo="Typo.body2"><b>Tạo lúc:</b> @_job.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</MudText>
+                            </MudStack>
+                        </MudItem>
+                    </MudGrid>
+                </MudPaper>
+            </MudTabPanel>
+            <MudTabPanel Text="Scene">
+                <MudPaper Class="todox-card pa-6 mt-3" rounded="true">
+                    <MudStack AlignItems="AlignItems.Center" Spacing="2">
+                        <MudIcon Icon="@Icons.Material.Filled.PhotoLibrary" Size="Size.Large" Color="Color.Warning" />
+                        <MudText Typo="Typo.h6">Scene sẽ được tạo khi bắt đầu render.</MudText>
+                        <MudText Color="Color.Secondary">Phase 2A mới lưu cấu hình, chưa chạy AI.</MudText>
+                    </MudStack>
+                </MudPaper>
+            </MudTabPanel>
+            <MudTabPanel Text="Kết quả">
+                <MudPaper Class="todox-card pa-6 mt-3" rounded="true">
+                    <MudStack AlignItems="AlignItems.Center" Spacing="2">
+                        <MudIcon Icon="@Icons.Material.Filled.Movie" Size="Size.Large" Color="Color.Warning" />
+                        <MudText Typo="Typo.h6">Kết quả chưa có.</MudText>
+                    </MudStack>
+                </MudPaper>
+            </MudTabPanel>
+        </MudTabs>
+    }
+</MudStack>
+
+@code {
+    [Parameter] public Guid JobId { get; set; }
+
+    private TimelapseJobView? _job;
+    private bool _loading = true;
+
+    protected override void OnInitialized()
+    {
+        AuthState.OnChange += HandleAuthChange;
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        await LoadJobAsync();
+    }
+
+    public void Dispose() => AuthState.OnChange -= HandleAuthChange;
+
+    private void HandleAuthChange() => _ = InvokeAsync(async () =>
+    {
+        await LoadJobAsync();
+        StateHasChanged();
+    });
+
+    private async Task LoadJobAsync()
+    {
+        _loading = true;
+        _job = null;
+        if (AuthState.CurrentUser is { IsCustomer: true })
+        {
+            _job = await Jobs.GetOwnedAsync(JobId, AuthState.CurrentUser);
+        }
+
+        _loading = false;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private static string FormatMode(string mode)
+        => string.Equals(mode, TimelapseRequestRules.ProfessionalMode, StringComparison.OrdinalIgnoreCase)
+            ? "Professional"
+            : "Fast";
+
+    private static string FormatRatio(string ratio)
+        => string.Equals(ratio, TimelapseRequestRules.PortraitRatio, StringComparison.OrdinalIgnoreCase)
+            ? "9:16"
+            : "16:9";
+}
