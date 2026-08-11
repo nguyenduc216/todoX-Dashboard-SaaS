@@ -110,6 +110,12 @@ builder.Services.AddScoped<AiCharacterRepository>();
 builder.Services.AddScoped<IAiCharacterService, AiCharacterService>();
 builder.Services.AddScoped<TodoX.Web.Services.AiProviders.AiProviderRepository>();
 builder.Services.AddScoped<TodoX.Web.Services.AiProviders.IAiProviderService, TodoX.Web.Services.AiProviders.AiProviderService>();
+builder.Services.AddScoped<TodoX.Web.Services.AiProviders.AiProviderModelRepository>();
+builder.Services.AddScoped<TodoX.Web.Services.AiProviders.IAiProviderModelService, TodoX.Web.Services.AiProviders.AiProviderModelService>();
+builder.Services.AddScoped<TodoX.Web.Services.AiProviders.AiPricingRepository>();
+builder.Services.AddScoped<TodoX.Web.Services.AiProviders.IAiPricingService, TodoX.Web.Services.AiProviders.AiPricingService>();
+builder.Services.AddScoped<TodoX.Web.Services.AiProviders.IAiProviderSyncService, TodoX.Web.Services.AiProviders.AiProviderSyncService>();
+builder.Services.AddHttpClient<TodoX.Web.Services.AiProviders.IAi79CatalogClient, TodoX.Web.Services.AiProviders.Ai79CatalogClient>();
 builder.Services.AddScoped<TodoX.Web.Services.AiProviders.IAiBillingPayerResolver, TodoX.Web.Services.AiProviders.AiBillingPayerResolver>();
 builder.Services.AddScoped<TodoX.Web.Services.AiProviders.IAiImageBillingService, TodoX.Web.Services.AiProviders.AiImageBillingService>();
 builder.Services.AddScoped<TodoX.Web.Services.AiProviders.IAiImageBillingDashboardService, TodoX.Web.Services.AiProviders.AiImageBillingDashboardService>();
@@ -382,6 +388,15 @@ extensionApi.MapGet("/download", async (
 
 app.MapDanceSellPhase1Endpoints();
 app.MapDanceSellPhase2Endpoints();
+
+app.MapPost("/api/ai/cost/estimate", async (
+    TodoX.Web.Services.AiProviders.IAiPricingService pricing,
+    EstimateCostRequestDto request,
+    CancellationToken ct) =>
+{
+    var result = await pricing.EstimateAsync(request, ct);
+    return Results.Json(result);
+});
 
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();

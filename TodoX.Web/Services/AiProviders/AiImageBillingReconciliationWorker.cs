@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Npgsql;
 
 namespace TodoX.Web.Services.AiProviders;
 
@@ -39,6 +40,12 @@ public sealed class AiImageBillingReconciliationWorker : BackgroundService
             }
             catch (Exception ex)
             {
+                if (IsMissingBillingTable(ex))
+                {
+                    _logger.LogWarning(ex, "AI_IMAGE_RECONCILIATION_DISABLED_MISSING_SCHEMA");
+                    return;
+                }
+
                 _logger.LogError(ex, "AI_IMAGE_RECONCILIATION_LOOP_FAILED");
             }
 
@@ -153,5 +160,19 @@ public sealed class AiImageBillingReconciliationWorker : BackgroundService
                 TimeSpan.FromMinutes(Math.Min(30, item.ReconciliationAttemptCount * 2)),
                 ct);
         }
+    }
+
+    private static bool IsMissingBillingTable(Exception ex)
+    {
+        for (var current = ex; current is not null; current = current.InnerException)
+        {
+            if (current is PostgresException postgres &&
+                string.Equals(postgres.SqlState, PostgresErrorCodes.UndefinedTable, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 }
