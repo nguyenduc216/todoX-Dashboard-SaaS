@@ -238,7 +238,7 @@
             </MudItem>
         </MudGrid>
             </MudTabPanel>
-            <MudTabPanel Text="Models">
+            <MudTabPanel Text="MODEL">
                 <MudPaper Class="todox-card pa-4" rounded="true">
                     <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
                         <MudText Typo="Typo.h6">Danh sách model</MudText>
@@ -282,8 +282,11 @@
                             <HeaderContent>
                                 <MudTh>Model</MudTh>
                                 <MudTh>Media</MudTh>
-                                <MudTh>Capabilities</MudTh>
-                                <MudTh>Giá 79AI</MudTh>
+                                <MudTh>Mode</MudTh>
+                                <MudTh>Duration</MudTh>
+                                <MudTh>Resolution</MudTh>
+                                <MudTh>Giá từ</MudTh>
+                                <MudTh>Điểm TodoX từ</MudTh>
                                 <MudTh>Trạng thái</MudTh>
                                 <MudTh></MudTh>
                             </HeaderContent>
@@ -297,13 +300,10 @@
                                     }
                                 </MudTd>
                                 <MudTd DataLabel="Media">@m.MediaType</MudTd>
-                                <MudTd DataLabel="Capabilities">
-                                    @foreach (var cap in m.Capabilities)
-                                    {
-                                        <MudChip T="string" Size="Size.Small" Class="me-1">@cap</MudChip>
-                                    }
-                                </MudTd>
-                                <MudTd DataLabel="Giá 79AI">
+                                <MudTd DataLabel="Mode">@FormatStrings(m.SupportedModes)</MudTd>
+                                <MudTd DataLabel="Duration">@FormatDurations(m.SupportedDurations)</MudTd>
+                                <MudTd DataLabel="Resolution">@FormatStrings(m.SupportedResolutions)</MudTd>
+                                <MudTd DataLabel="Giá từ">
                                     @if (m.PriceSummary is null)
                                     {
                                         <MudChip T="string" Size="Size.Small" Color="Color.Warning">Chưa có bảng giá</MudChip>
@@ -314,9 +314,10 @@
                                     }
                                     else
                                     {
-                                        <MudText Typo="Typo.caption">@m.PriceSummary.ProviderPrice?.ToString("0.####") / @m.PriceSummary.SellPoints?.ToString("0.####")</MudText>
+                                        <MudText Typo="Typo.caption">@m.PriceSummary.ProviderPrice?.ToString("0.####") credits</MudText>
                                     }
                                 </MudTd>
+                                <MudTd DataLabel="Điểm TodoX từ">@m.PriceSummary?.SellPoints?.ToString("0.####")</MudTd>
                                 <MudTd DataLabel="Trạng thái">
                                     <MudChip T="string" Size="Size.Small" Color="@(m.Enabled ? Color.Success : Color.Default)">@(m.Enabled ? "ON" : "OFF")</MudChip>
                                     @if (m.IsDeprecated)
@@ -349,6 +350,22 @@
                             </MudStack>
                         </MudStack>
                         <MudDivider Class="my-3" />
+                        <MudStack Row="true" Spacing="1" Class="flex-wrap mb-3">
+                            <MudChip T="string" Size="Size.Small" Color="Color.Default">@_selectedModel.ProviderCode</MudChip>
+                            <MudChip T="string" Size="Size.Small" Color="Color.Info">@_selectedModel.MediaType.ToUpperInvariant()</MudChip>
+                            <MudChip T="string" Size="Size.Small" Color="@(_selectedModel.Enabled ? Color.Success : Color.Default)">@(_selectedModel.Enabled ? "ON" : "OFF")</MudChip>
+                            @foreach (var cap in _selectedCapabilities)
+                            {
+                                <MudChip T="string" Size="Size.Small">@cap.CapabilityCode</MudChip>
+                            }
+                        </MudStack>
+                        <MudText Typo="Typo.subtitle2">Cấu hình hỗ trợ</MudText>
+                        <MudGrid Class="mb-3">
+                            <MudItem xs="12" sm="3"><MudText Typo="Typo.caption" Class="todox-page-subtitle">Mode</MudText><MudText Typo="Typo.body2">@FormatStrings(_selectedModel.SupportedModes)</MudText></MudItem>
+                            <MudItem xs="12" sm="3"><MudText Typo="Typo.caption" Class="todox-page-subtitle">Duration</MudText><MudText Typo="Typo.body2">@FormatDurations(_selectedModel.SupportedDurations)</MudText></MudItem>
+                            <MudItem xs="12" sm="3"><MudText Typo="Typo.caption" Class="todox-page-subtitle">Resolution</MudText><MudText Typo="Typo.body2">@FormatStrings(_selectedModel.SupportedResolutions)</MudText></MudItem>
+                            <MudItem xs="12" sm="3"><MudText Typo="Typo.caption" Class="todox-page-subtitle">Ratio</MudText><MudText Typo="Typo.body2">@FormatStrings(_selectedModel.SupportedRatios)</MudText></MudItem>
+                        </MudGrid>
                         <MudGrid>
                             <MudItem xs="12" sm="6"><MudTextField @bind-Value="_selectedModel.DisplayName" Label="Display name" Variant="Variant.Outlined" /></MudItem>
                             <MudItem xs="12" sm="6"><MudTextField @bind-Value="_selectedModel.ServerCode" Label="Server code" Variant="Variant.Outlined" /></MudItem>
@@ -361,29 +378,54 @@
                             <MudItem xs="12" sm="4" Class="d-flex align-center"><MudSwitch @bind-Value="_selectedModel.Enabled" Color="Color.Success" Label="Bật model" /></MudItem>
                             <MudItem xs="12" sm="4" Class="d-flex align-center"><MudSwitch @bind-Value="_selectedModel.AllowUserSelect" Color="Color.Primary" Label="Cho user chọn" /></MudItem>
                         </MudGrid>
-                        <MudText Typo="Typo.subtitle2" Class="mt-4">Pricing</MudText>
+                        <MudText Typo="Typo.subtitle2" Class="mt-4">Pricing matrix</MudText>
                         <MudTable Items="_selectedPrices" Dense="true" Hover="true">
                             <HeaderContent>
-                                <MudTh>Cấu hình</MudTh><MudTh>Giá 79AI</MudTh><MudTh>Giá vốn TodoX</MudTh><MudTh>Giá bán</MudTh>
+                                <MudTh>Configuration</MudTh><MudTh>79AI</MudTh><MudTh>TodoX cost</MudTh><MudTh>Sell</MudTh><MudTh>Active</MudTh>
                             </HeaderContent>
                             <RowTemplate Context="price">
                                 <MudTd DataLabel="Cấu hình">@FormatPriceLabel(price)</MudTd>
-                                <MudTd DataLabel="Giá 79AI">@price.ProviderPrice?.ToString("0.####")</MudTd>
-                                <MudTd DataLabel="Giá vốn TodoX">@price.InternalCostPoints?.ToString("0.####")</MudTd>
-                                <MudTd DataLabel="Giá bán">@price.SellPoints?.ToString("0.####") (@price.SellPriceMode)</MudTd>
+                                <MudTd DataLabel="79AI">@price.ProviderPrice?.ToString("0.####")</MudTd>
+                                <MudTd DataLabel="TodoX cost">@price.InternalCostPoints?.ToString("0.####") pts</MudTd>
+                                <MudTd DataLabel="Sell">@price.SellPoints?.ToString("0.####") pts (@price.SellPriceMode)</MudTd>
+                                <MudTd DataLabel="Active"><MudChip T="string" Size="Size.Small" Color="@(price.Active ? Color.Success : Color.Default)">@(price.Active ? "ON" : "OFF")</MudChip></MudTd>
                             </RowTemplate>
                         </MudTable>
-                        <MudText Typo="Typo.subtitle2" Class="mt-4">Capabilities</MudText>
-                        @foreach (var cap in _selectedCapabilities)
-                        {
-                            <MudChip T="string" Size="Size.Small" Class="me-1">@cap.CapabilityCode</MudChip>
-                        }
-                        <MudText Typo="Typo.subtitle2" Class="mt-4">Nâng cao</MudText>
-                        <MudText Typo="Typo.caption" Class="todox-page-subtitle">@_selectedModel.RawJson</MudText>
+                        <MudExpansionPanels Class="mt-3" Elevation="0">
+                            <MudExpansionPanel Text="Nâng cao">
+                                <MudText Typo="Typo.caption" Class="todox-page-subtitle">@_selectedModel.RawJson</MudText>
+                            </MudExpansionPanel>
+                        </MudExpansionPanels>
                     </MudPaper>
                 }
             </MudTabPanel>
-            <MudTabPanel Text="Sync">
+            <MudTabPanel Text="GIÁ & ĐIỂM">
+                <MudPaper Class="todox-card pa-4" rounded="true">
+                    <MudText Typo="Typo.h6">Giá & điểm TodoX</MudText>
+                    <MudText Typo="Typo.body2" Class="todox-page-subtitle">Provider price là read-only. TodoX sell points được giữ nguyên khi sync nếu admin đã cấu hình FIXED.</MudText>
+                    <MudDivider Class="my-3" />
+                    @if (_selectedModel is null)
+                    {
+                        <MudAlert Severity="Severity.Info">Chọn một model ở tab MODEL để xem bảng giá.</MudAlert>
+                    }
+                    else
+                    {
+                        <MudTable Items="_selectedPrices" Dense="true" Hover="true">
+                            <HeaderContent>
+                                <MudTh>Configuration</MudTh><MudTh>79AI</MudTh><MudTh>TodoX cost</MudTh><MudTh>Sell</MudTh><MudTh>Mode</MudTh>
+                            </HeaderContent>
+                            <RowTemplate Context="price">
+                                <MudTd>@FormatPriceLabel(price)</MudTd>
+                                <MudTd>@price.ProviderPrice?.ToString("0.####")</MudTd>
+                                <MudTd>@price.InternalCostPoints?.ToString("0.####")</MudTd>
+                                <MudTd>@price.SellPoints?.ToString("0.####")</MudTd>
+                                <MudTd>@price.SellPriceMode</MudTd>
+                            </RowTemplate>
+                        </MudTable>
+                    }
+                </MudPaper>
+            </MudTabPanel>
+            <MudTabPanel Text="LỊCH SỬ ĐỒNG BỘ">
                 <MudPaper Class="todox-card pa-4" rounded="true">
                     <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
                         <MudText Typo="Typo.h6">Lịch sử đồng bộ</MudText>
@@ -715,7 +757,7 @@
     {
         _selectedProviderForSync = item.Id;
         _syncHistory = (await ModelService.GetSyncHistoryAsync(item.Id)).ToList();
-        _activeTabIndex = 2;
+        _activeTabIndex = 3;
     }
 
     private async Task CheckProviderConnectionAsync(AiProviderListItemDto item)
@@ -1010,6 +1052,12 @@
 
     private static string FormatPriceLabel(AiModelPriceDto price)
         => $"{price.Mode ?? "-"} · {price.Resolution ?? "-"} · {price.DurationSeconds?.ToString() ?? "-"}s · {price.Ratio ?? "-"}";
+
+    private static string FormatStrings(IReadOnlyList<string> values)
+        => values.Count == 0 ? "-" : string.Join(" · ", values);
+
+    private static string FormatDurations(IReadOnlyList<int> values)
+        => values.Count == 0 ? "-" : string.Join(" · ", values.Select(x => $"{x}s"));
 
     private sealed class QuickDefaultRow
     {

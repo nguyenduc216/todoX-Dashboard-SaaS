@@ -120,6 +120,15 @@ public static class AiPricingEngine
             || before.MinimumPoints != after.MinimumPoints;
     }
 
+    public static bool IsProviderControlledPriceChanged(AiModelPriceDto before, AiModelPriceDto after)
+    {
+        return before.ProviderPrice != after.ProviderPrice
+            || before.ProviderPriceDefault != after.ProviderPriceDefault
+            || !string.Equals(before.ProviderPriceUnit, after.ProviderPriceUnit, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(before.RateType, after.RateType, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(before.UnitType, after.UnitType, StringComparison.OrdinalIgnoreCase);
+    }
+
     private static bool EqualsOrNull(string? left, string? right)
         => string.Equals(Normalize(left), Normalize(right), StringComparison.OrdinalIgnoreCase);
 

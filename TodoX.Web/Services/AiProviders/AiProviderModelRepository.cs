@@ -69,6 +69,7 @@ public sealed class AiProviderModelRepository
         {
             model.Capabilities = (await GetCapabilitiesAsync(model.Id, ct)).Select(x => x.CapabilityCode).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             model.PriceSummary = await BuildPriceSummaryAsync(conn, model.Id, ct);
+            await PopulateOptionsAsync(conn, model, ct);
         }
 
         return list;
@@ -119,6 +120,17 @@ public sealed class AiProviderModelRepository
             model.SyncChanges = (await GetSyncChangesAsync(model.SyncHistory[0].Id, 200, ct)).ToList();
         }
         model.PriceSummary = await BuildPriceSummaryAsync(conn, model.Id, ct);
+        var options = AiProviderModelOptionsNormalizer.Normalize(
+            model.SupportedModes,
+            model.SupportedDurations,
+            model.SupportedResolutions,
+            model.SupportedRatios,
+            model.Prices,
+            model.RawJson);
+        model.SupportedModes = options.Modes;
+        model.SupportedDurations = options.Durations;
+        model.SupportedResolutions = options.Resolutions;
+        model.SupportedRatios = options.Ratios;
         return model;
     }
 
@@ -410,7 +422,7 @@ public sealed class AiProviderModelRepository
             new { syncId, changeType, entityType, entityKey, beforeJson, afterJson });
     }
 
-    public async Task UpsertModelAsync(AiProviderModelDetailDto model, string? userId, CancellationToken ct = default)
+    public async Task<long> UpsertModelAsync(AiProviderModelDetailDto model, string? userId, CancellationToken ct = default)
     {
         using var conn = await _factory.OpenAsync(ct);
         using var tx = conn.BeginTransaction();
@@ -527,11 +539,6 @@ public sealed class AiProviderModelRepository
                               provider_price_default = EXCLUDED.provider_price_default,
                               provider_price_unit = EXCLUDED.provider_price_unit,
                               internal_cost_points = EXCLUDED.internal_cost_points,
-                              sell_points = EXCLUDED.sell_points,
-                              sell_price_mode = EXCLUDED.sell_price_mode,
-                              markup_percent = EXCLUDED.markup_percent,
-                              minimum_points = EXCLUDED.minimum_points,
-                              rounding_rule = EXCLUDED.rounding_rule,
                               price_source = EXCLUDED.price_source,
                               effective_from = EXCLUDED.effective_from,
                               effective_to = EXCLUDED.effective_to,
@@ -566,6 +573,7 @@ public sealed class AiProviderModelRepository
         }
 
         tx.Commit();
+        return modelId;
     }
 
     public async Task MarkMissingAsDeprecatedAsync(long providerId, IReadOnlyCollection<string> providerModelCodes, string? userId, CancellationToken ct = default)
@@ -606,11 +614,32 @@ public sealed class AiProviderModelRepository
         return new AiModelPriceSummaryDto
         {
             ActiveVariantCount = prices.Count,
-            ProviderPrice = prices.FirstOrDefault()?.ProviderPrice,
-            InternalCostPoints = prices.FirstOrDefault()?.InternalCostPoints,
-            SellPoints = prices.FirstOrDefault()?.SellPoints,
+            ProviderPrice = prices.Where(x => x.ProviderPrice.HasValue).Select(x => x.ProviderPrice).Min(),
+            InternalCostPoints = prices.Where(x => x.InternalCostPoints.HasValue).Select(x => x.InternalCostPoints).Min(),
+            SellPoints = prices.Where(x => x.SellPoints.HasValue).Select(x => x.SellPoints).Min(),
             SellPriceMode = prices.FirstOrDefault()?.SellPriceMode,
             StatusMessage = prices.Count == 0 ? "Chưa có bảng giá / cần đồng bộ" : null
         };
+    }
+
+    private static async Task PopulateOptionsAsync(IDbConnection conn, AiProviderModelListItemDto model, CancellationToken ct)
+    {
+        var rawJson = await conn.ExecuteScalarAsync<string?>(
+            "SELECT raw_json::text FROM public.todox_ai_provider_model WHERE id = @modelId;",
+            new { modelId = model.Id });
+        var prices = (await conn.QueryAsync<AiModelPriceDto>(
+            """
+            SELECT mode AS Mode, resolution AS Resolution, duration_seconds AS DurationSeconds,
+                   ratio AS Ratio, active AS Active
+              FROM public.todox_ai_model_price
+             WHERE model_id = @modelId
+               AND active = true;
+            """,
+            new { modelId = model.Id })).ToList();
+        var options = AiProviderModelOptionsNormalizer.Normalize(null, null, null, null, prices, rawJson);
+        model.SupportedModes = options.Modes;
+        model.SupportedDurations = options.Durations;
+        model.SupportedResolutions = options.Resolutions;
+        model.SupportedRatios = options.Ratios;
     }
 }

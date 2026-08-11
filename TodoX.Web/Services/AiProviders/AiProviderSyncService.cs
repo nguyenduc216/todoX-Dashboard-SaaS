@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text.Json;
 using TodoX.Web.Models;
 
@@ -22,6 +23,9 @@ public interface IAiProviderSyncService
 
 public sealed class AiProviderSyncService : IAiProviderSyncService
 {
+    private static readonly ConcurrentDictionary<long, SemaphoreSlim> ProviderLocks = new();
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
     private readonly IAiProviderService _providers;
     private readonly IAiProviderModelService _models;
     private readonly AiProviderModelRepository _modelRepository;
@@ -42,7 +46,32 @@ public sealed class AiProviderSyncService : IAiProviderSyncService
         _catalogClient = catalogClient;
     }
 
-    public async Task<AiProviderSyncResultDto> SyncProviderAsync(long providerId, CurrentUserSession? user = null, CancellationToken ct = default)
+    public Task<AiProviderSyncResultDto> SyncProviderAsync(long providerId, CurrentUserSession? user = null, CancellationToken ct = default)
+        => SyncProviderCoreAsync(providerId, "manual", user?.UserId.ToString(), ct);
+
+    internal async Task<AiProviderSyncResultDto> SyncProviderCoreAsync(long providerId, string trigger, string? requestedBy, CancellationToken ct = default)
+    {
+        var syncLock = ProviderLocks.GetOrAdd(providerId, _ => new SemaphoreSlim(1, 1));
+        if (!await syncLock.WaitAsync(0, ct))
+        {
+            return new AiProviderSyncResultDto
+            {
+                Success = false,
+                Message = "Provider sync is already running."
+            };
+        }
+
+        try
+        {
+            return await SyncProviderUnlockedAsync(providerId, trigger, requestedBy, ct);
+        }
+        finally
+        {
+            syncLock.Release();
+        }
+    }
+
+    private async Task<AiProviderSyncResultDto> SyncProviderUnlockedAsync(long providerId, string trigger, string? requestedBy, CancellationToken ct)
     {
         var provider = await _providers.GetProviderAsync(providerId, ct);
         if (provider is null)
@@ -53,12 +82,14 @@ public sealed class AiProviderSyncService : IAiProviderSyncService
         var syncId = await _modelRepository.InsertSyncHeaderAsync(
             provider.Id,
             provider.ProviderCode,
-            "manual",
-            user?.UserId.ToString(),
+            trigger,
+            requestedBy,
             GetCatalogEndpoint(provider.ConfigJson),
             "running",
             null,
             ct);
+
+        var result = new AiProviderSyncResultDto { Success = true, SyncId = syncId };
 
         try
         {
@@ -81,8 +112,8 @@ public sealed class AiProviderSyncService : IAiProviderSyncService
                 .Select(x => x.ProviderModelCode)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
-
-            var result = new AiProviderSyncResultDto { Success = true, SyncId = syncId };
+            var policies = (await _pricingRepository.GetPoliciesAsync(provider.Id, ct)).ToList();
+            var defaultPolicy = policies.FirstOrDefault(x => x.Enabled && x.IsDefault) ?? policies.FirstOrDefault(x => x.Enabled);
 
             foreach (var snapshot in catalog.Models)
             {
@@ -92,51 +123,42 @@ public sealed class AiProviderSyncService : IAiProviderSyncService
                 }
 
                 var detail = BuildDetail(provider, snapshot);
-                if (!existingByCode.TryGetValue(snapshot.ProviderModelCode, out var current))
-                {
-                    result.ModelInsertedCount++;
-                    await _modelRepository.InsertSyncChangeAsync(syncId, "insert", "model", snapshot.ProviderModelCode, null, detail.RawJson, ct);
-                    await _modelRepository.UpsertModelAsync(detail, user?.UserId.ToString(), ct);
-                    await UpsertPoliciesAndPricesAsync(detail, user?.UserId.ToString(), ct);
-                    continue;
-                }
+                var currentDetail = existingByCode.TryGetValue(snapshot.ProviderModelCode, out var current)
+                    ? await _models.GetModelAsync(current.Id, ct)
+                    : null;
 
-                var currentDetail = await _models.GetModelAsync(current.Id, ct);
+                PrepareIncomingPrices(detail.Prices, currentDetail?.Prices ?? new List<AiModelPriceDto>(), defaultPolicy);
+                var changeCount = await InsertChangesAsync(syncId, currentDetail, detail, ct);
+                result.PriceChangedCount += changeCount.PriceChanges;
+
                 if (currentDetail is null)
                 {
-                    continue;
+                    result.ModelInsertedCount++;
+                    await _modelRepository.InsertSyncChangeAsync(syncId, "MODEL_ADDED", "model", snapshot.ProviderModelCode, null, detail.RawJson, ct);
                 }
-
-                var beforeJson = currentDetail.RawJson ?? JsonSerializer.Serialize(currentDetail);
-                var afterJson = detail.RawJson;
-                var changed = HasModelChanged(currentDetail, detail);
-                if (changed)
+                else if (HasModelChanged(currentDetail, detail) || changeCount.ModelChanges > 0)
                 {
                     result.ModelUpdatedCount++;
-                    await _modelRepository.InsertSyncChangeAsync(syncId, "update", "model", snapshot.ProviderModelCode, beforeJson, afterJson, ct);
-                    await _modelRepository.UpsertModelAsync(detail, user?.UserId.ToString(), ct);
-                    await UpsertPoliciesAndPricesAsync(detail, user?.UserId.ToString(), ct);
                 }
 
-                var beforePrices = currentDetail.Prices.Where(x => x.Active).ToList();
-                var afterPrices = detail.Prices.Where(x => x.Active).ToList();
-                if (HasPriceChange(beforePrices, afterPrices))
+                var modelId = await _modelRepository.UpsertModelAsync(detail, requestedBy, ct);
+                foreach (var price in detail.Prices)
                 {
-                    result.PriceChangedCount++;
-                    await _modelRepository.InsertSyncChangeAsync(syncId, "price_change", "price", snapshot.ProviderModelCode, JsonSerializer.Serialize(beforePrices), JsonSerializer.Serialize(afterPrices), ct);
+                    price.ModelId = modelId;
                 }
+
+                await UpsertPoliciesAsync(detail, requestedBy, ct);
+                await DeactivateMissingPricesAsync(syncId, modelId, currentDetail?.Prices ?? new List<AiModelPriceDto>(), detail.Prices, requestedBy, ct);
             }
 
-            var missingCodes = existingByCode.Keys
-                .Where(code => !incomingCodes.Contains(code))
-                .ToList();
+            var missingCodes = AiProviderSyncPlanner.GetMissingCodes(existingByCode.Keys.ToList(), incomingCodes);
             if (missingCodes.Count > 0)
             {
                 result.ModelUnavailableCount += missingCodes.Count;
-                await _modelRepository.MarkMissingAsDeprecatedAsync(provider.Id, incomingCodes, user?.UserId.ToString(), ct);
+                await _modelRepository.MarkMissingAsDeprecatedAsync(provider.Id, incomingCodes, requestedBy, ct);
                 foreach (var code in missingCodes)
                 {
-                    await _modelRepository.InsertSyncChangeAsync(syncId, "unavailable", "model", code, null, null, ct);
+                    await _modelRepository.InsertSyncChangeAsync(syncId, "MODEL_STATUS_CHANGED", "model", code, null, "{\"provider_status\":\"DEPRECATED\"}", ct);
                 }
             }
 
@@ -150,7 +172,6 @@ public sealed class AiProviderSyncService : IAiProviderSyncService
                 result.ModelUnavailableCount,
                 result.PriceChangedCount,
                 ct);
-            result.SyncId = syncId;
             result.Message = result.ModelInsertedCount == 0 && result.ModelUpdatedCount == 0 && result.ModelUnavailableCount == 0 && result.PriceChangedCount == 0
                 ? "No changes."
                 : "Sync completed.";
@@ -168,50 +189,165 @@ public sealed class AiProviderSyncService : IAiProviderSyncService
         }
     }
 
-    private async Task UpsertPoliciesAndPricesAsync(AiProviderModelDetailDto model, string? userId, CancellationToken ct)
+    private async Task UpsertPoliciesAsync(AiProviderModelDetailDto model, string? userId, CancellationToken ct)
     {
         foreach (var policy in model.PricingPolicies)
         {
             await _pricingRepository.UpsertPolicyAsync(policy, userId, ct);
         }
+    }
 
-        foreach (var price in model.Prices)
+    private async Task DeactivateMissingPricesAsync(
+        long syncId,
+        long modelId,
+        IReadOnlyList<AiModelPriceDto> before,
+        IReadOnlyList<AiModelPriceDto> after,
+        string? userId,
+        CancellationToken ct)
+    {
+        var incomingKeys = after.Where(x => x.Active).Select(PriceKey).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var oldPrice in before.Where(x => x.Active && !incomingKeys.Contains(PriceKey(x))))
         {
-            await _pricingRepository.UpsertPriceAsync(new AiModelPriceDto
+            if (oldPrice.Id > 0)
             {
-                ModelId = model.Id,
-                Mode = price.Mode,
-                Resolution = price.Resolution,
-                DurationSeconds = price.DurationSeconds,
-                Ratio = price.Ratio,
-                RateType = price.RateType,
-                UnitType = price.UnitType,
-                ProviderPrice = price.ProviderPrice,
-                ProviderPriceDefault = price.ProviderPriceDefault,
-                ProviderPriceUnit = price.ProviderPriceUnit,
-                InternalCostPoints = price.InternalCostPoints,
-                SellPoints = price.SellPoints,
-                SellPriceMode = price.SellPriceMode,
-                MarkupPercent = price.MarkupPercent,
-                MinimumPoints = price.MinimumPoints,
-                RoundingRule = price.RoundingRule,
-                PriceSource = price.PriceSource,
-                EffectiveFrom = price.EffectiveFrom,
-                EffectiveTo = price.EffectiveTo,
-                Active = price.Active
-            }, userId, ct);
+                await _pricingRepository.MarkPriceInactiveAsync(oldPrice.Id, userId, ct);
+            }
+
+            await _modelRepository.InsertSyncChangeAsync(
+                syncId,
+                "PRICE_DISABLED",
+                "price",
+                $"{modelId}:{PriceKey(oldPrice)}",
+                Serialize(oldPrice),
+                null,
+                ct);
         }
+    }
+
+    private static void PrepareIncomingPrices(
+        IReadOnlyList<AiModelPriceDto> incoming,
+        IReadOnlyList<AiModelPriceDto> existing,
+        AiPricingPolicyDto? defaultPolicy)
+    {
+        var existingByKey = existing.ToDictionary(PriceKey, StringComparer.OrdinalIgnoreCase);
+        foreach (var price in incoming)
+        {
+            price.Mode = NormalizeNullable(price.Mode);
+            price.Resolution = NormalizeNullable(price.Resolution);
+            price.Ratio = NormalizeNullable(price.Ratio);
+            price.ProviderPriceUnit = NormalizeNullable(price.ProviderPriceUnit) ?? "79ai_credit";
+            price.UnitType = NormalizeNullable(price.UnitType) ?? "scene";
+            price.SellPriceMode = string.IsNullOrWhiteSpace(price.SellPriceMode) ? "AUTO" : price.SellPriceMode.Trim().ToUpperInvariant();
+            price.PriceSource = NormalizeNullable(price.PriceSource) ?? "catalog";
+            price.EffectiveFrom ??= DateTime.UtcNow;
+            price.Active = true;
+
+            var providerUnit = price.ProviderPrice ?? price.ProviderPriceDefault;
+            if (providerUnit.HasValue && defaultPolicy is not null)
+            {
+                price.InternalCostPoints = AiPricingEngine.CalculateInternalUnitCostPoints(providerUnit.Value, defaultPolicy.ProviderCreditPerInternalPoint);
+            }
+
+            if (existingByKey.TryGetValue(PriceKey(price), out var existingPrice))
+            {
+                price.SellPoints = existingPrice.SellPoints;
+                price.SellPriceMode = existingPrice.SellPriceMode;
+                price.MarkupPercent = existingPrice.MarkupPercent;
+                price.MinimumPoints = existingPrice.MinimumPoints;
+                price.RoundingRule = existingPrice.RoundingRule;
+                continue;
+            }
+
+            price.MarkupPercent ??= defaultPolicy?.DefaultMarkupPercent;
+            price.MinimumPoints ??= defaultPolicy?.MinimumSellPoints;
+            price.RoundingRule ??= defaultPolicy?.RoundingRule;
+            if (price.InternalCostPoints.HasValue && defaultPolicy is not null)
+            {
+                price.SellPoints = AiPricingEngine.CalculateSellUnitPoints(price.InternalCostPoints.Value, price, defaultPolicy);
+            }
+        }
+    }
+
+    private async Task<(int ModelChanges, int PriceChanges)> InsertChangesAsync(
+        long syncId,
+        AiProviderModelDetailDto? before,
+        AiProviderModelDetailDto after,
+        CancellationToken ct)
+    {
+        if (before is null)
+        {
+            foreach (var price in after.Prices.Where(x => x.Active))
+            {
+                await _modelRepository.InsertSyncChangeAsync(syncId, "PRICE_ADDED", "price", $"{after.ProviderModelCode}:{PriceKey(price)}", null, Serialize(price), ct);
+            }
+
+            return (0, after.Prices.Count(x => x.Active));
+        }
+
+        var modelChanges = 0;
+        var priceChanges = 0;
+
+        if (!string.Equals(before.ProviderStatus, after.ProviderStatus, StringComparison.OrdinalIgnoreCase))
+        {
+            modelChanges++;
+            await _modelRepository.InsertSyncChangeAsync(syncId, "MODEL_STATUS_CHANGED", "model", after.ProviderModelCode, before.ProviderStatus, after.ProviderStatus, ct);
+        }
+
+        foreach (var mode in after.SupportedModes.Except(before.SupportedModes, StringComparer.OrdinalIgnoreCase))
+        {
+            modelChanges++;
+            await _modelRepository.InsertSyncChangeAsync(syncId, "MODE_ADDED", "model_option", after.ProviderModelCode, null, mode, ct);
+        }
+
+        foreach (var duration in after.SupportedDurations.Except(before.SupportedDurations))
+        {
+            modelChanges++;
+            await _modelRepository.InsertSyncChangeAsync(syncId, "DURATION_ADDED", "model_option", after.ProviderModelCode, null, duration.ToString(), ct);
+        }
+
+        foreach (var duration in before.SupportedDurations.Except(after.SupportedDurations))
+        {
+            modelChanges++;
+            await _modelRepository.InsertSyncChangeAsync(syncId, "DURATION_REMOVED", "model_option", after.ProviderModelCode, duration.ToString(), null, ct);
+        }
+
+        foreach (var resolution in after.SupportedResolutions.Except(before.SupportedResolutions, StringComparer.OrdinalIgnoreCase))
+        {
+            modelChanges++;
+            await _modelRepository.InsertSyncChangeAsync(syncId, "RESOLUTION_ADDED", "model_option", after.ProviderModelCode, null, resolution, ct);
+        }
+
+        var beforePrices = before.Prices.Where(x => x.Active).ToDictionary(PriceKey, StringComparer.OrdinalIgnoreCase);
+        foreach (var price in after.Prices.Where(x => x.Active))
+        {
+            var key = PriceKey(price);
+            if (!beforePrices.TryGetValue(key, out var oldPrice))
+            {
+                priceChanges++;
+                await _modelRepository.InsertSyncChangeAsync(syncId, "PRICE_ADDED", "price", $"{after.ProviderModelCode}:{key}", null, Serialize(price), ct);
+                continue;
+            }
+
+            if (AiPricingEngine.IsProviderControlledPriceChanged(oldPrice, price))
+            {
+                priceChanges++;
+                await _modelRepository.InsertSyncChangeAsync(syncId, "PRICE_CHANGED", "price", $"{after.ProviderModelCode}:{key}", Serialize(oldPrice), Serialize(price), ct);
+            }
+        }
+
+        return (modelChanges, priceChanges);
     }
 
     private static AiProviderModelDetailDto BuildDetail(AiProviderDetailDto provider, AiCatalogModelSnapshot snapshot)
     {
+        var options = AiProviderModelOptionsNormalizer.Normalize(snapshot.SupportedModes, snapshot.SupportedDurations, snapshot.SupportedResolutions, snapshot.SupportedRatios, snapshot.Prices, snapshot.RawJson);
         return new AiProviderModelDetailDto
         {
             ProviderId = provider.Id,
             ProviderCode = provider.ProviderCode,
             ProviderModelCode = snapshot.ProviderModelCode,
             ProviderModelIdBase = snapshot.ProviderModelIdBase,
-            DisplayName = snapshot.DisplayName,
+            DisplayName = string.IsNullOrWhiteSpace(snapshot.DisplayName) ? snapshot.ProviderModelCode : snapshot.DisplayName,
             MediaType = snapshot.MediaType,
             ServerCode = snapshot.ServerCode,
             ProviderStatus = snapshot.ProviderStatus,
@@ -229,8 +365,12 @@ public sealed class AiProviderSyncService : IAiProviderSyncService
             LastSuccessAt = snapshot.LastSuccessAt,
             LastFailureAt = snapshot.LastFailureAt,
             FailureCount = snapshot.FailureCount,
-            RawJson = snapshot.RawJson,
-            ModelCapabilities = snapshot.Capabilities,
+            RawJson = SanitizeRawJson(snapshot.RawJson),
+            SupportedModes = options.Modes,
+            SupportedDurations = options.Durations,
+            SupportedResolutions = options.Resolutions,
+            SupportedRatios = options.Ratios,
+            ModelCapabilities = BuildCapabilities(snapshot, options),
             Prices = snapshot.Prices.Select(price =>
             {
                 price.ModelId = 0;
@@ -238,6 +378,29 @@ public sealed class AiProviderSyncService : IAiProviderSyncService
             }).ToList(),
             PricingPolicies = snapshot.Policies
         };
+    }
+
+    private static List<AiProviderModelCapabilityDto> BuildCapabilities(AiCatalogModelSnapshot snapshot, AiProviderModelOptions options)
+    {
+        var capabilities = snapshot.Capabilities.ToList();
+        if (capabilities.Count == 0)
+        {
+            capabilities.Add(new AiProviderModelCapabilityDto
+            {
+                CapabilityCode = string.Equals(snapshot.MediaType, "video", StringComparison.OrdinalIgnoreCase)
+                    ? AiProviderCatalog.ImageToVideo
+                    : "image_generation",
+                Enabled = true,
+                Source = "catalog"
+            });
+        }
+
+        foreach (var capability in capabilities)
+        {
+            capability.ConfigJson = AiProviderModelOptionsNormalizer.ToConfigJson(options);
+        }
+
+        return capabilities;
     }
 
     private static bool HasModelChanged(AiProviderModelDetailDto before, AiProviderModelDetailDto after)
@@ -255,33 +418,61 @@ public sealed class AiProviderSyncService : IAiProviderSyncService
                || !string.Equals(before.ProviderModelIdBase, after.ProviderModelIdBase, StringComparison.OrdinalIgnoreCase);
     }
 
-    private static bool HasPriceChange(IReadOnlyList<AiModelPriceDto> before, IReadOnlyList<AiModelPriceDto> after)
-    {
-        var beforeMap = before.ToDictionary(x => PriceKey(x), x => x, StringComparer.OrdinalIgnoreCase);
-        var afterMap = after.ToDictionary(x => PriceKey(x), x => x, StringComparer.OrdinalIgnoreCase);
-        if (beforeMap.Count != afterMap.Count)
-        {
-            return true;
-        }
-
-        foreach (var pair in beforeMap)
-        {
-            if (!afterMap.TryGetValue(pair.Key, out var afterPrice))
-            {
-                return true;
-            }
-
-            if (AiPricingEngine.IsPriceChanged(pair.Value, afterPrice))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
     private static string PriceKey(AiModelPriceDto price)
         => string.Join(":", price.Mode ?? string.Empty, price.Resolution ?? string.Empty, price.DurationSeconds?.ToString() ?? string.Empty, price.Ratio ?? string.Empty);
+
+    private static string Serialize(object value) => JsonSerializer.Serialize(value, JsonOptions);
+
+    private static string? NormalizeNullable(string? value)
+        => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static string? SanitizeRawJson(string? rawJson)
+    {
+        if (string.IsNullOrWhiteSpace(rawJson))
+        {
+            return rawJson;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(rawJson);
+            return SanitizeElement(doc.RootElement).GetRawText();
+        }
+        catch (JsonException)
+        {
+            return rawJson;
+        }
+    }
+
+    private static JsonElement SanitizeElement(JsonElement element)
+    {
+        var sanitized = SanitizeValue(element);
+        return JsonSerializer.SerializeToElement(sanitized, JsonOptions);
+    }
+
+    private static object? SanitizeValue(JsonElement element)
+    {
+        return element.ValueKind switch
+        {
+            JsonValueKind.Object => element.EnumerateObject().ToDictionary(
+                x => x.Name,
+                x => IsSecretName(x.Name) ? "***" : SanitizeValue(x.Value),
+                StringComparer.OrdinalIgnoreCase),
+            JsonValueKind.Array => element.EnumerateArray().Select(SanitizeValue).ToList(),
+            JsonValueKind.String => element.GetString(),
+            JsonValueKind.Number when element.TryGetDecimal(out var number) => number,
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            _ => null
+        };
+    }
+
+    private static bool IsSecretName(string name)
+        => name.Contains("token", StringComparison.OrdinalIgnoreCase)
+           || name.Contains("secret", StringComparison.OrdinalIgnoreCase)
+           || name.Contains("api_key", StringComparison.OrdinalIgnoreCase)
+           || name.Contains("apikey", StringComparison.OrdinalIgnoreCase)
+           || name.Contains("access_key", StringComparison.OrdinalIgnoreCase);
 
     private static string? GetCatalogEndpoint(string? providerConfigJson)
     {

@@ -337,6 +337,10 @@ public class AiProviderModelListItemDto
     public DateTime? LastFailureAt { get; set; }
     public int FailureCount { get; set; }
     public List<string> Capabilities { get; set; } = new();
+    public List<string> SupportedModes { get; set; } = new();
+    public List<int> SupportedDurations { get; set; } = new();
+    public List<string> SupportedResolutions { get; set; } = new();
+    public List<string> SupportedRatios { get; set; } = new();
     public AiModelPriceSummaryDto? PriceSummary { get; set; }
 }
 

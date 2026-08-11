@@ -111,19 +111,14 @@ public sealed class AiPricingRepository
                  @ProviderPriceDefault, @ProviderPriceUnit, @InternalCostPoints, @SellPoints, @SellPriceMode,
                  @MarkupPercent, @MinimumPoints, @RoundingRule, @PriceSource, @EffectiveFrom, @EffectiveTo, @Active,
                  @userId, @userId, now(), now())
-            ON CONFLICT (model_id, mode, resolution, duration_seconds, ratio)
-            DO UPDATE SET
+                ON CONFLICT (model_id, mode, resolution, duration_seconds, ratio)
+                DO UPDATE SET
                 rate_type = EXCLUDED.rate_type,
                 unit_type = EXCLUDED.unit_type,
                 provider_price = EXCLUDED.provider_price,
                 provider_price_default = EXCLUDED.provider_price_default,
                 provider_price_unit = EXCLUDED.provider_price_unit,
                 internal_cost_points = EXCLUDED.internal_cost_points,
-                sell_points = EXCLUDED.sell_points,
-                sell_price_mode = EXCLUDED.sell_price_mode,
-                markup_percent = EXCLUDED.markup_percent,
-                minimum_points = EXCLUDED.minimum_points,
-                rounding_rule = EXCLUDED.rounding_rule,
                 price_source = EXCLUDED.price_source,
                 effective_from = EXCLUDED.effective_from,
                 effective_to = EXCLUDED.effective_to,
@@ -155,5 +150,20 @@ public sealed class AiPricingRepository
                 price.Active,
                 userId
             });
+    }
+
+    public async Task MarkPriceInactiveAsync(long priceId, string? userId, CancellationToken ct = default)
+    {
+        using var conn = await _factory.OpenAsync(ct);
+        await conn.ExecuteAsync(
+            """
+            UPDATE public.todox_ai_model_price
+               SET active = false,
+                   effective_to = COALESCE(effective_to, now()),
+                   updated_by = @userId,
+                   updated_at = now()
+             WHERE id = @priceId;
+            """,
+            new { priceId, userId });
     }
 }

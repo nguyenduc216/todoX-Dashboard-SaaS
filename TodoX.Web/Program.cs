@@ -119,6 +119,8 @@ builder.Services.AddScoped<TodoX.Web.Services.AiProviders.AiPricingRepository>()
 builder.Services.AddScoped<TodoX.Web.Services.AiProviders.IAiPricingService, TodoX.Web.Services.AiProviders.AiPricingService>();
 builder.Services.AddScoped<TodoX.Web.Services.AiProviders.IAiProviderSyncService, TodoX.Web.Services.AiProviders.AiProviderSyncService>();
 builder.Services.AddHttpClient<TodoX.Web.Services.AiProviders.IAi79CatalogClient, TodoX.Web.Services.AiProviders.Ai79CatalogClient>();
+builder.Services.Configure<TodoX.Web.Services.AiProviders.AiProviderCatalogSyncOptions>(builder.Configuration.GetSection(TodoX.Web.Services.AiProviders.AiProviderCatalogSyncOptions.SectionName));
+builder.Services.AddHostedService<TodoX.Web.Services.AiProviders.AiProviderCatalogSyncWorker>();
 builder.Services.AddScoped<TodoX.Web.Services.AiProviders.IAiBillingPayerResolver, TodoX.Web.Services.AiProviders.AiBillingPayerResolver>();
 builder.Services.AddScoped<TodoX.Web.Services.AiProviders.IAiImageBillingService, TodoX.Web.Services.AiProviders.AiImageBillingService>();
 builder.Services.AddScoped<TodoX.Web.Services.AiProviders.IAiImageBillingDashboardService, TodoX.Web.Services.AiProviders.AiImageBillingDashboardService>();
