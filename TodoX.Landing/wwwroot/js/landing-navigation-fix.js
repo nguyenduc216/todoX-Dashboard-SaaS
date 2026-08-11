@@ -56,17 +56,17 @@
     }
 
     // Enforce the same order as the header navigation:
-    // Home -> About -> Solutions -> Workflow -> Industries -> ChatStaff.
+    // Home -> About -> Industries -> Solutions -> Workflow -> ChatStaff.
     if (solutions && workflowSection) {
       const anchor = founder || document.getElementById('about');
-      if (anchor?.parentNode) {
-        anchor.parentNode.insertBefore(solutions, anchor.nextSibling);
+      if (industries && anchor?.parentNode) {
+        anchor.parentNode.insertBefore(industries, anchor.nextSibling);
+      }
+      if (industries?.parentNode) {
+        industries.parentNode.insertBefore(solutions, industries.nextSibling);
       }
       if (solutions.parentNode) {
         solutions.parentNode.insertBefore(workflowSection, solutions.nextSibling);
-      }
-      if (industries && workflowSection.parentNode) {
-        workflowSection.parentNode.insertBefore(industries, workflowSection.nextSibling);
       }
     }
 

@@ -121,7 +121,10 @@ builder.Services.AddScoped<TodoX.Web.Services.AiProviders.IAiImageBillingService
 builder.Services.AddScoped<TodoX.Web.Services.AiProviders.IAiImageBillingDashboardService, TodoX.Web.Services.AiProviders.AiImageBillingDashboardService>();
 builder.Services.AddSingleton<TodoX.Web.Services.AiProviders.IYEScaleAccountService, TodoX.Web.Services.AiProviders.YEScaleAccountService>();
 builder.Services.AddScoped<TodoX.Web.Services.AiProviders.IAiImageRenderRouter, TodoX.Web.Services.AiProviders.AiImageRenderRouter>();
-builder.Services.AddHostedService<TodoX.Web.Services.AiProviders.AiImageBillingReconciliationWorker>();
+if (TodoX.Web.Services.AiProviders.AiImageBillingFeatureFlags.IsReconciliationWorkerEnabled(builder.Configuration))
+{
+    builder.Services.AddHostedService<TodoX.Web.Services.AiProviders.AiImageBillingReconciliationWorker>();
+}
 builder.Services.Configure<TodoX.Web.Services.VideoRender.VideoRenderOptions>(builder.Configuration.GetSection("VideoRender"));
 builder.Services.AddSingleton<TodoX.Web.Services.VideoRender.ITodoXVideoPromptParser, TodoX.Web.Services.VideoRender.TodoXVideoPromptParser>();
 builder.Services.AddSingleton<TodoX.Web.Services.VideoRender.IVideoPromptValidator, TodoX.Web.Services.VideoRender.VideoPromptValidator>();
