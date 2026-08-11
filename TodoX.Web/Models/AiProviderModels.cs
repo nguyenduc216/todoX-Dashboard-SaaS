@@ -306,3 +306,172 @@ public static class ProviderCodeMap
         };
     }
 }
+
+// ---------------------------------------------------------------------------
+// Phase 1B model, pricing, sync and estimate DTOs.
+// ---------------------------------------------------------------------------
+
+public class AiProviderModelListItemDto
+{
+    public long Id { get; set; }
+    public long ProviderId { get; set; }
+    public string ProviderCode { get; set; } = string.Empty;
+    public string ProviderModelCode { get; set; } = string.Empty;
+    public string? ProviderModelIdBase { get; set; }
+    public string DisplayName { get; set; } = string.Empty;
+    public string MediaType { get; set; } = string.Empty;
+    public string? ServerCode { get; set; }
+    public string? ProviderStatus { get; set; }
+    public string? StatusMessage { get; set; }
+    public string? RateType { get; set; }
+    public decimal? BaseProviderPrice { get; set; }
+    public string? ProviderPriceUnit { get; set; }
+    public string? Description { get; set; }
+    public bool Enabled { get; set; }
+    public bool AllowUserSelect { get; set; }
+    public bool IsDeprecated { get; set; }
+    public string? Source { get; set; }
+    public DateTime? LastProviderSyncAt { get; set; }
+    public DateTime? LastHealthCheckAt { get; set; }
+    public DateTime? LastSuccessAt { get; set; }
+    public DateTime? LastFailureAt { get; set; }
+    public int FailureCount { get; set; }
+    public List<string> Capabilities { get; set; } = new();
+    public AiModelPriceSummaryDto? PriceSummary { get; set; }
+}
+
+public sealed class AiProviderModelDetailDto : AiProviderModelListItemDto
+{
+    public string? RawJson { get; set; }
+    public List<AiProviderModelCapabilityDto> ModelCapabilities { get; set; } = new();
+    public List<AiModelPriceDto> Prices { get; set; } = new();
+    public List<AiPricingPolicyDto> PricingPolicies { get; set; } = new();
+    public List<AiProviderSyncHeaderDto> SyncHistory { get; set; } = new();
+    public List<AiProviderSyncChangeDto> SyncChanges { get; set; } = new();
+}
+
+public sealed class AiProviderModelCapabilityDto
+{
+    public long Id { get; set; }
+    public long ModelId { get; set; }
+    public string CapabilityCode { get; set; } = string.Empty;
+    public bool Enabled { get; set; }
+    public string? Source { get; set; }
+    public string? ConfigJson { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+}
+
+public sealed class AiModelPriceDto
+{
+    public long Id { get; set; }
+    public long ModelId { get; set; }
+    public string? Mode { get; set; }
+    public string? Resolution { get; set; }
+    public int? DurationSeconds { get; set; }
+    public string? Ratio { get; set; }
+    public string? RateType { get; set; }
+    public string? UnitType { get; set; }
+    public decimal? ProviderPrice { get; set; }
+    public decimal? ProviderPriceDefault { get; set; }
+    public string? ProviderPriceUnit { get; set; }
+    public decimal? InternalCostPoints { get; set; }
+    public decimal? SellPoints { get; set; }
+    public string SellPriceMode { get; set; } = "AUTO";
+    public decimal? MarkupPercent { get; set; }
+    public decimal? MinimumPoints { get; set; }
+    public string? RoundingRule { get; set; }
+    public string? PriceSource { get; set; }
+    public DateTime? EffectiveFrom { get; set; }
+    public DateTime? EffectiveTo { get; set; }
+    public bool Active { get; set; }
+    public string? Warning { get; set; }
+}
+
+public sealed class AiModelPriceSummaryDto
+{
+    public int ActiveVariantCount { get; set; }
+    public decimal? ProviderPrice { get; set; }
+    public decimal? InternalCostPoints { get; set; }
+    public decimal? SellPoints { get; set; }
+    public string? SellPriceMode { get; set; }
+    public string? StatusMessage { get; set; }
+}
+
+public sealed class AiPricingPolicyDto
+{
+    public long Id { get; set; }
+    public long ProviderId { get; set; }
+    public string PolicyCode { get; set; } = string.Empty;
+    public string PolicyName { get; set; } = string.Empty;
+    public decimal ProviderCreditPerInternalPoint { get; set; }
+    public decimal InternalPointValueVnd { get; set; }
+    public decimal DefaultMarkupPercent { get; set; }
+    public decimal MinimumSellPoints { get; set; }
+    public string RoundingRule { get; set; } = "ROUND";
+    public bool AllowAutoSellUpdate { get; set; }
+    public bool Enabled { get; set; }
+    public bool IsDefault { get; set; }
+}
+
+public sealed class AiProviderSyncHeaderDto
+{
+    public long Id { get; set; }
+    public long ProviderId { get; set; }
+    public string ProviderCode { get; set; } = string.Empty;
+    public string Trigger { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public string? Message { get; set; }
+    public string? RequestedBy { get; set; }
+    public string? ModelCatalogEndpoint { get; set; }
+    public int ModelInsertedCount { get; set; }
+    public int ModelUpdatedCount { get; set; }
+    public int ModelUnavailableCount { get; set; }
+    public int PriceChangedCount { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime? CompletedAt { get; set; }
+}
+
+public sealed class AiProviderSyncChangeDto
+{
+    public long Id { get; set; }
+    public long SyncId { get; set; }
+    public string ChangeType { get; set; } = string.Empty;
+    public string EntityType { get; set; } = string.Empty;
+    public string EntityKey { get; set; } = string.Empty;
+    public string? BeforeJson { get; set; }
+    public string? AfterJson { get; set; }
+    public DateTime CreatedAt { get; set; }
+}
+
+public sealed class EstimateCostRequestDto
+{
+    public long? ProviderModelId { get; set; }
+    public long? ProviderId { get; set; }
+    public string? ProviderCode { get; set; }
+    public string? ProviderModelCode { get; set; }
+    public string? Mode { get; set; }
+    public string? Resolution { get; set; }
+    public int? DurationSeconds { get; set; }
+    public string? Ratio { get; set; }
+    public decimal Quantity { get; set; } = 1;
+    public long? CustomerId { get; set; }
+}
+
+public sealed class EstimateCostResponseDto
+{
+    public bool Success { get; set; }
+    public string? ErrorCode { get; set; }
+    public string? Message { get; set; }
+    public AiProviderModelListItemDto? ProviderModel { get; set; }
+    public AiModelPriceDto? MatchedPrice { get; set; }
+    public AiPricingPolicyDto? PricingPolicy { get; set; }
+    public decimal ProviderUnitCost { get; set; }
+    public decimal ProviderTotalCost { get; set; }
+    public decimal InternalUnitCostPoints { get; set; }
+    public decimal InternalTotalCostPoints { get; set; }
+    public decimal SellUnitPoints { get; set; }
+    public decimal EstimatedTodoXPoints { get; set; }
+    public bool? SufficientBalance { get; set; }
+    public string? PriceSource { get; set; }
+}

@@ -3,6 +3,9 @@
 @using TodoX.Web.Services.AiProviders
 @inject AuthStateService AuthState
 @inject IAiProviderService Providers
+@inject IAiProviderModelService ModelService
+@inject IAiPricingService Pricing
+@inject IAiProviderSyncService Syncs
 @inject ISnackbar Snackbar
 
 <PageTitle>AI Providers</PageTitle>
@@ -23,7 +26,7 @@
             <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
                 <div>
                     <MudText Typo="Typo.h6">Cài đặt nhanh Provider mặc định</MudText>
-                    <MudText Typo="Typo.body2" Class="todox-page-subtitle">Chọn provider/model mặc định theo từng chức năng. Mỗi model là một capability row hiện có, không tạo cấu hình song song.</MudText>
+                    <MudText Typo="Typo.body2" Class="todox-page-subtitle">Thiết lập provider/model mặc định theo chức năng. Việc cho phép người dùng chọn model sẽ do cấu hình dịch vụ quyết định ở bước Service Configuration.</MudText>
                 </div>
                 <MudButton Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.Save" Disabled="@(_busy || _loadingQuickDefaults || !CanSaveQuickDefaults)" OnClick="SaveQuickDefaultsAsync">Lưu cài đặt mặc định</MudButton>
             </MudStack>
@@ -92,6 +95,8 @@
             }
         </MudPaper>
 
+        <MudTabs Rounded="true" Elevation="0" Class="pt-3" @bind-ActivePanelIndex="_activeTabIndex">
+            <MudTabPanel Text="Provider">
         <MudGrid>
             <MudItem xs="12" md="5">
                 <MudPaper Class="todox-card pa-4" rounded="true">
@@ -111,26 +116,43 @@
                     else
                     {
                         <MudTable Items="_providers" Hover="true" Dense="true" T="AiProviderListItemDto"
-                                  OnRowClick="@(args => args.Item is not null ? SelectProviderAsync(args.Item) : Task.CompletedTask)" RowClass="cursor-pointer">
+                                  OnRowClick="@(args => args.Item is not null ? SelectProviderAsync(args.Item) : Task.CompletedTask)"
+                                  RowClassFunc="ProviderRowClass"
+                                  Class="provider-table">
                             <HeaderContent>
-                                <MudTh>Provider</MudTh>
-                                <MudTh>Loại</MudTh>
-                                <MudTh>Ưu tiên</MudTh>
-                                <MudTh>Bật</MudTh>
-                                <MudTh>Capabilities</MudTh>
+                                <MudTh Class="provider-col-provider">Provider</MudTh>
+                                <MudTh Class="provider-col-type">Loại</MudTh>
+                                <MudTh Class="provider-col-priority">Ưu tiên</MudTh>
+                                <MudTh Class="provider-col-enabled">Bật</MudTh>
+                                <MudTh Class="provider-col-capabilities">Capabilities</MudTh>
+                                <MudTh Class="provider-col-actions"></MudTh>
                             </HeaderContent>
                             <RowTemplate Context="p">
-                                <MudTd DataLabel="Provider">
-                                    <MudText Typo="Typo.body2"><b>@p.ProviderName</b></MudText>
-                                    <MudText Typo="Typo.caption" Class="todox-page-subtitle">@p.ProviderCode @(p.IsSystem ? "· hệ thống" : "")</MudText>
+                                <MudTd DataLabel="Provider" Class="provider-col-provider">
+                                    <span @onclick:stopPropagation="true">
+                                        <MudButton Variant="Variant.Text" Color="Color.Primary" Class="provider-name-button pa-0" OnClick="@(() => SelectProviderAsync(p))">
+                                            <MudStack Spacing="0">
+                                                <MudText Typo="Typo.body2"><b>@p.ProviderName</b></MudText>
+                                                <MudText Typo="Typo.caption" Class="todox-page-subtitle">@p.ProviderCode @(p.IsSystem ? "· hệ thống" : "")</MudText>
+                                            </MudStack>
+                                        </MudButton>
+                                    </span>
                                 </MudTd>
-                                <MudTd DataLabel="Loại">@p.ProviderType</MudTd>
-                                <MudTd DataLabel="Ưu tiên">@p.Priority</MudTd>
-                                <MudTd DataLabel="Bật">
+                                <MudTd DataLabel="Loại" Class="provider-col-type">@p.ProviderType</MudTd>
+                                <MudTd DataLabel="Ưu tiên" Class="provider-col-priority">@p.Priority</MudTd>
+                                <MudTd DataLabel="Bật" Class="provider-col-enabled">
                                     <MudIcon Icon="@(p.Enabled ? Icons.Material.Filled.CheckCircle : Icons.Material.Filled.Cancel)"
                                              Color="@(p.Enabled ? Color.Success : Color.Default)" Size="Size.Small" />
                                 </MudTd>
-                                <MudTd DataLabel="Capabilities">@p.EnabledCapabilityCount / @p.CapabilityCount</MudTd>
+                                <MudTd DataLabel="Capabilities" Class="provider-col-capabilities">@p.EnabledCapabilityCount / @p.CapabilityCount</MudTd>
+                                <MudTd DataLabel="Actions" Class="provider-col-actions">
+                                    <MudMenu Icon="@Icons.Material.Filled.MoreVert" Dense="true">
+                                        <MudMenuItem Disabled="@_busy" OnClick="@(() => EditProviderAsync(p))">Sửa provider</MudMenuItem>
+                                        <MudMenuItem Disabled="@_busy" OnClick="@(() => OpenProviderModelsAsync(p))">Quản lý model</MudMenuItem>
+                                        <MudMenuItem Disabled="@_busy" OnClick="@(() => CheckProviderConnectionAsync(p))">Kiểm tra kết nối</MudMenuItem>
+                                        <MudMenuItem Disabled="@_busy" OnClick="@(() => OpenProviderSyncAsync(p))">Đồng bộ ngay</MudMenuItem>
+                                    </MudMenu>
+                                </MudTd>
                             </RowTemplate>
                         </MudTable>
                     }
@@ -215,18 +237,317 @@
                 }
             </MudItem>
         </MudGrid>
+            </MudTabPanel>
+            <MudTabPanel Text="Models">
+                <MudPaper Class="todox-card pa-4" rounded="true">
+                    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
+                        <MudText Typo="Typo.h6">Danh sách model</MudText>
+                        <MudStack Row="true" Spacing="2" Class="flex-wrap">
+                            <MudSelect T="string?" Dense="true" Variant="Variant.Outlined" Label="Provider" Value="@_modelProviderFilter" ValueChanged="OnModelProviderFilterChanged" Style="min-width:180px">
+                                <MudSelectItem T="string?" Value="@((string?)null)">Tất cả</MudSelectItem>
+                                @foreach (var provider in _providers)
+                                {
+                                    <MudSelectItem T="string?" Value="@provider.ProviderCode">@provider.ProviderName</MudSelectItem>
+                                }
+                            </MudSelect>
+                            <MudSelect T="string?" Dense="true" Variant="Variant.Outlined" Label="Media" Value="@_modelMediaFilter" ValueChanged="OnModelMediaFilterChanged" Style="min-width:140px">
+                                <MudSelectItem T="string?" Value="@((string?)null)">Tất cả</MudSelectItem>
+                                <MudSelectItem T="string?" Value="@("image")">Image</MudSelectItem>
+                                <MudSelectItem T="string?" Value="@("video")">Video</MudSelectItem>
+                            </MudSelect>
+                            <MudSelect T="string?" Dense="true" Variant="Variant.Outlined" Label="Status" Value="@_modelStatusFilter" ValueChanged="OnModelStatusFilterChanged" Style="min-width:160px">
+                                <MudSelectItem T="string?" Value="@((string?)null)">Tất cả</MudSelectItem>
+                                <MudSelectItem T="string?" Value="@("ACTIVE")">ACTIVE</MudSelectItem>
+                                <MudSelectItem T="string?" Value="@("DEPRECATED")">DEPRECATED</MudSelectItem>
+                                <MudSelectItem T="string?" Value="@("MAINTENANCE")">MAINTENANCE</MudSelectItem>
+                            </MudSelect>
+                            <MudCheckBox @bind-Value="_modelEnabledOnly" Label="Chỉ model bật" />
+                            <MudTextField @bind-Value="_modelSearch" Variant="Variant.Outlined" Placeholder="Tìm theo code/tên" Style="min-width:220px" />
+                            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Search" OnClick="ReloadModelsAsync">Lọc</MudButton>
+                        </MudStack>
+                    </MudStack>
+                    <MudDivider Class="my-3" />
+                    @if (_loadingModels)
+                    {
+                        <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+                    }
+                    else if (_models.Count == 0)
+                    {
+                        <MudText Class="todox-page-subtitle">Chưa có model nào.</MudText>
+                    }
+                    else
+                    {
+                        <MudTable Items="_models" Dense="true" Hover="true" T="AiProviderModelListItemDto"
+                                  OnRowClick="@(args => args.Item is not null ? SelectModelAsync(args.Item) : Task.CompletedTask)" RowClass="cursor-pointer">
+                            <HeaderContent>
+                                <MudTh>Model</MudTh>
+                                <MudTh>Media</MudTh>
+                                <MudTh>Capabilities</MudTh>
+                                <MudTh>Giá 79AI</MudTh>
+                                <MudTh>Trạng thái</MudTh>
+                                <MudTh></MudTh>
+                            </HeaderContent>
+                            <RowTemplate Context="m">
+                                <MudTd DataLabel="Model">
+                                    <MudText Typo="Typo.body2"><b>@m.DisplayName</b></MudText>
+                                    <MudText Typo="Typo.caption" Class="todox-page-subtitle">@m.ProviderCode · @m.ProviderModelCode</MudText>
+                                    @if (!string.IsNullOrWhiteSpace(m.Description))
+                                    {
+                                        <MudText Typo="Typo.caption">@m.Description</MudText>
+                                    }
+                                </MudTd>
+                                <MudTd DataLabel="Media">@m.MediaType</MudTd>
+                                <MudTd DataLabel="Capabilities">
+                                    @foreach (var cap in m.Capabilities)
+                                    {
+                                        <MudChip T="string" Size="Size.Small" Class="me-1">@cap</MudChip>
+                                    }
+                                </MudTd>
+                                <MudTd DataLabel="Giá 79AI">
+                                    @if (m.PriceSummary is null)
+                                    {
+                                        <MudChip T="string" Size="Size.Small" Color="Color.Warning">Chưa có bảng giá</MudChip>
+                                    }
+                                    else if (!string.IsNullOrWhiteSpace(m.PriceSummary.StatusMessage))
+                                    {
+                                        <MudChip T="string" Size="Size.Small" Color="Color.Warning">@m.PriceSummary.StatusMessage</MudChip>
+                                    }
+                                    else
+                                    {
+                                        <MudText Typo="Typo.caption">@m.PriceSummary.ProviderPrice?.ToString("0.####") / @m.PriceSummary.SellPoints?.ToString("0.####")</MudText>
+                                    }
+                                </MudTd>
+                                <MudTd DataLabel="Trạng thái">
+                                    <MudChip T="string" Size="Size.Small" Color="@(m.Enabled ? Color.Success : Color.Default)">@(m.Enabled ? "ON" : "OFF")</MudChip>
+                                    @if (m.IsDeprecated)
+                                    {
+                                        <MudChip T="string" Size="Size.Small" Color="Color.Warning">DEPRECATED</MudChip>
+                                    }
+                                </MudTd>
+                                <MudTd DataLabel="Actions">
+                                    <MudMenu Icon="@Icons.Material.Filled.MoreVert" Dense="true">
+                                        <MudMenuItem OnClick="@(() => SelectModelAsync(m))">Mở chi tiết</MudMenuItem>
+                                        <MudMenuItem Disabled="@_busy" OnClick="@(() => ToggleModelAsync(m))">Bật/tắt</MudMenuItem>
+                                    </MudMenu>
+                                </MudTd>
+                            </RowTemplate>
+                        </MudTable>
+                    }
+                </MudPaper>
+
+                @if (_selectedModel is not null)
+                {
+                    <MudPaper Class="todox-card pa-4 mt-3" rounded="true">
+                        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
+                            <div>
+                                <MudText Typo="Typo.h6">@_selectedModel.DisplayName</MudText>
+                                <MudText Typo="Typo.caption" Class="todox-page-subtitle">@_selectedModel.ProviderCode · @_selectedModel.ProviderModelCode · @_selectedModel.MediaType</MudText>
+                            </div>
+                            <MudStack Row="true" Spacing="2">
+                                <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Refresh" Disabled="@_busy" OnClick="ReloadSelectedModelAsync">Tải lại</MudButton>
+                                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save" Disabled="@_busy" OnClick="SaveSelectedModelAsync">Lưu model</MudButton>
+                            </MudStack>
+                        </MudStack>
+                        <MudDivider Class="my-3" />
+                        <MudGrid>
+                            <MudItem xs="12" sm="6"><MudTextField @bind-Value="_selectedModel.DisplayName" Label="Display name" Variant="Variant.Outlined" /></MudItem>
+                            <MudItem xs="12" sm="6"><MudTextField @bind-Value="_selectedModel.ServerCode" Label="Server code" Variant="Variant.Outlined" /></MudItem>
+                            <MudItem xs="12" sm="6"><MudTextField @bind-Value="_selectedModel.ProviderModelCode" Label="Provider model code" Variant="Variant.Outlined" Disabled="true" /></MudItem>
+                            <MudItem xs="12" sm="6"><MudTextField @bind-Value="_selectedModel.ProviderStatus" Label="Provider status" Variant="Variant.Outlined" /></MudItem>
+                            <MudItem xs="12" sm="6"><MudTextField @bind-Value="_selectedModel.StatusMessage" Label="Status message" Variant="Variant.Outlined" /></MudItem>
+                            <MudItem xs="12" sm="6"><MudTextField @bind-Value="_selectedModel.ProviderPriceUnit" Label="Provider price unit" Variant="Variant.Outlined" /></MudItem>
+                            <MudItem xs="12"><MudTextField @bind-Value="_selectedModel.Description" Label="Description" Lines="2" Variant="Variant.Outlined" /></MudItem>
+                            <MudItem xs="12" sm="4"><MudNumericField @bind-Value="_selectedModel.BaseProviderPrice" Label="Giá 79AI" Variant="Variant.Outlined" /></MudItem>
+                            <MudItem xs="12" sm="4" Class="d-flex align-center"><MudSwitch @bind-Value="_selectedModel.Enabled" Color="Color.Success" Label="Bật model" /></MudItem>
+                            <MudItem xs="12" sm="4" Class="d-flex align-center"><MudSwitch @bind-Value="_selectedModel.AllowUserSelect" Color="Color.Primary" Label="Cho user chọn" /></MudItem>
+                        </MudGrid>
+                        <MudText Typo="Typo.subtitle2" Class="mt-4">Pricing</MudText>
+                        <MudTable Items="_selectedPrices" Dense="true" Hover="true">
+                            <HeaderContent>
+                                <MudTh>Cấu hình</MudTh><MudTh>Giá 79AI</MudTh><MudTh>Giá vốn TodoX</MudTh><MudTh>Giá bán</MudTh>
+                            </HeaderContent>
+                            <RowTemplate Context="price">
+                                <MudTd DataLabel="Cấu hình">@FormatPriceLabel(price)</MudTd>
+                                <MudTd DataLabel="Giá 79AI">@price.ProviderPrice?.ToString("0.####")</MudTd>
+                                <MudTd DataLabel="Giá vốn TodoX">@price.InternalCostPoints?.ToString("0.####")</MudTd>
+                                <MudTd DataLabel="Giá bán">@price.SellPoints?.ToString("0.####") (@price.SellPriceMode)</MudTd>
+                            </RowTemplate>
+                        </MudTable>
+                        <MudText Typo="Typo.subtitle2" Class="mt-4">Capabilities</MudText>
+                        @foreach (var cap in _selectedCapabilities)
+                        {
+                            <MudChip T="string" Size="Size.Small" Class="me-1">@cap.CapabilityCode</MudChip>
+                        }
+                        <MudText Typo="Typo.subtitle2" Class="mt-4">Nâng cao</MudText>
+                        <MudText Typo="Typo.caption" Class="todox-page-subtitle">@_selectedModel.RawJson</MudText>
+                    </MudPaper>
+                }
+            </MudTabPanel>
+            <MudTabPanel Text="Sync">
+                <MudPaper Class="todox-card pa-4" rounded="true">
+                    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
+                        <MudText Typo="Typo.h6">Lịch sử đồng bộ</MudText>
+                        <MudStack Row="true" Spacing="2" Class="flex-wrap">
+                            <MudSelect T="long?" Dense="true" Variant="Variant.Outlined" Label="Provider" Value="@_selectedProviderForSync" ValueChanged="OnSyncProviderChanged" Style="min-width:220px">
+                                @foreach (var provider in _providers)
+                                {
+                                    <MudSelectItem T="long?" Value="@((long?)provider.Id)">@provider.ProviderName</MudSelectItem>
+                                }
+                            </MudSelect>
+                            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Sync" Disabled="@(_busy || _selectedProviderForSync is null)" OnClick="SyncSelectedProviderAsync">Đồng bộ ngay</MudButton>
+                        </MudStack>
+                    </MudStack>
+                    <MudText Typo="Typo.caption" Class="todox-page-subtitle">@_syncMessage</MudText>
+                    @if (LatestSync is not null)
+                    {
+                        <MudStack Row="true" Spacing="1" Class="flex-wrap mt-2">
+                            <MudChip T="string" Size="Size.Small" Color="Color.Default">Last sync: @LatestSync.CreatedAt.ToString("yyyy-MM-dd HH:mm")</MudChip>
+                            <MudChip T="string" Size="Size.Small" Color="Color.Info">Status: @LatestSync.Status</MudChip>
+                            <MudChip T="string" Size="Size.Small" Color="Color.Success">New: @LatestSync.ModelInsertedCount</MudChip>
+                            <MudChip T="string" Size="Size.Small" Color="Color.Primary">Updated: @LatestSync.ModelUpdatedCount</MudChip>
+                            <MudChip T="string" Size="Size.Small" Color="Color.Warning">Unavailable: @LatestSync.ModelUnavailableCount</MudChip>
+                            <MudChip T="string" Size="Size.Small" Color="Color.Secondary">Price changes: @LatestSync.PriceChangedCount</MudChip>
+                        </MudStack>
+                    }
+                    <MudDivider Class="my-3" />
+                    @if (_syncHistory.Count == 0)
+                    {
+                        <MudText Class="todox-page-subtitle">Chưa có lịch sử đồng bộ.</MudText>
+                    }
+                    else
+                    {
+                        <MudTable Items="_syncHistory" Dense="true" Hover="true" T="AiProviderSyncHeaderDto">
+                            <HeaderContent>
+                                <MudTh>Thời gian</MudTh><MudTh>Trigger</MudTh><MudTh>Status</MudTh><MudTh>Model mới</MudTh><MudTh>Model đổi</MudTh><MudTh>Unavailable</MudTh><MudTh>Price change</MudTh>
+                            </HeaderContent>
+                            <RowTemplate>
+                                <MudTd DataLabel="Thời gian">@context.CreatedAt.ToString("yyyy-MM-dd HH:mm")</MudTd>
+                                <MudTd DataLabel="Trigger">@context.Trigger</MudTd>
+                                <MudTd DataLabel="Status">@context.Status</MudTd>
+                                <MudTd DataLabel="Model mới">@context.ModelInsertedCount</MudTd>
+                                <MudTd DataLabel="Model đổi">@context.ModelUpdatedCount</MudTd>
+                                <MudTd DataLabel="Unavailable">@context.ModelUnavailableCount</MudTd>
+                                <MudTd DataLabel="Price change">@context.PriceChangedCount</MudTd>
+                            </RowTemplate>
+                        </MudTable>
+                    }
+                </MudPaper>
+                <MudExpansionPanels Class="mt-3" Elevation="0">
+                    <MudExpansionPanel Text="Công cụ nâng cao">
+                        <MudText Typo="Typo.h6">EstimateCost</MudText>
+                        <MudDivider Class="my-3" />
+                        <MudGrid>
+                            <MudItem xs="12" sm="6"><MudTextField @bind-Value="_estimateRequest.ProviderCode" Label="Provider code" Variant="Variant.Outlined" /></MudItem>
+                            <MudItem xs="12" sm="6"><MudTextField @bind-Value="_estimateRequest.ProviderModelCode" Label="Provider model code" Variant="Variant.Outlined" /></MudItem>
+                            <MudItem xs="12" sm="4"><MudTextField @bind-Value="_estimateRequest.Mode" Label="Mode" Variant="Variant.Outlined" /></MudItem>
+                            <MudItem xs="12" sm="4"><MudTextField @bind-Value="_estimateRequest.Resolution" Label="Resolution" Variant="Variant.Outlined" /></MudItem>
+                            <MudItem xs="12" sm="4"><MudTextField @bind-Value="_estimateRequest.Ratio" Label="Ratio" Variant="Variant.Outlined" /></MudItem>
+                            <MudItem xs="12" sm="4"><MudNumericField @bind-Value="_estimateRequest.DurationSeconds" Label="Duration seconds" Variant="Variant.Outlined" /></MudItem>
+                            <MudItem xs="12" sm="4"><MudNumericField @bind-Value="_estimateRequest.Quantity" Label="Quantity" Variant="Variant.Outlined" /></MudItem>
+                            <MudItem xs="12" sm="4" Class="d-flex align-center"><MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Calculate" OnClick="EstimateAsync">Estimate</MudButton></MudItem>
+                        </MudGrid>
+                        @if (_estimateResult is not null)
+                        {
+                            <MudAlert Severity="@(_estimateResult.Success ? Severity.Success : Severity.Warning)" Class="mt-3">
+                                @(_estimateResult.Message ?? _estimateResult.ErrorCode)
+                            </MudAlert>
+                        }
+                    </MudExpansionPanel>
+                </MudExpansionPanels>
+            </MudTabPanel>
+        </MudTabs>
     }
 </MudStack>
+
+<style>
+    .provider-table table {
+        table-layout: fixed;
+        width: 100%;
+    }
+
+    .provider-table .provider-col-provider {
+        width: 40%;
+        min-width: 0;
+        white-space: normal;
+    }
+
+    .provider-table .provider-col-type {
+        width: 18%;
+        white-space: normal;
+    }
+
+    .provider-table .provider-col-priority,
+    .provider-table .provider-col-enabled {
+        width: 12%;
+        white-space: nowrap;
+    }
+
+    .provider-table .provider-col-capabilities {
+        width: 14%;
+        white-space: nowrap;
+    }
+
+    .provider-table .provider-col-actions {
+        width: 44px;
+        white-space: nowrap;
+    }
+
+    .provider-name-button {
+        min-width: 0;
+        max-width: 100%;
+        text-align: left;
+        text-transform: none;
+    }
+
+    .provider-name-button .mud-button-label {
+        justify-content: flex-start;
+        min-width: 0;
+        width: 100%;
+    }
+
+    .provider-row-selected {
+        background-color: rgba(25, 118, 210, 0.08);
+    }
+
+    @@media (max-width: 960px) {
+        .provider-table .provider-col-type,
+        .provider-table .provider-col-priority,
+        .provider-table .provider-col-capabilities {
+            display: none;
+        }
+
+        .provider-table .provider-col-provider {
+            width: auto;
+        }
+    }
+</style>
 
 @code {
     private bool _loading = true;
     private bool _loadingQuickDefaults = true;
+    private bool _loadingModels = true;
     private bool _busy;
     private List<AiProviderListItemDto> _providers = new();
+    private List<AiProviderModelListItemDto> _models = new();
     private AiProviderDetailDto? _selected;
+    private AiProviderModelDetailDto? _selectedModel;
     private UpdateAiProviderRequest _providerEdit = new();
     private List<AiProviderCapabilityDto> _capabilities = new();
+    private List<AiProviderModelCapabilityDto> _selectedCapabilities = new();
+    private List<AiModelPriceDto> _selectedPrices = new();
     private List<QuickDefaultRow> _quickDefaults = new();
+    private string? _modelProviderFilter;
+    private string? _modelMediaFilter;
+    private string? _modelStatusFilter;
+    private bool _modelEnabledOnly = true;
+    private string? _modelSearch;
+    private long? _selectedProviderForSync;
+    private string? _syncMessage;
+    private List<AiProviderSyncHeaderDto> _syncHistory = new();
+    private EstimateCostRequestDto _estimateRequest = new() { Quantity = 1 };
+    private EstimateCostResponseDto? _estimateResult;
+    private int _activeTabIndex;
+    private AiProviderSyncHeaderDto? LatestSync => _syncHistory.FirstOrDefault();
 
     private bool CanSaveQuickDefaults
         => _quickDefaults.Count == AiFeatureProviderCatalog.QuickDefaultFeatures.Count
@@ -234,10 +555,14 @@
 
     private bool IsAdmin => AuthState.CurrentUser?.Role is TodoXUserRole.Admin or TodoXUserRole.SystemOperator || AuthState.CurrentUser?.IsRoot == true;
 
+    private string ProviderRowClass(AiProviderListItemDto provider, int index)
+        => _selected?.Id == provider.Id ? "provider-row-selected cursor-pointer" : "cursor-pointer";
+
     protected override async Task OnInitializedAsync()
     {
-        if (!IsAdmin) { _loading = false; return; }
+        if (!IsAdmin) { _loading = false; _loadingModels = false; return; }
         await ReloadProviders();
+        await ReloadModelsAsync();
     }
 
     private async Task ReloadProviders()
@@ -247,7 +572,9 @@
         try
         {
             _providers = (await Providers.GetProvidersAsync()).ToList();
+            _selectedProviderForSync ??= _providers.FirstOrDefault()?.Id;
             await LoadQuickDefaultsAsync();
+            await ReloadModelsAsync();
         }
         finally
         {
@@ -353,19 +680,90 @@
 
     private async Task SelectProviderAsync(AiProviderListItemDto item)
     {
-        _selected = await Providers.GetProviderAsync(item.Id);
-        if (_selected is null) return;
-        _providerEdit = new UpdateAiProviderRequest
+        try
         {
-            ProviderName = _selected.ProviderName,
-            BaseUrl = _selected.BaseUrl,
-            ApiKeyConfigName = _selected.ApiKeyConfigName,
-            Enabled = _selected.Enabled,
-            Priority = _selected.Priority,
-            Description = _selected.Description,
-            ConfigJson = _selected.ConfigJson
-        };
-        _capabilities = _selected.Capabilities.ToList();
+            _selected = await Providers.GetProviderAsync(item.Id);
+            if (_selected is null)
+            {
+                Snackbar.Add("Không tìm thấy provider.", Severity.Warning);
+                return;
+            }
+
+            _selectedProviderForSync = _selected.Id;
+            _syncHistory = (await ModelService.GetSyncHistoryAsync(_selected.Id)).ToList();
+            _providerEdit = new UpdateAiProviderRequest
+            {
+                ProviderName = _selected.ProviderName,
+                BaseUrl = _selected.BaseUrl,
+                ApiKeyConfigName = _selected.ApiKeyConfigName,
+                Enabled = _selected.Enabled,
+                Priority = _selected.Priority,
+                Description = _selected.Description,
+                ConfigJson = _selected.ConfigJson
+            };
+            _capabilities = _selected.Capabilities.ToList();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+    }
+
+    private Task EditProviderAsync(AiProviderListItemDto item) => SelectProviderAsync(item);
+
+    private async Task OpenProviderSyncAsync(AiProviderListItemDto item)
+    {
+        _selectedProviderForSync = item.Id;
+        _syncHistory = (await ModelService.GetSyncHistoryAsync(item.Id)).ToList();
+        _activeTabIndex = 2;
+    }
+
+    private async Task CheckProviderConnectionAsync(AiProviderListItemDto item)
+    {
+        var detail = await Providers.GetProviderAsync(item.Id);
+        if (detail is null)
+        {
+            Snackbar.Add("Không tìm thấy provider.", Severity.Error);
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(detail.BaseUrl))
+        {
+            Snackbar.Add("Provider chưa cấu hình Base URL.", Severity.Warning);
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(detail.ApiKeyConfigName))
+        {
+            Snackbar.Add("Provider chưa cấu hình tên credential. Không thực hiện render tính phí.", Severity.Warning);
+            return;
+        }
+
+        Snackbar.Add("Cấu hình provider đã sẵn sàng để kiểm tra an toàn.", Severity.Success);
+    }
+
+    private async Task OpenProviderModelsAsync(AiProviderListItemDto item)
+    {
+        _modelProviderFilter = item.ProviderCode;
+        _activeTabIndex = 1;
+        await ReloadModelsAsync();
+        var first = _models.FirstOrDefault();
+        if (first is not null)
+        {
+            await SelectModelAsync(first);
+        }
+    }
+
+    private async Task OpenProviderModelsAsync(AiProviderDetailDto provider)
+    {
+        _modelProviderFilter = provider.ProviderCode;
+        _activeTabIndex = 1;
+        await ReloadModelsAsync();
+        var first = _models.FirstOrDefault();
+        if (first is not null)
+        {
+            await SelectModelAsync(first);
+        }
     }
 
     private async Task SaveProvider()
@@ -438,6 +836,180 @@
         _capabilities = _selected?.Capabilities.ToList() ?? new();
         await ReloadProviders();
     }
+
+    private async Task ReloadModelsAsync()
+    {
+        _loadingModels = true;
+        try
+        {
+            _models = (await ModelService.GetModelsAsync(_modelProviderFilter, _modelMediaFilter, _modelStatusFilter, _modelEnabledOnly, _modelSearch)).ToList();
+            if (_selectedModel is not null)
+            {
+                _selectedModel = _models.FirstOrDefault(x => x.Id == _selectedModel.Id) is not null
+                    ? await ModelService.GetModelAsync(_selectedModel.Id)
+                    : null;
+                if (_selectedModel is not null)
+                {
+                    _selectedPrices = _selectedModel.Prices.ToList();
+                    _selectedCapabilities = _selectedModel.ModelCapabilities.ToList();
+                    _selectedProviderForSync = _selectedModel.ProviderId;
+                    _syncHistory = _selectedModel.SyncHistory.ToList();
+                    _syncMessage = _selectedModel.SyncHistory.FirstOrDefault()?.Message;
+                }
+            }
+        }
+        finally
+        {
+            _loadingModels = false;
+        }
+    }
+
+    private Task OnModelProviderFilterChanged(string? value)
+    {
+        _modelProviderFilter = value;
+        return Task.CompletedTask;
+    }
+
+    private Task OnModelMediaFilterChanged(string? value)
+    {
+        _modelMediaFilter = value;
+        return Task.CompletedTask;
+    }
+
+    private Task OnModelStatusFilterChanged(string? value)
+    {
+        _modelStatusFilter = value;
+        return Task.CompletedTask;
+    }
+
+    private async Task OnSyncProviderChanged(long? value)
+    {
+        _selectedProviderForSync = value;
+        _syncMessage = null;
+        _syncHistory = value is long providerId
+            ? (await ModelService.GetSyncHistoryAsync(providerId)).ToList()
+            : new List<AiProviderSyncHeaderDto>();
+    }
+
+    private async Task SelectModelAsync(AiProviderModelListItemDto item)
+    {
+        _selectedModel = await ModelService.GetModelAsync(item.Id);
+        if (_selectedModel is null)
+        {
+            return;
+        }
+
+        _selectedCapabilities = _selectedModel.ModelCapabilities.ToList();
+        _selectedPrices = _selectedModel.Prices.ToList();
+        _selectedProviderForSync = _selectedModel.ProviderId;
+        _syncHistory = _selectedModel.SyncHistory.ToList();
+        _syncMessage = _selectedModel.SyncHistory.FirstOrDefault()?.Message;
+    }
+
+    private async Task ReloadSelectedModelAsync()
+    {
+        if (_selectedModel is null) return;
+        _selectedModel = await ModelService.GetModelAsync(_selectedModel.Id);
+        if (_selectedModel is null) return;
+        _selectedCapabilities = _selectedModel.ModelCapabilities.ToList();
+        _selectedPrices = _selectedModel.Prices.ToList();
+        _selectedProviderForSync = _selectedModel.ProviderId;
+        _syncHistory = _selectedModel.SyncHistory.ToList();
+    }
+
+    private async Task SaveSelectedModelAsync()
+    {
+        if (_selectedModel is null || AuthState.CurrentUser is null) return;
+        _busy = true;
+        try
+        {
+            await ModelService.UpdateAdminFieldsAsync(
+                _selectedModel.Id,
+                _selectedModel.DisplayName,
+                _selectedModel.Enabled,
+                _selectedModel.AllowUserSelect,
+                _selectedModel.Description,
+                AuthState.CurrentUser.UserId.ToString());
+            Snackbar.Add("Đã lưu model.", Severity.Success);
+            await ReloadSelectedModelAsync();
+            await ReloadModelsAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task ToggleModelAsync(AiProviderModelListItemDto item)
+    {
+        var detail = await ModelService.GetModelAsync(item.Id);
+        if (detail is null || AuthState.CurrentUser is null) return;
+        _busy = true;
+        try
+        {
+            await ModelService.UpdateAdminFieldsAsync(detail.Id, detail.DisplayName, !detail.Enabled, detail.AllowUserSelect, detail.Description, AuthState.CurrentUser.UserId.ToString());
+            Snackbar.Add("Đã cập nhật trạng thái model.", Severity.Success);
+            await ReloadModelsAsync();
+            if (_selectedModel?.Id == detail.Id)
+            {
+                await ReloadSelectedModelAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task SyncSelectedProviderAsync()
+    {
+        if (_selectedProviderForSync is null || AuthState.CurrentUser is null)
+        {
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            var result = await Syncs.SyncProviderAsync(_selectedProviderForSync.Value, AuthState.CurrentUser);
+            _syncMessage = result.Message;
+            Snackbar.Add(result.Message ?? "Đồng bộ xong.", result.Success ? Severity.Success : Severity.Warning);
+            await ReloadModelsAsync();
+        }
+        catch (Exception ex)
+        {
+            _syncMessage = ex.Message;
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task EstimateAsync()
+    {
+        _estimateResult = await Pricing.EstimateAsync(_estimateRequest);
+        if (!_estimateResult.Success)
+        {
+            Snackbar.Add(_estimateResult.Message ?? _estimateResult.ErrorCode ?? "price_not_configured", Severity.Warning);
+        }
+        else
+        {
+            Snackbar.Add("Đã tính giá.", Severity.Success);
+        }
+    }
+
+    private static string FormatPriceLabel(AiModelPriceDto price)
+        => $"{price.Mode ?? "-"} · {price.Resolution ?? "-"} · {price.DurationSeconds?.ToString() ?? "-"}s · {price.Ratio ?? "-"}";
 
     private sealed class QuickDefaultRow
     {
