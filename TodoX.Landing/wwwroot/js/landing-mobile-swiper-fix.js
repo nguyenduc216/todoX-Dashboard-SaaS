@@ -10,7 +10,9 @@
     if (!swiper) return;
 
     try {
-      swiper.params.slidesPerView = 1;
+      swiper.params.slidesPerView = 'auto';
+      swiper.params.centeredSlides = true;
+      swiper.params.centeredSlidesBounds = true;
       swiper.params.spaceBetween = 12;
       swiper.params.loop = false;
       swiper.params.rewind = true;
@@ -31,9 +33,8 @@
       swiper.params.observer = true;
       swiper.params.observeParents = true;
 
-      // Mobile uses swipe + pagination only. Hide/disable previous/next navigation.
       if (swiper.navigation) {
-        try { swiper.navigation.disable(); } catch {}
+        try { swiper.navigation.enable(); } catch {}
       }
 
       swiper.update();

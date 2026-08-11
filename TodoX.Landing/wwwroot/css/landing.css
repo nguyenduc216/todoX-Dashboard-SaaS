@@ -198,6 +198,17 @@
     }
     .industry-pill:nth-child(2){animation-delay:.8s} .industry-pill:nth-child(3){animation-delay:1.6s}
     .industry-pill:nth-child(4){animation-delay:2.4s} .industry-pill:nth-child(5){animation-delay:3.2s}
+    .industry-pill-more {
+      color: var(--gold);
+    }
+    .industry-pill-more i {
+      font-size: 20px;
+    }
+    .industry-pill-more span {
+      font-size: 13px;
+      letter-spacing: 0;
+      line-height: 1.25;
+    }
     @keyframes float { 50% { transform:translateY(-9px); } }
     .industry-pill i {
       width:45px; height:45px; border-radius:12px; display:grid; place-items:center;
@@ -316,14 +327,17 @@
       .industrySwiper .swiper-wrapper { grid-template-columns: repeat(5, minmax(0,1fr)); }
     }
     @media (max-width: 768px) {
-      .industrySwiper { overflow: hidden; }
+      .industrySwiper {
+        overflow: visible;
+        padding-inline: 20px;
+      }
       .industrySwiper .swiper-wrapper {
         display: flex;
         gap: 0;
       }
       .industrySwiper .swiper-slide {
-        width: 100% !important;
-        flex: 0 0 100%;
+        width: min(82vw, 330px) !important;
+        flex: 0 0 min(82vw, 330px);
       }
     }
     .swiper-pagination-bullet { background:#fff; opacity:.25; }
@@ -562,7 +576,8 @@
       .hero,
       .hero-visual {
         max-width: 100%;
-        overflow-x: hidden;
+        overflow-x: clip;
+        overflow-y: visible;
       }
     }
 
@@ -1091,7 +1106,9 @@
       .phone { left:0; width:305px; height:575px; }
       .industry-pills { right:-24px; z-index:3; }
       .industry-pill { width:155px; min-height:60px; }
-      .industry-pill:nth-child(n+4) { display:none; }
+      .industry-pill-more {
+        display: flex;
+      }
       .feature-grid, .form-grid, .chat-demo, .footer-grid { grid-template-columns:1fr; }
       .founder-metrics { grid-template-columns:repeat(2, minmax(0,1fr)); }
       .process { grid-template-columns:1fr; }

@@ -14,7 +14,7 @@ window.TODOX_LANDING_CONFIG = {
     document.head.appendChild(element);
   };
 
-  window.TODOX_LANDING_ASSET_VERSION = "20260811-1";
+  window.TODOX_LANDING_ASSET_VERSION = "20260811-6";
 
   ensureAsset("link", {
     rel: "stylesheet",
@@ -53,11 +53,11 @@ window.TODOX_LANDING_CONFIG = {
 
   ensureAsset("link", {
     rel: "stylesheet",
-    href: "/css/landing-mobile-compact.css?v=20260811-1"
+    href: "/css/landing-mobile-compact.css?v=20260811-6"
   }, "todox-landing-mobile-compact-css");
 
   ensureAsset("script", {
-    src: "/js/landing-mobile-swiper-fix.js?v=20260811-1",
+    src: "/js/landing-mobile-swiper-fix.js?v=20260811-6",
     defer: "defer"
   }, "todox-landing-mobile-swiper-fix-js");
 

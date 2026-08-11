@@ -18,19 +18,66 @@ main > .section + .section {
   min-height: 720px !important;
 }
 
-/* Industry slider navigation is unnecessary on touch/mobile. */
 @media (max-width: 768px) {
   .industrySwiper .swiper-button-prev,
   .industrySwiper .swiper-button-next {
-    display: none !important;
+    position: relative !important;
+    inset: auto !important;
+    display: inline-flex !important;
+    order: 2;
+    flex: 0 0 24px;
+    align-items: center !important;
+    justify-content: center !important;
+    width: 24px !important;
+    height: 24px !important;
+    margin: 10px 8px 0 !important;
+    border-radius: 999px !important;
+    border: 0 !important;
+    background: rgba(255, 189, 34, .14) !important;
+    color: var(--gold) !important;
+    box-shadow: none !important;
+    vertical-align: middle !important;
+  }
+
+  .industrySwiper .swiper-button-next {
+    order: 4;
+  }
+
+  .industrySwiper .swiper-button-prev::after,
+  .industrySwiper .swiper-button-next::after {
+    font-family: Arial, sans-serif !important;
+    font-size: 13px !important;
+    font-weight: 800 !important;
+    line-height: 1 !important;
+    text-transform: none !important;
+  }
+
+  .industrySwiper .swiper-button-prev::after {
+    content: "‹" !important;
+  }
+
+  .industrySwiper .swiper-button-next::after {
+    content: "›" !important;
+  }
+
+  .industrySwiper .swiper-button-disabled {
+    opacity: .35 !important;
   }
 
   .industrySwiper {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    align-items: center !important;
+    justify-content: center !important;
     touch-action: pan-y;
-    overflow: hidden !important;
+    overflow: visible !important;
+    padding-inline: 22px !important;
+    text-align: center;
   }
 
   .industrySwiper .swiper-wrapper {
+    order: 1;
+    flex: 0 0 100%;
     display: flex !important;
     gap: 0 !important;
     transition-timing-function: cubic-bezier(.22,.61,.36,1) !important;
@@ -38,8 +85,8 @@ main > .section + .section {
   }
 
   .industrySwiper .swiper-slide {
-    width: 100% !important;
-    flex: 0 0 100% !important;
+    width: min(82vw, 330px) !important;
+    flex: 0 0 min(82vw, 330px) !important;
     height: auto !important;
   }
 
@@ -136,6 +183,10 @@ main > .section + .section {
     min-height: 520px !important;
   }
 
+  #about {
+    padding-top: 36px !important;
+  }
+
   .feature-grid {
     gap: 10px !important;
     margin-top: 18px !important;
@@ -191,8 +242,17 @@ main > .section + .section {
 
   .industrySwiper .swiper-pagination {
     position: relative !important;
+    display: inline-flex !important;
+    order: 3;
+    flex: 0 1 auto;
+    align-items: center !important;
+    justify-content: center !important;
+    width: auto !important;
     bottom: auto !important;
+    left: auto !important;
+    right: auto !important;
     margin-top: 8px !important;
+    vertical-align: middle !important;
   }
 
   .industry-modal {
@@ -324,7 +384,8 @@ main > .section + .section {
   .section,
   .hero {
     max-width: 100% !important;
-    overflow-x: hidden !important;
+    overflow-x: clip !important;
+    overflow-y: visible !important;
   }
 
   .hero-visual {
@@ -481,6 +542,10 @@ main > .section + .section {
   .hero-visual {
     min-height: 560px !important;
     overflow: visible !important;
+  }
+
+  #about {
+    padding-top: 32px !important;
   }
 
   .ai-workflow-shell {

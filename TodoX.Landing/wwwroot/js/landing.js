@@ -115,7 +115,9 @@ AOS.init({
       if (industryMobileQuery.matches) {
         if (!industrySwiper) {
           industrySwiper = new Swiper(".industrySwiper", {
-            slidesPerView: 1,
+            slidesPerView: "auto",
+            centeredSlides: true,
+            centeredSlidesBounds: true,
             spaceBetween: 12,
             loop: false,
             rewind: true,
