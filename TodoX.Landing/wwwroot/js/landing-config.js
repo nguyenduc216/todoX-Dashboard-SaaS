@@ -14,7 +14,7 @@ window.TODOX_LANDING_CONFIG = {
     document.head.appendChild(element);
   };
 
-  window.TODOX_LANDING_ASSET_VERSION = "20260810-10";
+  window.TODOX_LANDING_ASSET_VERSION = "20260811-1";
 
   ensureAsset("link", {
     rel: "stylesheet",
@@ -50,6 +50,16 @@ window.TODOX_LANDING_CONFIG = {
     src: "/js/landing-navigation-fix.js?v=20260810-1",
     defer: "defer"
   }, "todox-landing-navigation-fix-js");
+
+  ensureAsset("link", {
+    rel: "stylesheet",
+    href: "/css/landing-mobile-compact.css?v=20260811-1"
+  }, "todox-landing-mobile-compact-css");
+
+  ensureAsset("script", {
+    src: "/js/landing-mobile-swiper-fix.js?v=20260811-1",
+    defer: "defer"
+  }, "todox-landing-mobile-swiper-fix-js");
 
   const applyFounderPhoto = () => {
     const founder = document.querySelector('.founder-image');
