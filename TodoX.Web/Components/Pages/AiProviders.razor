@@ -116,32 +116,41 @@
                     else
                     {
                         <MudTable Items="_providers" Hover="true" Dense="true" T="AiProviderListItemDto"
-                                  OnRowClick="@(args => args.Item is not null ? SelectProviderAsync(args.Item) : Task.CompletedTask)" RowClass="cursor-pointer">
+                                  OnRowClick="@(args => args.Item is not null ? SelectProviderAsync(args.Item) : Task.CompletedTask)"
+                                  RowClassFunc="ProviderRowClass"
+                                  Class="provider-table">
                             <HeaderContent>
-                                <MudTh>Provider</MudTh>
-                                <MudTh>Loại</MudTh>
-                                <MudTh>Ưu tiên</MudTh>
-                                <MudTh>Bật</MudTh>
-                                <MudTh>Capabilities</MudTh>
-                                <MudTh></MudTh>
+                                <MudTh Class="provider-col-provider">Provider</MudTh>
+                                <MudTh Class="provider-col-type">Loại</MudTh>
+                                <MudTh Class="provider-col-priority">Ưu tiên</MudTh>
+                                <MudTh Class="provider-col-enabled">Bật</MudTh>
+                                <MudTh Class="provider-col-capabilities">Capabilities</MudTh>
+                                <MudTh Class="provider-col-actions"></MudTh>
                             </HeaderContent>
                             <RowTemplate Context="p">
-                                <MudTd DataLabel="Provider">
-                                    <MudText Typo="Typo.body2"><b>@p.ProviderName</b></MudText>
-                                    <MudText Typo="Typo.caption" Class="todox-page-subtitle">@p.ProviderCode @(p.IsSystem ? "· hệ thống" : "")</MudText>
+                                <MudTd DataLabel="Provider" Class="provider-col-provider">
+                                    <span @onclick:stopPropagation="true">
+                                        <MudButton Variant="Variant.Text" Color="Color.Primary" Class="provider-name-button pa-0" OnClick="@(() => SelectProviderAsync(p))">
+                                            <MudStack Spacing="0">
+                                                <MudText Typo="Typo.body2"><b>@p.ProviderName</b></MudText>
+                                                <MudText Typo="Typo.caption" Class="todox-page-subtitle">@p.ProviderCode @(p.IsSystem ? "· hệ thống" : "")</MudText>
+                                            </MudStack>
+                                        </MudButton>
+                                    </span>
                                 </MudTd>
-                                <MudTd DataLabel="Loại">@p.ProviderType</MudTd>
-                                <MudTd DataLabel="Ưu tiên">@p.Priority</MudTd>
-                                <MudTd DataLabel="Bật">
+                                <MudTd DataLabel="Loại" Class="provider-col-type">@p.ProviderType</MudTd>
+                                <MudTd DataLabel="Ưu tiên" Class="provider-col-priority">@p.Priority</MudTd>
+                                <MudTd DataLabel="Bật" Class="provider-col-enabled">
                                     <MudIcon Icon="@(p.Enabled ? Icons.Material.Filled.CheckCircle : Icons.Material.Filled.Cancel)"
                                              Color="@(p.Enabled ? Color.Success : Color.Default)" Size="Size.Small" />
                                 </MudTd>
-                                <MudTd DataLabel="Capabilities">@p.EnabledCapabilityCount / @p.CapabilityCount</MudTd>
-                                <MudTd DataLabel="Actions">
+                                <MudTd DataLabel="Capabilities" Class="provider-col-capabilities">@p.EnabledCapabilityCount / @p.CapabilityCount</MudTd>
+                                <MudTd DataLabel="Actions" Class="provider-col-actions">
                                     <MudMenu Icon="@Icons.Material.Filled.MoreVert" Dense="true">
-                                        <MudMenuItem Disabled="@_busy" OnClick="@(() => OpenProviderSyncAsync(p))">Đồng bộ ngay</MudMenuItem>
+                                        <MudMenuItem Disabled="@_busy" OnClick="@(() => EditProviderAsync(p))">Sửa provider</MudMenuItem>
+                                        <MudMenuItem Disabled="@_busy" OnClick="@(() => OpenProviderModelsAsync(p))">Quản lý model</MudMenuItem>
                                         <MudMenuItem Disabled="@_busy" OnClick="@(() => CheckProviderConnectionAsync(p))">Kiểm tra kết nối</MudMenuItem>
-                                        <MudMenuItem OnClick="@(() => OpenProviderModelsAsync(p))">Quản lý model</MudMenuItem>
+                                        <MudMenuItem Disabled="@_busy" OnClick="@(() => OpenProviderSyncAsync(p))">Đồng bộ ngay</MudMenuItem>
                                     </MudMenu>
                                 </MudTd>
                             </RowTemplate>
@@ -378,9 +387,28 @@
                 <MudPaper Class="todox-card pa-4" rounded="true">
                     <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
                         <MudText Typo="Typo.h6">Lịch sử đồng bộ</MudText>
-                        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Sync" Disabled="@(_busy || _selectedProviderForSync is null)" OnClick="SyncSelectedProviderAsync">Đồng bộ ngay</MudButton>
+                        <MudStack Row="true" Spacing="2" Class="flex-wrap">
+                            <MudSelect T="long?" Dense="true" Variant="Variant.Outlined" Label="Provider" Value="@_selectedProviderForSync" ValueChanged="OnSyncProviderChanged" Style="min-width:220px">
+                                @foreach (var provider in _providers)
+                                {
+                                    <MudSelectItem T="long?" Value="@((long?)provider.Id)">@provider.ProviderName</MudSelectItem>
+                                }
+                            </MudSelect>
+                            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Sync" Disabled="@(_busy || _selectedProviderForSync is null)" OnClick="SyncSelectedProviderAsync">Đồng bộ ngay</MudButton>
+                        </MudStack>
                     </MudStack>
                     <MudText Typo="Typo.caption" Class="todox-page-subtitle">@_syncMessage</MudText>
+                    @if (LatestSync is not null)
+                    {
+                        <MudStack Row="true" Spacing="1" Class="flex-wrap mt-2">
+                            <MudChip T="string" Size="Size.Small" Color="Color.Default">Last sync: @LatestSync.CreatedAt.ToString("yyyy-MM-dd HH:mm")</MudChip>
+                            <MudChip T="string" Size="Size.Small" Color="Color.Info">Status: @LatestSync.Status</MudChip>
+                            <MudChip T="string" Size="Size.Small" Color="Color.Success">New: @LatestSync.ModelInsertedCount</MudChip>
+                            <MudChip T="string" Size="Size.Small" Color="Color.Primary">Updated: @LatestSync.ModelUpdatedCount</MudChip>
+                            <MudChip T="string" Size="Size.Small" Color="Color.Warning">Unavailable: @LatestSync.ModelUnavailableCount</MudChip>
+                            <MudChip T="string" Size="Size.Small" Color="Color.Secondary">Price changes: @LatestSync.PriceChangedCount</MudChip>
+                        </MudStack>
+                    }
                     <MudDivider Class="my-3" />
                     @if (_syncHistory.Count == 0)
                     {
@@ -404,30 +432,95 @@
                         </MudTable>
                     }
                 </MudPaper>
-                <MudPaper Class="todox-card pa-4 mt-3" rounded="true">
-                    <MudText Typo="Typo.h6">EstimateCost</MudText>
-                    <MudDivider Class="my-3" />
-                    <MudGrid>
-                        <MudItem xs="12" sm="6"><MudTextField @bind-Value="_estimateRequest.ProviderCode" Label="Provider code" Variant="Variant.Outlined" /></MudItem>
-                        <MudItem xs="12" sm="6"><MudTextField @bind-Value="_estimateRequest.ProviderModelCode" Label="Provider model code" Variant="Variant.Outlined" /></MudItem>
-                        <MudItem xs="12" sm="4"><MudTextField @bind-Value="_estimateRequest.Mode" Label="Mode" Variant="Variant.Outlined" /></MudItem>
-                        <MudItem xs="12" sm="4"><MudTextField @bind-Value="_estimateRequest.Resolution" Label="Resolution" Variant="Variant.Outlined" /></MudItem>
-                        <MudItem xs="12" sm="4"><MudTextField @bind-Value="_estimateRequest.Ratio" Label="Ratio" Variant="Variant.Outlined" /></MudItem>
-                        <MudItem xs="12" sm="4"><MudNumericField @bind-Value="_estimateRequest.DurationSeconds" Label="Duration seconds" Variant="Variant.Outlined" /></MudItem>
-                        <MudItem xs="12" sm="4"><MudNumericField @bind-Value="_estimateRequest.Quantity" Label="Quantity" Variant="Variant.Outlined" /></MudItem>
-                        <MudItem xs="12" sm="4" Class="d-flex align-center"><MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Calculate" OnClick="EstimateAsync">Estimate</MudButton></MudItem>
-                    </MudGrid>
-                    @if (_estimateResult is not null)
-                    {
-                        <MudAlert Severity="@(_estimateResult.Success ? Severity.Success : Severity.Warning)" Class="mt-3">
-                            @(_estimateResult.Message ?? _estimateResult.ErrorCode)
-                        </MudAlert>
-                    }
-                </MudPaper>
+                <MudExpansionPanels Class="mt-3" Elevation="0">
+                    <MudExpansionPanel Text="Công cụ nâng cao">
+                        <MudText Typo="Typo.h6">EstimateCost</MudText>
+                        <MudDivider Class="my-3" />
+                        <MudGrid>
+                            <MudItem xs="12" sm="6"><MudTextField @bind-Value="_estimateRequest.ProviderCode" Label="Provider code" Variant="Variant.Outlined" /></MudItem>
+                            <MudItem xs="12" sm="6"><MudTextField @bind-Value="_estimateRequest.ProviderModelCode" Label="Provider model code" Variant="Variant.Outlined" /></MudItem>
+                            <MudItem xs="12" sm="4"><MudTextField @bind-Value="_estimateRequest.Mode" Label="Mode" Variant="Variant.Outlined" /></MudItem>
+                            <MudItem xs="12" sm="4"><MudTextField @bind-Value="_estimateRequest.Resolution" Label="Resolution" Variant="Variant.Outlined" /></MudItem>
+                            <MudItem xs="12" sm="4"><MudTextField @bind-Value="_estimateRequest.Ratio" Label="Ratio" Variant="Variant.Outlined" /></MudItem>
+                            <MudItem xs="12" sm="4"><MudNumericField @bind-Value="_estimateRequest.DurationSeconds" Label="Duration seconds" Variant="Variant.Outlined" /></MudItem>
+                            <MudItem xs="12" sm="4"><MudNumericField @bind-Value="_estimateRequest.Quantity" Label="Quantity" Variant="Variant.Outlined" /></MudItem>
+                            <MudItem xs="12" sm="4" Class="d-flex align-center"><MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Calculate" OnClick="EstimateAsync">Estimate</MudButton></MudItem>
+                        </MudGrid>
+                        @if (_estimateResult is not null)
+                        {
+                            <MudAlert Severity="@(_estimateResult.Success ? Severity.Success : Severity.Warning)" Class="mt-3">
+                                @(_estimateResult.Message ?? _estimateResult.ErrorCode)
+                            </MudAlert>
+                        }
+                    </MudExpansionPanel>
+                </MudExpansionPanels>
             </MudTabPanel>
         </MudTabs>
     }
 </MudStack>
+
+<style>
+    .provider-table table {
+        table-layout: fixed;
+        width: 100%;
+    }
+
+    .provider-table .provider-col-provider {
+        width: 40%;
+        min-width: 0;
+        white-space: normal;
+    }
+
+    .provider-table .provider-col-type {
+        width: 18%;
+        white-space: normal;
+    }
+
+    .provider-table .provider-col-priority,
+    .provider-table .provider-col-enabled {
+        width: 12%;
+        white-space: nowrap;
+    }
+
+    .provider-table .provider-col-capabilities {
+        width: 14%;
+        white-space: nowrap;
+    }
+
+    .provider-table .provider-col-actions {
+        width: 44px;
+        white-space: nowrap;
+    }
+
+    .provider-name-button {
+        min-width: 0;
+        max-width: 100%;
+        text-align: left;
+        text-transform: none;
+    }
+
+    .provider-name-button .mud-button-label {
+        justify-content: flex-start;
+        min-width: 0;
+        width: 100%;
+    }
+
+    .provider-row-selected {
+        background-color: rgba(25, 118, 210, 0.08);
+    }
+
+    @@media (max-width: 960px) {
+        .provider-table .provider-col-type,
+        .provider-table .provider-col-priority,
+        .provider-table .provider-col-capabilities {
+            display: none;
+        }
+
+        .provider-table .provider-col-provider {
+            width: auto;
+        }
+    }
+</style>
 
 @code {
     private bool _loading = true;
@@ -454,12 +547,16 @@
     private EstimateCostRequestDto _estimateRequest = new() { Quantity = 1 };
     private EstimateCostResponseDto? _estimateResult;
     private int _activeTabIndex;
+    private AiProviderSyncHeaderDto? LatestSync => _syncHistory.FirstOrDefault();
 
     private bool CanSaveQuickDefaults
         => _quickDefaults.Count == AiFeatureProviderCatalog.QuickDefaultFeatures.Count
            && _quickDefaults.All(x => x.SelectedCapabilityId is not null && string.IsNullOrWhiteSpace(x.Warning));
 
     private bool IsAdmin => AuthState.CurrentUser?.Role is TodoXUserRole.Admin or TodoXUserRole.SystemOperator || AuthState.CurrentUser?.IsRoot == true;
+
+    private string ProviderRowClass(AiProviderListItemDto provider, int index)
+        => _selected?.Id == provider.Id ? "provider-row-selected cursor-pointer" : "cursor-pointer";
 
     protected override async Task OnInitializedAsync()
     {
@@ -583,22 +680,36 @@
 
     private async Task SelectProviderAsync(AiProviderListItemDto item)
     {
-        _selected = await Providers.GetProviderAsync(item.Id);
-        if (_selected is null) return;
-        _selectedProviderForSync = _selected.Id;
-        _syncHistory = (await ModelService.GetSyncHistoryAsync(_selected.Id)).ToList();
-        _providerEdit = new UpdateAiProviderRequest
+        try
         {
-            ProviderName = _selected.ProviderName,
-            BaseUrl = _selected.BaseUrl,
-            ApiKeyConfigName = _selected.ApiKeyConfigName,
-            Enabled = _selected.Enabled,
-            Priority = _selected.Priority,
-            Description = _selected.Description,
-            ConfigJson = _selected.ConfigJson
-        };
-        _capabilities = _selected.Capabilities.ToList();
+            _selected = await Providers.GetProviderAsync(item.Id);
+            if (_selected is null)
+            {
+                Snackbar.Add("Không tìm thấy provider.", Severity.Warning);
+                return;
+            }
+
+            _selectedProviderForSync = _selected.Id;
+            _syncHistory = (await ModelService.GetSyncHistoryAsync(_selected.Id)).ToList();
+            _providerEdit = new UpdateAiProviderRequest
+            {
+                ProviderName = _selected.ProviderName,
+                BaseUrl = _selected.BaseUrl,
+                ApiKeyConfigName = _selected.ApiKeyConfigName,
+                Enabled = _selected.Enabled,
+                Priority = _selected.Priority,
+                Description = _selected.Description,
+                ConfigJson = _selected.ConfigJson
+            };
+            _capabilities = _selected.Capabilities.ToList();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
     }
+
+    private Task EditProviderAsync(AiProviderListItemDto item) => SelectProviderAsync(item);
 
     private async Task OpenProviderSyncAsync(AiProviderListItemDto item)
     {
@@ -634,6 +745,18 @@
     private async Task OpenProviderModelsAsync(AiProviderListItemDto item)
     {
         _modelProviderFilter = item.ProviderCode;
+        _activeTabIndex = 1;
+        await ReloadModelsAsync();
+        var first = _models.FirstOrDefault();
+        if (first is not null)
+        {
+            await SelectModelAsync(first);
+        }
+    }
+
+    private async Task OpenProviderModelsAsync(AiProviderDetailDto provider)
+    {
+        _modelProviderFilter = provider.ProviderCode;
         _activeTabIndex = 1;
         await ReloadModelsAsync();
         var first = _models.FirstOrDefault();
@@ -757,6 +880,15 @@
     {
         _modelStatusFilter = value;
         return Task.CompletedTask;
+    }
+
+    private async Task OnSyncProviderChanged(long? value)
+    {
+        _selectedProviderForSync = value;
+        _syncMessage = null;
+        _syncHistory = value is long providerId
+            ? (await ModelService.GetSyncHistoryAsync(providerId)).ToList()
+            : new List<AiProviderSyncHeaderDto>();
     }
 
     private async Task SelectModelAsync(AiProviderModelListItemDto item)
