@@ -21,6 +21,7 @@
     <Content Remove="publish/**" />
     <None Remove="publish/**" />
     <Compile Remove="publish/**" />
+    <Compile Remove="Tests/**" />
     <Content Remove="keys/**/*.json" />
     <None Remove="keys/**/*.json" />
   </ItemGroup>

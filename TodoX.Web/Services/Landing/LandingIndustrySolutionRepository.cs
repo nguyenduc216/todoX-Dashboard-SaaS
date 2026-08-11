@@ -496,10 +496,10 @@ public sealed class LandingIndustrySolutionRepository
                 aspect_ratio = v.aspect_ratio,
                 updated_by = @actorUserId,
                 updated_at = now()
-            from lateral (
+            from (
                 select thumbnail_url, video_url, aspect_ratio
                 from landing.industry_solution_videos
-                where industry_solution_id=i.id and is_primary=true and is_active=true and deleted_at is null
+                where industry_solution_id=@industryId and is_primary=true and is_active=true and deleted_at is null
                 limit 1
             ) v
             where i.id=@industryId;
