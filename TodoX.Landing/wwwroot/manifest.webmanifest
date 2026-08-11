@@ -1,0 +1,16 @@
+{
+  "name": "TodoX",
+  "short_name": "TodoX",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#050607",
+  "theme_color": "#ffbd22",
+  "lang": "vi",
+  "icons": [
+    {
+      "src": "/img/favicon/favicon.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    }
+  ]
+}

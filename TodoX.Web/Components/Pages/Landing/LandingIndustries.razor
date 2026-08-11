@@ -1,0 +1,981 @@
+@page "/landing/industries"
+@using System.Text.RegularExpressions
+@using Microsoft.AspNetCore.Components.Forms
+@using TodoX.Web.Models
+@using TodoX.Web.Models.Landing
+@using TodoX.Web.Services
+@using TodoX.Web.Services.Landing
+@using TodoX.Web.Services.SharedMedia
+@inject AuthStateService AuthState
+@inject AccountService Accounts
+@inject LandingIndustrySolutionRepository Repository
+@inject LandingIndustryMediaService Media
+@inject SharedMediaPathService MediaPaths
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+
+<PageTitle>Giải pháp ngành nghề Landing</PageTitle>
+
+<MudStack Spacing="3">
+    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-3">
+        <div>
+            <MudText Typo="Typo.h4" Class="todox-page-title">Giải pháp theo ngành nghề</MudText>
+            <MudText Typo="Typo.body1" Class="todox-page-subtitle">Quản lý nội dung, thumbnail và video clip hiển thị trên todox.vn.</MudText>
+        </div>
+        <MudStack Row="true" Spacing="2">
+            <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Refresh" OnClick="LoadAsync">Refresh</MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Add" Disabled="@(!CanCreate)" OnClick="NewItem">Thêm mới</MudButton>
+        </MudStack>
+    </MudStack>
+
+    @if (!_ready)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+    }
+    else if (!CanView)
+    {
+        <MudAlert Severity="Severity.Error">Bạn không có quyền truy cập phân hệ quản trị Landing Page.</MudAlert>
+    }
+    else if (!_schemaReady)
+    {
+        <MudAlert Severity="Severity.Warning">Database chưa cập nhật bảng ngành nghề. Hãy chạy thủ công file SQL `database/manual/todox_landing_industry_solutions.sql`.</MudAlert>
+    }
+    else
+    {
+        @if (!_videoLibraryReady)
+        {
+            <MudAlert Severity="Severity.Warning">Database chưa cập nhật cấu trúc nhiều video. Hãy chạy database/manual/todox_landing_industry_multi_videos.sql.</MudAlert>
+        }
+
+        @if (!_mediaReady)
+        {
+            <MudAlert Severity="Severity.Warning">
+                SharedMedia chưa sẵn sàng. Cấu hình `SharedMedia:StorageRoot` và cấp quyền ghi cho Dashboard App Pool trước khi upload thumbnail/video.
+            </MudAlert>
+        }
+
+        <MudPaper Class="todox-table-card industry-admin-table-card pa-2">
+            <MudTable Items="@_items" Dense="true" Hover="true" Breakpoint="Breakpoint.None" Loading="_loading" Class="industry-admin-table">
+                <HeaderContent>
+                    <MudTh>Thumbnail</MudTh>
+                    <MudTh>Tên ngành</MudTh>
+                    <MudTh>Tỷ lệ</MudTh>
+                    <MudTh>Số video</MudTh>
+                    <MudTh>Thứ tự</MudTh>
+                    <MudTh>Trạng thái</MudTh>
+                    <MudTh>Cập nhật</MudTh>
+                    <MudTh>Actions</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd DataLabel="Thumbnail">
+                        @if (!string.IsNullOrWhiteSpace(context.ThumbnailUrl))
+                        {
+                            <img src="@context.ThumbnailUrl" alt="@context.Title" style="width:64px;height:42px;object-fit:cover;border-radius:8px;" />
+                        }
+                        else
+                        {
+                            <MudAvatar Rounded="true" Color="Color.Dark" Style="width:64px;height:42px;">TX</MudAvatar>
+                        }
+                    </MudTd>
+                    <MudTd DataLabel="Tên ngành"><MudText Typo="Typo.subtitle2">@context.Title</MudText></MudTd>
+                    <MudTd DataLabel="Tỷ lệ"><MudChip T="string" Size="Size.Small" Color="Color.Warning">@context.AspectRatio</MudChip></MudTd>
+                    <MudTd DataLabel="Số video">@GetVideoCountText(context)</MudTd>
+                    <MudTd DataLabel="Thứ tự">
+                        <MudNumericField T="int" Value="@context.DisplayOrder" ValueChanged="@((int value) => ReorderAsync(context, value))" Min="0" Margin="Margin.Dense" Style="width:72px;" Disabled="@(!CanUpdate)" />
+                    </MudTd>
+                    <MudTd DataLabel="Trạng thái">
+                        @if (context.IsDeleted)
+                        {
+                            <MudChip T="string" Size="Size.Small" Color="Color.Error">Đã xóa</MudChip>
+                        }
+                        else if (context.IsActive)
+                        {
+                            <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Success" Disabled="@(!CanUpdate)" OnClick="@(() => ToggleActiveAsync(context))">Hiển thị</MudButton>
+                        }
+                        else
+                        {
+                            <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Default" Disabled="@(!CanUpdate)" OnClick="@(() => ToggleActiveAsync(context))">Ẩn</MudButton>
+                        }
+                    </MudTd>
+                    <MudTd DataLabel="Cập nhật">@context.UpdatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</MudTd>
+                    <MudTd DataLabel="Actions">
+                        <MudMenu Dense="true" Icon="@Icons.Material.Filled.MoreVert" AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight">
+                            <MudMenuItem Icon="@Icons.Material.Filled.Edit" Disabled="@(!CanUpdate)" OnClick="@(() => EditAsync(context.Id))">Sửa</MudMenuItem>
+                            <MudMenuItem Icon="@Icons.Material.Filled.VideoLibrary" Disabled="@(!CanUpdate || !_videoLibraryReady)" OnClick="@(() => OpenVideoManagerAsync(context))">Quản lý video</MudMenuItem>
+                            <MudMenuItem Icon="@Icons.Material.Filled.PlayCircle" Disabled="@string.IsNullOrWhiteSpace(context.VideoUrl)" OnClick="@(() => PreviewAsync(context))">Xem thử video</MudMenuItem>
+                            @if (context.IsDeleted)
+                            {
+                                <MudMenuItem Icon="@Icons.Material.Filled.Restore" Disabled="@(!CanDelete)" OnClick="@(() => RestoreAsync(context.Id))">Khôi phục</MudMenuItem>
+                            }
+                            else
+                            {
+                                <MudMenuItem Icon="@Icons.Material.Filled.Delete" Disabled="@(!CanDelete)" OnClick="@(() => DeleteAsync(context.Id))">Xóa mềm</MudMenuItem>
+                            }
+                        </MudMenu>
+                    </MudTd>
+                </RowTemplate>
+                <NoRecordsContent><MudText Class="pa-4">Chưa có dữ liệu ngành nghề.</MudText></NoRecordsContent>
+            </MudTable>
+        </MudPaper>
+    }
+</MudStack>
+
+@if (_editOpen)
+{
+    <div class="industry-edit-modal-backdrop" @onclick="CloseEditor">
+        <div class="industry-edit-modal" @onclick:stopPropagation="true">
+            <div class="industry-edit-modal-header">
+                <div>
+                    <MudText Typo="Typo.h5">@(_edit.Id is null ? "Thêm ngành nghề" : "Cập nhật ngành nghề")</MudText>
+                    <MudText Typo="Typo.body2" Color="Color.Secondary">Thông tin này sẽ được sử dụng trên Landing Page todox.vn.</MudText>
+                </div>
+                <MudIconButton Icon="@Icons.Material.Filled.Close" Color="Color.Default" OnClick="CloseEditor" />
+            </div>
+
+            <div class="industry-edit-modal-body">
+                <MudGrid Spacing="2">
+                    <MudItem xs="12" md="6">
+                        <MudTextField T="string" Label="Tên ngành *" Variant="Variant.Outlined" @bind-Value="_edit.Title" OnBlur="EnsureSlug" />
+                    </MudItem>
+                    <MudItem xs="12" md="6">
+                        <MudTextField T="string" Label="Slug *" Variant="Variant.Outlined" @bind-Value="_edit.Slug" HelperText="Tự tạo từ tên ngành lần đầu, vẫn cho phép sửa tay." />
+                    </MudItem>
+                    <MudItem xs="12" md="6">
+                        <MudTextField T="string" Label="Mô tả ngắn" Lines="3" Variant="Variant.Outlined" @bind-Value="_edit.ShortDescription" Counter="500" MaxLength="500" />
+                    </MudItem>
+                    <MudItem xs="12" md="6">
+                        <MudTextField T="string" Label="Mô tả chi tiết" Lines="3" Variant="Variant.Outlined" @bind-Value="_edit.Description" />
+                    </MudItem>
+                    <MudItem xs="12" sm="6" md="3">
+                        <MudSelect T="string" Label="Tỷ lệ video" Variant="Variant.Outlined" @bind-Value="_edit.AspectRatio">
+                            <MudSelectItem Value="@LandingIndustryAspectRatios.Portrait">9:16</MudSelectItem>
+                            <MudSelectItem Value="@LandingIndustryAspectRatios.Landscape">16:9</MudSelectItem>
+                        </MudSelect>
+                    </MudItem>
+                    <MudItem xs="12" sm="6" md="3">
+                        <MudNumericField T="int" Label="Thứ tự hiển thị" Variant="Variant.Outlined" @bind-Value="_edit.DisplayOrder" Min="0" />
+                    </MudItem>
+                    <MudItem xs="12" md="6" Class="d-flex align-center">
+                        <MudSwitch T="bool" @bind-Value="_edit.IsActive" Color="Color.Success" Label="Hiển thị trên Landing Page" />
+                    </MudItem>
+                    <MudItem xs="12" md="4">
+                        <MudTextField T="string" Label="Định dạng phù hợp" Lines="2" Variant="Variant.Outlined" @bind-Value="_edit.FormatNote" />
+                    </MudItem>
+                    <MudItem xs="12" md="4">
+                        <MudTextField T="string" Label="Mục tiêu" Lines="2" Variant="Variant.Outlined" @bind-Value="_edit.GoalNote" />
+                    </MudItem>
+                    <MudItem xs="12" md="4">
+                        <MudTextField T="string" Label="TodoX có thể triển khai" Lines="2" Variant="Variant.Outlined" @bind-Value="_edit.CapabilityNote" />
+                    </MudItem>
+
+                    <MudItem xs="12" md="6">
+                        <MudPaper Class="pa-3 industry-media-box" Outlined="true">
+                            <MudText Typo="Typo.subtitle2">Thumbnail</MudText>
+                            @if (!string.IsNullOrWhiteSpace(_edit.ThumbnailUrl))
+                            {
+                                <img src="@_edit.ThumbnailUrl" alt="Thumbnail" class="industry-thumb-preview" />
+                            }
+                            @if (_videoLibraryReady)
+                            {
+                                <MudText Typo="Typo.caption">Video đại diện đang được quản lý trong "Quản lý video".</MudText>
+                            }
+                            else
+                            {
+                                <InputFile OnChange="ThumbnailSelected" accept="image/jpeg,image/png,image/webp" />
+                                <MudText Typo="Typo.caption">JPG, JPEG, PNG, WEBP. Tối đa 5 MB.</MudText>
+                            }
+                        </MudPaper>
+                    </MudItem>
+
+                    <MudItem xs="12" md="6">
+                        <MudPaper Class="pa-3 industry-media-box" Outlined="true">
+                            <MudText Typo="Typo.subtitle2">Video clip</MudText>
+                            @if (!string.IsNullOrWhiteSpace(_edit.VideoUrl))
+                            {
+                                <video src="@_edit.VideoUrl" controls preload="metadata" class="industry-video-preview"></video>
+                            }
+                            @if (_videoLibraryReady)
+                            {
+                                <MudText Typo="Typo.caption">Video đại diện đang được quản lý trong "Quản lý video".</MudText>
+                                @if (_edit.Id is not null)
+                                {
+                                    <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.VideoLibrary" Disabled="@(!CanUpdate)" OnClick="OpenVideoManagerFromEditorAsync">Mở quản lý video</MudButton>
+                                }
+                            }
+                            else
+                            {
+                                <InputFile OnChange="VideoSelected" accept="video/mp4,video/webm" />
+                                <MudText Typo="Typo.caption">MP4 hoặc WEBM. Tối đa 200 MB.</MudText>
+                            }
+                        </MudPaper>
+                    </MudItem>
+                </MudGrid>
+            </div>
+
+            <div class="industry-edit-modal-footer">
+                <MudButton Variant="Variant.Text" Color="Color.Default" OnClick="CloseEditor">Hủy</MudButton>
+                <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Save" Disabled="@(_saving || !CanSave)" OnClick="SaveAsync">
+                    @(_saving ? "Đang lưu..." : "Lưu")
+                </MudButton>
+            </div>
+        </div>
+    </div>
+}
+
+@if (_videoManagerOpen && _videoIndustry is not null)
+{
+    <div class="industry-edit-modal-backdrop" @onclick="CloseVideoManager">
+        <div class="industry-edit-modal industry-video-manager-modal" @onclick:stopPropagation="true">
+            <div class="industry-edit-modal-header">
+                <div>
+                    <MudText Typo="Typo.h5">Video ngành: @_videoIndustry.Title</MudText>
+                    <MudText Typo="Typo.body2" Color="Color.Secondary">@_industryVideos.Count video trong danh sách</MudText>
+                </div>
+                <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
+                    <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Add" Disabled="@(!CanUpdate)" OnClick="NewVideo">Thêm video</MudButton>
+                    <MudIconButton Icon="@Icons.Material.Filled.Close" Color="Color.Default" OnClick="CloseVideoManager" />
+                </MudStack>
+            </div>
+
+            <div class="industry-edit-modal-body">
+                @if (_videoLoading)
+                {
+                    <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+                }
+                else if (_industryVideos.Count == 0)
+                {
+                    <MudAlert Severity="Severity.Info">Chưa có video cho ngành này.</MudAlert>
+                }
+                else
+                {
+                    <MudTable Items="@_industryVideos" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Class="industry-video-table">
+                        <HeaderContent>
+                            <MudTh>Thumbnail</MudTh>
+                            <MudTh>Tiêu đề</MudTh>
+                            <MudTh>Tỷ lệ</MudTh>
+                            <MudTh>Thứ tự</MudTh>
+                            <MudTh>Trạng thái</MudTh>
+                            <MudTh>Cập nhật</MudTh>
+                            <MudTh>Actions</MudTh>
+                        </HeaderContent>
+                        <RowTemplate>
+                            <MudTd DataLabel="Thumbnail">
+                                @if (!string.IsNullOrWhiteSpace(context.ThumbnailUrl))
+                                {
+                                    <img src="@context.ThumbnailUrl" alt="@context.Title" class="industry-video-thumb" />
+                                }
+                                else
+                                {
+                                    <MudAvatar Rounded="true" Color="Color.Dark" Style="width:72px;height:48px;">TX</MudAvatar>
+                                }
+                            </MudTd>
+                            <MudTd DataLabel="Tiêu đề">
+                                <MudStack Spacing="1">
+                                    <MudText Typo="Typo.subtitle2">@context.Title</MudText>
+                                    @if (context.IsPrimary)
+                                    {
+                                        <MudChip T="string" Size="Size.Small" Color="Color.Warning">ĐẠI DIỆN</MudChip>
+                                    }
+                                </MudStack>
+                            </MudTd>
+                            <MudTd DataLabel="Tỷ lệ"><MudChip T="string" Size="Size.Small">@context.AspectRatio</MudChip></MudTd>
+                            <MudTd DataLabel="Thứ tự">@context.DisplayOrder</MudTd>
+                            <MudTd DataLabel="Trạng thái">
+                                @if (context.IsDeleted)
+                                {
+                                    <MudChip T="string" Size="Size.Small" Color="Color.Error">Đã xóa</MudChip>
+                                }
+                                else if (context.IsActive)
+                                {
+                                    <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Success" Disabled="@(!CanUpdate)" OnClick="@(() => ToggleVideoActiveAsync(context))">Hiển thị</MudButton>
+                                }
+                                else
+                                {
+                                    <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Default" Disabled="@(!CanUpdate)" OnClick="@(() => ToggleVideoActiveAsync(context))">Ẩn</MudButton>
+                                }
+                            </MudTd>
+                            <MudTd DataLabel="Cập nhật">@context.UpdatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</MudTd>
+                            <MudTd DataLabel="Actions">
+                                <MudMenu Dense="true" Icon="@Icons.Material.Filled.MoreVert" AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight">
+                                    <MudMenuItem Icon="@Icons.Material.Filled.PlayCircle" Disabled="@string.IsNullOrWhiteSpace(context.VideoUrl)" OnClick="@(() => PreviewVideoAsync(context))">Xem</MudMenuItem>
+                                    <MudMenuItem Icon="@Icons.Material.Filled.Edit" Disabled="@(!CanUpdate || context.IsDeleted)" OnClick="@(() => EditVideo(context))">Sửa</MudMenuItem>
+                                    <MudMenuItem Icon="@Icons.Material.Filled.Star" Disabled="@(!CanUpdate || context.IsPrimary || context.IsDeleted)" OnClick="@(() => SetPrimaryVideoAsync(context))">Chọn đại diện</MudMenuItem>
+                                    @if (context.IsDeleted)
+                                    {
+                                        <MudMenuItem Icon="@Icons.Material.Filled.Restore" Disabled="@(!CanDelete)" OnClick="@(() => RestoreVideoAsync(context))">Khôi phục</MudMenuItem>
+                                    }
+                                    else
+                                    {
+                                        <MudMenuItem Icon="@Icons.Material.Filled.Delete" Disabled="@(!CanDelete)" OnClick="@(() => DeleteVideoAsync(context))">Xóa mềm</MudMenuItem>
+                                    }
+                                </MudMenu>
+                            </MudTd>
+                        </RowTemplate>
+                    </MudTable>
+                }
+            </div>
+        </div>
+    </div>
+}
+
+@if (_videoEditorOpen && _videoIndustry is not null)
+{
+    <div class="industry-edit-modal-backdrop" @onclick="CloseVideoEditor">
+        <div class="industry-edit-modal industry-video-editor-modal" @onclick:stopPropagation="true">
+            <div class="industry-edit-modal-header">
+                <div>
+                    <MudText Typo="Typo.h5">@(_videoEdit.Id is null ? "Thêm video" : "Cập nhật video")</MudText>
+                    <MudText Typo="Typo.body2" Color="Color.Secondary">@_videoIndustry.Title</MudText>
+                </div>
+                <MudIconButton Icon="@Icons.Material.Filled.Close" Color="Color.Default" OnClick="CloseVideoEditor" />
+            </div>
+
+            <div class="industry-edit-modal-body">
+                <MudGrid Spacing="2">
+                    <MudItem xs="12" md="6">
+                        <MudTextField T="string" Label="Tiêu đề *" Variant="Variant.Outlined" @bind-Value="_videoEdit.Title" />
+                    </MudItem>
+                    <MudItem xs="12" md="3">
+                        <MudSelect T="string" Label="Tỷ lệ" Variant="Variant.Outlined" @bind-Value="_videoEdit.AspectRatio">
+                            <MudSelectItem Value="@LandingIndustryAspectRatios.Portrait">9:16</MudSelectItem>
+                            <MudSelectItem Value="@LandingIndustryAspectRatios.Landscape">16:9</MudSelectItem>
+                        </MudSelect>
+                    </MudItem>
+                    <MudItem xs="12" md="3">
+                        <MudNumericField T="int" Label="Thứ tự" Variant="Variant.Outlined" @bind-Value="_videoEdit.DisplayOrder" Min="0" />
+                    </MudItem>
+                    <MudItem xs="12" md="6">
+                        <MudTextField T="string" Label="Mô tả ngắn" Lines="3" Variant="Variant.Outlined" @bind-Value="_videoEdit.ShortDescription" Counter="500" MaxLength="500" />
+                    </MudItem>
+                    <MudItem xs="12" md="6">
+                        <MudTextField T="string" Label="Mô tả chi tiết" Lines="3" Variant="Variant.Outlined" @bind-Value="_videoEdit.Description" />
+                    </MudItem>
+                    <MudItem xs="12" md="4">
+                        <MudTextField T="string" Label="Định dạng phù hợp" Lines="2" Variant="Variant.Outlined" @bind-Value="_videoEdit.FormatNote" />
+                    </MudItem>
+                    <MudItem xs="12" md="4">
+                        <MudTextField T="string" Label="Mục tiêu" Lines="2" Variant="Variant.Outlined" @bind-Value="_videoEdit.GoalNote" />
+                    </MudItem>
+                    <MudItem xs="12" md="4">
+                        <MudTextField T="string" Label="TodoX có thể triển khai" Lines="2" Variant="Variant.Outlined" @bind-Value="_videoEdit.CapabilityNote" />
+                    </MudItem>
+                    <MudItem xs="12" md="6" Class="d-flex align-center">
+                        <MudSwitch T="bool" @bind-Value="_videoEdit.IsActive" Color="Color.Success" Label="Active" />
+                    </MudItem>
+                    <MudItem xs="12" md="6" Class="d-flex align-center">
+                        <MudCheckBox T="bool" @bind-Value="_videoEdit.IsPrimary" Color="Color.Warning" Label="Video đại diện" />
+                    </MudItem>
+                    <MudItem xs="12" md="6">
+                        <MudPaper Class="pa-3 industry-media-box" Outlined="true">
+                            <MudText Typo="Typo.subtitle2">Thumbnail</MudText>
+                            @if (!string.IsNullOrWhiteSpace(_videoEdit.ThumbnailUrl))
+                            {
+                                <img src="@_videoEdit.ThumbnailUrl" alt="Thumbnail" class="industry-thumb-preview" />
+                            }
+                            <InputFile OnChange="VideoThumbnailSelected" accept="image/jpeg,image/png,image/webp" />
+                            <MudText Typo="Typo.caption">JPG, JPEG, PNG, WEBP. Tối đa 5 MB.</MudText>
+                        </MudPaper>
+                    </MudItem>
+                    <MudItem xs="12" md="6">
+                        <MudPaper Class="pa-3 industry-media-box" Outlined="true">
+                            <MudText Typo="Typo.subtitle2">Video clip *</MudText>
+                            @if (!string.IsNullOrWhiteSpace(_videoEdit.VideoUrl))
+                            {
+                                <video src="@_videoEdit.VideoUrl" controls preload="metadata" class="industry-video-preview"></video>
+                            }
+                            <InputFile OnChange="VideoUploadSelected" accept="video/mp4,video/webm" />
+                            <MudText Typo="Typo.caption">MP4 hoặc WEBM. Tối đa 200 MB.</MudText>
+                        </MudPaper>
+                    </MudItem>
+                </MudGrid>
+            </div>
+
+            <div class="industry-edit-modal-footer">
+                <MudButton Variant="Variant.Text" Color="Color.Default" OnClick="CloseVideoEditor">Hủy</MudButton>
+                <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Save" Disabled="@(_videoSaving || !CanUpdate)" OnClick="SaveVideoAsync">
+                    @(_videoSaving ? "Đang lưu..." : "Lưu video")
+                </MudButton>
+            </div>
+        </div>
+    </div>
+}
+
+<style>
+    .industry-edit-modal-backdrop {
+        position: fixed;
+        inset: 0;
+        z-index: 1400;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+        background: rgba(0,0,0,.72);
+        backdrop-filter: blur(5px);
+    }
+
+    .industry-admin-table-card {
+        overflow-x: auto;
+    }
+
+    .industry-admin-table :deep(.mud-table-cell) {
+        padding: 8px 10px;
+        vertical-align: middle;
+    }
+
+    .industry-admin-table :deep(.mud-button-root) {
+        min-width: 0;
+        padding-inline: 7px;
+        font-size: .78rem;
+    }
+
+    .industry-video-manager-modal {
+        width: min(1280px, 97vw);
+    }
+
+    .industry-video-editor-modal {
+        width: min(1040px, 96vw);
+    }
+
+    .industry-video-table :deep(.mud-table-cell) {
+        padding: 9px 10px;
+        vertical-align: middle;
+    }
+
+    .industry-admin-table :deep(th:nth-child(2)),
+    .industry-admin-table :deep(td:nth-child(2)),
+    .industry-video-table :deep(th:nth-child(2)),
+    .industry-video-table :deep(td:nth-child(2)) {
+        min-width: 220px;
+    }
+
+    .industry-admin-table :deep(th:last-child),
+    .industry-admin-table :deep(td:last-child),
+    .industry-video-table :deep(th:last-child),
+    .industry-video-table :deep(td:last-child) {
+        width: 64px;
+        text-align: center;
+    }
+
+    .industry-admin-table :deep(.mud-menu),
+    .industry-video-table :deep(.mud-menu) {
+        display: inline-flex;
+        justify-content: center;
+    }
+
+    .industry-video-thumb {
+        width: 72px;
+        height: 48px;
+        object-fit: cover;
+        border-radius: 8px;
+        background: #070a0d;
+    }
+
+    .industry-edit-modal {
+        width: min(1120px, 96vw);
+        max-height: 92vh;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        border-radius: 18px;
+        border: 1px solid rgba(255, 183, 0, .28);
+        background: #0d151f;
+        box-shadow: 0 28px 80px rgba(0,0,0,.55);
+    }
+
+    .industry-edit-modal-header,
+    .industry-edit-modal-footer {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        padding: 18px 22px;
+        background: #101a25;
+    }
+
+    .industry-edit-modal-header {
+        border-bottom: 1px solid rgba(255,255,255,.08);
+    }
+
+    .industry-edit-modal-footer {
+        justify-content: flex-end;
+        border-top: 1px solid rgba(255,255,255,.08);
+    }
+
+    .industry-edit-modal-body {
+        overflow-y: auto;
+        padding: 22px;
+        scrollbar-width: thin;
+        scrollbar-color: #ffb900 #111923;
+    }
+
+    .industry-edit-modal-body::-webkit-scrollbar { width: 8px; }
+    .industry-edit-modal-body::-webkit-scrollbar-track { background: #111923; }
+    .industry-edit-modal-body::-webkit-scrollbar-thumb { background: #ffb900; border-radius: 999px; }
+
+    .industry-media-box {
+        min-height: 210px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+    }
+
+    .industry-thumb-preview {
+        width: 100%;
+        max-height: 180px;
+        object-fit: cover;
+        border-radius: 10px;
+        background: #070a0d;
+    }
+
+    .industry-video-preview {
+        width: 100%;
+        max-height: 230px;
+        object-fit: contain;
+        background: #000;
+        border-radius: 10px;
+    }
+
+    @@media (max-width: 768px) {
+        .industry-edit-modal-backdrop { padding: 8px; align-items: flex-end; }
+        .industry-edit-modal { width: 100%; max-height: 94vh; border-radius: 16px 16px 0 0; }
+        .industry-edit-modal-header,
+        .industry-edit-modal-footer { padding: 14px 16px; }
+        .industry-edit-modal-body { padding: 16px; }
+        .industry-video-manager-modal,
+        .industry-video-editor-modal { width: 100%; }
+    }
+</style>
+
+@code {
+    private bool _ready;
+    private bool _schemaReady;
+    private bool _videoLibraryReady;
+    private bool _mediaReady;
+    private bool _loading;
+    private bool _saving;
+    private bool _editOpen;
+    private bool _videoManagerOpen;
+    private bool _videoEditorOpen;
+    private bool _videoLoading;
+    private bool _videoSaving;
+    private IReadOnlyList<LandingIndustrySolution> _items = Array.Empty<LandingIndustrySolution>();
+    private IReadOnlyList<LandingIndustryVideo> _industryVideos = Array.Empty<LandingIndustryVideo>();
+    private Dictionary<Guid, int> _videoCounts = new();
+    private LandingIndustrySolution? _videoIndustry;
+    private LandingIndustrySolutionEdit _edit = NewEdit();
+    private LandingIndustryVideoEdit _videoEdit = NewVideoEdit();
+    private IBrowserFile? _thumbnailFile;
+    private IBrowserFile? _videoFile;
+    private IBrowserFile? _videoThumbnailFile;
+    private IBrowserFile? _videoUploadFile;
+
+    private bool CanView => AuthState.CurrentUser is not null && !AuthState.CurrentUser.IsCustomer && (AuthState.CurrentUser.IsRoot || AuthState.CurrentUser.Role is TodoXUserRole.Admin or TodoXUserRole.SystemOperator || AuthState.CurrentUser.Can(LandingIndustryPermissions.View));
+    private bool CanCreate => AuthState.CurrentUser is not null && (AuthState.CurrentUser.IsRoot || AuthState.CurrentUser.Role is TodoXUserRole.Admin || AuthState.CurrentUser.Can(LandingIndustryPermissions.Create));
+    private bool CanUpdate => AuthState.CurrentUser is not null && (AuthState.CurrentUser.IsRoot || AuthState.CurrentUser.Role is TodoXUserRole.Admin or TodoXUserRole.SystemOperator || AuthState.CurrentUser.Can(LandingIndustryPermissions.Update));
+    private bool CanDelete => AuthState.CurrentUser is not null && (AuthState.CurrentUser.IsRoot || AuthState.CurrentUser.Role is TodoXUserRole.Admin || AuthState.CurrentUser.Can(LandingIndustryPermissions.Delete));
+    private bool CanSave => _edit.Id is null ? CanCreate : CanUpdate;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!AuthState.IsInitialized)
+        {
+            await AuthState.InitializeAsync(id => Accounts.RehydrateSessionAsync(id));
+        }
+
+        _ready = true;
+        if (!CanView) return;
+        _schemaReady = await Repository.IsReadyAsync();
+        _videoLibraryReady = await Repository.IsVideoLibraryReadyAsync();
+        _mediaReady = MediaPaths.IsConfigured && MediaPaths.CanWrite();
+        if (_schemaReady) await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        if (!CanView || !_schemaReady) return;
+        try
+        {
+            _loading = true;
+            _videoLibraryReady = await Repository.IsVideoLibraryReadyAsync();
+            _items = await Repository.ListAsync(includeInactive: true, includeDeleted: true);
+            _videoCounts = _videoLibraryReady
+                ? await Repository.GetVideoCountsAsync()
+                : new Dictionary<Guid, int>();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Không tải được danh sách: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private string GetVideoCountText(LandingIndustrySolution item)
+    {
+        if (_videoLibraryReady)
+        {
+            return $"{(_videoCounts.TryGetValue(item.Id, out var count) ? count : 0)} video";
+        }
+
+        return string.IsNullOrWhiteSpace(item.VideoUrl) ? "Đang cập nhật" : "Đã upload";
+    }
+
+    private void ResetEditor()
+    {
+        _edit = NewEdit();
+        _thumbnailFile = null;
+        _videoFile = null;
+    }
+
+    private void NewItem()
+    {
+        ResetEditor();
+        _editOpen = true;
+    }
+
+    private void CloseEditor()
+    {
+        if (_saving) return;
+        _editOpen = false;
+        ResetEditor();
+    }
+
+    private async Task EditAsync(Guid id)
+    {
+        var item = await Repository.GetAsync(id);
+        if (item is null) return;
+
+        _edit = new LandingIndustrySolutionEdit
+        {
+            Id = item.Id,
+            Slug = item.Slug,
+            Title = item.Title,
+            ShortDescription = item.ShortDescription,
+            Description = item.Description,
+            ThumbnailUrl = item.ThumbnailUrl,
+            VideoUrl = item.VideoUrl,
+            AspectRatio = item.AspectRatio,
+            FormatNote = item.FormatNote,
+            GoalNote = item.GoalNote,
+            CapabilityNote = item.CapabilityNote,
+            DisplayOrder = item.DisplayOrder,
+            IsActive = item.IsActive
+        };
+        _thumbnailFile = null;
+        _videoFile = null;
+        _editOpen = true;
+    }
+
+    private void ThumbnailSelected(InputFileChangeEventArgs e) => _thumbnailFile = e.File;
+    private void VideoSelected(InputFileChangeEventArgs e) => _videoFile = e.File;
+
+    private Task PreviewAsync(LandingIndustrySolution item)
+    {
+        var parameters = new DialogParameters
+        {
+            ["Title"] = item.Title,
+            ["VideoUrl"] = item.VideoUrl,
+            ["AspectRatio"] = item.AspectRatio
+        };
+
+        return DialogService.ShowAsync<Components.Dialogs.LandingIndustryVideoPreviewDialog>(
+            "Xem thử video",
+            parameters,
+            new DialogOptions { MaxWidth = item.AspectRatio == "16:9" ? MaxWidth.Large : MaxWidth.Small, FullWidth = true });
+    }
+
+    private async Task OpenVideoManagerAsync(LandingIndustrySolution item)
+    {
+        if (!_videoLibraryReady || !CanUpdate) return;
+        _videoIndustry = item;
+        _videoManagerOpen = true;
+        await LoadIndustryVideosAsync();
+    }
+
+    private async Task OpenVideoManagerFromEditorAsync()
+    {
+        if (_edit.Id is null) return;
+        var item = _items.FirstOrDefault(x => x.Id == _edit.Id.Value);
+        if (item is null) return;
+        _editOpen = false;
+        await OpenVideoManagerAsync(item);
+    }
+
+    private async Task LoadIndustryVideosAsync()
+    {
+        if (_videoIndustry is null || !_videoLibraryReady) return;
+        try
+        {
+            _videoLoading = true;
+            _industryVideos = await Repository.ListVideosAsync(_videoIndustry.Id, includeInactive: true, includeDeleted: true);
+            _videoCounts[_videoIndustry.Id] = _industryVideos.Count(x => !x.IsDeleted);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Không tải được danh sách video: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _videoLoading = false;
+        }
+    }
+
+    private void CloseVideoManager()
+    {
+        if (_videoSaving) return;
+        _videoManagerOpen = false;
+        _videoEditorOpen = false;
+        _videoIndustry = null;
+        _industryVideos = Array.Empty<LandingIndustryVideo>();
+        ResetVideoEditor();
+    }
+
+    private void NewVideo()
+    {
+        if (_videoIndustry is null) return;
+        _videoEdit = NewVideoEdit(_videoIndustry.Id);
+        _videoThumbnailFile = null;
+        _videoUploadFile = null;
+        _videoEditorOpen = true;
+    }
+
+    private void EditVideo(LandingIndustryVideo video)
+    {
+        _videoEdit = new LandingIndustryVideoEdit
+        {
+            Id = video.Id,
+            IndustrySolutionId = video.IndustrySolutionId,
+            Title = video.Title,
+            ShortDescription = video.ShortDescription,
+            Description = video.Description,
+            ThumbnailUrl = video.ThumbnailUrl,
+            VideoUrl = video.VideoUrl,
+            AspectRatio = video.AspectRatio,
+            FormatNote = video.FormatNote,
+            GoalNote = video.GoalNote,
+            CapabilityNote = video.CapabilityNote,
+            DisplayOrder = video.DisplayOrder,
+            IsPrimary = video.IsPrimary,
+            IsActive = video.IsActive
+        };
+        _videoThumbnailFile = null;
+        _videoUploadFile = null;
+        _videoEditorOpen = true;
+    }
+
+    private void CloseVideoEditor()
+    {
+        if (_videoSaving) return;
+        _videoEditorOpen = false;
+        ResetVideoEditor();
+    }
+
+    private void ResetVideoEditor()
+    {
+        _videoEdit = NewVideoEdit(_videoIndustry?.Id ?? Guid.Empty);
+        _videoThumbnailFile = null;
+        _videoUploadFile = null;
+    }
+
+    private void VideoThumbnailSelected(InputFileChangeEventArgs e) => _videoThumbnailFile = e.File;
+    private void VideoUploadSelected(InputFileChangeEventArgs e) => _videoUploadFile = e.File;
+
+    private Task PreviewVideoAsync(LandingIndustryVideo video)
+    {
+        var parameters = new DialogParameters
+        {
+            ["Title"] = video.Title,
+            ["VideoUrl"] = video.VideoUrl,
+            ["AspectRatio"] = video.AspectRatio
+        };
+
+        return DialogService.ShowAsync<Components.Dialogs.LandingIndustryVideoPreviewDialog>(
+            "Xem thử video",
+            parameters,
+            new DialogOptions { MaxWidth = video.AspectRatio == "16:9" ? MaxWidth.Large : MaxWidth.Small, FullWidth = true });
+    }
+
+    private async Task SaveVideoAsync()
+    {
+        if (AuthState.CurrentUser is null || _videoIndustry is null || !CanUpdate || _videoSaving) return;
+        _videoSaving = true;
+        var oldThumbnail = _videoEdit.ThumbnailUrl;
+        var oldVideo = _videoEdit.VideoUrl;
+        try
+        {
+            if (_videoThumbnailFile is not null)
+            {
+                _videoEdit.ThumbnailUrl = await Media.SaveThumbnailAsync(_videoThumbnailFile);
+            }
+
+            if (_videoUploadFile is not null)
+            {
+                _videoEdit.VideoUrl = await Media.SaveVideoAsync(_videoUploadFile);
+            }
+
+            await Repository.UpsertVideoAsync(_videoEdit, AuthState.CurrentUser.UserId);
+            if (_videoThumbnailFile is not null) Media.DeleteIfSharedMedia(oldThumbnail);
+            if (_videoUploadFile is not null) Media.DeleteIfSharedMedia(oldVideo);
+
+            Snackbar.Add("Đã lưu video ngành nghề.", Severity.Success);
+            _videoEditorOpen = false;
+            ResetVideoEditor();
+            await ReloadVideoViewsAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Không lưu được video: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _videoSaving = false;
+        }
+    }
+
+    private async Task SetPrimaryVideoAsync(LandingIndustryVideo video)
+    {
+        if (AuthState.CurrentUser is null || _videoIndustry is null || !CanUpdate) return;
+        await Repository.SetPrimaryVideoAsync(_videoIndustry.Id, video.Id, AuthState.CurrentUser.UserId);
+        await ReloadVideoViewsAsync();
+    }
+
+    private async Task ToggleVideoActiveAsync(LandingIndustryVideo video)
+    {
+        if (AuthState.CurrentUser is null || !CanUpdate) return;
+        await Repository.SetVideoActiveAsync(video.Id, !video.IsActive, AuthState.CurrentUser.UserId);
+        await ReloadVideoViewsAsync();
+    }
+
+    private async Task DeleteVideoAsync(LandingIndustryVideo video)
+    {
+        if (AuthState.CurrentUser is null || !CanDelete) return;
+        await Repository.DeleteVideoAsync(video.Id, AuthState.CurrentUser.UserId);
+        await ReloadVideoViewsAsync();
+    }
+
+    private async Task RestoreVideoAsync(LandingIndustryVideo video)
+    {
+        if (AuthState.CurrentUser is null || !CanDelete) return;
+        await Repository.RestoreVideoAsync(video.Id, AuthState.CurrentUser.UserId);
+        await ReloadVideoViewsAsync();
+    }
+
+    private async Task ReloadVideoViewsAsync()
+    {
+        await LoadIndustryVideosAsync();
+        _items = await Repository.ListAsync(includeInactive: true, includeDeleted: true);
+        _videoCounts = await Repository.GetVideoCountsAsync();
+        if (_videoIndustry is not null)
+        {
+            _videoIndustry = _items.FirstOrDefault(x => x.Id == _videoIndustry.Id) ?? _videoIndustry;
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        if (AuthState.CurrentUser is null || !CanSave || _saving) return;
+        _saving = true;
+        var oldThumbnail = _edit.ThumbnailUrl;
+        var oldVideo = _edit.VideoUrl;
+        try
+        {
+            _edit.Title = _edit.Title.Trim();
+            _edit.Slug = string.IsNullOrWhiteSpace(_edit.Slug) ? Slugify(_edit.Title) : Slugify(_edit.Slug);
+
+            if (_thumbnailFile is not null)
+            {
+                _edit.ThumbnailUrl = await Media.SaveThumbnailAsync(_thumbnailFile);
+            }
+
+            if (_videoFile is not null)
+            {
+                _edit.VideoUrl = await Media.SaveVideoAsync(_videoFile);
+            }
+
+            await Repository.UpsertAsync(_edit, AuthState.CurrentUser.UserId);
+            if (_thumbnailFile is not null) Media.DeleteIfSharedMedia(oldThumbnail);
+            if (_videoFile is not null) Media.DeleteIfSharedMedia(oldVideo);
+
+            Snackbar.Add("Đã lưu giải pháp ngành nghề.", Severity.Success);
+            _editOpen = false;
+            ResetEditor();
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Không lưu được dữ liệu: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task ToggleActiveAsync(LandingIndustrySolution item)
+    {
+        if (AuthState.CurrentUser is null || !CanUpdate) return;
+        await Repository.SetActiveAsync(item.Id, !item.IsActive, AuthState.CurrentUser.UserId);
+        await LoadAsync();
+    }
+
+    private async Task DeleteAsync(Guid id)
+    {
+        if (AuthState.CurrentUser is null || !CanDelete) return;
+        await Repository.DeleteAsync(id, AuthState.CurrentUser.UserId);
+        if (_edit.Id == id) CloseEditor();
+        await LoadAsync();
+    }
+
+    private async Task RestoreAsync(Guid id)
+    {
+        if (AuthState.CurrentUser is null || !CanDelete) return;
+        await Repository.RestoreAsync(id, AuthState.CurrentUser.UserId);
+        await LoadAsync();
+    }
+
+    private async Task ReorderAsync(LandingIndustrySolution item, int displayOrder)
+    {
+        if (AuthState.CurrentUser is null || !CanUpdate || displayOrder == item.DisplayOrder) return;
+        await Repository.ReorderAsync(item.Id, displayOrder, AuthState.CurrentUser.UserId);
+        await LoadAsync();
+    }
+
+    private void EnsureSlug()
+    {
+        if (string.IsNullOrWhiteSpace(_edit.Slug) && !string.IsNullOrWhiteSpace(_edit.Title))
+        {
+            _edit.Slug = Slugify(_edit.Title);
+        }
+    }
+
+    private static LandingIndustrySolutionEdit NewEdit() => new()
+    {
+        AspectRatio = LandingIndustryAspectRatios.Portrait,
+        DisplayOrder = 10,
+        IsActive = true
+    };
+
+    private static LandingIndustryVideoEdit NewVideoEdit(Guid industrySolutionId = default) => new()
+    {
+        IndustrySolutionId = industrySolutionId,
+        AspectRatio = LandingIndustryAspectRatios.Portrait,
+        DisplayOrder = 0,
+        IsActive = true
+    };
+
+    private static string Slugify(string value)
+    {
+        var normalized = RemoveVietnameseMarks(value.Trim().ToLowerInvariant().Replace("đ", "d").Replace("Đ", "d"));
+        normalized = Regex.Replace(normalized, "[^a-z0-9]+", "-");
+        return normalized.Trim('-');
+    }
+
+    private static string RemoveVietnameseMarks(string value)
+    {
+        var formD = value.Normalize(System.Text.NormalizationForm.FormD);
+        var chars = formD.Where(c => System.Globalization.CharUnicodeInfo.GetUnicodeCategory(c) != System.Globalization.UnicodeCategory.NonSpacingMark).ToArray();
+        return new string(chars).Normalize(System.Text.NormalizationForm.FormC);
+    }
+}

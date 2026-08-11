@@ -301,6 +301,11 @@
             list.Add(BuildAiAssetsGroup());
         }
 
+        if (!existingCodes.Contains("landing_contacts") || !existingCodes.Contains("landing_industries"))
+        {
+            list.Add(BuildLandingPageGroup(existingCodes));
+        }
+
         // Ensure "AI Providers" is always reachable even if the DB menu has not been seeded with it.
         if (!existingCodes.Contains("ai_providers"))
         {
@@ -422,6 +427,7 @@
         "Api" => Icons.Material.Filled.Api,
         "Dns" => Icons.Material.Filled.Dns,
         "SettingsEthernet" => Icons.Material.Filled.SettingsEthernet,
+        "ContactMail" => Icons.Material.Filled.ContactMail,
         "Article" => Icons.Material.Filled.Article,
         _ => Icons.Material.Filled.Circle
     };
@@ -520,6 +526,57 @@
                     SortOrder = 10
                 }
             }
+        };
+    }
+
+    private static NavigationMenuGroupDto BuildLandingPageGroup(ISet<string> existingCodes)
+    {
+        var groupId = Guid.NewGuid();
+        var items = new List<NavigationMenuItemDto>();
+
+        if (!existingCodes.Contains("landing_contacts"))
+        {
+            items.Add(new NavigationMenuItemDto
+            {
+                Id = Guid.NewGuid(),
+                GroupId = groupId,
+                Code = "landing_contacts",
+                Title = "Liên hệ tư vấn",
+                Href = "/landing/contacts",
+                IconKey = "ContactMail",
+                ModuleKeys = Array.Empty<string>(),
+                VisibilityPolicy = "always",
+                MatchAll = false,
+                SortOrder = 10
+            });
+        }
+
+        if (!existingCodes.Contains("landing_industries"))
+        {
+            items.Add(new NavigationMenuItemDto
+            {
+                Id = Guid.NewGuid(),
+                GroupId = groupId,
+                Code = "landing_industries",
+                Title = "Giải pháp ngành nghề",
+                Href = "/landing/industries",
+                IconKey = "VideoLibrary",
+                ModuleKeys = Array.Empty<string>(),
+                VisibilityPolicy = "always",
+                MatchAll = false,
+                SortOrder = 20
+            });
+        }
+
+        return new NavigationMenuGroupDto
+        {
+            Id = groupId,
+            Code = "landing_page",
+            Title = "Landing Page",
+            IconKey = "Public",
+            SortOrder = 55,
+            DefaultExpanded = true,
+            Items = items
         };
     }
 

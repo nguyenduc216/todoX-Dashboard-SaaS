@@ -1,0 +1,78 @@
+/* TodoX text-only wordmark: hide image logo in Landing header/footer */
+.brand{
+  display:inline-flex;
+  align-items:center;
+  gap:0!important;
+  flex:0 0 auto;
+}
+.brand>img{
+  display:none!important;
+}
+.brand .brand-name{
+  display:flex;
+  flex-direction:column;
+  align-items:flex-start;
+  justify-content:center;
+  line-height:1;
+  min-width:max-content;
+}
+.brand .brand-name strong{
+  display:block;
+  margin:0;
+  color:#f7f8fa;
+  font-size:clamp(25px,1.9vw,32px)!important;
+  font-weight:800;
+  line-height:.96!important;
+  letter-spacing:-.055em;
+  white-space:nowrap;
+}
+.brand .brand-name strong .gold-text{
+  display:inline;
+  font-size:1em;
+  font-weight:900;
+  letter-spacing:-.045em;
+  background:linear-gradient(135deg,#ffe39a 0%,#ffbd22 52%,#ff9200 100%);
+  -webkit-background-clip:text;
+  background-clip:text;
+  color:transparent;
+}
+.brand .brand-name>span{
+  display:block;
+  margin-top:8px;
+  color:#ffbd22!important;
+  font-size:10px!important;
+  font-weight:700;
+  line-height:1;
+  letter-spacing:.24em!important;
+  white-space:nowrap;
+}
+
+/* Keep header wordmark compact so navigation has more horizontal space. */
+header .brand{
+  min-width:175px;
+}
+header .nav{
+  column-gap:clamp(16px,2vw,34px);
+}
+
+/* Footer uses the same clean wordmark, without the image badge. */
+footer .brand .brand-name strong{
+  font-size:30px!important;
+}
+footer .brand .brand-name>span{
+  font-size:10px!important;
+  margin-top:9px;
+}
+
+@media(max-width:1180px){
+  header .brand{min-width:145px}
+  header .brand .brand-name strong{font-size:25px!important}
+  header .brand .brand-name>span{font-size:8.5px!important;letter-spacing:.19em!important}
+}
+
+@media(max-width:768px){
+  header .brand{min-width:auto}
+  header .brand .brand-name strong{font-size:25px!important}
+  header .brand .brand-name>span{display:block!important;font-size:8px!important;margin-top:6px;letter-spacing:.18em!important}
+  footer .brand .brand-name strong{font-size:28px!important}
+}

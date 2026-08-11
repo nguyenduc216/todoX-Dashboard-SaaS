@@ -1,0 +1,37 @@
+<MudDialog>
+    <TitleContent>
+        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="gap-2">
+            <div>
+                <MudText Typo="Typo.h6">@Title</MudText>
+                <MudText Typo="Typo.caption" Class="todox-page-subtitle">Preview video ngành nghề Landing</MudText>
+            </div>
+            <MudChip T="string" Size="Size.Small" Color="Color.Warning">@AspectRatio</MudChip>
+        </MudStack>
+    </TitleContent>
+    <DialogContent>
+        @if (!string.IsNullOrWhiteSpace(VideoUrl))
+        {
+            <video src="@VideoUrl" controls playsinline preload="metadata" style="@VideoStyle"></video>
+        }
+        else
+        {
+            <MudAlert Severity="Severity.Info">Ngành nghề này chưa có video.</MudAlert>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton Color="Color.Warning" Variant="Variant.Filled" OnClick="Close">Đóng</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public string? Title { get; set; }
+    [Parameter] public string? VideoUrl { get; set; }
+    [Parameter] public string AspectRatio { get; set; } = "9:16";
+
+    private string VideoStyle => AspectRatio == "16:9"
+        ? "width:100%;max-height:68vh;background:#000;border-radius:12px;object-fit:contain;"
+        : "display:block;width:min(420px,100%);max-height:72vh;margin:0 auto;background:#000;border-radius:12px;object-fit:contain;";
+
+    private void Close() => MudDialog.Close();
+}
