@@ -66,21 +66,21 @@ public sealed class AiProviderCatalogSyncWorker : BackgroundService
 
         foreach (var providerCode in configuredCodes)
         {
-            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
-            timeout.CancelAfter(TimeSpan.FromSeconds(Math.Max(15, options.TimeoutSeconds)));
+            using var lookupTimeout = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+            lookupTimeout.CancelAfter(TimeSpan.FromSeconds(Math.Max(15, options.TimeoutSeconds)));
 
-            var provider = await providers.GetProviderByCodeAsync(providerCode, timeout.Token);
+            var provider = await providers.GetProviderByCodeAsync(providerCode, lookupTimeout.Token);
             if (provider is null || !provider.Enabled)
             {
                 _logger.LogInformation("AI_PROVIDER_CATALOG_DAILY_SYNC_SKIPPED providerCode={ProviderCode}", providerCode);
                 continue;
             }
 
-            var result = await sync.SyncProviderAsync(provider.Id, user: null, timeout.Token);
+            var result = await RunAttemptAsync(sync, provider.Id, stoppingToken, options);
             if (!result.Success && options.RetryDelaySeconds > 0 && !stoppingToken.IsCancellationRequested)
             {
                 await Task.Delay(TimeSpan.FromSeconds(options.RetryDelaySeconds), stoppingToken);
-                result = await sync.SyncProviderAsync(provider.Id, user: null, timeout.Token);
+                result = await RunAttemptAsync(sync, provider.Id, stoppingToken, options);
             }
 
             _logger.LogInformation(
@@ -90,5 +90,16 @@ public sealed class AiProviderCatalogSyncWorker : BackgroundService
                 result.SyncId,
                 result.Message);
         }
+    }
+
+    private static async Task<AiProviderSyncResultDto> RunAttemptAsync(
+        IAiProviderSyncService sync,
+        long providerId,
+        CancellationToken stoppingToken,
+        AiProviderCatalogSyncOptions options)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(Math.Max(15, options.TimeoutSeconds)));
+        return await sync.SyncScheduledProviderAsync(providerId, timeout.Token);
     }
 }

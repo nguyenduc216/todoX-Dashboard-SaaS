@@ -19,6 +19,7 @@ public sealed class AiProviderSyncResultDto
 public interface IAiProviderSyncService
 {
     Task<AiProviderSyncResultDto> SyncProviderAsync(long providerId, CurrentUserSession? user = null, CancellationToken ct = default);
+    Task<AiProviderSyncResultDto> SyncScheduledProviderAsync(long providerId, CancellationToken ct = default);
 }
 
 public sealed class AiProviderSyncService : IAiProviderSyncService
@@ -48,6 +49,9 @@ public sealed class AiProviderSyncService : IAiProviderSyncService
 
     public Task<AiProviderSyncResultDto> SyncProviderAsync(long providerId, CurrentUserSession? user = null, CancellationToken ct = default)
         => SyncProviderCoreAsync(providerId, "manual", user?.UserId.ToString(), ct);
+
+    public Task<AiProviderSyncResultDto> SyncScheduledProviderAsync(long providerId, CancellationToken ct = default)
+        => SyncProviderCoreAsync(providerId, "scheduled", null, ct);
 
     internal async Task<AiProviderSyncResultDto> SyncProviderCoreAsync(long providerId, string trigger, string? requestedBy, CancellationToken ct = default)
     {

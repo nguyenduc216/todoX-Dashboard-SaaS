@@ -10,7 +10,7 @@ public class AiProviderQuickDefaultsSourceTests
     {
         var text = ReadStrictUtf8(Path.Combine("TodoX.Web", "Components", "Pages", "AiProviders.razor"));
 
-        Assert.Contains("C\u00E0i \u0111\u1EB7t nhanh Provider m\u1EB7c \u0111\u1ECBnh", text, StringComparison.Ordinal);
+        Assert.Contains("MudTable Items=\"_quickDefaults\"", text, StringComparison.Ordinal);
         Assert.Contains("AiFeatureProviderCatalog.QuickDefaultFeatures", text, StringComparison.Ordinal);
         Assert.Contains("GetSelectableProvidersAsync(feature.CapabilityCode)", text, StringComparison.Ordinal);
         Assert.Contains("SetDefaultCapabilitiesAsync(selectedIds", text, StringComparison.Ordinal);

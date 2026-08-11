@@ -1,4 +1,4 @@
-@page "/admin/ai-providers"
+﻿@page "/admin/ai-providers"
 @using TodoX.Web.Models
 @using TodoX.Web.Services.AiProviders
 @inject AuthStateService AuthState
@@ -13,22 +13,22 @@
 <MudStack Spacing="3">
     <div>
         <MudText Typo="Typo.h4" Class="todox-page-title">AI Providers</MudText>
-        <MudText Typo="Typo.body1" Class="todox-page-subtitle">Quản lý nhà cung cấp AI, capability, model và điểm sử dụng theo đơn vị. Model do admin cấu hình, người dùng không tự chọn model.</MudText>
+        <MudText Typo="Typo.body1" Class="todox-page-subtitle">QuÃ¡ÂºÂ£n lÃƒÂ½ nhÃƒÂ  cung cÃ¡ÂºÂ¥p AI, capability, model vÃƒÂ  Ã„â€˜iÃ¡Â»Æ’m sÃ¡Â»Â­ dÃ¡Â»Â¥ng theo Ã„â€˜Ã†Â¡n vÃ¡Â»â€¹. Model do admin cÃ¡ÂºÂ¥u hÃƒÂ¬nh, ngÃ†Â°Ã¡Â»Âi dÃƒÂ¹ng khÃƒÂ´ng tÃ¡Â»Â± chÃ¡Â»Ân model.</MudText>
     </div>
 
     @if (!IsAdmin)
     {
-        <MudAlert Severity="Severity.Error">Bạn cần quyền quản trị TodoX để mở trang này.</MudAlert>
+        <MudAlert Severity="Severity.Error">BÃ¡ÂºÂ¡n cÃ¡ÂºÂ§n quyÃ¡Â»Ân quÃ¡ÂºÂ£n trÃ¡Â»â€¹ TodoX Ã„â€˜Ã¡Â»Æ’ mÃ¡Â»Å¸ trang nÃƒÂ y.</MudAlert>
     }
     else
     {
         <MudPaper Class="todox-card pa-4" rounded="true">
             <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
                 <div>
-                    <MudText Typo="Typo.h6">Cài đặt nhanh Provider mặc định</MudText>
-                    <MudText Typo="Typo.body2" Class="todox-page-subtitle">Thiết lập provider/model mặc định theo chức năng. Việc cho phép người dùng chọn model sẽ do cấu hình dịch vụ quyết định ở bước Service Configuration.</MudText>
+                    <MudText Typo="Typo.h6">CÃƒÂ i Ã„â€˜Ã¡ÂºÂ·t nhanh Provider mÃ¡ÂºÂ·c Ã„â€˜Ã¡Â»â€¹nh</MudText>
+                    <MudText Typo="Typo.body2" Class="todox-page-subtitle">ThiÃ¡ÂºÂ¿t lÃ¡ÂºÂ­p provider/model mÃ¡ÂºÂ·c Ã„â€˜Ã¡Â»â€¹nh theo chÃ¡Â»Â©c nÃ„Æ’ng. ViÃ¡Â»â€¡c cho phÃƒÂ©p ngÃ†Â°Ã¡Â»Âi dÃƒÂ¹ng chÃ¡Â»Ân model sÃ¡ÂºÂ½ do cÃ¡ÂºÂ¥u hÃƒÂ¬nh dÃ¡Â»â€¹ch vÃ¡Â»Â¥ quyÃ¡ÂºÂ¿t Ã„â€˜Ã¡Â»â€¹nh Ã¡Â»Å¸ bÃ†Â°Ã¡Â»â€ºc Service Configuration.</MudText>
                 </div>
-                <MudButton Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.Save" Disabled="@(_busy || _loadingQuickDefaults || !CanSaveQuickDefaults)" OnClick="SaveQuickDefaultsAsync">Lưu cài đặt mặc định</MudButton>
+                <MudButton Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.Save" Disabled="@(_busy || _loadingQuickDefaults || !CanSaveQuickDefaults)" OnClick="SaveQuickDefaultsAsync">LÃ†Â°u cÃƒÂ i Ã„â€˜Ã¡ÂºÂ·t mÃ¡ÂºÂ·c Ã„â€˜Ã¡Â»â€¹nh</MudButton>
             </MudStack>
             <MudDivider Class="my-3" />
             @if (_loadingQuickDefaults)
@@ -39,20 +39,20 @@
             {
                 <MudTable Items="_quickDefaults" Dense="true" Hover="true" T="QuickDefaultRow">
                     <HeaderContent>
-                        <MudTh>Chức năng</MudTh>
+                        <MudTh>ChÃ¡Â»Â©c nÃ„Æ’ng</MudTh>
                         <MudTh>Provider</MudTh>
                         <MudTh>Model</MudTh>
-                        <MudTh>Trạng thái</MudTh>
+                        <MudTh>TrÃ¡ÂºÂ¡ng thÃƒÂ¡i</MudTh>
                     </HeaderContent>
                     <RowTemplate Context="row">
-                        <MudTd DataLabel="Chức năng">
+                        <MudTd DataLabel="ChÃ¡Â»Â©c nÃ„Æ’ng">
                             <MudText Typo="Typo.body2"><b>@row.Feature.DisplayName</b></MudText>
-                            <MudText Typo="Typo.caption" Class="todox-page-subtitle">@row.Feature.CapabilityCode · @row.Feature.MediaKind</MudText>
+                            <MudText Typo="Typo.caption" Class="todox-page-subtitle">@row.Feature.CapabilityCode Ã‚Â· @row.Feature.MediaKind</MudText>
                             <MudText Typo="Typo.caption">@row.Feature.Description</MudText>
                         </MudTd>
                         <MudTd DataLabel="Provider">
                             <MudSelect T="long?" Value="@row.SelectedProviderId" ValueChanged="@((long? value) => OnQuickProviderChanged(row, value))" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" Disabled="@_busy">
-                                <MudSelectItem T="long?" Value="@((long?)null)">Chọn provider</MudSelectItem>
+                                <MudSelectItem T="long?" Value="@((long?)null)">ChÃ¡Â»Ân provider</MudSelectItem>
                                 @foreach (var provider in row.ProviderOptions)
                                 {
                                     <MudSelectItem T="long?" Value="@provider.ProviderId">@provider.ProviderName (@provider.ProviderCode)</MudSelectItem>
@@ -61,7 +61,7 @@
                         </MudTd>
                         <MudTd DataLabel="Model">
                             <MudSelect T="long?" Value="@row.SelectedCapabilityId" ValueChanged="@((long? value) => OnQuickModelChanged(row, value))" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" Disabled="@(_busy || row.SelectedProviderId is null || row.ModelOptions.Count == 0)">
-                                <MudSelectItem T="long?" Value="@((long?)null)">Chọn model</MudSelectItem>
+                                <MudSelectItem T="long?" Value="@((long?)null)">ChÃ¡Â»Ân model</MudSelectItem>
                                 @foreach (var model in row.ModelOptions)
                                 {
                                     <MudSelectItem T="long?" Value="@model.ProviderCapabilityId">@ModelOptionLabel(model)</MudSelectItem>
@@ -69,21 +69,21 @@
                             </MudSelect>
                             @if (row.SelectedCapability is not null)
                             {
-                                <MudText Typo="Typo.caption" Class="todox-page-subtitle">@row.SelectedCapability.CapabilityCode · @row.SelectedCapability.UnitCostPoints.ToString("0.####") điểm/@row.SelectedCapability.UnitType</MudText>
+                                <MudText Typo="Typo.caption" Class="todox-page-subtitle">@row.SelectedCapability.CapabilityCode Ã‚Â· @row.SelectedCapability.UnitCostPoints.ToString("0.####") Ã„â€˜iÃ¡Â»Æ’m/@row.SelectedCapability.UnitType</MudText>
                             }
                         </MudTd>
-                        <MudTd DataLabel="Trạng thái">
+                        <MudTd DataLabel="TrÃ¡ÂºÂ¡ng thÃƒÂ¡i">
                             @if (row.SelectedCapability is null)
                             {
-                                <MudChip T="string" Size="Size.Small" Color="Color.Warning">Chưa chọn model</MudChip>
+                                <MudChip T="string" Size="Size.Small" Color="Color.Warning">ChÃ†Â°a chÃ¡Â»Ân model</MudChip>
                             }
                             else if (row.SelectedCapability.IsDefault)
                             {
-                                <MudChip T="string" Size="Size.Small" Color="Color.Success">Đang dùng</MudChip>
+                                <MudChip T="string" Size="Size.Small" Color="Color.Success">Ã„Âang dÃƒÂ¹ng</MudChip>
                             }
                             else
                             {
-                                <MudChip T="string" Size="Size.Small" Color="Color.Info">Sẽ cập nhật</MudChip>
+                                <MudChip T="string" Size="Size.Small" Color="Color.Info">SÃ¡ÂºÂ½ cÃ¡ÂºÂ­p nhÃ¡ÂºÂ­t</MudChip>
                             }
                             @if (!string.IsNullOrWhiteSpace(row.Warning))
                             {
@@ -101,7 +101,7 @@
             <MudItem xs="12" md="5">
                 <MudPaper Class="todox-card pa-4" rounded="true">
                     <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
-                        <MudText Typo="Typo.h6">Danh sách provider</MudText>
+                        <MudText Typo="Typo.h6">Danh sÃƒÂ¡ch provider</MudText>
                         <MudIconButton Icon="@Icons.Material.Filled.Refresh" Disabled="@_loading" OnClick="ReloadProviders" />
                     </MudStack>
                     <MudDivider Class="my-3" />
@@ -111,7 +111,7 @@
                     }
                     else if (_providers.Count == 0)
                     {
-                        <MudText Class="todox-page-subtitle">Chưa có provider nào.</MudText>
+                        <MudText Class="todox-page-subtitle">ChÃ†Â°a cÃƒÂ³ provider nÃƒÂ o.</MudText>
                     }
                     else
                     {
@@ -121,9 +121,9 @@
                                   Class="provider-table">
                             <HeaderContent>
                                 <MudTh Class="provider-col-provider">Provider</MudTh>
-                                <MudTh Class="provider-col-type">Loại</MudTh>
-                                <MudTh Class="provider-col-priority">Ưu tiên</MudTh>
-                                <MudTh Class="provider-col-enabled">Bật</MudTh>
+                                <MudTh Class="provider-col-type">LoÃ¡ÂºÂ¡i</MudTh>
+                                <MudTh Class="provider-col-priority">Ã†Â¯u tiÃƒÂªn</MudTh>
+                                <MudTh Class="provider-col-enabled">BÃ¡ÂºÂ­t</MudTh>
                                 <MudTh Class="provider-col-capabilities">Capabilities</MudTh>
                                 <MudTh Class="provider-col-actions"></MudTh>
                             </HeaderContent>
@@ -133,24 +133,24 @@
                                         <MudButton Variant="Variant.Text" Color="Color.Primary" Class="provider-name-button pa-0" OnClick="@(() => SelectProviderAsync(p))">
                                             <MudStack Spacing="0">
                                                 <MudText Typo="Typo.body2"><b>@p.ProviderName</b></MudText>
-                                                <MudText Typo="Typo.caption" Class="todox-page-subtitle">@p.ProviderCode @(p.IsSystem ? "· hệ thống" : "")</MudText>
+                                                <MudText Typo="Typo.caption" Class="todox-page-subtitle">@p.ProviderCode @(p.IsSystem ? "Ã‚Â· hÃ¡Â»â€¡ thÃ¡Â»â€˜ng" : "")</MudText>
                                             </MudStack>
                                         </MudButton>
                                     </span>
                                 </MudTd>
-                                <MudTd DataLabel="Loại" Class="provider-col-type">@p.ProviderType</MudTd>
-                                <MudTd DataLabel="Ưu tiên" Class="provider-col-priority">@p.Priority</MudTd>
-                                <MudTd DataLabel="Bật" Class="provider-col-enabled">
+                                <MudTd DataLabel="LoÃ¡ÂºÂ¡i" Class="provider-col-type">@p.ProviderType</MudTd>
+                                <MudTd DataLabel="Ã†Â¯u tiÃƒÂªn" Class="provider-col-priority">@p.Priority</MudTd>
+                                <MudTd DataLabel="BÃ¡ÂºÂ­t" Class="provider-col-enabled">
                                     <MudIcon Icon="@(p.Enabled ? Icons.Material.Filled.CheckCircle : Icons.Material.Filled.Cancel)"
                                              Color="@(p.Enabled ? Color.Success : Color.Default)" Size="Size.Small" />
                                 </MudTd>
                                 <MudTd DataLabel="Capabilities" Class="provider-col-capabilities">@p.EnabledCapabilityCount / @p.CapabilityCount</MudTd>
                                 <MudTd DataLabel="Actions" Class="provider-col-actions">
                                     <MudMenu Icon="@Icons.Material.Filled.MoreVert" Dense="true">
-                                        <MudMenuItem Disabled="@_busy" OnClick="@(() => EditProviderAsync(p))">Sửa provider</MudMenuItem>
-                                        <MudMenuItem Disabled="@_busy" OnClick="@(() => OpenProviderModelsAsync(p))">Quản lý model</MudMenuItem>
-                                        <MudMenuItem Disabled="@_busy" OnClick="@(() => CheckProviderConnectionAsync(p))">Kiểm tra kết nối</MudMenuItem>
-                                        <MudMenuItem Disabled="@_busy" OnClick="@(() => OpenProviderSyncAsync(p))">Đồng bộ ngay</MudMenuItem>
+                                        <MudMenuItem Disabled="@_busy" OnClick="@(() => EditProviderAsync(p))">SÃ¡Â»Â­a provider</MudMenuItem>
+                                        <MudMenuItem Disabled="@_busy" OnClick="@(() => OpenProviderModelsAsync(p))">QuÃ¡ÂºÂ£n lÃƒÂ½ model</MudMenuItem>
+                                        <MudMenuItem Disabled="@_busy" OnClick="@(() => CheckProviderConnectionAsync(p))">KiÃ¡Â»Æ’m tra kÃ¡ÂºÂ¿t nÃ¡Â»â€˜i</MudMenuItem>
+                                        <MudMenuItem Disabled="@_busy" OnClick="@(() => OpenProviderSyncAsync(p))">Ã„ÂÃ¡Â»â€œng bÃ¡Â»â„¢ ngay</MudMenuItem>
                                     </MudMenu>
                                 </MudTd>
                             </RowTemplate>
@@ -163,7 +163,7 @@
                 @if (_selected is null)
                 {
                     <MudPaper Class="todox-card pa-5" rounded="true">
-                        <MudText Class="todox-page-subtitle">Chọn một provider để xem và chỉnh sửa cấu hình.</MudText>
+                        <MudText Class="todox-page-subtitle">ChÃ¡Â»Ân mÃ¡Â»â„¢t provider Ã„â€˜Ã¡Â»Æ’ xem vÃƒÂ  chÃ¡Â»â€°nh sÃ¡Â»Â­a cÃ¡ÂºÂ¥u hÃƒÂ¬nh.</MudText>
                     </MudPaper>
                 }
                 else
@@ -171,16 +171,16 @@
                     <MudPaper Class="todox-card pa-5" rounded="true">
                         <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
                             <MudText Typo="Typo.h6">@_selected.ProviderName <MudChip T="string" Size="Size.Small" Color="Color.Default">@_selected.ProviderCode</MudChip></MudText>
-                            <MudButton Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.Save" Disabled="@_busy" OnClick="SaveProvider">Lưu provider</MudButton>
+                            <MudButton Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.Save" Disabled="@_busy" OnClick="SaveProvider">LÃ†Â°u provider</MudButton>
                         </MudStack>
                         <MudDivider Class="my-3" />
                         <MudGrid>
-                            <MudItem xs="12" sm="6"><MudTextField @bind-Value="_providerEdit.ProviderName" Label="Tên provider" Variant="Variant.Outlined" /></MudItem>
-                            <MudItem xs="12" sm="6"><MudNumericField @bind-Value="_providerEdit.Priority" Label="Ưu tiên" Variant="Variant.Outlined" /></MudItem>
+                            <MudItem xs="12" sm="6"><MudTextField @bind-Value="_providerEdit.ProviderName" Label="TÃƒÂªn provider" Variant="Variant.Outlined" /></MudItem>
+                            <MudItem xs="12" sm="6"><MudNumericField @bind-Value="_providerEdit.Priority" Label="Ã†Â¯u tiÃƒÂªn" Variant="Variant.Outlined" /></MudItem>
                             <MudItem xs="12"><MudTextField @bind-Value="_providerEdit.BaseUrl" Label="Base URL" Variant="Variant.Outlined" /></MudItem>
-                            <MudItem xs="12" sm="6"><MudTextField @bind-Value="_providerEdit.ApiKeyConfigName" Label="API key config name" HelperText="Tên biến cấu hình (VD: OpenRouter__ApiKey). Không nhập API key thật." Variant="Variant.Outlined" /></MudItem>
-                            <MudItem xs="12" sm="6" Class="d-flex align-center"><MudSwitch @bind-Value="_providerEdit.Enabled" Color="Color.Success" Label="Bật provider" /></MudItem>
-                            <MudItem xs="12"><MudTextField @bind-Value="_providerEdit.Description" Label="Mô tả" Lines="2" Variant="Variant.Outlined" /></MudItem>
+                            <MudItem xs="12" sm="6"><MudTextField @bind-Value="_providerEdit.ApiKeyConfigName" Label="API key config name" HelperText="TÃƒÂªn biÃ¡ÂºÂ¿n cÃ¡ÂºÂ¥u hÃƒÂ¬nh (VD: OpenRouter__ApiKey). KhÃƒÂ´ng nhÃ¡ÂºÂ­p API key thÃ¡ÂºÂ­t." Variant="Variant.Outlined" /></MudItem>
+                            <MudItem xs="12" sm="6" Class="d-flex align-center"><MudSwitch @bind-Value="_providerEdit.Enabled" Color="Color.Success" Label="BÃ¡ÂºÂ­t provider" /></MudItem>
+                            <MudItem xs="12"><MudTextField @bind-Value="_providerEdit.Description" Label="MÃƒÂ´ tÃ¡ÂºÂ£" Lines="2" Variant="Variant.Outlined" /></MudItem>
                         </MudGrid>
                     </MudPaper>
 
@@ -189,7 +189,7 @@
                         <MudDivider Class="my-3" />
                         @if (_capabilities.Count == 0)
                         {
-                            <MudText Class="todox-page-subtitle">Provider này chưa có capability.</MudText>
+                            <MudText Class="todox-page-subtitle">Provider nÃƒÂ y chÃ†Â°a cÃƒÂ³ capability.</MudText>
                         }
                         else
                         {
@@ -202,32 +202,32 @@
                                                 <MudChip T="string" Size="Size.Small" Color="Color.Primary">@cap.CapabilityCode</MudChip>
                                                 @if (cap.IsDefault)
                                                 {
-                                                    <MudChip T="string" Size="Size.Small" Color="Color.Success">Mặc định</MudChip>
+                                                    <MudChip T="string" Size="Size.Small" Color="Color.Success">MÃ¡ÂºÂ·c Ã„â€˜Ã¡Â»â€¹nh</MudChip>
                                                 }
                                             </MudText>
                                             <MudStack Row="true" Spacing="1">
                                                 <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Success"
                                                            StartIcon="@Icons.Material.Filled.Star" Disabled="@(_busy || cap.IsDefault || !cap.Enabled || !_providerEdit.Enabled)"
-                                                           OnClick="@(() => SetDefault(cap))">Đặt mặc định</MudButton>
+                                                           OnClick="@(() => SetDefault(cap))">Ã„ÂÃ¡ÂºÂ·t mÃ¡ÂºÂ·c Ã„â€˜Ã¡Â»â€¹nh</MudButton>
                                                 <MudButton Size="Size.Small" Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.Save"
-                                                           Disabled="@_busy" OnClick="@(() => SaveCapability(cap))">Lưu</MudButton>
+                                                           Disabled="@_busy" OnClick="@(() => SaveCapability(cap))">LÃ†Â°u</MudButton>
                                             </MudStack>
                                         </MudStack>
                                         <MudGrid Class="mt-1">
-                                            <MudItem xs="12" sm="6"><MudTextField @bind-Value="cap.DisplayName" Label="Tên hiển thị" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
+                                            <MudItem xs="12" sm="6"><MudTextField @bind-Value="cap.DisplayName" Label="TÃƒÂªn hiÃ¡Â»Æ’n thÃ¡Â»â€¹" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
                                             <MudItem xs="12" sm="6"><MudTextField @bind-Value="cap.ModelName" Label="Model name" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
                                             <MudItem xs="12" sm="6"><MudTextField @bind-Value="cap.EndpointPath" Label="Endpoint path" Variant="Variant.Outlined" Margin="Margin.Dense" /></MudItem>
                                             <MudItem xs="6" sm="3">
-                                                <MudSelect @bind-Value="cap.UnitType" Label="Đơn vị" Variant="Variant.Outlined" Margin="Margin.Dense">
+                                                <MudSelect @bind-Value="cap.UnitType" Label="Ã„ÂÃ†Â¡n vÃ¡Â»â€¹" Variant="Variant.Outlined" Margin="Margin.Dense">
                                                     @foreach (var u in AiProviderCatalog.UnitTypes)
                                                     {
                                                         <MudSelectItem Value="u">@u</MudSelectItem>
                                                     }
                                                 </MudSelect>
                                             </MudItem>
-                                            <MudItem xs="6" sm="3"><MudNumericField @bind-Value="cap.UnitCostPoints" Label="Điểm/đơn vị" Variant="Variant.Outlined" Margin="Margin.Dense" Min="0" /></MudItem>
-                                            <MudItem xs="6" sm="6" Class="d-flex align-center"><MudSwitch @bind-Value="cap.Enabled" Color="Color.Success" Label="Bật capability" /></MudItem>
-                                            <MudItem xs="6" sm="6" Class="d-flex align-center"><MudSwitch @bind-Value="cap.AllowUserSelect" Color="Color.Primary" Label="Cho user chọn" /></MudItem>
+                                            <MudItem xs="6" sm="3"><MudNumericField @bind-Value="cap.UnitCostPoints" Label="Ã„ÂiÃ¡Â»Æ’m/Ã„â€˜Ã†Â¡n vÃ¡Â»â€¹" Variant="Variant.Outlined" Margin="Margin.Dense" Min="0" /></MudItem>
+                                            <MudItem xs="6" sm="6" Class="d-flex align-center"><MudSwitch @bind-Value="cap.Enabled" Color="Color.Success" Label="BÃ¡ÂºÂ­t capability" /></MudItem>
+                                            <MudItem xs="6" sm="6" Class="d-flex align-center"><MudSwitch @bind-Value="cap.AllowUserSelect" Color="Color.Primary" Label="Cho user chÃ¡Â»Ân" /></MudItem>
                                         </MudGrid>
                                     </MudPaper>
                                 }
@@ -241,29 +241,29 @@
             <MudTabPanel Text="MODEL">
                 <MudPaper Class="todox-card pa-4" rounded="true">
                     <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
-                        <MudText Typo="Typo.h6">Danh sách model</MudText>
+                        <MudText Typo="Typo.h6">Danh sÃƒÂ¡ch model</MudText>
                         <MudStack Row="true" Spacing="2" Class="flex-wrap">
                             <MudSelect T="string?" Dense="true" Variant="Variant.Outlined" Label="Provider" Value="@_modelProviderFilter" ValueChanged="OnModelProviderFilterChanged" Style="min-width:180px">
-                                <MudSelectItem T="string?" Value="@((string?)null)">Tất cả</MudSelectItem>
+                                <MudSelectItem T="string?" Value="@((string?)null)">TÃ¡ÂºÂ¥t cÃ¡ÂºÂ£</MudSelectItem>
                                 @foreach (var provider in _providers)
                                 {
                                     <MudSelectItem T="string?" Value="@provider.ProviderCode">@provider.ProviderName</MudSelectItem>
                                 }
                             </MudSelect>
                             <MudSelect T="string?" Dense="true" Variant="Variant.Outlined" Label="Media" Value="@_modelMediaFilter" ValueChanged="OnModelMediaFilterChanged" Style="min-width:140px">
-                                <MudSelectItem T="string?" Value="@((string?)null)">Tất cả</MudSelectItem>
+                                <MudSelectItem T="string?" Value="@((string?)null)">TÃ¡ÂºÂ¥t cÃ¡ÂºÂ£</MudSelectItem>
                                 <MudSelectItem T="string?" Value="@("image")">Image</MudSelectItem>
                                 <MudSelectItem T="string?" Value="@("video")">Video</MudSelectItem>
                             </MudSelect>
                             <MudSelect T="string?" Dense="true" Variant="Variant.Outlined" Label="Status" Value="@_modelStatusFilter" ValueChanged="OnModelStatusFilterChanged" Style="min-width:160px">
-                                <MudSelectItem T="string?" Value="@((string?)null)">Tất cả</MudSelectItem>
+                                <MudSelectItem T="string?" Value="@((string?)null)">TÃ¡ÂºÂ¥t cÃ¡ÂºÂ£</MudSelectItem>
                                 <MudSelectItem T="string?" Value="@("ACTIVE")">ACTIVE</MudSelectItem>
                                 <MudSelectItem T="string?" Value="@("DEPRECATED")">DEPRECATED</MudSelectItem>
                                 <MudSelectItem T="string?" Value="@("MAINTENANCE")">MAINTENANCE</MudSelectItem>
                             </MudSelect>
-                            <MudCheckBox @bind-Value="_modelEnabledOnly" Label="Chỉ model bật" />
-                            <MudTextField @bind-Value="_modelSearch" Variant="Variant.Outlined" Placeholder="Tìm theo code/tên" Style="min-width:220px" />
-                            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Search" OnClick="ReloadModelsAsync">Lọc</MudButton>
+                            <MudCheckBox @bind-Value="_modelEnabledOnly" Label="ChÃ¡Â»â€° model bÃ¡ÂºÂ­t" />
+                            <MudTextField @bind-Value="_modelSearch" Variant="Variant.Outlined" Placeholder="TÃƒÂ¬m theo code/tÃƒÂªn" Style="min-width:220px" />
+                            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Search" OnClick="ReloadModelsAsync">LÃ¡Â»Âc</MudButton>
                         </MudStack>
                     </MudStack>
                     <MudDivider Class="my-3" />
@@ -273,7 +273,7 @@
                     }
                     else if (_models.Count == 0)
                     {
-                        <MudText Class="todox-page-subtitle">Chưa có model nào.</MudText>
+                        <MudText Class="todox-page-subtitle">ChÃ†Â°a cÃƒÂ³ model nÃƒÂ o.</MudText>
                     }
                     else
                     {
@@ -285,15 +285,15 @@
                                 <MudTh>Mode</MudTh>
                                 <MudTh>Duration</MudTh>
                                 <MudTh>Resolution</MudTh>
-                                <MudTh>Giá từ</MudTh>
-                                <MudTh>Điểm TodoX từ</MudTh>
-                                <MudTh>Trạng thái</MudTh>
+                                <MudTh>GiÃƒÂ¡ tÃ¡Â»Â«</MudTh>
+                                <MudTh>Ã„ÂiÃ¡Â»Æ’m TodoX tÃ¡Â»Â«</MudTh>
+                                <MudTh>TrÃ¡ÂºÂ¡ng thÃƒÂ¡i</MudTh>
                                 <MudTh></MudTh>
                             </HeaderContent>
                             <RowTemplate Context="m">
                                 <MudTd DataLabel="Model">
                                     <MudText Typo="Typo.body2"><b>@m.DisplayName</b></MudText>
-                                    <MudText Typo="Typo.caption" Class="todox-page-subtitle">@m.ProviderCode · @m.ProviderModelCode</MudText>
+                                    <MudText Typo="Typo.caption" Class="todox-page-subtitle">@m.ProviderCode Ã‚Â· @m.ProviderModelCode</MudText>
                                     @if (!string.IsNullOrWhiteSpace(m.Description))
                                     {
                                         <MudText Typo="Typo.caption">@m.Description</MudText>
@@ -303,10 +303,10 @@
                                 <MudTd DataLabel="Mode">@FormatStrings(m.SupportedModes)</MudTd>
                                 <MudTd DataLabel="Duration">@FormatDurations(m.SupportedDurations)</MudTd>
                                 <MudTd DataLabel="Resolution">@FormatStrings(m.SupportedResolutions)</MudTd>
-                                <MudTd DataLabel="Giá từ">
+                                <MudTd DataLabel="GiÃƒÂ¡ tÃ¡Â»Â«">
                                     @if (m.PriceSummary is null)
                                     {
-                                        <MudChip T="string" Size="Size.Small" Color="Color.Warning">Chưa có bảng giá</MudChip>
+                                        <MudChip T="string" Size="Size.Small" Color="Color.Warning">ChÃ†Â°a cÃƒÂ³ bÃ¡ÂºÂ£ng giÃƒÂ¡</MudChip>
                                     }
                                     else if (!string.IsNullOrWhiteSpace(m.PriceSummary.StatusMessage))
                                     {
@@ -317,8 +317,8 @@
                                         <MudText Typo="Typo.caption">@m.PriceSummary.ProviderPrice?.ToString("0.####") credits</MudText>
                                     }
                                 </MudTd>
-                                <MudTd DataLabel="Điểm TodoX từ">@m.PriceSummary?.SellPoints?.ToString("0.####")</MudTd>
-                                <MudTd DataLabel="Trạng thái">
+                                <MudTd DataLabel="Ã„ÂiÃ¡Â»Æ’m TodoX tÃ¡Â»Â«">@m.PriceSummary?.SellPoints?.ToString("0.####")</MudTd>
+                                <MudTd DataLabel="TrÃ¡ÂºÂ¡ng thÃƒÂ¡i">
                                     <MudChip T="string" Size="Size.Small" Color="@(m.Enabled ? Color.Success : Color.Default)">@(m.Enabled ? "ON" : "OFF")</MudChip>
                                     @if (m.IsDeprecated)
                                     {
@@ -327,8 +327,8 @@
                                 </MudTd>
                                 <MudTd DataLabel="Actions">
                                     <MudMenu Icon="@Icons.Material.Filled.MoreVert" Dense="true">
-                                        <MudMenuItem OnClick="@(() => SelectModelAsync(m))">Mở chi tiết</MudMenuItem>
-                                        <MudMenuItem Disabled="@_busy" OnClick="@(() => ToggleModelAsync(m))">Bật/tắt</MudMenuItem>
+                                        <MudMenuItem OnClick="@(() => SelectModelAsync(m))">MÃ¡Â»Å¸ chi tiÃ¡ÂºÂ¿t</MudMenuItem>
+                                        <MudMenuItem Disabled="@_busy" OnClick="@(() => ToggleModelAsync(m))">BÃ¡ÂºÂ­t/tÃ¡ÂºÂ¯t</MudMenuItem>
                                     </MudMenu>
                                 </MudTd>
                             </RowTemplate>
@@ -342,11 +342,11 @@
                         <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
                             <div>
                                 <MudText Typo="Typo.h6">@_selectedModel.DisplayName</MudText>
-                                <MudText Typo="Typo.caption" Class="todox-page-subtitle">@_selectedModel.ProviderCode · @_selectedModel.ProviderModelCode · @_selectedModel.MediaType</MudText>
+                                <MudText Typo="Typo.caption" Class="todox-page-subtitle">@_selectedModel.ProviderCode Ã‚Â· @_selectedModel.ProviderModelCode Ã‚Â· @_selectedModel.MediaType</MudText>
                             </div>
                             <MudStack Row="true" Spacing="2">
-                                <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Refresh" Disabled="@_busy" OnClick="ReloadSelectedModelAsync">Tải lại</MudButton>
-                                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save" Disabled="@_busy" OnClick="SaveSelectedModelAsync">Lưu model</MudButton>
+                                <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Refresh" Disabled="@_busy" OnClick="ReloadSelectedModelAsync">TÃ¡ÂºÂ£i lÃ¡ÂºÂ¡i</MudButton>
+                                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save" Disabled="@_busy" OnClick="SaveSelectedModelAsync">LÃ†Â°u model</MudButton>
                             </MudStack>
                         </MudStack>
                         <MudDivider Class="my-3" />
@@ -359,7 +359,7 @@
                                 <MudChip T="string" Size="Size.Small">@cap.CapabilityCode</MudChip>
                             }
                         </MudStack>
-                        <MudText Typo="Typo.subtitle2">Cấu hình hỗ trợ</MudText>
+                        <MudText Typo="Typo.subtitle2">CÃ¡ÂºÂ¥u hÃƒÂ¬nh hÃ¡Â»â€” trÃ¡Â»Â£</MudText>
                         <MudGrid Class="mb-3">
                             <MudItem xs="12" sm="3"><MudText Typo="Typo.caption" Class="todox-page-subtitle">Mode</MudText><MudText Typo="Typo.body2">@FormatStrings(_selectedModel.SupportedModes)</MudText></MudItem>
                             <MudItem xs="12" sm="3"><MudText Typo="Typo.caption" Class="todox-page-subtitle">Duration</MudText><MudText Typo="Typo.body2">@FormatDurations(_selectedModel.SupportedDurations)</MudText></MudItem>
@@ -374,9 +374,9 @@
                             <MudItem xs="12" sm="6"><MudTextField @bind-Value="_selectedModel.StatusMessage" Label="Status message" Variant="Variant.Outlined" /></MudItem>
                             <MudItem xs="12" sm="6"><MudTextField @bind-Value="_selectedModel.ProviderPriceUnit" Label="Provider price unit" Variant="Variant.Outlined" /></MudItem>
                             <MudItem xs="12"><MudTextField @bind-Value="_selectedModel.Description" Label="Description" Lines="2" Variant="Variant.Outlined" /></MudItem>
-                            <MudItem xs="12" sm="4"><MudNumericField @bind-Value="_selectedModel.BaseProviderPrice" Label="Giá 79AI" Variant="Variant.Outlined" /></MudItem>
-                            <MudItem xs="12" sm="4" Class="d-flex align-center"><MudSwitch @bind-Value="_selectedModel.Enabled" Color="Color.Success" Label="Bật model" /></MudItem>
-                            <MudItem xs="12" sm="4" Class="d-flex align-center"><MudSwitch @bind-Value="_selectedModel.AllowUserSelect" Color="Color.Primary" Label="Cho user chọn" /></MudItem>
+                            <MudItem xs="12" sm="4"><MudNumericField @bind-Value="_selectedModel.BaseProviderPrice" Label="GiÃƒÂ¡ 79AI" Variant="Variant.Outlined" /></MudItem>
+                            <MudItem xs="12" sm="4" Class="d-flex align-center"><MudSwitch @bind-Value="_selectedModel.Enabled" Color="Color.Success" Label="BÃ¡ÂºÂ­t model" /></MudItem>
+                            <MudItem xs="12" sm="4" Class="d-flex align-center"><MudSwitch @bind-Value="_selectedModel.AllowUserSelect" Color="Color.Primary" Label="Cho user chÃ¡Â»Ân" /></MudItem>
                         </MudGrid>
                         <MudText Typo="Typo.subtitle2" Class="mt-4">Pricing matrix</MudText>
                         <MudTable Items="_selectedPrices" Dense="true" Hover="true">
@@ -384,7 +384,7 @@
                                 <MudTh>Configuration</MudTh><MudTh>79AI</MudTh><MudTh>TodoX cost</MudTh><MudTh>Sell</MudTh><MudTh>Active</MudTh>
                             </HeaderContent>
                             <RowTemplate Context="price">
-                                <MudTd DataLabel="Cấu hình">@FormatPriceLabel(price)</MudTd>
+                                <MudTd DataLabel="CÃ¡ÂºÂ¥u hÃƒÂ¬nh">@FormatPriceLabel(price)</MudTd>
                                 <MudTd DataLabel="79AI">@price.ProviderPrice?.ToString("0.####")</MudTd>
                                 <MudTd DataLabel="TodoX cost">@price.InternalCostPoints?.ToString("0.####") pts</MudTd>
                                 <MudTd DataLabel="Sell">@price.SellPoints?.ToString("0.####") pts (@price.SellPriceMode)</MudTd>
@@ -392,43 +392,73 @@
                             </RowTemplate>
                         </MudTable>
                         <MudExpansionPanels Class="mt-3" Elevation="0">
-                            <MudExpansionPanel Text="Nâng cao">
+                            <MudExpansionPanel Text="NÃƒÂ¢ng cao">
                                 <MudText Typo="Typo.caption" Class="todox-page-subtitle">@_selectedModel.RawJson</MudText>
                             </MudExpansionPanel>
                         </MudExpansionPanels>
                     </MudPaper>
                 }
             </MudTabPanel>
-            <MudTabPanel Text="GIÁ & ĐIỂM">
+            <MudTabPanel Text="GIA & DIEM">
                 <MudPaper Class="todox-card pa-4" rounded="true">
-                    <MudText Typo="Typo.h6">Giá & điểm TodoX</MudText>
-                    <MudText Typo="Typo.body2" Class="todox-page-subtitle">Provider price là read-only. TodoX sell points được giữ nguyên khi sync nếu admin đã cấu hình FIXED.</MudText>
+                    <MudText Typo="Typo.h6">Gia & diem TodoX</MudText>
+                    <MudText Typo="Typo.body2" Class="todox-page-subtitle">Provider price la du lieu 79AI. TodoX sell points, mode, markup, minimum va active co the chinh theo tung variant.</MudText>
                     <MudDivider Class="my-3" />
                     @if (_selectedModel is null)
                     {
-                        <MudAlert Severity="Severity.Info">Chọn một model ở tab MODEL để xem bảng giá.</MudAlert>
+                        <MudAlert Severity="Severity.Info">Chon mot model o tab MODEL de xem bang gia.</MudAlert>
                     }
                     else
                     {
                         <MudTable Items="_selectedPrices" Dense="true" Hover="true">
                             <HeaderContent>
-                                <MudTh>Configuration</MudTh><MudTh>79AI</MudTh><MudTh>TodoX cost</MudTh><MudTh>Sell</MudTh><MudTh>Mode</MudTh>
+                                <MudTh>Configuration</MudTh><MudTh>Price source</MudTh><MudTh>79AI</MudTh><MudTh>TodoX cost</MudTh><MudTh>Sell points</MudTh><MudTh>Mode</MudTh><MudTh>Markup</MudTh><MudTh>Minimum</MudTh><MudTh>Active</MudTh><MudTh></MudTh>
                             </HeaderContent>
                             <RowTemplate Context="price">
-                                <MudTd>@FormatPriceLabel(price)</MudTd>
-                                <MudTd>@price.ProviderPrice?.ToString("0.####")</MudTd>
-                                <MudTd>@price.InternalCostPoints?.ToString("0.####")</MudTd>
-                                <MudTd>@price.SellPoints?.ToString("0.####")</MudTd>
-                                <MudTd>@price.SellPriceMode</MudTd>
+                                <MudTd DataLabel="Configuration">
+                                    <MudText Typo="Typo.body2"><b>@FormatPriceLabel(price)</b></MudText>
+                                    <MudText Typo="Typo.caption" Class="todox-page-subtitle">@PriceSourceLabel(price.PriceSource)</MudText>
+                                </MudTd>
+                                <MudTd DataLabel="Price source">
+                                    <MudChip T="string" Size="Size.Small" Color="@PriceSourceColor(price.PriceSource)">@PriceSourceLabel(price.PriceSource)</MudChip>
+                                    @if (string.Equals(price.PriceSource, "verified_seed", StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        <MudText Typo="Typo.caption" Class="todox-page-subtitle">Gia xac minh tu du lieu da kiem chung; chua chac la gia live hien tai cua provider.</MudText>
+                                    }
+                                </MudTd>
+                                <MudTd DataLabel="79AI">@price.ProviderPrice?.ToString("0.####") credits</MudTd>
+                                <MudTd DataLabel="TodoX cost">@price.InternalCostPoints?.ToString("0.####") pts</MudTd>
+                                <MudTd DataLabel="Sell points">
+                                    <MudNumericField T="decimal?" Value="@price.SellPoints" ValueChanged="@((decimal? value) => price.SellPoints = value)" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" Disabled="@(!CanEditSellPoints(price))" HideSpinButtons="true" />
+                                </MudTd>
+                                <MudTd DataLabel="Mode">
+                                    <MudSelect T="string" Value="@price.SellPriceMode" ValueChanged="@((string value) => price.SellPriceMode = value)" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true">
+                                        <MudSelectItem T="string" Value=@("AUTO")>AUTO</MudSelectItem>
+                                        <MudSelectItem T="string" Value=@("FIXED")>FIXED</MudSelectItem>
+                                        <MudSelectItem T="string" Value=@("MARKUP")>MARKUP</MudSelectItem>
+                                    </MudSelect>
+                                </MudTd>
+                                <MudTd DataLabel="Markup">
+                                    <MudNumericField T="decimal?" Value="@price.MarkupPercent" ValueChanged="@((decimal? value) => price.MarkupPercent = value)" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" HideSpinButtons="true" />
+                                </MudTd>
+                                <MudTd DataLabel="Minimum">
+                                    <MudNumericField T="decimal?" Value="@price.MinimumPoints" ValueChanged="@((decimal? value) => price.MinimumPoints = value)" Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" HideSpinButtons="true" />
+                                </MudTd>
+                                <MudTd DataLabel="Active">
+                                    <MudSwitch @bind-Value="price.Active" Color="Color.Success" />
+                                </MudTd>
+                                <MudTd DataLabel="Actions">
+                                    <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save" Disabled="@_busy" OnClick="@(() => SavePriceAsync(price))">Luu</MudButton>
+                                </MudTd>
                             </RowTemplate>
                         </MudTable>
                     }
                 </MudPaper>
             </MudTabPanel>
-            <MudTabPanel Text="LỊCH SỬ ĐỒNG BỘ">
+            <MudTabPanel Text="LÃ¡Â»Å CH SÃ¡Â»Â¬ Ã„ÂÃ¡Â»â€™NG BÃ¡Â»Ëœ">
                 <MudPaper Class="todox-card pa-4" rounded="true">
                     <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
-                        <MudText Typo="Typo.h6">Lịch sử đồng bộ</MudText>
+                        <MudText Typo="Typo.h6">LÃ¡Â»â€¹ch sÃ¡Â»Â­ Ã„â€˜Ã¡Â»â€œng bÃ¡Â»â„¢</MudText>
                         <MudStack Row="true" Spacing="2" Class="flex-wrap">
                             <MudSelect T="long?" Dense="true" Variant="Variant.Outlined" Label="Provider" Value="@_selectedProviderForSync" ValueChanged="OnSyncProviderChanged" Style="min-width:220px">
                                 @foreach (var provider in _providers)
@@ -436,7 +466,7 @@
                                     <MudSelectItem T="long?" Value="@((long?)provider.Id)">@provider.ProviderName</MudSelectItem>
                                 }
                             </MudSelect>
-                            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Sync" Disabled="@(_busy || _selectedProviderForSync is null)" OnClick="SyncSelectedProviderAsync">Đồng bộ ngay</MudButton>
+                            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Sync" Disabled="@(_busy || _selectedProviderForSync is null)" OnClick="SyncSelectedProviderAsync">Ã„ÂÃ¡Â»â€œng bÃ¡Â»â„¢ ngay</MudButton>
                         </MudStack>
                     </MudStack>
                     <MudText Typo="Typo.caption" Class="todox-page-subtitle">@_syncMessage</MudText>
@@ -452,22 +482,37 @@
                         </MudStack>
                     }
                     <MudDivider Class="my-3" />
+                    @if (_selectedSyncChanges.Count > 0)
+                    {
+                        <MudText Typo="Typo.subtitle2">Chi tiet sync gan nhat</MudText>
+                        <MudTable Items="_selectedSyncChanges" Dense="true" Hover="true">
+                            <HeaderContent>
+                                <MudTh>Type</MudTh><MudTh>Entity</MudTh><MudTh>Summary</MudTh>
+                            </HeaderContent>
+                            <RowTemplate Context="change">
+                                <MudTd DataLabel="Type">@change.ChangeType</MudTd>
+                                <MudTd DataLabel="Entity">@change.EntityKey</MudTd>
+                                <MudTd DataLabel="Summary"><MudText Style="white-space: pre-line">@FormatSyncChangeSummary(change)</MudText></MudTd>
+                            </RowTemplate>
+                        </MudTable>
+                    }
+                    <MudDivider Class="my-3" />
                     @if (_syncHistory.Count == 0)
                     {
-                        <MudText Class="todox-page-subtitle">Chưa có lịch sử đồng bộ.</MudText>
+                        <MudText Class="todox-page-subtitle">ChÃ†Â°a cÃƒÂ³ lÃ¡Â»â€¹ch sÃ¡Â»Â­ Ã„â€˜Ã¡Â»â€œng bÃ¡Â»â„¢.</MudText>
                     }
                     else
                     {
                         <MudTable Items="_syncHistory" Dense="true" Hover="true" T="AiProviderSyncHeaderDto">
                             <HeaderContent>
-                                <MudTh>Thời gian</MudTh><MudTh>Trigger</MudTh><MudTh>Status</MudTh><MudTh>Model mới</MudTh><MudTh>Model đổi</MudTh><MudTh>Unavailable</MudTh><MudTh>Price change</MudTh>
+                                <MudTh>ThÃ¡Â»Âi gian</MudTh><MudTh>Trigger</MudTh><MudTh>Status</MudTh><MudTh>Model mÃ¡Â»â€ºi</MudTh><MudTh>Model Ã„â€˜Ã¡Â»â€¢i</MudTh><MudTh>Unavailable</MudTh><MudTh>Price change</MudTh>
                             </HeaderContent>
                             <RowTemplate>
-                                <MudTd DataLabel="Thời gian">@context.CreatedAt.ToString("yyyy-MM-dd HH:mm")</MudTd>
+                                <MudTd DataLabel="ThÃ¡Â»Âi gian">@context.CreatedAt.ToString("yyyy-MM-dd HH:mm")</MudTd>
                                 <MudTd DataLabel="Trigger">@context.Trigger</MudTd>
                                 <MudTd DataLabel="Status">@context.Status</MudTd>
-                                <MudTd DataLabel="Model mới">@context.ModelInsertedCount</MudTd>
-                                <MudTd DataLabel="Model đổi">@context.ModelUpdatedCount</MudTd>
+                                <MudTd DataLabel="Model mÃ¡Â»â€ºi">@context.ModelInsertedCount</MudTd>
+                                <MudTd DataLabel="Model Ã„â€˜Ã¡Â»â€¢i">@context.ModelUpdatedCount</MudTd>
                                 <MudTd DataLabel="Unavailable">@context.ModelUnavailableCount</MudTd>
                                 <MudTd DataLabel="Price change">@context.PriceChangedCount</MudTd>
                             </RowTemplate>
@@ -475,7 +520,7 @@
                     }
                 </MudPaper>
                 <MudExpansionPanels Class="mt-3" Elevation="0">
-                    <MudExpansionPanel Text="Công cụ nâng cao">
+                    <MudExpansionPanel Text="CÃƒÂ´ng cÃ¡Â»Â¥ nÃƒÂ¢ng cao">
                         <MudText Typo="Typo.h6">EstimateCost</MudText>
                         <MudDivider Class="my-3" />
                         <MudGrid>
@@ -577,6 +622,7 @@
     private List<AiProviderCapabilityDto> _capabilities = new();
     private List<AiProviderModelCapabilityDto> _selectedCapabilities = new();
     private List<AiModelPriceDto> _selectedPrices = new();
+    private List<AiProviderSyncChangeDto> _selectedSyncChanges = new();
     private List<QuickDefaultRow> _quickDefaults = new();
     private string? _modelProviderFilter;
     private string? _modelMediaFilter;
@@ -646,7 +692,7 @@
 
             if (options.Count == 0)
             {
-                row.Warning = "Chưa có provider/model được bật cho chức năng này.";
+                row.Warning = "ChÃ†Â°a cÃƒÂ³ provider/model Ã„â€˜Ã†Â°Ã¡Â»Â£c bÃ¡ÂºÂ­t cho chÃ¡Â»Â©c nÃ„Æ’ng nÃƒÂ y.";
             }
 
             rows.Add(row);
@@ -665,7 +711,7 @@
             row.SelectedCapabilityId = row.ModelOptions[0].ProviderCapabilityId;
         }
         row.Warning = row.ModelOptions.Count == 0 && providerId is not null
-            ? "Provider chưa có model được bật cho chức năng này."
+            ? "Provider chÃ†Â°a cÃƒÂ³ model Ã„â€˜Ã†Â°Ã¡Â»Â£c bÃ¡ÂºÂ­t cho chÃ¡Â»Â©c nÃ„Æ’ng nÃƒÂ y."
             : null;
     }
 
@@ -686,7 +732,7 @@
 
         if (selectedIds.Count != AiFeatureProviderCatalog.QuickDefaultFeatures.Count)
         {
-            Snackbar.Add("Vui lòng chọn đủ provider và model cho tất cả chức năng.", Severity.Warning);
+            Snackbar.Add("Vui lÃƒÂ²ng chÃ¡Â»Ân Ã„â€˜Ã¡Â»Â§ provider vÃƒÂ  model cho tÃ¡ÂºÂ¥t cÃ¡ÂºÂ£ chÃ¡Â»Â©c nÃ„Æ’ng.", Severity.Warning);
             return;
         }
 
@@ -694,7 +740,7 @@
         try
         {
             await Providers.SetDefaultCapabilitiesAsync(selectedIds, AuthState.CurrentUser);
-            Snackbar.Add("Đã lưu cài đặt provider mặc định.", Severity.Success);
+            Snackbar.Add("Ã„ÂÃƒÂ£ lÃ†Â°u cÃƒÂ i Ã„â€˜Ã¡ÂºÂ·t provider mÃ¡ÂºÂ·c Ã„â€˜Ã¡Â»â€¹nh.", Severity.Success);
             if (_selected is not null)
             {
                 await RefreshSelected();
@@ -717,7 +763,7 @@
     private static string ModelOptionLabel(ProviderOptionDto option)
     {
         var model = string.IsNullOrWhiteSpace(option.ModelName) ? option.DisplayName : option.ModelName;
-        return $"{model} · {option.DisplayName} · {option.UnitCostPoints:0.####} điểm/{option.UnitType}";
+        return $"{model} Ã‚Â· {option.DisplayName} Ã‚Â· {option.UnitCostPoints:0.####} Ã„â€˜iÃ¡Â»Æ’m/{option.UnitType}";
     }
 
     private async Task SelectProviderAsync(AiProviderListItemDto item)
@@ -727,7 +773,7 @@
             _selected = await Providers.GetProviderAsync(item.Id);
             if (_selected is null)
             {
-                Snackbar.Add("Không tìm thấy provider.", Severity.Warning);
+                Snackbar.Add("KhÃƒÂ´ng tÃƒÂ¬m thÃ¡ÂºÂ¥y provider.", Severity.Warning);
                 return;
             }
 
@@ -765,23 +811,23 @@
         var detail = await Providers.GetProviderAsync(item.Id);
         if (detail is null)
         {
-            Snackbar.Add("Không tìm thấy provider.", Severity.Error);
+            Snackbar.Add("KhÃƒÂ´ng tÃƒÂ¬m thÃ¡ÂºÂ¥y provider.", Severity.Error);
             return;
         }
 
         if (string.IsNullOrWhiteSpace(detail.BaseUrl))
         {
-            Snackbar.Add("Provider chưa cấu hình Base URL.", Severity.Warning);
+            Snackbar.Add("Provider chÃ†Â°a cÃ¡ÂºÂ¥u hÃƒÂ¬nh Base URL.", Severity.Warning);
             return;
         }
 
         if (string.IsNullOrWhiteSpace(detail.ApiKeyConfigName))
         {
-            Snackbar.Add("Provider chưa cấu hình tên credential. Không thực hiện render tính phí.", Severity.Warning);
+            Snackbar.Add("Provider chÃ†Â°a cÃ¡ÂºÂ¥u hÃƒÂ¬nh tÃƒÂªn credential. KhÃƒÂ´ng thÃ¡Â»Â±c hiÃ¡Â»â€¡n render tÃƒÂ­nh phÃƒÂ­.", Severity.Warning);
             return;
         }
 
-        Snackbar.Add("Cấu hình provider đã sẵn sàng để kiểm tra an toàn.", Severity.Success);
+        Snackbar.Add("CÃ¡ÂºÂ¥u hÃƒÂ¬nh provider Ã„â€˜ÃƒÂ£ sÃ¡ÂºÂµn sÃƒÂ ng Ã„â€˜Ã¡Â»Æ’ kiÃ¡Â»Æ’m tra an toÃƒÂ n.", Severity.Success);
     }
 
     private async Task OpenProviderModelsAsync(AiProviderListItemDto item)
@@ -816,7 +862,7 @@
         {
             _selected = await Providers.UpdateProviderAsync(_selected.Id, _providerEdit, AuthState.CurrentUser);
             _capabilities = _selected.Capabilities.ToList();
-            Snackbar.Add("Đã lưu provider.", Severity.Success);
+            Snackbar.Add("Ã„ÂÃƒÂ£ lÃ†Â°u provider.", Severity.Success);
             await ReloadProviders();
         }
         catch (Exception ex)
@@ -844,7 +890,7 @@
                 AllowUserSelect = cap.AllowUserSelect,
                 ConfigJson = cap.ConfigJson
             }, AuthState.CurrentUser);
-            Snackbar.Add("Đã lưu capability.", Severity.Success);
+            Snackbar.Add("Ã„ÂÃƒÂ£ lÃ†Â°u capability.", Severity.Success);
             await RefreshSelected();
         }
         catch (Exception ex)
@@ -861,7 +907,7 @@
         try
         {
             await Providers.SetDefaultCapabilityAsync(cap.Id, AuthState.CurrentUser);
-            Snackbar.Add($"Đã đặt mặc định cho {cap.CapabilityCode}.", Severity.Success);
+            Snackbar.Add($"Ã„ÂÃƒÂ£ Ã„â€˜Ã¡ÂºÂ·t mÃ¡ÂºÂ·c Ã„â€˜Ã¡Â»â€¹nh cho {cap.CapabilityCode}.", Severity.Success);
             await RefreshSelected();
         }
         catch (Exception ex)
@@ -894,6 +940,7 @@
                 {
                     _selectedPrices = _selectedModel.Prices.ToList();
                     _selectedCapabilities = _selectedModel.ModelCapabilities.ToList();
+                    _selectedSyncChanges = _selectedModel.SyncChanges.ToList();
                     _selectedProviderForSync = _selectedModel.ProviderId;
                     _syncHistory = _selectedModel.SyncHistory.ToList();
                     _syncMessage = _selectedModel.SyncHistory.FirstOrDefault()?.Message;
@@ -943,6 +990,7 @@
 
         _selectedCapabilities = _selectedModel.ModelCapabilities.ToList();
         _selectedPrices = _selectedModel.Prices.ToList();
+        _selectedSyncChanges = _selectedModel.SyncChanges.ToList();
         _selectedProviderForSync = _selectedModel.ProviderId;
         _syncHistory = _selectedModel.SyncHistory.ToList();
         _syncMessage = _selectedModel.SyncHistory.FirstOrDefault()?.Message;
@@ -955,6 +1003,7 @@
         if (_selectedModel is null) return;
         _selectedCapabilities = _selectedModel.ModelCapabilities.ToList();
         _selectedPrices = _selectedModel.Prices.ToList();
+        _selectedSyncChanges = _selectedModel.SyncChanges.ToList();
         _selectedProviderForSync = _selectedModel.ProviderId;
         _syncHistory = _selectedModel.SyncHistory.ToList();
     }
@@ -972,7 +1021,7 @@
                 _selectedModel.AllowUserSelect,
                 _selectedModel.Description,
                 AuthState.CurrentUser.UserId.ToString());
-            Snackbar.Add("Đã lưu model.", Severity.Success);
+            Snackbar.Add("Ã„ÂÃƒÂ£ lÃ†Â°u model.", Severity.Success);
             await ReloadSelectedModelAsync();
             await ReloadModelsAsync();
         }
@@ -994,7 +1043,7 @@
         try
         {
             await ModelService.UpdateAdminFieldsAsync(detail.Id, detail.DisplayName, !detail.Enabled, detail.AllowUserSelect, detail.Description, AuthState.CurrentUser.UserId.ToString());
-            Snackbar.Add("Đã cập nhật trạng thái model.", Severity.Success);
+            Snackbar.Add("Ã„ÂÃƒÂ£ cÃ¡ÂºÂ­p nhÃ¡ÂºÂ­t trÃ¡ÂºÂ¡ng thÃƒÂ¡i model.", Severity.Success);
             await ReloadModelsAsync();
             if (_selectedModel?.Id == detail.Id)
             {
@@ -1023,7 +1072,7 @@
         {
             var result = await Syncs.SyncProviderAsync(_selectedProviderForSync.Value, AuthState.CurrentUser);
             _syncMessage = result.Message;
-            Snackbar.Add(result.Message ?? "Đồng bộ xong.", result.Success ? Severity.Success : Severity.Warning);
+            Snackbar.Add(result.Message ?? "Ã„ÂÃ¡Â»â€œng bÃ¡Â»â„¢ xong.", result.Success ? Severity.Success : Severity.Warning);
             await ReloadModelsAsync();
         }
         catch (Exception ex)
@@ -1046,18 +1095,117 @@
         }
         else
         {
-            Snackbar.Add("Đã tính giá.", Severity.Success);
+            Snackbar.Add("Ã„ÂÃƒÂ£ tÃƒÂ­nh giÃƒÂ¡.", Severity.Success);
+        }
+    }
+
+    private async Task SavePriceAsync(AiModelPriceDto price)
+    {
+        if (_selectedModel is null || AuthState.CurrentUser is null)
+        {
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            price.ModelId = _selectedModel.Id;
+            await Pricing.SavePriceAsync(price, AuthState.CurrentUser.UserId.ToString());
+            Snackbar.Add("Da luu gia.", Severity.Success);
+            await ReloadSelectedModelAsync();
+            await ReloadModelsAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
         }
     }
 
     private static string FormatPriceLabel(AiModelPriceDto price)
-        => $"{price.Mode ?? "-"} · {price.Resolution ?? "-"} · {price.DurationSeconds?.ToString() ?? "-"}s · {price.Ratio ?? "-"}";
+        => $"{price.Mode ?? "-"} Ã‚Â· {price.Resolution ?? "-"} Ã‚Â· {price.DurationSeconds?.ToString() ?? "-"}s Ã‚Â· {price.Ratio ?? "-"}";
 
     private static string FormatStrings(IReadOnlyList<string> values)
-        => values.Count == 0 ? "-" : string.Join(" · ", values);
+        => values.Count == 0 ? "-" : string.Join(" Ã‚Â· ", values);
 
     private static string FormatDurations(IReadOnlyList<int> values)
-        => values.Count == 0 ? "-" : string.Join(" · ", values.Select(x => $"{x}s"));
+        => values.Count == 0 ? "-" : string.Join(" Ã‚Â· ", values.Select(x => $"{x}s"));
+
+    private static bool CanEditSellPoints(AiModelPriceDto price)
+        => string.Equals(price.SellPriceMode, "FIXED", StringComparison.OrdinalIgnoreCase);
+
+    private static Color PriceSourceColor(string? source)
+        => string.Equals(source, "verified_seed", StringComparison.OrdinalIgnoreCase)
+            ? Color.Info
+            : string.Equals(source, "manual", StringComparison.OrdinalIgnoreCase)
+                ? Color.Default
+                : Color.Primary;
+
+    private static string PriceSourceLabel(string? source)
+        => source?.Trim().ToLowerInvariant() switch
+        {
+            "catalog" => "79AI live",
+            "verified_seed" => "Verified seed",
+            "manual" => "Manual",
+            _ => string.IsNullOrWhiteSpace(source) ? "-" : source!
+        };
+
+    private static string FormatSyncChangeSummary(AiProviderSyncChangeDto change)
+    {
+        if (string.Equals(change.ChangeType, "PRICE_CHANGED", StringComparison.OrdinalIgnoreCase))
+        {
+            return FormatPriceChangeSummary(change);
+        }
+
+        if (string.Equals(change.ChangeType, "PRICE_ADDED", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"Gia moi: {change.EntityKey}";
+        }
+
+        if (string.Equals(change.ChangeType, "PRICE_DISABLED", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"Gia da vo hieu hoa: {change.EntityKey}";
+        }
+
+        return change.AfterJson ?? change.BeforeJson ?? change.ChangeType;
+    }
+
+    private static string FormatPriceChangeSummary(AiProviderSyncChangeDto change)
+    {
+        var before = ReadPrice(change.BeforeJson);
+        var after = ReadPrice(change.AfterJson);
+        if (before is null || after is null)
+        {
+            return change.EntityKey;
+        }
+
+        var providerBefore = before.ProviderPrice?.ToString("0.####") ?? "-";
+        var providerAfter = after.ProviderPrice?.ToString("0.####") ?? "-";
+        var sellBefore = before.SellPoints?.ToString("0.####") ?? "-";
+        var sellAfter = after.SellPoints?.ToString("0.####") ?? "-";
+        var note = before.SellPoints == after.SellPoints ? "Gia provider thay doi · Gia TodoX giu nguyen" : "Gia provider va Gia TodoX thay doi";
+        return $"{change.EntityKey}\n79AI: {providerBefore} -> {providerAfter} credits\nTodoX sell: {sellBefore} -> {sellAfter} pts\nStatus: {note}";
+    }
+
+    private static AiModelPriceDto? ReadPrice(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return null;
+        }
+
+        try
+        {
+            return System.Text.Json.JsonSerializer.Deserialize<AiModelPriceDto>(json);
+        }
+        catch
+        {
+            return null;
+        }
+    }
 
     private sealed class QuickDefaultRow
     {
@@ -1088,3 +1236,5 @@
         }
     }
 }
+
+

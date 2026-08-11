@@ -6,6 +6,7 @@ public interface IAiPricingService
 {
     Task<IReadOnlyList<AiPricingPolicyDto>> GetPoliciesAsync(long providerId, CancellationToken ct = default);
     Task<IReadOnlyList<AiModelPriceDto>> GetPricesAsync(long modelId, CancellationToken ct = default);
+    Task SavePriceAsync(AiModelPriceDto price, string? userId, CancellationToken ct = default);
     Task<EstimateCostResponseDto> EstimateAsync(EstimateCostRequestDto request, CancellationToken ct = default);
 }
 
@@ -27,6 +28,31 @@ public sealed class AiPricingService : IAiPricingService
 
     public Task<IReadOnlyList<AiModelPriceDto>> GetPricesAsync(long modelId, CancellationToken ct = default)
         => _pricingRepo.GetPricesAsync(modelId, ct);
+
+    public async Task SavePriceAsync(AiModelPriceDto price, string? userId, CancellationToken ct = default)
+    {
+        var mode = NormalizeSellMode(price.SellPriceMode);
+        if (mode is not ("AUTO" or "FIXED" or "MARKUP"))
+        {
+            throw new InvalidOperationException("Sell price mode khong hop le.");
+        }
+
+        price.SellPriceMode = mode;
+        if (price.SellPoints is < 0)
+        {
+            throw new InvalidOperationException("Sell points khong duoc am.");
+        }
+        if (price.MarkupPercent is < 0)
+        {
+            throw new InvalidOperationException("Markup percent khong duoc am.");
+        }
+        if (price.MinimumPoints is < 0)
+        {
+            throw new InvalidOperationException("Minimum points khong duoc am.");
+        }
+
+        await _pricingRepo.UpsertPriceAsync(price, userId, ct);
+    }
 
     public async Task<EstimateCostResponseDto> EstimateAsync(EstimateCostRequestDto request, CancellationToken ct = default)
     {
@@ -84,4 +110,7 @@ public sealed class AiPricingService : IAiPricingService
             ? null
             : await _models.GetModelByCodeAsync(provider.Id, providerModelCode, ct);
     }
+
+    private static string NormalizeSellMode(string? mode)
+        => string.IsNullOrWhiteSpace(mode) ? "AUTO" : mode.Trim().ToUpperInvariant();
 }

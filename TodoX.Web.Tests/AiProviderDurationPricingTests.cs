@@ -89,23 +89,36 @@ public sealed class AiProviderDurationPricingTests
         var pricingRepository = ReadSource("TodoX.Web", "Services", "AiProviders", "AiPricingRepository.cs");
         var syncService = ReadSource("TodoX.Web", "Services", "AiProviders", "AiProviderSyncService.cs");
 
-        Assert.Contains("sell_points, sell_price_mode", pricingRepository);
-        Assert.DoesNotContain("sell_points = EXCLUDED.sell_points", pricingRepository);
-        Assert.DoesNotContain("sell_price_mode = EXCLUDED.sell_price_mode", pricingRepository);
+        Assert.Contains("sell_points = EXCLUDED.sell_points", pricingRepository);
+        Assert.Contains("sell_price_mode = EXCLUDED.sell_price_mode", pricingRepository);
+        Assert.Contains("markup_percent = EXCLUDED.markup_percent", pricingRepository);
+        Assert.Contains("minimum_points = EXCLUDED.minimum_points", pricingRepository);
         Assert.Contains("PRICE_DISABLED", syncService);
         Assert.Contains("MarkPriceInactiveAsync", syncService);
+        Assert.Contains("existingPrice.SellPoints", syncService);
+        Assert.Contains("existingPrice.SellPriceMode", syncService);
     }
 
     [Fact]
-    public void ProviderSync_UsesPerProviderNonBlockingLockForDailyAndManualSync()
+    public void ProviderSync_UsesManualAndScheduledTriggers_WithFreshRetryTimeout()
     {
+        var syncInterface = ReadSource("TodoX.Web", "Services", "AiProviders", "AiProviderSyncService.cs");
+        var pricingPage = ReadSource("TodoX.Web", "Components", "Pages", "AiProviders.razor");
         var syncService = ReadSource("TodoX.Web", "Services", "AiProviders", "AiProviderSyncService.cs");
         var worker = ReadSource("TodoX.Web", "Services", "AiProviders", "AiProviderCatalogSyncWorker.cs");
 
-        Assert.Contains("ConcurrentDictionary<long, SemaphoreSlim>", syncService);
-        Assert.Contains("WaitAsync(0", syncService);
+        Assert.Contains("Task<AiProviderSyncResultDto> SyncScheduledProviderAsync", syncInterface);
+        Assert.Contains("\"manual\"", syncService);
+        Assert.Contains("\"scheduled\"", syncService);
+        Assert.Contains("lookupTimeout", worker);
+        Assert.Contains("RunAttemptAsync", worker);
+        Assert.Contains("SyncScheduledProviderAsync", worker);
+        Assert.Contains("CreateLinkedTokenSource(stoppingToken)", worker);
         Assert.Contains("AiProviderCatalogSync", worker);
         Assert.Contains("DailyHourLocal", worker);
+        Assert.Contains("PriceSourceLabel", pricingPage);
+        Assert.Contains("verified_seed", pricingPage);
+        Assert.Contains("SavePriceAsync", pricingPage);
     }
 
     private static Ai79CatalogClient CreateClient(string json)
