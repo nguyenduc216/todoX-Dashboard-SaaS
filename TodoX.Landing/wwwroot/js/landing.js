@@ -115,9 +115,24 @@ AOS.init({
       if (industryMobileQuery.matches) {
         if (!industrySwiper) {
           industrySwiper = new Swiper(".industrySwiper", {
-            slidesPerView: 1.12,
-            spaceBetween: 16,
-            loop: industryItems.length > 2,
+            slidesPerView: 1,
+            spaceBetween: 12,
+            loop: false,
+            rewind: true,
+            speed: 420,
+            threshold: 10,
+            touchRatio: 1,
+            longSwipes: true,
+            longSwipesRatio: 0.2,
+            longSwipesMs: 280,
+            resistance: true,
+            resistanceRatio: 0.35,
+            followFinger: true,
+            touchReleaseOnEdges: true,
+            watchOverflow: true,
+            preventInteractionOnTransition: true,
+            roundLengths: true,
+            grabCursor: true,
             pagination: { el: ".swiper-pagination", clickable: true },
             navigation: { nextEl: ".swiper-button-next", prevEl: ".swiper-button-prev" }
           });
@@ -167,6 +182,11 @@ AOS.init({
     function openIndustryModal(item) {
       if (!industryModal || !industryModalVideo || !item?.videoUrl) return;
       currentIndustry = item;
+      const relatedContainer = industryModal.querySelector(".industry-related-videos");
+      if (relatedContainer) {
+        relatedContainer.hidden = true;
+        relatedContainer.innerHTML = "";
+      }
       stopIndustryVideo(industryModalVideo);
       industryModalTitle.textContent = item.title || "";
       industryModalDescription.textContent = item.description || item.shortDescription || "";
@@ -193,6 +213,11 @@ AOS.init({
 
     function closeIndustryModal() {
       stopIndustryVideo(industryModalVideo);
+      const relatedContainer = industryModal?.querySelector(".industry-related-videos");
+      if (relatedContainer) {
+        relatedContainer.hidden = true;
+        relatedContainer.innerHTML = "";
+      }
       industryModal?.classList.remove("is-open");
       industryModal?.setAttribute("aria-hidden", "true");
       industryModal?.querySelector(".industry-modal__dialog")?.classList.remove("is-landscape", "is-portrait");

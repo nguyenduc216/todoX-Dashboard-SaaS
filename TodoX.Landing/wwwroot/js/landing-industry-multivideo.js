@@ -47,9 +47,9 @@
 
     container = document.createElement('div');
     container.className = 'industry-related-videos';
-    const consult = modal.querySelector('[data-industry-consult]');
-    if (consult?.parentElement) {
-      consult.parentElement.insertBefore(container, consult);
+    const media = modal.querySelector('.industry-modal__video');
+    if (media?.parentElement) {
+      media.insertAdjacentElement('afterend', container);
     } else {
       notesEl.insertAdjacentElement('afterend', container);
     }

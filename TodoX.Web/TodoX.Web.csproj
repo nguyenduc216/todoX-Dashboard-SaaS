@@ -5,6 +5,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
+    <DefaultItemExcludes>$(DefaultItemExcludes);bin/**;bin2/**;obj/**;publish/**;Tests/**;.codex_bin/**;.codex_obj/**</DefaultItemExcludes>
   </PropertyGroup>
 
   <ItemGroup>
@@ -21,7 +22,24 @@
     <Content Remove="publish/**" />
     <None Remove="publish/**" />
     <Compile Remove="publish/**" />
+    <Content Remove="bin/**" />
+    <None Remove="bin/**" />
+    <Compile Remove="bin/**" />
+    <Content Remove="bin2/**" />
+    <None Remove="bin2/**" />
+    <Compile Remove="bin2/**" />
+    <Content Remove="obj/**" />
+    <None Remove="obj/**" />
+    <Compile Remove="obj/**" />
+    <Content Remove="Tests/**" />
+    <None Remove="Tests/**" />
     <Compile Remove="Tests/**" />
+    <Content Remove=".codex_bin/**" />
+    <None Remove=".codex_bin/**" />
+    <Compile Remove=".codex_bin/**" />
+    <Content Remove=".codex_obj/**" />
+    <None Remove=".codex_obj/**" />
+    <Compile Remove=".codex_obj/**" />
     <Content Remove="keys/**/*.json" />
     <None Remove="keys/**/*.json" />
   </ItemGroup>

@@ -10,17 +10,23 @@
     if (!swiper) return;
 
     try {
+      swiper.params.slidesPerView = 1;
+      swiper.params.spaceBetween = 12;
+      swiper.params.loop = false;
+      swiper.params.rewind = true;
       swiper.params.speed = 420;
-      swiper.params.threshold = 5;
+      swiper.params.threshold = 10;
       swiper.params.resistance = true;
-      swiper.params.resistanceRatio = 0.62;
+      swiper.params.resistanceRatio = 0.35;
       swiper.params.touchRatio = 1;
       swiper.params.longSwipes = true;
-      swiper.params.longSwipesRatio = 0.22;
-      swiper.params.longSwipesMs = 260;
+      swiper.params.longSwipesRatio = 0.2;
+      swiper.params.longSwipesMs = 280;
       swiper.params.followFinger = true;
       swiper.params.allowTouchMove = true;
       swiper.params.grabCursor = true;
+      swiper.params.touchReleaseOnEdges = true;
+      swiper.params.watchOverflow = true;
       swiper.params.watchSlidesProgress = true;
       swiper.params.observer = true;
       swiper.params.observeParents = true;

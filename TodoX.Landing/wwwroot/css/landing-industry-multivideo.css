@@ -4,6 +4,10 @@
   display:none!important;
 }
 
+.industry-modal__dialog .industry-related-videos{
+  min-width:0;
+}
+
 .industry-modal__dialog.is-portrait{
   width:min(1280px,98vw)!important;
   grid-template-columns:minmax(340px,430px) minmax(300px,1fr)!important;
@@ -162,6 +166,45 @@
   .industry-related-video{
     flex:0 0 min(82vw,330px);
     grid-template-columns:112px minmax(0,1fr);
+  }
+}
+
+@media(max-width:768px){
+  .industry-related-videos{
+    margin-top:4px;
+    padding-top:10px;
+  }
+  .industry-related-videos__head{
+    margin-bottom:8px;
+  }
+  .industry-related-videos__head h4{
+    font-size:14px;
+  }
+  .industry-related-videos__count{
+    font-size:10px;
+  }
+  .industry-related-videos__grid{
+    display:flex;
+    overflow-x:auto;
+    gap:8px;
+    padding-bottom:4px;
+    scrollbar-width:none;
+    scroll-snap-type:x mandatory;
+  }
+  .industry-related-videos__grid::-webkit-scrollbar{display:none}
+  .industry-related-video{
+    flex:0 0 min(78vw,260px);
+    grid-template-columns:96px minmax(0,1fr);
+    padding:7px;
+    border-radius:12px;
+    scroll-snap-align:start;
+  }
+  .industry-related-video__body{
+    padding-right:0;
+  }
+  .industry-related-video__title{
+    font-size:12px;
+    line-height:1.35;
   }
 }
 

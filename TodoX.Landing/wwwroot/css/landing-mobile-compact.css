@@ -25,6 +25,24 @@ main > .section + .section {
     display: none !important;
   }
 
+  .industrySwiper {
+    touch-action: pan-y;
+    overflow: hidden !important;
+  }
+
+  .industrySwiper .swiper-wrapper {
+    display: flex !important;
+    gap: 0 !important;
+    transition-timing-function: cubic-bezier(.22,.61,.36,1) !important;
+    will-change: transform;
+  }
+
+  .industrySwiper .swiper-slide {
+    width: 100% !important;
+    flex: 0 0 100% !important;
+    height: auto !important;
+  }
+
   main > .section {
     padding-top: 10px !important;
     padding-bottom: 10px !important;
@@ -175,6 +193,67 @@ main > .section + .section {
     position: relative !important;
     bottom: auto !important;
     margin-top: 8px !important;
+  }
+
+  .industry-modal {
+    padding: 6px !important;
+  }
+
+  .industry-modal__dialog {
+    grid-template-columns: 1fr !important;
+    max-height: calc(100dvh - 12px) !important;
+    padding: 10px !important;
+    gap: 8px !important;
+    border-radius: 18px !important;
+  }
+
+  .industry-modal__dialog.is-portrait .industry-modal__video,
+  .industry-modal__dialog.is-landscape .industry-modal__video {
+    width: 100% !important;
+    max-width: 100% !important;
+    height: auto !important;
+    aspect-ratio: 9 / 16 !important;
+    align-self: start !important;
+  }
+
+  .industry-modal__dialog .industry-modal__video {
+    padding: 8px !important;
+    border-radius: 16px !important;
+  }
+
+  .industry-modal__dialog .industry-modal__video video {
+    max-height: 38dvh !important;
+    border-radius: 12px !important;
+  }
+
+  .industry-modal__dialog .industry-related-videos {
+    margin-top: 2px !important;
+    padding-top: 8px !important;
+  }
+
+  .industry-modal__dialog.is-portrait .industry-modal__content,
+  .industry-modal__dialog.is-landscape .industry-modal__content {
+    grid-column: auto !important;
+    grid-row: auto !important;
+    align-self: start !important;
+  }
+
+  .industry-modal__dialog .industry-related-videos__grid {
+    display: flex !important;
+    overflow-x: auto !important;
+    gap: 8px !important;
+    padding-bottom: 2px !important;
+    scrollbar-width: none !important;
+    scroll-snap-type: x mandatory;
+  }
+
+  .industry-modal__dialog .industry-related-videos__grid::-webkit-scrollbar {
+    display: none;
+  }
+
+  .industry-modal__dialog .industry-related-video {
+    flex: 0 0 min(78vw, 260px) !important;
+    scroll-snap-align: start;
   }
 
   .ai-workflow-shell {

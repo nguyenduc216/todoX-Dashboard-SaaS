@@ -112,6 +112,24 @@
   }
 }
 
+@media(max-width:768px){
+  .industry-modal__dialog.is-portrait{
+    max-height:calc(100dvh - 14px);
+    padding:12px;
+    gap:10px;
+  }
+  .industry-modal__dialog.is-portrait .industry-modal__video{
+    width:100%;
+    max-width:100%;
+    height:auto;
+    aspect-ratio:9/16;
+    max-height:none;
+  }
+  .industry-modal__dialog.is-portrait .industry-modal__video video{
+    max-height:40dvh;
+  }
+}
+
 @media(max-height:820px) and (min-width:769px){
   .industry-modal__dialog.is-portrait .industry-modal__video{
     height:min(62vh,520px);
