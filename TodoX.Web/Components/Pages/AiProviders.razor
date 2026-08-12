@@ -1,6 +1,7 @@
 ﻿@page "/admin/ai-providers"
 @using TodoX.Web.Models
 @using TodoX.Web.Services.AiProviders
+@implements IDisposable
 @inject AuthStateService AuthState
 @inject IAiProviderService Providers
 @inject IAiProviderModelService ModelService
@@ -18,7 +19,16 @@
         <MudText Typo="Typo.body1" Class="todox-page-subtitle">Quản lý nhà cung cấp AI, capability, model và điểm sử dụng theo đơn vị. Model do admin cấu hình, người dùng không tự chọn model.</MudText>
     </div>
 
-    @if (!IsAdmin)
+    @if (!AuthState.IsInitialized)
+    {
+        <MudPaper Class="todox-card pa-4">
+            <MudStack AlignItems="AlignItems.Center" Spacing="2">
+                <MudProgressCircular Indeterminate="true" Color="Color.Warning" />
+                <MudText>Đang xác thực...</MudText>
+            </MudStack>
+        </MudPaper>
+    }
+    else if (!IsAdmin)
     {
         <MudAlert Severity="Severity.Error">Bạn cần quyền quản trị TodoX để mở trang này.</MudAlert>
     }
@@ -658,6 +668,8 @@
     private EstimateCostRequestDto _estimateRequest = new() { Quantity = 1 };
     private EstimateCostResponseDto? _estimateResult;
     private int _activeTabIndex;
+    private bool _pageInitialized;
+    private bool _initializingPage;
     private AiProviderSyncHeaderDto? LatestSync => _syncHistory.FirstOrDefault();
     private bool IsSelected79Ai => string.Equals(_selected?.ProviderCode, "79ai", StringComparison.OrdinalIgnoreCase);
 
@@ -672,9 +684,56 @@
 
     protected override async Task OnInitializedAsync()
     {
-        if (!IsAdmin) { _loading = false; _loadingModels = false; return; }
-        await ReloadProviders();
-        await ReloadModelsAsync();
+        AuthState.OnChange += HandleAuthStateChanged;
+        await EnsurePageInitializedAsync();
+    }
+
+    private void HandleAuthStateChanged()
+    {
+        _ = InvokeAsync(async () =>
+        {
+            if (!AuthState.IsInitialized)
+            {
+                StateHasChanged();
+                return;
+            }
+
+            if (!IsAdmin)
+            {
+                _pageInitialized = false;
+                _loading = false;
+                _loadingModels = false;
+                StateHasChanged();
+                return;
+            }
+
+            await EnsurePageInitializedAsync();
+            StateHasChanged();
+        });
+    }
+
+    private async Task EnsurePageInitializedAsync()
+    {
+        if (!AuthState.IsInitialized || !IsAdmin || _pageInitialized || _initializingPage)
+        {
+            return;
+        }
+
+        _initializingPage = true;
+        try
+        {
+            await ReloadProviders();
+            _pageInitialized = true;
+        }
+        finally
+        {
+            _initializingPage = false;
+        }
+    }
+
+    public void Dispose()
+    {
+        AuthState.OnChange -= HandleAuthStateChanged;
     }
 
     private async Task ReloadProviders()
