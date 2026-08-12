@@ -145,7 +145,9 @@ public sealed class AiProviderDurationPricingTests
         Assert.Contains("duplicate provider_model_code", sync, StringComparison.Ordinal);
         Assert.Contains("invalid/no model code", sync, StringComparison.Ordinal);
         Assert.Contains("ignored_models = ignoredModels", sync, StringComparison.Ordinal);
-        Assert.DoesNotContain("capabilityRowsChanged: ignoredCount", sync, StringComparison.Ordinal);
+        Assert.Contains("result.PriceChangedCount,", sync, StringComparison.Ordinal);
+        Assert.Contains("0,", sync, StringComparison.Ordinal);
+        Assert.DoesNotContain("normalizedCatalog.IgnoredCount,\r\n                BuildSummaryJson(result, normalizedCatalog.IgnoredCount)", sync, StringComparison.Ordinal);
         Assert.DoesNotContain("provider_model_id_base = ANY", sync, StringComparison.OrdinalIgnoreCase);
     }
 

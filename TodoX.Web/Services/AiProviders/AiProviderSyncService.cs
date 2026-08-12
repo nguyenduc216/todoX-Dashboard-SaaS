@@ -172,7 +172,7 @@ public sealed class AiProviderSyncService : IAiProviderSyncService
                 result.ModelUnavailableCount,
                 normalizedCatalog.Models.Sum(x => x.Prices?.Count ?? 0),
                 result.PriceChangedCount,
-                normalizedCatalog.IgnoredCount,
+                0,
                 BuildSummaryJson(result, normalizedCatalog.IgnoredCount),
                 ct);
             result.Message = result.ModelInsertedCount == 0 && result.ModelUpdatedCount == 0 && result.ModelUnavailableCount == 0 && result.PriceChangedCount == 0
