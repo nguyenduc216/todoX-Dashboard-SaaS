@@ -1,4 +1,5 @@
 @page "/admin/ai-providers"
+@using TodoX.Web.Components.Dialogs
 @using TodoX.Web.Models
 @using TodoX.Web.Services.AiProviders
 @implements IDisposable
@@ -319,7 +320,7 @@
                     else
                     {
                         <MudTable Items="_models" Dense="true" Hover="true" T="AiProviderModelListItemDto"
-                                  OnRowClick="@(args => args.Item is not null ? SelectModelAsync(args.Item) : Task.CompletedTask)" RowClass="cursor-pointer">
+                                  OnRowClick="@(args => args.Item is not null ? OpenModelDialogAsync(args.Item) : Task.CompletedTask)" RowClass="cursor-pointer">
                             <HeaderContent>
                                 <MudTh>Model</MudTh>
                                 <MudTh>Media</MudTh>
@@ -332,7 +333,11 @@
                             </HeaderContent>
                             <RowTemplate Context="m">
                                 <MudTd DataLabel="Model">
-                                    <MudText Typo="Typo.body2"><b>@m.DisplayName</b></MudText>
+                                    <span @onclick:stopPropagation="true">
+                                        <MudButton Variant="Variant.Text" Color="Color.Primary" Class="provider-name-button pa-0" OnClick="@(() => OpenModelDialogAsync(m))">
+                                            <MudText Typo="Typo.body2"><b>@m.DisplayName</b></MudText>
+                                        </MudButton>
+                                    </span>
                                     <MudText Typo="Typo.caption" Class="todox-page-subtitle">@m.ProviderCode · @m.ProviderModelCode</MudText>
                                     @if (!string.IsNullOrWhiteSpace(m.Description))
                                     {
@@ -366,98 +371,16 @@
                                 </MudTd>
                                 <MudTd DataLabel="Actions">
                                     <MudMenu Icon="@Icons.Material.Filled.MoreVert" Dense="true">
-                                        <MudMenuItem OnClick="@(() => SelectModelAsync(m))">Mở chi tiết</MudMenuItem>
+                                        <MudMenuItem OnClick="@(() => OpenModelDialogAsync(m))">Chi tiết</MudMenuItem>
+                                        <MudMenuItem OnClick="@(() => OpenModelCostDialogAsync(m))">Giá vốn</MudMenuItem>
                                         <MudMenuItem Disabled="@_busy" OnClick="@(() => ToggleModelAsync(m))">Bật/tắt</MudMenuItem>
+                                        <MudMenuItem Disabled="@_busy" OnClick="@(() => SyncModelProviderAsync(m))">Đồng bộ/làm mới model</MudMenuItem>
                                     </MudMenu>
                                 </MudTd>
                             </RowTemplate>
                         </MudTable>
                     }
                 </MudPaper>
-
-                @if (_selectedModel is not null)
-                {
-                    <MudPaper Class="todox-card pa-4 mt-3" rounded="true">
-                        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
-                            <div>
-                                <MudText Typo="Typo.h6">@_selectedModel.DisplayName</MudText>
-                                <MudText Typo="Typo.caption" Class="todox-page-subtitle">@_selectedModel.ProviderCode · @_selectedModel.ProviderModelCode · @_selectedModel.MediaType</MudText>
-                            </div>
-                            <MudStack Row="true" Spacing="2">
-                                <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Refresh" Disabled="@_busy" OnClick="ReloadSelectedModelAsync">Tải lại</MudButton>
-                                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save" Disabled="@_busy" OnClick="SaveSelectedModelAsync">Lưu model</MudButton>
-                            </MudStack>
-                        </MudStack>
-                        <MudDivider Class="my-3" />
-                        <MudStack Row="true" Spacing="1" Class="flex-wrap mb-3">
-                            <MudChip T="string" Size="Size.Small" Color="Color.Default">@_selectedModel.ProviderCode</MudChip>
-                            <MudChip T="string" Size="Size.Small" Color="Color.Info">@_selectedModel.MediaType.ToUpperInvariant()</MudChip>
-                            <MudChip T="string" Size="Size.Small" Color="@(_selectedModel.Enabled ? Color.Success : Color.Default)">@(_selectedModel.Enabled ? "ON" : "OFF")</MudChip>
-                            @foreach (var cap in _selectedCapabilities)
-                            {
-                                <MudChip T="string" Size="Size.Small">@cap.CapabilityCode</MudChip>
-                            }
-                        </MudStack>
-                        <MudText Typo="Typo.subtitle2">Supported variants</MudText>
-                        <MudGrid Class="mb-3">
-                            <MudItem xs="12" sm="3"><MudText Typo="Typo.caption" Class="todox-page-subtitle">Mode</MudText><MudText Typo="Typo.body2">@FormatStrings(_selectedModel.SupportedModes)</MudText></MudItem>
-                            <MudItem xs="12" sm="3"><MudText Typo="Typo.caption" Class="todox-page-subtitle">Duration</MudText><MudText Typo="Typo.body2">@FormatDurations(_selectedModel.SupportedDurations)</MudText></MudItem>
-                            <MudItem xs="12" sm="3"><MudText Typo="Typo.caption" Class="todox-page-subtitle">Resolution</MudText><MudText Typo="Typo.body2">@FormatStrings(_selectedModel.SupportedResolutions)</MudText></MudItem>
-                            <MudItem xs="12" sm="3"><MudText Typo="Typo.caption" Class="todox-page-subtitle">Ratio</MudText><MudText Typo="Typo.body2">@FormatStrings(_selectedModel.SupportedRatios)</MudText></MudItem>
-                        </MudGrid>
-                        <MudTable Items="@BuildVariantRows(_selectedModel)" Dense="true" Hover="true" Class="mb-3">
-                            <HeaderContent>
-                                <MudTh>Mode</MudTh>
-                                <MudTh>Resolution</MudTh>
-                                <MudTh>Quality label</MudTh>
-                                <MudTh>Duration</MudTh>
-                                <MudTh>Ratio</MudTh>
-                                <MudTh>Availability</MudTh>
-                            </HeaderContent>
-                            <RowTemplate Context="variant">
-                                <MudTd DataLabel="Mode">@variant.Mode</MudTd>
-                                <MudTd DataLabel="Resolution">
-                                    <MudText Typo="Typo.body2"><b>@variant.Resolution</b></MudText>
-                                    <MudText Typo="Typo.caption" Class="todox-page-subtitle">@GetQualityLabel(_selectedModel.MediaType, variant.Resolution)</MudText>
-                                </MudTd>
-                                <MudTd DataLabel="Quality label">@GetQualityLabel(_selectedModel.MediaType, variant.Resolution)</MudTd>
-                                <MudTd DataLabel="Duration">@variant.Duration</MudTd>
-                                <MudTd DataLabel="Ratio">@variant.Ratio</MudTd>
-                                <MudTd DataLabel="Availability"><MudChip T="string" Size="Size.Small" Color="Color.Success">@variant.Availability</MudChip></MudTd>
-                            </RowTemplate>
-                        </MudTable>
-                        <MudGrid>
-                            <MudItem xs="12" sm="6"><MudTextField @bind-Value="_selectedModel.DisplayName" Label="Display name" Variant="Variant.Outlined" /></MudItem>
-                            <MudItem xs="12" sm="6"><MudTextField @bind-Value="_selectedModel.ServerCode" Label="Server code" Variant="Variant.Outlined" /></MudItem>
-                            <MudItem xs="12" sm="6"><MudTextField @bind-Value="_selectedModel.ProviderModelCode" Label="Provider model code" Variant="Variant.Outlined" Disabled="true" /></MudItem>
-                            <MudItem xs="12" sm="6"><MudTextField @bind-Value="_selectedModel.ProviderStatus" Label="Provider status" Variant="Variant.Outlined" /></MudItem>
-                            <MudItem xs="12" sm="6"><MudTextField @bind-Value="_selectedModel.StatusMessage" Label="Status message" Variant="Variant.Outlined" /></MudItem>
-                            <MudItem xs="12" sm="6"><MudTextField @bind-Value="_selectedModel.ProviderPriceUnit" Label="Provider price unit" Variant="Variant.Outlined" /></MudItem>
-                            <MudItem xs="12"><MudTextField @bind-Value="_selectedModel.Description" Label="Description" Lines="2" Variant="Variant.Outlined" /></MudItem>
-                            <MudItem xs="12" sm="4"><MudNumericField @bind-Value="_selectedModel.BaseProviderPrice" Label="Giá vốn provider" Variant="Variant.Outlined" /></MudItem>
-                            <MudItem xs="12" sm="4" Class="d-flex align-center"><MudSwitch @bind-Value="_selectedModel.Enabled" Color="Color.Success" Label="Bật model" /></MudItem>
-                            <MudItem xs="12" sm="4" Class="d-flex align-center"><MudSwitch @bind-Value="_selectedModel.AllowUserSelect" Color="Color.Primary" Label="Cho user chọn" /></MudItem>
-                        </MudGrid>
-                        <MudText Typo="Typo.subtitle2" Class="mt-4">Provider cost matrix</MudText>
-                        <MudTable Items="_selectedPrices" Dense="true" Hover="true">
-                            <HeaderContent>
-                                <MudTh>Configuration</MudTh><MudTh>Provider price</MudTh><MudTh>Internal cost</MudTh><MudTh>Source</MudTh><MudTh>Active</MudTh>
-                            </HeaderContent>
-                            <RowTemplate Context="price">
-                                <MudTd DataLabel="Cấu hình">@FormatPriceLabel(price)</MudTd>
-                                <MudTd DataLabel="Provider price">@price.ProviderPrice?.ToString("0.####") @price.ProviderPriceUnit</MudTd>
-                                <MudTd DataLabel="Internal cost">@price.InternalCostPoints?.ToString("0.####") pts</MudTd>
-                                <MudTd DataLabel="Source">@PriceSourceLabel(price.PriceSource)</MudTd>
-                                <MudTd DataLabel="Active"><MudChip T="string" Size="Size.Small" Color="@(price.Active ? Color.Success : Color.Default)">@(price.Active ? "ON" : "OFF")</MudChip></MudTd>
-                            </RowTemplate>
-                        </MudTable>
-                        <MudExpansionPanels Class="mt-3" Elevation="0">
-                            <MudExpansionPanel Text="Nâng cao">
-                                <MudText Typo="Typo.caption" Class="todox-page-subtitle">@_selectedModel.RawJson</MudText>
-                            </MudExpansionPanel>
-                        </MudExpansionPanels>
-                    </MudPaper>
-                }
             </MudTabPanel>
             <MudTabPanel Text="GIÁ VỐN">
                 <MudPaper Class="todox-card pa-4" rounded="true">
@@ -1117,11 +1040,6 @@
         _modelProviderFilter = item.ProviderCode;
         _activeTabIndex = 2;
         await ReloadModelsAsync();
-        var first = _models.FirstOrDefault();
-        if (first is not null)
-        {
-            await SelectModelAsync(first);
-        }
     }
 
     private async Task OpenProviderModelsAsync(AiProviderDetailDto provider)
@@ -1129,11 +1047,6 @@
         _modelProviderFilter = provider.ProviderCode;
         _activeTabIndex = 2;
         await ReloadModelsAsync();
-        var first = _models.FirstOrDefault();
-        if (first is not null)
-        {
-            await SelectModelAsync(first);
-        }
     }
 
     private async Task SaveProvider()
@@ -1277,6 +1190,43 @@
         _syncMessage = _selectedModel.SyncHistory.FirstOrDefault()?.ErrorMessage;
     }
 
+    private async Task OpenModelDialogAsync(AiProviderModelListItemDto item)
+        => await OpenModelDialogAsync(item, initialTabIndex: 0);
+
+    private async Task OpenModelCostDialogAsync(AiProviderModelListItemDto item)
+        => await OpenModelDialogAsync(item, initialTabIndex: 2);
+
+    private async Task OpenModelDialogAsync(AiProviderModelListItemDto item, int initialTabIndex)
+    {
+        await SelectModelAsync(item);
+        if (_selectedModel is null)
+        {
+            Snackbar.Add("Không tìm thấy model.", Severity.Warning);
+            return;
+        }
+
+        var parameters = new DialogParameters<AiProviderModelDetailDialog>
+        {
+            { x => x.Model, _selectedModel },
+            { x => x.CurrentUser, AuthState.CurrentUser },
+            { x => x.InitialTabIndex, initialTabIndex }
+        };
+        var options = new DialogOptions
+        {
+            MaxWidth = MaxWidth.ExtraLarge,
+            FullWidth = true,
+            CloseButton = true,
+            CloseOnEscapeKey = true
+        };
+        var dialog = await DialogService.ShowAsync<AiProviderModelDetailDialog>($"Chi tiết model · {_selectedModel.DisplayName}", parameters, options);
+        var result = await dialog.Result;
+        if (result is { Canceled: false, Data: bool changed } && changed)
+        {
+            await ReloadSelectedModelAsync();
+            await ReloadModelsAsync();
+        }
+    }
+
     private async Task ReloadSelectedModelAsync()
     {
         if (_selectedModel is null) return;
@@ -1339,6 +1289,13 @@
         {
             _busy = false;
         }
+    }
+
+    private async Task SyncModelProviderAsync(AiProviderModelListItemDto item)
+    {
+        _selectedProviderForSync = item.ProviderId;
+        _activeTabIndex = 5;
+        await SyncSelectedProviderAsync();
     }
 
     private async Task SyncSelectedProviderAsync()

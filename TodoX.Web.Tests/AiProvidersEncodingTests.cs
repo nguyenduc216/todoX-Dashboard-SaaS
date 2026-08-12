@@ -6,9 +6,11 @@ namespace TodoX.Web.Tests;
 public class AiProvidersEncodingTests
 {
     [Fact]
-    public void AiProvidersPage_IsStrictUtf8_AndContainsExpectedVietnameseText()
+    public void AiProvidersPageAndDialog_AreStrictUtf8_AndContainExpectedVietnameseText()
     {
-        var text = ReadStrictUtf8(Path.Combine("TodoX.Web", "Components", "Pages", "AiProviders.razor"));
+        var page = ReadStrictUtf8(Path.Combine("TodoX.Web", "Components", "Pages", "AiProviders.razor"));
+        var dialog = ReadStrictUtf8(Path.Combine("TodoX.Web", "Components", "Dialogs", "AiProviderModelDetailDialog.razor"));
+        var text = page + "\n" + dialog;
 
         Assert.DoesNotContain('\uFFFD', text);
 
@@ -66,6 +68,7 @@ public class AiProvidersEncodingTests
         "Đồng bộ",
         "Giá vốn Provider",
         "MẶC ĐỊNH",
-        "NÂNG CAO"
+        "NÂNG CAO",
+        "Chi tiết model"
     ];
 }

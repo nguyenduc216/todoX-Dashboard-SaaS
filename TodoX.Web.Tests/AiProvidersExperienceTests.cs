@@ -29,44 +29,67 @@ public sealed class AiProvidersExperienceTests
     public void ProviderCostLanguageIsPrimaryAndSellPricingIsSeparated()
     {
         var page = ReadPage();
+        var dialog = ReadDialog();
 
         Assert.Contains("Giá vốn Provider", page, StringComparison.Ordinal);
+        Assert.Contains("Giá vốn Provider", dialog, StringComparison.Ordinal);
         Assert.Contains("Không phải giá bán dịch vụ cho khách hàng.", page, StringComparison.Ordinal);
-        Assert.Contains("Giá bán khách hàng sẽ được cấu hình theo Dịch vụ, không theo model provider.", page, StringComparison.Ordinal);
+        Assert.Contains("Giá bán khách hàng được cấu hình theo Dịch vụ, không theo model provider.", dialog, StringComparison.Ordinal);
         Assert.Contains("Legacy sell pricing", page, StringComparison.Ordinal);
+        Assert.Contains("Legacy sell pricing", dialog, StringComparison.Ordinal);
         Assert.DoesNotContain("MudTabPanel Text=\"GIÁ & ĐIỂM\"", page, StringComparison.Ordinal);
     }
 
     [Fact]
     public void QualityLabelHelperMapsProviderResolutionForDisplayOnly()
     {
-        var page = ReadPage();
+        var dialog = ReadDialog();
 
-        Assert.Contains("normalized.Equals(\"720p\", StringComparison.OrdinalIgnoreCase) ? \"Thường\"", page, StringComparison.Ordinal);
-        Assert.Contains("normalized.Equals(\"1080p\", StringComparison.OrdinalIgnoreCase) ? \"Cao\"", page, StringComparison.Ordinal);
-        Assert.Contains("normalized.Equals(\"2K\", StringComparison.OrdinalIgnoreCase) ? \"Thường\"", page, StringComparison.Ordinal);
-        Assert.Contains("normalized.Equals(\"4K\", StringComparison.OrdinalIgnoreCase) ? \"Cao\"", page, StringComparison.Ordinal);
-        Assert.Contains("GetQualityLabel(_selectedModel.MediaType, variant.Resolution)", page, StringComparison.Ordinal);
-        Assert.Contains("GetQualityLabel(_selectedModel.MediaType, price.Resolution)", page, StringComparison.Ordinal);
+        Assert.Contains("normalized.Equals(\"720p\", StringComparison.OrdinalIgnoreCase) ? \"Thường\"", dialog, StringComparison.Ordinal);
+        Assert.Contains("normalized.Equals(\"1080p\", StringComparison.OrdinalIgnoreCase) ? \"Cao\"", dialog, StringComparison.Ordinal);
+        Assert.Contains("normalized.Equals(\"2K\", StringComparison.OrdinalIgnoreCase) ? \"Thường\"", dialog, StringComparison.Ordinal);
+        Assert.Contains("normalized.Equals(\"4K\", StringComparison.OrdinalIgnoreCase) ? \"Cao\"", dialog, StringComparison.Ordinal);
+        Assert.Contains("GetQualityLabel(_model.MediaType, variant.Resolution)", dialog, StringComparison.Ordinal);
+        Assert.Contains("GetQualityLabel(_model.MediaType, price.Resolution)", dialog, StringComparison.Ordinal);
     }
 
     [Fact]
     public void TechnicalProviderValuesRemainVisibleFor79AiCatalogModels()
     {
-        var page = ReadPage();
+        var dialog = ReadDialog();
 
-        Assert.Contains("@variant.Resolution", page, StringComparison.Ordinal);
-        Assert.Contains("DisplayValue(price.Resolution)", page, StringComparison.Ordinal);
-        Assert.Contains("@FormatStrings(_selectedModel.SupportedResolutions)", page, StringComparison.Ordinal);
-        Assert.Contains("@FormatDurations(_selectedModel.SupportedDurations)", page, StringComparison.Ordinal);
-        Assert.Contains("@FormatStrings(_selectedModel.SupportedModes)", page, StringComparison.Ordinal);
-        Assert.Contains("@FormatStrings(_selectedModel.SupportedRatios)", page, StringComparison.Ordinal);
+        Assert.Contains("@variant.Resolution", dialog, StringComparison.Ordinal);
+        Assert.Contains("DisplayValue(price.Resolution)", dialog, StringComparison.Ordinal);
+        Assert.Contains("@FormatStrings(_model.SupportedResolutions)", dialog, StringComparison.Ordinal);
+        Assert.Contains("@FormatDurations(_model.SupportedDurations)", dialog, StringComparison.Ordinal);
+        Assert.Contains("@FormatStrings(_model.SupportedModes)", dialog, StringComparison.Ordinal);
+        Assert.Contains("@FormatStrings(_model.SupportedRatios)", dialog, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ModelDetailUsesMudDialogAndInlineDetailIsRemoved()
+    {
+        var page = ReadPage();
+        var dialog = ReadDialog();
+
+        Assert.Contains("DialogService.ShowAsync<AiProviderModelDetailDialog>", page, StringComparison.Ordinal);
+        Assert.Contains("MaxWidth = MaxWidth.ExtraLarge", page, StringComparison.Ordinal);
+        Assert.Contains("FullWidth = true", page, StringComparison.Ordinal);
+        Assert.Contains("OnRowClick=\"@(args => args.Item is not null ? OpenModelDialogAsync(args.Item) : Task.CompletedTask)\"", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("@if (_selectedModel is not null)", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("<MudText Typo=\"Typo.subtitle2\">Supported variants</MudText>", page, StringComparison.Ordinal);
+        Assert.Contains("<MudDialog Class=\"ai-provider-model-dialog\">", dialog, StringComparison.Ordinal);
+        Assert.Contains("MudTabPanel Text=\"TỔNG QUAN\"", dialog, StringComparison.Ordinal);
+        Assert.Contains("MudTabPanel Text=\"VARIANT\"", dialog, StringComparison.Ordinal);
+        Assert.Contains("MudTabPanel Text=\"GIÁ VỐN\"", dialog, StringComparison.Ordinal);
+        Assert.Contains("MudTabPanel Text=\"RAW / NÂNG CAO\"", dialog, StringComparison.Ordinal);
     }
 
     [Fact]
     public void ExistingFunctionalityRemainsAccessibleFromTabs()
     {
         var page = ReadPage();
+        var dialog = ReadDialog();
 
         foreach (var handler in new[]
         {
@@ -75,9 +98,8 @@ public sealed class AiProvidersExperienceTests
             "SaveCapability",
             "SetDefault",
             "ReloadModelsAsync",
-            "SaveSelectedModelAsync",
+            "OpenModelDialogAsync",
             "ToggleModelAsync",
-            "SavePriceAsync",
             "SyncSelectedProviderAsync",
             "EstimateAsync",
             "Migrate79AiCredentialAsync"
@@ -85,26 +107,43 @@ public sealed class AiProvidersExperienceTests
         {
             Assert.Contains(handler, page, StringComparison.Ordinal);
         }
+
+        Assert.Contains("SaveModelAsync", dialog, StringComparison.Ordinal);
+        Assert.Contains("SavePriceAsync", dialog, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void PageDoesNotDisplaySecureTokenValues()
+    public void PageAndModelDialogDoNotDisplaySecureTokenValues()
     {
         var page = ReadPage();
+        var dialog = ReadDialog();
 
         Assert.Contains("MaskedHint", page, StringComparison.Ordinal);
         Assert.DoesNotContain("access_token", page, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("access_token", dialog, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Bearer ", page, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Bearer ", dialog, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("sk-", page, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("sk-", dialog, StringComparison.OrdinalIgnoreCase);
     }
 
     private static string ReadPage()
     {
         var file = Path.Combine(FindRepoRoot(), "TodoX.Web", "Components", "Pages", "AiProviders.razor");
         Assert.True(File.Exists(file), $"Missing file: {file}");
-        return new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true)
-            .GetString(File.ReadAllBytes(file));
+        return ReadStrictUtf8(file);
     }
+
+    private static string ReadDialog()
+    {
+        var file = Path.Combine(FindRepoRoot(), "TodoX.Web", "Components", "Dialogs", "AiProviderModelDetailDialog.razor");
+        Assert.True(File.Exists(file), $"Missing file: {file}");
+        return ReadStrictUtf8(file);
+    }
+
+    private static string ReadStrictUtf8(string file)
+        => new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true)
+            .GetString(File.ReadAllBytes(file));
 
     private static string FindRepoRoot()
     {

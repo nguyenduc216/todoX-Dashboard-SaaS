@@ -111,9 +111,10 @@ public sealed class AiProviderSyncService : IAiProviderSyncService
 
             var existing = (await _models.GetModelsAsync(provider.ProviderCode, ct: ct)).ToList();
             var existingByCode = existing.ToDictionary(x => x.ProviderModelCode, StringComparer.OrdinalIgnoreCase);
+            var ignoredCount = await InsertIgnoredCatalogDiagnosticsAsync(syncId, catalog.Models, ct);
             var incomingCodes = catalog.Models
                 .Where(x => !string.IsNullOrWhiteSpace(x.ProviderModelCode))
-                .Select(x => x.ProviderModelCode)
+                .Select(x => x.ProviderModelCode.Trim())
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
             var policies = (await _pricingRepository.GetPoliciesAsync(provider.Id, ct)).ToList();
@@ -177,7 +178,7 @@ public sealed class AiProviderSyncService : IAiProviderSyncService
                 result.ModelUnavailableCount,
                 catalog.Models.Sum(x => x.Prices?.Count ?? 0),
                 result.PriceChangedCount,
-                0,
+                ignoredCount,
                 BuildSummaryJson(result),
                 ct);
             result.Message = result.ModelInsertedCount == 0 && result.ModelUpdatedCount == 0 && result.ModelUnavailableCount == 0 && result.PriceChangedCount == 0
@@ -203,6 +204,62 @@ public sealed class AiProviderSyncService : IAiProviderSyncService
         {
             await _pricingRepository.UpsertPolicyAsync(policy, userId, ct);
         }
+    }
+
+    private async Task<int> InsertIgnoredCatalogDiagnosticsAsync(
+        Guid syncId,
+        IReadOnlyList<AiCatalogModelSnapshot> models,
+        CancellationToken ct)
+    {
+        var ignored = 0;
+        var seenCodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var snapshot in models)
+        {
+            var code = NormalizeNullable(snapshot.ProviderModelCode);
+            if (code is null)
+            {
+                ignored++;
+                await _modelRepository.InsertSyncChangeAsync(
+                    syncId,
+                    "MODEL_UPDATED",
+                    "catalog_ignored",
+                    "invalid/no model code",
+                    null,
+                    Serialize(new
+                    {
+                        reason = "invalid/no model code",
+                        display_name = snapshot.DisplayName,
+                        media_type = snapshot.MediaType,
+                        server = snapshot.ServerCode,
+                        status = snapshot.ProviderStatus
+                    }),
+                    ct,
+                    changedFields: new[] { "ignored_reason" });
+                continue;
+            }
+
+            if (!seenCodes.Add(code))
+            {
+                ignored++;
+                await _modelRepository.InsertSyncChangeAsync(
+                    syncId,
+                    "MODEL_UPDATED",
+                    "catalog_ignored",
+                    code,
+                    null,
+                    Serialize(new
+                    {
+                        reason = "duplicate provider_model_code",
+                        provider_model_code = code,
+                        display_name = snapshot.DisplayName,
+                        media_type = snapshot.MediaType
+                    }),
+                    ct,
+                    changedFields: new[] { "ignored_reason" });
+            }
+        }
+
+        return ignored;
     }
 
     private async Task DeactivateMissingPricesAsync(

@@ -261,13 +261,16 @@ public sealed class Ai79CatalogClient : IAi79CatalogClient
             ProviderModelCode = ReadString(item, "provider_model_code")
                                 ?? ReadString(item, "model_code")
                                 ?? ReadString(item, "model")
+                                ?? ReadString(item, "model_name")
+                                ?? ReadString(item, "model_id")
+                                ?? ReadString(item, "model_key")
                                 ?? ReadString(item, "code")
                                 ?? ReadString(item, "id")
                                 ?? string.Empty,
-            ProviderModelIdBase = ReadString(item, "provider_model_id_base") ?? ReadString(item, "id_base") ?? ReadString(item, "base_id"),
-            DisplayName = ReadString(item, "display_name") ?? ReadString(item, "name") ?? ReadString(item, "title") ?? string.Empty,
-            MediaType = ReadString(item, "media_type") ?? ReadString(item, "type") ?? fallbackMediaType,
-            ServerCode = ReadString(item, "server_code") ?? ReadString(item, "serverCode") ?? ReadString(item, "server"),
+            ProviderModelIdBase = ReadString(item, "provider_model_id_base") ?? ReadString(item, "id_base") ?? ReadString(item, "base_id") ?? ReadString(item, "base_model") ?? ReadString(item, "family"),
+            DisplayName = ReadString(item, "display_name") ?? ReadString(item, "name") ?? ReadString(item, "title") ?? ReadString(item, "label") ?? string.Empty,
+            MediaType = ReadString(item, "media_type") ?? ReadString(item, "type") ?? ReadString(item, "modality") ?? fallbackMediaType,
+            ServerCode = ReadString(item, "server_code") ?? ReadString(item, "serverCode") ?? ReadString(item, "server") ?? ReadString(item, "provider_server"),
             ProviderStatus = ReadString(item, "provider_status") ?? ReadString(item, "status"),
             StatusMessage = ReadString(item, "status_message") ?? ReadString(item, "message"),
             RateType = ReadString(item, "rate_type"),
@@ -286,10 +289,11 @@ public sealed class Ai79CatalogClient : IAi79CatalogClient
             RawJson = rawJson
         };
 
-        model.SupportedModes = ReadStringList(item, "modes", "mode");
-        model.SupportedDurations = ReadIntList(item, "durations", "duration", "duration_seconds");
-        model.SupportedResolutions = ReadStringList(item, "resolutions", "resolution");
-        model.SupportedRatios = ReadStringList(item, "ratios", "ratio");
+        model.SupportedModes = ReadStringList(item, "modes", "mode", "supported_modes");
+        model.SupportedDurations = ReadIntList(item, "durations", "duration", "duration_seconds", "supported_durations", "duration_options");
+        model.SupportedResolutions = ReadStringList(item, "resolutions", "resolution", "supported_resolutions", "size", "sizes");
+        model.SupportedRatios = ReadStringList(item, "ratios", "ratio", "aspect_ratio", "aspect_ratios", "supported_ratios");
+        ApplyVariantOptions(item, model);
 
         if (item.TryGetProperty("capabilities", out var capabilities) && capabilities.ValueKind == JsonValueKind.Array)
         {
@@ -311,9 +315,13 @@ public sealed class Ai79CatalogClient : IAi79CatalogClient
             }
         }
 
-        if (item.TryGetProperty("prices", out var prices) && prices.ValueKind == JsonValueKind.Array)
+        if (TryReadArray(item, "prices", out var prices)
+            || TryReadArray(item, "pricing", out prices)
+            || TryReadArray(item, "price_options", out prices)
+            || TryReadArray(item, "variants", out prices)
+            || TryReadArray(item, "options", out prices))
         {
-            foreach (var price in prices.EnumerateArray())
+            foreach (var price in prices)
             {
                 if (price.ValueKind != JsonValueKind.Object)
                 {
@@ -370,6 +378,39 @@ public sealed class Ai79CatalogClient : IAi79CatalogClient
         model.SupportedRatios = normalized.Ratios;
 
         return model;
+    }
+
+    private static void ApplyVariantOptions(JsonElement item, AiCatalogModelSnapshot model)
+    {
+        foreach (var arrayName in new[] { "variants", "options", "variant_options", "price_options" })
+        {
+            if (!TryReadArray(item, arrayName, out var variants))
+            {
+                continue;
+            }
+
+            foreach (var variant in variants.Where(x => x.ValueKind == JsonValueKind.Object))
+            {
+                AddDistinct(model.SupportedModes, ReadString(variant, "mode"));
+                AddDistinct(model.SupportedResolutions, ReadString(variant, "resolution") ?? ReadString(variant, "size"));
+                AddDistinct(model.SupportedRatios, ReadString(variant, "ratio") ?? ReadString(variant, "aspect_ratio"));
+                var duration = ReadInt(variant, "duration_seconds") ?? ReadInt(variant, "duration");
+                if (duration.HasValue && !model.SupportedDurations.Contains(duration.Value))
+                {
+                    model.SupportedDurations.Add(duration.Value);
+                }
+            }
+        }
+
+        model.SupportedDurations = model.SupportedDurations.Distinct().OrderBy(x => x).ToList();
+    }
+
+    private static void AddDistinct(List<string> values, string? value)
+    {
+        if (!string.IsNullOrWhiteSpace(value) && !values.Contains(value.Trim(), StringComparer.OrdinalIgnoreCase))
+        {
+            values.Add(value.Trim());
+        }
     }
 
     private static void ApplyVerifiedVeoOmniSeedPrices(AiCatalogModelSnapshot model)

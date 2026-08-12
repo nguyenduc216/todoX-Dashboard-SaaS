@@ -70,6 +70,82 @@ public sealed class AiProviderDurationPricingTests
     }
 
     [Fact]
+    public async Task CatalogClient_KeepsDistinctVeoCodesAndPersistsGrokWhenReturned()
+    {
+        var client = CreateClient(
+            """
+            {
+              "models": [
+                { "model": "veo-fast-live", "name": "VEO Fast", "id_base": "veo", "type": "video", "durations": [4], "resolutions": ["720p"], "prices": [{ "mode": "fast", "duration": 4, "resolution": "720p", "price": 800 }] },
+                { "model": "veo-lite-live", "name": "VEO Lite", "id_base": "veo", "type": "video", "durations": [6], "resolutions": ["1080p"], "prices": [{ "mode": "lite", "duration": 6, "resolution": "1080p", "price": 1100 }] },
+                { "model": "veo-omni", "name": "VEO Omni", "id_base": "veo", "type": "video", "modes": ["flash"], "durations": [4], "resolutions": ["720p"] },
+                { "model": "grok-video-live", "name": "Grok Video", "id_base": "grok", "type": "video", "server": "xai", "variants": [{ "mode": "standard", "duration": 6, "resolution": "720p", "ratio": "16:9", "price": 900 }] }
+              ]
+            }
+            """);
+
+        var result = await client.FetchAsync(Provider());
+
+        Assert.Contains(result.Models, x => x.ProviderModelCode == "grok-video-live" && x.DisplayName == "Grok Video");
+        Assert.Equal(4, result.Models.Select(x => x.ProviderModelCode).Distinct(StringComparer.OrdinalIgnoreCase).Count());
+        Assert.Contains(result.Models, x => x.ProviderModelCode == "veo-fast-live");
+        Assert.Contains(result.Models, x => x.ProviderModelCode == "veo-lite-live");
+        Assert.Contains(result.Models, x => x.ProviderModelCode == "veo-omni");
+    }
+
+    [Fact]
+    public async Task CatalogClient_InsertsUnknownValidModelAndPreservesNestedSeedanceModes()
+    {
+        var client = CreateClient(
+            """
+            {
+              "items": [
+                {
+                  "model_key": "seedance-2-pro-live",
+                  "label": "Seedance 2.0 Pro",
+                  "modality": "video",
+                  "variant_options": [
+                    { "mode": "fast", "duration_seconds": 5, "resolution": "720p", "aspect_ratio": "16:9" },
+                    { "mode": "professional", "duration_seconds": 10, "resolution": "1080p", "aspect_ratio": "9:16" }
+                  ]
+                },
+                {
+                  "model_id": "provider-new-video",
+                  "display_name": "Provider New Video",
+                  "media_type": "video",
+                  "options": [{ "duration": 8, "size": "720p", "ratio": "1:1" }]
+                }
+              ]
+            }
+            """);
+
+        var result = await client.FetchAsync(Provider());
+        var seedance = Assert.Single(result.Models, x => x.ProviderModelCode == "seedance-2-pro-live");
+        var unknown = Assert.Single(result.Models, x => x.ProviderModelCode == "provider-new-video");
+
+        Assert.Equal(["fast", "professional"], seedance.SupportedModes);
+        Assert.Equal([5, 10], seedance.SupportedDurations);
+        Assert.Equal(["720p", "1080p"], seedance.SupportedResolutions);
+        Assert.Equal(["16:9", "9:16"], seedance.SupportedRatios);
+        Assert.Empty(seedance.Prices);
+        Assert.Equal("Provider New Video", unknown.DisplayName);
+        Assert.Equal(["720p"], unknown.SupportedResolutions);
+    }
+
+    [Fact]
+    public void ProviderSync_SourceContract_UsesProviderIdAndProviderModelCodeWithIgnoredDiagnostics()
+    {
+        var repository = ReadSource("TodoX.Web", "Services", "AiProviders", "AiProviderModelRepository.cs");
+        var sync = ReadSource("TodoX.Web", "Services", "AiProviders", "AiProviderSyncService.cs");
+
+        Assert.Contains("ON CONFLICT (provider_id, provider_model_code)", repository, StringComparison.Ordinal);
+        Assert.Contains("existing.ToDictionary(x => x.ProviderModelCode", sync, StringComparison.Ordinal);
+        Assert.Contains("duplicate provider_model_code", sync, StringComparison.Ordinal);
+        Assert.Contains("invalid/no model code", sync, StringComparison.Ordinal);
+        Assert.DoesNotContain("provider_model_id_base = ANY", sync, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void EstimateCost_MultipliesQuantityBySceneCount()
     {
         var model = new AiProviderModelListItemDto { Id = 1, ProviderId = 2, DisplayName = "VEO Omni" };
