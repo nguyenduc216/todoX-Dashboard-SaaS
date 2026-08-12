@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Components.Server.ProtectedBrowserStorage;
+using Microsoft.Extensions.Logging;
 using TodoX.Web.Models;
 
 namespace TodoX.Web.Services;
@@ -12,14 +13,17 @@ namespace TodoX.Web.Services;
 public sealed class AuthStateService
 {
     private const string StorageKey = "todox_auth";
+    private const int CurrentMarkerVersion = 2;
 
     private readonly ProtectedLocalStorage _local;
     private readonly ProtectedSessionStorage _session;
+    private readonly ILogger<AuthStateService> _logger;
 
-    public AuthStateService(ProtectedLocalStorage local, ProtectedSessionStorage session)
+    public AuthStateService(ProtectedLocalStorage local, ProtectedSessionStorage session, ILogger<AuthStateService> logger)
     {
         _local = local;
         _session = session;
+        _logger = logger;
     }
 
     public CurrentUserSession? CurrentUser { get; private set; }
@@ -30,45 +34,56 @@ public sealed class AuthStateService
 
     public event Action? OnChange;
 
-    private sealed record PersistedAuth(
+    internal sealed record PersistedAuth(
         Guid UserId,
         bool Remember,
         Guid? ImpersonatorUserId = null,
-        string? ImpersonatorDisplayName = null);
+        string? ImpersonatorDisplayName = null,
+        int Version = CurrentMarkerVersion,
+        DateTimeOffset? IssuedAtUtc = null);
+
+    internal sealed record ResolvedPersistedAuth(PersistedAuth Marker, string Source);
 
     public async Task SignInAsync(CurrentUserSession user, bool rememberMe)
     {
         CurrentUser = user;
         var marker = CreateMarker(user, rememberMe);
-        try
+
+        if (rememberMe)
         {
-            if (rememberMe)
+            var written = await PersistSignInMarkerAsync(_local.SetAsync(StorageKey, marker), "local", "write", user.UserId);
+            if (written)
             {
-                await _local.SetAsync(StorageKey, marker);
-                await _session.DeleteAsync(StorageKey);
+                await ClearMarkerAsync("session", _session.DeleteAsync(StorageKey));
             }
             else
             {
-                await _session.SetAsync(StorageKey, marker);
-                await _local.DeleteAsync(StorageKey);
+                await ClearMarkerAsync("session", _session.DeleteAsync(StorageKey));
+                _logger.LogWarning("AUTH_PERSIST_MARKER_INCOMPLETE intendedSource=local userId={UserId}", user.UserId);
             }
         }
-        catch
+        else
         {
-            // Storage may be unavailable during prerender; the in-memory session still works.
+            var written = await PersistSignInMarkerAsync(_session.SetAsync(StorageKey, marker), "session", "write", user.UserId);
+            if (written)
+            {
+                await ClearMarkerAsync("local", _local.DeleteAsync(StorageKey));
+            }
+            else
+            {
+                await ClearMarkerAsync("local", _local.DeleteAsync(StorageKey));
+                _logger.LogWarning("AUTH_PERSIST_MARKER_INCOMPLETE intendedSource=session userId={UserId}", user.UserId);
+            }
         }
+
         NotifyStateChanged();
     }
 
     public async Task SignOutAsync()
     {
         CurrentUser = null;
-        try
-        {
-            await _local.DeleteAsync(StorageKey);
-            await _session.DeleteAsync(StorageKey);
-        }
-        catch { /* ignore */ }
+        await ClearMarkerAsync("local", _local.DeleteAsync(StorageKey));
+        await ClearMarkerAsync("session", _session.DeleteAsync(StorageKey));
         NotifyStateChanged();
     }
 
@@ -117,13 +132,18 @@ public sealed class AuthStateService
             var marker = await ReadMarkerAsync();
             if (marker is not null)
             {
-                var session = await rehydrate(marker.UserId);
+                _logger.LogInformation(
+                    "AUTH_RESTORE_MARKER_SELECTED source={Source} userId={UserId}",
+                    marker.Source,
+                    marker.Marker.UserId);
+
+                var session = await rehydrate(marker.Marker.UserId);
                 if (session is not null)
                 {
-                    if (marker.ImpersonatorUserId is Guid actorId)
+                    if (marker.Marker.ImpersonatorUserId is Guid actorId)
                     {
                         session.ImpersonatorUserId = actorId;
-                        session.ImpersonatorDisplayName = marker.ImpersonatorDisplayName;
+                        session.ImpersonatorDisplayName = marker.Marker.ImpersonatorDisplayName;
                         if (string.IsNullOrWhiteSpace(session.ImpersonatorDisplayName))
                         {
                             var actor = await rehydrate(actorId);
@@ -131,45 +151,168 @@ public sealed class AuthStateService
                         }
                     }
                     CurrentUser = session;
+                    _logger.LogInformation(
+                        "AUTH_RESTORE_COMPLETED source={Source} userId={UserId} role={Role} isRoot={IsRoot} isAuthenticated={IsAuthenticated}",
+                        marker.Source,
+                        session.UserId,
+                        session.Role,
+                        session.IsRoot,
+                        session.IsAuthenticated);
                 }
                 else
                 {
                     // Account no longer valid; clear stale marker.
-                    await _local.DeleteAsync(StorageKey);
-                    await _session.DeleteAsync(StorageKey);
+                    _logger.LogWarning(
+                        "AUTH_RESTORE_REHYDRATE_FAILED source={Source} userId={UserId}; clearing persisted auth markers.",
+                        marker.Source,
+                        marker.Marker.UserId);
+                    await ClearMarkerAsync("local", _local.DeleteAsync(StorageKey));
+                    await ClearMarkerAsync("session", _session.DeleteAsync(StorageKey));
                 }
             }
+            else
+            {
+                _logger.LogInformation("AUTH_RESTORE_NO_MARKER");
+            }
         }
-        catch
+        catch (Exception ex)
         {
             // Ignore storage/JS errors; treat as not authenticated.
+            _logger.LogWarning(ex, "AUTH_RESTORE_FAILED");
         }
         finally
         {
             IsInitialized = true;
+            _logger.LogInformation(
+                "AUTH_RESTORE_STATE isInitialized={IsInitialized} userId={UserId} role={Role} isRoot={IsRoot} isAuthenticated={IsAuthenticated}",
+                IsInitialized,
+                CurrentUser?.UserId,
+                CurrentUser?.Role,
+                CurrentUser?.IsRoot,
+                CurrentUser?.IsAuthenticated ?? false);
             NotifyStateChanged();
         }
     }
 
-    private async Task<PersistedAuth?> ReadMarkerAsync()
+    private async Task<ResolvedPersistedAuth?> ReadMarkerAsync()
     {
-        var local = await _local.GetAsync<PersistedAuth>(StorageKey);
-        if (local.Success && local.Value is not null)
+        var local = await ReadMarkerFromStoreAsync("local", () => _local.GetAsync<PersistedAuth>(StorageKey));
+        var session = await ReadMarkerFromStoreAsync("session", () => _session.GetAsync<PersistedAuth>(StorageKey));
+        var selected = ResolveLatestMarker(local, session);
+
+        if (selected is not null && local is not null && session is not null)
         {
-            return local.Value;
+            var skipped = selected.Source == "local" ? session : local;
+            _logger.LogWarning(
+                "AUTH_RESTORE_CONFLICT selectedSource={SelectedSource} skippedSource={SkippedSource} selectedUserId={SelectedUserId} skippedUserId={SkippedUserId}",
+                selected.Source,
+                skipped.Source,
+                selected.Marker.UserId,
+                skipped.Marker.UserId);
         }
 
-        var session = await _session.GetAsync<PersistedAuth>(StorageKey);
-        if (session.Success && session.Value is not null)
-        {
-            return session.Value;
-        }
-
-        return null;
+        return selected;
     }
 
     private static PersistedAuth CreateMarker(CurrentUserSession user, bool rememberMe)
-        => new(user.UserId, rememberMe, user.ImpersonatorUserId, user.ImpersonatorDisplayName);
+        => new(
+            user.UserId,
+            rememberMe,
+            user.ImpersonatorUserId,
+            user.ImpersonatorDisplayName,
+            CurrentMarkerVersion,
+            DateTimeOffset.UtcNow);
+
+    internal static ResolvedPersistedAuth? ResolveLatestMarker(ResolvedPersistedAuth? local, ResolvedPersistedAuth? session)
+    {
+        if (local is null)
+        {
+            return session;
+        }
+
+        if (session is null)
+        {
+            return local;
+        }
+
+        var localIssuedAt = NormalizeIssuedAt(local.Marker);
+        var sessionIssuedAt = NormalizeIssuedAt(session.Marker);
+
+        if (localIssuedAt > sessionIssuedAt)
+        {
+            return local;
+        }
+
+        if (sessionIssuedAt > localIssuedAt)
+        {
+            return session;
+        }
+
+        return local.Marker.Remember == session.Marker.Remember
+            ? session
+            : session.Marker.Remember ? local : session;
+    }
+
+    private static DateTimeOffset NormalizeIssuedAt(PersistedAuth marker)
+        => marker.IssuedAtUtc ?? DateTimeOffset.MinValue;
+
+    private async Task<ResolvedPersistedAuth?> ReadMarkerFromStoreAsync(
+        string source,
+        Func<ValueTask<ProtectedBrowserStorageResult<PersistedAuth>>> read)
+    {
+        try
+        {
+            var result = await read();
+            if (!result.Success || result.Value is null)
+            {
+                return null;
+            }
+
+            _logger.LogInformation(
+                "AUTH_RESTORE_MARKER_FOUND source={Source} userId={UserId} version={Version} issuedAtUtc={IssuedAtUtc}",
+                source,
+                result.Value.UserId,
+                result.Value.Version,
+                result.Value.IssuedAtUtc);
+            return new ResolvedPersistedAuth(result.Value, source);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "AUTH_RESTORE_MARKER_READ_FAILED source={Source}", source);
+            return null;
+        }
+    }
+
+    private async Task<bool> PersistSignInMarkerAsync(ValueTask storageTask, string source, string operation, Guid userId)
+    {
+        try
+        {
+            await storageTask;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "AUTH_PERSIST_MARKER_FAILED operation={Operation} source={Source} userId={UserId}",
+                operation,
+                source,
+                userId);
+            return false;
+        }
+    }
+
+    private async Task ClearMarkerAsync(string source, ValueTask storageTask)
+    {
+        try
+        {
+            await storageTask;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "AUTH_CLEAR_MARKER_FAILED source={Source}", source);
+        }
+    }
 
     /// <summary>Update the cached display name after a profile edit.</summary>
     public void UpdateDisplayName(string displayName)

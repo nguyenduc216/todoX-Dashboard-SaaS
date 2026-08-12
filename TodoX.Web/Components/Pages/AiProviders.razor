@@ -10,6 +10,7 @@
 @inject IAi79CredentialMigrationService Ai79CredentialMigration
 @inject IDialogService DialogService
 @inject ISnackbar Snackbar
+@inject ILogger<AiProviders> Logger
 
 <PageTitle>AI Providers</PageTitle>
 
@@ -670,6 +671,7 @@
     private int _activeTabIndex;
     private bool _pageInitialized;
     private bool _initializingPage;
+    private bool _authorizationDenialLogged;
     private AiProviderSyncHeaderDto? LatestSync => _syncHistory.FirstOrDefault();
     private bool IsSelected79Ai => string.Equals(_selected?.ProviderCode, "79ai", StringComparison.OrdinalIgnoreCase);
 
@@ -700,6 +702,7 @@
 
             if (!IsAdmin)
             {
+                LogAuthorizationDenied();
                 _pageInitialized = false;
                 _loading = false;
                 _loadingModels = false;
@@ -716,6 +719,11 @@
     {
         if (!AuthState.IsInitialized || !IsAdmin || _pageInitialized || _initializingPage)
         {
+            if (AuthState.IsInitialized && !IsAdmin)
+            {
+                LogAuthorizationDenied();
+            }
+
             return;
         }
 
@@ -724,6 +732,7 @@
         {
             await ReloadProviders();
             _pageInitialized = true;
+            _authorizationDenialLogged = false;
         }
         finally
         {
@@ -734,6 +743,24 @@
     public void Dispose()
     {
         AuthState.OnChange -= HandleAuthStateChanged;
+    }
+
+    private void LogAuthorizationDenied()
+    {
+        if (_authorizationDenialLogged)
+        {
+            return;
+        }
+
+        var user = AuthState.CurrentUser;
+        Logger.LogWarning(
+            "AI_PROVIDERS_AUTH_DENIED userId={UserId} role={Role} isRoot={IsRoot} isAuthenticated={IsAuthenticated} isInitialized={IsInitialized}",
+            user?.UserId,
+            user?.Role,
+            user?.IsRoot,
+            user?.IsAuthenticated ?? false,
+            AuthState.IsInitialized);
+        _authorizationDenialLogged = true;
     }
 
     private async Task ReloadProviders()

@@ -62,6 +62,17 @@ public sealed class AiProvidersAuthHydrationTests
         Assert.Contains("StateHasChanged();", page, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void AuthorizationDenialLogsSafeServerSideDiagnosticsOnly()
+    {
+        var page = ReadPage();
+
+        Assert.Contains("@inject ILogger<AiProviders> Logger", page, StringComparison.Ordinal);
+        Assert.Contains("AI_PROVIDERS_AUTH_DENIED", page, StringComparison.Ordinal);
+        Assert.Contains("userId={UserId} role={Role} isRoot={IsRoot} isAuthenticated={IsAuthenticated} isInitialized={IsInitialized}", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("MudText>AI_PROVIDERS_AUTH_DENIED", page, StringComparison.Ordinal);
+    }
+
     private static string ReadPage()
     {
         var file = Path.Combine(FindRepoRoot(), "TodoX.Web", "Components", "Pages", "AiProviders.razor");
