@@ -52,8 +52,9 @@ public class AiProvidersEncodingTests
     private static readonly string[] BadMojibakeFragments =
     [
         "Ã",
-        "Â",
-        "Ä",
+        "Âº",
+        "Â¡",
+        "Ä‘",
         "â€"
     ];
 
@@ -63,6 +64,8 @@ public class AiProvidersEncodingTests
         "Cài đặt",
         "Trạng thái",
         "Đồng bộ",
-        "Giá & điểm"
+        "Giá vốn Provider",
+        "MẶC ĐỊNH",
+        "NÂNG CAO"
     ];
 }

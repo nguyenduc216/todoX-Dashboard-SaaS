@@ -49,6 +49,8 @@ Before declaring completion:
 - After validation succeeds, build and publish the application using the repository's documented workflow.
 - Do not deploy to a server or restart production services unless explicitly requested.
 - Report the publish command, output directory, and result.
+- Default publish root: `D:\todoX\Dashboard-web\TodoXPortal\todoX-Dashboard-SaaS\artifacts\publish`.
+- For the dashboard application, publish to `D:\todoX\Dashboard-web\TodoXPortal\todoX-Dashboard-SaaS\artifacts\publish\todox-dashboard` unless the user explicitly requests another subfolder.
 
 ## YEScale provider workflow
 
