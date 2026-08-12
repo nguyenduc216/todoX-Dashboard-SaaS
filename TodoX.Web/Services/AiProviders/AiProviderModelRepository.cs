@@ -228,9 +228,9 @@ public sealed class AiProviderModelRepository
                  raw_json, enabled, allow_user_select, is_deprecated, created_by, updated_by, created_at, updated_at)
             VALUES
                 (@providerId, @providerCode, @providerModelCode, @providerModelIdBase, @displayName, @mediaType, @serverCode,
-                 @providerStatus, @statusMessage, @rateType, @baseProviderPrice, @providerPriceUnit, @source,
-                 @lastProviderSyncAt, @lastHealthCheckAt, @lastSuccessAt, @lastFailureAt, @failureCount,
-                 CAST(@rawJson AS jsonb), true, true, false, @userId, @userId, now(), now())
+                 COALESCE(NULLIF(@providerStatus, ''), 'UNKNOWN'), @statusMessage, @rateType, @baseProviderPrice, COALESCE(NULLIF(@providerPriceUnit, ''), 'credit'), COALESCE(NULLIF(@source, ''), 'catalog'),
+                 @lastProviderSyncAt, @lastHealthCheckAt, @lastSuccessAt, @lastFailureAt, GREATEST(@failureCount, 0),
+                 CASE WHEN NULLIF(@rawJson, '') IS NULL THEN '{}'::jsonb ELSE CAST(@rawJson AS jsonb) END, true, true, false, @userId, @userId, now(), now())
             ON CONFLICT (provider_id, provider_model_code)
             DO UPDATE SET
                 provider_code = EXCLUDED.provider_code,
@@ -468,9 +468,9 @@ public sealed class AiProviderModelRepository
                  last_success_at, last_failure_at, failure_count, raw_json, created_by, updated_by, created_at, updated_at)
             VALUES
                 (@ProviderId, @ProviderCode, @ProviderModelCode, @ProviderModelIdBase, @DisplayName, @MediaType, @ServerCode,
-                 @ProviderStatus, @StatusMessage, @RateType, @BaseProviderPrice, @ProviderPriceUnit, @Description,
-                 @Enabled, @AllowUserSelect, @IsDeprecated, @Source, @LastProviderSyncAt, @LastHealthCheckAt,
-                 @LastSuccessAt, @LastFailureAt, @FailureCount, CAST(@RawJson AS jsonb), @userId, @userId, now(), now())
+                 COALESCE(NULLIF(@ProviderStatus, ''), 'UNKNOWN'), @StatusMessage, @RateType, @BaseProviderPrice, COALESCE(NULLIF(@ProviderPriceUnit, ''), 'credit'), @Description,
+                 @Enabled, @AllowUserSelect, @IsDeprecated, COALESCE(NULLIF(@Source, ''), 'catalog'), @LastProviderSyncAt, @LastHealthCheckAt,
+                 @LastSuccessAt, @LastFailureAt, GREATEST(@FailureCount, 0), CASE WHEN NULLIF(@RawJson, '') IS NULL THEN '{}'::jsonb ELSE CAST(@RawJson AS jsonb) END, @userId, @userId, now(), now())
             ON CONFLICT (provider_id, provider_model_code)
             DO UPDATE SET
                 provider_code = EXCLUDED.provider_code,

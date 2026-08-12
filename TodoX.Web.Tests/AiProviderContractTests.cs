@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.RegularExpressions;
 using TodoX.Web.Models;
+using TodoX.Web.Services.AiProviders;
 using Xunit;
 
 namespace TodoX.Web.Tests;
@@ -151,6 +152,111 @@ public sealed class AiProviderContractTests
         Assert.Contains("ProviderCode = provider.ProviderCode", syncService, StringComparison.Ordinal);
         Assert.DoesNotContain("ProviderCode = snapshot", syncService, StringComparison.Ordinal);
         Assert.Contains("ON CONFLICT (provider_id, provider_model_code)", repository, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ProviderModelInsertPathsProtectProductionNotNullRuntimeValues()
+    {
+        var repository = ReadSource("TodoX.Web", "Services", "AiProviders", "AiProviderModelRepository.cs");
+
+        foreach (var insertBlock in ProviderModelInsertBlocks(repository))
+        {
+            Assert.Contains("COALESCE(NULLIF(@ProviderStatus, ''), 'UNKNOWN')", insertBlock, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("COALESCE(NULLIF(@ProviderPriceUnit, ''), 'credit')", insertBlock, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("COALESCE(NULLIF(@Source, ''), 'catalog')", insertBlock, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("CASE WHEN NULLIF(@RawJson, '') IS NULL THEN '{}'::jsonb ELSE CAST(@RawJson AS jsonb) END", insertBlock, StringComparison.OrdinalIgnoreCase);
+            Assert.Matches(@"GREATEST\(@(?:FailureCount|failureCount), 0\)", insertBlock);
+        }
+    }
+
+    [Fact]
+    public void CatalogModelNormalizationUsesProductionSafeDefaults()
+    {
+        var syncService = ReadSource("TodoX.Web", "Services", "AiProviders", "AiProviderSyncService.cs");
+
+        Assert.Contains("ProviderStatus = NormalizeNullable(snapshot.ProviderStatus) ?? \"UNKNOWN\"", syncService, StringComparison.Ordinal);
+        Assert.Contains("ProviderPriceUnit = ResolveModelProviderPriceUnit(provider.ProviderCode, snapshot)", syncService, StringComparison.Ordinal);
+        Assert.Contains("Normalize79AiModelProviderPriceUnit", syncService, StringComparison.Ordinal);
+        Assert.Contains("\"79ai_credit\" or \"credits\" => \"credit\"", syncService, StringComparison.Ordinal);
+        Assert.Contains("Source = NormalizeNullable(snapshot.Source) ?? \"catalog\"", syncService, StringComparison.Ordinal);
+        Assert.Contains("RawJson = SanitizeRawJson(snapshot.RawJson) ?? \"{}\"", syncService, StringComparison.Ordinal);
+        Assert.Contains("FailureCount = Math.Max(snapshot.FailureCount, 0)", syncService, StringComparison.Ordinal);
+        Assert.Contains("DisplayName = NormalizeNullable(snapshot.DisplayName) ?? providerModelCode", syncService, StringComparison.Ordinal);
+        Assert.Contains("reason = \"invalid/no media type\"", syncService, StringComparison.Ordinal);
+        Assert.Contains("reason = \"invalid/no model code\"", syncService, StringComparison.Ordinal);
+        Assert.Contains("ProviderCode = provider.ProviderCode", syncService, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(null, "credit")]
+    [InlineData("79ai_credit", "credit")]
+    [InlineData("credits", "credit")]
+    public void CatalogModelNormalization_Maps79AiModelLevelProviderPriceUnitToCredit(string? inputUnit, string expectedUnit)
+    {
+        var detail = BuildCatalogDetail(new AiCatalogModelSnapshot
+        {
+            ProviderModelCode = "grok_video_heavy",
+            DisplayName = "",
+            MediaType = "video",
+            ProviderPriceUnit = inputUnit,
+            ProviderStatus = "",
+            Source = "",
+            RawJson = null,
+            FailureCount = -3
+        });
+
+        Assert.Equal("79ai", detail.ProviderCode);
+        Assert.Equal("credit", detail.ProviderPriceUnit);
+        Assert.Equal(expectedUnit, detail.ProviderPriceUnit);
+        Assert.Equal("UNKNOWN", detail.ProviderStatus);
+        Assert.Equal("catalog", detail.Source);
+        Assert.Equal("{}", detail.RawJson);
+        Assert.Equal("grok_video_heavy", detail.DisplayName);
+        Assert.Equal(0, detail.FailureCount);
+    }
+
+    [Fact]
+    public void CatalogModelNormalization_UsesFirstPriceUnitWhenModelUnitIsMissing()
+    {
+        var detail = BuildCatalogDetail(new AiCatalogModelSnapshot
+        {
+            ProviderModelCode = "veo-3.1",
+            DisplayName = "VEO 3.1",
+            MediaType = "video",
+            Prices = [new AiModelPriceDto { ProviderPriceUnit = "79ai_credit" }]
+        });
+
+        Assert.Equal("veo-3.1", detail.ProviderModelCode);
+        Assert.Equal("VEO 3.1", detail.DisplayName);
+        Assert.Equal("credit", detail.ProviderPriceUnit);
+    }
+
+    private static AiProviderModelDetailDto BuildCatalogDetail(AiCatalogModelSnapshot snapshot)
+    {
+        var method = typeof(AiProviderSyncService).GetMethod("BuildDetail", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var provider = new AiProviderDetailDto
+        {
+            Id = 79,
+            ProviderCode = "79ai",
+            ProviderName = "79AI"
+        };
+
+        return Assert.IsType<AiProviderModelDetailDto>(method!.Invoke(null, [provider, snapshot]));
+    }
+
+    private static IEnumerable<string> ProviderModelInsertBlocks(string repository)
+    {
+        var marker = "INSERT INTO public.todox_ai_provider_model";
+        var index = 0;
+        while ((index = repository.IndexOf(marker, index, StringComparison.Ordinal)) >= 0)
+        {
+            var end = repository.IndexOf("ON CONFLICT", index, StringComparison.Ordinal);
+            Assert.True(end > index, "Provider model insert block must contain ON CONFLICT.");
+            yield return repository[index..end];
+            index = end;
+        }
     }
 
     private static string ReadSource(params string[] parts)

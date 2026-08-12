@@ -235,6 +235,28 @@ public sealed class AiProviderSyncService : IAiProviderSyncService
                 continue;
             }
 
+            if (NormalizeNullable(snapshot.MediaType) is null)
+            {
+                ignored++;
+                await _modelRepository.InsertSyncChangeAsync(
+                    syncId,
+                    "MODEL_UPDATED",
+                    "catalog_ignored",
+                    code,
+                    null,
+                    Serialize(new
+                    {
+                        reason = "invalid/no media type",
+                        provider_model_code = code,
+                        display_name = snapshot.DisplayName,
+                        server = snapshot.ServerCode,
+                        status = snapshot.ProviderStatus
+                    }),
+                    ct,
+                    changedFields: new[] { "ignored_reason" });
+                continue;
+            }
+
             snapshot.ProviderModelCode = code;
             if (!seenCodes.Add(code))
             {
@@ -425,31 +447,32 @@ public sealed class AiProviderSyncService : IAiProviderSyncService
     private static AiProviderModelDetailDto BuildDetail(AiProviderDetailDto provider, AiCatalogModelSnapshot snapshot)
     {
         var options = AiProviderModelOptionsNormalizer.Normalize(snapshot.SupportedModes, snapshot.SupportedDurations, snapshot.SupportedResolutions, snapshot.SupportedRatios, snapshot.Prices, snapshot.RawJson);
+        var providerModelCode = snapshot.ProviderModelCode.Trim();
         return new AiProviderModelDetailDto
         {
             ProviderId = provider.Id,
             ProviderCode = provider.ProviderCode,
-            ProviderModelCode = snapshot.ProviderModelCode,
+            ProviderModelCode = providerModelCode,
             ProviderModelIdBase = snapshot.ProviderModelIdBase,
-            DisplayName = string.IsNullOrWhiteSpace(snapshot.DisplayName) ? snapshot.ProviderModelCode : snapshot.DisplayName,
-            MediaType = snapshot.MediaType,
+            DisplayName = NormalizeNullable(snapshot.DisplayName) ?? providerModelCode,
+            MediaType = snapshot.MediaType.Trim(),
             ServerCode = snapshot.ServerCode,
-            ProviderStatus = snapshot.ProviderStatus,
+            ProviderStatus = NormalizeNullable(snapshot.ProviderStatus) ?? "UNKNOWN",
             StatusMessage = snapshot.StatusMessage,
             RateType = snapshot.RateType,
             BaseProviderPrice = snapshot.BaseProviderPrice,
-            ProviderPriceUnit = snapshot.ProviderPriceUnit,
+            ProviderPriceUnit = ResolveModelProviderPriceUnit(provider.ProviderCode, snapshot),
             Description = snapshot.Description,
             Enabled = snapshot.Enabled,
             AllowUserSelect = snapshot.AllowUserSelect,
             IsDeprecated = snapshot.IsDeprecated,
-            Source = snapshot.Source,
+            Source = NormalizeNullable(snapshot.Source) ?? "catalog",
             LastProviderSyncAt = snapshot.LastProviderSyncAt ?? DateTime.UtcNow,
             LastHealthCheckAt = snapshot.LastHealthCheckAt,
             LastSuccessAt = snapshot.LastSuccessAt,
             LastFailureAt = snapshot.LastFailureAt,
-            FailureCount = snapshot.FailureCount,
-            RawJson = SanitizeRawJson(snapshot.RawJson),
+            FailureCount = Math.Max(snapshot.FailureCount, 0),
+            RawJson = SanitizeRawJson(snapshot.RawJson) ?? "{}",
             SupportedModes = options.Modes,
             SupportedDurations = options.Durations,
             SupportedResolutions = options.Resolutions,
@@ -463,6 +486,24 @@ public sealed class AiProviderSyncService : IAiProviderSyncService
             PricingPolicies = snapshot.Policies
         };
     }
+
+    private static string ResolveModelProviderPriceUnit(string providerCode, AiCatalogModelSnapshot snapshot)
+    {
+        var unit = NormalizeNullable(snapshot.ProviderPriceUnit)
+            ?? snapshot.Prices.Select(x => NormalizeNullable(x.ProviderPriceUnit)).FirstOrDefault(x => x is not null)
+            ?? "credit";
+
+        return string.Equals(providerCode, "79ai", StringComparison.OrdinalIgnoreCase)
+            ? Normalize79AiModelProviderPriceUnit(unit)
+            : unit;
+    }
+
+    private static string Normalize79AiModelProviderPriceUnit(string unit)
+        => unit.Trim().ToLowerInvariant() switch
+        {
+            "79ai_credit" or "credits" => "credit",
+            _ => unit.Trim()
+        };
 
     private static List<AiProviderModelCapabilityDto> BuildCapabilities(AiCatalogModelSnapshot snapshot, AiProviderModelOptions options)
     {
