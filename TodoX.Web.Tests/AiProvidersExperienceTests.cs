@@ -127,6 +127,50 @@ public sealed class AiProvidersExperienceTests
         Assert.DoesNotContain("sk-", dialog, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public void ProviderSyncedFieldsAreReadonlyAndOnlyAdminFieldsRemainEditable()
+    {
+        var dialog = ReadDialog();
+
+        foreach (var field in new[]
+        {
+            "_model.ProviderModelCode",
+            "_model.MediaType",
+            "_model.ServerCode",
+            "_model.ProviderStatus",
+            "_model.StatusMessage",
+            "_model.BaseProviderPrice",
+            "_model.ProviderPriceUnit",
+            "_model.Source",
+            "_model.LastProviderSyncAt"
+        })
+        {
+            Assert.DoesNotContain($"@bind-Value=\"{field}\"", dialog, StringComparison.Ordinal);
+        }
+
+        foreach (var field in new[]
+        {
+            "_model.DisplayName",
+            "_model.Enabled",
+            "_model.AllowUserSelect",
+            "_model.Description"
+        })
+        {
+            Assert.Contains($"@bind-Value=\"{field}\"", dialog, StringComparison.Ordinal);
+        }
+
+        Assert.Contains("Value=\"_model.ProviderModelCode\"", dialog, StringComparison.Ordinal);
+        Assert.Contains("Value=\"_model.MediaType\"", dialog, StringComparison.Ordinal);
+        Assert.Contains("Value=\"_model.ServerCode\"", dialog, StringComparison.Ordinal);
+        Assert.Contains("Value=\"_model.ProviderStatus\"", dialog, StringComparison.Ordinal);
+        Assert.Contains("Value=\"_model.StatusMessage\"", dialog, StringComparison.Ordinal);
+        Assert.Contains("Value=\"_model.BaseProviderPrice\"", dialog, StringComparison.Ordinal);
+        Assert.Contains("Value=\"_model.ProviderPriceUnit\"", dialog, StringComparison.Ordinal);
+        Assert.Contains("Value=\"_model.Source\"", dialog, StringComparison.Ordinal);
+        Assert.Contains("Disabled=\"true\"", dialog, StringComparison.Ordinal);
+        Assert.Contains("@bind-Value=\"_model.IsDeprecated\"", dialog, StringComparison.Ordinal);
+    }
+
     private static string ReadPage()
     {
         var file = Path.Combine(FindRepoRoot(), "TodoX.Web", "Components", "Pages", "AiProviders.razor");

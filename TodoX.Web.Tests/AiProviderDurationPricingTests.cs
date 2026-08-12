@@ -139,9 +139,13 @@ public sealed class AiProviderDurationPricingTests
         var sync = ReadSource("TodoX.Web", "Services", "AiProviders", "AiProviderSyncService.cs");
 
         Assert.Contains("ON CONFLICT (provider_id, provider_model_code)", repository, StringComparison.Ordinal);
-        Assert.Contains("existing.ToDictionary(x => x.ProviderModelCode", sync, StringComparison.Ordinal);
+        Assert.Contains("NormalizeCatalogSnapshotsAsync", sync, StringComparison.Ordinal);
+        Assert.Contains("normalizedCatalog.Models", sync, StringComparison.Ordinal);
+        Assert.Contains("snapshot.ProviderModelCode = code", sync, StringComparison.Ordinal);
         Assert.Contains("duplicate provider_model_code", sync, StringComparison.Ordinal);
         Assert.Contains("invalid/no model code", sync, StringComparison.Ordinal);
+        Assert.Contains("ignored_models = ignoredModels", sync, StringComparison.Ordinal);
+        Assert.DoesNotContain("capabilityRowsChanged: ignoredCount", sync, StringComparison.Ordinal);
         Assert.DoesNotContain("provider_model_id_base = ANY", sync, StringComparison.OrdinalIgnoreCase);
     }
 

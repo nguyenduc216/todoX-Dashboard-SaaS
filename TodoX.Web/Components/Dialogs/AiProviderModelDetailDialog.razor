@@ -17,15 +17,16 @@
                 <MudGrid Class="mt-2">
                     <MudItem xs="12" sm="6"><MudTextField @bind-Value="_model.DisplayName" Label="Display name" Variant="Variant.Outlined" /></MudItem>
                     <MudItem xs="12" sm="6"><MudTextField Value="_model.ProviderCode" Label="Provider" Variant="Variant.Outlined" Disabled="true" /></MudItem>
-                    <MudItem xs="12" sm="6"><MudTextField @bind-Value="_model.ProviderModelCode" Label="Provider model code" HelperText="Readonly với model đồng bộ từ provider." Variant="Variant.Outlined" Disabled="true" /></MudItem>
+                    <MudItem xs="12" sm="6"><MudTextField Value="_model.ProviderModelCode" Label="Provider model code" HelperText="Readonly với model đồng bộ từ provider." Variant="Variant.Outlined" Disabled="true" /></MudItem>
                     <MudItem xs="12" sm="6"><MudTextField Value="_model.MediaType" Label="Media type" Variant="Variant.Outlined" Disabled="true" /></MudItem>
-                    <MudItem xs="12" sm="6"><MudTextField @bind-Value="_model.ServerCode" Label="Server code" Variant="Variant.Outlined" /></MudItem>
-                    <MudItem xs="12" sm="6"><MudTextField @bind-Value="_model.ProviderStatus" Label="Provider status" Variant="Variant.Outlined" /></MudItem>
+                    <MudItem xs="12" sm="6"><MudTextField Value="_model.ServerCode" Label="Server code" Variant="Variant.Outlined" Disabled="true" /></MudItem>
+                    <MudItem xs="12" sm="6"><MudTextField Value="_model.ProviderStatus" Label="Provider status" Variant="Variant.Outlined" Disabled="true" /></MudItem>
                     <MudItem xs="12" sm="6"><MudTextField Value="_model.Source" Label="Source" Variant="Variant.Outlined" Disabled="true" /></MudItem>
                     <MudItem xs="12" sm="6"><MudTextField Value="@(_model.LastProviderSyncAt?.ToString("yyyy-MM-dd HH:mm") ?? "-")" Label="Last provider sync" Variant="Variant.Outlined" Disabled="true" /></MudItem>
-                    <MudItem xs="12"><MudTextField @bind-Value="_model.StatusMessage" Label="Status message" Variant="Variant.Outlined" /></MudItem>
+                    <MudItem xs="12"><MudTextField Value="_model.StatusMessage" Label="Status message" Variant="Variant.Outlined" Disabled="true" /></MudItem>
                     <MudItem xs="12"><MudTextField @bind-Value="_model.Description" Label="Description" Lines="2" Variant="Variant.Outlined" /></MudItem>
-                    <MudItem xs="12" sm="4"><MudNumericField @bind-Value="_model.BaseProviderPrice" Label="Giá vốn provider" Variant="Variant.Outlined" /></MudItem>
+                    <MudItem xs="12" sm="4"><MudNumericField Value="_model.BaseProviderPrice" Label="Giá vốn provider" Variant="Variant.Outlined" Disabled="true" /></MudItem>
+                    <MudItem xs="12" sm="4"><MudTextField Value="_model.ProviderPriceUnit" Label="Provider price unit" Variant="Variant.Outlined" Disabled="true" /></MudItem>
                     <MudItem xs="12" sm="4" Class="d-flex align-center"><MudSwitch @bind-Value="_model.Enabled" Color="Color.Success" Label="Enabled" /></MudItem>
                     <MudItem xs="12" sm="4" Class="d-flex align-center"><MudSwitch @bind-Value="_model.AllowUserSelect" Color="Color.Primary" Label="Allow user select" /></MudItem>
                     <MudItem xs="12" sm="4" Class="d-flex align-center"><MudCheckBox @bind-Value="_model.IsDeprecated" Label="Deprecated" Disabled="true" /></MudItem>
