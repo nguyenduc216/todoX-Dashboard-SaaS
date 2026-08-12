@@ -9,6 +9,7 @@ public sealed class AiCatalogFetchResult
     public string? Message { get; set; }
     public string? ImageModelsPath { get; set; }
     public string? VideoModelsPath { get; set; }
+    public string? ModelsPath { get; set; }
     public List<AiCatalogModelSnapshot> Models { get; set; } = new();
 }
 
@@ -52,15 +53,38 @@ public interface IAi79CatalogClient
 public sealed class Ai79CatalogClient : IAi79CatalogClient
 {
     private readonly HttpClient _httpClient;
+    private readonly IProviderCredentialResolver _credentialResolver;
+    private readonly IProviderCredentialRepository _credentialRepository;
 
-    public Ai79CatalogClient(HttpClient httpClient)
+    public Ai79CatalogClient(
+        HttpClient httpClient,
+        IProviderCredentialResolver credentialResolver,
+        IProviderCredentialRepository credentialRepository)
     {
         _httpClient = httpClient;
+        _credentialResolver = credentialResolver;
+        _credentialRepository = credentialRepository;
     }
 
     public async Task<AiCatalogFetchResult> FetchAsync(AiProviderDetailDto provider, CancellationToken ct = default)
     {
         var config = ParseConfig(provider.ConfigJson);
+        if (Is79AiProvider(provider.ProviderCode))
+        {
+            var modelsPath = string.IsNullOrWhiteSpace(config.ModelsPath) ? "/models" : config.ModelsPath.Trim();
+            if (string.IsNullOrWhiteSpace(provider.BaseUrl))
+            {
+                return new AiCatalogFetchResult
+                {
+                    Configured = false,
+                    Message = "Model catalog endpoint chưa được cấu hình.",
+                    ModelsPath = modelsPath
+                };
+            }
+
+            return await Fetch79AiAsync(provider, config, modelsPath, ct);
+        }
+
         var imagePath = config.ImageModelsPath?.Trim();
         var videoPath = config.VideoModelsPath?.Trim();
 
@@ -92,6 +116,64 @@ public sealed class Ai79CatalogClient : IAi79CatalogClient
             VideoModelsPath = videoPath,
             Models = models
         };
+    }
+
+    private async Task<AiCatalogFetchResult> Fetch79AiAsync(AiProviderDetailDto provider, AiCatalogPaths config, string modelsPath, CancellationToken ct)
+    {
+        ResolvedProviderCredential credential;
+        try
+        {
+            credential = await _credentialResolver.ResolveAsync("79ai", "access_token", ct);
+        }
+        catch
+        {
+            return new AiCatalogFetchResult
+            {
+                Configured = false,
+                Message = "Không tìm thấy credential 79AI đang hoạt động.",
+                ModelsPath = modelsPath
+            };
+        }
+
+        var domain = await ResolveDomainAsync(credential.ProviderAccountId, provider.ConfigJson, config.Domain, ct);
+        var uri = new Uri(new Uri(provider.BaseUrl!.TrimEnd('/') + "/"), modelsPath.TrimStart('/'));
+        var models = new List<AiCatalogModelSnapshot>();
+        models.AddRange(await Load79AiModelsAsync(uri, credential.Secret, domain, "image", ct));
+        models.AddRange(await Load79AiModelsAsync(uri, credential.Secret, domain, "video", ct));
+
+        return new AiCatalogFetchResult
+        {
+            Configured = true,
+            ModelsPath = modelsPath,
+            Models = models
+        };
+    }
+
+    private async Task<IReadOnlyList<AiCatalogModelSnapshot>> Load79AiModelsAsync(Uri uri, string accessToken, string domain, string mediaType, CancellationToken ct)
+    {
+        using var body = new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["access_token"] = accessToken,
+            ["domain"] = domain,
+            ["type"] = mediaType
+        });
+
+        using var response = await _httpClient.PostAsync(uri, body, ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException($"79AI catalog trả HTTP {(int)response.StatusCode}.");
+        }
+
+        try
+        {
+            using var stream = await response.Content.ReadAsStreamAsync(ct);
+            using var document = await JsonDocument.ParseAsync(stream, cancellationToken: ct);
+            return ParseModels(RemoveSecretEcho(document.RootElement, accessToken), mediaType);
+        }
+        catch (JsonException ex)
+        {
+            throw new InvalidOperationException("79AI catalog trả dữ liệu không hợp lệ.", ex);
+        }
     }
 
     private async Task<IReadOnlyList<AiCatalogModelSnapshot>> LoadModelsAsync(string baseUrl, string path, string fallbackMediaType, CancellationToken ct)
@@ -127,8 +209,10 @@ public sealed class Ai79CatalogClient : IAi79CatalogClient
             : root;
         return new AiCatalogPaths
         {
+            ModelsPath = ReadString(catalog, "models_path") ?? ReadString(catalog, "modelsPath"),
             ImageModelsPath = ReadString(catalog, "image_models_path") ?? ReadString(catalog, "imageModelsPath"),
-            VideoModelsPath = ReadString(catalog, "video_models_path") ?? ReadString(catalog, "videoModelsPath")
+            VideoModelsPath = ReadString(catalog, "video_models_path") ?? ReadString(catalog, "videoModelsPath"),
+            Domain = ReadString(catalog, "domain") ?? ReadString(root, "domain")
         };
     }
 
@@ -497,7 +581,71 @@ public sealed class Ai79CatalogClient : IAi79CatalogClient
 
     private sealed class AiCatalogPaths
     {
+        public string? ModelsPath { get; set; }
         public string? ImageModelsPath { get; set; }
         public string? VideoModelsPath { get; set; }
+        public string? Domain { get; set; }
     }
+
+    private static bool Is79AiProvider(string? providerCode)
+        => string.Equals(providerCode?.Trim(), "79ai", StringComparison.OrdinalIgnoreCase);
+
+    private async Task<string> ResolveDomainAsync(Guid providerAccountId, string? providerConfigJson, string? configDomain, CancellationToken ct)
+    {
+        var account = await _credentialRepository.GetAccountByIdAsync(providerAccountId, ct);
+        var accountDomain = ReadDomainFromJson(account?.ConfigJson);
+        return FirstNonBlank(accountDomain, configDomain, ReadDomainFromJson(providerConfigJson), "79ai.net")!;
+    }
+
+    private static string? FirstNonBlank(params string?[] values)
+        => values.FirstOrDefault(x => !string.IsNullOrWhiteSpace(x))?.Trim();
+
+    private static string? ReadDomainFromJson(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            return doc.RootElement.ValueKind == JsonValueKind.Object
+                ? ReadString(doc.RootElement, "domain")
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static JsonElement RemoveSecretEcho(JsonElement root, string accessToken)
+    {
+        var sanitized = SanitizeSecretEcho(root, accessToken);
+        return JsonSerializer.SerializeToElement(sanitized);
+    }
+
+    private static object? SanitizeSecretEcho(JsonElement element, string accessToken)
+    {
+        return element.ValueKind switch
+        {
+            JsonValueKind.Object => element.EnumerateObject().ToDictionary(
+                x => x.Name,
+                x => IsSecretProperty(x.Name) ? "***" : SanitizeSecretEcho(x.Value, accessToken),
+                StringComparer.OrdinalIgnoreCase),
+            JsonValueKind.Array => element.EnumerateArray().Select(x => SanitizeSecretEcho(x, accessToken)).ToList(),
+            JsonValueKind.String => string.Equals(element.GetString(), accessToken, StringComparison.Ordinal) ? "***" : element.GetString(),
+            JsonValueKind.Number when element.TryGetDecimal(out var number) => number,
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            _ => null
+        };
+    }
+
+    private static bool IsSecretProperty(string name)
+        => name.Contains("access_token", StringComparison.OrdinalIgnoreCase)
+           || name.Contains("accessToken", StringComparison.OrdinalIgnoreCase)
+           || name.Contains("token", StringComparison.OrdinalIgnoreCase)
+           || name.Contains("secret", StringComparison.OrdinalIgnoreCase);
 }

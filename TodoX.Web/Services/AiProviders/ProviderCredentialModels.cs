@@ -44,6 +44,7 @@ public sealed class ProviderCredentialAccount
     public bool Enabled { get; set; }
     public bool IsDefault { get; set; }
     public int Priority { get; set; } = 100;
+    public string? ConfigJson { get; set; }
 }
 
 public sealed class ProviderCredentialMapping

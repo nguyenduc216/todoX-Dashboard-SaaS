@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Headers;
 using TodoX.Web.Models;
 using TodoX.Web.Services.AiProviders;
 using Xunit;
@@ -121,8 +122,104 @@ public sealed class AiProviderDurationPricingTests
         Assert.Contains("SavePriceAsync", pricingPage);
     }
 
+    [Fact]
+    public async Task CatalogClient_For79AiUsesSecureCredentialAndPostsImageAndVideoForms()
+    {
+        var handler = new RecordingJsonHandler(
+            """{"data":[{"model":"img-model","type":"image","price":12,"access_token":"phase-c-token"}]}""",
+            """{"items":[{"model":"video-model","type":"video","durations":[5],"resolutions":["720p"],"prices":[{"duration":5,"resolution":"720p","price":34}]}]}""");
+        var resolver = new FakeResolver("phase-c-token");
+        var repository = new FakeCredentialRepository
+        {
+            Account = new ProviderCredentialAccount
+            {
+                Id = resolver.AccountId,
+                ProviderCode = "79ai",
+                Environment = "production",
+                ConfigJson = """{"domain":"79ai.net"}"""
+            }
+        };
+        var client = new Ai79CatalogClient(new HttpClient(handler), resolver, repository);
+
+        var result = await client.FetchAsync(new AiProviderDetailDto
+        {
+            ProviderCode = "79ai",
+            BaseUrl = "https://api.gommo.net/ai",
+            ConfigJson = "{}"
+        });
+
+        Assert.True(result.Configured);
+        Assert.Equal("/models", result.ModelsPath);
+        Assert.Equal(2, handler.Requests.Count);
+        Assert.All(handler.Requests, r =>
+        {
+            Assert.Equal(HttpMethod.Post, r.Method);
+            Assert.Equal("https://api.gommo.net/ai/models", r.Uri);
+            Assert.Equal("application/x-www-form-urlencoded", r.ContentType);
+            Assert.Contains("access_token=phase-c-token", r.Body);
+            Assert.Contains("domain=79ai.net", r.Body);
+            Assert.DoesNotContain("phase-c-token", r.Uri, StringComparison.Ordinal);
+            Assert.Null(r.Authorization);
+        });
+        Assert.Contains("type=image", handler.Requests[0].Body);
+        Assert.Contains("type=video", handler.Requests[1].Body);
+        Assert.Equal(("79ai", "access_token"), resolver.LastResolve);
+        Assert.Contains(result.Models, x => x.ProviderModelCode == "img-model" && x.MediaType == "image");
+        Assert.Contains(result.Models, x => x.ProviderModelCode == "video-model" && x.MediaType == "video");
+        Assert.DoesNotContain("phase-c-token", string.Join("\n", result.Models.Select(x => x.RawJson)), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CatalogClient_For79AiDoesNotRequireLegacyPathsAndReturnsSanitizedCredentialError()
+    {
+        var handler = new RecordingJsonHandler("""{"models":[]}""");
+        var resolver = new FakeResolver("phase-c-token") { Fail = true };
+        var client = new Ai79CatalogClient(new HttpClient(handler), resolver, new FakeCredentialRepository());
+
+        var result = await client.FetchAsync(new AiProviderDetailDto
+        {
+            ProviderCode = "79ai",
+            BaseUrl = "https://api.gommo.net/ai",
+            ConfigJson = "{}"
+        });
+
+        Assert.False(result.Configured);
+        Assert.Equal("Không tìm thấy credential 79AI đang hoạt động.", result.Message);
+        Assert.Empty(handler.Requests);
+        Assert.DoesNotContain("phase-c-token", result.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CatalogClient_SourceContracts_DoNotUseLegacy79AiCredentialOrGetFor79Ai()
+    {
+        var client = ReadSource("TodoX.Web", "Services", "AiProviders", "AiCatalogClient.cs");
+        var patch = ReadSource("database", "manual", "ai-provider-secure-credentials", "03_fix_provider_account_credential_secure_ref_check.sql");
+
+        Assert.Contains("IProviderCredentialResolver", client, StringComparison.Ordinal);
+        Assert.Contains("ResolveAsync(\"79ai\", \"access_token\"", client, StringComparison.Ordinal);
+        Assert.Contains("PostAsync(uri, body, ct)", client, StringComparison.Ordinal);
+        Assert.Contains("\"/models\"", client, StringComparison.Ordinal);
+        Assert.Contains("[\"type\"] = mediaType", client, StringComparison.Ordinal);
+        Assert.DoesNotContain("todox_video_79ai_provider_keys", client, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("GetAsync(uri, ct);", client.Substring(0, client.IndexOf("LoadModelsAsync", StringComparison.Ordinal)), StringComparison.Ordinal);
+
+        Assert.Contains("secure_credential_id IS NOT NULL", patch, StringComparison.Ordinal);
+        Assert.Contains("todox_ai_provider_account_credential_ref_ck", patch, StringComparison.Ordinal);
+    }
+
     private static Ai79CatalogClient CreateClient(string json)
-        => new(new HttpClient(new JsonHandler(json)) { BaseAddress = new Uri("https://catalog.local") });
+        => new(
+            new HttpClient(new JsonHandler(json)) { BaseAddress = new Uri("https://catalog.local") },
+            new FakeResolver("phase-c-token"),
+            new FakeCredentialRepository
+            {
+                Account = new ProviderCredentialAccount
+                {
+                    ProviderCode = "79ai",
+                    Environment = "production",
+                    ConfigJson = """{"domain":"79ai.net"}"""
+                }
+            });
 
     private static AiProviderDetailDto Provider()
         => new()
@@ -149,6 +246,7 @@ public sealed class AiProviderDurationPricingTests
     private sealed class JsonHandler : HttpMessageHandler
     {
         private readonly string _json;
+        private bool _served;
 
         public JsonHandler(string json)
         {
@@ -156,9 +254,92 @@ public sealed class AiProviderDurationPricingTests
         }
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-            => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            var json = _served ? """{"models":[]}""" : _json;
+            _served = true;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             {
-                Content = new StringContent(_json)
+                Content = new StringContent(json)
             });
+        }
+    }
+
+    private sealed class RecordingJsonHandler : HttpMessageHandler
+    {
+        private readonly Queue<string> _responses;
+        public List<RequestSnapshot> Requests { get; } = new();
+
+        public RecordingJsonHandler(params string[] responses)
+        {
+            _responses = new Queue<string>(responses);
+        }
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var body = request.Content is null ? string.Empty : await request.Content.ReadAsStringAsync(cancellationToken);
+            Requests.Add(new RequestSnapshot(
+                request.Method,
+                request.RequestUri!.ToString(),
+                body,
+                request.Content?.Headers.ContentType?.MediaType,
+                request.Headers.Authorization));
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(_responses.Count == 0 ? """{"models":[]}""" : _responses.Dequeue())
+            };
+        }
+    }
+
+    private sealed record RequestSnapshot(HttpMethod Method, string Uri, string Body, string? ContentType, AuthenticationHeaderValue? Authorization);
+
+    private sealed class FakeResolver : IProviderCredentialResolver
+    {
+        private readonly string _secret;
+        public Guid AccountId { get; } = Guid.NewGuid();
+        public bool Fail { get; set; }
+        public (string ProviderCode, string CredentialRole)? LastResolve { get; private set; }
+
+        public FakeResolver(string secret)
+        {
+            _secret = secret;
+        }
+
+        public Task<ResolvedProviderCredential> ResolveAsync(string providerCode, string credentialRole, CancellationToken ct = default)
+        {
+            LastResolve = (providerCode, credentialRole);
+            if (Fail)
+            {
+                throw new InvalidOperationException("missing");
+            }
+
+            return Task.FromResult(new ResolvedProviderCredential
+            {
+                ProviderAccountId = AccountId,
+                ProviderCode = providerCode,
+                CredentialRole = credentialRole,
+                Secret = _secret,
+                MaskedHint = "****oken"
+            });
+        }
+    }
+
+    private sealed class FakeCredentialRepository : IProviderCredentialRepository
+    {
+        public ProviderCredentialAccount? Account { get; set; }
+
+        public Task<ProviderCredentialAccount?> GetAccountByIdAsync(Guid providerAccountId, CancellationToken ct = default)
+            => Task.FromResult<ProviderCredentialAccount?>(Account ?? new ProviderCredentialAccount { Id = providerAccountId, ProviderCode = "79ai", ConfigJson = """{"domain":"79ai.net"}""" });
+
+        public Task<ProviderCredentialAccount?> GetPreferredAccountAsync(string providerCode, string environment = "production", CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<ProviderCredentialMapping?> GetActiveMappingAsync(Guid providerAccountId, string credentialRole, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<ProviderSecureCredentialRecord?> GetSecureCredentialAsync(Guid secureCredentialId, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<ProviderSecureCredentialRecord?> GetActiveSecureCredentialAsync(Guid providerAccountId, string credentialRole, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<Guid> InsertSecureCredentialAsync(Guid providerAccountId, string credentialRole, ProtectedProviderCredential protectedCredential, Guid? userId, string metadataJson, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task DeactivatePriorSecureCredentialsAsync(Guid providerAccountId, string credentialRole, Guid keepSecureCredentialId, Guid? userId, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task UpsertMappingAsync(Guid providerAccountId, string credentialRole, Guid secureCredentialId, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task DeactivatePriorMappingsAsync(Guid providerAccountId, string credentialRole, Guid keepSecureCredentialId, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task SetProviderAccountEnabledDefaultAsync(Guid providerAccountId, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task UpdateLastUsedAsync(Guid secureCredentialId, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<ProviderAccountCredentialMetadata?> GetCredentialMetadataAsync(Guid providerAccountId, string credentialRole, CancellationToken ct = default) => throw new NotImplementedException();
     }
 }

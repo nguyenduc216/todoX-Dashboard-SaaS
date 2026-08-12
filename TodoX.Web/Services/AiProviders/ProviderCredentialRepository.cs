@@ -35,7 +35,7 @@ public sealed class ProviderCredentialRepository : IProviderCredentialRepository
             """
             SELECT id AS Id, provider_id AS ProviderId, provider_code AS ProviderCode,
                    account_code AS AccountCode, account_name AS AccountName, environment AS Environment,
-                   enabled AS Enabled, is_default AS IsDefault, priority AS Priority
+                   enabled AS Enabled, is_default AS IsDefault, priority AS Priority, config_json::text AS ConfigJson
               FROM public.todox_ai_provider_account
              WHERE lower(btrim(provider_code)) = lower(btrim(@providerCode))
                AND environment = @environment
@@ -52,7 +52,7 @@ public sealed class ProviderCredentialRepository : IProviderCredentialRepository
             """
             SELECT id AS Id, provider_id AS ProviderId, provider_code AS ProviderCode,
                    account_code AS AccountCode, account_name AS AccountName, environment AS Environment,
-                   enabled AS Enabled, is_default AS IsDefault, priority AS Priority
+                   enabled AS Enabled, is_default AS IsDefault, priority AS Priority, config_json::text AS ConfigJson
               FROM public.todox_ai_provider_account
              WHERE id = @providerAccountId
              LIMIT 1;
@@ -213,7 +213,7 @@ public sealed class ProviderCredentialRepository : IProviderCredentialRepository
             """
             SELECT id AS Id, provider_id AS ProviderId, provider_code AS ProviderCode,
                    account_code AS AccountCode, account_name AS AccountName, environment AS Environment,
-                   enabled AS Enabled, is_default AS IsDefault, priority AS Priority
+                   enabled AS Enabled, is_default AS IsDefault, priority AS Priority, config_json::text AS ConfigJson
               FROM public.todox_ai_provider_account
              WHERE id = @providerAccountId
              LIMIT 1;
