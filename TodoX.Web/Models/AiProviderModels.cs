@@ -420,31 +420,37 @@ public sealed class AiPricingPolicyDto
 
 public sealed class AiProviderSyncHeaderDto
 {
-    public long Id { get; set; }
+    public Guid Id { get; set; }
     public long ProviderId { get; set; }
     public string ProviderCode { get; set; } = string.Empty;
     public string Trigger { get; set; } = string.Empty;
     public string Status { get; set; } = string.Empty;
-    public string? Message { get; set; }
-    public string? RequestedBy { get; set; }
-    public string? ModelCatalogEndpoint { get; set; }
+    public Guid? RequestedBy { get; set; }
+    public int ModelsReceived { get; set; }
     public int ModelInsertedCount { get; set; }
     public int ModelUpdatedCount { get; set; }
     public int ModelUnavailableCount { get; set; }
+    public int PricingRowsReceived { get; set; }
     public int PriceChangedCount { get; set; }
+    public int CapabilityRowsChanged { get; set; }
+    public string? ErrorMessage { get; set; }
+    public DateTime StartedAt { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime? CompletedAt { get; set; }
+    public string SummaryJson { get; set; } = "{}";
 }
 
 public sealed class AiProviderSyncChangeDto
 {
     public long Id { get; set; }
-    public long SyncId { get; set; }
+    public Guid SyncId { get; set; }
     public string ChangeType { get; set; } = string.Empty;
     public string EntityType { get; set; } = string.Empty;
     public string EntityKey { get; set; } = string.Empty;
+    public long? ModelId { get; set; }
     public string? BeforeJson { get; set; }
     public string? AfterJson { get; set; }
+    public string[] ChangedFields { get; set; } = Array.Empty<string>();
     public DateTime CreatedAt { get; set; }
 }
 

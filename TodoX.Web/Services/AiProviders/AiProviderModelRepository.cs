@@ -333,11 +333,14 @@ public sealed class AiProviderModelRepository
         using var conn = await _factory.OpenAsync(ct);
         var rows = await conn.QueryAsync<AiProviderSyncHeaderDto>(
             """
-            SELECT id AS Id, provider_id AS ProviderId, provider_code AS ProviderCode, "trigger" AS Trigger,
-                   status AS Status, message AS Message, requested_by AS RequestedBy,
-                   model_catalog_endpoint AS ModelCatalogEndpoint, model_inserted_count AS ModelInsertedCount,
-                   model_updated_count AS ModelUpdatedCount, model_unavailable_count AS ModelUnavailableCount,
-                   price_changed_count AS PriceChangedCount, created_at AS CreatedAt, completed_at AS CompletedAt
+            SELECT id AS Id, provider_id AS ProviderId, provider_code AS ProviderCode, trigger_type AS Trigger,
+                   status AS Status, triggered_by AS RequestedBy,
+                   models_received AS ModelsReceived, models_inserted AS ModelInsertedCount,
+                   models_updated AS ModelUpdatedCount, models_unavailable AS ModelUnavailableCount,
+                   pricing_rows_received AS PricingRowsReceived, pricing_rows_changed AS PriceChangedCount,
+                   capability_rows_changed AS CapabilityRowsChanged, error_message AS ErrorMessage,
+                   started_at AS StartedAt, created_at AS CreatedAt, completed_at AS CompletedAt,
+                   summary_json::text AS SummaryJson
               FROM public.todox_ai_provider_sync
              WHERE provider_id = @providerId
              ORDER BY created_at DESC
@@ -346,13 +349,15 @@ public sealed class AiProviderModelRepository
         return rows.ToList();
     }
 
-    public async Task<IReadOnlyList<AiProviderSyncChangeDto>> GetSyncChangesAsync(long syncId, int limit, CancellationToken ct = default)
+    public async Task<IReadOnlyList<AiProviderSyncChangeDto>> GetSyncChangesAsync(Guid syncId, int limit, CancellationToken ct = default)
     {
         using var conn = await _factory.OpenAsync(ct);
         var rows = await conn.QueryAsync<AiProviderSyncChangeDto>(
             """
             SELECT id AS Id, sync_id AS SyncId, change_type AS ChangeType, entity_type AS EntityType,
-                   entity_key AS EntityKey, before_json AS BeforeJson, after_json AS AfterJson, created_at AS CreatedAt
+                   entity_key AS EntityKey, model_id AS ModelId,
+                   old_value_json::text AS BeforeJson, new_value_json::text AS AfterJson,
+                   changed_fields AS ChangedFields, created_at AS CreatedAt
               FROM public.todox_ai_provider_sync_change
              WHERE sync_id = @syncId
              ORDER BY created_at ASC
@@ -361,65 +366,89 @@ public sealed class AiProviderModelRepository
         return rows.ToList();
     }
 
-    public async Task<long> InsertSyncHeaderAsync(
+    public async Task<Guid> InsertSyncHeaderAsync(
         long providerId,
         string providerCode,
         string trigger,
-        string? requestedBy,
-        string? modelCatalogEndpoint,
+        Guid? triggeredBy,
         string status,
-        string? message,
         CancellationToken ct = default)
     {
         using var conn = await _factory.OpenAsync(ct);
-        return await conn.ExecuteScalarAsync<long>(
+        return await conn.ExecuteScalarAsync<Guid>(
             """
             INSERT INTO public.todox_ai_provider_sync
-                (provider_id, provider_code, "trigger", status, message, requested_by, model_catalog_endpoint, created_at)
+                (provider_id, provider_code, trigger_type, status, started_at,
+                 models_received, models_inserted, models_updated, models_unavailable,
+                 pricing_rows_received, pricing_rows_changed, capability_rows_changed,
+                 triggered_by, error_message, summary_json, created_at)
             VALUES
-                (@providerId, @providerCode, @trigger, @status, @message, @requestedBy, @modelCatalogEndpoint, now())
+                (@providerId, @providerCode, @trigger, @status, now(),
+                 0, 0, 0, 0, 0, 0, 0,
+                 @triggeredBy, NULL, '{}'::jsonb, now())
             RETURNING id;
             """,
-            new { providerId, providerCode, trigger, status, message, requestedBy, modelCatalogEndpoint });
+            new { providerId, providerCode, trigger, status, triggeredBy });
     }
 
-    public async Task CompleteSyncHeaderAsync(long syncId, string status, string? message,
-        int inserted, int updated, int unavailable, int priceChanged, CancellationToken ct = default)
+    public async Task CompleteSyncHeaderAsync(
+        Guid syncId,
+        string status,
+        string? errorMessage,
+        int modelsReceived,
+        int inserted,
+        int updated,
+        int unavailable,
+        int pricingRowsReceived,
+        int priceChanged,
+        int capabilityRowsChanged,
+        string summaryJson,
+        CancellationToken ct = default)
     {
         using var conn = await _factory.OpenAsync(ct);
         await conn.ExecuteAsync(
             """
             UPDATE public.todox_ai_provider_sync
                SET status = @status,
-                   message = @message,
-                   model_inserted_count = @inserted,
-                   model_updated_count = @updated,
-                   model_unavailable_count = @unavailable,
-                   price_changed_count = @priceChanged,
-                   completed_at = now()
+                   completed_at = now(),
+                   models_received = @modelsReceived,
+                   models_inserted = @inserted,
+                   models_updated = @updated,
+                   models_unavailable = @unavailable,
+                   pricing_rows_received = @pricingRowsReceived,
+                   pricing_rows_changed = @priceChanged,
+                   capability_rows_changed = @capabilityRowsChanged,
+                   error_message = @errorMessage,
+                   summary_json = CAST(@summaryJson AS jsonb)
              WHERE id = @syncId;
             """,
-            new { syncId, status, message, inserted, updated, unavailable, priceChanged });
+            new { syncId, status, errorMessage, modelsReceived, inserted, updated, unavailable, pricingRowsReceived, priceChanged, capabilityRowsChanged, summaryJson });
     }
 
     public async Task InsertSyncChangeAsync(
-        long syncId,
+        Guid syncId,
         string changeType,
         string entityType,
         string entityKey,
         string? beforeJson,
         string? afterJson,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        long? modelId = null,
+        IReadOnlyList<string>? changedFields = null)
     {
         using var conn = await _factory.OpenAsync(ct);
         await conn.ExecuteAsync(
             """
             INSERT INTO public.todox_ai_provider_sync_change
-                (sync_id, change_type, entity_type, entity_key, before_json, after_json, created_at)
+                (sync_id, entity_type, entity_key, change_type, model_id,
+                 old_value_json, new_value_json, changed_fields, created_at)
             VALUES
-                (@syncId, @changeType, @entityType, @entityKey, @beforeJson, @afterJson, now());
+                (@syncId, @entityType, @entityKey, @changeType, @modelId,
+                 CASE WHEN @beforeJson IS NULL THEN NULL ELSE CAST(@beforeJson AS jsonb) END,
+                 CASE WHEN @afterJson IS NULL THEN NULL ELSE CAST(@afterJson AS jsonb) END,
+                 COALESCE(@changedFields, ARRAY[]::text[]), now());
             """,
-            new { syncId, changeType, entityType, entityKey, beforeJson, afterJson });
+            new { syncId, changeType, entityType, entityKey, beforeJson, afterJson, modelId, changedFields = changedFields?.ToArray() ?? Array.Empty<string>() });
     }
 
     public async Task<long> UpsertModelAsync(AiProviderModelDetailDto model, string? userId, CancellationToken ct = default)

@@ -10,7 +10,7 @@ public interface IAiProviderModelService
     Task UpdateAdminFieldsAsync(long id, string displayName, bool enabled, bool allowUserSelect, string? description, string? userId, CancellationToken ct = default);
     Task UpdateSyncFieldsAsync(AiProviderModelDetailDto model, string? userId, CancellationToken ct = default);
     Task<IReadOnlyList<AiProviderSyncHeaderDto>> GetSyncHistoryAsync(long providerId, int limit = 20, CancellationToken ct = default);
-    Task<IReadOnlyList<AiProviderSyncChangeDto>> GetSyncChangesAsync(long syncId, int limit = 200, CancellationToken ct = default);
+    Task<IReadOnlyList<AiProviderSyncChangeDto>> GetSyncChangesAsync(Guid syncId, int limit = 200, CancellationToken ct = default);
 }
 
 public sealed class AiProviderModelService : IAiProviderModelService
@@ -60,6 +60,6 @@ public sealed class AiProviderModelService : IAiProviderModelService
     public Task<IReadOnlyList<AiProviderSyncHeaderDto>> GetSyncHistoryAsync(long providerId, int limit = 20, CancellationToken ct = default)
         => _repo.GetSyncHistoryAsync(providerId, limit, ct);
 
-    public Task<IReadOnlyList<AiProviderSyncChangeDto>> GetSyncChangesAsync(long syncId, int limit = 200, CancellationToken ct = default)
+    public Task<IReadOnlyList<AiProviderSyncChangeDto>> GetSyncChangesAsync(Guid syncId, int limit = 200, CancellationToken ct = default)
         => _repo.GetSyncChangesAsync(syncId, limit, ct);
 }

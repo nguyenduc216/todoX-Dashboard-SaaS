@@ -8,7 +8,7 @@ public sealed class AiProviderSyncResultDto
 {
     public bool Success { get; set; }
     public string? Message { get; set; }
-    public long? SyncId { get; set; }
+    public Guid? SyncId { get; set; }
     public int ModelInsertedCount { get; set; }
     public int ModelUpdatedCount { get; set; }
     public int ModelUnavailableCount { get; set; }
@@ -48,12 +48,12 @@ public sealed class AiProviderSyncService : IAiProviderSyncService
     }
 
     public Task<AiProviderSyncResultDto> SyncProviderAsync(long providerId, CurrentUserSession? user = null, CancellationToken ct = default)
-        => SyncProviderCoreAsync(providerId, "manual", user?.UserId.ToString(), ct);
+        => SyncProviderCoreAsync(providerId, "manual", user?.UserId, ct);
 
     public Task<AiProviderSyncResultDto> SyncScheduledProviderAsync(long providerId, CancellationToken ct = default)
         => SyncProviderCoreAsync(providerId, "scheduled", null, ct);
 
-    internal async Task<AiProviderSyncResultDto> SyncProviderCoreAsync(long providerId, string trigger, string? requestedBy, CancellationToken ct = default)
+    internal async Task<AiProviderSyncResultDto> SyncProviderCoreAsync(long providerId, string trigger, Guid? triggeredBy, CancellationToken ct = default)
     {
         var syncLock = ProviderLocks.GetOrAdd(providerId, _ => new SemaphoreSlim(1, 1));
         if (!await syncLock.WaitAsync(0, ct))
@@ -67,7 +67,7 @@ public sealed class AiProviderSyncService : IAiProviderSyncService
 
         try
         {
-            return await SyncProviderUnlockedAsync(providerId, trigger, requestedBy, ct);
+            return await SyncProviderUnlockedAsync(providerId, trigger, triggeredBy, ct);
         }
         finally
         {
@@ -75,7 +75,7 @@ public sealed class AiProviderSyncService : IAiProviderSyncService
         }
     }
 
-    private async Task<AiProviderSyncResultDto> SyncProviderUnlockedAsync(long providerId, string trigger, string? requestedBy, CancellationToken ct)
+    private async Task<AiProviderSyncResultDto> SyncProviderUnlockedAsync(long providerId, string trigger, Guid? triggeredBy, CancellationToken ct)
     {
         var provider = await _providers.GetProviderAsync(providerId, ct);
         if (provider is null)
@@ -87,10 +87,8 @@ public sealed class AiProviderSyncService : IAiProviderSyncService
             provider.Id,
             provider.ProviderCode,
             trigger,
-            requestedBy,
-            GetCatalogEndpoint(provider.ConfigJson),
+            triggeredBy,
             "running",
-            null,
             ct);
 
         var result = new AiProviderSyncResultDto { Success = true, SyncId = syncId };
@@ -100,7 +98,9 @@ public sealed class AiProviderSyncService : IAiProviderSyncService
             var catalog = await _catalogClient.FetchAsync(provider, ct);
             if (!catalog.Configured)
             {
-                await _modelRepository.CompleteSyncHeaderAsync(syncId, "failed", catalog.Message, 0, 0, 0, 0, ct);
+                await _modelRepository.CompleteSyncHeaderAsync(
+                    syncId, "failed", catalog.Message, 0, 0, 0, 0, 0, 0, 0,
+                    BuildSummaryJson(result), ct);
                 return new AiProviderSyncResultDto
                 {
                     Success = false,
@@ -145,21 +145,21 @@ public sealed class AiProviderSyncService : IAiProviderSyncService
                     result.ModelUpdatedCount++;
                 }
 
-                var modelId = await _modelRepository.UpsertModelAsync(detail, requestedBy, ct);
+                var modelId = await _modelRepository.UpsertModelAsync(detail, triggeredBy?.ToString(), ct);
                 foreach (var price in detail.Prices)
                 {
                     price.ModelId = modelId;
                 }
 
-                await UpsertPoliciesAsync(detail, requestedBy, ct);
-                await DeactivateMissingPricesAsync(syncId, modelId, currentDetail?.Prices ?? new List<AiModelPriceDto>(), detail.Prices, requestedBy, ct);
+                await UpsertPoliciesAsync(detail, triggeredBy?.ToString(), ct);
+                await DeactivateMissingPricesAsync(syncId, modelId, currentDetail?.Prices ?? new List<AiModelPriceDto>(), detail.Prices, triggeredBy?.ToString(), ct);
             }
 
             var missingCodes = AiProviderSyncPlanner.GetMissingCodes(existingByCode.Keys.ToList(), incomingCodes);
             if (missingCodes.Count > 0)
             {
                 result.ModelUnavailableCount += missingCodes.Count;
-                await _modelRepository.MarkMissingAsDeprecatedAsync(provider.Id, incomingCodes, requestedBy, ct);
+                await _modelRepository.MarkMissingAsDeprecatedAsync(provider.Id, incomingCodes, triggeredBy?.ToString(), ct);
                 foreach (var code in missingCodes)
                 {
                     await _modelRepository.InsertSyncChangeAsync(syncId, "MODEL_STATUS_CHANGED", "model", code, null, "{\"provider_status\":\"DEPRECATED\"}", ct);
@@ -170,11 +170,15 @@ public sealed class AiProviderSyncService : IAiProviderSyncService
             await _modelRepository.CompleteSyncHeaderAsync(
                 syncId,
                 "success",
-                result.Message,
+                null,
+                catalog.Models.Count,
                 result.ModelInsertedCount,
                 result.ModelUpdatedCount,
                 result.ModelUnavailableCount,
+                catalog.Models.Sum(x => x.Prices?.Count ?? 0),
                 result.PriceChangedCount,
+                0,
+                BuildSummaryJson(result),
                 ct);
             result.Message = result.ModelInsertedCount == 0 && result.ModelUpdatedCount == 0 && result.ModelUnavailableCount == 0 && result.PriceChangedCount == 0
                 ? "No changes."
@@ -183,7 +187,7 @@ public sealed class AiProviderSyncService : IAiProviderSyncService
         }
         catch (Exception ex)
         {
-            await _modelRepository.CompleteSyncHeaderAsync(syncId, "failed", ex.Message, 0, 0, 0, 0, ct);
+            await _modelRepository.CompleteSyncHeaderAsync(syncId, "failed", ex.Message, 0, 0, 0, 0, 0, 0, 0, BuildSummaryJson(new AiProviderSyncResultDto()), ct);
             return new AiProviderSyncResultDto
             {
                 Success = false,
@@ -202,7 +206,7 @@ public sealed class AiProviderSyncService : IAiProviderSyncService
     }
 
     private async Task DeactivateMissingPricesAsync(
-        long syncId,
+        Guid syncId,
         long modelId,
         IReadOnlyList<AiModelPriceDto> before,
         IReadOnlyList<AiModelPriceDto> after,
@@ -273,7 +277,7 @@ public sealed class AiProviderSyncService : IAiProviderSyncService
     }
 
     private async Task<(int ModelChanges, int PriceChanges)> InsertChangesAsync(
-        long syncId,
+        Guid syncId,
         AiProviderModelDetailDto? before,
         AiProviderModelDetailDto after,
         CancellationToken ct)
@@ -335,12 +339,29 @@ public sealed class AiProviderSyncService : IAiProviderSyncService
             if (AiPricingEngine.IsProviderControlledPriceChanged(oldPrice, price))
             {
                 priceChanges++;
-                await _modelRepository.InsertSyncChangeAsync(syncId, "PRICE_CHANGED", "price", $"{after.ProviderModelCode}:{key}", Serialize(oldPrice), Serialize(price), ct);
+                await _modelRepository.InsertSyncChangeAsync(
+                    syncId,
+                    "PRICE_CHANGED",
+                    "price",
+                    $"{after.ProviderModelCode}:{key}",
+                    Serialize(oldPrice),
+                    Serialize(price),
+                    ct,
+                    changedFields: new[] { "provider_price", "provider_price_default" });
             }
         }
 
         return (modelChanges, priceChanges);
     }
+
+    private static string BuildSummaryJson(AiProviderSyncResultDto result)
+        => JsonSerializer.Serialize(new
+        {
+            model_inserted_count = result.ModelInsertedCount,
+            model_updated_count = result.ModelUpdatedCount,
+            model_unavailable_count = result.ModelUnavailableCount,
+            price_changed_count = result.PriceChangedCount
+        });
 
     private static AiProviderModelDetailDto BuildDetail(AiProviderDetailDto provider, AiCatalogModelSnapshot snapshot)
     {

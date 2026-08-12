@@ -942,7 +942,7 @@
                     _selectedCapabilities = _selectedModel.ModelCapabilities.ToList();
                     _selectedProviderForSync = _selectedModel.ProviderId;
                     _syncHistory = _selectedModel.SyncHistory.ToList();
-                    _syncMessage = _selectedModel.SyncHistory.FirstOrDefault()?.Message;
+                    _syncMessage = _selectedModel.SyncHistory.FirstOrDefault()?.ErrorMessage;
                 }
             }
         }
@@ -992,7 +992,7 @@
         _selectedSyncChanges = _selectedModel.SyncChanges.ToList();
         _selectedProviderForSync = _selectedModel.ProviderId;
         _syncHistory = _selectedModel.SyncHistory.ToList();
-        _syncMessage = _selectedModel.SyncHistory.FirstOrDefault()?.Message;
+        _syncMessage = _selectedModel.SyncHistory.FirstOrDefault()?.ErrorMessage;
     }
 
     private async Task ReloadSelectedModelAsync()
