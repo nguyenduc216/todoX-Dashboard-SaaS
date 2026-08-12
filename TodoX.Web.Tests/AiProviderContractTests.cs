@@ -191,6 +191,166 @@ public sealed class AiProviderContractTests
     }
 
     [Fact]
+    public void PriceInsertPathsProtectProductionNotNullRuntimeValues()
+    {
+        var pricingRepository = ReadSource("TodoX.Web", "Services", "AiProviders", "AiPricingRepository.cs");
+        var modelRepository = ReadSource("TodoX.Web", "Services", "AiProviders", "AiProviderModelRepository.cs");
+        var blocks = PriceInsertBlocks(pricingRepository).Concat(PriceInsertBlocks(modelRepository)).ToList();
+
+        Assert.Equal(2, blocks.Count);
+        foreach (var block in blocks)
+        {
+            Assert.Contains("COALESCE(NULLIF(@RateType, ''), 'per_unit')", block, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("COALESCE(NULLIF(@UnitType, ''), 'request')", block, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("COALESCE(NULLIF(@ProviderPriceUnit, ''), 'credit')", block, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("COALESCE(NULLIF(@SellPriceMode, ''), 'AUTO')", block, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("GREATEST(COALESCE(@MinimumPoints, 0), 0)", block, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("COALESCE(NULLIF(@RoundingRule, ''), 'CEIL')", block, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("COALESCE(NULLIF(@PriceSource, ''), 'catalog')", block, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("COALESCE(@EffectiveFrom, now())", block, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("COALESCE(@Active, true)", block, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    [Fact]
+    public void PriceNormalizer_AppliesCompleteCatalogProductionDefaults()
+    {
+        var price = new AiModelPriceDto
+        {
+            RateType = " ",
+            UnitType = null,
+            ProviderPriceUnit = "79ai_credit",
+            SellPriceMode = "not-valid",
+            MinimumPoints = -5,
+            RoundingRule = "bad",
+            PriceSource = null,
+            Active = false
+        };
+
+        var before = DateTime.UtcNow.AddSeconds(-1);
+        var ok = AiModelPriceNormalizer.NormalizeForCatalog(price, "79ai", out var ignoredReason);
+        var after = DateTime.UtcNow.AddSeconds(1);
+
+        Assert.True(ok, ignoredReason);
+        Assert.Null(ignoredReason);
+        Assert.Equal("per_unit", price.RateType);
+        Assert.Equal("request", price.UnitType);
+        Assert.Equal("credit", price.ProviderPriceUnit);
+        Assert.Equal("AUTO", price.SellPriceMode);
+        Assert.Equal(0, price.MinimumPoints);
+        Assert.Equal("CEIL", price.RoundingRule);
+        Assert.Equal("catalog", price.PriceSource);
+        Assert.True(price.Active);
+        Assert.NotNull(price.EffectiveFrom);
+        Assert.InRange(price.EffectiveFrom.Value, before, after);
+    }
+
+    [Theory]
+    [InlineData(null, "credit")]
+    [InlineData("", "credit")]
+    [InlineData("79ai_credit", "credit")]
+    [InlineData("credits", "credit")]
+    [InlineData("usd", "usd")]
+    public void PriceNormalizer_Normalizes79AiProviderPriceUnitAliases(string? input, string expected)
+    {
+        var price = new AiModelPriceDto { ProviderPriceUnit = input };
+
+        var ok = AiModelPriceNormalizer.NormalizeForCatalog(price, "79ai", out var ignoredReason);
+
+        Assert.True(ok, ignoredReason);
+        Assert.Equal(expected, price.ProviderPriceUnit);
+    }
+
+    [Theory]
+    [InlineData("FIXED", "FIXED")]
+    [InlineData("fixed", "FIXED")]
+    [InlineData("MARKUP", "MARKUP")]
+    [InlineData(null, "AUTO")]
+    [InlineData("invalid", "AUTO")]
+    public void PriceNormalizer_NormalizesSellPriceModeWithoutViolatingCheck(string? input, string expected)
+    {
+        var price = new AiModelPriceDto { SellPriceMode = input! };
+
+        var ok = AiModelPriceNormalizer.NormalizeForCatalog(price, "79ai", out var ignoredReason);
+
+        Assert.True(ok, ignoredReason);
+        Assert.Equal(expected, price.SellPriceMode);
+    }
+
+    [Theory]
+    [InlineData("CEIL", "CEIL")]
+    [InlineData("floor", "FLOOR")]
+    [InlineData("ROUND", "ROUND")]
+    [InlineData("NONE", "NONE")]
+    [InlineData(null, "CEIL")]
+    [InlineData("bad", "CEIL")]
+    public void PriceNormalizer_NormalizesRoundingRuleWithoutViolatingCheck(string? input, string expected)
+    {
+        var price = new AiModelPriceDto { RoundingRule = input };
+
+        var ok = AiModelPriceNormalizer.NormalizeForCatalog(price, "79ai", out var ignoredReason);
+
+        Assert.True(ok, ignoredReason);
+        Assert.Equal(expected, price.RoundingRule);
+    }
+
+    [Theory]
+    [MemberData(nameof(InvalidCatalogPrices))]
+    public void PriceNormalizer_RejectsCatalogRowsThatWouldViolateProductionChecks(AiModelPriceDto price, string reason)
+    {
+        var ok = AiModelPriceNormalizer.NormalizeForCatalog(price, "79ai", out var ignoredReason);
+
+        Assert.False(ok);
+        Assert.Equal(reason, ignoredReason);
+    }
+
+    [Fact]
+    public void PriceVariantKeyMatchesProductionNormalizedIdentity()
+    {
+        var left = new AiModelPriceDto { RateType = "per_unit", UnitType = "request" };
+        var right = new AiModelPriceDto { Mode = "", Resolution = "", DurationSeconds = 0, Ratio = "", RateType = "per_unit", UnitType = "request" };
+        var differentRate = new AiModelPriceDto { RateType = "fixed", UnitType = "request" };
+        var differentUnit = new AiModelPriceDto { RateType = "per_unit", UnitType = "image" };
+
+        Assert.Equal(AiModelPriceVariantKey.Build(left), AiModelPriceVariantKey.Build(right));
+        Assert.NotEqual(AiModelPriceVariantKey.Build(left), AiModelPriceVariantKey.Build(differentRate));
+        Assert.NotEqual(AiModelPriceVariantKey.Build(left), AiModelPriceVariantKey.Build(differentUnit));
+    }
+
+    [Fact]
+    public async Task CatalogPricesWithMissingRateTypeNormalizeBeforePersistence()
+    {
+        var client = new Ai79CatalogClient(
+            new HttpClient(new JsonHandler("""{"models":[{"model":"grok-video-heavy","type":"video","prices":[{"mode":"standard","duration":6,"resolution":"720p","price":900}]},{"model":"veo-3.1","type":"video","prices":[{"mode":"fast","duration":8,"resolution":"1080p","price":1500}]}]}""")) { BaseAddress = new Uri("https://catalog.local") },
+            new FakeResolver("phase-c-token"),
+            new FakeCredentialRepository());
+
+        var result = await client.FetchAsync(new AiProviderDetailDto { ProviderCode = "79ai", BaseUrl = "https://catalog.local", ConfigJson = "{}" });
+
+        foreach (var price in result.Models.SelectMany(x => x.Prices))
+        {
+            var ok = AiModelPriceNormalizer.NormalizeForCatalog(price, "79ai", out var ignoredReason);
+
+            Assert.True(ok, ignoredReason);
+            Assert.Equal("per_unit", price.RateType);
+            Assert.Equal("request", price.UnitType);
+            Assert.Equal("credit", price.ProviderPriceUnit);
+        }
+    }
+
+    public static IEnumerable<object[]> InvalidCatalogPrices()
+    {
+        var now = DateTime.UtcNow;
+        yield return [new AiModelPriceDto { DurationSeconds = 0 }, "invalid duration_seconds"];
+        yield return [new AiModelPriceDto { DurationSeconds = -1 }, "invalid duration_seconds"];
+        yield return [new AiModelPriceDto { ProviderPrice = -1 }, "invalid provider_price"];
+        yield return [new AiModelPriceDto { ProviderPriceDefault = -1 }, "invalid provider_price_default"];
+        yield return [new AiModelPriceDto { InternalCostPoints = -1 }, "invalid internal_cost_points"];
+        yield return [new AiModelPriceDto { SellPoints = -1 }, "invalid sell_points"];
+        yield return [new AiModelPriceDto { EffectiveFrom = now, EffectiveTo = now }, "invalid effective range"];
+    }
+
+    [Fact]
     public void CatalogModelNormalizationUsesProductionSafeDefaults()
     {
         var syncService = ReadSource("TodoX.Web", "Services", "AiProviders", "AiProviderSyncService.cs");
@@ -278,6 +438,79 @@ public sealed class AiProviderContractTests
             yield return repository[index..end];
             index = end;
         }
+    }
+
+    private static IEnumerable<string> PriceInsertBlocks(string repository)
+    {
+        var marker = "INSERT INTO public.todox_ai_model_price";
+        var index = 0;
+        while ((index = repository.IndexOf(marker, index, StringComparison.Ordinal)) >= 0)
+        {
+            var end = repository.IndexOf("ON CONFLICT", index, StringComparison.Ordinal);
+            Assert.True(end > index, "Price insert block must contain ON CONFLICT.");
+            yield return repository[index..end];
+            index = end;
+        }
+    }
+
+    private sealed class JsonHandler : HttpMessageHandler
+    {
+        private readonly string _json;
+        private bool _served;
+
+        public JsonHandler(string json)
+        {
+            _json = json;
+        }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var json = _served ? """{"models":[]}""" : _json;
+            _served = true;
+            return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new StringContent(json)
+            });
+        }
+    }
+
+    private sealed class FakeResolver : IProviderCredentialResolver
+    {
+        private readonly string _secret;
+        public Guid AccountId { get; } = Guid.NewGuid();
+
+        public FakeResolver(string secret)
+        {
+            _secret = secret;
+        }
+
+        public Task<ResolvedProviderCredential> ResolveAsync(string providerCode, string credentialRole, CancellationToken ct = default)
+            => Task.FromResult(new ResolvedProviderCredential
+            {
+                ProviderAccountId = AccountId,
+                ProviderCode = providerCode,
+                CredentialRole = credentialRole,
+                Secret = _secret,
+                MaskedHint = "****oken"
+            });
+    }
+
+    private sealed class FakeCredentialRepository : IProviderCredentialRepository
+    {
+        public Task<ProviderCredentialAccount?> GetAccountByIdAsync(Guid providerAccountId, CancellationToken ct = default)
+            => Task.FromResult<ProviderCredentialAccount?>(new ProviderCredentialAccount { Id = providerAccountId, ProviderCode = "79ai", ConfigJson = """{"domain":"79ai.net"}""" });
+
+        public Task<ProviderCredentialAccount?> GetPreferredAccountAsync(string providerCode, string environment = "production", CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<ProviderCredentialMapping?> GetActiveMappingAsync(Guid providerAccountId, string credentialRole, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<ProviderSecureCredentialRecord?> GetSecureCredentialAsync(Guid secureCredentialId, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<ProviderSecureCredentialRecord?> GetActiveSecureCredentialAsync(Guid providerAccountId, string credentialRole, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<Guid> InsertSecureCredentialAsync(Guid providerAccountId, string credentialRole, ProtectedProviderCredential protectedCredential, Guid? userId, string metadataJson, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task DeactivatePriorSecureCredentialsAsync(Guid providerAccountId, string credentialRole, Guid keepSecureCredentialId, Guid? userId, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task UpsertMappingAsync(Guid providerAccountId, string credentialRole, Guid secureCredentialId, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task DeactivatePriorMappingsAsync(Guid providerAccountId, string credentialRole, Guid keepSecureCredentialId, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task SetProviderAccountEnabledDefaultAsync(Guid providerAccountId, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task UpdateLastUsedAsync(Guid secureCredentialId, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<ProviderAccountCredentialMetadata?> GetCredentialMetadataAsync(Guid providerAccountId, string credentialRole, CancellationToken ct = default) => throw new NotImplementedException();
     }
 
     private static string ReadSource(params string[] parts)

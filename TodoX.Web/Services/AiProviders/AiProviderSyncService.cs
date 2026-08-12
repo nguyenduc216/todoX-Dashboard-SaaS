@@ -126,7 +126,7 @@ public sealed class AiProviderSyncService : IAiProviderSyncService
                     ? await _models.GetModelAsync(current.Id, ct)
                     : null;
 
-                PrepareIncomingPrices(detail.Prices, currentDetail?.Prices ?? new List<AiModelPriceDto>(), defaultPolicy);
+                await PrepareIncomingPricesAsync(syncId, provider.ProviderCode, detail, currentDetail?.Prices ?? new List<AiModelPriceDto>(), defaultPolicy, ct);
                 var changeCount = await InsertChangesAsync(syncId, currentDetail, detail, ct);
                 result.PriceChangedCount += changeCount.PriceChanges;
 
@@ -312,24 +312,46 @@ public sealed class AiProviderSyncService : IAiProviderSyncService
         }
     }
 
-    private static void PrepareIncomingPrices(
-        IReadOnlyList<AiModelPriceDto> incoming,
+    private async Task PrepareIncomingPricesAsync(
+        Guid syncId,
+        string providerCode,
+        AiProviderModelDetailDto model,
         IReadOnlyList<AiModelPriceDto> existing,
-        AiPricingPolicyDto? defaultPolicy)
+        AiPricingPolicyDto? defaultPolicy,
+        CancellationToken ct)
     {
-        var existingByKey = existing.ToDictionary(PriceKey, StringComparer.OrdinalIgnoreCase);
-        foreach (var price in incoming)
+        foreach (var price in model.Prices.ToList())
         {
-            price.Mode = NormalizeNullable(price.Mode);
-            price.Resolution = NormalizeNullable(price.Resolution);
-            price.Ratio = NormalizeNullable(price.Ratio);
-            price.ProviderPriceUnit = NormalizeNullable(price.ProviderPriceUnit) ?? "79ai_credit";
-            price.UnitType = NormalizeNullable(price.UnitType) ?? "scene";
-            price.SellPriceMode = string.IsNullOrWhiteSpace(price.SellPriceMode) ? "AUTO" : price.SellPriceMode.Trim().ToUpperInvariant();
-            price.PriceSource = NormalizeNullable(price.PriceSource) ?? "catalog";
-            price.EffectiveFrom ??= DateTime.UtcNow;
-            price.Active = true;
+            if (AiModelPriceNormalizer.NormalizeForCatalog(price, providerCode, out var ignoredReason))
+            {
+                continue;
+            }
 
+            model.Prices.Remove(price);
+            await _modelRepository.InsertSyncChangeAsync(
+                syncId,
+                "MODEL_UPDATED",
+                "price_ignored",
+                $"{model.ProviderModelCode}:{PriceKey(price)}",
+                null,
+                Serialize(new
+                {
+                    reason = ignoredReason,
+                    provider_model_code = model.ProviderModelCode,
+                    mode = price.Mode,
+                    resolution = price.Resolution,
+                    duration_seconds = price.DurationSeconds,
+                    ratio = price.Ratio,
+                    rate_type = price.RateType,
+                    unit_type = price.UnitType
+                }),
+                ct,
+                changedFields: new[] { "ignored_reason" });
+        }
+
+        var existingByKey = existing.ToDictionary(PriceKey, StringComparer.OrdinalIgnoreCase);
+        foreach (var price in model.Prices.ToList())
+        {
             var providerUnit = price.ProviderPrice ?? price.ProviderPriceDefault;
             if (providerUnit.HasValue && defaultPolicy is not null)
             {
@@ -352,6 +374,30 @@ public sealed class AiProviderSyncService : IAiProviderSyncService
             if (price.InternalCostPoints.HasValue && defaultPolicy is not null)
             {
                 price.SellPoints = AiPricingEngine.CalculateSellUnitPoints(price.InternalCostPoints.Value, price, defaultPolicy);
+            }
+
+            if (!AiModelPriceNormalizer.NormalizeForCatalog(price, providerCode, out var ignoredReason))
+            {
+                model.Prices.Remove(price);
+                await _modelRepository.InsertSyncChangeAsync(
+                    syncId,
+                    "MODEL_UPDATED",
+                    "price_ignored",
+                    $"{model.ProviderModelCode}:{PriceKey(price)}",
+                    null,
+                    Serialize(new
+                    {
+                        reason = ignoredReason,
+                        provider_model_code = model.ProviderModelCode,
+                        mode = price.Mode,
+                        resolution = price.Resolution,
+                        duration_seconds = price.DurationSeconds,
+                        ratio = price.Ratio,
+                        rate_type = price.RateType,
+                        unit_type = price.UnitType
+                    }),
+                    ct,
+                    changedFields: new[] { "ignored_reason" });
             }
         }
     }
@@ -544,7 +590,7 @@ public sealed class AiProviderSyncService : IAiProviderSyncService
     }
 
     private static string PriceKey(AiModelPriceDto price)
-        => string.Join(":", price.Mode ?? string.Empty, price.Resolution ?? string.Empty, price.DurationSeconds?.ToString() ?? string.Empty, price.Ratio ?? string.Empty);
+        => AiModelPriceVariantKey.Build(price);
 
     private static string Serialize(object value) => JsonSerializer.Serialize(value, JsonOptions);
 

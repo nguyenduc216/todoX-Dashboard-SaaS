@@ -38,5 +38,5 @@ public static class AiProviderSyncPlanner
     }
 
     private static string PriceKey(AiModelPriceDto price)
-        => string.Join(":", price.Mode ?? string.Empty, price.Resolution ?? string.Empty, price.DurationSeconds?.ToString() ?? string.Empty, price.Ratio ?? string.Empty);
+        => AiModelPriceVariantKey.Build(price);
 }

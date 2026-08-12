@@ -31,24 +31,10 @@ public sealed class AiPricingService : IAiPricingService
 
     public async Task SavePriceAsync(AiModelPriceDto price, string? userId, CancellationToken ct = default)
     {
-        var mode = NormalizeSellMode(price.SellPriceMode);
-        if (mode is not ("AUTO" or "FIXED" or "MARKUP"))
+        var model = price.ModelId > 0 ? await _models.GetModelAsync(price.ModelId, ct) : null;
+        if (!AiModelPriceNormalizer.NormalizeForManualSave(price, model?.ProviderCode ?? string.Empty, out var ignoredReason))
         {
-            throw new InvalidOperationException("Sell price mode khong hop le.");
-        }
-
-        price.SellPriceMode = mode;
-        if (price.SellPoints is < 0)
-        {
-            throw new InvalidOperationException("Sell points khong duoc am.");
-        }
-        if (price.MarkupPercent is < 0)
-        {
-            throw new InvalidOperationException("Markup percent khong duoc am.");
-        }
-        if (price.MinimumPoints is < 0)
-        {
-            throw new InvalidOperationException("Minimum points khong duoc am.");
+            throw new InvalidOperationException(ignoredReason ?? "Price row khong hop le.");
         }
 
         await _pricingRepo.UpsertPriceAsync(price, userId, ct);

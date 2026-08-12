@@ -107,9 +107,9 @@ public sealed class AiPricingRepository
                  markup_percent, minimum_points, rounding_rule, price_source, effective_from, effective_to, active,
                  created_by, updated_by, created_at, updated_at)
             VALUES
-                (@ModelId, @Mode, @Resolution, @DurationSeconds, @Ratio, @RateType, @UnitType, @ProviderPrice,
-                 @ProviderPriceDefault, @ProviderPriceUnit, @InternalCostPoints, @SellPoints, @SellPriceMode,
-                 @MarkupPercent, @MinimumPoints, @RoundingRule, @PriceSource, @EffectiveFrom, @EffectiveTo, @Active,
+                (@ModelId, @Mode, @Resolution, @DurationSeconds, @Ratio, COALESCE(NULLIF(@RateType, ''), 'per_unit'), COALESCE(NULLIF(@UnitType, ''), 'request'), @ProviderPrice,
+                 @ProviderPriceDefault, COALESCE(NULLIF(@ProviderPriceUnit, ''), 'credit'), @InternalCostPoints, @SellPoints, COALESCE(NULLIF(@SellPriceMode, ''), 'AUTO'),
+                 @MarkupPercent, GREATEST(COALESCE(@MinimumPoints, 0), 0), COALESCE(NULLIF(@RoundingRule, ''), 'CEIL'), COALESCE(NULLIF(@PriceSource, ''), 'catalog'), COALESCE(@EffectiveFrom, now()), @EffectiveTo, COALESCE(@Active, true),
                  @userId, @userId, now(), now())
             ON CONFLICT (
                 model_id,
