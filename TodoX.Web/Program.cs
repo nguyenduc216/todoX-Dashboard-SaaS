@@ -118,6 +118,11 @@ builder.Services.AddScoped<TodoX.Web.Services.AiProviders.IAiProviderModelServic
 builder.Services.AddScoped<TodoX.Web.Services.AiProviders.AiPricingRepository>();
 builder.Services.AddScoped<TodoX.Web.Services.AiProviders.IAiPricingService, TodoX.Web.Services.AiProviders.AiPricingService>();
 builder.Services.AddScoped<TodoX.Web.Services.AiProviders.IAiProviderSyncService, TodoX.Web.Services.AiProviders.AiProviderSyncService>();
+builder.Services.AddScoped<TodoX.Web.Services.AiProviders.IProviderCredentialKeyStore, TodoX.Web.Services.AiProviders.ProviderCredentialKeyStore>();
+builder.Services.AddScoped<TodoX.Web.Services.AiProviders.IProviderCredentialProtector, TodoX.Web.Services.AiProviders.ProviderCredentialProtector>();
+builder.Services.AddScoped<TodoX.Web.Services.AiProviders.IProviderCredentialRepository, TodoX.Web.Services.AiProviders.ProviderCredentialRepository>();
+builder.Services.AddScoped<TodoX.Web.Services.AiProviders.IProviderCredentialResolver, TodoX.Web.Services.AiProviders.ProviderCredentialResolver>();
+builder.Services.AddScoped<TodoX.Web.Services.AiProviders.IAi79CredentialMigrationService, TodoX.Web.Services.AiProviders.Ai79CredentialMigrationService>();
 builder.Services.AddHttpClient<TodoX.Web.Services.AiProviders.IAi79CatalogClient, TodoX.Web.Services.AiProviders.Ai79CatalogClient>();
 builder.Services.Configure<TodoX.Web.Services.AiProviders.AiProviderCatalogSyncOptions>(builder.Configuration.GetSection(TodoX.Web.Services.AiProviders.AiProviderCatalogSyncOptions.SectionName));
 builder.Services.AddHostedService<TodoX.Web.Services.AiProviders.AiProviderCatalogSyncWorker>();

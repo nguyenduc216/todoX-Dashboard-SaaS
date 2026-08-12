@@ -6,6 +6,8 @@
 @inject IAiProviderModelService ModelService
 @inject IAiPricingService Pricing
 @inject IAiProviderSyncService Syncs
+@inject IAi79CredentialMigrationService Ai79CredentialMigration
+@inject IDialogService DialogService
 @inject ISnackbar Snackbar
 
 <PageTitle>AI Providers</PageTitle>
@@ -171,8 +173,28 @@
                     <MudPaper Class="todox-card pa-5" rounded="true">
                         <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
                             <MudText Typo="Typo.h6">@_selected.ProviderName <MudChip T="string" Size="Size.Small" Color="Color.Default">@_selected.ProviderCode</MudChip></MudText>
-                            <MudButton Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.Save" Disabled="@_busy" OnClick="SaveProvider">Lưu provider</MudButton>
+                            <MudStack Row="true" Spacing="2" Class="flex-wrap">
+                                @if (IsSelected79Ai)
+                                {
+                                    <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Key" Disabled="@_busy" OnClick="Migrate79AiCredentialAsync">Khởi tạo credential bảo mật</MudButton>
+                                }
+                                <MudButton Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.Save" Disabled="@_busy" OnClick="SaveProvider">Lưu provider</MudButton>
+                            </MudStack>
                         </MudStack>
+                        @if (IsSelected79Ai && _ai79CredentialMetadata is not null)
+                        {
+                            <MudStack Row="true" Spacing="1" Class="flex-wrap mt-2">
+                                <MudChip T="string" Size="Size.Small" Color="@(_ai79CredentialMetadata.AccountEnabled ? Color.Success : Color.Default)">Account: @(_ai79CredentialMetadata.AccountEnabled ? "enabled" : "disabled")</MudChip>
+                                <MudChip T="string" Size="Size.Small" Color="@(_ai79CredentialMetadata.MappingEnabled ? Color.Success : Color.Default)">Role: @_ai79CredentialMetadata.CredentialRole</MudChip>
+                                <MudChip T="string" Size="Size.Small" Color="Color.Info">Status: @_ai79CredentialMetadata.SecureStatus</MudChip>
+                                <MudChip T="string" Size="Size.Small" Color="Color.Default">Key: @_ai79CredentialMetadata.KeyVersion</MudChip>
+                                <MudChip T="string" Size="Size.Small" Color="Color.Primary">@(_ai79CredentialMetadata.MaskedHint ?? "****")</MudChip>
+                                @if (_ai79CredentialMetadata.LastUsedAt is not null)
+                                {
+                                    <MudChip T="string" Size="Size.Small" Color="Color.Secondary">Last used: @_ai79CredentialMetadata.LastUsedAt.Value.ToString("yyyy-MM-dd HH:mm")</MudChip>
+                                }
+                            </MudStack>
+                        }
                         <MudDivider Class="my-3" />
                         <MudGrid>
                             <MudItem xs="12" sm="6"><MudTextField @bind-Value="_providerEdit.ProviderName" Label="Tên provider" Variant="Variant.Outlined" /></MudItem>
@@ -631,11 +653,13 @@
     private string? _modelSearch;
     private long? _selectedProviderForSync;
     private string? _syncMessage;
+    private ProviderAccountCredentialMetadata? _ai79CredentialMetadata;
     private List<AiProviderSyncHeaderDto> _syncHistory = new();
     private EstimateCostRequestDto _estimateRequest = new() { Quantity = 1 };
     private EstimateCostResponseDto? _estimateResult;
     private int _activeTabIndex;
     private AiProviderSyncHeaderDto? LatestSync => _syncHistory.FirstOrDefault();
+    private bool IsSelected79Ai => string.Equals(_selected?.ProviderCode, "79ai", StringComparison.OrdinalIgnoreCase);
 
     private bool CanSaveQuickDefaults
         => _quickDefaults.Count == AiFeatureProviderCatalog.QuickDefaultFeatures.Count
@@ -790,10 +814,63 @@
                 ConfigJson = _selected.ConfigJson
             };
             _capabilities = _selected.Capabilities.ToList();
+            _ai79CredentialMetadata = IsSelected79Ai ? await Ai79CredentialMigration.GetMetadataAsync() : null;
         }
         catch (Exception ex)
         {
             Snackbar.Add(ex.Message, Severity.Error);
+        }
+    }
+
+    private async Task Migrate79AiCredentialAsync()
+    {
+        if (!IsSelected79Ai || AuthState.CurrentUser is null)
+        {
+            return;
+        }
+
+        var confirmed = await DialogService.ShowMessageBoxAsync(
+            "Xác nhận",
+            "Khởi tạo credential bảo mật 79AI từ credential runtime legacy hiện có?",
+            yesText: "Khởi tạo",
+            cancelText: "Hủy");
+        if (confirmed != true)
+        {
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            var result = await Ai79CredentialMigration.MigrateAsync(AuthState.CurrentUser.UserId);
+            _ai79CredentialMetadata = result.Metadata;
+            Snackbar.Add(result.Message, result.Success ? Severity.Success : Severity.Warning);
+            await ReloadProviders();
+            if (_selected is not null)
+            {
+                _selected = await Providers.GetProviderAsync(_selected.Id);
+                if (_selected is not null)
+                {
+                    _providerEdit = new UpdateAiProviderRequest
+                    {
+                        ProviderName = _selected.ProviderName,
+                        BaseUrl = _selected.BaseUrl,
+                        ApiKeyConfigName = _selected.ApiKeyConfigName,
+                        Enabled = _selected.Enabled,
+                        Priority = _selected.Priority,
+                        Description = _selected.Description,
+                        ConfigJson = _selected.ConfigJson
+                    };
+                }
+            }
+        }
+        catch
+        {
+            Snackbar.Add("Không thể khởi tạo credential bảo mật 79AI.", Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
         }
     }
 
