@@ -177,8 +177,16 @@ public sealed class AiProviderContractTests
 
         foreach (var source in new[] { pricingRepository, modelRepository })
         {
-            Assert.Contains("ON CONFLICT (model_id, (COALESCE(mode, '')), (COALESCE(resolution, '')), (COALESCE(duration_seconds, 0)), (COALESCE(ratio, '')))", source, StringComparison.Ordinal);
+            Assert.Contains("(COALESCE(mode, ''::character varying))", source, StringComparison.Ordinal);
+            Assert.Contains("(COALESCE(resolution, ''::character varying))", source, StringComparison.Ordinal);
+            Assert.Contains("(COALESCE(duration_seconds, (0)::numeric))", source, StringComparison.Ordinal);
+            Assert.Contains("(COALESCE(ratio, ''::character varying))", source, StringComparison.Ordinal);
+            Assert.Contains("rate_type,", source, StringComparison.Ordinal);
+            Assert.Contains("unit_type", source, StringComparison.Ordinal);
+            Assert.Contains("WHERE active = true", source, StringComparison.Ordinal);
+            Assert.Contains("AND effective_to IS NULL", source, StringComparison.Ordinal);
             Assert.DoesNotContain("ON CONFLICT (model_id, mode, resolution, duration_seconds, ratio)", source, StringComparison.Ordinal);
+            Assert.DoesNotContain("ON CONFLICT (model_id, (COALESCE(mode, '')), (COALESCE(resolution, '')), (COALESCE(duration_seconds, 0)), (COALESCE(ratio, '')))", source, StringComparison.Ordinal);
         }
     }
 

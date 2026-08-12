@@ -150,8 +150,8 @@ public sealed class AiProviderDurationPricingTests
         Assert.Contains("0,", sync, StringComparison.Ordinal);
         Assert.DoesNotContain("normalizedCatalog.IgnoredCount,\r\n                BuildSummaryJson(result, normalizedCatalog.IgnoredCount)", sync, StringComparison.Ordinal);
         Assert.DoesNotContain("provider_model_id_base = ANY", sync, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("ON CONFLICT (model_id, (COALESCE(mode, '')), (COALESCE(resolution, '')), (COALESCE(duration_seconds, 0)), (COALESCE(ratio, '')))", repository, StringComparison.Ordinal);
-        Assert.Contains("ON CONFLICT (model_id, (COALESCE(mode, '')), (COALESCE(resolution, '')), (COALESCE(duration_seconds, 0)), (COALESCE(ratio, '')))", pricingRepository, StringComparison.Ordinal);
+        AssertPriceConflictTargetMatchesActiveVariantIndex(repository);
+        AssertPriceConflictTargetMatchesActiveVariantIndex(pricingRepository);
     }
 
     [Fact]
@@ -162,12 +162,33 @@ public sealed class AiProviderDurationPricingTests
 
         foreach (var source in new[] { pricingRepository, modelRepository })
         {
-            Assert.Contains("COALESCE(mode, '')", source, StringComparison.Ordinal);
-            Assert.Contains("COALESCE(resolution, '')", source, StringComparison.Ordinal);
-            Assert.Contains("COALESCE(duration_seconds, 0)", source, StringComparison.Ordinal);
-            Assert.Contains("COALESCE(ratio, '')", source, StringComparison.Ordinal);
+            AssertPriceConflictTargetMatchesActiveVariantIndex(source);
             Assert.DoesNotContain("ON CONFLICT (model_id, mode, resolution, duration_seconds, ratio)", source, StringComparison.Ordinal);
+            Assert.DoesNotContain("ON CONFLICT (model_id, (COALESCE(mode, '')), (COALESCE(resolution, '')), (COALESCE(duration_seconds, 0)), (COALESCE(ratio, '')))", source, StringComparison.Ordinal);
         }
+    }
+
+    [Fact]
+    public void PriceVariantIdentity_NormalizesOnlyActiveOpenRowsWithRateAndUnit()
+    {
+        var basePrice = new AiModelPriceDto
+        {
+            ModelId = 10,
+            Mode = null,
+            Resolution = null,
+            DurationSeconds = null,
+            Ratio = null,
+            RateType = "credit",
+            UnitType = "scene",
+            Active = true,
+            EffectiveTo = null
+        };
+
+        Assert.Equal(ActiveVariantKey(basePrice), ActiveVariantKey(new AiModelPriceDto { ModelId = 10, Mode = "", Resolution = "", DurationSeconds = 0, Ratio = "", RateType = "credit", UnitType = "scene", Active = true }));
+        Assert.NotEqual(ActiveVariantKey(basePrice), ActiveVariantKey(new AiModelPriceDto { ModelId = 10, RateType = "usd", UnitType = "scene", Active = true }));
+        Assert.NotEqual(ActiveVariantKey(basePrice), ActiveVariantKey(new AiModelPriceDto { ModelId = 10, RateType = "credit", UnitType = "request", Active = true }));
+        Assert.Null(ActiveVariantKey(new AiModelPriceDto { ModelId = 10, RateType = "credit", UnitType = "scene", Active = false }));
+        Assert.Null(ActiveVariantKey(new AiModelPriceDto { ModelId = 10, RateType = "credit", UnitType = "scene", Active = true, EffectiveTo = DateTime.UtcNow }));
     }
 
     [Fact]
@@ -331,6 +352,32 @@ public sealed class AiProviderDurationPricingTests
             BaseUrl = "https://catalog.local",
             ConfigJson = """{"catalog":{"video_models_path":"/catalog/video-models"}}"""
         };
+
+    private static void AssertPriceConflictTargetMatchesActiveVariantIndex(string source)
+    {
+        Assert.Contains("ON CONFLICT (", source, StringComparison.Ordinal);
+        Assert.Contains("model_id,", source, StringComparison.Ordinal);
+        Assert.Contains("(COALESCE(mode, ''::character varying))", source, StringComparison.Ordinal);
+        Assert.Contains("(COALESCE(resolution, ''::character varying))", source, StringComparison.Ordinal);
+        Assert.Contains("(COALESCE(duration_seconds, (0)::numeric))", source, StringComparison.Ordinal);
+        Assert.Contains("(COALESCE(ratio, ''::character varying))", source, StringComparison.Ordinal);
+        Assert.Contains("rate_type,", source, StringComparison.Ordinal);
+        Assert.Contains("unit_type", source, StringComparison.Ordinal);
+        Assert.Contains("WHERE active = true", source, StringComparison.Ordinal);
+        Assert.Contains("AND effective_to IS NULL", source, StringComparison.Ordinal);
+    }
+
+    private static string? ActiveVariantKey(AiModelPriceDto price)
+        => price.Active && price.EffectiveTo is null
+            ? string.Join("|",
+                price.ModelId,
+                price.Mode ?? string.Empty,
+                price.Resolution ?? string.Empty,
+                price.DurationSeconds ?? 0,
+                price.Ratio ?? string.Empty,
+                price.RateType ?? string.Empty,
+                price.UnitType ?? string.Empty)
+            : null;
 
     private static string ReadSource(params string[] parts)
     {
