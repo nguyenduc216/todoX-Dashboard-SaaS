@@ -170,6 +170,19 @@ public sealed class AiProviderContractTests
     }
 
     [Fact]
+    public void PriceUpsertUsesProductionNormalizedVariantIdentity()
+    {
+        var pricingRepository = ReadSource("TodoX.Web", "Services", "AiProviders", "AiPricingRepository.cs");
+        var modelRepository = ReadSource("TodoX.Web", "Services", "AiProviders", "AiProviderModelRepository.cs");
+
+        foreach (var source in new[] { pricingRepository, modelRepository })
+        {
+            Assert.Contains("ON CONFLICT (model_id, (COALESCE(mode, '')), (COALESCE(resolution, '')), (COALESCE(duration_seconds, 0)), (COALESCE(ratio, '')))", source, StringComparison.Ordinal);
+            Assert.DoesNotContain("ON CONFLICT (model_id, mode, resolution, duration_seconds, ratio)", source, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
     public void CatalogModelNormalizationUsesProductionSafeDefaults()
     {
         var syncService = ReadSource("TodoX.Web", "Services", "AiProviders", "AiProviderSyncService.cs");

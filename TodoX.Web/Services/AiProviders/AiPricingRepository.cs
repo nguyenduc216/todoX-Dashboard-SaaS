@@ -111,7 +111,7 @@ public sealed class AiPricingRepository
                  @ProviderPriceDefault, @ProviderPriceUnit, @InternalCostPoints, @SellPoints, @SellPriceMode,
                  @MarkupPercent, @MinimumPoints, @RoundingRule, @PriceSource, @EffectiveFrom, @EffectiveTo, @Active,
                  @userId, @userId, now(), now())
-            ON CONFLICT (model_id, mode, resolution, duration_seconds, ratio)
+            ON CONFLICT (model_id, (COALESCE(mode, '')), (COALESCE(resolution, '')), (COALESCE(duration_seconds, 0)), (COALESCE(ratio, '')))
             DO UPDATE SET
                 rate_type = EXCLUDED.rate_type,
                 unit_type = EXCLUDED.unit_type,

@@ -136,6 +136,7 @@ public sealed class AiProviderDurationPricingTests
     public void ProviderSync_SourceContract_UsesProviderIdAndProviderModelCodeWithIgnoredDiagnostics()
     {
         var repository = ReadSource("TodoX.Web", "Services", "AiProviders", "AiProviderModelRepository.cs");
+        var pricingRepository = ReadSource("TodoX.Web", "Services", "AiProviders", "AiPricingRepository.cs");
         var sync = ReadSource("TodoX.Web", "Services", "AiProviders", "AiProviderSyncService.cs");
 
         Assert.Contains("ON CONFLICT (provider_id, provider_model_code)", repository, StringComparison.Ordinal);
@@ -149,6 +150,24 @@ public sealed class AiProviderDurationPricingTests
         Assert.Contains("0,", sync, StringComparison.Ordinal);
         Assert.DoesNotContain("normalizedCatalog.IgnoredCount,\r\n                BuildSummaryJson(result, normalizedCatalog.IgnoredCount)", sync, StringComparison.Ordinal);
         Assert.DoesNotContain("provider_model_id_base = ANY", sync, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("ON CONFLICT (model_id, (COALESCE(mode, '')), (COALESCE(resolution, '')), (COALESCE(duration_seconds, 0)), (COALESCE(ratio, '')))", repository, StringComparison.Ordinal);
+        Assert.Contains("ON CONFLICT (model_id, (COALESCE(mode, '')), (COALESCE(resolution, '')), (COALESCE(duration_seconds, 0)), (COALESCE(ratio, '')))", pricingRepository, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PriceRepository_UsesNormalizedVariantIdentity()
+    {
+        var pricingRepository = ReadSource("TodoX.Web", "Services", "AiProviders", "AiPricingRepository.cs");
+        var modelRepository = ReadSource("TodoX.Web", "Services", "AiProviders", "AiProviderModelRepository.cs");
+
+        foreach (var source in new[] { pricingRepository, modelRepository })
+        {
+            Assert.Contains("COALESCE(mode, '')", source, StringComparison.Ordinal);
+            Assert.Contains("COALESCE(resolution, '')", source, StringComparison.Ordinal);
+            Assert.Contains("COALESCE(duration_seconds, 0)", source, StringComparison.Ordinal);
+            Assert.Contains("COALESCE(ratio, '')", source, StringComparison.Ordinal);
+            Assert.DoesNotContain("ON CONFLICT (model_id, mode, resolution, duration_seconds, ratio)", source, StringComparison.Ordinal);
+        }
     }
 
     [Fact]
