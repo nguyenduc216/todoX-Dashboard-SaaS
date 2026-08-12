@@ -214,10 +214,32 @@ public static class AiProviderCatalog
         MotionControlVideo
     };
 
+    // Keep this list aligned with the production capability/unit contract.
     public static IReadOnlyList<string> UnitTypes { get; } = new[]
     {
-        "image", "second", "minute", "request", "scene", "character_1000", "token_1000"
+        "credits",
+        "tokens",
+        "token_1000",
+        "request",
+        "requests",
+        "image",
+        "images",
+        "second",
+        "seconds",
+        "video_second",
+        "video_seconds",
+        "minute",
+        "minutes",
+        "scene",
+        "character_1000",
+        "usd",
+        "fixed"
     };
+
+    private static readonly HashSet<string> UnitTypeSet = new(UnitTypes, StringComparer.Ordinal);
+
+    public static bool IsValidUnitType(string? unitType)
+        => !string.IsNullOrWhiteSpace(unitType) && UnitTypeSet.Contains(unitType);
 
     public static IReadOnlyList<string> ProviderTypes { get; } = new[]
     {

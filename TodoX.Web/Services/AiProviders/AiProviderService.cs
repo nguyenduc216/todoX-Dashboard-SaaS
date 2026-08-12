@@ -70,7 +70,7 @@ public sealed class AiProviderService : IAiProviderService
         {
             throw new InvalidOperationException("TÃªn hiá»ƒn thá»‹ capability khÃ´ng Ä‘Æ°á»£c Ä‘á»ƒ trá»‘ng.");
         }
-        if (!AiProviderCatalog.UnitTypes.Contains(request.UnitType))
+        if (!AiProviderCatalog.IsValidUnitType(request.UnitType))
         {
             throw new InvalidOperationException("ÄÆ¡n vá»‹ tÃ­nh (unit_type) khÃ´ng há»£p lá»‡.");
         }
