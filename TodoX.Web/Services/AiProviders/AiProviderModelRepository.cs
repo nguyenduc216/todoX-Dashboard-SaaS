@@ -197,6 +197,7 @@ public sealed class AiProviderModelRepository
 
     public async Task UpdateSyncFieldsAsync(
         long providerId,
+        string providerCode,
         string providerModelCode,
         string? providerModelIdBase,
         string displayName,
@@ -221,17 +222,18 @@ public sealed class AiProviderModelRepository
         await conn.ExecuteAsync(
             """
             INSERT INTO public.todox_ai_provider_model
-                (provider_id, provider_model_code, provider_model_id_base, display_name, media_type, server_code,
+                (provider_id, provider_code, provider_model_code, provider_model_id_base, display_name, media_type, server_code,
                  provider_status, status_message, rate_type, base_provider_price, provider_price_unit, source,
                  last_provider_sync_at, last_health_check_at, last_success_at, last_failure_at, failure_count,
                  raw_json, enabled, allow_user_select, is_deprecated, created_by, updated_by, created_at, updated_at)
             VALUES
-                (@providerId, @providerModelCode, @providerModelIdBase, @displayName, @mediaType, @serverCode,
+                (@providerId, @providerCode, @providerModelCode, @providerModelIdBase, @displayName, @mediaType, @serverCode,
                  @providerStatus, @statusMessage, @rateType, @baseProviderPrice, @providerPriceUnit, @source,
                  @lastProviderSyncAt, @lastHealthCheckAt, @lastSuccessAt, @lastFailureAt, @failureCount,
                  CAST(@rawJson AS jsonb), true, true, false, @userId, @userId, now(), now())
             ON CONFLICT (provider_id, provider_model_code)
             DO UPDATE SET
+                provider_code = EXCLUDED.provider_code,
                 provider_model_id_base = EXCLUDED.provider_model_id_base,
                 display_name = EXCLUDED.display_name,
                 media_type = EXCLUDED.media_type,
@@ -254,6 +256,7 @@ public sealed class AiProviderModelRepository
             new
             {
                 providerId,
+                providerCode,
                 providerModelCode,
                 providerModelIdBase,
                 displayName,
@@ -459,17 +462,18 @@ public sealed class AiProviderModelRepository
         var modelId = await conn.ExecuteScalarAsync<long>(
             """
             INSERT INTO public.todox_ai_provider_model
-                (provider_id, provider_model_code, provider_model_id_base, display_name, media_type, server_code,
+                (provider_id, provider_code, provider_model_code, provider_model_id_base, display_name, media_type, server_code,
                  provider_status, status_message, rate_type, base_provider_price, provider_price_unit, description,
                  enabled, allow_user_select, is_deprecated, source, last_provider_sync_at, last_health_check_at,
                  last_success_at, last_failure_at, failure_count, raw_json, created_by, updated_by, created_at, updated_at)
             VALUES
-                (@ProviderId, @ProviderModelCode, @ProviderModelIdBase, @DisplayName, @MediaType, @ServerCode,
+                (@ProviderId, @ProviderCode, @ProviderModelCode, @ProviderModelIdBase, @DisplayName, @MediaType, @ServerCode,
                  @ProviderStatus, @StatusMessage, @RateType, @BaseProviderPrice, @ProviderPriceUnit, @Description,
                  @Enabled, @AllowUserSelect, @IsDeprecated, @Source, @LastProviderSyncAt, @LastHealthCheckAt,
                  @LastSuccessAt, @LastFailureAt, @FailureCount, CAST(@RawJson AS jsonb), @userId, @userId, now(), now())
             ON CONFLICT (provider_id, provider_model_code)
             DO UPDATE SET
+                provider_code = EXCLUDED.provider_code,
                 provider_model_id_base = EXCLUDED.provider_model_id_base,
                 display_name = EXCLUDED.display_name,
                 media_type = EXCLUDED.media_type,
@@ -497,6 +501,7 @@ public sealed class AiProviderModelRepository
             new
             {
                 model.ProviderId,
+                model.ProviderCode,
                 model.ProviderModelCode,
                 model.ProviderModelIdBase,
                 model.DisplayName,

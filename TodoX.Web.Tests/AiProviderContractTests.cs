@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.RegularExpressions;
 using TodoX.Web.Models;
 using Xunit;
 
@@ -129,6 +130,27 @@ public sealed class AiProviderContractTests
 
         Assert.Contains("DROP CONSTRAINT IF EXISTS ck_todox_ai_provider_sync_change_type", migration, StringComparison.Ordinal);
         Assert.Contains("ADD CONSTRAINT ck_todox_ai_provider_sync_change_type", migration, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ProviderModelInsertPathsPersistProviderCodeFromTodoXProvider()
+    {
+        var repository = ReadSource("TodoX.Web", "Services", "AiProviders", "AiProviderModelRepository.cs");
+        var modelService = ReadSource("TodoX.Web", "Services", "AiProviders", "AiProviderModelService.cs");
+        var syncService = ReadSource("TodoX.Web", "Services", "AiProviders", "AiProviderSyncService.cs");
+
+        foreach (Match insert in Regex.Matches(repository, @"INSERT INTO public\.todox_ai_provider_model\s*\((?<columns>.*?)\)\s*VALUES\s*\((?<values>.*?)\)", RegexOptions.Singleline))
+        {
+            Assert.Contains("provider_code", insert.Groups["columns"].Value, StringComparison.OrdinalIgnoreCase);
+            Assert.Matches(@"@(?:ProviderCode|providerCode)\b", insert.Groups["values"].Value);
+        }
+
+        Assert.Contains("provider_code = EXCLUDED.provider_code", repository, StringComparison.Ordinal);
+        Assert.Contains("model.ProviderCode", repository, StringComparison.Ordinal);
+        Assert.Contains("model.ProviderCode", modelService, StringComparison.Ordinal);
+        Assert.Contains("ProviderCode = provider.ProviderCode", syncService, StringComparison.Ordinal);
+        Assert.DoesNotContain("ProviderCode = snapshot", syncService, StringComparison.Ordinal);
+        Assert.Contains("ON CONFLICT (provider_id, provider_model_code)", repository, StringComparison.Ordinal);
     }
 
     private static string ReadSource(params string[] parts)

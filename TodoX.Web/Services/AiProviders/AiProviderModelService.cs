@@ -37,6 +37,7 @@ public sealed class AiProviderModelService : IAiProviderModelService
     public Task UpdateSyncFieldsAsync(AiProviderModelDetailDto model, string? userId, CancellationToken ct = default)
         => _repo.UpdateSyncFieldsAsync(
             model.ProviderId,
+            model.ProviderCode,
             model.ProviderModelCode,
             model.ProviderModelIdBase,
             model.DisplayName,
