@@ -64,6 +64,21 @@
     min-height: 280px;
 }
 
+.health-video-result-frame {
+    width: 100%;
+    max-width: 420px;
+    aspect-ratio: 9 / 16;
+    overflow: hidden;
+    border-radius: 8px;
+    background: #10161d;
+}
+
+.health-video-result-frame .health-video-result-player,
+.health-video-result-frame .health-video-placeholder {
+    width: 100%;
+    height: 100%;
+}
+
 .health-video-audio {
     width: 100%;
     max-width: 420px;

@@ -290,16 +290,18 @@
                                         <MudText Typo="Typo.h6">Video đã hoàn thiện</MudText>
                                         <MudText Typo="Typo.body2" Class="todox-page-subtitle">5 Scene · 30 giây · 9:16 · 1080x1920</MudText>
                                         <MudChip T="string" Color="Color.Success" Variant="Variant.Filled" Icon="@Icons.Material.Filled.CheckCircle">Hoàn thành</MudChip>
-                                        @if (ResourceExists(ResultVideoUrl))
-                                        {
-                                            <video controls preload="metadata" class="health-video-result-player">
-                                                <source src="@ResultVideoUrl" type="video/mp4" />
-                                            </video>
-                                        }
-                                        else
-                                        {
-                                            <div class="health-video-placeholder health-video-video-placeholder">Video scene đang chờ cập nhật resource</div>
-                                        }
+                                        <div class="health-video-result-frame">
+                                            @if (ResourceExists(ResultVideoUrl))
+                                            {
+                                                <video controls preload="metadata" class="health-video-result-player">
+                                                    <source src="@ResultVideoUrl" type="video/mp4" />
+                                                </video>
+                                            }
+                                            else
+                                            {
+                                                <div class="health-video-placeholder health-video-video-placeholder">Video scene đang chờ cập nhật resource</div>
+                                            }
+                                        </div>
                                         <MudStack Row="true" Class="flex-wrap gap-2">
                                             <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.PlayArrow" OnClick="OpenResultAsync">Xem video</MudButton>
                                             <a href="@ResultVideoUrl" download="health-video-result.mp4" class="health-video-download-link">
