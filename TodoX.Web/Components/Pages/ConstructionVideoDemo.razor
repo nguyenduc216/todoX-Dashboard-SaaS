@@ -14,7 +14,7 @@
                 <MudText Typo="Typo.h4" Class="todox-page-title">Video Xây Dựng</MudText>
                 <MudChip T="string" Color="Color.Warning" Variant="Variant.Filled" Size="Size.Small">DEMO</MudChip>
             </MudStack>
-            <MudText Typo="Typo.body1" Class="todox-page-subtitle">Tạo video giới thiệu công trình, tiến độ thi công và năng lực nhà thầu bằng AI</MudText>
+            <MudText Typo="Typo.body1" Class="todox-page-subtitle">Tạo video giới thiệu tiến trình xây căn nhà bằng AI</MudText>
         </div>
     </MudStack>
 
@@ -43,7 +43,7 @@
                                         <MudText Typo="Typo.h6">Video Xây Dựng</MudText>
                                         <MudChip T="string" Color="Color.Info" Variant="Variant.Outlined" Size="Size.Small">Mockup</MudChip>
                                     </MudStack>
-                                    <MudText Typo="Typo.body2" Class="todox-page-subtitle">Tạo video showcase quy trình thi công, an toàn và năng lực triển khai dự án.</MudText>
+                                    <MudText Typo="Typo.body2" Class="todox-page-subtitle">Mockup dùng ảnh tiến độ và video đặt trong `wwwroot/resources/mockup/construction-video`.</MudText>
                                 </div>
                                 <MudChip T="string" Color="@(_projectCreated ? Color.Success : Color.Default)" Variant="Variant.Outlined" Size="Size.Small">@(_projectCreated ? "Created" : "Draft")</MudChip>
                             </MudStack>
@@ -52,18 +52,22 @@
                                 <MudItem xs="12" md="5">
                                     <MudPaper Class="pa-4 construction-video-image-panel" Outlined="true" rounded="true">
                                         <MudStack Spacing="2">
-                                            <MudText Typo="Typo.subtitle2">Ảnh công trình</MudText>
-                                            <MudText Typo="Typo.caption" Class="todox-page-subtitle">Ảnh đầu vào đặt tại thư mục resources mockup của ngành xây dựng.</MudText>
+                                            <MudText Typo="Typo.subtitle2">Ảnh căn nhà</MudText>
+                                            <MudText Typo="Typo.caption" Class="todox-page-subtitle">Chọn ảnh local để preview ngay trên browser, hoặc dùng ảnh mặc định.</MudText>
                                             <div class="construction-video-media-frame">
                                                 @if (ResourceExists(_projectImageUrl))
                                                 {
-                                                    <img src="@_projectImageUrl" alt="Ảnh công trình" class="construction-video-media-cover" />
+                                                    <img src="@_projectImageUrl" alt="Ảnh căn nhà" class="construction-video-media-cover" />
                                                 }
                                                 else
                                                 {
-                                                    <div class="construction-video-placeholder">Chưa có ảnh demo</div>
+                                                    <div class="construction-video-placeholder">construction-video-input.jpg chưa có trong thư mục mockup</div>
                                                 }
                                             </div>
+                                            <label class="construction-video-upload-label">
+                                                <InputFile class="construction-video-hidden-input" OnChange="OnProjectImageSelected" accept="image/png,image/jpeg,image/webp" />
+                                                <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Upload">Chọn file ảnh</MudButton>
+                                            </label>
                                             <MudText Typo="Typo.caption" Class="todox-page-subtitle">@_projectImageFileName</MudText>
                                         </MudStack>
                                     </MudPaper>
@@ -73,7 +77,6 @@
                                     <MudPaper Class="pa-4" Outlined="true" rounded="true">
                                         <MudStack Spacing="2">
                                             <MudText Typo="Typo.subtitle2">Thông tin mockup</MudText>
-                                            <MudText Typo="Typo.caption" Class="todox-page-subtitle">Mockup này dùng trực tiếp ảnh và video đặt trong `wwwroot/resources/mockup/construction-video`.</MudText>
                                             <MudGrid>
                                                 <MudItem xs="12" sm="6">
                                                     <MudTextField T="string" Label="Tên video" @bind-Value="_videoTitle" Variant="Variant.Outlined" Margin="Margin.Dense" />
@@ -101,12 +104,8 @@
                                                 <MudText Typo="Typo.body2">Độ phân giải: 1080 × 1920</MudText>
                                             </MudPaper>
                                             <MudDivider />
-                                            <MudButton Variant="Variant.Filled" Color="Color.Warning" Disabled="@_busy" StartIcon="@Icons.Material.Filled.MovieCreation" OnClick="CreateVideoAsync">Tạo video</MudButton>
+                                            <MudButton Variant="Variant.Filled" Color="Color.Warning" Disabled="@_busy" StartIcon="@Icons.Material.Filled.Image" OnClick="CreateImagesAsync">TẠO ẢNH TIẾN ĐỘ</MudButton>
                                             <MudAlert Severity="Severity.Info" Dense="true">@_statusMessage</MudAlert>
-                                            @if (_busy)
-                                            {
-                                                @LoadingPanel
-                                            }
                                         </MudStack>
                                     </MudPaper>
                                 </MudItem>
@@ -116,7 +115,7 @@
                 </div>
             </MudTabPanel>
 
-            <MudTabPanel Text="Scene / Hình ảnh">
+            <MudTabPanel Text="Render ảnh">
                 <div class="render-tab-scroll">
                     @if (!_projectCreated)
                     {
@@ -127,10 +126,16 @@
                         <MudStack Spacing="3">
                             <MudPaper Class="todox-card pa-4" rounded="true">
                                 <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
-                                    <MudText Typo="Typo.h6">Scene / Hình ảnh</MudText>
-                                    <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.ArrowForward" OnClick="ContinueToVideoAsync" Disabled="@_busy">Tiếp tục tạo video</MudButton>
+                                    <div>
+                                        <MudText Typo="Typo.h6">Render ảnh</MudText>
+                                        <MudText Typo="Typo.caption" Class="todox-page-subtitle">@_imageCompletedCount / @Scenes.Count ảnh đã hoàn thành</MudText>
+                                    </div>
+                                    @if (_imageCompletedCount == Scenes.Count)
+                                    {
+                                        <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.MovieCreation" OnClick="CreateSceneVideosAsync" Disabled="@_busy">TẠO VIDEO</MudButton>
+                                    }
                                 </MudStack>
-                                @if (_busy)
+                                @if (_isVideoRendering)
                                 {
                                     @LoadingPanel
                                 }
@@ -138,21 +143,36 @@
                             <MudGrid Class="construction-video-compact-grid">
                                 @foreach (var scene in Scenes)
                                 {
+                                    var isComplete = scene.SceneNo <= _imageCompletedCount;
                                     <MudItem xs="12" sm="6" md="3">
                                         <MudPaper Class="todox-card pa-3 construction-video-scene-card construction-video-compact-card" rounded="true">
                                             <MudStack Spacing="1">
                                                 <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="construction-video-card-header">
                                                     <MudText Typo="Typo.subtitle2">@scene.Title</MudText>
-                                                    <MudChip T="string" Color="Color.Success" Size="Size.Small">Hoàn thành</MudChip>
+                                                    <MudChip T="string" Color="@(isComplete ? Color.Success : Color.Warning)" Variant="@(isComplete ? Variant.Filled : Variant.Outlined)" Size="Size.Small">
+                                                        @(isComplete ? "Hoàn thành" : "Đang xử lý")
+                                                    </MudChip>
                                                 </MudStack>
+                                                <MudText Typo="Typo.body2" Class="construction-video-stage-title">@scene.Stage</MudText>
                                                 <div class="construction-video-media-frame construction-video-scene-frame">
-                                                    @if (ResourceExists(scene.ImageUrl))
+                                                    @if (isComplete)
                                                     {
-                                                        <img src="@scene.ImageUrl" alt="@scene.Title" class="construction-video-media-cover" />
+                                                        if (ResourceExists(scene.ImageUrl))
+                                                        {
+                                                            <img src="@scene.ImageUrl" alt="@scene.Title" class="construction-video-media-cover construction-video-fade-in" />
+                                                        }
+                                                        else
+                                                        {
+                                                            <div class="construction-video-placeholder">@scene.ImageFileName chưa có trong thư mục mockup</div>
+                                                        }
                                                     }
                                                     else
                                                     {
-                                                        <div class="construction-video-placeholder">@scene.ImageFileName chưa có trong thư mục mockup</div>
+                                                        <div class="construction-video-processing">
+                                                            <div class="construction-video-shimmer"></div>
+                                                            <MudProgressCircular Indeterminate="true" Color="Color.Warning" Size="Size.Medium" />
+                                                            <MudText Typo="Typo.caption">Đang xử lý</MudText>
+                                                        </div>
                                                     }
                                                 </div>
                                                 <MudText Typo="Typo.caption" Class="todox-page-subtitle">@scene.TimeRange</MudText>
@@ -170,9 +190,9 @@
 
             <MudTabPanel Text="Video">
                 <div class="render-tab-scroll">
-                    @if (!_projectCreated)
+                    @if (!_videosCreated)
                     {
-                        <MudAlert Severity="Severity.Info">Hãy hoàn thành bước Scene / Hình ảnh trước.</MudAlert>
+                        <MudAlert Severity="Severity.Info">Hãy render đủ 4 ảnh và bấm TẠO VIDEO trước.</MudAlert>
                     }
                     else
                     {
@@ -182,7 +202,7 @@
                                     <MudText Typo="Typo.h6">Video</MudText>
                                     <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.AutoAwesome" Disabled="@(_busy || _finalized)" OnClick="FinalizeVideoAsync">Hoàn thiện video</MudButton>
                                 </MudStack>
-                                @if (_busy)
+                                @if (_isFinalizing)
                                 {
                                     @LoadingPanel
                                 }
@@ -194,6 +214,7 @@
                                         <MudPaper Class="todox-card pa-3 construction-video-video-card construction-video-compact-card" rounded="true">
                                             <MudStack Spacing="1">
                                                 <MudText Typo="Typo.subtitle2">@scene.Title</MudText>
+                                                <MudText Typo="Typo.body2" Class="construction-video-stage-title">@scene.Stage</MudText>
                                                 <div class="construction-video-video-frame">
                                                     @if (ResourceExists(scene.VideoUrl))
                                                     {
@@ -264,7 +285,7 @@
                                 <MudPaper Class="todox-card pa-4" rounded="true">
                                     <MudStack Spacing="2">
                                         <MudText Typo="Typo.h6">Thông tin kết quả</MudText>
-                                        <MudText Typo="Typo.body2">Video giới thiệu công trình đã hoàn thiện</MudText>
+                                        <MudText Typo="Typo.body2">Video giới thiệu tiến trình xây căn nhà đã hoàn thiện</MudText>
                                         <MudText Typo="Typo.caption" Class="todox-page-subtitle">Loại video: Xây dựng &amp; Công trình</MudText>
                                         <MudText Typo="Typo.caption" Class="todox-page-subtitle">Loại công trình: @_projectType</MudText>
                                         <MudText Typo="Typo.caption" Class="todox-page-subtitle">Số scene: 4</MudText>
@@ -284,12 +305,13 @@
 </MudStack>
 
 @code {
-    public sealed record ConstructionVideoSceneMock(int SceneNo, string Title, string TimeRange, string Description, string ImageUrl, string VideoUrl, int DurationSeconds)
+    public sealed record ConstructionVideoSceneMock(int SceneNo, string Title, string Stage, string TimeRange, string Description, string ImageUrl, string VideoUrl, int DurationSeconds)
     {
         public string ImageFileName => Path.GetFileName(ImageUrl);
         public string VideoFileName => Path.GetFileName(VideoUrl);
     }
 
+    private const int TotalScenes = 4;
     private const string SceneCountText = "4";
     private const string DurationText = "24 giây";
     private const string AspectRatioText = "9:16";
@@ -300,23 +322,27 @@
 
     private readonly List<ConstructionVideoSceneMock> Scenes =
     [
-        new(1, "Scene 01", "00:00 - 00:06", "Mở đầu bằng tổng quan dự án, vị trí công trình và quy mô thi công.", $"{MockupBasePath}/construction-video-scene-01.jpg", $"{MockupBasePath}/construction-video-scene-01.mp4", 6),
-        new(2, "Scene 02", "00:06 - 00:12", "Giới thiệu năng lực nhà thầu, đội ngũ kỹ thuật và tiêu chuẩn an toàn.", $"{MockupBasePath}/construction-video-scene-02.jpg", $"{MockupBasePath}/construction-video-scene-02.mp4", 6),
-        new(3, "Scene 03", "00:12 - 00:18", "Mô tả các hạng mục chính: móng, kết cấu, hoàn thiện và kiểm soát chất lượng.", $"{MockupBasePath}/construction-video-scene-03.jpg", $"{MockupBasePath}/construction-video-scene-03.mp4", 6),
-        new(4, "Scene 04", "00:18 - 00:24", "Thể hiện tiến độ thi công, máy móc, vật tư và quy trình phối hợp tại hiện trường.", $"{MockupBasePath}/construction-video-scene-04.jpg", $"{MockupBasePath}/construction-video-scene-04.mp4", 6)
+        new(1, "Scene 01", "Giai đoạn 1 – Khởi công", "00:00 - 00:06", "Chuẩn bị mặt bằng, móng và kết cấu ban đầu của công trình.", $"{MockupBasePath}/construction-video-scene-01.jpg", $"{MockupBasePath}/construction-video-scene-01.mp4", 6),
+        new(2, "Scene 02", "Giai đoạn 2 – Thi công kết cấu", "00:06 - 00:12", "Hình thành khung nhà, cột, dầm, sàn và các tầng chính.", $"{MockupBasePath}/construction-video-scene-02.jpg", $"{MockupBasePath}/construction-video-scene-02.mp4", 6),
+        new(3, "Scene 03", "Giai đoạn 3 – Hoàn thiện kiến trúc", "00:12 - 00:18", "Hoàn thiện tường, cửa, mái, mặt tiền và các hạng mục chính.", $"{MockupBasePath}/construction-video-scene-03.jpg", $"{MockupBasePath}/construction-video-scene-03.mp4", 6),
+        new(4, "Scene 04", "Giai đoạn 4 – Công trình hoàn thiện", "00:18 - 00:24", "Hoàn thiện sơn, cảnh quan và toàn bộ công trình.", $"{MockupBasePath}/construction-video-scene-04.jpg", $"{MockupBasePath}/construction-video-scene-04.mp4", 6)
     ];
 
     private int _tabIndex;
     private bool _busy;
     private bool _projectCreated;
+    private bool _videosCreated;
     private bool _finalized;
+    private bool _isVideoRendering;
+    private bool _isFinalizing;
+    private int _imageCompletedCount;
     private int _actionProgress;
     private string _loadingTitle = string.Empty;
     private string _loadingMessage = string.Empty;
     private string _projectImageFileName = "construction-video-input.jpg";
-    private string _videoTitle = "Giới thiệu năng lực thi công dự án";
-    private string _projectType = "Nhà xưởng công nghiệp";
-    private string _statusMessage = "Hãy hoàn thành cấu hình ở tab Thông tin trước.";
+    private string _videoTitle = "Giới thiệu tiến trình xây căn nhà";
+    private string _projectType = "Nhà ở dân dụng";
+    private string _statusMessage = "Hãy chọn ảnh căn nhà hoặc dùng ảnh mặc định trước khi render.";
     private string _projectImageUrl = DefaultProjectImageUrl;
 
     private RenderFragment LoadingPanel => @<MudPaper Class="construction-video-loading-panel mt-3" Outlined="true" rounded="true">
@@ -329,39 +355,51 @@
         </MudStack>
     </MudPaper>;
 
-    private async Task CreateVideoAsync()
+    private async Task OnProjectImageSelected(InputFileChangeEventArgs args)
     {
-        if (_busy) return;
-        _busy = true;
-        await RunMockProgressAsync("AI đang tạo scene",
-        [
-            "Đang phân tích ảnh công trình và loại dự án...",
-            "Đang đọc kịch bản giới thiệu nhà thầu...",
-            "Đang chuẩn bị 4 scene theo tiến độ thi công...",
-            "Đang hoàn thiện nội dung scene..."
-        ]);
-        _projectCreated = true;
-        _busy = false;
-        _tabIndex = 1;
-        _statusMessage = "4 scene công trình đã sẵn sàng.";
-        Snackbar.Add(_statusMessage, Severity.Success);
-        ResetLoadingState();
+        _projectImageFileName = args.File.Name;
+        using var ms = new MemoryStream();
+        await args.File.OpenReadStream(10 * 1024 * 1024).CopyToAsync(ms);
+        _projectImageUrl = $"data:{args.File.ContentType};base64,{Convert.ToBase64String(ms.ToArray())}";
     }
 
-    private async Task ContinueToVideoAsync()
+    private async Task CreateImagesAsync()
     {
         if (_busy) return;
+
         _busy = true;
-        await RunMockProgressAsync("AI đang dựng video",
-        [
-            "Đang dựng chuyển động camera cho hiện trường...",
-            "Đang xử lý Scene 01...",
-            "Đang xử lý Scene 02...",
-            "Đang xử lý Scene 03...",
-            "Đang xử lý Scene 04...",
-            "Đang xử lý Scene 05..."
-        ]);
+        _projectCreated = true;
+        _videosCreated = false;
+        _finalized = false;
+        _imageCompletedCount = 0;
+        _tabIndex = 1;
+        _statusMessage = "Đang render 4 ảnh tiến độ.";
+        StateHasChanged();
+
+        for (var sceneNo = 1; sceneNo <= TotalScenes; sceneNo++)
+        {
+            await Task.Delay(2500);
+            _imageCompletedCount = sceneNo;
+            _statusMessage = sceneNo == TotalScenes
+                ? "4 ảnh tiến độ đã hoàn thành."
+                : $"Scene {sceneNo:00} đã hoàn thành, đang xử lý ảnh tiếp theo.";
+            StateHasChanged();
+        }
+
         _busy = false;
+        Snackbar.Add("4 ảnh tiến độ đã hoàn thành.", Severity.Success);
+    }
+
+    private async Task CreateSceneVideosAsync()
+    {
+        if (_busy || _imageCompletedCount < TotalScenes) return;
+
+        _busy = true;
+        _isVideoRendering = true;
+        await RunMockProgressAsync("AI đang tạo video", "Đang tạo video từ 4 ảnh tiến độ...", 5000);
+        _videosCreated = true;
+        _busy = false;
+        _isVideoRendering = false;
         _tabIndex = 2;
         _statusMessage = "Video của 4 scene đã hoàn thành.";
         Snackbar.Add(_statusMessage, Severity.Success);
@@ -371,37 +409,36 @@
     private async Task FinalizeVideoAsync()
     {
         if (_busy) return;
+
         _busy = true;
-        await RunMockProgressAsync("AI đang hoàn thiện video",
-        [
-            "Đang chuẩn bị timeline các scene...",
-            "Đang ghép video tiến độ công trình...",
-            "Đang hoàn tất bản dựng cuối cùng...",
-            "Đang xuất bản video xây dựng..."
-        ]);
+        _isFinalizing = true;
+        await RunMockProgressAsync("AI đang hoàn thiện video", "Đang xuất bản video xây dựng hoàn chỉnh...", 5000);
         _finalized = true;
         _busy = false;
+        _isFinalizing = false;
         _tabIndex = 3;
         _statusMessage = "Video xây dựng đã hoàn thiện.";
         Snackbar.Add(_statusMessage, Severity.Success);
         ResetLoadingState();
     }
 
-    private async Task RunMockProgressAsync(string title, IReadOnlyList<string> messages)
+    private async Task RunMockProgressAsync(string title, string message, int totalMilliseconds)
     {
         _loadingTitle = title;
+        _loadingMessage = message;
         _actionProgress = 0;
+
         const int steps = 10;
+        var delay = totalMilliseconds / steps;
         for (var step = 0; step <= steps; step++)
         {
             _actionProgress = step * 10;
-            _loadingMessage = messages[Math.Min(messages.Count - 1, step * messages.Count / (steps + 1))];
             StateHasChanged();
-            await Task.Delay(450);
+            if (step < steps)
+            {
+                await Task.Delay(delay);
+            }
         }
-        _actionProgress = 100;
-        StateHasChanged();
-        await Task.Delay(300);
     }
 
     private void ResetLoadingState()
@@ -418,9 +455,13 @@
         _tabIndex = 0;
         _busy = false;
         _projectCreated = false;
+        _videosCreated = false;
         _finalized = false;
+        _isVideoRendering = false;
+        _isFinalizing = false;
+        _imageCompletedCount = 0;
         ResetLoadingState();
-        _statusMessage = "Hãy hoàn thành cấu hình ở tab Thông tin trước.";
+        _statusMessage = "Hãy chọn ảnh căn nhà hoặc dùng ảnh mặc định trước khi render.";
         _projectImageFileName = "construction-video-input.jpg";
         _projectImageUrl = DefaultProjectImageUrl;
     }
