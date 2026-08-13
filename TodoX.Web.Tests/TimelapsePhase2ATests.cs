@@ -78,6 +78,76 @@ public class TimelapsePhase2ATests
         Assert.Empty(errors);
     }
 
+    [Theory]
+    [InlineData(TimelapseRequestRules.FastMode, ServiceSellPriceQualityTiers.Standard, "Tiêu chuẩn")]
+    [InlineData(TimelapseRequestRules.ProfessionalMode, ServiceSellPriceQualityTiers.Premium, "Cao cấp")]
+    public void TimelapseSellPricing_MapsRuntimeModesToCustomerQualityTiers(string mode, string qualityTier, string label)
+    {
+        Assert.Equal(qualityTier, TimelapseSellPricing.QualityTierForMode(mode));
+        Assert.Equal(label, TimelapseSellPricing.CustomerQualityLabel(mode));
+    }
+
+    [Theory]
+    [InlineData(3, 10, 30)]
+    [InlineData(4, 10, 40)]
+    [InlineData(5, 10, 50)]
+    [InlineData(6, 10, 60)]
+    public void TimelapseSellPricing_MultipliesVideoScenePriceBySceneCount(int sceneCount, decimal price, decimal expected)
+    {
+        Assert.Equal(expected, TimelapseSellPricing.EstimateVideoSubtotal(price, sceneCount));
+    }
+
+    [Fact]
+    public void TimelapseCustomerCreator_UsesSelectedServiceAndSellPriceContracts()
+    {
+        var page = ReadSource("TodoX.Web", "Components", "Pages", "TimelapseJobCreate.razor");
+        var service = ReadSource("TodoX.Web", "Services", "Timelapse", "TimelapseJobService.cs");
+        var catalog = ReadSource("TodoX.Web", "Services", "CatalogRepository.cs");
+        var adminCatalog = ReadSource("TodoX.Web", "Services", "CatalogAdminRepository.cs");
+        var models = ReadSource("TodoX.Web", "Models", "Timelapse", "TimelapseModels.cs");
+        var resolver = ReadSource("TodoX.Web", "Services", "ServiceSellPriceResolver.cs");
+
+        Assert.Contains("<PageTitle>@PageHeading</PageTitle>", page, StringComparison.Ordinal);
+        Assert.Contains("Catalog.GetServiceByIdAsync(_request.ServiceId.Value)", page, StringComparison.Ordinal);
+        Assert.Contains("Dịch vụ này đang tạm ngưng", page, StringComparison.Ordinal);
+        Assert.Contains("Dịch vụ đã chọn không thuộc nhóm Timelapse", page, StringComparison.Ordinal);
+        Assert.Contains("timelapse-upload-card", page, StringComparison.Ordinal);
+        Assert.Contains("Kéo thả ảnh vào đây", page, StringComparison.Ordinal);
+        Assert.Contains("JPG, PNG hoặc WebP · tối đa 10MB", page, StringComparison.Ordinal);
+        Assert.Contains("AllowedImageContentTypes", page, StringComparison.Ordinal);
+        Assert.Contains("MaxImageBytes", page, StringComparison.Ordinal);
+        Assert.Contains("ImageCount: 0", page, StringComparison.Ordinal);
+        Assert.Contains("TimelapseSellPricing.QualityTierForMode(_request.VideoMode)", page, StringComparison.Ordinal);
+        Assert.Contains("TimelapseRequestRules.RuntimeClipDurationSeconds", page, StringComparison.Ordinal);
+        Assert.Contains("SellPrices.EstimateAsync", page, StringComparison.Ordinal);
+        Assert.Contains("SubmitDisabled", page, StringComparison.Ordinal);
+        Assert.Contains("!HasValidPrice", page, StringComparison.Ordinal);
+        Assert.Contains("Bắt đầu tạo video", page, StringComparison.Ordinal);
+        Assert.Contains("TIÊU CHUẨN", page, StringComparison.Ordinal);
+        Assert.Contains("CAO CẤP", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("<MudText Typo=\"Typo.h4\" Class=\"todox-page-title\">Video Timelapse AI</MudText>", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("Fast</MudRadio>", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("Professional</MudRadio>", page, StringComparison.Ordinal);
+
+        Assert.Contains("GetServiceByIdAsync", catalog, StringComparison.Ordinal);
+        Assert.Contains("WHERE s.id = @serviceId", catalog, StringComparison.Ordinal);
+        Assert.Contains("CASE WHEN lower(s.status) = 'active'", catalog, StringComparison.Ordinal);
+        Assert.Contains("IServiceSellPriceResolver", service, StringComparison.Ordinal);
+        Assert.Contains("_sellPrices.ResolveVideoScenePriceAsync", service, StringComparison.Ordinal);
+        Assert.Contains("TimelapseSellPricing.QualityTierForMode(request.VideoMode)", service, StringComparison.Ordinal);
+        Assert.Contains("TimelapseRequestRules.RuntimeClipDurationSeconds", service, StringComparison.Ordinal);
+        Assert.Contains("TimelapseSellPriceSnapshot", service, StringComparison.Ordinal);
+        Assert.Contains("TotalPoints = videoSubtotal", service, StringComparison.Ordinal);
+        Assert.Contains("catalog.service_sell_prices", adminCatalog, StringComparison.Ordinal);
+        Assert.DoesNotContain("todox_ai_model_price", resolver, StringComparison.Ordinal);
+        Assert.Contains("public const int RuntimeClipDurationSeconds = 6", models, StringComparison.Ordinal);
+        Assert.Contains("AllowedSceneCounts { get; } = [3, 4, 5, 6]", models, StringComparison.Ordinal);
+        Assert.Contains("FastMode = \"fast\"", models, StringComparison.Ordinal);
+        Assert.Contains("ProfessionalMode = \"professional\"", models, StringComparison.Ordinal);
+        Assert.Contains("LandscapeRatio = \"16_9\"", models, StringComparison.Ordinal);
+        Assert.Contains("PortraitRatio = \"9_16\"", models, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void TimelapseJobAccess_DeniesAnotherCustomersJob()
     {
@@ -114,5 +184,22 @@ public class TimelapsePhase2ATests
     public void FixedCatalog_RemainsLegacyOnlyTimelapseReference()
     {
         Assert.Equal("timelapse", FixedTodoXServiceCatalog.ResolveServiceType(FixedTodoXServiceCatalog.Timelapse));
+    }
+
+    private static string ReadSource(params string[] parts)
+    {
+        var root = FindRepositoryRoot();
+        return File.ReadAllText(Path.Combine(new[] { root }.Concat(parts).ToArray()));
+    }
+
+    private static string FindRepositoryRoot()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "TodoX.Dashboard.sln")))
+        {
+            dir = dir.Parent;
+        }
+
+        return dir?.FullName ?? throw new DirectoryNotFoundException("Could not locate repository root.");
     }
 }

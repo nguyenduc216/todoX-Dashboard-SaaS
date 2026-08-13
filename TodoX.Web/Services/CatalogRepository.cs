@@ -77,6 +77,31 @@ public sealed class CatalogRepository
         return rows.ToList();
     }
 
+    public async Task<CatalogServiceView?> GetServiceByIdAsync(Guid serviceId, CancellationToken ct = default)
+    {
+        using var conn = await _factory.OpenAsync(ct);
+        return await conn.QuerySingleOrDefaultAsync<CatalogServiceView>(
+            new CommandDefinition(
+                """
+                SELECT s.id AS Id,
+                       s.service_code AS ServiceCode,
+                       s.service_name AS DisplayName,
+                       COALESCE(NULLIF(s.short_description, ''), s.description) AS Description,
+                       s.service_type AS ServiceType,
+                       s.workflow_code AS WorkflowCode,
+                       s.thumbnail_url AS ThumbnailUrl,
+                       s.cover_image_url AS CoverImageUrl,
+                       NULL::text AS StartingPriceSummary,
+                       CASE WHEN lower(s.status) = 'active' THEN true ELSE false END AS Enabled,
+                       s.sort_order AS SortOrder
+                  FROM catalog.services s
+                 WHERE s.id = @serviceId
+                 LIMIT 1;
+                """,
+                new { serviceId },
+                cancellationToken: ct));
+    }
+
     public async Task<IReadOnlyList<RenderOrderView>> GetRenderOrdersAsync(string? statusFilter = null, Guid? customerId = null)
     {
         using var conn = await _factory.OpenAsync();

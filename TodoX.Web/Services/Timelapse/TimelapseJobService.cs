@@ -34,6 +34,7 @@ public sealed class TimelapseJobService : ITimelapseJobService
     private readonly ITimelapseProfileRepository _profiles;
     private readonly IMediaFileService _media;
     private readonly IRenderJobService _renderJobs;
+    private readonly IServiceSellPriceResolver _sellPrices;
     private readonly TodoXConnectionFactory _factory;
     private readonly TenantContext _tenant;
 
@@ -42,6 +43,7 @@ public sealed class TimelapseJobService : ITimelapseJobService
         ITimelapseProfileRepository profiles,
         IMediaFileService media,
         IRenderJobService renderJobs,
+        IServiceSellPriceResolver sellPrices,
         TodoXConnectionFactory factory,
         TenantContext tenant)
     {
@@ -49,6 +51,7 @@ public sealed class TimelapseJobService : ITimelapseJobService
         _profiles = profiles;
         _media = media;
         _renderJobs = renderJobs;
+        _sellPrices = sellPrices;
         _factory = factory;
         _tenant = tenant;
     }
@@ -83,6 +86,19 @@ public sealed class TimelapseJobService : ITimelapseJobService
             throw new InvalidOperationException("Dịch vụ Timelapse hiện chưa khả dụng.");
         }
 
+        var qualityTier = TimelapseSellPricing.QualityTierForMode(request.VideoMode);
+        var sellPrice = await _sellPrices.ResolveVideoScenePriceAsync(
+            service.Id,
+            qualityTier,
+            TimelapseRequestRules.RuntimeClipDurationSeconds,
+            ct);
+        if (!sellPrice.Found || sellPrice.Price is null)
+        {
+            throw new InvalidOperationException(sellPrice.Message ?? "Chưa cấu hình giá cho lựa chọn này.");
+        }
+
+        var videoSubtotal = TimelapseSellPricing.EstimateVideoSubtotal(sellPrice.Price.SellPoints, request.SceneCount);
+
         var profile = await _profiles.GetEnabledProfileAsync(request.ProfileCode, ct);
         if (profile is null)
         {
@@ -111,6 +127,15 @@ public sealed class TimelapseJobService : ITimelapseJobService
             VideoMode = request.VideoMode.Trim().ToLowerInvariant(),
             Ratio = request.Ratio.Trim().ToLowerInvariant(),
             Title = NormalizeTitle(request.Title),
+            SellPrice = new TimelapseSellPriceSnapshot
+            {
+                QualityTier = qualityTier,
+                RuntimeClipDurationSeconds = TimelapseRequestRules.RuntimeClipDurationSeconds,
+                SceneCount = request.SceneCount,
+                VideoSceneSellPoints = sellPrice.Price.SellPoints,
+                VideoSubtotal = videoSubtotal,
+                TotalPoints = videoSubtotal
+            },
             OriginalImage = new TimelapseOriginalImageSnapshot
             {
                 MediaId = media.Id,

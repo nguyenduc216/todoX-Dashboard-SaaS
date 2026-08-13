@@ -1,18 +1,21 @@
-@page "/jobs/timelapse/new"
+﻿@page "/jobs/timelapse/new"
 @implements IDisposable
 @using Microsoft.AspNetCore.Components.Forms
+@using TodoX.Web.Models.Catalog
 @using TodoX.Web.Models.Timelapse
 @using TodoX.Web.Services.Timelapse
 @using Microsoft.AspNetCore.WebUtilities
 @inject AuthStateService AuthState
+@inject CatalogRepository Catalog
+@inject IServiceSellPriceResolver SellPrices
 @inject ITimelapseProfileRepository Profiles
 @inject ITimelapseJobService Jobs
 @inject NavigationManager Navigation
 @inject ISnackbar Snackbar
 
-<PageTitle>Video Timelapse AI</PageTitle>
+<PageTitle>@PageHeading</PageTitle>
 
-<MudStack Spacing="3">
+<MudStack Spacing="3" Class="timelapse-create-page">
     @if (!AuthState.IsInitialized)
     {
         <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
@@ -26,105 +29,261 @@
         <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="flex-wrap">
             <MudIconButton Icon="@Icons.Material.Filled.ArrowBack" Color="Color.Default" OnClick="@(() => Navigation.NavigateTo("/create"))" />
             <div>
-                <MudText Typo="Typo.h4" Class="todox-page-title">Video Timelapse AI</MudText>
-                <MudText Typo="Typo.body1" Class="todox-page-subtitle">Thiết lập yêu cầu trước khi bắt đầu render.</MudText>
+                <MudText Typo="Typo.h4" Class="todox-page-title">@PageHeading</MudText>
+                <MudText Typo="Typo.body1" Class="todox-page-subtitle">@PageSubtitle</MudText>
             </div>
         </MudStack>
 
-        <MudTabs Rounded="true" KeepPanelsAlive="true">
-            <MudTabPanel Text="Yêu cầu">
-                <MudPaper Class="todox-card pa-4 mt-3" rounded="true">
-                    <MudStack Spacing="3">
-                        <MudTextField T="string" Label="Tên job" @bind-Value="_request.Title" Variant="Variant.Outlined" />
+        @if (_loadingService)
+        {
+            <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+        }
+        else if (!string.IsNullOrWhiteSpace(_serviceWarning))
+        {
+            <MudAlert Severity="Severity.Warning">
+                <MudStack Spacing="2">
+                    <MudText>@_serviceWarning</MudText>
+                    <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.ArrowBack" OnClick="@(() => Navigation.NavigateTo("/create"))">
+                        Quay lại danh sách dịch vụ
+                    </MudButton>
+                </MudStack>
+            </MudAlert>
+        }
+        else
+        {
+            <MudGrid Class="timelapse-create-grid">
+                <MudItem xs="12" lg="8">
+                    <MudPaper Class="todox-card timelapse-form-card pa-4" rounded="true">
+                        <MudStack Spacing="3">
+                            <MudTextField T="string" Label="Tên job" @bind-Value="_request.Title" Variant="Variant.Outlined" />
 
-                        <MudStack Spacing="1">
-                            <MudText Typo="Typo.subtitle2">Ảnh thành phẩm / ảnh tham chiếu</MudText>
-                            <InputFile OnChange="OnImageSelected" accept="image/png,image/jpeg,image/webp" disabled="@_busy" />
-                            @if (_selectedFile is not null)
-                            {
-                                <MudText Typo="Typo.caption" Color="Color.Success">@_selectedFile.Name</MudText>
-                            }
-                            <MudText Typo="Typo.caption" Color="Color.Secondary">Một ảnh hoàn thiện, tối đa 10MB.</MudText>
-                        </MudStack>
-
-                        <MudSelect T="string" Label="Loại công trình" @bind-Value="_request.ProfileCode" Variant="Variant.Outlined" Required="true">
-                            @foreach (var profile in _profiles)
-                            {
-                                <MudSelectItem T="string" Value="@profile.ProfileCode">@profile.ProfileName</MudSelectItem>
-                            }
-                        </MudSelect>
-
-                        <MudStack Spacing="1">
-                            <MudText Typo="Typo.subtitle2">Số scene</MudText>
-                            <MudRadioGroup T="int" @bind-Value="_request.SceneCount">
-                                @foreach (var count in TimelapseRequestRules.AllowedSceneCounts)
+                            <MudStack Spacing="1">
+                                <MudText Typo="Typo.subtitle2">Ảnh thành phẩm / ảnh tham chiếu</MudText>
+                                <label class="timelapse-upload-card @(_selectedFile is not null ? "has-file" : string.Empty)">
+                                    <InputFile OnChange="OnImageSelected" accept="image/png,image/jpeg,image/webp" disabled="@_busy" />
+                                    @if (!string.IsNullOrWhiteSpace(_previewDataUrl))
+                                    {
+                                        <img src="@_previewDataUrl" alt="Ảnh đã chọn" />
+                                    }
+                                    else
+                                    {
+                                        <MudIcon Icon="@Icons.Material.Filled.CloudUpload" Size="Size.Large" />
+                                    }
+                                    <span class="upload-primary">Kéo thả ảnh vào đây</span>
+                                    <span class="upload-secondary">hoặc bấm để chọn ảnh</span>
+                                    <span class="upload-helper">JPG, PNG hoặc WebP · tối đa 10MB</span>
+                                </label>
+                                @if (_selectedFile is not null)
                                 {
-                                    <MudRadio T="int" Value="@count" Color="Color.Warning">@count</MudRadio>
+                                    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
+                                        <MudText Typo="Typo.caption" Color="Color.Success">@_selectedFile.Name</MudText>
+                                        <MudButton Variant="Variant.Text" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" OnClick="RemoveImage">
+                                            Xóa ảnh
+                                        </MudButton>
+                                    </MudStack>
                                 }
-                            </MudRadioGroup>
+                            </MudStack>
+
+                            <MudSelect T="string" Label="Loại công trình" @bind-Value="_request.ProfileCode" Variant="Variant.Outlined" Required="true">
+                                @foreach (var profile in _profiles)
+                                {
+                                    <MudSelectItem T="string" Value="@profile.ProfileCode">@profile.ProfileName</MudSelectItem>
+                                }
+                            </MudSelect>
+
+                            <MudStack Spacing="1">
+                                <MudText Typo="Typo.subtitle2">Số scene</MudText>
+                                <div class="timelapse-option-grid scene-options">
+                                    @foreach (var count in TimelapseRequestRules.AllowedSceneCounts)
+                                    {
+                                        <button type="button" class="timelapse-option @(IsSceneSelected(count) ? "selected" : string.Empty)" @onclick="() => SelectSceneCount(count)">
+                                            <strong>@count scene</strong>
+                                        </button>
+                                    }
+                                </div>
+                            </MudStack>
+
+                            <MudStack Spacing="1">
+                                <MudText Typo="Typo.subtitle2">Chất lượng</MudText>
+                                <div class="timelapse-option-grid quality-options">
+                                    <button type="button" class="timelapse-option @(IsModeSelected(TimelapseRequestRules.FastMode) ? "selected" : string.Empty)" @onclick="() => SelectMode(TimelapseRequestRules.FastMode)">
+                                        <strong>TIÊU CHUẨN</strong>
+                                        <span>Tối ưu chi phí, tốc độ xử lý nhanh</span>
+                                    </button>
+                                    <button type="button" class="timelapse-option @(IsModeSelected(TimelapseRequestRules.ProfessionalMode) ? "selected" : string.Empty)" @onclick="() => SelectMode(TimelapseRequestRules.ProfessionalMode)">
+                                        <strong>CAO CẤP</strong>
+                                        <span>Chất lượng xử lý cao hơn</span>
+                                    </button>
+                                </div>
+                            </MudStack>
+
+                            <MudStack Spacing="1">
+                                <MudText Typo="Typo.subtitle2">Tỷ lệ</MudText>
+                                <div class="timelapse-option-grid ratio-options">
+                                    <button type="button" class="timelapse-option @(IsRatioSelected(TimelapseRequestRules.LandscapeRatio) ? "selected" : string.Empty)" @onclick="() => SelectRatio(TimelapseRequestRules.LandscapeRatio)">
+                                        <strong>16:9</strong>
+                                        <span>Ngang</span>
+                                    </button>
+                                    <button type="button" class="timelapse-option @(IsRatioSelected(TimelapseRequestRules.PortraitRatio) ? "selected" : string.Empty)" @onclick="() => SelectRatio(TimelapseRequestRules.PortraitRatio)">
+                                        <strong>9:16</strong>
+                                        <span>Dọc</span>
+                                    </button>
+                                </div>
+                            </MudStack>
+
+                            @if (_profiles.Count == 0)
+                            {
+                                <MudAlert Severity="Severity.Warning">Không tải được profile Timelapse từ hệ thống workflow.</MudAlert>
+                            }
                         </MudStack>
+                    </MudPaper>
+                </MudItem>
 
-                        <MudStack Spacing="1">
-                            <MudText Typo="Typo.subtitle2">Chế độ</MudText>
-                            <MudRadioGroup T="string" @bind-Value="_request.VideoMode">
-                                <MudRadio T="string" Value="@TimelapseRequestRules.FastMode" Color="Color.Warning">Fast</MudRadio>
-                                <MudRadio T="string" Value="@TimelapseRequestRules.ProfessionalMode" Color="Color.Warning">Professional</MudRadio>
-                            </MudRadioGroup>
+                <MudItem xs="12" lg="4">
+                    <MudPaper Class="todox-card timelapse-price-card pa-4" rounded="true">
+                        <MudStack Spacing="2">
+                            <MudText Typo="Typo.overline">CHI PHÍ DỰ KIẾN</MudText>
+                            <div class="price-row"><span>Chất lượng</span><strong>@TimelapseSellPricing.CustomerQualityLabel(_request.VideoMode)</strong></div>
+                            <div class="price-row"><span>Số scene</span><strong>@_request.SceneCount</strong></div>
+                            <div class="price-row"><span>Ảnh khách tải lên</span><strong>Miễn phí</strong></div>
+
+                            @if (_priceLoading)
+                            {
+                                <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+                            }
+                            else if (_priceEstimate?.Success == true && _priceEstimate.VideoScenePrice is not null)
+                            {
+                                <div class="price-row"><span>Đơn giá video</span><strong>@FormatPoints(_priceEstimate.VideoScenePrice.SellPoints) / scene</strong></div>
+                                <div class="price-row"><span>Video</span><strong>@($"{_request.SceneCount} x {FormatPoints(_priceEstimate.VideoScenePrice.SellPoints)} = {FormatPoints(_priceEstimate.VideoSubtotal)}")</strong></div>
+                                <MudDivider />
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">Ảnh AI trung gian chưa tính trong phase UI này.</MudText>
+                                <div class="timelapse-total">
+                                    <span>TỔNG DỰ KIẾN</span>
+                                    <strong>@FormatPoints(_priceEstimate.TotalPoints) todoX</strong>
+                                </div>
+                            }
+                            else
+                            {
+                                <MudAlert Severity="Severity.Warning" Dense="true">@PriceMessage</MudAlert>
+                            }
+
+                            <MudButton Class="todox-primary-btn"
+                                       Variant="Variant.Filled"
+                                       StartIcon="@Icons.Material.Filled.MovieCreation"
+                                       Disabled="@SubmitDisabled"
+                                       OnClick="CreateDraftAsync">
+                                Bắt đầu tạo video
+                            </MudButton>
                         </MudStack>
-
-                        <MudStack Spacing="1">
-                            <MudText Typo="Typo.subtitle2">Tỷ lệ</MudText>
-                            <MudRadioGroup T="string" @bind-Value="_request.Ratio">
-                                <MudRadio T="string" Value="@TimelapseRequestRules.LandscapeRatio" Color="Color.Warning">16:9</MudRadio>
-                                <MudRadio T="string" Value="@TimelapseRequestRules.PortraitRatio" Color="Color.Warning">9:16</MudRadio>
-                            </MudRadioGroup>
-                        </MudStack>
-
-                        @if (_profiles.Count == 0)
-                        {
-                            <MudAlert Severity="Severity.Warning">Không tải được profile Timelapse từ hệ thống workflow.</MudAlert>
-                        }
-
-                        <MudButton Class="todox-primary-btn"
-                                   Variant="Variant.Filled"
-                                   StartIcon="@Icons.Material.Filled.AddTask"
-                                   Disabled="@(_busy || _profiles.Count == 0)"
-                                   OnClick="CreateDraftAsync">
-                            Tạo Job
-                        </MudButton>
-                    </MudStack>
-                </MudPaper>
-            </MudTabPanel>
-            <MudTabPanel Text="Scene" Disabled="true">
-                <MudAlert Severity="Severity.Info" Class="mt-3">Scene sẽ được tạo khi bắt đầu render.</MudAlert>
-            </MudTabPanel>
-            <MudTabPanel Text="Kết quả" Disabled="true">
-                <MudAlert Severity="Severity.Info" Class="mt-3">Kết quả chưa có.</MudAlert>
-            </MudTabPanel>
-        </MudTabs>
+                    </MudPaper>
+                </MudItem>
+            </MudGrid>
+        }
     }
 </MudStack>
 
 @code {
+    private const long MaxImageBytes = 10 * 1024 * 1024;
+    private static readonly HashSet<string> AllowedImageContentTypes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "image/jpeg",
+        "image/png",
+        "image/webp"
+    };
+
     private TimelapseCreateRequest _request = new();
     private IReadOnlyList<TimelapseProfileDto> _profiles = Array.Empty<TimelapseProfileDto>();
+    private CatalogServiceView? _selectedService;
+    private ServiceSellPriceEstimate? _priceEstimate;
     private IBrowserFile? _selectedFile;
+    private string? _previewDataUrl;
+    private string? _serviceWarning;
+    private string? _priceError;
     private bool _busy;
+    private bool _loadingService = true;
+    private bool _priceLoading;
+    private int _priceLoadVersion;
+
+    private string PageHeading => _selectedService?.DisplayName ?? "Tạo video Timelapse AI";
+    private string PageSubtitle => _selectedService is null
+        ? "Tạo video Timelapse AI từ ảnh thành phẩm."
+        : "Tạo video Timelapse AI từ ảnh thành phẩm.";
+    private string PriceMessage => _priceError ?? _priceEstimate?.Message ?? "Chưa cấu hình giá cho lựa chọn này.";
+    private bool HasValidImage => _selectedFile is not null && ValidateSelectedImage(showSnackbar: false);
+    private bool HasValidPrice => _priceEstimate is { Success: true, VideoScenePrice: not null };
+    private bool ServiceReady => _selectedService is { Enabled: true } && string.Equals(_selectedService.ServiceType, TodoXServiceEngineTypes.Timelapse, StringComparison.OrdinalIgnoreCase);
+    private bool SubmitDisabled => _busy || _profiles.Count == 0 || !ServiceReady || !HasValidImage || !HasValidPrice;
 
     protected override async Task OnInitializedAsync()
     {
         AuthState.OnChange += HandleAuthChange;
         ApplySelectedServiceFromQuery();
-        await LoadProfilesAsync();
+        await LoadPageAsync();
     }
 
     public void Dispose() => AuthState.OnChange -= HandleAuthChange;
 
     private void HandleAuthChange() => _ = InvokeAsync(async () =>
     {
-        await LoadProfilesAsync();
+        await LoadPageAsync();
         StateHasChanged();
     });
+
+    private async Task LoadPageAsync()
+    {
+        _serviceWarning = null;
+        _selectedService = null;
+        _priceEstimate = null;
+        _priceError = null;
+        _loadingService = true;
+
+        if (AuthState.CurrentUser is not { IsCustomer: true })
+        {
+            _loadingService = false;
+            return;
+        }
+
+        try
+        {
+            await LoadSelectedServiceAsync();
+            await LoadProfilesAsync();
+            await RefreshPriceEstimateAsync();
+        }
+        finally
+        {
+            _loadingService = false;
+        }
+    }
+
+    private async Task LoadSelectedServiceAsync()
+    {
+        if (!_request.ServiceId.HasValue)
+        {
+            _serviceWarning = "Vui lòng chọn dịch vụ từ danh sách trước khi tạo video.";
+            return;
+        }
+
+        var service = await Catalog.GetServiceByIdAsync(_request.ServiceId.Value);
+        if (service is null)
+        {
+            _serviceWarning = "Không tìm thấy dịch vụ đã chọn.";
+            return;
+        }
+
+        _request.ServiceCode = service.ServiceCode;
+        _selectedService = service;
+
+        if (!service.Enabled)
+        {
+            _serviceWarning = "Dịch vụ này đang tạm ngưng, vui lòng chọn dịch vụ khác.";
+            return;
+        }
+
+        if (!string.Equals(service.ServiceType, TodoXServiceEngineTypes.Timelapse, StringComparison.OrdinalIgnoreCase))
+        {
+            _serviceWarning = "Dịch vụ đã chọn không thuộc nhóm Timelapse.";
+        }
+    }
 
     private async Task LoadProfilesAsync()
     {
@@ -137,7 +296,10 @@
         try
         {
             _profiles = await Profiles.GetEnabledProfilesAsync();
-            _request.ProfileCode = _profiles.FirstOrDefault()?.ProfileCode ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(_request.ProfileCode))
+            {
+                _request.ProfileCode = _profiles.FirstOrDefault()?.ProfileCode ?? string.Empty;
+            }
         }
         catch (Exception ex)
         {
@@ -145,8 +307,56 @@
         }
     }
 
-    private void OnImageSelected(InputFileChangeEventArgs args)
-        => _selectedFile = args.File;
+    private async Task OnImageSelected(InputFileChangeEventArgs args)
+    {
+        _selectedFile = args.File;
+        _previewDataUrl = null;
+
+        if (!ValidateSelectedImage(showSnackbar: true))
+        {
+            _selectedFile = null;
+            return;
+        }
+
+        await using var stream = _selectedFile!.OpenReadStream(MaxImageBytes);
+        await using var buffer = new MemoryStream();
+        await stream.CopyToAsync(buffer);
+        _previewDataUrl = $"data:{_selectedFile.ContentType};base64,{Convert.ToBase64String(buffer.ToArray())}";
+    }
+
+    private bool ValidateSelectedImage(bool showSnackbar)
+    {
+        if (_selectedFile is null)
+        {
+            return false;
+        }
+
+        if (_selectedFile.Size <= 0 || _selectedFile.Size > MaxImageBytes)
+        {
+            if (showSnackbar)
+            {
+                Snackbar.Add("Ảnh phải có dung lượng tối đa 10MB.", Severity.Warning);
+            }
+            return false;
+        }
+
+        if (!AllowedImageContentTypes.Contains(_selectedFile.ContentType))
+        {
+            if (showSnackbar)
+            {
+                Snackbar.Add("Chỉ hỗ trợ JPG, PNG hoặc WebP.", Severity.Warning);
+            }
+            return false;
+        }
+
+        return true;
+    }
+
+    private void RemoveImage()
+    {
+        _selectedFile = null;
+        _previewDataUrl = null;
+    }
 
     private void ApplySelectedServiceFromQuery()
     {
@@ -164,11 +374,86 @@
         }
     }
 
+    private async Task SelectSceneCount(int sceneCount)
+    {
+        _request.SceneCount = sceneCount;
+        await RefreshPriceEstimateAsync();
+    }
+
+    private async Task SelectMode(string mode)
+    {
+        _request.VideoMode = mode;
+        await RefreshPriceEstimateAsync();
+    }
+
+    private void SelectRatio(string ratio) => _request.Ratio = ratio;
+
+    private bool IsSceneSelected(int sceneCount) => _request.SceneCount == sceneCount;
+
+    private bool IsModeSelected(string mode) => string.Equals(_request.VideoMode, mode, StringComparison.OrdinalIgnoreCase);
+
+    private bool IsRatioSelected(string ratio) => string.Equals(_request.Ratio, ratio, StringComparison.OrdinalIgnoreCase);
+
+    private async Task RefreshPriceEstimateAsync()
+    {
+        var version = ++_priceLoadVersion;
+        _priceError = null;
+        _priceEstimate = null;
+
+        if (_selectedService is null || !ServiceReady)
+        {
+            return;
+        }
+
+        _priceLoading = true;
+        try
+        {
+            var estimate = await SellPrices.EstimateAsync(new ServiceSellPriceEstimateRequest(
+                _selectedService.Id,
+                TimelapseSellPricing.QualityTierForMode(_request.VideoMode),
+                TimelapseRequestRules.RuntimeClipDurationSeconds,
+                _request.SceneCount,
+                ImageCount: 0));
+
+            if (version == _priceLoadVersion)
+            {
+                _priceEstimate = estimate;
+            }
+        }
+        catch (Exception ex)
+        {
+            if (version == _priceLoadVersion)
+            {
+                _priceError = "Không tải được giá cho lựa chọn này.";
+                Snackbar.Add($"Không tải được giá Timelapse: {ex.Message}", Severity.Error);
+            }
+        }
+        finally
+        {
+            if (version == _priceLoadVersion)
+            {
+                _priceLoading = false;
+            }
+        }
+    }
+
     private async Task CreateDraftAsync()
     {
-        if (_selectedFile is null || AuthState.CurrentUser is null)
+        if (!ServiceReady)
+        {
+            Snackbar.Add(_serviceWarning ?? "Dịch vụ Timelapse hiện chưa khả dụng.", Severity.Warning);
+            return;
+        }
+
+        if (!ValidateSelectedImage(showSnackbar: true) || AuthState.CurrentUser is null)
         {
             Snackbar.Add("Vui lòng chọn ảnh thành phẩm / ảnh tham chiếu.", Severity.Warning);
+            return;
+        }
+
+        if (!HasValidPrice)
+        {
+            Snackbar.Add(PriceMessage, Severity.Warning);
             return;
         }
 
@@ -182,7 +467,7 @@
         _busy = true;
         try
         {
-            await using var stream = _selectedFile.OpenReadStream(10 * 1024 * 1024);
+            await using var stream = _selectedFile!.OpenReadStream(MaxImageBytes);
             await using var buffer = new MemoryStream();
             await stream.CopyToAsync(buffer);
 
@@ -204,4 +489,6 @@
             _busy = false;
         }
     }
+
+    private static string FormatPoints(decimal value) => $"{value:0.##} điểm";
 }

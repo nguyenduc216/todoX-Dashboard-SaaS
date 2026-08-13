@@ -91,7 +91,18 @@ public sealed class TimelapseJobSnapshot
     public string VideoMode { get; set; } = TimelapseRequestRules.FastMode;
     public string Ratio { get; set; } = TimelapseRequestRules.LandscapeRatio;
     public string Title { get; set; } = "Video Timelapse";
+    public TimelapseSellPriceSnapshot? SellPrice { get; set; }
     public TimelapseOriginalImageSnapshot OriginalImage { get; set; } = new();
+}
+
+public sealed class TimelapseSellPriceSnapshot
+{
+    public string QualityTier { get; set; } = ServiceSellPriceQualityTiers.Standard;
+    public int RuntimeClipDurationSeconds { get; set; }
+    public int SceneCount { get; set; }
+    public decimal VideoSceneSellPoints { get; set; }
+    public decimal VideoSubtotal { get; set; }
+    public decimal TotalPoints { get; set; }
 }
 
 public sealed class TimelapseJobView
@@ -108,6 +119,7 @@ public static class TimelapseRequestRules
     public const string ProfessionalMode = "professional";
     public const string LandscapeRatio = "16_9";
     public const string PortraitRatio = "9_16";
+    public const int RuntimeClipDurationSeconds = 6;
 
     public static IReadOnlyList<int> AllowedSceneCounts { get; } = [3, 4, 5, 6];
 
@@ -158,6 +170,22 @@ public static class TimelapseRequestRules
     public static bool IsSupportedRatio(string? ratio)
         => string.Equals(ratio, LandscapeRatio, StringComparison.OrdinalIgnoreCase)
            || string.Equals(ratio, PortraitRatio, StringComparison.OrdinalIgnoreCase);
+}
+
+public static class TimelapseSellPricing
+{
+    public static string QualityTierForMode(string? mode)
+        => string.Equals(mode, TimelapseRequestRules.ProfessionalMode, StringComparison.OrdinalIgnoreCase)
+            ? ServiceSellPriceQualityTiers.Premium
+            : ServiceSellPriceQualityTiers.Standard;
+
+    public static string CustomerQualityLabel(string? mode)
+        => string.Equals(mode, TimelapseRequestRules.ProfessionalMode, StringComparison.OrdinalIgnoreCase)
+            ? "Cao cấp"
+            : "Tiêu chuẩn";
+
+    public static decimal EstimateVideoSubtotal(decimal videoSceneSellPoints, int sceneCount)
+        => videoSceneSellPoints * sceneCount;
 }
 
 public static class TimelapseJobAccess
