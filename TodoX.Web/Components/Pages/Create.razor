@@ -122,9 +122,7 @@
         _loading = true;
         try
         {
-            _services = (await Catalog.GetActiveCatalogServicesAsync())
-                .OrderBy(x => x.SortOrder)
-                .ToList();
+            _services = SortServices(await Catalog.GetActiveCatalogServicesAsync());
         }
         catch (Exception ex)
         {
@@ -136,6 +134,13 @@
             await InvokeAsync(StateHasChanged);
         }
     }
+
+    private static IReadOnlyList<CatalogServiceView> SortServices(IEnumerable<CatalogServiceView> services)
+        => services
+            .OrderBy(x => x.SortOrder)
+            .ThenBy(x => x.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(x => x.ServiceCode, StringComparer.OrdinalIgnoreCase)
+            .ToList();
 
     private void OpenService(CatalogServiceView service)
     {

@@ -93,9 +93,16 @@
     {
         _loading = true;
         _categories = await Catalog.GetCategoriesAsync();
-        _services = await Catalog.GetServicesAsync();
+        _services = SortServices(await Catalog.GetServicesAsync());
         _loading = false;
     }
+
+    private static IReadOnlyList<ServiceDto> SortServices(IEnumerable<ServiceDto> services)
+        => services
+            .OrderBy(x => x.SortOrder)
+            .ThenBy(x => x.ServiceName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(x => x.ServiceCode, StringComparer.OrdinalIgnoreCase)
+            .ToList();
 
     private static string? ImageUrl(ServiceDto s)
         => !string.IsNullOrWhiteSpace(s.ThumbnailUrl) ? s.ThumbnailUrl : s.CoverImageUrl;

@@ -81,13 +81,19 @@ public sealed class CommercialVideoServiceCatalogTests
 
         Assert.DoesNotContain("FixedTodoXServiceCatalog.IsFixedServiceCode", create, StringComparison.Ordinal);
         Assert.Contains("GetActiveCatalogServicesAsync", create, StringComparison.Ordinal);
+        Assert.Contains("SortServices(await Catalog.GetActiveCatalogServicesAsync())", create, StringComparison.Ordinal);
+        Assert.Contains("private static IReadOnlyList<CatalogServiceView> SortServices", create, StringComparison.Ordinal);
         Assert.Contains("OrderBy(x => x.SortOrder)", create, StringComparison.Ordinal);
+        Assert.Contains("ThenBy(x => x.DisplayName, StringComparer.OrdinalIgnoreCase)", create, StringComparison.Ordinal);
         Assert.Contains("CustomerServiceRouting.Resolve(service.ServiceType, service.Id, service.ServiceCode)", create, StringComparison.Ordinal);
         Assert.DoesNotContain("ApplyFixedDefinition", adminRepo, StringComparison.Ordinal);
         Assert.Contains("TodoXServiceEngineTypes.Normalize(s.ServiceType)", adminRepo, StringComparison.Ordinal);
         Assert.Contains("@bind-Value=\"_model.ServiceName\"", adminDialog, StringComparison.Ordinal);
         Assert.Contains("@bind-Value=\"_model.ServiceType\"", adminDialog, StringComparison.Ordinal);
         Assert.Contains("@bind-Value=\"_model.SortOrder\"", adminDialog, StringComparison.Ordinal);
+        Assert.Contains("_services = SortServices(await Catalog.GetServicesAsync())", servicesPage, StringComparison.Ordinal);
+        Assert.Contains("private static IReadOnlyList<ServiceDto> SortServices", servicesPage, StringComparison.Ordinal);
+        Assert.Contains("ThenBy(x => x.ServiceName, StringComparer.OrdinalIgnoreCase)", servicesPage, StringComparison.Ordinal);
         Assert.Contains("ServiceSellPricesDialog", servicesPage, StringComparison.Ordinal);
     }
 
