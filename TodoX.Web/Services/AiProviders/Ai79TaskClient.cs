@@ -1,0 +1,273 @@
+using System.Net.Http.Headers;
+using System.Text.Json;
+
+namespace TodoX.Web.Services.AiProviders;
+
+public interface IAi79TaskClient
+{
+    Task<Ai79TaskSubmitResult> SubmitAsync(Ai79TaskSubmitRequest request, CancellationToken ct = default);
+    Task<Ai79TaskStatusResult> GetStatusAsync(Ai79TaskStatusRequest request, CancellationToken ct = default);
+}
+
+public sealed record Ai79TaskSubmitRequest(
+    string BaseUrl,
+    string EndpointPath,
+    string AccessToken,
+    string Domain,
+    string Model,
+    string Prompt,
+    IReadOnlyList<string> Images,
+    IReadOnlyDictionary<string, string?> Options);
+
+public sealed record Ai79TaskStatusRequest(
+    string BaseUrl,
+    string EndpointPath,
+    string AccessToken,
+    string Domain,
+    string TaskId);
+
+public sealed record Ai79TaskSubmitResult(string TaskId, string SanitizedResponseJson);
+
+public sealed record Ai79TaskStatusResult(
+    string NormalizedStatus,
+    string SanitizedResponseJson,
+    string? OutputUrl,
+    string? ErrorCode,
+    string? ErrorMessage);
+
+public static class Ai79TaskStatusNormalizer
+{
+    public const string Running = "RUNNING";
+    public const string Success = "SUCCESS";
+    public const string Failed = "FAILED";
+
+    public static string Normalize(string? status)
+    {
+        var value = (status ?? string.Empty).Trim();
+        if (value.Length == 0)
+        {
+            return Running;
+        }
+
+        return value.ToUpperInvariant() switch
+        {
+            "SUCCESS" or "SUCCEEDED" or "COMPLETED" or "COMPLETE" or "DONE" or "FINISHED" => Success,
+            "FAILURE" or "FAILED" or "ERROR" or "CANCELLED" or "CANCELED" => Failed,
+            _ => Running
+        };
+    }
+}
+
+public sealed class Ai79TaskClient : IAi79TaskClient
+{
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
+    private readonly HttpClient _httpClient;
+
+    public Ai79TaskClient(HttpClient httpClient)
+    {
+        _httpClient = httpClient;
+    }
+
+    public async Task<Ai79TaskSubmitResult> SubmitAsync(Ai79TaskSubmitRequest request, CancellationToken ct = default)
+    {
+        var form = new Dictionary<string, string>
+        {
+            ["access_token"] = request.AccessToken,
+            ["domain"] = request.Domain,
+            ["model"] = request.Model,
+            ["prompt"] = request.Prompt
+        };
+
+        for (var i = 0; i < request.Images.Count; i++)
+        {
+            form[i == 0 ? "image" : $"image_{i + 1}"] = request.Images[i];
+        }
+
+        if (request.Images.Count > 0)
+        {
+            form["images"] = JsonSerializer.Serialize(request.Images, JsonOptions);
+        }
+
+        foreach (var pair in request.Options)
+        {
+            if (!string.IsNullOrWhiteSpace(pair.Value) && !form.ContainsKey(pair.Key))
+            {
+                form[pair.Key] = pair.Value!;
+            }
+        }
+
+        using var body = new FormUrlEncodedContent(form);
+        using var response = await _httpClient.PostAsync(BuildUri(request.BaseUrl, request.EndpointPath), body, ct);
+        var json = await ReadJsonAsync(response, ct);
+        using var document = JsonDocument.Parse(json);
+        var sanitized = SanitizeSecretJson(document.RootElement, request.AccessToken);
+        var taskId = FindString(document.RootElement, "task_id", "taskId", "request_id", "requestId", "id");
+        if (string.IsNullOrWhiteSpace(taskId))
+        {
+            throw new InvalidOperationException("79AI submit response missing task_id.");
+        }
+
+        return new Ai79TaskSubmitResult(taskId!, sanitized);
+    }
+
+    public async Task<Ai79TaskStatusResult> GetStatusAsync(Ai79TaskStatusRequest request, CancellationToken ct = default)
+    {
+        var path = request.EndpointPath.Replace("{task_id}", Uri.EscapeDataString(request.TaskId), StringComparison.OrdinalIgnoreCase)
+            .Replace("{taskId}", Uri.EscapeDataString(request.TaskId), StringComparison.OrdinalIgnoreCase);
+        var form = new Dictionary<string, string>
+        {
+            ["access_token"] = request.AccessToken,
+            ["domain"] = request.Domain,
+            ["task_id"] = request.TaskId
+        };
+
+        using var body = new FormUrlEncodedContent(form);
+        using var response = await _httpClient.PostAsync(BuildUri(request.BaseUrl, path), body, ct);
+        var json = await ReadJsonAsync(response, ct);
+        using var document = JsonDocument.Parse(json);
+        var sanitized = SanitizeSecretJson(document.RootElement, request.AccessToken);
+        var status = Ai79TaskStatusNormalizer.Normalize(FindString(document.RootElement, "status", "state", "task_status", "taskStatus"));
+        var outputUrl = FindUrl(document.RootElement);
+        var errorCode = FindString(document.RootElement, "error_code", "errorCode", "code");
+        var errorMessage = FindString(document.RootElement, "error_message", "errorMessage", "message", "msg");
+
+        return new Ai79TaskStatusResult(status, sanitized, outputUrl, errorCode, errorMessage);
+    }
+
+    private static Uri BuildUri(string baseUrl, string path)
+        => new(new Uri(baseUrl.TrimEnd('/') + "/"), path.TrimStart('/'));
+
+    private static async Task<string> ReadJsonAsync(HttpResponseMessage response, CancellationToken ct)
+    {
+        var text = await response.Content.ReadAsStringAsync(ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException($"79AI task API returned HTTP {(int)response.StatusCode}.");
+        }
+
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            throw new InvalidOperationException("79AI task API returned an empty response.");
+        }
+
+        return text;
+    }
+
+    private static string? FindString(JsonElement element, params string[] names)
+    {
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var name in names)
+            {
+                if (element.TryGetProperty(name, out var value))
+                {
+                    if (value.ValueKind == JsonValueKind.String)
+                    {
+                        return value.GetString();
+                    }
+
+                    if (value.ValueKind is JsonValueKind.Number or JsonValueKind.True or JsonValueKind.False)
+                    {
+                        return value.ToString();
+                    }
+                }
+            }
+
+            foreach (var property in element.EnumerateObject())
+            {
+                var found = FindString(property.Value, names);
+                if (!string.IsNullOrWhiteSpace(found))
+                {
+                    return found;
+                }
+            }
+        }
+        else if (element.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in element.EnumerateArray())
+            {
+                var found = FindString(item, names);
+                if (!string.IsNullOrWhiteSpace(found))
+                {
+                    return found;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static string? FindUrl(JsonElement element)
+    {
+        if (element.ValueKind == JsonValueKind.String)
+        {
+            var value = element.GetString();
+            return IsHttpUrl(value) ? value : null;
+        }
+
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var name in new[] { "url", "video_url", "videoUrl", "image_url", "imageUrl", "output_url", "outputUrl" })
+            {
+                if (element.TryGetProperty(name, out var value))
+                {
+                    var found = FindUrl(value);
+                    if (found is not null)
+                    {
+                        return found;
+                    }
+                }
+            }
+
+            foreach (var property in element.EnumerateObject())
+            {
+                var found = FindUrl(property.Value);
+                if (found is not null)
+                {
+                    return found;
+                }
+            }
+        }
+        else if (element.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in element.EnumerateArray())
+            {
+                var found = FindUrl(item);
+                if (found is not null)
+                {
+                    return found;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static bool IsHttpUrl(string? value)
+        => Uri.TryCreate(value, UriKind.Absolute, out var uri)
+           && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
+
+    private static string SanitizeSecretJson(JsonElement root, string accessToken)
+        => JsonSerializer.Serialize(Sanitize(root, accessToken), JsonOptions);
+
+    private static object? Sanitize(JsonElement element, string accessToken)
+        => element.ValueKind switch
+        {
+            JsonValueKind.Object => element.EnumerateObject().ToDictionary(
+                x => x.Name,
+                x => IsSecretName(x.Name) ? "***" : Sanitize(x.Value, accessToken),
+                StringComparer.OrdinalIgnoreCase),
+            JsonValueKind.Array => element.EnumerateArray().Select(x => Sanitize(x, accessToken)).ToArray(),
+            JsonValueKind.String => string.Equals(element.GetString(), accessToken, StringComparison.Ordinal) ? "***" : element.GetString(),
+            JsonValueKind.Number when element.TryGetDecimal(out var number) => number,
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            _ => null
+        };
+
+    private static bool IsSecretName(string name)
+        => name.Contains("token", StringComparison.OrdinalIgnoreCase)
+           || name.Contains("secret", StringComparison.OrdinalIgnoreCase)
+           || name.Contains("key", StringComparison.OrdinalIgnoreCase);
+}
