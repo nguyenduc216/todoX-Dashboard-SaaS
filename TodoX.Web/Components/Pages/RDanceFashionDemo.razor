@@ -1,0 +1,266 @@
+@page "/rdance-fashion-demo"
+@inject AuthStateService AuthState
+@inject Microsoft.AspNetCore.Hosting.IWebHostEnvironment Env
+@inject IJSRuntime JS
+
+<PageTitle>rDance Thời Trang</PageTitle>
+
+<MudStack Spacing="3">
+    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1" Class="flex-wrap gap-2">
+        <MudText Typo="Typo.h4" Class="todox-page-title">rDance Thời Trang</MudText>
+        <MudChip T="string" Color="Color.Warning" Variant="Variant.Filled" Size="Size.Small">DEMO</MudChip>
+    </MudStack>
+    <MudText Typo="Typo.body1" Class="todox-page-subtitle">Tạo video thời trang từ chuyển động TikTok bằng AI</MudText>
+
+    @if (!AuthState.IsInitialized)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+    }
+    else if (AuthState.CurrentUser is null)
+    {
+        <MudAlert Severity="Severity.Warning">Vui lòng đăng nhập để mở trang này.</MudAlert>
+    }
+    else
+    {
+        <MudTabs Class="render-project-tabs rdance-fashion-tabs"
+                 rounded="true"
+                 ApplyEffectsToContainer="true"
+                 panelClass="render-tab-panel"
+                 @bind-ActivePanelIndex="_tabIndex">
+            <MudTabPanel Text="Thông tin">
+                <div class="render-tab-scroll">
+                    <MudStack Spacing="3">
+                        <MudGrid>
+                            <MudItem xs="12" md="7">
+                                <MudPaper Class="todox-card pa-4 rdance-fashion-panel" rounded="true">
+                                    <MudStack Spacing="3">
+                                        <div>
+                                            <MudText Typo="Typo.h6">Link video TikTok</MudText>
+                                            <MudText Typo="Typo.body2" Class="todox-page-subtitle">Dán link video TikTok có chuyển động mà bạn muốn sử dụng.</MudText>
+                                        </div>
+                                        <MudTextField T="string"
+                                                      Label="Link video TikTok"
+                                                      @bind-Value="_tiktokUrl"
+                                                      Variant="Variant.Outlined"
+                                                      Disabled="@_busy" />
+                                        <MudPaper Class="pa-3 rdance-fashion-source-card" Outlined="true">
+                                            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                                                <MudIcon Icon="@Icons.Material.Filled.VideoLibrary" Color="Color.Warning" Size="Size.Large" />
+                                                <MudStack Spacing="0" Class="rdance-fashion-file-copy">
+                                                    <MudText Typo="Typo.overline">VIDEO CHUYỂN ĐỘNG</MudText>
+                                                    @if (ResourceExists(SourceVideoUrl))
+                                                    {
+                                                        <MudText Typo="Typo.subtitle2">rdance-fashion-source.mp4</MudText>
+                                                        <MudText Typo="Typo.caption" Class="todox-page-subtitle">Video TikTok đã được tải về để sử dụng làm chuyển động mẫu.</MudText>
+                                                        <MudChip T="string" Color="Color.Success" Variant="Variant.Filled" Size="Size.Small" Class="mt-2">Đã sẵn sàng</MudChip>
+                                                    }
+                                                    else
+                                                    {
+                                                        <MudText Typo="Typo.body2">Chưa cập nhật video chuyển động</MudText>
+                                                    }
+                                                </MudStack>
+                                            </MudStack>
+                                        </MudPaper>
+                                    </MudStack>
+                                </MudPaper>
+                            </MudItem>
+                            <MudItem xs="12" md="5">
+                                <MudPaper Class="todox-card pa-4 rdance-fashion-panel" rounded="true">
+                                    <MudStack Spacing="2">
+                                        <MudText Typo="Typo.h6">Ảnh nhân vật</MudText>
+                                        <MudText Typo="Typo.body2" Class="todox-page-subtitle">Tải ảnh nhân vật cần áp dụng chuyển động từ video TikTok.</MudText>
+                                        <div class="rdance-fashion-character-frame">
+                                            @if (ResourceExists(_characterImageUrl))
+                                            {
+                                                <img src="@_characterImageUrl" alt="Ảnh nhân vật" class="rdance-fashion-character-image" />
+                                            }
+                                            else
+                                            {
+                                                <div class="rdance-fashion-placeholder">Chưa cập nhật ảnh nhân vật</div>
+                                            }
+                                        </div>
+                                        <label class="rdance-fashion-upload-label">
+                                            <InputFile class="rdance-fashion-hidden-input"
+                                                       OnChange="OnCharacterImageSelected"
+                                                       accept="image/png,image/jpeg,image/webp" />
+                                            <MudButton Variant="Variant.Outlined"
+                                                       Color="Color.Warning"
+                                                       Disabled="@_busy"
+                                                       StartIcon="@Icons.Material.Filled.Upload">
+                                                Chọn ảnh
+                                            </MudButton>
+                                        </label>
+                                        <MudText Typo="Typo.caption" Class="todox-page-subtitle">@_characterImageFileName</MudText>
+                                    </MudStack>
+                                </MudPaper>
+                            </MudItem>
+                        </MudGrid>
+
+                        <MudPaper Class="todox-card pa-4 rdance-fashion-panel" rounded="true">
+                            <MudText Typo="Typo.subtitle2" Class="mb-2">Cấu hình mock</MudText>
+                            <div class="rdance-fashion-metadata">
+                                <MudText Typo="Typo.body2"><span>Dịch vụ</span>rDance Fashion</MudText>
+                                <MudText Typo="Typo.body2"><span>Đầu vào</span>TikTok + Character Image</MudText>
+                                <MudText Typo="Typo.body2"><span>Đầu ra</span>Video</MudText>
+                                <MudText Typo="Typo.body2"><span>Tỷ lệ</span>9:16</MudText>
+                            </div>
+                            <MudDivider Class="my-4" />
+                            <MudButton Variant="Variant.Filled"
+                                       Color="Color.Warning"
+                                       Disabled="@_busy"
+                                       StartIcon="@Icons.Material.Filled.MovieCreation"
+                                       OnClick="CreateVideoAsync">
+                                TẠO VIDEO
+                            </MudButton>
+                            @if (_busy)
+                            {
+                                <MudPaper Class="rdance-fashion-loading-panel mt-3" Outlined="true">
+                                    <MudStack AlignItems="AlignItems.Center" Spacing="2">
+                                        <MudProgressCircular Indeterminate="true" Color="Color.Warning" Size="Size.Medium" />
+                                        <MudText Typo="Typo.subtitle2">Đang xử lý video thời trang</MudText>
+                                        <MudText Typo="Typo.body2" Class="todox-page-subtitle">@LoadingMessage</MudText>
+                                        <MudProgressLinear Value="@_progress" Color="Color.Warning" Class="rdance-fashion-progress" />
+                                        <MudText Typo="Typo.caption" Class="todox-page-subtitle">@_progress%</MudText>
+                                    </MudStack>
+                                </MudPaper>
+                            }
+                        </MudPaper>
+                    </MudStack>
+                </div>
+            </MudTabPanel>
+
+            <MudTabPanel Text="Kết quả">
+                <div class="render-tab-scroll">
+                    @if (!_completed)
+                    {
+                        <MudAlert Severity="Severity.Info">Hãy tạo video từ tab Thông tin trước.</MudAlert>
+                    }
+                    else
+                    {
+                        <MudGrid>
+                            <MudItem xs="12" md="7">
+                                <MudPaper Class="todox-card pa-4 rdance-fashion-panel" rounded="true">
+                                    <MudStack Spacing="2">
+                                        <MudText Typo="Typo.h6">Video rDance đã hoàn thiện</MudText>
+                                        <MudChip T="string" Color="Color.Success" Variant="Variant.Filled" Size="Size.Small" Icon="@Icons.Material.Filled.CheckCircle">Hoàn thành</MudChip>
+                                        <div class="rdance-fashion-result-frame">
+                                            @if (ResourceExists(ResultVideoUrl))
+                                            {
+                                                <video controls preload="metadata" class="rdance-fashion-result-player">
+                                                    <source src="@ResultVideoUrl" type="video/mp4" />
+                                                </video>
+                                            }
+                                            else
+                                            {
+                                                <div class="rdance-fashion-placeholder">Chưa cập nhật video kết quả</div>
+                                            }
+                                        </div>
+                                        <MudStack Row="true" Class="flex-wrap gap-2">
+                                            <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.PlayArrow" OnClick="OpenResultAsync">Xem video</MudButton>
+                                            <a href="@ResultVideoUrl" download="rdance-fashion-result.mp4" class="rdance-fashion-download-link">
+                                                <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Download">Tải video</MudButton>
+                                            </a>
+                                            <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="CreateNew">Tạo video mới</MudButton>
+                                        </MudStack>
+                                    </MudStack>
+                                </MudPaper>
+                            </MudItem>
+                            <MudItem xs="12" md="5">
+                                <MudPaper Class="todox-card pa-4 rdance-fashion-panel" rounded="true">
+                                    <MudStack Spacing="2">
+                                        <MudText Typo="Typo.h6">Thông tin kết quả</MudText>
+                                        <MudText Typo="Typo.body2">Video rDance đã hoàn thiện</MudText>
+                                        <MudText Typo="Typo.body2">Dịch vụ: rDance Fashion</MudText>
+                                        <MudText Typo="Typo.body2">Nguồn chuyển động: TikTok</MudText>
+                                        <MudText Typo="Typo.body2">Nhân vật: Character Image</MudText>
+                                        <MudText Typo="Typo.body2">Tỷ lệ: 9:16</MudText>
+                                        <MudText Typo="Typo.body2">Trạng thái: Hoàn thành</MudText>
+                                    </MudStack>
+                                </MudPaper>
+                            </MudItem>
+                        </MudGrid>
+                    }
+                </div>
+            </MudTabPanel>
+        </MudTabs>
+    }
+</MudStack>
+
+@code {
+    private const string DefaultTikTokUrl = "https://www.tiktok.com/@kh.nh.n23/video/7666103921814850837?is_from_webapp=1&web_id=7532409290457269761";
+    private const string SourceVideoUrl = "/resources/mockup/rdance-fashion/rdance-fashion-source.mp4";
+    private const string DefaultCharacterImageUrl = "/resources/mockup/rdance-fashion/rdance-fashion-character.jpg";
+    private const string ResultVideoUrl = "/resources/mockup/rdance-fashion/rdance-fashion-result.mp4";
+
+    private int _tabIndex;
+    private int _progress;
+    private bool _busy;
+    private bool _completed;
+    private string _tiktokUrl = DefaultTikTokUrl;
+    private string _characterImageFileName = "rdance-fashion-character.jpg";
+    private string _characterImageUrl = DefaultCharacterImageUrl;
+
+    private string LoadingMessage => _progress switch
+    {
+        <= 20 => "Đang phân tích chuyển động video...",
+        <= 40 => "Đang nhận diện nhân vật...",
+        <= 70 => "Đang áp dụng chuyển động cho nhân vật...",
+        <= 90 => "Đang render video thời trang...",
+        _ => "Đang hoàn thiện video..."
+    };
+
+    private async Task OnCharacterImageSelected(InputFileChangeEventArgs args)
+    {
+        _characterImageFileName = args.File.Name;
+        using var stream = new MemoryStream();
+        await args.File.OpenReadStream(10 * 1024 * 1024).CopyToAsync(stream);
+        _characterImageUrl = $"data:{args.File.ContentType};base64,{Convert.ToBase64String(stream.ToArray())}";
+    }
+
+    private async Task CreateVideoAsync()
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _progress = 0;
+        const int steps = 10;
+
+        for (var step = 0; step <= steps; step++)
+        {
+            _progress = step * 10;
+            StateHasChanged();
+            await Task.Delay(500);
+        }
+
+        _completed = true;
+        _busy = false;
+        _tabIndex = 1;
+    }
+
+    private Task OpenResultAsync() => JS.InvokeVoidAsync("open", ResultVideoUrl).AsTask();
+
+    private void CreateNew()
+    {
+        _tabIndex = 0;
+        _progress = 0;
+        _busy = false;
+        _completed = false;
+        _tiktokUrl = DefaultTikTokUrl;
+        _characterImageFileName = "rdance-fashion-character.jpg";
+        _characterImageUrl = DefaultCharacterImageUrl;
+    }
+
+    private bool ResourceExists(string url)
+    {
+        if (url.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var relativePath = url.TrimStart('/').Replace('/', Path.DirectorySeparatorChar);
+        return File.Exists(Path.Combine(Env.WebRootPath, relativePath));
+    }
+}

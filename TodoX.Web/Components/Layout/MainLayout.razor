@@ -360,6 +360,17 @@
             }
         }
 
+        if (!existingCodes.Contains("rdance_fashion_demo"))
+        {
+            var rDanceFashionItem = BuildRDanceFashionDemoItem();
+            var aiStudio = list.FirstOrDefault(g => g.Code.Equals("ai_studio", StringComparison.OrdinalIgnoreCase));
+            if (aiStudio is not null)
+            {
+                rDanceFashionItem.GroupId = aiStudio.Id;
+                aiStudio.Items.Add(rDanceFashionItem);
+            }
+        }
+
         return list;
     }
 
@@ -403,6 +414,20 @@
             VisibilityPolicy = "always",
             MatchAll = false,
             SortOrder = 22
+        };
+
+    private static NavigationMenuItemDto BuildRDanceFashionDemoItem()
+        => new()
+        {
+            Id = Guid.NewGuid(),
+            Code = "rdance_fashion_demo",
+            Title = "rDance Thời Trang",
+            Href = "/rdance-fashion-demo",
+            IconKey = "Checkroom",
+            ModuleKeys = Array.Empty<string>(),
+            VisibilityPolicy = "always",
+            MatchAll = false,
+            SortOrder = 23
         };
 
     private static NavigationMenuGroupDto CloneGroup(NavigationMenuGroupDto group)
@@ -453,6 +478,7 @@
         "FaceRetouchingNatural" => Icons.Material.Filled.FaceRetouchingNatural,
         "Movie" => Icons.Material.Filled.Movie,
         "HealthAndSafety" => Icons.Material.Filled.HealthAndSafety,
+        "Checkroom" => Icons.Material.Filled.Checkroom,
         "Public" => Icons.Material.Filled.Public,
         "VideoLibrary" => Icons.Material.Filled.VideoLibrary,
         "Campaign" => Icons.Material.Filled.Campaign,
@@ -522,6 +548,7 @@
                 Item("admin_avatar_manager", "Quản lý avatar mẫu", "/admin/avatar-manager", "FaceRetouchingNatural", new[] { "settings", "services" }, "admin_avatar_manager", sort: 10),
                 Item("render_jobs", "Render Jobs", "/render-jobs", "Movie", new[] { "render_jobs" }, sort: 20),
                 Item("health_video_demo", "Video Sức Khoẻ", "/health-video-demo", "HealthAndSafety", Array.Empty<string>(), "always", sort: 22),
+                Item("rdance_fashion_demo", "rDance Thời Trang", "/rdance-fashion-demo", "Checkroom", Array.Empty<string>(), "always", sort: 23),
                 Item("render_video_jobs", "Render Video Job", "/render-video-jobs", "VideoLibrary", Array.Empty<string>(), "always", false, 25),
                 Item("prompt_templates", "Quản lý prompt", "/settings/prompt-templates", "AutoFixHigh", new[] { "prompt_templates", "settings", "app_settings" }, sort: 30),
                 Item("ai_providers", "AI Providers", "/admin/ai-providers", "Api", new[] { "settings", "services", "api_providers" }, "admin_avatar_manager", sort: 35)),
