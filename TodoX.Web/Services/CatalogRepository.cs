@@ -42,14 +42,14 @@ public sealed class CatalogRepository
         using var conn = await _factory.OpenAsync();
         var rows = await conn.QueryAsync<CatalogServiceView>(
             """
-            SELECT id AS Id,
-                   service_code AS ServiceCode,
-                   service_name AS DisplayName,
-                   COALESCE(NULLIF(short_description, ''), description) AS Description,
-                   service_type AS ServiceType,
-                   workflow_code AS WorkflowCode,
-                   thumbnail_url AS ThumbnailUrl,
-                   cover_image_url AS CoverImageUrl,
+            SELECT s.id AS Id,
+                   s.service_code AS ServiceCode,
+                   s.service_name AS DisplayName,
+                   COALESCE(NULLIF(s.short_description, ''), s.description) AS Description,
+                   s.service_type AS ServiceType,
+                   s.workflow_code AS WorkflowCode,
+                   s.thumbnail_url AS ThumbnailUrl,
+                   s.cover_image_url AS CoverImageUrl,
                    (
                        SELECT string_agg(summary_text, ' · ' ORDER BY sort_key)
                        FROM (
@@ -68,11 +68,11 @@ public sealed class CatalogRepository
                            HAVING count(*) > 0
                        ) prices
                    ) AS StartingPriceSummary,
-                   CASE WHEN lower(status) IN ('enabled', 'active') THEN true ELSE false END AS Enabled,
-                   sort_order AS SortOrder
-              FROM catalog.services
-             WHERE lower(status) IN ('enabled', 'active')
-             ORDER BY sort_order, service_name;
+                   CASE WHEN lower(s.status) IN ('enabled', 'active') THEN true ELSE false END AS Enabled,
+                   s.sort_order AS SortOrder
+              FROM catalog.services s
+             WHERE lower(s.status) IN ('enabled', 'active')
+             ORDER BY s.sort_order, s.service_name;
             """);
         return rows.ToList();
     }

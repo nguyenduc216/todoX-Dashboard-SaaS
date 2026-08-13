@@ -112,6 +112,31 @@ public sealed class CommercialVideoServiceCatalogTests
     }
 
     [Fact]
+    public void CustomerCatalogQuery_UsesServiceAliasForDynamicCatalogAndPriceSummary()
+    {
+        var catalogRepository = ReadSource("TodoX.Web", "Services", "CatalogRepository.cs");
+        var createPage = ReadSource("TodoX.Web", "Components", "Pages", "Create.razor");
+
+        Assert.Contains("FROM catalog.services s", catalogRepository, StringComparison.Ordinal);
+        Assert.Contains("SELECT s.id AS Id", catalogRepository, StringComparison.Ordinal);
+        Assert.Contains("s.service_code AS ServiceCode", catalogRepository, StringComparison.Ordinal);
+        Assert.Contains("s.thumbnail_url AS ThumbnailUrl", catalogRepository, StringComparison.Ordinal);
+        Assert.Contains("s.cover_image_url AS CoverImageUrl", catalogRepository, StringComparison.Ordinal);
+        Assert.Contains("p.service_id = s.id", catalogRepository, StringComparison.Ordinal);
+        Assert.Contains("string_agg(summary_text, ' · ' ORDER BY sort_key)", catalogRepository, StringComparison.Ordinal);
+        Assert.Contains("Từ ' || min(p.sell_points)::text || ' điểm / hình", catalogRepository, StringComparison.Ordinal);
+        Assert.Contains("Từ ' || min(p.sell_points)::text || ' điểm / scene", catalogRepository, StringComparison.Ordinal);
+        Assert.Contains("WHERE lower(s.status) IN ('enabled', 'active')", catalogRepository, StringComparison.Ordinal);
+        Assert.Contains("ORDER BY s.sort_order, s.service_name", catalogRepository, StringComparison.Ordinal);
+        Assert.DoesNotContain("FROM catalog.services\r\n", catalogRepository, StringComparison.Ordinal);
+        Assert.DoesNotContain("FROM catalog.services\n", catalogRepository, StringComparison.Ordinal);
+        Assert.DoesNotContain("FixedTodoXServiceCatalog.Services.Take(3)", createPage, StringComparison.Ordinal);
+        Assert.Contains("GetActiveCatalogServicesAsync", createPage, StringComparison.Ordinal);
+        Assert.Contains("ThumbnailUrl", createPage, StringComparison.Ordinal);
+        Assert.Contains("CoverImageUrl", createPage, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void SellPricingSourceContracts_KeepCustomerPriceSeparateFromProviderModelCost()
     {
         var catalogRepository = ReadSource("TodoX.Web", "Services", "CatalogRepository.cs");
