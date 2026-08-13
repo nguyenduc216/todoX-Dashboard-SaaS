@@ -8,6 +8,7 @@ public interface ITimelapseProfileRepository
 {
     Task<IReadOnlyList<TimelapseProfileDto>> GetEnabledProfilesAsync(CancellationToken ct = default);
     Task<TimelapseProfileDto?> GetEnabledProfileAsync(string profileCode, CancellationToken ct = default);
+    Task<TimelapseRenderProfileDto?> GetRenderProfileAsync(string profileCode, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -52,6 +53,28 @@ public sealed class TimelapseProfileRepository : ITimelapseProfileRepository
                    profile_name AS ProfileName,
                    enabled AS Enabled
               FROM public.todox_timelapse_prompt_profiles
+             WHERE profile_code = @profileCode
+               AND enabled = true
+             LIMIT 1;
+            """,
+            new { profileCode = profileCode.Trim() });
+    }
+
+    public async Task<TimelapseRenderProfileDto?> GetRenderProfileAsync(string profileCode, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(profileCode))
+        {
+            return null;
+        }
+
+        using var conn = await _factory.OpenAsync(ct);
+        return await conn.QuerySingleOrDefaultAsync<TimelapseRenderProfileDto>(
+            """
+            SELECT profile_code AS ProfileCode,
+                   profile_name AS ProfileName,
+                   enabled AS Enabled,
+                   to_jsonb(p)::text AS ProfileJson
+              FROM public.todox_timelapse_prompt_profiles p
              WHERE profile_code = @profileCode
                AND enabled = true
              LIMIT 1;

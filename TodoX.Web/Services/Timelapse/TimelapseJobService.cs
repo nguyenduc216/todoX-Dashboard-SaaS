@@ -21,6 +21,10 @@ public interface ITimelapseJobService
 
     Task<TimelapseJobView?> GetOwnedAsync(Guid jobId, CurrentUserSession currentUser, CancellationToken ct = default);
     Task<IReadOnlyList<TimelapseJobView>> ListOwnedAsync(CurrentUserSession currentUser, CancellationToken ct = default);
+    Task<TimelapseJobView> StartOrResumeAsync(Guid jobId, CurrentUserSession currentUser, CancellationToken ct = default);
+    Task<TimelapseJobView> RetryImageAsync(Guid jobId, int progressPercent, CurrentUserSession currentUser, CancellationToken ct = default);
+    Task<TimelapseJobView> RetryVideoAsync(Guid jobId, int clipIndex, CurrentUserSession currentUser, CancellationToken ct = default);
+    Task<TimelapseJobView> StartFinalizerAsync(Guid jobId, CurrentUserSession currentUser, CancellationToken ct = default);
 }
 
 public sealed class TimelapseJobService : ITimelapseJobService
@@ -35,6 +39,7 @@ public sealed class TimelapseJobService : ITimelapseJobService
     private readonly IMediaFileService _media;
     private readonly IRenderJobService _renderJobs;
     private readonly IServiceSellPriceResolver _sellPrices;
+    private readonly ITimelapseWorkflowService _workflow;
     private readonly TodoXConnectionFactory _factory;
     private readonly TenantContext _tenant;
 
@@ -44,6 +49,7 @@ public sealed class TimelapseJobService : ITimelapseJobService
         IMediaFileService media,
         IRenderJobService renderJobs,
         IServiceSellPriceResolver sellPrices,
+        ITimelapseWorkflowService workflow,
         TodoXConnectionFactory factory,
         TenantContext tenant)
     {
@@ -52,6 +58,7 @@ public sealed class TimelapseJobService : ITimelapseJobService
         _media = media;
         _renderJobs = renderJobs;
         _sellPrices = sellPrices;
+        _workflow = workflow;
         _factory = factory;
         _tenant = tenant;
     }
@@ -214,7 +221,14 @@ public sealed class TimelapseJobService : ITimelapseJobService
                 customerId = currentUser.CustomerId,
                 jobType = RenderJobTypes.Timelapse
             });
-        return row is null ? null : ToView(row, currentUser);
+        if (row is null)
+        {
+            return null;
+        }
+
+        var view = ToView(row, currentUser);
+        view.Workflow = await _workflow.GetStateAsync(jobId, ct);
+        return view;
     }
 
     public async Task<IReadOnlyList<TimelapseJobView>> ListOwnedAsync(CurrentUserSession currentUser, CancellationToken ct = default)
@@ -237,6 +251,44 @@ public sealed class TimelapseJobService : ITimelapseJobService
                 jobType = RenderJobTypes.Timelapse
             });
         return rows.Select(row => ToView(row, currentUser)).ToList();
+    }
+
+    public async Task<TimelapseJobView> StartOrResumeAsync(Guid jobId, CurrentUserSession currentUser, CancellationToken ct = default)
+    {
+        var view = await RequireOwnedAsync(jobId, currentUser, ct);
+        view.Workflow = await _workflow.StartOrResumeAsync(jobId, view.Snapshot, currentUser, ct);
+        view.Status = view.Workflow.ParentStatus;
+        return view;
+    }
+
+    public async Task<TimelapseJobView> RetryImageAsync(Guid jobId, int progressPercent, CurrentUserSession currentUser, CancellationToken ct = default)
+    {
+        var view = await RequireOwnedAsync(jobId, currentUser, ct);
+        view.Workflow = await _workflow.RetryImageAsync(jobId, progressPercent, view.Snapshot, currentUser, ct);
+        view.Status = view.Workflow.ParentStatus;
+        return view;
+    }
+
+    public async Task<TimelapseJobView> RetryVideoAsync(Guid jobId, int clipIndex, CurrentUserSession currentUser, CancellationToken ct = default)
+    {
+        var view = await RequireOwnedAsync(jobId, currentUser, ct);
+        view.Workflow = await _workflow.RetryVideoAsync(jobId, clipIndex, view.Snapshot, currentUser, ct);
+        view.Status = view.Workflow.ParentStatus;
+        return view;
+    }
+
+    public async Task<TimelapseJobView> StartFinalizerAsync(Guid jobId, CurrentUserSession currentUser, CancellationToken ct = default)
+    {
+        var view = await RequireOwnedAsync(jobId, currentUser, ct);
+        view.Workflow = await _workflow.StartFinalizerAsync(jobId, view.Snapshot, currentUser, ct);
+        view.Status = view.Workflow.ParentStatus;
+        return view;
+    }
+
+    private async Task<TimelapseJobView> RequireOwnedAsync(Guid jobId, CurrentUserSession currentUser, CancellationToken ct)
+    {
+        var view = await GetOwnedAsync(jobId, currentUser, ct);
+        return view ?? throw new InvalidOperationException("Không tìm thấy job hoặc bạn không có quyền xem job này.");
     }
 
     private static TimelapseJobView ToView(OwnedTimelapseJobRow row, CurrentUserSession currentUser)

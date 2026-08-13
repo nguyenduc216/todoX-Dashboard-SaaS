@@ -1,0 +1,124 @@
+.timelapse-job-detail {
+    max-width: 1280px;
+}
+
+.timelapse-detail-image {
+    display: grid;
+    place-items: center;
+    min-height: 280px;
+    border: 1px dashed rgba(255, 179, 0, 0.45);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.04);
+    overflow: hidden;
+}
+
+.timelapse-detail-image img {
+    width: 100%;
+    max-height: 420px;
+    object-fit: contain;
+}
+
+.price-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.timelapse-total {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding-top: 8px;
+}
+
+.timelapse-stage-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 12px;
+}
+
+.timelapse-stage-card {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-height: 280px;
+    padding: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.035);
+}
+
+.stage-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.stage-preview {
+    display: grid;
+    place-items: center;
+    min-height: 150px;
+    border-radius: 8px;
+    overflow: hidden;
+    background: linear-gradient(90deg, rgba(255,255,255,0.05), rgba(255,255,255,0.1), rgba(255,255,255,0.05));
+    background-size: 200% 100%;
+    animation: timelapse-shimmer 1.6s ease-in-out infinite;
+}
+
+.image-preview {
+    color: #ffca28;
+}
+
+.video-preview {
+    color: #80cbc4;
+}
+
+.stage-preview img,
+.stage-preview video {
+    width: 100%;
+    height: 100%;
+    max-height: 220px;
+    object-fit: cover;
+}
+
+.stage-preview span {
+    font-size: 0.875rem;
+}
+
+.clip-thumbs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+}
+
+.clip-thumbs img,
+.clip-thumbs span {
+    display: grid;
+    place-items: center;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.08);
+    object-fit: cover;
+    font-size: 0.8rem;
+}
+
+.final-video {
+    width: 100%;
+    max-height: 620px;
+    border-radius: 8px;
+    background: #000;
+}
+
+@keyframes timelapse-shimmer {
+    0% {
+        background-position: 100% 0;
+    }
+
+    100% {
+        background-position: -100% 0;
+    }
+}

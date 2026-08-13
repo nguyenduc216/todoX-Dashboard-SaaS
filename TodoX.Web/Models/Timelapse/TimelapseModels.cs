@@ -59,6 +59,14 @@ public sealed class TimelapseProfileDto
     public bool Enabled { get; set; }
 }
 
+public sealed class TimelapseRenderProfileDto
+{
+    public string ProfileCode { get; set; } = string.Empty;
+    public string ProfileName { get; set; } = string.Empty;
+    public bool Enabled { get; set; }
+    public string ProfileJson { get; set; } = "{}";
+}
+
 public sealed class TimelapseCreateRequest
 {
     public Guid? ServiceId { get; set; }
@@ -111,6 +119,96 @@ public sealed class TimelapseJobView
     public string Status { get; set; } = string.Empty;
     public DateTime CreatedAt { get; set; }
     public TimelapseJobSnapshot Snapshot { get; set; } = new();
+    public TimelapseWorkflowState Workflow { get; set; } = TimelapseWorkflowState.Empty;
+}
+
+public static class TimelapseParentStatuses
+{
+    public const string Draft = "DRAFT";
+    public const string GeneratingImages = "GENERATING_IMAGES";
+    public const string ImagesReady = "IMAGES_READY";
+    public const string GeneratingVideos = "GENERATING_VIDEOS";
+    public const string VideosReady = "VIDEOS_READY";
+    public const string Finalizing = "FINALIZING";
+    public const string Completed = "COMPLETED";
+    public const string Paused = "PAUSED";
+    public const string Failed = "FAILED";
+
+    public static bool IsEditableStopped(string? status)
+        => string.Equals(status, Draft, StringComparison.OrdinalIgnoreCase)
+           || string.Equals(status, Paused, StringComparison.OrdinalIgnoreCase)
+           || string.Equals(status, Failed, StringComparison.OrdinalIgnoreCase);
+}
+
+public static class TimelapseOperationStatuses
+{
+    public const string Waiting = "WAITING";
+    public const string Rendering = "RENDERING";
+    public const string Completed = "COMPLETED";
+    public const string Failed = "FAILED";
+    public const string Invalidated = "INVALIDATED";
+
+    public static bool IsActive(string? status)
+        => string.Equals(status, Rendering, StringComparison.OrdinalIgnoreCase);
+
+    public static bool IsCurrentCompleted(string? status)
+        => string.Equals(status, Completed, StringComparison.OrdinalIgnoreCase);
+}
+
+public sealed class TimelapseStageImage
+{
+    public int StageIndex { get; set; }
+    public int ProgressPercent { get; set; }
+    public bool IsOriginal { get; set; }
+    public int? DependsOnProgressPercent { get; set; }
+    public string Status { get; set; } = TimelapseOperationStatuses.Waiting;
+    public int Attempt { get; set; }
+    public Guid? MediaId { get; set; }
+    public string? PublicUrl { get; set; }
+    public string? ObjectKey { get; set; }
+    public string? ProviderTaskId { get; set; }
+    public string? ErrorMessage { get; set; }
+}
+
+public sealed class TimelapseVideoClip
+{
+    public int ClipIndex { get; set; }
+    public int StartProgressPercent { get; set; }
+    public int EndProgressPercent { get; set; }
+    public string Status { get; set; } = TimelapseOperationStatuses.Waiting;
+    public int Attempt { get; set; }
+    public Guid? MediaId { get; set; }
+    public string? PublicUrl { get; set; }
+    public string? ObjectKey { get; set; }
+    public string? ProviderTaskId { get; set; }
+    public string? ErrorMessage { get; set; }
+}
+
+public sealed class TimelapseFinalOutput
+{
+    public string Status { get; set; } = TimelapseOperationStatuses.Waiting;
+    public int Version { get; set; }
+    public Guid? MediaId { get; set; }
+    public string? PublicUrl { get; set; }
+    public string? ObjectKey { get; set; }
+    public string? ErrorMessage { get; set; }
+    public DateTime? CompletedAt { get; set; }
+}
+
+public sealed class TimelapseWorkflowState
+{
+    public static TimelapseWorkflowState Empty { get; } = new();
+
+    public string ParentStatus { get; set; } = TimelapseParentStatuses.Draft;
+    public IReadOnlyList<TimelapseStageImage> Images { get; set; } = Array.Empty<TimelapseStageImage>();
+    public IReadOnlyList<TimelapseVideoClip> Videos { get; set; } = Array.Empty<TimelapseVideoClip>();
+    public TimelapseFinalOutput? FinalOutput { get; set; }
+    public bool HasActiveOperations { get; set; }
+    public bool CanEditRequest { get; set; } = true;
+    public bool CanStartRender { get; set; } = true;
+    public bool CanFinalize { get; set; }
+    public int GeneratedImageCount { get; set; }
+    public string CurrentStep { get; set; } = "Chưa bắt đầu";
 }
 
 public static class TimelapseRequestRules
@@ -170,6 +268,71 @@ public static class TimelapseRequestRules
     public static bool IsSupportedRatio(string? ratio)
         => string.Equals(ratio, LandscapeRatio, StringComparison.OrdinalIgnoreCase)
            || string.Equals(ratio, PortraitRatio, StringComparison.OrdinalIgnoreCase);
+}
+
+public sealed record TimelapseStageGraph(
+    IReadOnlyList<int> ImageProgressions,
+    IReadOnlyList<TimelapseVideoEdge> VideoClips,
+    IReadOnlyList<int> GeneratedImageOrder);
+
+public sealed record TimelapseVideoEdge(int ClipIndex, int StartProgressPercent, int EndProgressPercent);
+
+public sealed record TimelapseInvalidationPlan(
+    IReadOnlyList<int> ImageProgressions,
+    IReadOnlyList<TimelapseVideoEdge> VideoClips,
+    bool FinalOutput);
+
+public static class TimelapseStageGraphBuilder
+{
+    public static TimelapseStageGraph Build(int sceneCount)
+    {
+        var images = TimelapseRequestRules.GetProgressMapping(sceneCount).ToArray();
+        var clips = images.Zip(images.Skip(1), (start, end) => new { start, end })
+            .Select((x, index) => new TimelapseVideoEdge(index + 1, x.start, x.end))
+            .ToArray();
+        var generatedOrder = images
+            .Where(x => x < 100)
+            .OrderByDescending(x => x)
+            .ToArray();
+
+        return new TimelapseStageGraph(images, clips, generatedOrder);
+    }
+
+    public static TimelapseInvalidationPlan PlanImageRerender(int sceneCount, int progressPercent)
+    {
+        if (progressPercent >= 100)
+        {
+            return new TimelapseInvalidationPlan(Array.Empty<int>(), Array.Empty<TimelapseVideoEdge>(), false);
+        }
+
+        var graph = Build(sceneCount);
+        var invalidImages = graph.ImageProgressions
+            .Where(x => x < progressPercent)
+            .ToArray();
+        var invalidVideos = graph.VideoClips
+            .Where(x => x.StartProgressPercent <= progressPercent && x.EndProgressPercent >= invalidImages.DefaultIfEmpty(progressPercent).Min())
+            .ToArray();
+
+        return new TimelapseInvalidationPlan(invalidImages, invalidVideos, invalidVideos.Length > 0);
+    }
+
+    public static TimelapseInvalidationPlan PlanOriginalReplacement(int sceneCount)
+    {
+        var graph = Build(sceneCount);
+        return new TimelapseInvalidationPlan(
+            graph.ImageProgressions.Where(x => x < 100).ToArray(),
+            graph.VideoClips,
+            true);
+    }
+
+    public static TimelapseInvalidationPlan PlanVideoRerender(int sceneCount, int clipIndex)
+    {
+        var clip = Build(sceneCount).VideoClips.FirstOrDefault(x => x.ClipIndex == clipIndex);
+        return new TimelapseInvalidationPlan(
+            Array.Empty<int>(),
+            clip is null ? Array.Empty<TimelapseVideoEdge>() : new[] { clip },
+            true);
+    }
 }
 
 public static class TimelapseSellPricing

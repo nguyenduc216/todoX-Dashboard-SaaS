@@ -50,6 +50,7 @@ builder.Services.AddScoped<CatalogRepository>();
 builder.Services.AddScoped<CatalogAdminRepository>();
 builder.Services.AddScoped<IServiceSellPriceResolver, ServiceSellPriceResolver>();
 builder.Services.AddScoped<ITimelapseProfileRepository, TimelapseProfileRepository>();
+builder.Services.AddScoped<ITimelapseWorkflowService, TimelapseWorkflowService>();
 builder.Services.AddScoped<ITimelapseJobService, TimelapseJobService>();
 builder.Services.AddScoped<MrTodoXAvatarService>();
 builder.Services.AddScoped<SystemImageStorage>();
