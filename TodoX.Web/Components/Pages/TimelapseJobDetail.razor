@@ -24,7 +24,7 @@
     }
     else if (_job is null)
     {
-        <MudAlert Severity="Severity.Error">Không tìm thấy job hoặc bạn không có quyền xem job này.</MudAlert>
+        <MudAlert Severity="Severity.Error">@(_loadError ?? "Không tìm thấy job.")</MudAlert>
     }
     else
     {
@@ -313,6 +313,7 @@
     private bool _busy;
     private bool _refreshing;
     private string? _refreshError;
+    private string? _loadError;
     private int _activeTabIndex;
 
     private int CompletedImages => ImageCards.Count(x => x.Status == TimelapseOperationStatuses.Completed);
@@ -364,16 +365,27 @@
     {
         _initialLoading = true;
         _refreshError = null;
+        _loadError = null;
         try
         {
             if (AuthState.CurrentUser is { IsCustomer: true } customer)
             {
                 _job = await Jobs.GetOwnedAsync(JobId, customer);
+                if (_job is null)
+                {
+                    _loadError = "Không tìm thấy job.";
+                }
             }
         }
-        catch (Exception ex)
+        catch (UnauthorizedAccessException)
         {
-            _refreshError = SafeRefreshError(ex);
+            _job = null;
+            _loadError = "Bạn không có quyền xem job này.";
+        }
+        catch (Exception)
+        {
+            _job = null;
+            _loadError = "Không thể tải thông tin job. Vui lòng thử lại.";
         }
         finally
         {

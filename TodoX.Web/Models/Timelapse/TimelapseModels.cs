@@ -356,6 +356,5 @@ public static class TimelapseJobAccess
     public static bool CanRead(Guid? jobUserId, Guid? jobCustomerId, CurrentUserSession? currentUser)
         => currentUser is { IsAuthenticated: true, IsCustomer: true }
            && currentUser.CustomerId.HasValue
-           && jobUserId == currentUser.UserId
            && jobCustomerId == currentUser.CustomerId;
 }

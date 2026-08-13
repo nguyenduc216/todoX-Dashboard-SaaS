@@ -108,7 +108,8 @@ public class TimelapsePhase2BTests
         Assert.Contains("PeriodicTimer(TimeSpan.FromSeconds(4))", detail, StringComparison.Ordinal);
         Assert.Contains("LoadInitialAsync", detail, StringComparison.Ordinal);
         Assert.Contains("RefreshJobStateAsync", detail, StringComparison.Ordinal);
-        Assert.DoesNotContain("_job = null", detail, StringComparison.Ordinal);
+        Assert.Contains("_job = null;", detail, StringComparison.Ordinal);
+        Assert.DoesNotContain("await RefreshJobStateAsync();\n                _job = null;", detail, StringComparison.Ordinal);
         Assert.Contains("await RefreshJobStateAsync()", detail, StringComparison.Ordinal);
         Assert.Contains("@bind-ActivePanelIndex=\"_activeTabIndex\"", detail, StringComparison.Ordinal);
         Assert.Contains("_activeTabIndex = 1", detail, StringComparison.Ordinal);

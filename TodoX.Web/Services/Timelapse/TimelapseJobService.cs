@@ -42,6 +42,7 @@ public sealed class TimelapseJobService : ITimelapseJobService
     private readonly ITimelapseWorkflowService _workflow;
     private readonly TodoXConnectionFactory _factory;
     private readonly TenantContext _tenant;
+    private readonly ILogger<TimelapseJobService> _logger;
 
     public TimelapseJobService(
         CatalogRepository catalog,
@@ -51,7 +52,8 @@ public sealed class TimelapseJobService : ITimelapseJobService
         IServiceSellPriceResolver sellPrices,
         ITimelapseWorkflowService workflow,
         TodoXConnectionFactory factory,
-        TenantContext tenant)
+        TenantContext tenant,
+        ILogger<TimelapseJobService> logger)
     {
         _catalog = catalog;
         _profiles = profiles;
@@ -61,6 +63,7 @@ public sealed class TimelapseJobService : ITimelapseJobService
         _workflow = workflow;
         _factory = factory;
         _tenant = tenant;
+        _logger = logger;
     }
 
     public async Task<TimelapseJobView> CreateDraftAsync(
@@ -212,18 +215,33 @@ public sealed class TimelapseJobService : ITimelapseJobService
 
         using var conn = await _factory.OpenAsync(ct);
         var row = await conn.QuerySingleOrDefaultAsync<OwnedTimelapseJobRow>(
-            SelectOwnedJobSql + " AND id=@jobId LIMIT 1;",
+            SelectJobByIdSql,
             new
             {
-                jobId,
-                tenantId = _tenant.TenantId,
-                userId = currentUser.UserId,
-                customerId = currentUser.CustomerId,
-                jobType = RenderJobTypes.Timelapse
+                jobId
             });
         if (row is null)
         {
+            LogGetOwnedMiss(jobId, currentUser, null, "not_found");
             return null;
+        }
+
+        if (row.TenantId != _tenant.TenantId)
+        {
+            LogGetOwnedMiss(jobId, currentUser, row, "tenant_mismatch");
+            throw new UnauthorizedAccessException("You do not have access to this Timelapse job.");
+        }
+
+        if (!string.Equals(row.JobType, RenderJobTypes.Timelapse, StringComparison.OrdinalIgnoreCase))
+        {
+            LogGetOwnedMiss(jobId, currentUser, row, "job_type_mismatch");
+            return null;
+        }
+
+        if (!TimelapseJobAccess.CanRead(row.UserId, row.CustomerId, currentUser))
+        {
+            LogGetOwnedMiss(jobId, currentUser, row, "ownership_mismatch");
+            throw new UnauthorizedAccessException("You do not have access to this Timelapse job.");
         }
 
         var view = ToView(row, currentUser);
@@ -246,7 +264,6 @@ public sealed class TimelapseJobService : ITimelapseJobService
             new
             {
                 tenantId = _tenant.TenantId,
-                userId = currentUser.UserId,
                 customerId = currentUser.CustomerId,
                 jobType = RenderJobTypes.Timelapse
             });
@@ -288,7 +305,7 @@ public sealed class TimelapseJobService : ITimelapseJobService
     private async Task<TimelapseJobView> RequireOwnedAsync(Guid jobId, CurrentUserSession currentUser, CancellationToken ct)
     {
         var view = await GetOwnedAsync(jobId, currentUser, ct);
-        return view ?? throw new InvalidOperationException("Không tìm thấy job hoặc bạn không có quyền xem job này.");
+        return view ?? throw new InvalidOperationException("Không tìm thấy job.");
     }
 
     private static TimelapseJobView ToView(OwnedTimelapseJobRow row, CurrentUserSession currentUser)
@@ -328,25 +345,56 @@ public sealed class TimelapseJobService : ITimelapseJobService
     private sealed class OwnedTimelapseJobRow
     {
         public Guid Id { get; set; }
+        public Guid TenantId { get; set; }
         public Guid? UserId { get; set; }
         public Guid? CustomerId { get; set; }
+        public string JobType { get; set; } = string.Empty;
         public string Status { get; set; } = string.Empty;
         public string InputJson { get; set; } = "{}";
         public DateTime CreatedAt { get; set; }
     }
 
+    private void LogGetOwnedMiss(Guid jobId, CurrentUserSession currentUser, OwnedTimelapseJobRow? row, string reason)
+        => _logger.LogWarning(
+            "TIMELAPSE_JOB_GET_OWNED_MISS reason={Reason} jobId={JobId} currentTenantId={CurrentTenantId} currentUserId={CurrentUserId} currentCustomerId={CurrentCustomerId} persistedTenantId={PersistedTenantId} persistedUserId={PersistedUserId} persistedCustomerId={PersistedCustomerId} persistedJobType={PersistedJobType}",
+            reason,
+            jobId,
+            _tenant.TenantId,
+            currentUser.UserId,
+            currentUser.CustomerId,
+            row?.TenantId,
+            row?.UserId,
+            row?.CustomerId,
+            row?.JobType);
+
+    private const string SelectJobByIdSql =
+        """
+        SELECT id AS Id,
+               tenant_id AS TenantId,
+               user_id AS UserId,
+               customer_id AS CustomerId,
+               job_type AS JobType,
+               status AS Status,
+               input_json::text AS InputJson,
+               created_at AS CreatedAt
+          FROM render.render_jobs
+         WHERE id=@jobId
+         LIMIT 1;
+        """;
+
     private const string SelectOwnedJobSql =
         """
         SELECT id AS Id,
+               tenant_id AS TenantId,
                user_id AS UserId,
                customer_id AS CustomerId,
+               job_type AS JobType,
                status AS Status,
                input_json::text AS InputJson,
                created_at AS CreatedAt
           FROM render.render_jobs
          WHERE tenant_id=@tenantId
-           AND user_id=@userId
-           AND customer_id=@customerId
+           AND customer_id IS NOT DISTINCT FROM @customerId
            AND job_type=@jobType
         """;
 }

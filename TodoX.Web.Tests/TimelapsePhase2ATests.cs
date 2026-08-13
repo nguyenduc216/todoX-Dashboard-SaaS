@@ -199,6 +199,69 @@ public class TimelapsePhase2ATests
     }
 
     [Fact]
+    public void TimelapseJobAccess_AllowsAnotherUserInSameCustomer()
+    {
+        var ownerUserId = Guid.NewGuid();
+        var customerId = Guid.NewGuid();
+        var currentUser = new CurrentUserSession
+        {
+            UserId = Guid.NewGuid(),
+            CustomerId = customerId,
+            IsAuthenticated = true,
+            Role = TodoXUserRole.CustomerUser
+        };
+
+        Assert.True(TimelapseJobAccess.CanRead(ownerUserId, customerId, currentUser));
+    }
+
+    [Fact]
+    public void TimelapseJobAccess_DeniesCustomerSessionWithoutCustomerId()
+    {
+        var currentUser = new CurrentUserSession
+        {
+            UserId = Guid.NewGuid(),
+            CustomerId = null,
+            IsAuthenticated = true,
+            Role = TodoXUserRole.CustomerUser
+        };
+
+        Assert.False(TimelapseJobAccess.CanRead(Guid.NewGuid(), Guid.NewGuid(), currentUser));
+    }
+
+    [Fact]
+    public void TimelapseOwnership_SourceContracts_AlignCreateReadAndNavigation()
+    {
+        var createPage = ReadSource("TodoX.Web", "Components", "Pages", "TimelapseJobCreate.razor");
+        var detailPage = ReadSource("TodoX.Web", "Components", "Pages", "TimelapseJobDetail.razor");
+        var service = ReadSource("TodoX.Web", "Services", "Timelapse", "TimelapseJobService.cs");
+        var models = ReadSource("TodoX.Web", "Models", "Timelapse", "TimelapseModels.cs");
+
+        Assert.Contains("Navigation.NavigateTo($\"/jobs/timelapse/{job.Id}\")", createPage, StringComparison.Ordinal);
+        Assert.Contains("UserId = currentUser.UserId", service, StringComparison.Ordinal);
+        Assert.Contains("CustomerId = currentUser.CustomerId", service, StringComparison.Ordinal);
+        Assert.Contains("JobType = RenderJobTypes.Timelapse", service, StringComparison.Ordinal);
+
+        Assert.Contains("SelectJobByIdSql", service, StringComparison.Ordinal);
+        Assert.Contains("WHERE id=@jobId", service, StringComparison.Ordinal);
+        Assert.Contains("row.TenantId != _tenant.TenantId", service, StringComparison.Ordinal);
+        Assert.Contains("job_type AS JobType", service, StringComparison.Ordinal);
+        Assert.Contains("customer_id IS NOT DISTINCT FROM @customerId", service, StringComparison.Ordinal);
+        Assert.DoesNotContain("AND user_id=@userId", service, StringComparison.Ordinal);
+        Assert.Contains("TIMELAPSE_JOB_GET_OWNED_MISS", service, StringComparison.Ordinal);
+        Assert.Contains("tenant_mismatch", service, StringComparison.Ordinal);
+        Assert.Contains("job_type_mismatch", service, StringComparison.Ordinal);
+        Assert.Contains("ownership_mismatch", service, StringComparison.Ordinal);
+
+        Assert.Contains("jobCustomerId == currentUser.CustomerId", models, StringComparison.Ordinal);
+        Assert.DoesNotContain("jobUserId == currentUser.UserId", models, StringComparison.Ordinal);
+
+        Assert.Contains("Không tìm thấy job.", detailPage, StringComparison.Ordinal);
+        Assert.Contains("Bạn không có quyền xem job này.", detailPage, StringComparison.Ordinal);
+        Assert.Contains("Không thể tải thông tin job. Vui lòng thử lại.", detailPage, StringComparison.Ordinal);
+        Assert.DoesNotContain("Không tìm thấy job hoặc bạn không có quyền xem job này.", detailPage, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void FixedCatalog_RemainsLegacyOnlyTimelapseReference()
     {
         Assert.Equal("timelapse", FixedTodoXServiceCatalog.ResolveServiceType(FixedTodoXServiceCatalog.Timelapse));
