@@ -1,0 +1,86 @@
+.health-video-tabs {
+    width: 100%;
+}
+
+.health-video-image-panel,
+.health-video-scene-card,
+.health-video-video-card,
+.health-video-summary {
+    border-radius: 8px;
+}
+
+.health-video-media-frame {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    overflow: hidden;
+    border-radius: 8px;
+    border: 1px solid var(--mud-palette-lines-default, #d9d9e3);
+    background: var(--mud-palette-background-grey, #f2f2f5);
+}
+
+.health-video-scene-frame {
+    aspect-ratio: 9 / 16;
+    max-width: 240px;
+}
+
+.health-video-media-cover {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.health-video-placeholder {
+    width: 100%;
+    height: 100%;
+    min-height: 180px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 12px;
+    text-align: center;
+    color: var(--mud-palette-text-secondary, #666);
+    background: var(--mud-palette-background-grey, #f2f2f5);
+}
+
+.health-video-video-placeholder {
+    min-height: 220px;
+}
+
+.health-video-player,
+.health-video-result-player {
+    width: 100%;
+    max-width: 100%;
+    border-radius: 8px;
+    background: #10161d;
+}
+
+.health-video-result-player {
+    min-height: 280px;
+}
+
+.health-video-hidden-input {
+    display: none;
+}
+
+.health-video-upload-label {
+    display: inline-flex;
+    width: fit-content;
+    cursor: pointer;
+}
+
+.health-video-download-link {
+    display: inline-flex;
+    text-decoration: none;
+}
+
+@media (max-width: 700px) {
+    .health-video-scene-frame {
+        max-width: 100%;
+    }
+
+    .health-video-result-player {
+        min-height: 220px;
+    }
+}

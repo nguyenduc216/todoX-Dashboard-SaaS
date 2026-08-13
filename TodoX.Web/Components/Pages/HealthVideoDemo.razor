@@ -1,0 +1,443 @@
+@page "/health-video-demo"
+@using Microsoft.AspNetCore.Components.Forms
+@inject AuthStateService AuthState
+@inject Microsoft.AspNetCore.Hosting.IWebHostEnvironment Env
+@inject ISnackbar Snackbar
+@inject IJSRuntime JS
+
+<PageTitle>Video Sức Khoẻ</PageTitle>
+
+<MudStack Spacing="3">
+    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-3">
+        <div>
+            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1" Class="flex-wrap gap-2">
+                <MudText Typo="Typo.h4" Class="todox-page-title">Video Sức Khoẻ</MudText>
+                <MudChip T="string" Color="Color.Warning" Variant="Variant.Filled" Size="Size.Small">DEMO</MudChip>
+            </MudStack>
+            <MudText Typo="Typo.body1" Class="todox-page-subtitle">Tạo video quảng bá sản phẩm sức khoẻ bằng AI</MudText>
+        </div>
+    </MudStack>
+
+    @if (!AuthState.IsInitialized)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+    }
+    else if (!IsAdmin)
+    {
+        <MudAlert Severity="Severity.Error">Bạn cần quyền quản trị để mở trang này.</MudAlert>
+    }
+    else
+    {
+        <MudTabs Class="render-project-tabs health-video-tabs"
+                 rounded="true"
+                 ApplyEffectsToContainer="true"
+                 panelClass="render-tab-panel"
+                 @bind-ActivePanelIndex="_tabIndex">
+            <MudTabPanel Text="Thông tin">
+                <div class="render-tab-scroll">
+                    <MudPaper Class="todox-card pa-4" rounded="true">
+                        <MudStack Spacing="3">
+                            <MudStack Row="true" AlignItems="AlignItems.Start" Justify="Justify.SpaceBetween" Class="flex-wrap gap-3">
+                                <div>
+                                    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1" Class="flex-wrap gap-2">
+                                        <MudText Typo="Typo.h6">Video Sức Khoẻ</MudText>
+                                        <MudChip T="string" Color="Color.Info" Variant="Variant.Outlined" Size="Size.Small">Mockup</MudChip>
+                                    </MudStack>
+                                    <MudText Typo="Typo.body2" Class="todox-page-subtitle">Tạo video quảng bá sản phẩm sức khoẻ bằng AI</MudText>
+                                </div>
+                                <MudChip T="string" Color="@(_projectCreated ? Color.Success : Color.Default)" Variant="Variant.Outlined" Size="Size.Small">@(_projectCreated ? "Created" : "Draft")</MudChip>
+                            </MudStack>
+
+                            <MudGrid>
+                                <MudItem xs="12" md="5">
+                                    <MudPaper Class="pa-4 health-video-image-panel" Outlined="true" rounded="true">
+                                        <MudStack Spacing="2">
+                                            <MudText Typo="Typo.subtitle2">Ảnh sản phẩm</MudText>
+                                            <MudText Typo="Typo.caption" Class="todox-page-subtitle">Tải lên hình ảnh sản phẩm cần sử dụng trong video.</MudText>
+                                            <div class="health-video-media-frame">
+                                                @if (ResourceExists(_productImageUrl))
+                                                {
+                                                    <img src="@_productImageUrl" alt="Ảnh sản phẩm" class="health-video-media-cover" />
+                                                }
+                                                else
+                                                {
+                                                    <div class="health-video-placeholder">Chưa có ảnh demo</div>
+                                                }
+                                            </div>
+                                            <label class="health-video-upload-label">
+                                                <InputFile class="health-video-hidden-input" OnChange="OnProductImageSelected" accept="image/png,image/jpeg,image/webp" />
+                                                <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Upload">Chọn file ảnh</MudButton>
+                                            </label>
+                                            <MudText Typo="Typo.caption" Class="todox-page-subtitle">@_productImageFileName</MudText>
+                                        </MudStack>
+                                    </MudPaper>
+                                </MudItem>
+
+                                <MudItem xs="12" md="7">
+                                    <MudPaper Class="pa-4" Outlined="true" rounded="true">
+                                        <MudStack Spacing="2">
+                                            <MudText Typo="Typo.subtitle2">Kịch bản / Prompt</MudText>
+                                            <MudText Typo="Typo.caption" Class="todox-page-subtitle">Chọn file `.json` để mô phỏng prompt đầu vào.</MudText>
+                                            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="flex-wrap gap-2">
+                                                <label class="health-video-upload-label">
+                                                    <InputFile class="health-video-hidden-input" OnChange="OnPromptFileSelected" accept=".json,application/json" />
+                                                    <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Description">Chọn file prompt</MudButton>
+                                                </label>
+                                                <MudChip T="string" Color="Color.Default" Variant="Variant.Outlined">@_promptFileName</MudChip>
+                                            </MudStack>
+                                            <MudGrid>
+                                                <MudItem xs="12" sm="6">
+                                                    <MudTextField T="string" Label="Tên video" @bind-Value="_videoTitle" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                                                </MudItem>
+                                                <MudItem xs="12" sm="6">
+                                                    <MudSelect T="string" Label="Số scene" @bind-Value="_sceneCount" Variant="Variant.Outlined" Dense="true">
+                                                        @foreach (var option in SceneCountOptions)
+                                                        {
+                                                            <MudSelectItem T="string" Value="@option">@option</MudSelectItem>
+                                                        }
+                                                    </MudSelect>
+                                                </MudItem>
+                                                <MudItem xs="12" sm="6">
+                                                    <MudSelect T="string" Label="Thời lượng" @bind-Value="_durationSeconds" Variant="Variant.Outlined" Dense="true">
+                                                        @foreach (var option in DurationOptions)
+                                                        {
+                                                            <MudSelectItem T="string" Value="@option">@option giây</MudSelectItem>
+                                                        }
+                                                    </MudSelect>
+                                                </MudItem>
+                                                <MudItem xs="12" sm="6">
+                                                    <MudSelect T="string" Label="Tỷ lệ video" @bind-Value="_aspectRatio" Variant="Variant.Outlined" Dense="true">
+                                                        @foreach (var option in AspectRatioOptions)
+                                                        {
+                                                            <MudSelectItem T="string" Value="@option">@option</MudSelectItem>
+                                                        }
+                                                    </MudSelect>
+                                                </MudItem>
+                                            </MudGrid>
+                                            <MudPaper Class="pa-3 health-video-summary" Outlined="true" rounded="true">
+                                                <MudText Typo="Typo.subtitle2">@_videoTitle</MudText>
+                                                <MudText Typo="Typo.body2">Số scene: @_sceneCount</MudText>
+                                                <MudText Typo="Typo.body2">Thời lượng: @_durationSeconds giây</MudText>
+                                                <MudText Typo="Typo.body2">Tỷ lệ: @_aspectRatio</MudText>
+                                            </MudPaper>
+                                            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="flex-wrap gap-2">
+                                                <MudSelect T="string" Label="Giọng đọc" @bind-Value="_selectedVoice" Variant="Variant.Outlined" Dense="true">
+                                                    @foreach (var voice in Voices)
+                                                    {
+                                                        <MudSelectItem T="string" Value="@voice.Name">@voice.Name</MudSelectItem>
+                                                    }
+                                                </MudSelect>
+                                                <MudIconButton Icon="@Icons.Material.Filled.PlayArrow" Color="Color.Warning" OnClick="PlayVoiceAsync" Disabled="@_busy" />
+                                            </MudStack>
+                                            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="flex-wrap gap-2">
+                                                <MudSelect T="string" Label="Nhạc nền" @bind-Value="_selectedMusic" Variant="Variant.Outlined" Dense="true">
+                                                    @foreach (var music in MusicOptions)
+                                                    {
+                                                        <MudSelectItem T="string" Value="@music">@music</MudSelectItem>
+                                                    }
+                                                </MudSelect>
+                                                <MudIconButton Icon="@Icons.Material.Filled.PlayCircle" Color="Color.Warning" OnClick="PlayMusicAsync" Disabled="@(_busy || _selectedMusic == MusicOptions[1])" />
+                                            </MudStack>
+                                            <MudDivider />
+                                            <MudButton Variant="Variant.Filled" Color="Color.Warning" Disabled="@_busy" StartIcon="@Icons.Material.Filled.MovieCreation" OnClick="CreateVideoAsync">Tạo video</MudButton>
+                                            @if (!string.IsNullOrWhiteSpace(_statusMessage))
+                                            {
+                                                <MudAlert Severity="Severity.Info" Dense="true">@_statusMessage</MudAlert>
+                                            }
+                                        </MudStack>
+                                    </MudPaper>
+                                </MudItem>
+                            </MudGrid>
+                        </MudStack>
+                    </MudPaper>
+                </div>
+            </MudTabPanel>
+
+            <MudTabPanel Text="Scene / Hình ảnh">
+                <div class="render-tab-scroll">
+                    @if (!_projectCreated)
+                    {
+                        <MudAlert Severity="Severity.Info">Hãy hoàn thành cấu hình ở tab Thông tin trước.</MudAlert>
+                    }
+                    else
+                    {
+                        <MudStack Spacing="3">
+                            <MudPaper Class="todox-card pa-4" rounded="true">
+                                <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
+                                    <MudText Typo="Typo.h6">Scene / Hình ảnh</MudText>
+                                    <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.ArrowForward" OnClick="ContinueToVideoAsync" Disabled="@_busy">Tiếp tục tạo video</MudButton>
+                                </MudStack>
+                            </MudPaper>
+                            <MudGrid>
+                                @foreach (var scene in Scenes)
+                                {
+                                    <MudItem xs="12" md="6">
+                                        <MudPaper Class="todox-card pa-4 health-video-scene-card" rounded="true">
+                                            <MudStack Spacing="2">
+                                                <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+                                                    <MudText Typo="Typo.subtitle1">@scene.Title</MudText>
+                                                    <MudChip T="string" Color="Color.Success" Size="Size.Small" Icon="@Icons.Material.Filled.CheckCircle">Hoàn thành</MudChip>
+                                                </MudStack>
+                                                <MudText Typo="Typo.caption" Class="todox-page-subtitle">@scene.TimeRange</MudText>
+                                                <div class="health-video-media-frame health-video-scene-frame">
+                                                    @if (ResourceExists(scene.ImageUrl))
+                                                    {
+                                                        <img src="@scene.ImageUrl" alt="@scene.Title" class="health-video-media-cover" />
+                                                    }
+                                                    else
+                                                    {
+                                                        <div class="health-video-placeholder">Chưa có ảnh demo</div>
+                                                    }
+                                                </div>
+                                                <MudText Typo="Typo.body2">@scene.Description</MudText>
+                                                <MudText Typo="Typo.caption">Trạng thái: Hoàn thành · Thời lượng: @scene.DurationSeconds giây · Voice: @_selectedVoice</MudText>
+                                            </MudStack>
+                                        </MudPaper>
+                                    </MudItem>
+                                }
+                            </MudGrid>
+                        </MudStack>
+                    }
+                </div>
+            </MudTabPanel>
+
+            <MudTabPanel Text="Video">
+                <div class="render-tab-scroll">
+                    @if (!_projectCreated)
+                    {
+                        <MudAlert Severity="Severity.Info">Hãy hoàn thành bước Scene / Hình ảnh trước.</MudAlert>
+                    }
+                    else
+                    {
+                        <MudStack Spacing="3">
+                            <MudPaper Class="todox-card pa-4" rounded="true">
+                                <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
+                                    <MudText Typo="Typo.h6">Video</MudText>
+                                    <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.AutoAwesome" Disabled="@(_busy || _finalized)" OnClick="FinalizeVideoAsync">Hoàn thiện video</MudButton>
+                                </MudStack>
+                                @if (_busy)
+                                {
+                                    <MudProgressLinear Value="@_finalizeProgress" Color="Color.Warning" Class="mt-3" />
+                                }
+                            </MudPaper>
+                            <MudGrid>
+                                @foreach (var scene in Scenes)
+                                {
+                                    <MudItem xs="12" md="6">
+                                        <MudPaper Class="todox-card pa-4 health-video-video-card" rounded="true">
+                                            <MudStack Spacing="2">
+                                                <MudText Typo="Typo.subtitle1">@scene.Title</MudText>
+                                                <MudText Typo="Typo.caption" Class="todox-page-subtitle">@scene.TimeRange</MudText>
+                                                @if (ResourceExists(scene.VideoUrl))
+                                                {
+                                                    <video controls preload="metadata" class="health-video-player">
+                                                        <source src="@scene.VideoUrl" type="video/mp4" />
+                                                    </video>
+                                                }
+                                                else
+                                                {
+                                                    <div class="health-video-placeholder health-video-video-placeholder">Video scene đang chờ cập nhật resource</div>
+                                                }
+                                                <MudText Typo="Typo.caption">Trạng thái: Hoàn thành · Voice: @_selectedVoice · Thời lượng: @scene.DurationSeconds giây</MudText>
+                                            </MudStack>
+                                        </MudPaper>
+                                    </MudItem>
+                                }
+                            </MudGrid>
+                        </MudStack>
+                    }
+                </div>
+            </MudTabPanel>
+
+            <MudTabPanel Text="Kết quả">
+                <div class="render-tab-scroll">
+                    @if (!_finalized)
+                    {
+                        <MudAlert Severity="Severity.Info">Hãy hoàn thiện video trước.</MudAlert>
+                    }
+                    else
+                    {
+                        <MudGrid>
+                            <MudItem xs="12" md="7">
+                                <MudPaper Class="todox-card pa-4" rounded="true">
+                                    <MudStack Spacing="2">
+                                        <MudText Typo="Typo.h6">Video đã hoàn thiện</MudText>
+                                        <MudText Typo="Typo.body2" Class="todox-page-subtitle">6 Scene · 36 giây · 9:16 · 1080x1920</MudText>
+                                        <MudChip T="string" Color="Color.Success" Variant="Variant.Filled" Icon="@Icons.Material.Filled.CheckCircle">Hoàn thành</MudChip>
+                                        @if (ResourceExists(ResultVideoUrl))
+                                        {
+                                            <video controls preload="metadata" class="health-video-result-player">
+                                                <source src="@ResultVideoUrl" type="video/mp4" />
+                                            </video>
+                                        }
+                                        else
+                                        {
+                                            <div class="health-video-placeholder health-video-video-placeholder">Video scene đang chờ cập nhật resource</div>
+                                        }
+                                        <MudStack Row="true" Class="flex-wrap gap-2">
+                                            <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.PlayArrow" OnClick="OpenResultAsync">Xem video</MudButton>
+                                            <a href="@ResultVideoUrl" download="health-video-result.mp4" class="health-video-download-link">
+                                                <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Download">Tải video</MudButton>
+                                            </a>
+                                            <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="CreateNewAsync">Tạo video mới</MudButton>
+                                        </MudStack>
+                                    </MudStack>
+                                </MudPaper>
+                            </MudItem>
+                            <MudItem xs="12" md="5">
+                                <MudPaper Class="todox-card pa-4" rounded="true">
+                                    <MudStack Spacing="2">
+                                        <MudText Typo="Typo.h6">Thông tin kết quả</MudText>
+                                        <MudText Typo="Typo.body2">Video đã hoàn thiện</MudText>
+                                        <MudText Typo="Typo.caption" Class="todox-page-subtitle">6 Scene</MudText>
+                                        <MudText Typo="Typo.caption" Class="todox-page-subtitle">36 giây</MudText>
+                                        <MudText Typo="Typo.caption" Class="todox-page-subtitle">9:16</MudText>
+                                        <MudText Typo="Typo.caption" Class="todox-page-subtitle">1080x1920</MudText>
+                                        <MudChip T="string" Color="Color.Success" Variant="Variant.Filled" Size="Size.Small">Hoàn thành</MudChip>
+                                    </MudStack>
+                                </MudPaper>
+                            </MudItem>
+                        </MudGrid>
+                    }
+                </div>
+            </MudTabPanel>
+        </MudTabs>
+    }
+</MudStack>
+
+@code {
+    public sealed record HealthVideoSceneMock(int SceneNo, string Title, string TimeRange, string Description, string ImageUrl, string VideoUrl, int DurationSeconds);
+    private sealed record VoiceOption(string Name, string AudioUrl);
+
+    private static readonly string[] SceneCountOptions = ["6", "4", "8"];
+    private static readonly string[] DurationOptions = ["36", "24", "48"];
+    private static readonly string[] AspectRatioOptions = ["9:16", "1:1", "16:9"];
+    private static readonly string[] MusicOptions = ["Health Lifestyle", "Không sử dụng nhạc nền"];
+    private static readonly VoiceOption[] Voices =
+    [
+        new("Ngọc Huyền – Nữ miền Bắc", "/resources/mockup/health-video/health-video-voice-01.mp3"),
+        new("Phú Thắng – Nam miền Bắc", "/resources/mockup/health-video/health-video-voice-02.mp3"),
+        new("Minh Đức – Nam Khánh Hoà", "/resources/mockup/health-video/health-video-voice-03.mp3")
+    ];
+
+    private readonly List<HealthVideoSceneMock> Scenes =
+    [
+        new(1, "Scene 01", "00:00 - 00:06", "Mở đầu với hình ảnh sản phẩm và thông điệp thu hút.", "/resources/mockup/health-video/health-video-scene-01.jpg", "/resources/mockup/health-video/health-video-scene-01.mp4", 6),
+        new(2, "Scene 02", "00:06 - 00:12", "Giới thiệu vấn đề sức khoẻ mà khách hàng thường gặp.", "/resources/mockup/health-video/health-video-scene-02.jpg", "/resources/mockup/health-video/health-video-scene-02.mp4", 6),
+        new(3, "Scene 03", "00:12 - 00:18", "Trình bày lợi ích và thành phần nổi bật của sản phẩm.", "/resources/mockup/health-video/health-video-scene-03.jpg", "/resources/mockup/health-video/health-video-scene-03.mp4", 6),
+        new(4, "Scene 04", "00:18 - 00:24", "Minh hoạ sản phẩm trong tình huống sử dụng thực tế.", "/resources/mockup/health-video/health-video-scene-04.jpg", "/resources/mockup/health-video/health-video-scene-04.mp4", 6),
+        new(5, "Scene 05", "00:24 - 00:30", "Tăng độ tin cậy bằng thông tin chất lượng và trải nghiệm.", "/resources/mockup/health-video/health-video-scene-05.jpg", "/resources/mockup/health-video/health-video-scene-05.mp4", 6),
+        new(6, "Scene 06", "00:30 - 00:36", "Kết thúc bằng lời kêu gọi hành động.", "/resources/mockup/health-video/health-video-scene-06.jpg", "/resources/mockup/health-video/health-video-scene-06.mp4", 6)
+    ];
+
+    private int _tabIndex;
+    private bool _busy;
+    private bool _projectCreated;
+    private bool _finalized;
+    private int _finalizeProgress;
+    private string _selectedVoice = Voices[0].Name;
+    private string _selectedMusic = MusicOptions[0];
+    private string _promptFileName = "health-video-prompt.json";
+    private string _productImageFileName = "health-video-input-01.jpg";
+    private string _videoTitle = "Giới thiệu sản phẩm chăm sóc sức khoẻ";
+    private string _sceneCount = "6";
+    private string _durationSeconds = "36";
+    private string _aspectRatio = "9:16";
+    private string _statusMessage = "Hãy hoàn thành cấu hình ở tab Thông tin trước.";
+    private string _productImageUrl = "/resources/mockup/health-video/health-video-input-01.jpg";
+
+    private bool IsAdmin => AuthState.CurrentUser?.Role is TodoXUserRole.Admin or TodoXUserRole.SystemOperator || AuthState.CurrentUser?.IsRoot == true;
+    private string ResultVideoUrl => "/resources/mockup/health-video/health-video-result.mp4";
+
+    private async Task OnProductImageSelected(InputFileChangeEventArgs args)
+    {
+        _productImageFileName = args.File.Name;
+        using var ms = new MemoryStream();
+        await args.File.OpenReadStream(10 * 1024 * 1024).CopyToAsync(ms);
+        _productImageUrl = $"data:{args.File.ContentType};base64,{Convert.ToBase64String(ms.ToArray())}";
+    }
+
+    private async Task OnPromptFileSelected(InputFileChangeEventArgs args)
+    {
+        _promptFileName = args.File.Name;
+        using var ms = new MemoryStream();
+        await args.File.OpenReadStream(2 * 1024 * 1024).CopyToAsync(ms);
+        Snackbar.Add($"Đã chọn {_promptFileName}.", Severity.Success);
+    }
+
+    private async Task PlayVoiceAsync()
+    {
+        var voice = Voices.FirstOrDefault(x => x.Name == _selectedVoice);
+        if (voice is not null)
+        {
+            await JS.InvokeVoidAsync("open", voice.AudioUrl);
+        }
+    }
+
+    private Task PlayMusicAsync() => JS.InvokeVoidAsync("open", "/resources/mockup/health-video/health-video-music.mp3").AsTask();
+
+    private async Task CreateVideoAsync()
+    {
+        _busy = true;
+        _statusMessage = "Đang phân tích prompt và tạo scene...";
+        await Task.Delay(800);
+        _projectCreated = true;
+        _busy = false;
+        _tabIndex = 1;
+        _statusMessage = "6 scene đã sẵn sàng.";
+        Snackbar.Add("6 scene đã sẵn sàng.", Severity.Success);
+    }
+
+    private async Task ContinueToVideoAsync()
+    {
+        _busy = true;
+        await Task.Delay(500);
+        _busy = false;
+        _tabIndex = 2;
+        _statusMessage = "Video của 6 scene đã hoàn thành.";
+        Snackbar.Add(_statusMessage, Severity.Success);
+    }
+
+    private async Task FinalizeVideoAsync()
+    {
+        _busy = true;
+        _statusMessage = "Đang ghép video...";
+        for (var progress = 0; progress <= 100; progress += 10)
+        {
+            _finalizeProgress = progress;
+            await Task.Delay(120);
+        }
+
+        _finalized = true;
+        _busy = false;
+        _tabIndex = 3;
+        _statusMessage = "Video đã hoàn thiện.";
+        Snackbar.Add(_statusMessage, Severity.Success);
+    }
+
+    private Task OpenResultAsync() => JS.InvokeVoidAsync("open", ResultVideoUrl).AsTask();
+
+    private void CreateNewAsync()
+    {
+        _tabIndex = 0;
+        _busy = false;
+        _projectCreated = false;
+        _finalized = false;
+        _finalizeProgress = 0;
+        _statusMessage = "Hãy hoàn thành cấu hình ở tab Thông tin trước.";
+        _promptFileName = "health-video-prompt.json";
+        _productImageFileName = "health-video-input-01.jpg";
+        _productImageUrl = "/resources/mockup/health-video/health-video-input-01.jpg";
+    }
+
+    private bool ResourceExists(string url)
+    {
+        if (url.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var relativePath = url.TrimStart('/').Replace('/', Path.DirectorySeparatorChar);
+        return File.Exists(Path.Combine(Env.WebRootPath, relativePath));
+    }
+}
