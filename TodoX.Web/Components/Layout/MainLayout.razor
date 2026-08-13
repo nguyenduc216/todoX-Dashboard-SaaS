@@ -360,6 +360,17 @@
             }
         }
 
+        if (!existingCodes.Contains("construction_video_demo"))
+        {
+            var constructionVideoItem = BuildConstructionVideoDemoItem();
+            var aiStudio = list.FirstOrDefault(g => g.Code.Equals("ai_studio", StringComparison.OrdinalIgnoreCase));
+            if (aiStudio is not null)
+            {
+                constructionVideoItem.GroupId = aiStudio.Id;
+                aiStudio.Items.Add(constructionVideoItem);
+            }
+        }
+
         if (!existingCodes.Contains("rdance_fashion_demo"))
         {
             var rDanceFashionItem = BuildRDanceFashionDemoItem();
@@ -425,6 +436,20 @@
             VisibilityPolicy = "always",
             MatchAll = false,
             SortOrder = 22
+        };
+
+    private static NavigationMenuItemDto BuildConstructionVideoDemoItem()
+        => new()
+        {
+            Id = Guid.NewGuid(),
+            Code = "construction_video_demo",
+            Title = "Video Xây Dựng",
+            Href = "/construction-video-demo",
+            IconKey = "Engineering",
+            ModuleKeys = Array.Empty<string>(),
+            VisibilityPolicy = "always",
+            MatchAll = false,
+            SortOrder = 21
         };
 
     private static NavigationMenuItemDto BuildRDanceFashionDemoItem()
@@ -573,6 +598,7 @@
             Group("ai_studio", "AI Studio", "AutoFixHigh", 40, true,
                 Item("admin_avatar_manager", "Quản lý avatar mẫu", "/admin/avatar-manager", "FaceRetouchingNatural", new[] { "settings", "services" }, "admin_avatar_manager", sort: 10),
                 Item("render_jobs", "Render Jobs", "/render-jobs", "Movie", new[] { "render_jobs" }, sort: 20),
+                Item("construction_video_demo", "Video Xây Dựng", "/construction-video-demo", "Engineering", Array.Empty<string>(), "always", sort: 21),
                 Item("health_video_demo", "Video Sức Khoẻ", "/health-video-demo", "HealthAndSafety", Array.Empty<string>(), "always", sort: 22),
                 Item("rdance_fashion_demo", "rDance Thời Trang", "/rdance-fashion-demo", "Checkroom", Array.Empty<string>(), "always", sort: 23),
                 Item("real_estate_video_demo", "Video Bất Động Sản", "/real-estate-video-demo", "Apartment", Array.Empty<string>(), "always", sort: 24),
