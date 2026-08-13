@@ -17,6 +17,7 @@
     flex: 1;
 }
 
+.rdance-fashion-source-frame,
 .rdance-fashion-character-frame,
 .rdance-fashion-result-frame {
     width: 100%;
@@ -28,6 +29,11 @@
     background: #10161d;
 }
 
+.rdance-fashion-source-frame {
+    max-width: 320px;
+}
+
+.rdance-fashion-source-player,
 .rdance-fashion-character-image,
 .rdance-fashion-result-player {
     display: block;
@@ -92,6 +98,7 @@
         grid-template-columns: 1fr;
     }
 
+    .rdance-fashion-source-frame,
     .rdance-fashion-character-frame,
     .rdance-fashion-result-frame {
         max-width: 100%;

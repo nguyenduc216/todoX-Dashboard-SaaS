@@ -19,6 +19,8 @@ public sealed class RDanceFashionDemoPageTests
             "/resources/mockup/rdance-fashion/rdance-fashion-source.mp4",
             "/resources/mockup/rdance-fashion/rdance-fashion-character.jpg",
             "/resources/mockup/rdance-fashion/rdance-fashion-result.mp4",
+            "rdance-fashion-source-frame",
+            "<source src=\"@SourceVideoUrl\" type=\"video/mp4\" />",
             "MudProgressCircular",
             "MudProgressLinear",
             "await Task.Delay(500);",

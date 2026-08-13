@@ -44,21 +44,28 @@
                                                       Variant="Variant.Outlined"
                                                       Disabled="@_busy" />
                                         <MudPaper Class="pa-3 rdance-fashion-source-card" Outlined="true">
-                                            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
-                                                <MudIcon Icon="@Icons.Material.Filled.VideoLibrary" Color="Color.Warning" Size="Size.Large" />
-                                                <MudStack Spacing="0" Class="rdance-fashion-file-copy">
+                                            <MudStack Spacing="2">
+                                                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                                                    <MudIcon Icon="@Icons.Material.Filled.VideoLibrary" Color="Color.Warning" Size="Size.Large" />
                                                     <MudText Typo="Typo.overline">VIDEO CHUYỂN ĐỘNG</MudText>
-                                                    @if (ResourceExists(SourceVideoUrl))
-                                                    {
-                                                        <MudText Typo="Typo.subtitle2">rdance-fashion-source.mp4</MudText>
-                                                        <MudText Typo="Typo.caption" Class="todox-page-subtitle">Video TikTok đã được tải về để sử dụng làm chuyển động mẫu.</MudText>
-                                                        <MudChip T="string" Color="Color.Success" Variant="Variant.Filled" Size="Size.Small" Class="mt-2">Đã sẵn sàng</MudChip>
-                                                    }
-                                                    else
-                                                    {
-                                                        <MudText Typo="Typo.body2">Chưa cập nhật video chuyển động</MudText>
-                                                    }
                                                 </MudStack>
+                                                @if (ResourceExists(SourceVideoUrl))
+                                                {
+                                                    <div class="rdance-fashion-source-frame">
+                                                        <video controls preload="metadata" class="rdance-fashion-source-player">
+                                                            <source src="@SourceVideoUrl" type="video/mp4" />
+                                                        </video>
+                                                    </div>
+                                                    <MudText Typo="Typo.subtitle2">rdance-fashion-source.mp4</MudText>
+                                                    <MudText Typo="Typo.caption" Class="todox-page-subtitle">Video TikTok đã được tải về để sử dụng làm chuyển động mẫu.</MudText>
+                                                    <MudChip T="string" Color="Color.Success" Variant="Variant.Filled" Size="Size.Small">Đã sẵn sàng</MudChip>
+                                                }
+                                                else
+                                                {
+                                                    <div class="rdance-fashion-source-frame">
+                                                        <div class="rdance-fashion-placeholder">Chưa cập nhật video chuyển động</div>
+                                                    </div>
+                                                }
                                             </MudStack>
                                         </MudPaper>
                                     </MudStack>
