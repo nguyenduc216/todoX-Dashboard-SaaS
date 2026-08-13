@@ -400,7 +400,7 @@
             Href = "/health-video-demo",
             IconKey = "HealthAndSafety",
             ModuleKeys = Array.Empty<string>(),
-            VisibilityPolicy = "admin_avatar_manager",
+            VisibilityPolicy = "always",
             MatchAll = false,
             SortOrder = 22
         };
@@ -521,7 +521,7 @@
             Group("ai_studio", "AI Studio", "AutoFixHigh", 40, true,
                 Item("admin_avatar_manager", "Quản lý avatar mẫu", "/admin/avatar-manager", "FaceRetouchingNatural", new[] { "settings", "services" }, "admin_avatar_manager", sort: 10),
                 Item("render_jobs", "Render Jobs", "/render-jobs", "Movie", new[] { "render_jobs" }, sort: 20),
-                Item("health_video_demo", "Video Sức Khoẻ", "/health-video-demo", "HealthAndSafety", Array.Empty<string>(), "admin_avatar_manager", sort: 22),
+                Item("health_video_demo", "Video Sức Khoẻ", "/health-video-demo", "HealthAndSafety", Array.Empty<string>(), "always", sort: 22),
                 Item("render_video_jobs", "Render Video Job", "/render-video-jobs", "VideoLibrary", Array.Empty<string>(), "always", false, 25),
                 Item("prompt_templates", "Quản lý prompt", "/settings/prompt-templates", "AutoFixHigh", new[] { "prompt_templates", "settings", "app_settings" }, sort: 30),
                 Item("ai_providers", "AI Providers", "/admin/ai-providers", "Api", new[] { "settings", "services", "api_providers" }, "admin_avatar_manager", sort: 35)),

@@ -6,20 +6,21 @@ namespace TodoX.Web.Tests;
 public sealed class HealthVideoDemoPageTests
 {
     [Fact]
-    public void PageIsAdminOnlyAndRegisteredInNavigation()
+    public void PageIsAuthenticatedAndRegisteredInNavigation()
     {
         var repoRoot = FindRepoRoot();
         var page = ReadStrictUtf8(Path.Combine(repoRoot, "TodoX.Web", "Components", "Pages", "HealthVideoDemo.razor"));
         var layout = ReadStrictUtf8(Path.Combine(repoRoot, "TodoX.Web", "Components", "Layout", "MainLayout.razor"));
 
         Assert.Contains("@page \"/health-video-demo\"", page, StringComparison.Ordinal);
-        Assert.Contains("Bạn cần quyền quản trị để mở trang này.", page, StringComparison.Ordinal);
-        Assert.Contains("private bool IsAdmin => AuthState.CurrentUser?.Role is TodoXUserRole.Admin or TodoXUserRole.SystemOperator || AuthState.CurrentUser?.IsRoot == true;", page, StringComparison.Ordinal);
+        Assert.Contains("Vui lòng đăng nhập để mở trang này.", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("private bool IsAdmin =>", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("Bạn cần quyền quản trị để mở trang này.", page, StringComparison.Ordinal);
         Assert.Contains("Video Sức Khoẻ", layout, StringComparison.Ordinal);
         Assert.Contains("/health-video-demo", layout, StringComparison.Ordinal);
         Assert.Contains("HealthAndSafety", layout, StringComparison.Ordinal);
         Assert.Contains("BuildHealthVideoDemoItem", layout, StringComparison.Ordinal);
-        Assert.Contains("VisibilityPolicy = \"admin_avatar_manager\"", layout, StringComparison.Ordinal);
+        Assert.Contains("VisibilityPolicy = \"always\"", layout, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -46,6 +47,29 @@ public sealed class HealthVideoDemoPageTests
         {
             Assert.Contains(expected, page, StringComparison.Ordinal);
         }
+    }
+
+    [Fact]
+    public void ConfigurationIsFixedAndAudioPreviewsStayInPage()
+    {
+        var page = ReadStrictUtf8(Path.Combine(FindRepoRoot(), "TodoX.Web", "Components", "Pages", "HealthVideoDemo.razor"));
+
+        Assert.Contains("Số scene", page, StringComparison.Ordinal);
+        Assert.Contains("Value=\"@SceneCountText\"", page, StringComparison.Ordinal);
+        Assert.Contains("Value=\"@DurationText\"", page, StringComparison.Ordinal);
+        Assert.Contains("Value=\"@AspectRatioText\"", page, StringComparison.Ordinal);
+        Assert.Contains("Value=\"@ResolutionText\"", page, StringComparison.Ordinal);
+        Assert.Contains("private const string SceneCountText = \"6\";", page, StringComparison.Ordinal);
+        Assert.Contains("private const string DurationText = \"36 giây\";", page, StringComparison.Ordinal);
+        Assert.Contains("private const string AspectRatioText = \"9:16\";", page, StringComparison.Ordinal);
+        Assert.Contains("private const string ResolutionText = \"1080 × 1920\";", page, StringComparison.Ordinal);
+        Assert.Contains("<audio controls preload=\"metadata\" src=\"@SelectedVoiceAudioUrl\"", page, StringComparison.Ordinal);
+        Assert.Contains("<audio controls preload=\"metadata\" src=\"@MusicAudioUrl\"", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("SceneCountOptions", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("DurationOptions", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("AspectRatioOptions", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("PlayVoiceAsync", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("PlayMusicAsync", page, StringComparison.Ordinal);
     }
 
     private static string ReadStrictUtf8(string file)

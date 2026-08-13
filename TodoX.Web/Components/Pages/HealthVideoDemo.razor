@@ -22,9 +22,9 @@
     {
         <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
     }
-    else if (!IsAdmin)
+    else if (AuthState.CurrentUser is null)
     {
-        <MudAlert Severity="Severity.Error">Bạn cần quyền quản trị để mở trang này.</MudAlert>
+        <MudAlert Severity="Severity.Warning">Vui lòng đăng nhập để mở trang này.</MudAlert>
     }
     else
     {
@@ -90,35 +90,24 @@
                                                     <MudTextField T="string" Label="Tên video" @bind-Value="_videoTitle" Variant="Variant.Outlined" Margin="Margin.Dense" />
                                                 </MudItem>
                                                 <MudItem xs="12" sm="6">
-                                                    <MudSelect T="string" Label="Số scene" @bind-Value="_sceneCount" Variant="Variant.Outlined" Dense="true">
-                                                        @foreach (var option in SceneCountOptions)
-                                                        {
-                                                            <MudSelectItem T="string" Value="@option">@option</MudSelectItem>
-                                                        }
-                                                    </MudSelect>
+                                                    <MudTextField T="string" Label="Số scene" Value="@SceneCountText" Variant="Variant.Outlined" Margin="Margin.Dense" ReadOnly="true" />
                                                 </MudItem>
                                                 <MudItem xs="12" sm="6">
-                                                    <MudSelect T="string" Label="Thời lượng" @bind-Value="_durationSeconds" Variant="Variant.Outlined" Dense="true">
-                                                        @foreach (var option in DurationOptions)
-                                                        {
-                                                            <MudSelectItem T="string" Value="@option">@option giây</MudSelectItem>
-                                                        }
-                                                    </MudSelect>
+                                                    <MudTextField T="string" Label="Thời lượng" Value="@DurationText" Variant="Variant.Outlined" Margin="Margin.Dense" ReadOnly="true" />
                                                 </MudItem>
                                                 <MudItem xs="12" sm="6">
-                                                    <MudSelect T="string" Label="Tỷ lệ video" @bind-Value="_aspectRatio" Variant="Variant.Outlined" Dense="true">
-                                                        @foreach (var option in AspectRatioOptions)
-                                                        {
-                                                            <MudSelectItem T="string" Value="@option">@option</MudSelectItem>
-                                                        }
-                                                    </MudSelect>
+                                                    <MudTextField T="string" Label="Tỷ lệ video" Value="@AspectRatioText" Variant="Variant.Outlined" Margin="Margin.Dense" ReadOnly="true" />
+                                                </MudItem>
+                                                <MudItem xs="12" sm="6">
+                                                    <MudTextField T="string" Label="Độ phân giải" Value="@ResolutionText" Variant="Variant.Outlined" Margin="Margin.Dense" ReadOnly="true" />
                                                 </MudItem>
                                             </MudGrid>
                                             <MudPaper Class="pa-3 health-video-summary" Outlined="true" rounded="true">
                                                 <MudText Typo="Typo.subtitle2">@_videoTitle</MudText>
-                                                <MudText Typo="Typo.body2">Số scene: @_sceneCount</MudText>
-                                                <MudText Typo="Typo.body2">Thời lượng: @_durationSeconds giây</MudText>
-                                                <MudText Typo="Typo.body2">Tỷ lệ: @_aspectRatio</MudText>
+                                                <MudText Typo="Typo.body2">Số scene: @SceneCountText</MudText>
+                                                <MudText Typo="Typo.body2">Thời lượng: @DurationText</MudText>
+                                                <MudText Typo="Typo.body2">Tỷ lệ video: @AspectRatioText</MudText>
+                                                <MudText Typo="Typo.body2">Độ phân giải: @ResolutionText</MudText>
                                             </MudPaper>
                                             <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="flex-wrap gap-2">
                                                 <MudSelect T="string" Label="Giọng đọc" @bind-Value="_selectedVoice" Variant="Variant.Outlined" Dense="true">
@@ -127,8 +116,8 @@
                                                         <MudSelectItem T="string" Value="@voice.Name">@voice.Name</MudSelectItem>
                                                     }
                                                 </MudSelect>
-                                                <MudIconButton Icon="@Icons.Material.Filled.PlayArrow" Color="Color.Warning" OnClick="PlayVoiceAsync" Disabled="@_busy" />
                                             </MudStack>
+                                            <audio controls preload="metadata" src="@SelectedVoiceAudioUrl" class="health-video-audio"></audio>
                                             <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="flex-wrap gap-2">
                                                 <MudSelect T="string" Label="Nhạc nền" @bind-Value="_selectedMusic" Variant="Variant.Outlined" Dense="true">
                                                     @foreach (var music in MusicOptions)
@@ -136,8 +125,11 @@
                                                         <MudSelectItem T="string" Value="@music">@music</MudSelectItem>
                                                     }
                                                 </MudSelect>
-                                                <MudIconButton Icon="@Icons.Material.Filled.PlayCircle" Color="Color.Warning" OnClick="PlayMusicAsync" Disabled="@(_busy || _selectedMusic == MusicOptions[1])" />
                                             </MudStack>
+                                            @if (_selectedMusic != NoMusicOption)
+                                            {
+                                                <audio controls preload="metadata" src="@MusicAudioUrl" class="health-video-audio"></audio>
+                                            }
                                             <MudDivider />
                                             <MudButton Variant="Variant.Filled" Color="Color.Warning" Disabled="@_busy" StartIcon="@Icons.Material.Filled.MovieCreation" OnClick="CreateVideoAsync">Tạo video</MudButton>
                                             @if (!string.IsNullOrWhiteSpace(_statusMessage))
@@ -309,10 +301,13 @@
     public sealed record HealthVideoSceneMock(int SceneNo, string Title, string TimeRange, string Description, string ImageUrl, string VideoUrl, int DurationSeconds);
     private sealed record VoiceOption(string Name, string AudioUrl);
 
-    private static readonly string[] SceneCountOptions = ["6", "4", "8"];
-    private static readonly string[] DurationOptions = ["36", "24", "48"];
-    private static readonly string[] AspectRatioOptions = ["9:16", "1:1", "16:9"];
-    private static readonly string[] MusicOptions = ["Health Lifestyle", "Không sử dụng nhạc nền"];
+    private const string SceneCountText = "6";
+    private const string DurationText = "36 giây";
+    private const string AspectRatioText = "9:16";
+    private const string ResolutionText = "1080 × 1920";
+    private const string MusicAudioUrl = "/resources/mockup/health-video/health-video-music.mp3";
+    private const string NoMusicOption = "Không sử dụng nhạc nền";
+    private static readonly string[] MusicOptions = ["Health Lifestyle", NoMusicOption];
     private static readonly VoiceOption[] Voices =
     [
         new("Ngọc Huyền – Nữ miền Bắc", "/resources/mockup/health-video/health-video-voice-01.mp3"),
@@ -340,14 +335,11 @@
     private string _promptFileName = "health-video-prompt.json";
     private string _productImageFileName = "health-video-input-01.jpg";
     private string _videoTitle = "Giới thiệu sản phẩm chăm sóc sức khoẻ";
-    private string _sceneCount = "6";
-    private string _durationSeconds = "36";
-    private string _aspectRatio = "9:16";
     private string _statusMessage = "Hãy hoàn thành cấu hình ở tab Thông tin trước.";
     private string _productImageUrl = "/resources/mockup/health-video/health-video-input-01.jpg";
 
-    private bool IsAdmin => AuthState.CurrentUser?.Role is TodoXUserRole.Admin or TodoXUserRole.SystemOperator || AuthState.CurrentUser?.IsRoot == true;
     private string ResultVideoUrl => "/resources/mockup/health-video/health-video-result.mp4";
+    private string SelectedVoiceAudioUrl => Voices.FirstOrDefault(x => x.Name == _selectedVoice)?.AudioUrl ?? Voices[0].AudioUrl;
 
     private async Task OnProductImageSelected(InputFileChangeEventArgs args)
     {
@@ -364,17 +356,6 @@
         await args.File.OpenReadStream(2 * 1024 * 1024).CopyToAsync(ms);
         Snackbar.Add($"Đã chọn {_promptFileName}.", Severity.Success);
     }
-
-    private async Task PlayVoiceAsync()
-    {
-        var voice = Voices.FirstOrDefault(x => x.Name == _selectedVoice);
-        if (voice is not null)
-        {
-            await JS.InvokeVoidAsync("open", voice.AudioUrl);
-        }
-    }
-
-    private Task PlayMusicAsync() => JS.InvokeVoidAsync("open", "/resources/mockup/health-video/health-video-music.mp3").AsTask();
 
     private async Task CreateVideoAsync()
     {
