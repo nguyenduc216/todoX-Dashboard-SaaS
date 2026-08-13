@@ -371,6 +371,17 @@
             }
         }
 
+        if (!existingCodes.Contains("real_estate_video_demo"))
+        {
+            var realEstateVideoItem = BuildRealEstateVideoDemoItem();
+            var aiStudio = list.FirstOrDefault(g => g.Code.Equals("ai_studio", StringComparison.OrdinalIgnoreCase));
+            if (aiStudio is not null)
+            {
+                realEstateVideoItem.GroupId = aiStudio.Id;
+                aiStudio.Items.Add(realEstateVideoItem);
+            }
+        }
+
         return list;
     }
 
@@ -430,6 +441,20 @@
             SortOrder = 23
         };
 
+    private static NavigationMenuItemDto BuildRealEstateVideoDemoItem()
+        => new()
+        {
+            Id = Guid.NewGuid(),
+            Code = "real_estate_video_demo",
+            Title = "Video Bất Động Sản",
+            Href = "/real-estate-video-demo",
+            IconKey = "Apartment",
+            ModuleKeys = Array.Empty<string>(),
+            VisibilityPolicy = "always",
+            MatchAll = false,
+            SortOrder = 24
+        };
+
     private static NavigationMenuGroupDto CloneGroup(NavigationMenuGroupDto group)
         => new()
         {
@@ -479,6 +504,7 @@
         "Movie" => Icons.Material.Filled.Movie,
         "HealthAndSafety" => Icons.Material.Filled.HealthAndSafety,
         "Checkroom" => Icons.Material.Filled.Checkroom,
+        "Apartment" => Icons.Material.Filled.Apartment,
         "Public" => Icons.Material.Filled.Public,
         "VideoLibrary" => Icons.Material.Filled.VideoLibrary,
         "Campaign" => Icons.Material.Filled.Campaign,
@@ -549,6 +575,7 @@
                 Item("render_jobs", "Render Jobs", "/render-jobs", "Movie", new[] { "render_jobs" }, sort: 20),
                 Item("health_video_demo", "Video Sức Khoẻ", "/health-video-demo", "HealthAndSafety", Array.Empty<string>(), "always", sort: 22),
                 Item("rdance_fashion_demo", "rDance Thời Trang", "/rdance-fashion-demo", "Checkroom", Array.Empty<string>(), "always", sort: 23),
+                Item("real_estate_video_demo", "Video Bất Động Sản", "/real-estate-video-demo", "Apartment", Array.Empty<string>(), "always", sort: 24),
                 Item("render_video_jobs", "Render Video Job", "/render-video-jobs", "VideoLibrary", Array.Empty<string>(), "always", false, 25),
                 Item("prompt_templates", "Quản lý prompt", "/settings/prompt-templates", "AutoFixHigh", new[] { "prompt_templates", "settings", "app_settings" }, sort: 30),
                 Item("ai_providers", "AI Providers", "/admin/ai-providers", "Api", new[] { "settings", "services", "api_providers" }, "admin_avatar_manager", sort: 35)),

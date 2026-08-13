@@ -1,0 +1,210 @@
+.real-estate-video-tabs {
+    width: 100%;
+}
+
+.real-estate-video-image-panel,
+.real-estate-video-scene-card,
+.real-estate-video-video-card,
+.real-estate-video-summary {
+    border-radius: 8px;
+}
+
+.real-estate-video-media-frame {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    overflow: hidden;
+    border-radius: 8px;
+    border: 1px solid var(--mud-palette-lines-default, #d9d9e3);
+    background: var(--mud-palette-background-grey, #f2f2f5);
+}
+
+.real-estate-video-scene-frame {
+    aspect-ratio: 9 / 16;
+}
+
+.real-estate-video-media-cover {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.real-estate-video-placeholder {
+    width: 100%;
+    height: 100%;
+    min-height: 180px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 12px;
+    text-align: center;
+    color: var(--mud-palette-text-secondary, #666);
+    background: var(--mud-palette-background-grey, #f2f2f5);
+}
+
+.real-estate-video-video-placeholder {
+    min-height: 100%;
+}
+
+.real-estate-video-player,
+.real-estate-video-result-player {
+    width: 100%;
+    max-width: 100%;
+    border-radius: 8px;
+    background: #10161d;
+}
+
+.real-estate-video-player {
+    height: 100%;
+    object-fit: cover;
+}
+
+.real-estate-video-result-player {
+    min-height: 280px;
+}
+
+.real-estate-video-result-frame {
+    width: 100%;
+    max-width: 420px;
+    aspect-ratio: 9 / 16;
+    overflow: hidden;
+    border-radius: 8px;
+    background: #10161d;
+}
+
+.real-estate-video-result-frame .real-estate-video-result-player,
+.real-estate-video-result-frame .real-estate-video-placeholder {
+    width: 100%;
+    height: 100%;
+}
+
+.real-estate-video-audio {
+    width: 100%;
+    max-width: 420px;
+}
+
+.real-estate-video-compact-grid {
+    align-items: stretch;
+}
+
+.real-estate-video-compact-card {
+    height: 100%;
+}
+
+.real-estate-video-card-header {
+    gap: 8px;
+    min-height: 32px;
+}
+
+.real-estate-video-card-header .mud-chip {
+    flex-shrink: 0;
+}
+
+.real-estate-video-scene-description {
+    display: -webkit-box;
+    min-height: 42px;
+    overflow: hidden;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+}
+
+.real-estate-video-video-frame {
+    width: 100%;
+    aspect-ratio: 9 / 16;
+    overflow: hidden;
+    border-radius: 8px;
+    background: #10161d;
+}
+
+.real-estate-video-loading-panel {
+    padding: 22px;
+    background: var(--mud-palette-background-grey, #f2f2f5);
+    border-radius: 8px;
+}
+
+.real-estate-video-loading-progress {
+    width: 100%;
+    max-width: 460px;
+}
+
+.real-estate-video-hidden-input {
+    display: none;
+}
+
+.real-estate-video-prompt-upload-grid {
+    margin-top: 4px;
+}
+
+.real-estate-video-prompt-upload-card,
+.real-estate-video-selected-file-card {
+    width: 100%;
+    min-height: 190px;
+    height: 100%;
+    border: 1px dashed var(--mud-palette-lines-default, #d9d9e3);
+    border-radius: 8px;
+    padding: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    background: var(--mud-palette-background-grey, #f2f2f5);
+}
+
+.real-estate-video-prompt-upload-card {
+    flex-direction: column;
+    cursor: pointer;
+    text-align: center;
+    transition: border-color 140ms ease, background-color 140ms ease;
+}
+
+.real-estate-video-prompt-upload-card:hover {
+    border-color: var(--mud-palette-warning, #f5a623);
+    background: var(--mud-palette-surface, #fff);
+}
+
+.real-estate-video-selected-file-card {
+    border-style: solid;
+    justify-content: flex-start;
+    text-align: left;
+}
+
+.real-estate-video-selected-file-copy {
+    min-width: 0;
+    flex: 1;
+}
+
+.real-estate-video-file-name {
+    display: block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.real-estate-video-upload-label {
+    display: inline-flex;
+    width: fit-content;
+    cursor: pointer;
+}
+
+.real-estate-video-download-link {
+    display: inline-flex;
+    text-decoration: none;
+}
+
+@media (max-width: 700px) {
+    .real-estate-video-scene-frame {
+        max-width: 100%;
+    }
+
+    .real-estate-video-result-player {
+        min-height: 220px;
+    }
+
+    .real-estate-video-prompt-upload-card,
+    .real-estate-video-selected-file-card {
+        min-height: 170px;
+        padding: 20px;
+    }
+}

@@ -1,0 +1,536 @@
+@page "/real-estate-video-demo"
+@using Microsoft.AspNetCore.Components.Forms
+@inject AuthStateService AuthState
+@inject Microsoft.AspNetCore.Hosting.IWebHostEnvironment Env
+@inject ISnackbar Snackbar
+@inject IJSRuntime JS
+
+<PageTitle>Video Bất Động Sản</PageTitle>
+
+<MudStack Spacing="3">
+    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-3">
+        <div>
+            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1" Class="flex-wrap gap-2">
+                <MudText Typo="Typo.h4" Class="todox-page-title">Video Bất Động Sản</MudText>
+                <MudChip T="string" Color="Color.Warning" Variant="Variant.Filled" Size="Size.Small">DEMO</MudChip>
+            </MudStack>
+            <MudText Typo="Typo.body1" Class="todox-page-subtitle">Tạo video giới thiệu bất động sản chuyên nghiệp bằng AI</MudText>
+        </div>
+    </MudStack>
+
+    @if (!AuthState.IsInitialized)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+    }
+    else if (AuthState.CurrentUser is null)
+    {
+        <MudAlert Severity="Severity.Warning">Vui lòng đăng nhập để mở trang này.</MudAlert>
+    }
+    else
+    {
+        <MudTabs Class="render-project-tabs real-estate-video-tabs"
+                 rounded="true"
+                 ApplyEffectsToContainer="true"
+                 panelClass="render-tab-panel"
+                 @bind-ActivePanelIndex="_tabIndex">
+            <MudTabPanel Text="Thông tin">
+                <div class="render-tab-scroll">
+                    <MudPaper Class="todox-card pa-4" rounded="true">
+                        <MudStack Spacing="3">
+                            <MudStack Row="true" AlignItems="AlignItems.Start" Justify="Justify.SpaceBetween" Class="flex-wrap gap-3">
+                                <div>
+                                    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1" Class="flex-wrap gap-2">
+                                        <MudText Typo="Typo.h6">Video Bất Động Sản</MudText>
+                                        <MudChip T="string" Color="Color.Info" Variant="Variant.Outlined" Size="Size.Small">Mockup</MudChip>
+                                    </MudStack>
+                                    <MudText Typo="Typo.body2" Class="todox-page-subtitle">Tạo video giới thiệu bất động sản chuyên nghiệp bằng AI</MudText>
+                                </div>
+                                <MudChip T="string" Color="@(_projectCreated ? Color.Success : Color.Default)" Variant="Variant.Outlined" Size="Size.Small">@(_projectCreated ? "Created" : "Draft")</MudChip>
+                            </MudStack>
+
+                            <MudGrid>
+                                <MudItem xs="12" md="5">
+                                    <MudPaper Class="pa-4 real-estate-video-image-panel" Outlined="true" rounded="true">
+                                        <MudStack Spacing="2">
+                                            <MudText Typo="Typo.subtitle2">Ảnh bất động sản</MudText>
+                                            <MudText Typo="Typo.caption" Class="todox-page-subtitle">Tải lên hình ảnh bất động sản cần sử dụng trong video.</MudText>
+                                            <div class="real-estate-video-media-frame">
+                                                @if (ResourceExists(_productImageUrl))
+                                                {
+                                                    <img src="@_productImageUrl" alt="Ảnh bất động sản" class="real-estate-video-media-cover" />
+                                                }
+                                                else
+                                                {
+                                                    <div class="real-estate-video-placeholder">Chưa có ảnh demo</div>
+                                                }
+                                            </div>
+                                            <label class="real-estate-video-upload-label">
+                                                <InputFile class="real-estate-video-hidden-input" OnChange="OnProductImageSelected" accept="image/png,image/jpeg,image/webp" />
+                                                <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Upload">Chọn file ảnh</MudButton>
+                                            </label>
+                                            <MudText Typo="Typo.caption" Class="todox-page-subtitle">@_productImageFileName</MudText>
+                                        </MudStack>
+                                    </MudPaper>
+                                </MudItem>
+
+                                <MudItem xs="12" md="7">
+                                    <MudPaper Class="pa-4" Outlined="true" rounded="true">
+                                        <MudStack Spacing="2">
+                                            <MudText Typo="Typo.subtitle2">Kịch bản / Prompt</MudText>
+                                            <MudText Typo="Typo.caption" Class="todox-page-subtitle">Chọn file `.json` để mô phỏng prompt đầu vào.</MudText>
+                                            <MudGrid Class="real-estate-video-prompt-upload-grid">
+                                                <MudItem xs="12" sm="6">
+                                                    <label class="real-estate-video-prompt-upload-card">
+                                                        <InputFile class="real-estate-video-hidden-input" OnChange="OnPromptFileSelected" accept=".json,application/json" />
+                                                        <MudIcon Icon="@Icons.Material.Filled.CloudUpload" Color="Color.Warning" Size="Size.Large" />
+                                                        <MudText Typo="Typo.subtitle2">Tải file prompt</MudText>
+                                                        <MudText Typo="Typo.caption" Class="todox-page-subtitle">Chọn file .json để mô phỏng prompt đầu vào</MudText>
+                                                        <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.UploadFile">CHỌN FILE PROMPT</MudButton>
+                                                    </label>
+                                                </MudItem>
+                                                <MudItem xs="12" sm="6">
+                                                    <MudPaper Class="real-estate-video-selected-file-card" Outlined="true" rounded="true">
+                                                        <MudIcon Icon="@Icons.Material.Filled.Article" Color="Color.Info" Size="Size.Large" />
+                                                        <MudStack Spacing="1" Class="real-estate-video-selected-file-copy">
+                                                            <MudText Typo="Typo.caption" Class="todox-page-subtitle">File prompt</MudText>
+                                                            <MudText Typo="Typo.subtitle2" Class="real-estate-video-file-name">@_promptFileName</MudText>
+                                                            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1" Class="flex-wrap gap-1">
+                                                                <MudChip T="string" Color="Color.Info" Variant="Variant.Outlined" Size="Size.Small">JSON</MudChip>
+                                                                <MudChip T="string" Color="Color.Success" Variant="Variant.Filled" Size="Size.Small">Đã sẵn sàng</MudChip>
+                                                            </MudStack>
+                                                        </MudStack>
+                                                    </MudPaper>
+                                                </MudItem>
+                                            </MudGrid>
+                                            <MudGrid>
+                                                <MudItem xs="12" sm="6">
+                                                    <MudTextField T="string" Label="Tên video" @bind-Value="_videoTitle" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                                                </MudItem>
+                                                <MudItem xs="12" sm="6">
+                                                    <MudTextField T="string" Label="Số scene" Value="@SceneCountText" Variant="Variant.Outlined" Margin="Margin.Dense" ReadOnly="true" />
+                                                </MudItem>
+                                                <MudItem xs="12" sm="6">
+                                                    <MudTextField T="string" Label="Thời lượng" Value="@DurationText" Variant="Variant.Outlined" Margin="Margin.Dense" ReadOnly="true" />
+                                                </MudItem>
+                                                <MudItem xs="12" sm="6">
+                                                    <MudTextField T="string" Label="Tỷ lệ video" Value="@AspectRatioText" Variant="Variant.Outlined" Margin="Margin.Dense" ReadOnly="true" />
+                                                </MudItem>
+                                                <MudItem xs="12" sm="6">
+                                                    <MudTextField T="string" Label="Độ phân giải" Value="@ResolutionText" Variant="Variant.Outlined" Margin="Margin.Dense" ReadOnly="true" />
+                                                </MudItem>
+                                            </MudGrid>
+                                            <MudPaper Class="pa-3 real-estate-video-summary" Outlined="true" rounded="true">
+                                                <MudText Typo="Typo.subtitle2">@_videoTitle</MudText>
+                                                <MudText Typo="Typo.body2">Số scene: @SceneCountText</MudText>
+                                                <MudText Typo="Typo.body2">Thời lượng: @DurationText</MudText>
+                                                <MudText Typo="Typo.body2">Tỷ lệ video: @AspectRatioText</MudText>
+                                                <MudText Typo="Typo.body2">Độ phân giải: @ResolutionText</MudText>
+                                            </MudPaper>
+                                            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="flex-wrap gap-2">
+                                                <MudSelect T="string" Label="Giọng đọc" @bind-Value="_selectedVoice" Variant="Variant.Outlined" Dense="true">
+                                                    <MudSelectItem T="string" Value="@NoVoiceOption">@NoVoiceOption</MudSelectItem>
+                                                    @foreach (var voice in Voices)
+                                                    {
+                                                        <MudSelectItem T="string" Value="@voice.Name">@voice.Name</MudSelectItem>
+                                                    }
+                                                </MudSelect>
+                                            </MudStack>
+                                            @if (_selectedVoice != NoVoiceOption)
+                                            {
+                                                <audio controls preload="metadata" src="@SelectedVoiceAudioUrl" class="real-estate-video-audio"></audio>
+                                            }
+                                            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="flex-wrap gap-2">
+                                                <MudSelect T="string" Label="Nhạc nền" @bind-Value="_selectedMusic" Variant="Variant.Outlined" Dense="true">
+                                                    @foreach (var music in MusicOptions)
+                                                    {
+                                                        <MudSelectItem T="string" Value="@music">@music</MudSelectItem>
+                                                    }
+                                                </MudSelect>
+                                            </MudStack>
+                                            @if (_selectedMusic != NoMusicOption)
+                                            {
+                                                <audio controls preload="metadata" src="@MusicAudioUrl" class="real-estate-video-audio"></audio>
+                                            }
+                                            <MudDivider />
+                                            <MudButton Variant="Variant.Filled" Color="Color.Warning" Disabled="@_busy" StartIcon="@Icons.Material.Filled.MovieCreation" OnClick="CreateVideoAsync">Tạo video</MudButton>
+                                            @if (!string.IsNullOrWhiteSpace(_statusMessage))
+                                            {
+                                                <MudAlert Severity="Severity.Info" Dense="true">@_statusMessage</MudAlert>
+                                            }
+                                            @if (_busy)
+                                            {
+                                                @LoadingPanel
+                                            }
+                                        </MudStack>
+                                    </MudPaper>
+                                </MudItem>
+                            </MudGrid>
+                        </MudStack>
+                    </MudPaper>
+                </div>
+            </MudTabPanel>
+
+            <MudTabPanel Text="Scene / Hình ảnh">
+                <div class="render-tab-scroll">
+                    @if (!_projectCreated)
+                    {
+                        <MudAlert Severity="Severity.Info">Hãy hoàn thành cấu hình ở tab Thông tin trước.</MudAlert>
+                    }
+                    else
+                    {
+                        <MudStack Spacing="3">
+                            <MudPaper Class="todox-card pa-4" rounded="true">
+                                <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
+                                    <MudText Typo="Typo.h6">Scene / Hình ảnh</MudText>
+                                    <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.ArrowForward" OnClick="ContinueToVideoAsync" Disabled="@_busy">Tiếp tục tạo video</MudButton>
+                                </MudStack>
+                                @if (_busy)
+                                {
+                                    @LoadingPanel
+                                }
+                            </MudPaper>
+                            <MudGrid Class="real-estate-video-compact-grid">
+                                @foreach (var scene in Scenes)
+                                {
+                                    <MudItem xs="12" sm="6" md="3">
+                                        <MudPaper Class="todox-card pa-3 real-estate-video-scene-card real-estate-video-compact-card" rounded="true">
+                                            <MudStack Spacing="1">
+                                                <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="real-estate-video-card-header">
+                                                    <MudText Typo="Typo.subtitle2">@scene.Title</MudText>
+                                                    <MudChip T="string" Color="Color.Success" Size="Size.Small" Icon="@Icons.Material.Filled.CheckCircle">Hoàn thành</MudChip>
+                                                </MudStack>
+                                                <div class="real-estate-video-media-frame real-estate-video-scene-frame">
+                                                    @if (ResourceExists(scene.ImageUrl))
+                                                    {
+                                                        <img src="@scene.ImageUrl" alt="@scene.Title" class="real-estate-video-media-cover" />
+                                                    }
+                                                    else
+                                                    {
+                                                        <div class="real-estate-video-placeholder">Chưa có ảnh demo</div>
+                                                    }
+                                                </div>
+                                                <MudText Typo="Typo.caption" Class="todox-page-subtitle">@scene.TimeRange</MudText>
+                                                <MudText Typo="Typo.body2" Class="real-estate-video-scene-description">@scene.Description</MudText>
+                                                <MudText Typo="Typo.caption" Class="todox-page-subtitle">@VoiceFooterText · @scene.DurationSeconds giây</MudText>
+                                            </MudStack>
+                                        </MudPaper>
+                                    </MudItem>
+                                }
+                            </MudGrid>
+                        </MudStack>
+                    }
+                </div>
+            </MudTabPanel>
+
+            <MudTabPanel Text="Video">
+                <div class="render-tab-scroll">
+                    @if (!_projectCreated)
+                    {
+                        <MudAlert Severity="Severity.Info">Hãy hoàn thành bước Scene / Hình ảnh trước.</MudAlert>
+                    }
+                    else
+                    {
+                        <MudStack Spacing="3">
+                            <MudPaper Class="todox-card pa-4" rounded="true">
+                                <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
+                                    <MudText Typo="Typo.h6">Video</MudText>
+                                    <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.AutoAwesome" Disabled="@(_busy || _finalized)" OnClick="FinalizeVideoAsync">Hoàn thiện video</MudButton>
+                                </MudStack>
+                                @if (_busy)
+                                {
+                                    @LoadingPanel
+                                }
+                            </MudPaper>
+                            <MudGrid Class="real-estate-video-compact-grid">
+                                @foreach (var scene in Scenes)
+                                {
+                                    <MudItem xs="12" sm="6" md="3">
+                                        <MudPaper Class="todox-card pa-3 real-estate-video-video-card real-estate-video-compact-card" rounded="true">
+                                            <MudStack Spacing="1">
+                                                <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="real-estate-video-card-header">
+                                                    <MudText Typo="Typo.subtitle2">@scene.Title</MudText>
+                                                    <MudChip T="string" Color="Color.Success" Size="Size.Small" Icon="@Icons.Material.Filled.CheckCircle">Hoàn thành</MudChip>
+                                                </MudStack>
+                                                <div class="real-estate-video-video-frame">
+                                                    @if (ResourceExists(scene.VideoUrl))
+                                                    {
+                                                        <video controls preload="metadata" class="real-estate-video-player">
+                                                            <source src="@scene.VideoUrl" type="video/mp4" />
+                                                        </video>
+                                                    }
+                                                    else
+                                                    {
+                                                        <div class="real-estate-video-placeholder real-estate-video-video-placeholder">Video scene đang chờ cập nhật resource</div>
+                                                    }
+                                                </div>
+                                                <MudText Typo="Typo.caption" Class="todox-page-subtitle">@scene.TimeRange</MudText>
+                                                <MudText Typo="Typo.caption" Class="todox-page-subtitle">@VoiceFooterText · @scene.DurationSeconds giây</MudText>
+                                            </MudStack>
+                                        </MudPaper>
+                                    </MudItem>
+                                }
+                            </MudGrid>
+                        </MudStack>
+                    }
+                </div>
+            </MudTabPanel>
+
+            <MudTabPanel Text="Kết quả">
+                <div class="render-tab-scroll">
+                    @if (!_finalized)
+                    {
+                        <MudAlert Severity="Severity.Info">Hãy hoàn thiện video trước.</MudAlert>
+                    }
+                    else
+                    {
+                        <MudGrid>
+                            <MudItem xs="12" md="7">
+                                <MudPaper Class="todox-card pa-4" rounded="true">
+                                    <MudStack Spacing="2">
+                                        <MudText Typo="Typo.h6">Video bất động sản đã hoàn thiện</MudText>
+                                        <MudText Typo="Typo.body2" Class="todox-page-subtitle">5 Scene · 30 giây · 9:16 · 1080x1920</MudText>
+                                        <MudChip T="string" Color="Color.Success" Variant="Variant.Filled" Icon="@Icons.Material.Filled.CheckCircle">Hoàn thành</MudChip>
+                                        <div class="real-estate-video-result-frame">
+                                            @if (ResourceExists(ResultVideoUrl))
+                                            {
+                                                <video controls preload="metadata" class="real-estate-video-result-player">
+                                                    <source src="@ResultVideoUrl" type="video/mp4" />
+                                                </video>
+                                            }
+                                            else
+                                            {
+                                                <div class="real-estate-video-placeholder real-estate-video-video-placeholder">Chưa có video kết quả</div>
+                                            }
+                                        </div>
+                                        <MudStack Row="true" Class="flex-wrap gap-2">
+                                            <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.PlayArrow" OnClick="OpenResultAsync">Xem video</MudButton>
+                                            <a href="@ResultVideoUrl" download="real-estate-video-result.mp4" class="real-estate-video-download-link">
+                                                <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Download">Tải video</MudButton>
+                                            </a>
+                                            <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="CreateNewAsync">Tạo video mới</MudButton>
+                                        </MudStack>
+                                    </MudStack>
+                                </MudPaper>
+                            </MudItem>
+                            <MudItem xs="12" md="5">
+                                <MudPaper Class="todox-card pa-4" rounded="true">
+                                    <MudStack Spacing="2">
+                                        <MudText Typo="Typo.h6">Thông tin kết quả</MudText>
+                                        <MudText Typo="Typo.body2">Video bất động sản đã hoàn thiện</MudText>
+                                        <MudText Typo="Typo.caption" Class="todox-page-subtitle">Loại video: Bất động sản</MudText>
+                                        <MudText Typo="Typo.caption" Class="todox-page-subtitle">Số scene: 5</MudText>
+                                        <MudText Typo="Typo.caption" Class="todox-page-subtitle">Thời lượng: 30 giây</MudText>
+                                        <MudText Typo="Typo.caption" Class="todox-page-subtitle">Tỷ lệ: 9:16</MudText>
+                                        <MudText Typo="Typo.caption" Class="todox-page-subtitle">Độ phân giải: 1080x1920</MudText>
+                                        <MudText Typo="Typo.caption" Class="todox-page-subtitle">Trạng thái: Hoàn thành</MudText>
+                                        <MudChip T="string" Color="Color.Success" Variant="Variant.Filled" Size="Size.Small">Hoàn thành</MudChip>
+                                    </MudStack>
+                                </MudPaper>
+                            </MudItem>
+                        </MudGrid>
+                    }
+                </div>
+            </MudTabPanel>
+        </MudTabs>
+    }
+</MudStack>
+
+@code {
+    public sealed record RealEstateVideoSceneMock(int SceneNo, string Title, string TimeRange, string Description, string ImageUrl, string VideoUrl, int DurationSeconds);
+    private sealed record VoiceOption(string Name, string AudioUrl);
+
+    private const string SceneCountText = "5";
+    private const string DurationText = "30 giây";
+    private const string AspectRatioText = "9:16";
+    private const string ResolutionText = "1080 × 1920";
+    private const string MusicAudioUrl = "/resources/mockup/real-estate-video/real-estate-video-music.mp3";
+    private const string NoMusicOption = "Không sử dụng nhạc nền";
+    private const string NoVoiceOption = "Không đọc";
+    private static readonly string[] MusicOptions = ["Real Estate Lifestyle", NoMusicOption];
+    private static readonly VoiceOption[] Voices =
+    [
+        new("Ngọc Huyền – Nữ miền Bắc", "/resources/mockup/real-estate-video/real-estate-video-voice-01.mp3"),
+        new("Phú Thắng – Nam miền Bắc", "/resources/mockup/real-estate-video/real-estate-video-voice-02.mp3"),
+        new("Minh Đức – Nam Khánh Hoà", "/resources/mockup/real-estate-video/real-estate-video-voice-03.mp3")
+    ];
+
+    private readonly List<RealEstateVideoSceneMock> Scenes =
+    [
+        new(1, "Scene 01", "00:00 - 00:06", "Mở đầu với toàn cảnh bất động sản và vị trí nổi bật.", "/resources/mockup/real-estate-video/real-estate-video-scene-01.jpg", "/resources/mockup/real-estate-video/real-estate-video-scene-01.mp4", 6),
+        new(2, "Scene 02", "00:06 - 00:12", "Giới thiệu kiến trúc, mặt tiền và không gian tổng thể.", "/resources/mockup/real-estate-video/real-estate-video-scene-02.jpg", "/resources/mockup/real-estate-video/real-estate-video-scene-02.mp4", 6),
+        new(3, "Scene 03", "00:12 - 00:18", "Làm nổi bật không gian nội thất, tiện nghi và công năng sử dụng.", "/resources/mockup/real-estate-video/real-estate-video-scene-03.jpg", "/resources/mockup/real-estate-video/real-estate-video-scene-03.mp4", 6),
+        new(4, "Scene 04", "00:18 - 00:24", "Giới thiệu tiện ích xung quanh, vị trí và giá trị kết nối.", "/resources/mockup/real-estate-video/real-estate-video-scene-04.jpg", "/resources/mockup/real-estate-video/real-estate-video-scene-04.mp4", 6),
+        new(5, "Scene 05", "00:24 - 00:30", "Kết thúc bằng giá trị nổi bật của bất động sản và lời kêu gọi liên hệ.", "/resources/mockup/real-estate-video/real-estate-video-scene-05.jpg", "/resources/mockup/real-estate-video/real-estate-video-scene-05.mp4", 6)
+    ];
+
+    private int _tabIndex;
+    private bool _busy;
+    private bool _projectCreated;
+    private bool _finalized;
+    private int _actionProgress;
+    private string _loadingTitle = string.Empty;
+    private string _loadingMessage = string.Empty;
+    private string _selectedVoice = Voices[0].Name;
+    private string _selectedMusic = MusicOptions[0];
+    private string _promptFileName = "real-estate-video-prompt.json";
+    private string _productImageFileName = "real-estate-video-input-01.jpg";
+    private string _videoTitle = "Giới thiệu bất động sản nổi bật";
+    private string _statusMessage = "Hãy hoàn thành cấu hình ở tab Thông tin trước.";
+    private string _productImageUrl = "/resources/mockup/real-estate-video/real-estate-video-input-01.jpg";
+
+    private string ResultVideoUrl => "/resources/mockup/real-estate-video/real-estate-video-result.mp4";
+    private string SelectedVoiceAudioUrl => Voices.FirstOrDefault(x => x.Name == _selectedVoice)?.AudioUrl ?? Voices[0].AudioUrl;
+    private string VoiceFooterText => _selectedVoice == NoVoiceOption ? NoVoiceOption : _selectedVoice.Split('–')[0].Trim();
+    private RenderFragment LoadingPanel => @<MudPaper Class="real-estate-video-loading-panel mt-3" Outlined="true" rounded="true">
+        <MudStack AlignItems="AlignItems.Center" Spacing="2">
+            <MudProgressCircular Indeterminate="true" Color="Color.Warning" Size="Size.Medium" />
+            <MudText Typo="Typo.subtitle2">@_loadingTitle</MudText>
+            <MudText Typo="Typo.body2" Class="todox-page-subtitle">@_loadingMessage</MudText>
+            <MudProgressLinear Value="@_actionProgress" Color="Color.Warning" Class="real-estate-video-loading-progress" />
+            <MudText Typo="Typo.caption" Class="todox-page-subtitle">@_actionProgress% · Vui lòng chờ trong giây lát</MudText>
+        </MudStack>
+    </MudPaper>;
+
+    private async Task OnProductImageSelected(InputFileChangeEventArgs args)
+    {
+        _productImageFileName = args.File.Name;
+        using var ms = new MemoryStream();
+        await args.File.OpenReadStream(10 * 1024 * 1024).CopyToAsync(ms);
+        _productImageUrl = $"data:{args.File.ContentType};base64,{Convert.ToBase64String(ms.ToArray())}";
+    }
+
+    private async Task OnPromptFileSelected(InputFileChangeEventArgs args)
+    {
+        _promptFileName = args.File.Name;
+        using var ms = new MemoryStream();
+        await args.File.OpenReadStream(2 * 1024 * 1024).CopyToAsync(ms);
+        Snackbar.Add($"Đã chọn {_promptFileName}.", Severity.Success);
+    }
+
+    private async Task CreateVideoAsync()
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        await RunMockProgressAsync("AI đang tạo scene",
+        [
+            "Đang phân tích hình ảnh bất động sản...",
+            "Đang đọc kịch bản...",
+            "Đang chuẩn bị 5 scene...",
+            "Đang hoàn thiện nội dung scene..."
+        ]);
+
+        _projectCreated = true;
+        _busy = false;
+        _tabIndex = 1;
+        _statusMessage = "5 scene đã sẵn sàng.";
+        Snackbar.Add("5 scene đã sẵn sàng.", Severity.Success);
+        ResetLoadingState();
+    }
+
+    private async Task ContinueToVideoAsync()
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        await RunMockProgressAsync("AI đang dựng video",
+        [
+            "Đang dựng chuyển động cho bất động sản...",
+            "Đang xử lý các scene...",
+            "Đang hoàn thiện video từng scene...",
+            "Đang xử lý các scene...",
+            "Đang hoàn thiện video từng scene...",
+            "Đang xử lý các scene..."
+        ]);
+
+        _busy = false;
+        _tabIndex = 2;
+        _statusMessage = "Video của 5 scene đã hoàn thành.";
+        Snackbar.Add(_statusMessage, Severity.Success);
+        ResetLoadingState();
+    }
+
+    private async Task FinalizeVideoAsync()
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        await RunMockProgressAsync("AI đang hoàn thiện video",
+        [
+            "Đang chuẩn bị các scene...",
+            "Đang ghép video...",
+            "Đang đồng bộ voice và nhạc nền...",
+            "Đang hoàn thiện video bất động sản..."
+        ]);
+
+        _finalized = true;
+        _busy = false;
+        _tabIndex = 3;
+        _statusMessage = "Video đã hoàn thiện.";
+        Snackbar.Add(_statusMessage, Severity.Success);
+        ResetLoadingState();
+    }
+
+    private async Task RunMockProgressAsync(string title, IReadOnlyList<string> messages)
+    {
+        _loadingTitle = title;
+        _actionProgress = 0;
+
+        const int steps = 10;
+        for (var step = 0; step <= steps; step++)
+        {
+            _actionProgress = step * 10;
+            var messageIndex = Math.Min(messages.Count - 1, step * messages.Count / (steps + 1));
+            _loadingMessage = messages[messageIndex];
+            StateHasChanged();
+            await Task.Delay(450);
+        }
+
+        _actionProgress = 100;
+        StateHasChanged();
+        await Task.Delay(300);
+    }
+
+    private void ResetLoadingState()
+    {
+        _actionProgress = 0;
+        _loadingTitle = string.Empty;
+        _loadingMessage = string.Empty;
+    }
+
+    private Task OpenResultAsync() => JS.InvokeVoidAsync("open", ResultVideoUrl).AsTask();
+
+    private void CreateNewAsync()
+    {
+        _tabIndex = 0;
+        _busy = false;
+        _projectCreated = false;
+        _finalized = false;
+        _actionProgress = 0;
+        ResetLoadingState();
+        _statusMessage = "Hãy hoàn thành cấu hình ở tab Thông tin trước.";
+        _promptFileName = "real-estate-video-prompt.json";
+        _productImageFileName = "real-estate-video-input-01.jpg";
+        _productImageUrl = "/resources/mockup/real-estate-video/real-estate-video-input-01.jpg";
+    }
+
+    private bool ResourceExists(string url)
+    {
+        if (url.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var relativePath = url.TrimStart('/').Replace('/', Path.DirectorySeparatorChar);
+        return File.Exists(Path.Combine(Env.WebRootPath, relativePath));
+    }
+}
