@@ -180,8 +180,8 @@ public sealed class AiProviderContractTests
     }
 
     [Theory]
-    [InlineData(null, "{}")]
-    [InlineData("", "{}")]
+    [InlineData(null, null)]
+    [InlineData("", null)]
     [InlineData("ON", "\"ON\"")]
     [InlineData("flash", "\"flash\"")]
     [InlineData("1080p", "\"1080p\"")]
@@ -189,7 +189,7 @@ public sealed class AiProviderContractTests
     [InlineData("[\"a\",\"b\"]", "[\"a\",\"b\"]")]
     [InlineData("\"ON\"", "\"ON\"")]
     [InlineData("8", "8")]
-    public void JsonPersistence_NormalizeJsonText_PreservesValidJsonOrSerializesScalar(string? input, string expected)
+    public void JsonPersistence_NormalizeJsonText_PreservesValidJsonOrSerializesScalar(string? input, string? expected)
     {
         Assert.Equal(expected, AiJsonPersistence.NormalizeJsonText(input));
     }
@@ -208,6 +208,17 @@ public sealed class AiProviderContractTests
         Assert.Equal("8", AiJsonPersistence.NormalizeJsonPayload(8));
         Assert.Equal("{}", AiJsonPersistence.NormalizeObjectJson("{bad json"));
         Assert.Equal("{}", AiJsonPersistence.NormalizeObjectJson(null));
+    }
+
+    [Fact]
+    public void SyncChangeJsonNullsRemainNullWhileScalarsStayValidJson()
+    {
+        Assert.Null(AiJsonPersistence.NormalizeJsonText(null));
+        Assert.Null(AiJsonPersistence.NormalizeJsonText(""));
+        Assert.Null(AiJsonPersistence.NormalizeJsonText("   "));
+        Assert.Equal("\"flash\"", AiJsonPersistence.NormalizeJsonText("flash"));
+        Assert.Equal("\"1080p\"", AiJsonPersistence.NormalizeJsonText("1080p"));
+        Assert.Equal("8", AiJsonPersistence.NormalizeJsonText("8"));
     }
 
     [Fact]

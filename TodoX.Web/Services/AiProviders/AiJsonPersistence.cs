@@ -6,7 +6,7 @@ public static class AiJsonPersistence
 {
     private static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web);
 
-    public static string? NormalizeJsonText(string? value, string emptyFallback = "{}")
+    public static string? NormalizeJsonText(string? value, string? emptyFallback = null)
     {
         if (string.IsNullOrWhiteSpace(value))
         {
