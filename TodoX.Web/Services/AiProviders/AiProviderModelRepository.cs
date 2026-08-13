@@ -219,6 +219,7 @@ public sealed class AiProviderModelRepository
         CancellationToken ct = default)
     {
         providerStatus = AiProviderModelStatusNormalizer.Normalize(providerStatus);
+        rawJson = AiJsonPersistence.NormalizeObjectJson(rawJson);
         using var conn = await _factory.OpenAsync(ct);
         await conn.ExecuteAsync(
             """
@@ -231,7 +232,7 @@ public sealed class AiProviderModelRepository
                 (@providerId, @providerCode, @providerModelCode, @providerModelIdBase, @displayName, @mediaType, @serverCode,
                  @providerStatus, @statusMessage, @rateType, @baseProviderPrice, COALESCE(NULLIF(@providerPriceUnit, ''), 'credit'), COALESCE(NULLIF(@source, ''), 'catalog'),
                  @lastProviderSyncAt, @lastHealthCheckAt, @lastSuccessAt, @lastFailureAt, GREATEST(@failureCount, 0),
-                 CASE WHEN NULLIF(@rawJson, '') IS NULL THEN '{}'::jsonb ELSE CAST(@rawJson AS jsonb) END, true, true, false, @userId, @userId, now(), now())
+                 CAST(@rawJson AS jsonb), true, true, false, @userId, @userId, now(), now())
             ON CONFLICT (provider_id, provider_model_code)
             DO UPDATE SET
                 provider_code = EXCLUDED.provider_code,
@@ -409,6 +410,7 @@ public sealed class AiProviderModelRepository
         string summaryJson,
         CancellationToken ct = default)
     {
+        summaryJson = AiJsonPersistence.NormalizeObjectJson(summaryJson);
         using var conn = await _factory.OpenAsync(ct);
         await conn.ExecuteAsync(
             """
@@ -440,6 +442,8 @@ public sealed class AiProviderModelRepository
         long? modelId = null,
         IReadOnlyList<string>? changedFields = null)
     {
+        beforeJson = AiJsonPersistence.NormalizeJsonText(beforeJson);
+        afterJson = AiJsonPersistence.NormalizeJsonText(afterJson);
         using var conn = await _factory.OpenAsync(ct);
         await conn.ExecuteAsync(
             """
@@ -458,6 +462,7 @@ public sealed class AiProviderModelRepository
     public async Task<long> UpsertModelAsync(AiProviderModelDetailDto model, string? userId, CancellationToken ct = default)
     {
         model.ProviderStatus = AiProviderModelStatusNormalizer.Normalize(model.ProviderStatus);
+        model.RawJson = AiJsonPersistence.NormalizeObjectJson(model.RawJson);
         using var conn = await _factory.OpenAsync(ct);
         using var tx = conn.BeginTransaction();
 
@@ -472,7 +477,7 @@ public sealed class AiProviderModelRepository
                 (@ProviderId, @ProviderCode, @ProviderModelCode, @ProviderModelIdBase, @DisplayName, @MediaType, @ServerCode,
                  @ProviderStatus, @StatusMessage, @RateType, @BaseProviderPrice, COALESCE(NULLIF(@ProviderPriceUnit, ''), 'credit'), @Description,
                  @Enabled, @AllowUserSelect, @IsDeprecated, COALESCE(NULLIF(@Source, ''), 'catalog'), @LastProviderSyncAt, @LastHealthCheckAt,
-                 @LastSuccessAt, @LastFailureAt, GREATEST(@FailureCount, 0), CASE WHEN NULLIF(@RawJson, '') IS NULL THEN '{}'::jsonb ELSE CAST(@RawJson AS jsonb) END, @userId, @userId, now(), now())
+                 @LastSuccessAt, @LastFailureAt, GREATEST(@FailureCount, 0), CAST(@RawJson AS jsonb), @userId, @userId, now(), now())
             ON CONFLICT (provider_id, provider_model_code)
             DO UPDATE SET
                 provider_code = EXCLUDED.provider_code,
@@ -530,6 +535,7 @@ public sealed class AiProviderModelRepository
 
         foreach (var capability in model.ModelCapabilities)
         {
+            capability.ConfigJson = AiJsonPersistence.NormalizeObjectJson(capability.ConfigJson);
             await conn.ExecuteAsync(
                 """
                 INSERT INTO public.todox_ai_model_capability

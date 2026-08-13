@@ -537,7 +537,7 @@ public sealed class AiProviderSyncService : IAiProviderSyncService
             LastSuccessAt = snapshot.LastSuccessAt,
             LastFailureAt = snapshot.LastFailureAt,
             FailureCount = Math.Max(snapshot.FailureCount, 0),
-            RawJson = SanitizeRawJson(snapshot.RawJson) ?? "{}",
+            RawJson = AiJsonPersistence.NormalizeObjectJson(SanitizeRawJson(snapshot.RawJson)),
             SupportedModes = options.Modes,
             SupportedDurations = options.Durations,
             SupportedResolutions = options.Resolutions,
@@ -620,7 +620,7 @@ public sealed class AiProviderSyncService : IAiProviderSyncService
     {
         if (string.IsNullOrWhiteSpace(rawJson))
         {
-            return rawJson;
+            return "{}";
         }
 
         try
@@ -630,7 +630,7 @@ public sealed class AiProviderSyncService : IAiProviderSyncService
         }
         catch (JsonException)
         {
-            return rawJson;
+            return "{}";
         }
     }
 

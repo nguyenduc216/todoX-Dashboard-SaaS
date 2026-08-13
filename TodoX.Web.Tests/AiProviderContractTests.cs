@@ -159,18 +159,55 @@ public sealed class AiProviderContractTests
     {
         var repository = ReadSource("TodoX.Web", "Services", "AiProviders", "AiProviderModelRepository.cs");
         var syncService = ReadSource("TodoX.Web", "Services", "AiProviders", "AiProviderSyncService.cs");
+        var jsonHelper = ReadSource("TodoX.Web", "Services", "AiProviders", "AiJsonPersistence.cs");
 
         foreach (var insertBlock in ProviderModelInsertBlocks(repository))
         {
             Assert.Contains("COALESCE(NULLIF(@ProviderPriceUnit, ''), 'credit')", insertBlock, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("COALESCE(NULLIF(@Source, ''), 'catalog')", insertBlock, StringComparison.OrdinalIgnoreCase);
-            Assert.Contains("CASE WHEN NULLIF(@RawJson, '') IS NULL THEN '{}'::jsonb ELSE CAST(@RawJson AS jsonb) END", insertBlock, StringComparison.OrdinalIgnoreCase);
             Assert.Matches(@"GREATEST\(@(?:FailureCount|failureCount), 0\)", insertBlock);
         }
 
         Assert.Contains("providerStatus = AiProviderModelStatusNormalizer.Normalize(providerStatus);", repository, StringComparison.Ordinal);
         Assert.Contains("model.ProviderStatus = AiProviderModelStatusNormalizer.Normalize(model.ProviderStatus);", repository, StringComparison.Ordinal);
+        Assert.Contains("AiJsonPersistence.NormalizeObjectJson(rawJson)", repository, StringComparison.Ordinal);
+        Assert.Contains("AiJsonPersistence.NormalizeObjectJson(model.RawJson)", repository, StringComparison.Ordinal);
+        Assert.Contains("AiJsonPersistence.NormalizeJsonText(beforeJson)", repository, StringComparison.Ordinal);
+        Assert.Contains("AiJsonPersistence.NormalizeJsonText(afterJson)", repository, StringComparison.Ordinal);
+        Assert.Contains("NormalizeJsonText(string? value", jsonHelper, StringComparison.Ordinal);
+        Assert.Contains("JsonSerializer.Serialize(trimmed", jsonHelper, StringComparison.Ordinal);
         Assert.Contains("ProviderStatus = AiProviderModelStatusNormalizer.Normalize(snapshot.ProviderStatus)", syncService, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(null, "{}")]
+    [InlineData("", "{}")]
+    [InlineData("ON", "\"ON\"")]
+    [InlineData("flash", "\"flash\"")]
+    [InlineData("1080p", "\"1080p\"")]
+    [InlineData("{\"status\":\"ON\"}", "{\"status\":\"ON\"}")]
+    [InlineData("[\"a\",\"b\"]", "[\"a\",\"b\"]")]
+    [InlineData("\"ON\"", "\"ON\"")]
+    [InlineData("8", "8")]
+    public void JsonPersistence_NormalizeJsonText_PreservesValidJsonOrSerializesScalar(string? input, string expected)
+    {
+        Assert.Equal(expected, AiJsonPersistence.NormalizeJsonText(input));
+    }
+
+    [Fact]
+    public void JsonPersistence_NormalizeJsonText_FallsBackForMalformedInput()
+    {
+        Assert.Equal("\"{bad json\"", AiJsonPersistence.NormalizeJsonText("{bad json"));
+    }
+
+    [Fact]
+    public void JsonPersistence_NormalizeJsonPayload_HandlesObjectsAndScalars()
+    {
+        Assert.Equal("{\"status\":\"ON\"}", AiJsonPersistence.NormalizeJsonPayload(new { status = "ON" }));
+        Assert.Equal("\"flash\"", AiJsonPersistence.NormalizeJsonPayload("flash"));
+        Assert.Equal("8", AiJsonPersistence.NormalizeJsonPayload(8));
+        Assert.Equal("{}", AiJsonPersistence.NormalizeObjectJson("{bad json"));
+        Assert.Equal("{}", AiJsonPersistence.NormalizeObjectJson(null));
     }
 
     [Fact]
@@ -391,7 +428,7 @@ public sealed class AiProviderContractTests
         Assert.Contains("Normalize79AiModelProviderPriceUnit", syncService, StringComparison.Ordinal);
         Assert.Contains("\"79ai_credit\" or \"credits\" => \"credit\"", syncService, StringComparison.Ordinal);
         Assert.Contains("Source = NormalizeNullable(snapshot.Source) ?? \"catalog\"", syncService, StringComparison.Ordinal);
-        Assert.Contains("RawJson = SanitizeRawJson(snapshot.RawJson) ?? \"{}\"", syncService, StringComparison.Ordinal);
+        Assert.Contains("RawJson = AiJsonPersistence.NormalizeObjectJson(SanitizeRawJson(snapshot.RawJson))", syncService, StringComparison.Ordinal);
         Assert.Contains("FailureCount = Math.Max(snapshot.FailureCount, 0)", syncService, StringComparison.Ordinal);
         Assert.Contains("DisplayName = NormalizeNullable(snapshot.DisplayName) ?? providerModelCode", syncService, StringComparison.Ordinal);
         Assert.Contains("reason = \"invalid/no media type\"", syncService, StringComparison.Ordinal);
