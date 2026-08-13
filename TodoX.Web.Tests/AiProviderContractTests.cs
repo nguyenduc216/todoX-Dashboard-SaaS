@@ -158,15 +158,19 @@ public sealed class AiProviderContractTests
     public void ProviderModelInsertPathsProtectProductionNotNullRuntimeValues()
     {
         var repository = ReadSource("TodoX.Web", "Services", "AiProviders", "AiProviderModelRepository.cs");
+        var syncService = ReadSource("TodoX.Web", "Services", "AiProviders", "AiProviderSyncService.cs");
 
         foreach (var insertBlock in ProviderModelInsertBlocks(repository))
         {
-            Assert.Contains("COALESCE(NULLIF(@ProviderStatus, ''), 'UNKNOWN')", insertBlock, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("COALESCE(NULLIF(@ProviderPriceUnit, ''), 'credit')", insertBlock, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("COALESCE(NULLIF(@Source, ''), 'catalog')", insertBlock, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("CASE WHEN NULLIF(@RawJson, '') IS NULL THEN '{}'::jsonb ELSE CAST(@RawJson AS jsonb) END", insertBlock, StringComparison.OrdinalIgnoreCase);
             Assert.Matches(@"GREATEST\(@(?:FailureCount|failureCount), 0\)", insertBlock);
         }
+
+        Assert.Contains("providerStatus = AiProviderModelStatusNormalizer.Normalize(providerStatus);", repository, StringComparison.Ordinal);
+        Assert.Contains("model.ProviderStatus = AiProviderModelStatusNormalizer.Normalize(model.ProviderStatus);", repository, StringComparison.Ordinal);
+        Assert.Contains("ProviderStatus = AiProviderModelStatusNormalizer.Normalize(snapshot.ProviderStatus)", syncService, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -243,6 +247,33 @@ public sealed class AiProviderContractTests
         Assert.True(price.Active);
         Assert.NotNull(price.EffectiveFrom);
         Assert.InRange(price.EffectiveFrom.Value, before, after);
+    }
+
+    [Theory]
+    [InlineData(null, "UNKNOWN")]
+    [InlineData("", "UNKNOWN")]
+    [InlineData("ON", "ON")]
+    [InlineData("on", "ON")]
+    [InlineData("ACTIVE", "ON")]
+    [InlineData("enabled", "ON")]
+    [InlineData("AVAILABLE", "ON")]
+    [InlineData("ONLINE", "ON")]
+    [InlineData("READY", "ON")]
+    [InlineData("MAINTENANCE", "MAINTENANCE")]
+    [InlineData("maintaining", "MAINTENANCE")]
+    [InlineData("DISABLED", "DISABLED")]
+    [InlineData("OFF", "DISABLED")]
+    [InlineData("INACTIVE", "DISABLED")]
+    [InlineData("UNAVAILABLE", "DISABLED")]
+    [InlineData("DEPRECATED", "DEPRECATED")]
+    [InlineData("RETIRED", "DEPRECATED")]
+    [InlineData("EOL", "DEPRECATED")]
+    [InlineData("BETA", "UNKNOWN")]
+    [InlineData("PROCESSING", "UNKNOWN")]
+    [InlineData("whatever-new-status", "UNKNOWN")]
+    public void ProviderStatusNormalizer_MapsProviderStatusesToCanonicalTodoXStatus(string? input, string expected)
+    {
+        Assert.Equal(expected, AiProviderModelStatusNormalizer.Normalize(input));
     }
 
     [Theory]
@@ -355,7 +386,7 @@ public sealed class AiProviderContractTests
     {
         var syncService = ReadSource("TodoX.Web", "Services", "AiProviders", "AiProviderSyncService.cs");
 
-        Assert.Contains("ProviderStatus = NormalizeNullable(snapshot.ProviderStatus) ?? \"UNKNOWN\"", syncService, StringComparison.Ordinal);
+        Assert.Contains("ProviderStatus = AiProviderModelStatusNormalizer.Normalize(snapshot.ProviderStatus)", syncService, StringComparison.Ordinal);
         Assert.Contains("ProviderPriceUnit = ResolveModelProviderPriceUnit(provider.ProviderCode, snapshot)", syncService, StringComparison.Ordinal);
         Assert.Contains("Normalize79AiModelProviderPriceUnit", syncService, StringComparison.Ordinal);
         Assert.Contains("\"79ai_credit\" or \"credits\" => \"credit\"", syncService, StringComparison.Ordinal);
@@ -366,6 +397,15 @@ public sealed class AiProviderContractTests
         Assert.Contains("reason = \"invalid/no media type\"", syncService, StringComparison.Ordinal);
         Assert.Contains("reason = \"invalid/no model code\"", syncService, StringComparison.Ordinal);
         Assert.Contains("ProviderCode = provider.ProviderCode", syncService, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CatalogModelNormalization_DoesNotAssignRawProviderStatusDirectly()
+    {
+        var syncService = ReadSource("TodoX.Web", "Services", "AiProviders", "AiProviderSyncService.cs");
+
+        Assert.DoesNotContain("ProviderStatus = snapshot.ProviderStatus", syncService, StringComparison.Ordinal);
+        Assert.DoesNotContain("ProviderStatus = NormalizeNullable(snapshot.ProviderStatus) ?? \"UNKNOWN\"", syncService, StringComparison.Ordinal);
     }
 
     [Theory]

@@ -134,6 +134,25 @@ public sealed class AiProviderSyncService : IAiProviderSyncService
                 {
                     result.ModelInsertedCount++;
                     await _modelRepository.InsertSyncChangeAsync(syncId, "MODEL_ADDED", "model", detail.ProviderModelCode, null, detail.RawJson, ct);
+                    if (!string.IsNullOrWhiteSpace(snapshot.ProviderStatus)
+                        && AiProviderModelStatusNormalizer.Normalize(snapshot.ProviderStatus) == "UNKNOWN")
+                    {
+                        await _modelRepository.InsertSyncChangeAsync(
+                            syncId,
+                            "MODEL_UPDATED",
+                            "status_diagnostic",
+                            detail.ProviderModelCode,
+                            null,
+                            Serialize(new
+                            {
+                                reason = "unknown provider status",
+                                provider_model_code = detail.ProviderModelCode,
+                                provider_status_raw = snapshot.ProviderStatus,
+                                provider_status_normalized = "UNKNOWN"
+                            }),
+                            ct,
+                            changedFields: new[] { "provider_status" });
+                    }
                 }
                 else if (HasModelChanged(currentDetail, detail) || changeCount.ModelChanges > 0)
                 {
@@ -503,7 +522,7 @@ public sealed class AiProviderSyncService : IAiProviderSyncService
             DisplayName = NormalizeNullable(snapshot.DisplayName) ?? providerModelCode,
             MediaType = snapshot.MediaType.Trim(),
             ServerCode = snapshot.ServerCode,
-            ProviderStatus = NormalizeNullable(snapshot.ProviderStatus) ?? "UNKNOWN",
+            ProviderStatus = AiProviderModelStatusNormalizer.Normalize(snapshot.ProviderStatus),
             StatusMessage = snapshot.StatusMessage,
             RateType = snapshot.RateType,
             BaseProviderPrice = snapshot.BaseProviderPrice,

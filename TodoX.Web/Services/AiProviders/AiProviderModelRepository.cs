@@ -218,6 +218,7 @@ public sealed class AiProviderModelRepository
         string? userId,
         CancellationToken ct = default)
     {
+        providerStatus = AiProviderModelStatusNormalizer.Normalize(providerStatus);
         using var conn = await _factory.OpenAsync(ct);
         await conn.ExecuteAsync(
             """
@@ -228,7 +229,7 @@ public sealed class AiProviderModelRepository
                  raw_json, enabled, allow_user_select, is_deprecated, created_by, updated_by, created_at, updated_at)
             VALUES
                 (@providerId, @providerCode, @providerModelCode, @providerModelIdBase, @displayName, @mediaType, @serverCode,
-                 COALESCE(NULLIF(@providerStatus, ''), 'UNKNOWN'), @statusMessage, @rateType, @baseProviderPrice, COALESCE(NULLIF(@providerPriceUnit, ''), 'credit'), COALESCE(NULLIF(@source, ''), 'catalog'),
+                 @providerStatus, @statusMessage, @rateType, @baseProviderPrice, COALESCE(NULLIF(@providerPriceUnit, ''), 'credit'), COALESCE(NULLIF(@source, ''), 'catalog'),
                  @lastProviderSyncAt, @lastHealthCheckAt, @lastSuccessAt, @lastFailureAt, GREATEST(@failureCount, 0),
                  CASE WHEN NULLIF(@rawJson, '') IS NULL THEN '{}'::jsonb ELSE CAST(@rawJson AS jsonb) END, true, true, false, @userId, @userId, now(), now())
             ON CONFLICT (provider_id, provider_model_code)
@@ -456,6 +457,7 @@ public sealed class AiProviderModelRepository
 
     public async Task<long> UpsertModelAsync(AiProviderModelDetailDto model, string? userId, CancellationToken ct = default)
     {
+        model.ProviderStatus = AiProviderModelStatusNormalizer.Normalize(model.ProviderStatus);
         using var conn = await _factory.OpenAsync(ct);
         using var tx = conn.BeginTransaction();
 
@@ -468,7 +470,7 @@ public sealed class AiProviderModelRepository
                  last_success_at, last_failure_at, failure_count, raw_json, created_by, updated_by, created_at, updated_at)
             VALUES
                 (@ProviderId, @ProviderCode, @ProviderModelCode, @ProviderModelIdBase, @DisplayName, @MediaType, @ServerCode,
-                 COALESCE(NULLIF(@ProviderStatus, ''), 'UNKNOWN'), @StatusMessage, @RateType, @BaseProviderPrice, COALESCE(NULLIF(@ProviderPriceUnit, ''), 'credit'), @Description,
+                 @ProviderStatus, @StatusMessage, @RateType, @BaseProviderPrice, COALESCE(NULLIF(@ProviderPriceUnit, ''), 'credit'), @Description,
                  @Enabled, @AllowUserSelect, @IsDeprecated, COALESCE(NULLIF(@Source, ''), 'catalog'), @LastProviderSyncAt, @LastHealthCheckAt,
                  @LastSuccessAt, @LastFailureAt, GREATEST(@FailureCount, 0), CASE WHEN NULLIF(@RawJson, '') IS NULL THEN '{}'::jsonb ELSE CAST(@RawJson AS jsonb) END, @userId, @userId, now(), now())
             ON CONFLICT (provider_id, provider_model_code)
