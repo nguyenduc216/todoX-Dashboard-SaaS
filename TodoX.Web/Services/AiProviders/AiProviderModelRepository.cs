@@ -442,6 +442,8 @@ public sealed class AiProviderModelRepository
         long? modelId = null,
         IReadOnlyList<string>? changedFields = null)
     {
+        AiProviderSyncChangeContract.EnsureChangeType(changeType);
+        AiProviderSyncChangeContract.EnsureEntityType(entityType);
         beforeJson = AiJsonPersistence.NormalizeJsonText(beforeJson);
         afterJson = AiJsonPersistence.NormalizeJsonText(afterJson);
         using var conn = await _factory.OpenAsync(ct);

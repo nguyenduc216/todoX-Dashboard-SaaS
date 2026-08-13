@@ -67,6 +67,15 @@ public sealed class AiProviderContractTests
         "PRICE_DISABLED"
     ];
 
+    private static readonly string[] ProductionSyncChangeEntityTypes =
+    [
+        "provider",
+        "model",
+        "capability",
+        "price",
+        "status"
+    ];
+
     [Fact]
     public void CapabilityUnitTypes_MatchProductionContract()
     {
@@ -122,6 +131,68 @@ public sealed class AiProviderContractTests
         {
             Assert.Contains($"'{legacyType}'", migration, StringComparison.Ordinal);
         }
+    }
+
+    [Fact]
+    public void SyncChangeContract_AllowsOnlyProductionEntityTypes()
+    {
+        Assert.Equal(ProductionSyncChangeEntityTypes, AiProviderSyncChangeContract.EntityTypes);
+
+        foreach (var entityType in ProductionSyncChangeEntityTypes)
+        {
+            Assert.True(AiProviderSyncChangeContract.IsValidEntityType(entityType));
+            AiProviderSyncChangeContract.EnsureEntityType(entityType);
+        }
+
+        foreach (var entityType in new[] { "catalog_ignored", "price_ignored", "status_diagnostic", "model_option", "whatever" })
+        {
+            Assert.False(AiProviderSyncChangeContract.IsValidEntityType(entityType));
+            Assert.Throws<InvalidOperationException>(() => AiProviderSyncChangeContract.EnsureEntityType(entityType));
+        }
+    }
+
+    [Fact]
+    public void SyncChangeContract_AllowsOnlyProductionChangeTypes()
+    {
+        var expected = LegacySyncChangeTypes.Concat(CurrentSyncChangeTypes).ToArray();
+
+        Assert.Equal(expected, AiProviderSyncChangeContract.ChangeTypes);
+        foreach (var changeType in expected)
+        {
+            Assert.True(AiProviderSyncChangeContract.IsValidChangeType(changeType));
+            AiProviderSyncChangeContract.EnsureChangeType(changeType);
+        }
+
+        Assert.False(AiProviderSyncChangeContract.IsValidChangeType("MODEL_OPTION_ADDED"));
+        Assert.Throws<InvalidOperationException>(() => AiProviderSyncChangeContract.EnsureChangeType("MODEL_OPTION_ADDED"));
+    }
+
+    [Fact]
+    public void SyncChangeEntityMappings_MatchProductionContract()
+    {
+        var syncService = ReadSource("TodoX.Web", "Services", "AiProviders", "AiProviderSyncService.cs");
+        var repository = ReadSource("TodoX.Web", "Services", "AiProviders", "AiProviderModelRepository.cs");
+
+        Assert.DoesNotContain("\"catalog_ignored\"", syncService, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"price_ignored\"", syncService, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"status_diagnostic\"", syncService, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"model_option\"", syncService, StringComparison.Ordinal);
+
+        Assert.Contains("\"invalid/no model code\"", syncService, StringComparison.Ordinal);
+        Assert.Contains("\"duplicate provider_model_code\"", syncService, StringComparison.Ordinal);
+        Assert.Contains("\"unknown provider status\"", syncService, StringComparison.Ordinal);
+        Assert.Matches("\"MODEL_UPDATED\"\\s*,\\s*AiProviderSyncChangeContract\\.Model", syncService);
+        Assert.Matches("\"MODEL_UPDATED\"\\s*,\\s*AiProviderSyncChangeContract\\.Price", syncService);
+        Assert.Matches("\"MODEL_UPDATED\"\\s*,\\s*AiProviderSyncChangeContract\\.Status", syncService);
+        Assert.Contains("\"MODE_ADDED\", AiProviderSyncChangeContract.Capability", syncService, StringComparison.Ordinal);
+        Assert.Contains("\"DURATION_ADDED\", AiProviderSyncChangeContract.Capability", syncService, StringComparison.Ordinal);
+        Assert.Contains("\"DURATION_REMOVED\", AiProviderSyncChangeContract.Capability", syncService, StringComparison.Ordinal);
+        Assert.Contains("\"RESOLUTION_ADDED\", AiProviderSyncChangeContract.Capability", syncService, StringComparison.Ordinal);
+        Assert.Contains("\"PRICE_ADDED\", AiProviderSyncChangeContract.Price", syncService, StringComparison.Ordinal);
+        Assert.Contains("\"PRICE_CHANGED\"", syncService, StringComparison.Ordinal);
+        Assert.Contains("\"PRICE_DISABLED\"", syncService, StringComparison.Ordinal);
+        Assert.Contains("AiProviderSyncChangeContract.EnsureChangeType(changeType);", repository, StringComparison.Ordinal);
+        Assert.Contains("AiProviderSyncChangeContract.EnsureEntityType(entityType);", repository, StringComparison.Ordinal);
     }
 
     [Fact]

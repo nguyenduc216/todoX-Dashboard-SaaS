@@ -133,14 +133,14 @@ public sealed class AiProviderSyncService : IAiProviderSyncService
                 if (currentDetail is null)
                 {
                     result.ModelInsertedCount++;
-                    await _modelRepository.InsertSyncChangeAsync(syncId, "MODEL_ADDED", "model", detail.ProviderModelCode, null, detail.RawJson, ct);
+                    await _modelRepository.InsertSyncChangeAsync(syncId, "MODEL_ADDED", AiProviderSyncChangeContract.Model, detail.ProviderModelCode, null, detail.RawJson, ct);
                     if (!string.IsNullOrWhiteSpace(snapshot.ProviderStatus)
                         && AiProviderModelStatusNormalizer.Normalize(snapshot.ProviderStatus) == "UNKNOWN")
                     {
                         await _modelRepository.InsertSyncChangeAsync(
                             syncId,
                             "MODEL_UPDATED",
-                            "status_diagnostic",
+                            AiProviderSyncChangeContract.Status,
                             detail.ProviderModelCode,
                             null,
                             Serialize(new
@@ -176,7 +176,7 @@ public sealed class AiProviderSyncService : IAiProviderSyncService
                 await _modelRepository.MarkMissingAsDeprecatedAsync(provider.Id, incomingCodes, triggeredBy?.ToString(), ct);
                 foreach (var code in missingCodes)
                 {
-                    await _modelRepository.InsertSyncChangeAsync(syncId, "MODEL_STATUS_CHANGED", "model", code, null, "{\"provider_status\":\"DEPRECATED\"}", ct);
+                    await _modelRepository.InsertSyncChangeAsync(syncId, "MODEL_STATUS_CHANGED", AiProviderSyncChangeContract.Model, code, null, "{\"provider_status\":\"DEPRECATED\"}", ct);
                 }
             }
 
@@ -238,7 +238,7 @@ public sealed class AiProviderSyncService : IAiProviderSyncService
                 await _modelRepository.InsertSyncChangeAsync(
                     syncId,
                     "MODEL_UPDATED",
-                    "catalog_ignored",
+                    AiProviderSyncChangeContract.Model,
                     "invalid/no model code",
                     null,
                     Serialize(new
@@ -260,7 +260,7 @@ public sealed class AiProviderSyncService : IAiProviderSyncService
                 await _modelRepository.InsertSyncChangeAsync(
                     syncId,
                     "MODEL_UPDATED",
-                    "catalog_ignored",
+                    AiProviderSyncChangeContract.Model,
                     code,
                     null,
                     Serialize(new
@@ -283,7 +283,7 @@ public sealed class AiProviderSyncService : IAiProviderSyncService
                 await _modelRepository.InsertSyncChangeAsync(
                     syncId,
                     "MODEL_UPDATED",
-                    "catalog_ignored",
+                    AiProviderSyncChangeContract.Model,
                     code,
                     null,
                     Serialize(new
@@ -323,7 +323,7 @@ public sealed class AiProviderSyncService : IAiProviderSyncService
             await _modelRepository.InsertSyncChangeAsync(
                 syncId,
                 "PRICE_DISABLED",
-                "price",
+                AiProviderSyncChangeContract.Price,
                 $"{modelId}:{PriceKey(oldPrice)}",
                 Serialize(oldPrice),
                 null,
@@ -350,7 +350,7 @@ public sealed class AiProviderSyncService : IAiProviderSyncService
             await _modelRepository.InsertSyncChangeAsync(
                 syncId,
                 "MODEL_UPDATED",
-                "price_ignored",
+                AiProviderSyncChangeContract.Price,
                 $"{model.ProviderModelCode}:{PriceKey(price)}",
                 null,
                 Serialize(new
@@ -401,7 +401,7 @@ public sealed class AiProviderSyncService : IAiProviderSyncService
                 await _modelRepository.InsertSyncChangeAsync(
                     syncId,
                     "MODEL_UPDATED",
-                    "price_ignored",
+                    AiProviderSyncChangeContract.Price,
                     $"{model.ProviderModelCode}:{PriceKey(price)}",
                     null,
                     Serialize(new
@@ -431,7 +431,7 @@ public sealed class AiProviderSyncService : IAiProviderSyncService
         {
             foreach (var price in after.Prices.Where(x => x.Active))
             {
-                await _modelRepository.InsertSyncChangeAsync(syncId, "PRICE_ADDED", "price", $"{after.ProviderModelCode}:{PriceKey(price)}", null, Serialize(price), ct);
+                await _modelRepository.InsertSyncChangeAsync(syncId, "PRICE_ADDED", AiProviderSyncChangeContract.Price, $"{after.ProviderModelCode}:{PriceKey(price)}", null, Serialize(price), ct);
             }
 
             return (0, after.Prices.Count(x => x.Active));
@@ -443,31 +443,31 @@ public sealed class AiProviderSyncService : IAiProviderSyncService
         if (!string.Equals(before.ProviderStatus, after.ProviderStatus, StringComparison.OrdinalIgnoreCase))
         {
             modelChanges++;
-            await _modelRepository.InsertSyncChangeAsync(syncId, "MODEL_STATUS_CHANGED", "model", after.ProviderModelCode, before.ProviderStatus, after.ProviderStatus, ct);
+            await _modelRepository.InsertSyncChangeAsync(syncId, "MODEL_STATUS_CHANGED", AiProviderSyncChangeContract.Model, after.ProviderModelCode, before.ProviderStatus, after.ProviderStatus, ct);
         }
 
         foreach (var mode in after.SupportedModes.Except(before.SupportedModes, StringComparer.OrdinalIgnoreCase))
         {
             modelChanges++;
-            await _modelRepository.InsertSyncChangeAsync(syncId, "MODE_ADDED", "model_option", after.ProviderModelCode, null, mode, ct);
+            await _modelRepository.InsertSyncChangeAsync(syncId, "MODE_ADDED", AiProviderSyncChangeContract.Capability, after.ProviderModelCode, null, mode, ct);
         }
 
         foreach (var duration in after.SupportedDurations.Except(before.SupportedDurations))
         {
             modelChanges++;
-            await _modelRepository.InsertSyncChangeAsync(syncId, "DURATION_ADDED", "model_option", after.ProviderModelCode, null, duration.ToString(), ct);
+            await _modelRepository.InsertSyncChangeAsync(syncId, "DURATION_ADDED", AiProviderSyncChangeContract.Capability, after.ProviderModelCode, null, duration.ToString(), ct);
         }
 
         foreach (var duration in before.SupportedDurations.Except(after.SupportedDurations))
         {
             modelChanges++;
-            await _modelRepository.InsertSyncChangeAsync(syncId, "DURATION_REMOVED", "model_option", after.ProviderModelCode, duration.ToString(), null, ct);
+            await _modelRepository.InsertSyncChangeAsync(syncId, "DURATION_REMOVED", AiProviderSyncChangeContract.Capability, after.ProviderModelCode, duration.ToString(), null, ct);
         }
 
         foreach (var resolution in after.SupportedResolutions.Except(before.SupportedResolutions, StringComparer.OrdinalIgnoreCase))
         {
             modelChanges++;
-            await _modelRepository.InsertSyncChangeAsync(syncId, "RESOLUTION_ADDED", "model_option", after.ProviderModelCode, null, resolution, ct);
+            await _modelRepository.InsertSyncChangeAsync(syncId, "RESOLUTION_ADDED", AiProviderSyncChangeContract.Capability, after.ProviderModelCode, null, resolution, ct);
         }
 
         var beforePrices = before.Prices.Where(x => x.Active).ToDictionary(PriceKey, StringComparer.OrdinalIgnoreCase);
@@ -477,7 +477,7 @@ public sealed class AiProviderSyncService : IAiProviderSyncService
             if (!beforePrices.TryGetValue(key, out var oldPrice))
             {
                 priceChanges++;
-                await _modelRepository.InsertSyncChangeAsync(syncId, "PRICE_ADDED", "price", $"{after.ProviderModelCode}:{key}", null, Serialize(price), ct);
+                await _modelRepository.InsertSyncChangeAsync(syncId, "PRICE_ADDED", AiProviderSyncChangeContract.Price, $"{after.ProviderModelCode}:{key}", null, Serialize(price), ct);
                 continue;
             }
 
@@ -487,7 +487,7 @@ public sealed class AiProviderSyncService : IAiProviderSyncService
                 await _modelRepository.InsertSyncChangeAsync(
                     syncId,
                     "PRICE_CHANGED",
-                    "price",
+                    AiProviderSyncChangeContract.Price,
                     $"{after.ProviderModelCode}:{key}",
                     Serialize(oldPrice),
                     Serialize(price),
