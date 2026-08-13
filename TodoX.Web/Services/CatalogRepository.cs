@@ -68,10 +68,10 @@ public sealed class CatalogRepository
                            HAVING count(*) > 0
                        ) prices
                    ) AS StartingPriceSummary,
-                   CASE WHEN lower(s.status) IN ('enabled', 'active') THEN true ELSE false END AS Enabled,
+                   CASE WHEN lower(s.status) = 'active' THEN true ELSE false END AS Enabled,
                    s.sort_order AS SortOrder
               FROM catalog.services s
-             WHERE lower(s.status) IN ('enabled', 'active')
+             WHERE lower(s.status) = 'active'
              ORDER BY s.sort_order, s.service_name;
             """);
         return rows.ToList();

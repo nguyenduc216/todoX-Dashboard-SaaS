@@ -45,8 +45,8 @@
             </MudItem>
             <MudItem xs="12" sm="6">
                 <MudSelect T="string" Label="Trạng thái" @bind-Value="_model.Status" Variant="Variant.Outlined">
-                    <MudSelectItem Value="@(FixedTodoXServiceCatalog.EnabledStatus)">Enabled</MudSelectItem>
-                    <MudSelectItem Value="@(FixedTodoXServiceCatalog.DisabledStatus)">Disabled</MudSelectItem>
+                    <MudSelectItem T="string" Value="@TodoXServiceStatuses.Active">Hoạt động</MudSelectItem>
+                    <MudSelectItem T="string" Value="@TodoXServiceStatuses.Inactive">Tạm ngưng</MudSelectItem>
                 </MudSelect>
             </MudItem>
             <MudItem xs="12" sm="6">
@@ -128,7 +128,7 @@
     {
         _isNew = Source is null;
         _model = Source is null
-            ? new ServiceDto { Status = FixedTodoXServiceCatalog.EnabledStatus, SortOrder = 0, ServiceType = TodoXServiceEngineTypes.Timelapse }
+            ? new ServiceDto { Status = TodoXServiceStatuses.Active, SortOrder = 0, ServiceType = TodoXServiceEngineTypes.Timelapse }
             : new ServiceDto
             {
                 Id = Source.Id,
@@ -142,7 +142,7 @@
                 ThumbnailUrl = Source.ThumbnailUrl,
                 CoverImageUrl = Source.CoverImageUrl,
                 WorkflowCode = Source.WorkflowCode,
-                Status = Source.Status,
+                Status = TodoXServiceStatuses.Normalize(Source.Status),
                 SortOrder = Source.SortOrder
             };
     }

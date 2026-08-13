@@ -27,7 +27,7 @@ public sealed class ServiceDto
     public string? ThumbnailUrl { get; set; }
     public string? CoverImageUrl { get; set; }
     public string? WorkflowCode { get; set; }
-    public string Status { get; set; } = "active";
+    public string Status { get; set; } = TodoXServiceStatuses.Active;
     public int SortOrder { get; set; }
     public int TierCount { get; set; }
     public decimal? MinTokenCost { get; set; }
@@ -113,6 +113,7 @@ public sealed class CatalogAdminRepository
     {
         s.ServiceType = TodoXServiceEngineTypes.Normalize(s.ServiceType);
         s.ServiceCode = NormalizeServiceCode(s.ServiceCode);
+        s.Status = TodoXServiceStatuses.Normalize(s.Status);
         if (await ServiceCodeExistsAsync(s.ServiceCode))
         {
             throw new InvalidOperationException("Mã dịch vụ đã tồn tại.");
@@ -150,6 +151,7 @@ public sealed class CatalogAdminRepository
     {
         s.ServiceType = TodoXServiceEngineTypes.Normalize(s.ServiceType);
         s.ServiceCode = NormalizeServiceCode(s.ServiceCode);
+        s.Status = TodoXServiceStatuses.Normalize(s.Status);
 
         using var conn = await _factory.OpenAsync();
         await conn.ExecuteAsync(

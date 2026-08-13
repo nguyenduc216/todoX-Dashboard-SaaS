@@ -48,8 +48,8 @@
                             }
 
                             <MudChip T="string" Size="Size.Small" Class="todox-service-status"
-                                     Color="@(IsEnabled(svc) ? Color.Success : Color.Default)">
-                                @(IsEnabled(svc) ? "Enabled" : "Disabled")
+                                     Color="@(TodoXServiceStatuses.IsActive(svc.Status) ? Color.Success : Color.Default)">
+                                @TodoXServiceStatuses.LabelFor(svc.Status)
                             </MudChip>
                         </div>
 
@@ -99,8 +99,6 @@
 
     private static string? ImageUrl(ServiceDto s)
         => !string.IsNullOrWhiteSpace(s.ThumbnailUrl) ? s.ThumbnailUrl : s.CoverImageUrl;
-
-    private static bool IsEnabled(ServiceDto s) => FixedTodoXServiceCatalog.IsEnabledStatus(s.Status);
 
     private static string PriceSummary(ServiceDto svc)
     {

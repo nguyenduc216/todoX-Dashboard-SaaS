@@ -126,7 +126,8 @@ public sealed class CommercialVideoServiceCatalogTests
         Assert.Contains("string_agg(summary_text, ' · ' ORDER BY sort_key)", catalogRepository, StringComparison.Ordinal);
         Assert.Contains("Từ ' || min(p.sell_points)::text || ' điểm / hình", catalogRepository, StringComparison.Ordinal);
         Assert.Contains("Từ ' || min(p.sell_points)::text || ' điểm / scene", catalogRepository, StringComparison.Ordinal);
-        Assert.Contains("WHERE lower(s.status) IN ('enabled', 'active')", catalogRepository, StringComparison.Ordinal);
+        Assert.Contains("WHERE lower(s.status) = 'active'", catalogRepository, StringComparison.Ordinal);
+        Assert.DoesNotContain("WHERE lower(s.status) IN ('enabled', 'active')", catalogRepository, StringComparison.Ordinal);
         Assert.Contains("ORDER BY s.sort_order, s.service_name", catalogRepository, StringComparison.Ordinal);
         Assert.DoesNotContain("FROM catalog.services\r\n", catalogRepository, StringComparison.Ordinal);
         Assert.DoesNotContain("FROM catalog.services\n", catalogRepository, StringComparison.Ordinal);
@@ -134,6 +135,51 @@ public sealed class CommercialVideoServiceCatalogTests
         Assert.Contains("GetActiveCatalogServicesAsync", createPage, StringComparison.Ordinal);
         Assert.Contains("ThumbnailUrl", createPage, StringComparison.Ordinal);
         Assert.Contains("CoverImageUrl", createPage, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("active", "active", true)]
+    [InlineData("enabled", "active", true)]
+    [InlineData("ACTIVE", "active", true)]
+    [InlineData("inactive", "inactive", false)]
+    [InlineData("disabled", "inactive", false)]
+    [InlineData("", "inactive", false)]
+    [InlineData(null, "inactive", false)]
+    [InlineData("unknown", "inactive", false)]
+    public void ServiceStatuses_NormalizeLegacyValuesToCanonicalContract(string? input, string expected, bool active)
+    {
+        Assert.Equal(expected, TodoXServiceStatuses.Normalize(input));
+        Assert.Equal(active, TodoXServiceStatuses.IsActive(input));
+    }
+
+    [Fact]
+    public void CommercialServiceStatusContracts_UseActiveInactiveForAdminAndCustomer()
+    {
+        var adminDialog = ReadSource("TodoX.Web", "Components", "Dialogs", "ServiceDialog.razor");
+        var adminPage = ReadSource("TodoX.Web", "Components", "Pages", "Services.razor");
+        var adminRepository = ReadSource("TodoX.Web", "Services", "CatalogAdminRepository.cs");
+        var customerRepository = ReadSource("TodoX.Web", "Services", "CatalogRepository.cs");
+        var statusMigration = ReadSource("database", "migrations", "20260813_catalog_service_status_active_inactive.sql");
+
+        Assert.Contains("Status = TodoXServiceStatuses.Active", adminDialog, StringComparison.Ordinal);
+        Assert.Contains("Value=\"@TodoXServiceStatuses.Active\">Hoạt động", adminDialog, StringComparison.Ordinal);
+        Assert.Contains("Value=\"@TodoXServiceStatuses.Inactive\">Tạm ngưng", adminDialog, StringComparison.Ordinal);
+        Assert.Contains("TodoXServiceStatuses.Normalize(Source.Status)", adminDialog, StringComparison.Ordinal);
+        Assert.Contains("TodoXServiceStatuses.Normalize(s.Status)", adminRepository, StringComparison.Ordinal);
+        Assert.Contains("TodoXServiceStatuses.LabelFor(svc.Status)", adminPage, StringComparison.Ordinal);
+        Assert.Contains("TodoXServiceStatuses.IsActive(svc.Status) ? Color.Success : Color.Default", adminPage, StringComparison.Ordinal);
+        Assert.Contains("ORDER BY s.sort_order, s.service_name", adminRepository, StringComparison.Ordinal);
+        Assert.Contains("WHERE lower(s.status) = 'active'", customerRepository, StringComparison.Ordinal);
+        Assert.DoesNotContain("FixedTodoXServiceCatalog.IsEnabledStatus", adminPage, StringComparison.Ordinal);
+        Assert.DoesNotContain("IN ('enabled', 'active')", customerRepository, StringComparison.Ordinal);
+        Assert.Contains("SET status = 'active'", statusMigration, StringComparison.Ordinal);
+        Assert.Contains("IN ('enabled', 'active')", statusMigration, StringComparison.Ordinal);
+        Assert.Contains("SET status = 'inactive'", statusMigration, StringComparison.Ordinal);
+        Assert.Contains("IN ('disabled', 'inactive')", statusMigration, StringComparison.Ordinal);
+        Assert.Contains("lower(trim(status)) NOT IN ('active', 'inactive')", statusMigration, StringComparison.Ordinal);
+        Assert.Contains("ALTER COLUMN status SET DEFAULT 'active'", statusMigration, StringComparison.Ordinal);
+        Assert.Contains("CHECK (status IN ('active', 'inactive'))", statusMigration, StringComparison.Ordinal);
+        Assert.Equal(10, CommercialVideoServiceCatalog.Services.Count);
     }
 
     [Fact]
