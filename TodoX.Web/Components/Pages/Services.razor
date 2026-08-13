@@ -1,4 +1,4 @@
-@page "/services"
+﻿@page "/services"
 @using TodoX.Web.Components.Dialogs
 @using TodoX.Web.Models.Catalog
 @inject CatalogAdminRepository Catalog
@@ -11,7 +11,7 @@
     <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-3">
         <div>
             <MudText Typo="Typo.h4" Class="todox-page-title">Quản lý dịch vụ</MudText>
-            <MudText Typo="Typo.body1" Class="todox-page-subtitle">Dịch vụ AI khách hàng có thể chọn: tên, nhóm, giá điểm, mô tả, hình minh họa.</MudText>
+            <MudText Typo="Typo.body1" Class="todox-page-subtitle">Dịch vụ thương mại, ảnh minh họa, engine và giá bán.</MudText>
         </div>
     </MudStack>
 
@@ -24,7 +24,7 @@
         <MudPaper Class="todox-card pa-8" rounded="true">
             <MudStack AlignItems="AlignItems.Center" Spacing="2">
                 <MudIcon Icon="@Icons.Material.Filled.Category" Size="Size.Large" Class="todox-gold" />
-                <MudText Class="todox-page-subtitle">Chưa có dịch vụ nào. Chạy seed fixed service catalog để cập nhật danh sách.</MudText>
+                <MudText Class="todox-page-subtitle">Chưa có dịch vụ nào.</MudText>
             </MudStack>
         </MudPaper>
     }
@@ -56,30 +56,21 @@
                         <div class="todox-service-body">
                             <MudStack Spacing="2">
                                 <MudText Typo="Typo.h6" Class="todox-service-title">@svc.ServiceName</MudText>
-
                                 <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center" Class="gap-2">
-                                    @if (!string.IsNullOrWhiteSpace(svc.CategoryName))
-                                    {
-                                        <span class="todox-badge">@svc.CategoryName</span>
-                                    }
-                                    else
-                                    {
-                                        <span></span>
-                                    }
+                                    <span class="todox-badge">@TodoXServiceEngineTypes.LabelFor(svc.ServiceType)</span>
+                                    <span class="todox-badge">#@svc.SortOrder</span>
                                 </MudStack>
-
                                 <MudText Typo="Typo.body2" Class="todox-page-subtitle todox-service-desc">
                                     @(svc.ShortDescription ?? svc.Description ?? "")
+                                </MudText>
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                    @PriceSummary(svc)
                                 </MudText>
                             </MudStack>
 
                             <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="mt-4">
-                                <div>
-                                    <span class="todox-service-price">@(svc.MinTokenCost?.ToString("#,0") ?? "-")</span>
-                                    <span class="todox-service-price-unit">điểm @(svc.TierCount > 0 ? $"· {svc.TierCount} gói" : "")</span>
-                                </div>
                                 <div class="todox-service-actions">
-                                    <MudIconButton Icon="@Icons.Material.Filled.Sell" Size="Size.Small" title="Bảng giá" OnClick="@(() => OpenTiers(svc))" />
+                                    <MudIconButton Icon="@Icons.Material.Filled.Sell" Size="Size.Small" title="Giá bán" OnClick="@(() => OpenSellPrices(svc))" />
                                     <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" title="Sửa" OnClick="@(() => OpenEdit(svc))" />
                                 </div>
                             </MudStack>
@@ -111,6 +102,16 @@
 
     private static bool IsEnabled(ServiceDto s) => FixedTodoXServiceCatalog.IsEnabledStatus(s.Status);
 
+    private static string PriceSummary(ServiceDto svc)
+    {
+        if (svc.MinSellPoints is null)
+        {
+            return "Chưa có giá bán";
+        }
+
+        return $"Từ {svc.MinSellPoints:0} điểm";
+    }
+
     private async Task OpenEdit(ServiceDto svc)
     {
         var parameters = new DialogParameters<ServiceDialog>
@@ -128,11 +129,14 @@
         }
     }
 
-    private async Task OpenTiers(ServiceDto svc)
+    private async Task OpenSellPrices(ServiceDto svc)
     {
-        var parameters = new DialogParameters<ServiceTiersDialog> { { x => x.Service, svc } };
-        var options = new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true };
-        await DialogService.ShowAsync<ServiceTiersDialog>($"Bảng giá · {svc.ServiceName}", parameters, options);
+        var parameters = new DialogParameters<ServiceSellPricesDialog>
+        {
+            { x => x.Service, svc }
+        };
+        var options = new DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true };
+        await DialogService.ShowAsync<ServiceSellPricesDialog>($"Giá bán · {svc.ServiceName}", parameters, options);
         await Reload();
     }
 }

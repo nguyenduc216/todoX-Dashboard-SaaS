@@ -48,6 +48,26 @@ public sealed class CatalogRepository
                    COALESCE(NULLIF(short_description, ''), description) AS Description,
                    service_type AS ServiceType,
                    workflow_code AS WorkflowCode,
+                   thumbnail_url AS ThumbnailUrl,
+                   cover_image_url AS CoverImageUrl,
+                   (
+                       SELECT string_agg(summary_text, ' · ' ORDER BY sort_key)
+                       FROM (
+                           SELECT 1 AS sort_key, 'Từ ' || min(p.sell_points)::text || ' điểm / hình' AS summary_text
+                             FROM catalog.service_sell_prices p
+                            WHERE p.service_id = s.id
+                              AND p.asset_type = 'image'
+                              AND p.is_active = true
+                           HAVING count(*) > 0
+                           UNION ALL
+                           SELECT 2 AS sort_key, 'Từ ' || min(p.sell_points)::text || ' điểm / scene' AS summary_text
+                             FROM catalog.service_sell_prices p
+                            WHERE p.service_id = s.id
+                              AND p.asset_type = 'video_scene'
+                              AND p.is_active = true
+                           HAVING count(*) > 0
+                       ) prices
+                   ) AS StartingPriceSummary,
                    CASE WHEN lower(status) IN ('enabled', 'active') THEN true ELSE false END AS Enabled,
                    sort_order AS SortOrder
               FROM catalog.services

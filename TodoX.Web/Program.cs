@@ -48,6 +48,7 @@ builder.Services.AddScoped<AuditRepository>();
 builder.Services.AddScoped<BillingRepository>();
 builder.Services.AddScoped<CatalogRepository>();
 builder.Services.AddScoped<CatalogAdminRepository>();
+builder.Services.AddScoped<IServiceSellPriceResolver, ServiceSellPriceResolver>();
 builder.Services.AddScoped<ITimelapseProfileRepository, TimelapseProfileRepository>();
 builder.Services.AddScoped<ITimelapseJobService, TimelapseJobService>();
 builder.Services.AddScoped<MrTodoXAvatarService>();

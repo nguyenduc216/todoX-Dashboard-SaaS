@@ -1,4 +1,4 @@
-@page "/create"
+﻿@page "/create"
 @implements IDisposable
 @using TodoX.Web.Models.Catalog
 @using TodoX.Web.Models.Timelapse
@@ -36,31 +36,48 @@
         <MudGrid Class="todox-service-grid">
             @foreach (var service in _services)
             {
-                <MudItem xs="12" sm="6" md="4">
-                    <MudPaper Class="todox-card todox-service-card pa-4" rounded="true">
-                        <MudStack Spacing="2" Class="h-100">
-                            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
-                                <MudAvatar Color="Color.Warning" Variant="Variant.Filled">
-                                    <MudIcon Icon="@ServiceIcon(service.ServiceType)" />
-                                </MudAvatar>
-                                <MudStack Spacing="0">
-                                    <MudText Typo="Typo.h6">@service.DisplayName</MudText>
-                                    <MudText Typo="Typo.caption" Color="Color.Success">Sẵn sàng</MudText>
+                <MudItem xs="12" sm="6" md="4" lg="4">
+                    <MudPaper Class="todox-card todox-service-card pa-0" rounded="true">
+                        <div class="todox-service-media">
+                            @if (!string.IsNullOrWhiteSpace(service.ThumbnailUrl))
+                            {
+                                <img src="@service.ThumbnailUrl" alt="@service.DisplayName" />
+                            }
+                            else if (!string.IsNullOrWhiteSpace(service.CoverImageUrl))
+                            {
+                                <img src="@service.CoverImageUrl" alt="@service.DisplayName" />
+                            }
+                            else
+                            {
+                                <div class="todox-service-media-empty">
+                                    <MudIcon Icon="@Icons.Material.Filled.Movie" Size="Size.Large" />
+                                </div>
+                            }
+                        </div>
+
+                        <div class="todox-service-body pa-4">
+                            <MudStack Spacing="2">
+                                <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="gap-2">
+                                    <MudText Typo="Typo.h6" Class="todox-service-title">@service.DisplayName</MudText>
+                                </MudStack>
+
+                                <MudText Typo="Typo.body2" Color="Color.Secondary" Class="todox-service-desc">
+                                    @service.Description
+                                </MudText>
+
+                                <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
+                                    <div>
+                                        <span class="todox-service-price">@service.StartingPriceSummary</span>
+                                    </div>
+                                    <MudButton Variant="Variant.Filled"
+                                               Color="Color.Warning"
+                                               StartIcon="@Icons.Material.Filled.ArrowForward"
+                                               OnClick="@(() => OpenService(service))">
+                                        Tạo video
+                                    </MudButton>
                                 </MudStack>
                             </MudStack>
-
-                            <MudText Typo="Typo.body2" Color="Color.Secondary" Class="flex-grow-1">
-                                @service.Description
-                            </MudText>
-
-                            <MudButton Variant="Variant.Filled"
-                                       Color="Color.Warning"
-                                       FullWidth="true"
-                                       StartIcon="@Icons.Material.Filled.ArrowForward"
-                                       OnClick="@(() => OpenService(service))">
-                                Bắt đầu
-                            </MudButton>
-                        </MudStack>
+                        </div>
                     </MudPaper>
                 </MudItem>
             }
@@ -105,9 +122,7 @@
         _loading = true;
         try
         {
-            var active = await Catalog.GetActiveCatalogServicesAsync();
-            _services = active
-                .Where(x => FixedTodoXServiceCatalog.IsFixedServiceCode(x.ServiceCode))
+            _services = (await Catalog.GetActiveCatalogServicesAsync())
                 .OrderBy(x => x.SortOrder)
                 .ToList();
         }
@@ -124,8 +139,8 @@
 
     private void OpenService(CatalogServiceView service)
     {
-        var route = CustomerServiceRouting.Resolve(service.ServiceCode);
-        if (route.Destination == CustomerServiceDestination.TimelapseCreator && route.Route is not null)
+        var route = CustomerServiceRouting.Resolve(service.ServiceType, service.Id, service.ServiceCode);
+        if (!string.IsNullOrWhiteSpace(route.Route))
         {
             Navigation.NavigateTo(route.Route);
             return;
@@ -133,13 +148,4 @@
 
         Snackbar.Add(route.Message ?? "Dịch vụ hiện chưa khả dụng.", Severity.Info);
     }
-
-    private static string ServiceIcon(string? serviceType)
-        => serviceType?.ToLowerInvariant() switch
-        {
-            "timelapse" => Icons.Material.Filled.Timeline,
-            "rvideo" => Icons.Material.Filled.VideoLibrary,
-            "rdance" => Icons.Material.Filled.AccessibilityNew,
-            _ => Icons.Material.Filled.Movie
-        };
 }

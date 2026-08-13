@@ -17,6 +17,9 @@ public sealed class CatalogServiceView
     public string? Description { get; set; }
     public string ServiceType { get; set; } = string.Empty;
     public string? WorkflowCode { get; set; }
+    public string? ThumbnailUrl { get; set; }
+    public string? CoverImageUrl { get; set; }
+    public string? StartingPriceSummary { get; set; }
     public bool Enabled { get; set; }
     public int SortOrder { get; set; }
 }
@@ -36,7 +39,7 @@ public static class FixedTodoXServiceCatalog
             Timelapse,
             "Video Timelapse AI",
             "Tạo video mô phỏng quá trình xây dựng, thi công và hoàn thiện từ một ảnh thành phẩm.",
-            "timelapse",
+            TodoXServiceEngineTypes.Timelapse,
             "CONSTRUCTION_TIMELAPSE",
             EnabledStatus,
             10),
@@ -44,7 +47,7 @@ public static class FixedTodoXServiceCatalog
             RenderVideo,
             "Render Video AI",
             "Tạo video theo scene từ hình ảnh và prompt, hỗ trợ nội dung, giọng đọc và nhạc nền.",
-            "rvideo",
+            TodoXServiceEngineTypes.RVideo,
             "TODOX_RENDERVIDEO",
             EnabledStatus,
             20),
@@ -52,7 +55,7 @@ public static class FixedTodoXServiceCatalog
             RDance,
             "R Dance AI",
             "Tạo video chuyển động theo video mẫu bằng AI Motion Control.",
-            "rdance",
+            TodoXServiceEngineTypes.RDance,
             "RDANCE_79AI",
             EnabledStatus,
             30)

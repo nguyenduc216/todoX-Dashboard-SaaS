@@ -1,4 +1,4 @@
-using Dapper;
+﻿using Dapper;
 using TodoX.Web.Data;
 using TodoX.Web.Models.Catalog;
 
@@ -31,6 +31,8 @@ public sealed class ServiceDto
     public int SortOrder { get; set; }
     public int TierCount { get; set; }
     public decimal? MinTokenCost { get; set; }
+    public int SellPriceCount { get; set; }
+    public decimal? MinSellPoints { get; set; }
 }
 
 public sealed class ServiceIllustrationDialogValue
@@ -89,7 +91,9 @@ public sealed class CatalogAdminRepository
                    s.thumbnail_url AS ThumbnailUrl, s.cover_image_url AS CoverImageUrl,
                    s.workflow_code AS WorkflowCode, s.status AS Status, s.sort_order AS SortOrder,
                    (SELECT count(*) FROM catalog.service_pricing_tiers t WHERE t.service_id = s.id) AS TierCount,
-                   (SELECT min(token_cost) FROM catalog.service_pricing_tiers t WHERE t.service_id = s.id AND t.is_active) AS MinTokenCost
+                   (SELECT min(token_cost) FROM catalog.service_pricing_tiers t WHERE t.service_id = s.id AND t.is_active) AS MinTokenCost,
+                   (SELECT count(*) FROM catalog.service_sell_prices p WHERE p.service_id = s.id) AS SellPriceCount,
+                   (SELECT min(sell_points) FROM catalog.service_sell_prices p WHERE p.service_id = s.id AND p.is_active) AS MinSellPoints
               FROM catalog.services s
               LEFT JOIN catalog.service_categories c ON c.id = s.category_id
              ORDER BY s.sort_order, s.service_name;
@@ -107,7 +111,7 @@ public sealed class CatalogAdminRepository
 
     public async Task<Guid> InsertServiceAsync(ServiceDto s)
     {
-        ApplyFixedDefinition(s);
+        s.ServiceType = TodoXServiceEngineTypes.Normalize(s.ServiceType);
 
         using var conn = await _factory.OpenAsync();
         var id = Guid.NewGuid();
@@ -139,7 +143,7 @@ public sealed class CatalogAdminRepository
 
     public async Task UpdateServiceAsync(ServiceDto s)
     {
-        ApplyFixedDefinition(s);
+        s.ServiceType = TodoXServiceEngineTypes.Normalize(s.ServiceType);
 
         using var conn = await _factory.OpenAsync();
         await conn.ExecuteAsync(
@@ -165,22 +169,6 @@ public sealed class CatalogAdminRepository
                 status = s.Status,
                 sort = s.SortOrder
             });
-    }
-
-    private static void ApplyFixedDefinition(ServiceDto service)
-    {
-        if (!FixedTodoXServiceCatalog.TryGetByCode(service.ServiceCode, out var definition))
-        {
-            return;
-        }
-
-        service.ServiceCode = definition.ServiceCode;
-        service.ServiceName = definition.DisplayName;
-        service.ServiceType = definition.ServiceType;
-        service.WorkflowCode = definition.WorkflowCode;
-        service.Description = definition.Description;
-        service.ShortDescription = definition.Description;
-        service.SortOrder = definition.SortOrder;
     }
 
     public async Task DeleteServiceAsync(Guid id)
@@ -237,4 +225,71 @@ public sealed class CatalogAdminRepository
         using var conn = await _factory.OpenAsync();
         await conn.ExecuteAsync("DELETE FROM catalog.service_pricing_tiers WHERE id=@id;", new { id });
     }
+
+    // ---------- Commercial sell prices ----------
+    public async Task<IReadOnlyList<ServiceSellPriceDto>> GetSellPricesAsync(Guid serviceId, CancellationToken ct = default)
+    {
+        using var conn = await _factory.OpenAsync();
+        var rows = await conn.QueryAsync<ServiceSellPriceDto>(
+            new CommandDefinition(
+                """
+                SELECT id AS Id, service_id AS ServiceId, asset_type AS AssetType,
+                       quality_tier AS QualityTier, duration_seconds AS DurationSeconds,
+                       sell_points AS SellPoints, display_label AS DisplayLabel,
+                       is_active AS IsActive, sort_order AS SortOrder
+                  FROM catalog.service_sell_prices
+                 WHERE service_id=@sid
+                 ORDER BY sort_order, asset_type, quality_tier, duration_seconds NULLS FIRST;
+                """,
+                new { sid = serviceId },
+                cancellationToken: ct));
+        return rows.ToList();
+    }
+
+    public async Task UpsertSellPriceAsync(ServiceSellPriceDto p, CancellationToken ct = default)
+    {
+        ServiceSellPriceRules.Validate(p);
+        using var conn = await _factory.OpenAsync();
+        await conn.ExecuteAsync(
+            new CommandDefinition(
+                """
+                INSERT INTO catalog.service_sell_prices
+                    (id, service_id, asset_type, quality_tier, duration_seconds,
+                     sell_points, display_label, is_active, sort_order, created_at, updated_at)
+                VALUES
+                    (CASE WHEN @id = '00000000-0000-0000-0000-000000000000'::uuid THEN gen_random_uuid() ELSE @id END,
+                     @sid, @asset, @quality, @duration, @points, @label, @active, @sort, now(), now())
+                ON CONFLICT (service_id, asset_type, quality_tier, (COALESCE(duration_seconds, 0)))
+                DO UPDATE SET
+                    sell_points = EXCLUDED.sell_points,
+                    display_label = EXCLUDED.display_label,
+                    is_active = EXCLUDED.is_active,
+                    sort_order = EXCLUDED.sort_order,
+                    updated_at = now();
+                """,
+                new
+                {
+                    id = p.Id,
+                    sid = p.ServiceId,
+                    asset = p.AssetType,
+                    quality = p.QualityTier,
+                    duration = p.DurationSeconds,
+                    points = p.SellPoints,
+                    label = p.DisplayLabel,
+                    active = p.IsActive,
+                    sort = p.SortOrder
+                },
+                cancellationToken: ct));
+    }
+
+    public async Task DeactivateSellPriceAsync(Guid id, CancellationToken ct = default)
+    {
+        using var conn = await _factory.OpenAsync();
+        await conn.ExecuteAsync(
+            new CommandDefinition(
+                "UPDATE catalog.service_sell_prices SET is_active=false, updated_at=now() WHERE id=@id;",
+                new { id },
+                cancellationToken: ct));
+    }
+
 }

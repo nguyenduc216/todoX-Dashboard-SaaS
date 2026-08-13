@@ -8,18 +8,28 @@ namespace TodoX.Web.Tests;
 public class TimelapsePhase2ATests
 {
     [Theory]
-    [InlineData("TIMELAPSE", CustomerServiceDestination.TimelapseCreator, "/jobs/timelapse/new")]
-    [InlineData("RVIDEO", CustomerServiceDestination.ComingSoon, null)]
-    [InlineData("RDANCE", CustomerServiceDestination.ComingSoon, null)]
-    public void CustomerServiceRouting_UsesStableServiceCodes(
-        string serviceCode,
+    [InlineData(TodoXServiceEngineTypes.Timelapse, CustomerServiceDestination.TimelapseCreator, "/jobs/timelapse/new")]
+    [InlineData(TodoXServiceEngineTypes.RVideo, CustomerServiceDestination.RVideoCreator, null)]
+    [InlineData(TodoXServiceEngineTypes.RDance, CustomerServiceDestination.RDanceCreator, null)]
+    public void CustomerServiceRouting_UsesEngineType(
+        string engineType,
         CustomerServiceDestination expectedDestination,
         string? expectedRoute)
     {
-        var route = CustomerServiceRouting.Resolve(serviceCode);
+        var serviceId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+        var route = CustomerServiceRouting.Resolve(engineType, serviceId, "CONSTRUCTION_VIDEO");
 
         Assert.Equal(expectedDestination, route.Destination);
-        Assert.Equal(expectedRoute, route.Route);
+        if (expectedRoute is null)
+        {
+            Assert.Null(route.Route);
+        }
+        else
+        {
+            Assert.StartsWith(expectedRoute, route.Route);
+            Assert.Contains($"serviceId={serviceId}", route.Route);
+            Assert.Contains("serviceCode=CONSTRUCTION_VIDEO", route.Route);
+        }
     }
 
     [Theory]
@@ -101,7 +111,7 @@ public class TimelapsePhase2ATests
     }
 
     [Fact]
-    public void FixedCatalog_RemainsTheTimelapseIdentitySource()
+    public void FixedCatalog_RemainsLegacyOnlyTimelapseReference()
     {
         Assert.Equal("timelapse", FixedTodoXServiceCatalog.ResolveServiceType(FixedTodoXServiceCatalog.Timelapse));
     }

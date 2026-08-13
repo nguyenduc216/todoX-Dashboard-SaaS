@@ -1,4 +1,4 @@
-using TodoX.Web.Models;
+﻿using TodoX.Web.Models;
 using TodoX.Web.Models.Catalog;
 
 namespace TodoX.Web.Models.Timelapse;
@@ -6,7 +6,8 @@ namespace TodoX.Web.Models.Timelapse;
 public enum CustomerServiceDestination
 {
     TimelapseCreator,
-    ComingSoon,
+    RVideoCreator,
+    RDanceCreator,
     Unavailable
 }
 
@@ -14,20 +15,40 @@ public sealed record CustomerServiceRoute(CustomerServiceDestination Destination
 
 public static class CustomerServiceRouting
 {
-    public static CustomerServiceRoute Resolve(string? serviceCode)
+    public static CustomerServiceRoute Resolve(string? engineType, Guid? serviceId = null, string? serviceCode = null)
     {
-        if (string.Equals(serviceCode, FixedTodoXServiceCatalog.Timelapse, StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(engineType, TodoXServiceEngineTypes.Timelapse, StringComparison.OrdinalIgnoreCase))
         {
-            return new(CustomerServiceDestination.TimelapseCreator, "/jobs/timelapse/new", null);
+            return new(CustomerServiceDestination.TimelapseCreator, BuildRoute("/jobs/timelapse/new", serviceId, serviceCode), null);
         }
 
-        if (string.Equals(serviceCode, FixedTodoXServiceCatalog.RenderVideo, StringComparison.OrdinalIgnoreCase)
-            || string.Equals(serviceCode, FixedTodoXServiceCatalog.RDance, StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(engineType, TodoXServiceEngineTypes.RVideo, StringComparison.OrdinalIgnoreCase))
         {
-            return new(CustomerServiceDestination.ComingSoon, null, "Dịch vụ đang hoàn thiện.");
+            return new(CustomerServiceDestination.RVideoCreator, null, "Dịch vụ RVideo đang hoàn thiện.");
+        }
+
+        if (string.Equals(engineType, TodoXServiceEngineTypes.RDance, StringComparison.OrdinalIgnoreCase))
+        {
+            return new(CustomerServiceDestination.RDanceCreator, null, "Dịch vụ RDance đang hoàn thiện.");
         }
 
         return new(CustomerServiceDestination.Unavailable, null, "Dịch vụ hiện chưa khả dụng.");
+    }
+
+    private static string BuildRoute(string route, Guid? serviceId, string? serviceCode)
+    {
+        var parts = new List<string>();
+        if (serviceId.HasValue && serviceId.Value != Guid.Empty)
+        {
+            parts.Add($"serviceId={Uri.EscapeDataString(serviceId.Value.ToString())}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(serviceCode))
+        {
+            parts.Add($"serviceCode={Uri.EscapeDataString(serviceCode)}");
+        }
+
+        return parts.Count == 0 ? route : route + "?" + string.Join("&", parts);
     }
 }
 
@@ -40,6 +61,8 @@ public sealed class TimelapseProfileDto
 
 public sealed class TimelapseCreateRequest
 {
+    public Guid? ServiceId { get; set; }
+    public string? ServiceCode { get; set; }
     public string? Title { get; set; } = "Video Timelapse";
     public string ProfileCode { get; set; } = string.Empty;
     public int SceneCount { get; set; } = 3;
@@ -58,9 +81,9 @@ public sealed class TimelapseOriginalImageSnapshot
 public sealed class TimelapseJobSnapshot
 {
     public int SchemaVersion { get; set; } = 1;
-    public string Engine { get; set; } = "timelapse";
+    public string Engine { get; set; } = TodoXServiceEngineTypes.Timelapse;
     public Guid ServiceId { get; set; }
-    public string ServiceCode { get; set; } = FixedTodoXServiceCatalog.Timelapse;
+    public string ServiceCode { get; set; } = string.Empty;
     public string ProfileCode { get; set; } = string.Empty;
     public string ProfileName { get; set; } = string.Empty;
     public int SceneCount { get; set; }
@@ -102,27 +125,27 @@ public static class TimelapseRequestRules
         var errors = new List<string>();
         if (string.IsNullOrWhiteSpace(request.ProfileCode))
         {
-            errors.Add("Vui lòng chọn loại công trình.");
+            errors.Add("Vui lÃ²ng chá»n loáº¡i cÃ´ng trÃ¬nh.");
         }
 
         if (!AllowedSceneCounts.Contains(request.SceneCount))
         {
-            errors.Add("Số scene chỉ có thể là 3, 4, 5 hoặc 6.");
+            errors.Add("Sá»‘ scene chá»‰ cÃ³ thá»ƒ lÃ  3, 4, 5 hoáº·c 6.");
         }
 
         if (!IsSupportedMode(request.VideoMode))
         {
-            errors.Add("Chế độ video không hợp lệ.");
+            errors.Add("Cháº¿ Ä‘á»™ video khÃ´ng há»£p lá»‡.");
         }
 
         if (!IsSupportedRatio(request.Ratio))
         {
-            errors.Add("Tỷ lệ video không hợp lệ.");
+            errors.Add("Tá»· lá»‡ video khÃ´ng há»£p lá»‡.");
         }
 
         if (!hasOriginalImage)
         {
-            errors.Add("Vui lòng chọn ảnh thành phẩm / ảnh tham chiếu.");
+            errors.Add("Vui lÃ²ng chá»n áº£nh thÃ nh pháº©m / áº£nh tham chiáº¿u.");
         }
 
         return errors;

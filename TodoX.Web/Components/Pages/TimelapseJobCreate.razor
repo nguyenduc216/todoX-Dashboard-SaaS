@@ -3,6 +3,7 @@
 @using Microsoft.AspNetCore.Components.Forms
 @using TodoX.Web.Models.Timelapse
 @using TodoX.Web.Services.Timelapse
+@using Microsoft.AspNetCore.WebUtilities
 @inject AuthStateService AuthState
 @inject ITimelapseProfileRepository Profiles
 @inject ITimelapseJobService Jobs
@@ -113,6 +114,7 @@
     protected override async Task OnInitializedAsync()
     {
         AuthState.OnChange += HandleAuthChange;
+        ApplySelectedServiceFromQuery();
         await LoadProfilesAsync();
     }
 
@@ -145,6 +147,22 @@
 
     private void OnImageSelected(InputFileChangeEventArgs args)
         => _selectedFile = args.File;
+
+    private void ApplySelectedServiceFromQuery()
+    {
+        var uri = Navigation.ToAbsoluteUri(Navigation.Uri);
+        var query = QueryHelpers.ParseQuery(uri.Query);
+        if (query.TryGetValue("serviceId", out var serviceIdValues)
+            && Guid.TryParse(serviceIdValues.FirstOrDefault(), out var serviceId))
+        {
+            _request.ServiceId = serviceId;
+        }
+
+        if (query.TryGetValue("serviceCode", out var serviceCodeValues))
+        {
+            _request.ServiceCode = serviceCodeValues.FirstOrDefault();
+        }
+    }
 
     private async Task CreateDraftAsync()
     {

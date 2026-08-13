@@ -1,0 +1,117 @@
+﻿@using TodoX.Web.Models.Catalog
+@inject CatalogAdminRepository Catalog
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">Giá bán · @Service.ServiceName</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudTable Items="@_prices" Dense="true" Hover="true" Class="todox-table mb-4">
+            <HeaderContent>
+                <MudTh>Loại</MudTh>
+                <MudTh>Chất lượng</MudTh>
+                <MudTh>Thời lượng</MudTh>
+                <MudTh Style="text-align:right">Giá điểm</MudTh>
+                <MudTh>Nhãn hiển thị</MudTh>
+                <MudTh>Bật</MudTh>
+                <MudTh></MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd>@ServiceSellPriceAssetTypes.LabelFor(context.AssetType)</MudTd>
+                <MudTd>@ServiceSellPriceQualityTiers.LabelFor(context.QualityTier)</MudTd>
+                <MudTd>@(context.DurationSeconds?.ToString() is { } d ? $"{d} giây" : "—")</MudTd>
+                <MudTd Style="text-align:right">@context.SellPoints.ToString("#,0")</MudTd>
+                <MudTd>@(context.DisplayLabel ?? "")</MudTd>
+                <MudTd>@(context.IsActive ? "✔" : "")</MudTd>
+                <MudTd Style="text-align:right">
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small" OnClick="@(() => DisablePrice(context))" />
+                </MudTd>
+            </RowTemplate>
+            <NoRecordsContent><MudText Class="pa-3 todox-page-subtitle">Chưa có giá bán nào.</MudText></NoRecordsContent>
+        </MudTable>
+
+        <MudText Typo="Typo.subtitle2" Class="mb-2">Thêm / cập nhật giá</MudText>
+        <MudGrid Spacing="2">
+            <MudItem xs="6" sm="3">
+                <MudSelect T="string" Label="Loại" @bind-Value="_new.AssetType" Variant="Variant.Outlined">
+                    @foreach (var item in ServiceSellPriceAssetTypes.All)
+                    {
+                        <MudSelectItem Value="@item">@ServiceSellPriceAssetTypes.LabelFor(item)</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="6" sm="3">
+                <MudSelect T="string" Label="Chất lượng" @bind-Value="_new.QualityTier" Variant="Variant.Outlined">
+                    @foreach (var item in ServiceSellPriceQualityTiers.All)
+                    {
+                        <MudSelectItem Value="@item">@ServiceSellPriceQualityTiers.LabelFor(item)</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="6" sm="3">
+                <MudNumericField T="int?" Label="Thời lượng (giây)" @bind-Value="_newDuration" Variant="Variant.Outlined" />
+            </MudItem>
+            <MudItem xs="6" sm="3">
+                <MudNumericField T="decimal" Label="Giá điểm" @bind-Value="_new.SellPoints" Variant="Variant.Outlined" />
+            </MudItem>
+            <MudItem xs="12">
+                <MudTextField T="string" Label="Nhãn hiển thị" @bind-Value="_new.DisplayLabel" Variant="Variant.Outlined" />
+            </MudItem>
+            <MudItem xs="6" sm="3" Class="d-flex align-center">
+                <MudSwitch T="bool" @bind-Value="_new.IsActive" Color="Color.Warning" Label="Bật" />
+            </MudItem>
+            <MudItem xs="12" Class="d-flex justify-end">
+                <MudButton Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.Save" OnClick="UpsertPrice">Lưu giá</MudButton>
+            </MudItem>
+        </MudGrid>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Close">Đóng</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public ServiceDto Service { get; set; } = default!;
+
+    private IReadOnlyList<ServiceSellPriceDto> _prices = new List<ServiceSellPriceDto>();
+    private ServiceSellPriceDto _new = new() { AssetType = ServiceSellPriceAssetTypes.Image, QualityTier = ServiceSellPriceQualityTiers.Standard, IsActive = true };
+    private int? _newDuration;
+
+    protected override async Task OnInitializedAsync() => await Reload();
+
+    private async Task Reload() => _prices = await Catalog.GetSellPricesAsync(Service.Id);
+
+    private async Task UpsertPrice()
+    {
+        _new.ServiceId = Service.Id;
+        _new.DurationSeconds = _newDuration;
+        if (string.Equals(_new.AssetType, ServiceSellPriceAssetTypes.Image, StringComparison.OrdinalIgnoreCase))
+        {
+            _new.DurationSeconds = null;
+        }
+
+        try
+        {
+            await Catalog.UpsertSellPriceAsync(_new);
+            Snackbar.Add("Đã lưu giá bán.", Severity.Success);
+            _new = new ServiceSellPriceDto { AssetType = ServiceSellPriceAssetTypes.Image, QualityTier = ServiceSellPriceQualityTiers.Standard, IsActive = true };
+            _newDuration = null;
+            await Reload();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+    }
+
+    private async Task DisablePrice(ServiceSellPriceDto price)
+    {
+        await Catalog.DeactivateSellPriceAsync(price.Id);
+        Snackbar.Add("Đã tắt giá bán.", Severity.Success);
+        await Reload();
+    }
+
+    private void Close() => MudDialog.Close();
+}

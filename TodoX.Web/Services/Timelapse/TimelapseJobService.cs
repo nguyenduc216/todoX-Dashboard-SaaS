@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using Dapper;
 using TodoX.Web.Data;
 using TodoX.Web.Models;
@@ -69,17 +69,24 @@ public sealed class TimelapseJobService : ITimelapseJobService
             throw new InvalidOperationException(string.Join(" ", errors));
         }
 
-        var service = (await _catalog.GetActiveCatalogServicesAsync())
-            .SingleOrDefault(x => string.Equals(x.ServiceCode, FixedTodoXServiceCatalog.Timelapse, StringComparison.OrdinalIgnoreCase));
+        var timelapseServices = (await _catalog.GetActiveCatalogServicesAsync())
+            .Where(x => string.Equals(x.ServiceType, TodoXServiceEngineTypes.Timelapse, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(x => x.SortOrder)
+            .ToList();
+        var service = request.ServiceId.HasValue
+            ? timelapseServices.SingleOrDefault(x => x.Id == request.ServiceId.Value)
+            : !string.IsNullOrWhiteSpace(request.ServiceCode)
+                ? timelapseServices.SingleOrDefault(x => string.Equals(x.ServiceCode, request.ServiceCode, StringComparison.OrdinalIgnoreCase))
+                : timelapseServices.FirstOrDefault();
         if (service is null || !service.Enabled)
         {
-            throw new InvalidOperationException("Dịch vụ Video Timelapse AI hiện chưa khả dụng.");
+            throw new InvalidOperationException("Dịch vụ Timelapse hiện chưa khả dụng.");
         }
 
         var profile = await _profiles.GetEnabledProfileAsync(request.ProfileCode, ct);
         if (profile is null)
         {
-            throw new InvalidOperationException("Loại công trình không hợp lệ hoặc đã bị tắt.");
+            throw new InvalidOperationException("Loáº¡i cÃ´ng trÃ¬nh khÃ´ng há»£p lá»‡ hoáº·c Ä‘Ã£ bá»‹ táº¯t.");
         }
 
         await _tenant.EnsureLoadedAsync(ct);
@@ -96,7 +103,7 @@ public sealed class TimelapseJobService : ITimelapseJobService
         var snapshot = new TimelapseJobSnapshot
         {
             ServiceId = service.Id,
-            ServiceCode = FixedTodoXServiceCatalog.Timelapse,
+            ServiceCode = service.ServiceCode,
             ProfileCode = profile.ProfileCode,
             ProfileName = profile.ProfileName,
             SceneCount = request.SceneCount,
@@ -203,7 +210,7 @@ public sealed class TimelapseJobService : ITimelapseJobService
 
         var snapshot = JsonSerializer.Deserialize<TimelapseJobSnapshot>(row.InputJson, JsonOptions);
         if (snapshot is null
-            || !string.Equals(snapshot.ServiceCode, FixedTodoXServiceCatalog.Timelapse, StringComparison.OrdinalIgnoreCase))
+            || !string.Equals(snapshot.Engine, TodoXServiceEngineTypes.Timelapse, StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException("Timelapse job snapshot is invalid.");
         }
