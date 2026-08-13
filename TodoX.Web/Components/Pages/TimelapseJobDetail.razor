@@ -18,7 +18,7 @@
     {
         <MudAlert Severity="Severity.Warning">Vui lòng đăng nhập bằng tài khoản khách hàng.</MudAlert>
     }
-    else if (_loading)
+    else if (_initialLoading)
     {
         <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
     }
@@ -28,6 +28,13 @@
     }
     else
     {
+        @if (!string.IsNullOrWhiteSpace(_refreshError))
+        {
+            <MudAlert Severity="Severity.Warning" Dense="true" Class="timelapse-refresh-warning">
+                @_refreshError
+            </MudAlert>
+        }
+
         <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="flex-wrap">
             <MudIconButton Icon="@Icons.Material.Filled.ArrowBack" OnClick="@(() => Navigation.NavigateTo("/jobs"))" />
             <div>
@@ -55,7 +62,7 @@
             </MudGrid>
         </MudPaper>
 
-        <MudTabs Rounded="true" KeepPanelsAlive="true">
+        <MudTabs Rounded="true" KeepPanelsAlive="true" @bind-ActivePanelIndex="_activeTabIndex">
             <MudTabPanel Text="YÊU CẦU">
                 <MudGrid Class="mt-3">
                     <MudItem xs="12" lg="8">
@@ -146,6 +153,12 @@
                                 <MudText Typo="Typo.h6">HÌNH ẢNH</MudText>
                             </MudStack>
                             <MudText Typo="Typo.caption" Color="Color.Secondary">Tạo theo thứ tự ngược từ ảnh thành phẩm.</MudText>
+                            @if (ImageFailureCount > 0 || VideoFailureCount > 0)
+                            {
+                                <MudAlert Severity="Severity.Error" Dense="true">
+                                    Có @ImageFailureCount ảnh lỗi và @VideoFailureCount video lỗi. Bạn có thể render lại tại scene tương ứng.
+                                </MudAlert>
+                            }
                             <div class="timelapse-stage-grid">
                                 @foreach (var image in ImageCards)
                                 {
@@ -159,6 +172,11 @@
                                             {
                                                 <img src="@image.PublicUrl" alt="@($"{image.ProgressPercent}%")" />
                                             }
+                                            else if (image.IsOriginal)
+                                            {
+                                                <MudIcon Icon="@Icons.Material.Filled.Image" Size="Size.Large" />
+                                                <span>Ảnh thành phẩm chưa sẵn sàng</span>
+                                            }
                                             else if (TimelapseOperationStatuses.IsActive(image.Status))
                                             {
                                                 <MudIcon Icon="@Icons.Material.Filled.Image" Size="Size.Large" />
@@ -167,6 +185,7 @@
                                             else
                                             {
                                                 <MudIcon Icon="@Icons.Material.Filled.Image" Size="Size.Large" />
+                                                <span>@ImagePlaceholderText(image)</span>
                                             }
                                         </div>
                                         <MudText Typo="Typo.body2">@(image.IsOriginal ? "Ảnh thành phẩm" : $"Stage {image.ProgressPercent}%")</MudText>
@@ -221,6 +240,7 @@
                                             else
                                             {
                                                 <MudIcon Icon="@Icons.Material.Filled.Movie" Size="Size.Large" />
+                                                <span>@VideoPlaceholderText(clip)</span>
                                             }
                                         </div>
                                         <MudText Typo="Typo.caption">@TimelapseRequestRules.RuntimeClipDurationSeconds giây · @TimelapseSellPricing.CustomerQualityLabel(_job.Snapshot.VideoMode) · @FormatRatio(_job.Snapshot.Ratio)</MudText>
@@ -289,14 +309,22 @@
     private TimelapseJobView? _job;
     private PeriodicTimer? _pollTimer;
     private CancellationTokenSource? _pollCts;
-    private bool _loading = true;
+    private bool _initialLoading = true;
     private bool _busy;
+    private bool _refreshing;
+    private string? _refreshError;
+    private int _activeTabIndex;
 
-    private int CompletedImages => _job?.Workflow.Images.Count(x => x.Status == TimelapseOperationStatuses.Completed) ?? 0;
-    private int TotalImages => _job?.Workflow.Images.Count ?? _job?.Snapshot.ProgressMapping.Count ?? 0;
-    private int CompletedVideos => _job?.Workflow.Videos.Count(x => x.Status == TimelapseOperationStatuses.Completed) ?? 0;
-    private int TotalVideos => _job?.Workflow.Videos.Count ?? _job?.Snapshot.SceneCount ?? 0;
-    private IEnumerable<TimelapseStageImage> ImageCards => _job?.Workflow.Images.OrderBy(x => x.ProgressPercent) ?? Enumerable.Empty<TimelapseStageImage>();
+    private int CompletedImages => ImageCards.Count(x => x.Status == TimelapseOperationStatuses.Completed);
+    private int TotalImages => ImageCards.Count();
+    private int CompletedVideos => VideoCards.Count(x => x.Status == TimelapseOperationStatuses.Completed);
+    private int TotalVideos => VideoCards.Count();
+    private IEnumerable<TimelapseStageImage> ImageCards
+        => EnsureImageCards().OrderBy(x => x.ProgressPercent);
+    private IEnumerable<TimelapseVideoClip> VideoCards
+        => EnsureVideoCards();
+    private int ImageFailureCount => ImageCards.Count(x => x.Status == TimelapseOperationStatuses.Failed);
+    private int VideoFailureCount => VideoCards.Count(x => x.Status == TimelapseOperationStatuses.Failed);
     private string StartButtonLabel => _job?.Workflow.HasActiveOperations == true
         ? "Đang xử lý..."
         : _job?.Workflow.ParentStatus is TimelapseParentStatuses.Paused or TimelapseParentStatuses.Failed
@@ -310,7 +338,7 @@
 
     protected override async Task OnParametersSetAsync()
     {
-        await LoadJobAsync();
+        await LoadInitialAsync();
         RestartPollingIfNeeded();
     }
 
@@ -324,22 +352,62 @@
 
     private void HandleAuthChange() => _ = InvokeAsync(async () =>
     {
-        await LoadJobAsync();
+        if (_job is null)
+        {
+            await LoadInitialAsync();
+        }
         RestartPollingIfNeeded();
         StateHasChanged();
     });
 
-    private async Task LoadJobAsync()
+    private async Task LoadInitialAsync()
     {
-        _loading = true;
-        _job = null;
-        if (AuthState.CurrentUser is { IsCustomer: true })
+        _initialLoading = true;
+        _refreshError = null;
+        try
         {
-            _job = await Jobs.GetOwnedAsync(JobId, AuthState.CurrentUser);
+            if (AuthState.CurrentUser is { IsCustomer: true } customer)
+            {
+                _job = await Jobs.GetOwnedAsync(JobId, customer);
+            }
+        }
+        catch (Exception ex)
+        {
+            _refreshError = SafeRefreshError(ex);
+        }
+        finally
+        {
+            _initialLoading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task RefreshJobStateAsync()
+    {
+        if (_refreshing || AuthState.CurrentUser is not { IsCustomer: true } customer)
+        {
+            return;
         }
 
-        _loading = false;
-        await InvokeAsync(StateHasChanged);
+        _refreshing = true;
+        try
+        {
+            var latest = await Jobs.GetOwnedAsync(JobId, customer);
+            if (latest is not null)
+            {
+                _job = latest;
+                _refreshError = null;
+            }
+        }
+        catch (Exception ex)
+        {
+            _refreshError = SafeRefreshError(ex);
+        }
+        finally
+        {
+            _refreshing = false;
+            await InvokeAsync(StateHasChanged);
+        }
     }
 
     private async Task StartOrResumeAsync()
@@ -349,7 +417,11 @@
             return;
         }
 
-        await RunActionAsync(async () => _job = await Jobs.StartOrResumeAsync(JobId, AuthState.CurrentUser));
+        await RunActionAsync(async () =>
+        {
+            _job = await Jobs.StartOrResumeAsync(JobId, AuthState.CurrentUser);
+            _activeTabIndex = 1;
+        });
     }
 
     private async Task RetryImageAsync(int progressPercent)
@@ -359,7 +431,11 @@
             return;
         }
 
-        await RunActionAsync(async () => _job = await Jobs.RetryImageAsync(JobId, progressPercent, AuthState.CurrentUser));
+        await RunActionAsync(async () =>
+        {
+            _job = await Jobs.RetryImageAsync(JobId, progressPercent, AuthState.CurrentUser);
+            _activeTabIndex = 1;
+        });
     }
 
     private async Task RetryVideoAsync(int clipIndex)
@@ -369,7 +445,11 @@
             return;
         }
 
-        await RunActionAsync(async () => _job = await Jobs.RetryVideoAsync(JobId, clipIndex, AuthState.CurrentUser));
+        await RunActionAsync(async () =>
+        {
+            _job = await Jobs.RetryVideoAsync(JobId, clipIndex, AuthState.CurrentUser);
+            _activeTabIndex = 1;
+        });
     }
 
     private async Task StartFinalizerAsync()
@@ -379,7 +459,11 @@
             return;
         }
 
-        await RunActionAsync(async () => _job = await Jobs.StartFinalizerAsync(JobId, AuthState.CurrentUser));
+        await RunActionAsync(async () =>
+        {
+            _job = await Jobs.StartFinalizerAsync(JobId, AuthState.CurrentUser);
+            _activeTabIndex = 2;
+        });
     }
 
     private async Task RunActionAsync(Func<Task> action)
@@ -430,7 +514,7 @@
         {
             while (await _pollTimer.WaitForNextTickAsync(ct))
             {
-                await LoadJobAsync();
+                await RefreshJobStateAsync();
                 if (_job?.Workflow.HasActiveOperations != true)
                 {
                     break;
@@ -444,7 +528,7 @@
 
     private RenderFragment RenderImageThumb(int progress) => builder =>
     {
-        var image = _job?.Workflow.Images.FirstOrDefault(x => x.ProgressPercent == progress);
+        var image = ImageCards.FirstOrDefault(x => x.ProgressPercent == progress);
         if (!string.IsNullOrWhiteSpace(image?.PublicUrl))
         {
             builder.OpenElement(0, "img");
@@ -458,6 +542,79 @@
         builder.AddContent(4, $"{progress}%");
         builder.CloseElement();
     };
+
+    private IReadOnlyList<TimelapseStageImage> EnsureImageCards()
+    {
+        if (_job is null)
+        {
+            return Array.Empty<TimelapseStageImage>();
+        }
+
+        var current = _job.Workflow.Images.ToDictionary(x => x.ProgressPercent);
+        return _job.Snapshot.ProgressMapping
+            .Select((progress, index) =>
+            {
+                if (current.TryGetValue(progress, out var image))
+                {
+                    return image;
+                }
+
+                var isOriginal = progress == 100;
+                var dependency = isOriginal
+                    ? (int?)null
+                    : _job.Snapshot.ProgressMapping.Where(x => x > progress).OrderBy(x => x).FirstOrDefault();
+                return new TimelapseStageImage
+                {
+                    StageIndex = index + 1,
+                    ProgressPercent = progress,
+                    IsOriginal = isOriginal,
+                    DependsOnProgressPercent = dependency,
+                    Status = isOriginal ? TimelapseOperationStatuses.Completed : TimelapseOperationStatuses.Waiting,
+                    PublicUrl = isOriginal ? _job.Snapshot.OriginalImage.PublicUrl : null,
+                    MediaId = isOriginal ? _job.Snapshot.OriginalImage.MediaId : null
+                };
+            })
+            .ToList();
+    }
+
+    private IReadOnlyList<TimelapseVideoClip> EnsureVideoCards()
+    {
+        if (_job is null)
+        {
+            return Array.Empty<TimelapseVideoClip>();
+        }
+
+        var current = _job.Workflow.Videos.ToDictionary(x => x.ClipIndex);
+        var graph = TimelapseStageGraphBuilder.Build(_job.Snapshot.SceneCount);
+        return graph.VideoClips
+            .Select(edge => current.TryGetValue(edge.ClipIndex, out var clip)
+                ? clip
+                : new TimelapseVideoClip
+                {
+                    ClipIndex = edge.ClipIndex,
+                    StartProgressPercent = edge.StartProgressPercent,
+                    EndProgressPercent = edge.EndProgressPercent,
+                    Status = TimelapseOperationStatuses.Waiting
+                })
+            .ToList();
+    }
+
+    private static string ImagePlaceholderText(TimelapseStageImage image)
+        => image.Status == TimelapseOperationStatuses.Failed
+            ? "Lỗi render ảnh"
+            : image.DependsOnProgressPercent.HasValue
+                ? $"Đang chờ ảnh {image.DependsOnProgressPercent}% hoàn thành"
+                : "Đang chờ render...";
+
+    private static string VideoPlaceholderText(TimelapseVideoClip clip)
+        => clip.Status == TimelapseOperationStatuses.Failed
+            ? "Lỗi render video"
+            : "Đang chờ ảnh đầu vào...";
+
+    private static string SafeRefreshError(Exception ex)
+        => ex is UnauthorizedAccessException
+            ? "Không thể cập nhật trạng thái mới nhất. Hệ thống sẽ thử lại."
+            : "Không thể cập nhật trạng thái mới nhất. Hệ thống sẽ thử lại.";
 
     private static bool CanRetry(string status)
         => status is TimelapseOperationStatuses.Failed or TimelapseOperationStatuses.Completed or TimelapseOperationStatuses.Invalidated;

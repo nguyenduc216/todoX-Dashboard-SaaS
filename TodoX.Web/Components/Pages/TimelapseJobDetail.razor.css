@@ -68,6 +68,24 @@
     animation: timelapse-shimmer 1.6s ease-in-out infinite;
 }
 
+.stage-preview img,
+.stage-preview video {
+    animation: none;
+}
+
+.timelapse-refresh-warning {
+    margin-bottom: 0;
+}
+
+.timelapse-stage-card {
+    position: relative;
+}
+
+.timelapse-stage-card:has(.image-preview span),
+.timelapse-stage-card:has(.video-preview span) {
+    border-color: rgba(255, 193, 7, 0.28);
+}
+
 .image-preview {
     color: #ffca28;
 }
@@ -120,5 +138,21 @@
 
     100% {
         background-position: -100% 0;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .stage-preview {
+        animation: none;
+    }
+}
+
+@media (max-width: 700px) {
+    .timelapse-stage-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .timelapse-stage-card {
+        min-height: 250px;
     }
 }
