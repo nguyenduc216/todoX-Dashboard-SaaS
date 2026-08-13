@@ -17,6 +17,9 @@ public class TimelapsePhase2CTests
         Assert.Contains("AddHostedService<TodoX.Web.Services.Timelapse.TimelapseFinalizerWorker>", program);
         Assert.Contains("RenderQueue:Enabled", workers);
         Assert.Contains("TimelapseProviderWorkerOptions", workers);
+        Assert.Contains("\"TimelapseProviderWorkers\"", ReadSource("TodoX.Web", "appsettings.json"), StringComparison.Ordinal);
+        Assert.Contains("\"DefaultImageSubmitPath\": \"/generateImage\"", ReadSource("TodoX.Web", "appsettings.json"), StringComparison.Ordinal);
+        Assert.Contains("\"DefaultVideoSubmitPath\": \"/create-video\"", ReadSource("TodoX.Web", "appsettings.json"), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -38,6 +41,10 @@ public class TimelapsePhase2CTests
 
         Assert.Contains("ResolveAsync(\"79ai\", \"access_token\"", source);
         Assert.Contains("Timelapse requires configured 79AI provider", source);
+        Assert.Contains("/generateImage", source);
+        Assert.Contains("/create-video", source);
+        Assert.Contains("/image", source);
+        Assert.Contains("/video", source);
         Assert.DoesNotContain("YEScale", source, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("SubmitAndWaitAsync", source, StringComparison.Ordinal);
     }
@@ -80,6 +87,20 @@ public class TimelapsePhase2CTests
         Assert.Contains("copy", source);
         Assert.Contains("ORDER BY clip_index", repo);
         Assert.Contains("SaveFinalizerCompletedAsync", source);
+        Assert.Contains("Storage:Provider", source);
+        Assert.Contains("requires local media storage", source);
+    }
+
+    [Fact]
+    public void Runtime_UsesProviderSpecificImageFieldsWithoutGenericImagesPayloadForTwoImages()
+    {
+        var client = ReadSource("TodoX.Web", "Services", "AiProviders", "Ai79TaskClient.cs");
+        var runtime = ReadSource("TodoX.Web", "Services", "Timelapse", "TimelapseProviderRuntime.cs");
+
+        Assert.Contains("DefaultVideoStartImageField", runtime, StringComparison.Ordinal);
+        Assert.Contains("DefaultVideoEndImageField", runtime, StringComparison.Ordinal);
+        Assert.Contains("request.Images.Count > 2", client, StringComparison.Ordinal);
+        Assert.DoesNotContain("FindString(document.RootElement, \"task_id\", \"taskId\", \"request_id\", \"requestId\", \"id\")", client, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -48,6 +48,21 @@ public sealed class TimelapseFinalizerRuntime : ITimelapseFinalizerRuntime
                 throw new InvalidOperationException("Timelapse finalizer requires completed clips with stored media.");
             }
 
+            var storageProvider = _config["Storage:Provider"] ?? "local";
+            if (!string.Equals(storageProvider, "local", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("Timelapse finalizer requires local media storage; remote storage needs a media download adapter.");
+            }
+
+            foreach (var clip in clips.Where(x => x.MediaId.HasValue))
+            {
+                var clipMedia = await _media.GetAsync(clip.MediaId!.Value, ct);
+                if (clipMedia is not null && !string.Equals(clipMedia.StorageProvider, "local", StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException("Timelapse clip media is stored by a non-local provider and cannot be passed to FFmpeg as a physical path.");
+                }
+            }
+
             var paths = clips.Select(x => ResolveObjectKey(x.ObjectKey!)).ToList();
             foreach (var path in paths)
             {

@@ -186,7 +186,7 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
             ["type"] = "image",
             ["progress_percent"] = item.ProgressPercent.ToString(),
             ["ratio"] = item.Snapshot.Ratio
-        });
+        }, _options.DefaultImageReferenceField, null);
 
         var submit = await _taskClient.SubmitAsync(request.Raw, ct);
         await _repo.SaveImageSubmittedAsync(item.Id, item.Attempt, provider.ProviderCode, provider.Model, submit.TaskId, request.SanitizedJson, submit.SanitizedResponseJson, ct);
@@ -213,7 +213,7 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
             ["ratio"] = NormalizeRatio(item.Ratio),
             ["start_progress_percent"] = item.StartProgressPercent.ToString(),
             ["end_progress_percent"] = item.EndProgressPercent.ToString()
-        });
+        }, _options.DefaultVideoStartImageField, _options.DefaultVideoEndImageField);
 
         var submit = await _taskClient.SubmitAsync(request.Raw, ct);
         await _repo.SaveVideoSubmittedAsync(item.Id, item.Attempt, provider.ProviderCode, provider.Model, submit.TaskId, request.SanitizedJson, submit.SanitizedResponseJson, ct);
@@ -262,17 +262,37 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
         var account = await _credentialRepository.GetAccountByIdAsync(credential.ProviderAccountId, ct);
         var domain = FirstNonBlank(ReadString(account?.ConfigJson, "domain"), ReadString(capability.ConfigJson, "domain"), ReadString(provider.ConfigJson, "domain"), "79ai.net")!;
         var baseUrl = FirstNonBlank(provider.BaseUrl, ReadString(provider.ConfigJson, "base_url"), _options.Default79AiBaseUrl)!;
-        var submitPath = FirstNonBlank(ReadString(capability.ConfigJson, "submit_path"), ReadString(provider.ConfigJson, "submit_path"), capability.EndpointPath, _options.DefaultSubmitPath)!;
-        var pollPath = FirstNonBlank(ReadString(capability.ConfigJson, "poll_path"), ReadString(provider.ConfigJson, "poll_path"), _options.DefaultPollPath)!;
+        var (submitPath, pollPath) = Resolve79AiPaths(
+            capabilityCode,
+            capability.ConfigJson,
+            provider.ConfigJson,
+            capability.EndpointPath,
+            _options);
         var model = FirstNonBlank(expectedModel, capability.ModelName, option.ModelName)
             ?? throw new InvalidOperationException("Configured 79AI model is missing.");
 
         return new Ai79RuntimeProvider(option.ProviderCode, model, baseUrl, submitPath, pollPath, domain, credential);
     }
 
-    private SubmitRequestEnvelope BuildSubmitRequest(Ai79RuntimeProvider provider, string prompt, IReadOnlyList<string> images, IReadOnlyDictionary<string, string?> options)
+    private SubmitRequestEnvelope BuildSubmitRequest(
+        Ai79RuntimeProvider provider,
+        string prompt,
+        IReadOnlyList<string> images,
+        IReadOnlyDictionary<string, string?> options,
+        string? firstImageField,
+        string? secondImageField)
     {
-        var raw = new Ai79TaskSubmitRequest(provider.BaseUrl, provider.SubmitPath, provider.Credential.Secret, provider.Domain, provider.Model, prompt, images, options);
+        var raw = new Ai79TaskSubmitRequest(
+            provider.BaseUrl,
+            provider.SubmitPath,
+            provider.Credential.Secret,
+            provider.Domain,
+            provider.Model,
+            prompt,
+            images,
+            options,
+            firstImageField,
+            secondImageField);
         var sanitized = JsonSerializer.Serialize(new
         {
             provider.ProviderCode,
@@ -282,10 +302,56 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
             provider.Domain,
             prompt,
             images,
+            firstImageField,
+            secondImageField,
             options
         }, JsonOptions);
         return new SubmitRequestEnvelope(raw, sanitized);
     }
+
+    private static (string SubmitPath, string PollPath) Resolve79AiPaths(
+        string capabilityCode,
+        string? capabilityConfigJson,
+        string? providerConfigJson,
+        string? capabilityEndpointPath,
+        TimelapseProviderWorkerOptions options)
+    {
+        var expected = string.Equals(capabilityCode, AiProviderCatalog.SceneImageGeneration, StringComparison.OrdinalIgnoreCase)
+            ? (SubmitPath: options.DefaultImageSubmitPath, PollPath: options.DefaultImagePollPath)
+            : (SubmitPath: options.DefaultVideoSubmitPath, PollPath: options.DefaultVideoPollPath);
+        var verified = string.Equals(capabilityCode, AiProviderCatalog.SceneImageGeneration, StringComparison.OrdinalIgnoreCase)
+            ? (SubmitPath: "/generateImage", PollPath: "/image")
+            : (SubmitPath: "/create-video", PollPath: "/video");
+
+        if (!PathsEqual(expected.SubmitPath, verified.SubmitPath)
+            || !PathsEqual(expected.PollPath, verified.PollPath))
+        {
+            throw new InvalidOperationException("79AI Timelapse endpoint configuration does not match the verified production contract.");
+        }
+
+        var configuredSubmit = FirstNonBlank(
+            ReadString(capabilityConfigJson, "submit_path"),
+            ReadString(providerConfigJson, "submit_path"),
+            capabilityEndpointPath);
+        var configuredPoll = FirstNonBlank(
+            ReadString(capabilityConfigJson, "poll_path"),
+            ReadString(providerConfigJson, "poll_path"));
+
+        if (configuredSubmit is not null && !PathsEqual(configuredSubmit, expected.SubmitPath))
+        {
+            throw new InvalidOperationException($"79AI {capabilityCode} submit endpoint is not the verified production path.");
+        }
+
+        if (configuredPoll is not null && !PathsEqual(configuredPoll, expected.PollPath))
+        {
+            throw new InvalidOperationException($"79AI {capabilityCode} poll endpoint is not the verified production path.");
+        }
+
+        return expected;
+    }
+
+    private static bool PathsEqual(string left, string right)
+        => string.Equals(left.Trim().TrimStart('/'), right.Trim().TrimStart('/'), StringComparison.OrdinalIgnoreCase);
 
     private async Task FailImageAsync(TimelapseImageWorkItem item, string? errorCode, string errorMessage, string responseJson, CancellationToken ct)
     {

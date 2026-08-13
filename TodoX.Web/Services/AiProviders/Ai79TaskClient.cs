@@ -17,7 +17,9 @@ public sealed record Ai79TaskSubmitRequest(
     string Model,
     string Prompt,
     IReadOnlyList<string> Images,
-    IReadOnlyDictionary<string, string?> Options);
+    IReadOnlyDictionary<string, string?> Options,
+    string? FirstImageField = null,
+    string? SecondImageField = null);
 
 public sealed record Ai79TaskStatusRequest(
     string BaseUrl,
@@ -81,10 +83,16 @@ public sealed class Ai79TaskClient : IAi79TaskClient
 
         for (var i = 0; i < request.Images.Count; i++)
         {
-            form[i == 0 ? "image" : $"image_{i + 1}"] = request.Images[i];
+            var field = i switch
+            {
+                0 => request.FirstImageField ?? "image",
+                1 => request.SecondImageField ?? "image_2",
+                _ => $"image_{i + 1}"
+            };
+            form[field] = request.Images[i];
         }
 
-        if (request.Images.Count > 0)
+        if (request.Images.Count > 2)
         {
             form["images"] = JsonSerializer.Serialize(request.Images, JsonOptions);
         }
@@ -102,7 +110,7 @@ public sealed class Ai79TaskClient : IAi79TaskClient
         var json = await ReadJsonAsync(response, ct);
         using var document = JsonDocument.Parse(json);
         var sanitized = SanitizeSecretJson(document.RootElement, request.AccessToken);
-        var taskId = FindString(document.RootElement, "task_id", "taskId", "request_id", "requestId", "id");
+        var taskId = FindTaskId(document.RootElement);
         if (string.IsNullOrWhiteSpace(taskId))
         {
             throw new InvalidOperationException("79AI submit response missing task_id.");
@@ -127,10 +135,10 @@ public sealed class Ai79TaskClient : IAi79TaskClient
         var json = await ReadJsonAsync(response, ct);
         using var document = JsonDocument.Parse(json);
         var sanitized = SanitizeSecretJson(document.RootElement, request.AccessToken);
-        var status = Ai79TaskStatusNormalizer.Normalize(FindString(document.RootElement, "status", "state", "task_status", "taskStatus"));
+        var status = Ai79TaskStatusNormalizer.Normalize(FindStatus(document.RootElement));
         var outputUrl = FindUrl(document.RootElement);
-        var errorCode = FindString(document.RootElement, "error_code", "errorCode", "code");
-        var errorMessage = FindString(document.RootElement, "error_message", "errorMessage", "message", "msg");
+        var errorCode = FindErrorValue(document.RootElement, "error_code", "errorCode", "code");
+        var errorMessage = FindErrorValue(document.RootElement, "error_message", "errorMessage", "message", "msg");
 
         return new Ai79TaskStatusResult(status, sanitized, outputUrl, errorCode, errorMessage);
     }
@@ -197,6 +205,131 @@ public sealed class Ai79TaskClient : IAi79TaskClient
 
         return null;
     }
+
+    private static string? FindTaskId(JsonElement element)
+    {
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var name in new[] { "task_id", "taskId", "request_id", "requestId" })
+            {
+                if (element.TryGetProperty(name, out var value))
+                {
+                    var found = ScalarString(value);
+                    if (!string.IsNullOrWhiteSpace(found))
+                    {
+                        return found;
+                    }
+                }
+            }
+
+            foreach (var containerName in new[] { "task", "data", "result", "response" })
+            {
+                if (element.TryGetProperty(containerName, out var child))
+                {
+                    var found = FindTaskId(child);
+                    if (!string.IsNullOrWhiteSpace(found))
+                    {
+                        return found;
+                    }
+                }
+            }
+        }
+        else if (element.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in element.EnumerateArray())
+            {
+                var found = FindTaskId(item);
+                if (!string.IsNullOrWhiteSpace(found))
+                {
+                    return found;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static string? FindStatus(JsonElement element)
+    {
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var name in new[] { "status", "state", "task_status", "taskStatus" })
+            {
+                if (element.TryGetProperty(name, out var value))
+                {
+                    var found = ScalarString(value);
+                    if (!string.IsNullOrWhiteSpace(found))
+                    {
+                        return found;
+                    }
+                }
+            }
+
+            foreach (var containerName in new[] { "task", "data", "result", "response" })
+            {
+                if (element.TryGetProperty(containerName, out var child))
+                {
+                    var found = FindStatus(child);
+                    if (!string.IsNullOrWhiteSpace(found))
+                    {
+                        return found;
+                    }
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static string? FindErrorValue(JsonElement element, params string[] names)
+    {
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var name in names)
+            {
+                if (element.TryGetProperty(name, out var value))
+                {
+                    var found = ScalarString(value);
+                    if (!string.IsNullOrWhiteSpace(found))
+                    {
+                        return found;
+                    }
+                }
+            }
+
+            foreach (var containerName in new[] { "error", "errors", "data", "result", "response" })
+            {
+                if (element.TryGetProperty(containerName, out var child))
+                {
+                    var found = FindErrorValue(child, names);
+                    if (!string.IsNullOrWhiteSpace(found))
+                    {
+                        return found;
+                    }
+                }
+            }
+        }
+        else if (element.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in element.EnumerateArray())
+            {
+                var found = FindErrorValue(item, names);
+                if (!string.IsNullOrWhiteSpace(found))
+                {
+                    return found;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static string? ScalarString(JsonElement value)
+        => value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : value.ValueKind is JsonValueKind.Number or JsonValueKind.True or JsonValueKind.False
+                ? value.ToString()
+                : null;
 
     private static string? FindUrl(JsonElement element)
     {

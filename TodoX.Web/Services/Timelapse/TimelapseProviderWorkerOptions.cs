@@ -12,6 +12,11 @@ public sealed class TimelapseProviderWorkerOptions
     public int PollDelayMs { get; set; } = 1500;
     public int ClaimMinutes { get; set; } = 10;
     public string Default79AiBaseUrl { get; set; } = "https://api.gommo.net/ai";
-    public string DefaultSubmitPath { get; set; } = "/task/submit";
-    public string DefaultPollPath { get; set; } = "/task/{task_id}";
+    public string DefaultImageSubmitPath { get; set; } = "/generateImage";
+    public string DefaultImagePollPath { get; set; } = "/image";
+    public string DefaultVideoSubmitPath { get; set; } = "/create-video";
+    public string DefaultVideoPollPath { get; set; } = "/video";
+    public string DefaultImageReferenceField { get; set; } = "image";
+    public string DefaultVideoStartImageField { get; set; } = "image";
+    public string DefaultVideoEndImageField { get; set; } = "image_2";
 }
