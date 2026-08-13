@@ -112,7 +112,9 @@ public class TimelapsePhase2ATests
         Assert.Contains("Dịch vụ này đang tạm ngưng", page, StringComparison.Ordinal);
         Assert.Contains("Dịch vụ đã chọn không thuộc nhóm Timelapse", page, StringComparison.Ordinal);
         Assert.Contains("timelapse-upload-card", page, StringComparison.Ordinal);
-        Assert.Contains("Kéo thả ảnh vào đây", page, StringComparison.Ordinal);
+        Assert.Contains("Chọn ảnh thành phẩm", page, StringComparison.Ordinal);
+        Assert.Contains("Bấm để tải ảnh lên", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("Kéo thả ảnh vào đây", page, StringComparison.Ordinal);
         Assert.Contains("JPG, PNG hoặc WebP · tối đa 10MB", page, StringComparison.Ordinal);
         Assert.Contains("AllowedImageContentTypes", page, StringComparison.Ordinal);
         Assert.Contains("MaxImageBytes", page, StringComparison.Ordinal);
@@ -121,6 +123,8 @@ public class TimelapsePhase2ATests
         Assert.Contains("TimelapseRequestRules.RuntimeClipDurationSeconds", page, StringComparison.Ordinal);
         Assert.Contains("SellPrices.EstimateAsync", page, StringComparison.Ordinal);
         Assert.Contains("SubmitDisabled", page, StringComparison.Ordinal);
+        Assert.Contains("_priceLoading", page, StringComparison.Ordinal);
+        Assert.Contains("!_request.ServiceId.HasValue || _request.ServiceId.Value == Guid.Empty", page, StringComparison.Ordinal);
         Assert.Contains("!HasValidPrice", page, StringComparison.Ordinal);
         Assert.Contains("Bắt đầu tạo video", page, StringComparison.Ordinal);
         Assert.Contains("TIÊU CHUẨN", page, StringComparison.Ordinal);
@@ -133,6 +137,12 @@ public class TimelapsePhase2ATests
         Assert.Contains("WHERE s.id = @serviceId", catalog, StringComparison.Ordinal);
         Assert.Contains("CASE WHEN lower(s.status) = 'active'", catalog, StringComparison.Ordinal);
         Assert.Contains("IServiceSellPriceResolver", service, StringComparison.Ordinal);
+        Assert.Contains("!request.ServiceId.HasValue || request.ServiceId.Value == Guid.Empty", service, StringComparison.Ordinal);
+        Assert.Contains("_catalog.GetServiceByIdAsync(request.ServiceId.Value, ct)", service, StringComparison.Ordinal);
+        Assert.Contains("Dịch vụ đã chọn không tồn tại.", service, StringComparison.Ordinal);
+        Assert.Contains("Dịch vụ này đang tạm ngưng.", service, StringComparison.Ordinal);
+        Assert.Contains("Dịch vụ đã chọn không thuộc nhóm Timelapse.", service, StringComparison.Ordinal);
+        Assert.Contains("Dịch vụ đã chọn không khớp với mã dịch vụ.", service, StringComparison.Ordinal);
         Assert.Contains("_sellPrices.ResolveVideoScenePriceAsync", service, StringComparison.Ordinal);
         Assert.Contains("TimelapseSellPricing.QualityTierForMode(request.VideoMode)", service, StringComparison.Ordinal);
         Assert.Contains("TimelapseRequestRules.RuntimeClipDurationSeconds", service, StringComparison.Ordinal);
@@ -146,6 +156,14 @@ public class TimelapsePhase2ATests
         Assert.Contains("ProfessionalMode = \"professional\"", models, StringComparison.Ordinal);
         Assert.Contains("LandscapeRatio = \"16_9\"", models, StringComparison.Ordinal);
         Assert.Contains("PortraitRatio = \"9_16\"", models, StringComparison.Ordinal);
+        Assert.DoesNotContain("GetActiveCatalogServicesAsync()", service, StringComparison.Ordinal);
+        Assert.DoesNotContain("timelapseServices.FirstOrDefault", service, StringComparison.Ordinal);
+        Assert.DoesNotContain("SingleOrDefault(x => string.Equals(x.ServiceCode", service, StringComparison.Ordinal);
+        Assert.DoesNotContain("Loáº¡i", service, StringComparison.Ordinal);
+        Assert.DoesNotContain("Vui lÃ²ng", models, StringComparison.Ordinal);
+        Assert.DoesNotContain("Sá»‘", models, StringComparison.Ordinal);
+        Assert.DoesNotContain("Cháº¿", models, StringComparison.Ordinal);
+        Assert.DoesNotContain("Tá»·", models, StringComparison.Ordinal);
     }
 
     [Fact]

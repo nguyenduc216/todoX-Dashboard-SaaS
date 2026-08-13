@@ -69,8 +69,8 @@
                                     {
                                         <MudIcon Icon="@Icons.Material.Filled.CloudUpload" Size="Size.Large" />
                                     }
-                                    <span class="upload-primary">Kéo thả ảnh vào đây</span>
-                                    <span class="upload-secondary">hoặc bấm để chọn ảnh</span>
+                                    <span class="upload-primary">Chọn ảnh thành phẩm</span>
+                                    <span class="upload-secondary">Bấm để tải ảnh lên</span>
                                     <span class="upload-helper">JPG, PNG hoặc WebP · tối đa 10MB</span>
                                 </label>
                                 @if (_selectedFile is not null)
@@ -212,7 +212,7 @@
     private bool HasValidImage => _selectedFile is not null && ValidateSelectedImage(showSnackbar: false);
     private bool HasValidPrice => _priceEstimate is { Success: true, VideoScenePrice: not null };
     private bool ServiceReady => _selectedService is { Enabled: true } && string.Equals(_selectedService.ServiceType, TodoXServiceEngineTypes.Timelapse, StringComparison.OrdinalIgnoreCase);
-    private bool SubmitDisabled => _busy || _profiles.Count == 0 || !ServiceReady || !HasValidImage || !HasValidPrice;
+    private bool SubmitDisabled => _busy || _priceLoading || _profiles.Count == 0 || !ServiceReady || !HasValidImage || !HasValidPrice;
 
     protected override async Task OnInitializedAsync()
     {
@@ -257,7 +257,7 @@
 
     private async Task LoadSelectedServiceAsync()
     {
-        if (!_request.ServiceId.HasValue)
+        if (!_request.ServiceId.HasValue || _request.ServiceId.Value == Guid.Empty)
         {
             _serviceWarning = "Vui lòng chọn dịch vụ từ danh sách trước khi tạo video.";
             return;

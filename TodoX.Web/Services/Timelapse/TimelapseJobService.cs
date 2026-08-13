@@ -72,18 +72,31 @@ public sealed class TimelapseJobService : ITimelapseJobService
             throw new InvalidOperationException(string.Join(" ", errors));
         }
 
-        var timelapseServices = (await _catalog.GetActiveCatalogServicesAsync())
-            .Where(x => string.Equals(x.ServiceType, TodoXServiceEngineTypes.Timelapse, StringComparison.OrdinalIgnoreCase))
-            .OrderBy(x => x.SortOrder)
-            .ToList();
-        var service = request.ServiceId.HasValue
-            ? timelapseServices.SingleOrDefault(x => x.Id == request.ServiceId.Value)
-            : !string.IsNullOrWhiteSpace(request.ServiceCode)
-                ? timelapseServices.SingleOrDefault(x => string.Equals(x.ServiceCode, request.ServiceCode, StringComparison.OrdinalIgnoreCase))
-                : timelapseServices.FirstOrDefault();
-        if (service is null || !service.Enabled)
+        if (!request.ServiceId.HasValue || request.ServiceId.Value == Guid.Empty)
         {
-            throw new InvalidOperationException("Dịch vụ Timelapse hiện chưa khả dụng.");
+            throw new InvalidOperationException("Vui lòng chọn dịch vụ trước khi tạo video.");
+        }
+
+        var service = await _catalog.GetServiceByIdAsync(request.ServiceId.Value, ct);
+        if (service is null)
+        {
+            throw new InvalidOperationException("Dịch vụ đã chọn không tồn tại.");
+        }
+
+        if (!service.Enabled)
+        {
+            throw new InvalidOperationException("Dịch vụ này đang tạm ngưng.");
+        }
+
+        if (!string.Equals(service.ServiceType, TodoXServiceEngineTypes.Timelapse, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Dịch vụ đã chọn không thuộc nhóm Timelapse.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.ServiceCode)
+            && !string.Equals(request.ServiceCode, service.ServiceCode, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Dịch vụ đã chọn không khớp với mã dịch vụ.");
         }
 
         var qualityTier = TimelapseSellPricing.QualityTierForMode(request.VideoMode);
@@ -102,7 +115,7 @@ public sealed class TimelapseJobService : ITimelapseJobService
         var profile = await _profiles.GetEnabledProfileAsync(request.ProfileCode, ct);
         if (profile is null)
         {
-            throw new InvalidOperationException("Loáº¡i cÃ´ng trÃ¬nh khÃ´ng há»£p lá»‡ hoáº·c Ä‘Ã£ bá»‹ táº¯t.");
+            throw new InvalidOperationException("Loại công trình không hợp lệ hoặc đã bị tắt.");
         }
 
         await _tenant.EnsureLoadedAsync(ct);

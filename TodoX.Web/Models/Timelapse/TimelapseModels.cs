@@ -137,27 +137,27 @@ public static class TimelapseRequestRules
         var errors = new List<string>();
         if (string.IsNullOrWhiteSpace(request.ProfileCode))
         {
-            errors.Add("Vui lÃ²ng chá»n loáº¡i cÃ´ng trÃ¬nh.");
+            errors.Add("Vui lòng chọn loại công trình.");
         }
 
         if (!AllowedSceneCounts.Contains(request.SceneCount))
         {
-            errors.Add("Sá»‘ scene chá»‰ cÃ³ thá»ƒ lÃ  3, 4, 5 hoáº·c 6.");
+            errors.Add("Số scene chỉ có thể là 3, 4, 5 hoặc 6.");
         }
 
         if (!IsSupportedMode(request.VideoMode))
         {
-            errors.Add("Cháº¿ Ä‘á»™ video khÃ´ng há»£p lá»‡.");
+            errors.Add("Chế độ video không hợp lệ.");
         }
 
         if (!IsSupportedRatio(request.Ratio))
         {
-            errors.Add("Tá»· lá»‡ video khÃ´ng há»£p lá»‡.");
+            errors.Add("Tỷ lệ video không hợp lệ.");
         }
 
         if (!hasOriginalImage)
         {
-            errors.Add("Vui lÃ²ng chá»n áº£nh thÃ nh pháº©m / áº£nh tham chiáº¿u.");
+            errors.Add("Vui lòng chọn ảnh thành phẩm / ảnh tham chiếu.");
         }
 
         return errors;
