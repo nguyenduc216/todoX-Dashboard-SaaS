@@ -11,7 +11,12 @@
     <DialogContent>
         <MudGrid>
             <MudItem xs="12" sm="6">
-                <MudTextField T="string" Label="Mã dịch vụ" @bind-Value="_model.ServiceCode" Variant="Variant.Outlined" Required="true" ReadOnly="true" />
+                <MudTextField T="string"
+                              Label="Mã dịch vụ"
+                              @bind-Value="_model.ServiceCode"
+                              Variant="Variant.Outlined"
+                              Required="true"
+                              ReadOnly="@(!_isNew)" />
             </MudItem>
             <MudItem xs="12" sm="6">
                 <MudSelect T="string" Label="Engine" @bind-Value="_model.ServiceType" Variant="Variant.Outlined" Required="true">
@@ -39,9 +44,6 @@
                 <MudTextField T="string" Label="Mô tả chi tiết" @bind-Value="_model.Description" Variant="Variant.Outlined" Lines="4" />
             </MudItem>
             <MudItem xs="12" sm="6">
-                <MudTextField T="string" Label="Workflow reference" @bind-Value="_model.WorkflowCode" Variant="Variant.Outlined" />
-            </MudItem>
-            <MudItem xs="12" sm="6">
                 <MudSelect T="string" Label="Trạng thái" @bind-Value="_model.Status" Variant="Variant.Outlined">
                     <MudSelectItem Value="@(FixedTodoXServiceCatalog.EnabledStatus)">Enabled</MudSelectItem>
                     <MudSelectItem Value="@(FixedTodoXServiceCatalog.DisabledStatus)">Disabled</MudSelectItem>
@@ -55,6 +57,54 @@
             </MudItem>
             <MudItem xs="12" sm="6">
                 <MudTextField T="string" Label="Cover image URL" @bind-Value="_model.CoverImageUrl" Variant="Variant.Outlined" />
+            </MudItem>
+            <MudItem xs="12">
+                <MudPaper Class="service-thumbnail-tool pa-3" rounded="true">
+                    <MudStack Spacing="2">
+                        <MudStack Row="true" AlignItems="AlignItems.Start" Spacing="3" Class="flex-wrap">
+                            <div class="service-thumbnail-preview">
+                                @if (!string.IsNullOrWhiteSpace(_model.ThumbnailUrl))
+                                {
+                                    <img src="@_model.ThumbnailUrl" alt="Thumbnail dịch vụ" />
+                                }
+                                else
+                                {
+                                    <div class="todox-mr-avatar-empty">
+                                        <MudIcon Icon="@Icons.Material.Filled.Image" Size="Size.Large" />
+                                        <span>Chưa có thumbnail</span>
+                                    </div>
+                                }
+                            </div>
+                            <MudStack Spacing="2" Class="service-thumbnail-fields">
+                                <MudStack Row="true" Spacing="2" Class="flex-wrap">
+                                    <label class="@($"profile-avatar-upload {(_thumbnailBusy ? "is-disabled" : string.Empty)}")">
+                                        <MudIcon Icon="@Icons.Material.Filled.Upload" Size="Size.Small" />
+                                        <span>Upload thumbnail</span>
+                                        <InputFile OnChange="UploadThumbnail" accept="image/png,image/jpeg,image/webp" disabled="@_thumbnailBusy" />
+                                    </label>
+                                    <MudButton Variant="Variant.Outlined"
+                                               Color="Color.Warning"
+                                               StartIcon="@Icons.Material.Filled.AutoAwesome"
+                                               Disabled="@_thumbnailBusy"
+                                               OnClick="OpenIllustrationDialog">
+                                        Tạo ảnh minh họa
+                                    </MudButton>
+                                </MudStack>
+                                @if (_thumbnailBusy)
+                                {
+                                    <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+                                }
+                            </MudStack>
+                        </MudStack>
+                    </MudStack>
+                </MudPaper>
+            </MudItem>
+            <MudItem xs="12">
+                <MudExpansionPanels Elevation="0" Class="mt-2">
+                    <MudExpansionPanel Text="Nâng cao">
+                        <MudTextField T="string" Label="Workflow reference" @bind-Value="_model.WorkflowCode" Variant="Variant.Outlined" />
+                    </MudExpansionPanel>
+                </MudExpansionPanels>
             </MudItem>
         </MudGrid>
     </DialogContent>
@@ -72,6 +122,7 @@
 
     private ServiceDto _model = new();
     private bool _isNew;
+    private bool _thumbnailBusy;
 
     protected override void OnInitialized()
     {
@@ -95,6 +146,71 @@
                 SortOrder = Source.SortOrder
             };
     }
+
+    private async Task UploadThumbnail(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        if (file is null)
+        {
+            return;
+        }
+
+        _thumbnailBusy = true;
+        try
+        {
+            var url = await SystemImageStorage.SaveServiceThumbnailAsync(file);
+            _model.ThumbnailUrl = url;
+            Snackbar.Add("Đã upload thumbnail dịch vụ.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Upload thumbnail lỗi: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _thumbnailBusy = false;
+        }
+    }
+
+    private async Task OpenIllustrationDialog()
+    {
+        var parameters = new DialogParameters
+        {
+            ["ServiceId"] = _model.Id == Guid.Empty ? null : _model.Id,
+            ["ServiceCode"] = _model.ServiceCode,
+            ["ServiceName"] = _model.ServiceName,
+            ["ServiceGroupName"] = SelectedCategoryName,
+            ["ServiceType"] = _model.ServiceType,
+            ["ShortDescription"] = _model.ShortDescription,
+            ["Description"] = _model.Description,
+            ["CurrentThumbnailUrl"] = _model.ThumbnailUrl
+        };
+
+        var options = new DialogOptions
+        {
+            MaxWidth = MaxWidth.ExtraLarge,
+            FullWidth = true,
+            CloseButton = true,
+            BackdropClick = false,
+            CloseOnEscapeKey = true
+        };
+
+        var dialog = await DialogService.ShowAsync<ServiceIllustrationRenderDialog>(
+            "Tạo ảnh minh họa dịch vụ",
+            parameters,
+            options);
+
+        var result = await dialog.Result;
+        if (result is null || result.Canceled || result.Data is not ServiceIllustrationDialogValue value)
+        {
+            return;
+        }
+
+        _model.ThumbnailUrl = value.SelectedImageUrl;
+        StateHasChanged();
+    }
+
+    private string? SelectedCategoryName => Categories.FirstOrDefault(x => x.Id == _model.CategoryId)?.CategoryName ?? _model.CategoryName;
 
     private void Submit()
     {

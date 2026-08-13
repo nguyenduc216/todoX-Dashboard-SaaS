@@ -92,6 +92,26 @@ public sealed class CommercialVideoServiceCatalogTests
     }
 
     [Fact]
+    public void ServiceDialog_RestoresThumbnailManagementAndServiceCodeRules()
+    {
+        var adminDialog = ReadSource("TodoX.Web", "Components", "Dialogs", "ServiceDialog.razor");
+        var adminRepo = ReadSource("TodoX.Web", "Services", "CatalogAdminRepository.cs");
+
+        Assert.Contains("ReadOnly=\"@(!_isNew)\"", adminDialog, StringComparison.Ordinal);
+        Assert.Contains("private bool _isNew;", adminDialog, StringComparison.Ordinal);
+        Assert.Contains("service-thumbnail-preview", adminDialog, StringComparison.Ordinal);
+        Assert.Contains("<img src=\"@_model.ThumbnailUrl\"", adminDialog, StringComparison.Ordinal);
+        Assert.Contains("<InputFile OnChange=\"UploadThumbnail\" accept=\"image/png,image/jpeg,image/webp\"", adminDialog, StringComparison.Ordinal);
+        Assert.Contains("SystemImageStorage.SaveServiceThumbnailAsync(file)", adminDialog, StringComparison.Ordinal);
+        Assert.Contains("ServiceIllustrationRenderDialog", adminDialog, StringComparison.Ordinal);
+        Assert.Contains("Nâng cao", adminDialog, StringComparison.Ordinal);
+        Assert.Contains("Workflow reference", adminDialog, StringComparison.Ordinal);
+        Assert.Contains("NormalizeServiceCode(s.ServiceCode)", adminRepo, StringComparison.Ordinal);
+        Assert.Contains("ServiceCodeExistsAsync(s.ServiceCode)", adminRepo, StringComparison.Ordinal);
+        Assert.Contains("char.IsAsciiLetterUpper(c) || char.IsDigit(c) || c == '_'", adminRepo, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void SellPricingSourceContracts_KeepCustomerPriceSeparateFromProviderModelCost()
     {
         var catalogRepository = ReadSource("TodoX.Web", "Services", "CatalogRepository.cs");
@@ -109,6 +129,22 @@ public sealed class CommercialVideoServiceCatalogTests
         Assert.Contains("ON CONFLICT (service_id, asset_type, quality_tier, (COALESCE(duration_seconds, 0)))", migration, StringComparison.Ordinal);
         Assert.Contains("DO UPDATE SET", migration, StringComparison.Ordinal);
         Assert.DoesNotContain("sell_points = EXCLUDED.sell_points", migration, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ThumbnailManifestDocumentsDeterministicMappingWhenFilesAreUnavailable()
+    {
+        var manifest = ReadSource("TodoX.Web", "docs", "commercial-thumbnail-manifest.md");
+        var migration = ReadSource("database", "migrations", "20260813_commercial_video_service_catalog.sql");
+
+        foreach (var service in CommercialVideoServiceCatalog.Services)
+        {
+            Assert.Contains(service.ServiceCode, manifest, StringComparison.Ordinal);
+            Assert.Contains(service.ThumbnailManifestKey, manifest, StringComparison.Ordinal);
+        }
+
+        Assert.Contains("thumbnail_url = COALESCE(NULLIF(catalog.services.thumbnail_url, ''), EXCLUDED.thumbnail_url)", migration, StringComparison.Ordinal);
+        Assert.Contains("does not invent thumbnail URLs", migration, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -23,7 +23,7 @@ The fixed legacy 3-service catalog remains only as a compatibility reference for
 
 ## Thumbnail Mapping
 
-The runtime could not access the 10 uploaded images from the current ChatGPT conversation. No replacement images were generated and no invented URLs were written. Migration/report records placeholder manifest keys for manual mapping:
+The runtime could not access the 10 uploaded images from the current ChatGPT conversation. No replacement images were generated and no invented URLs were written. A source-controlled thumbnail manifest was added at `TodoX.Web/docs/commercial-thumbnail-manifest.md` for deterministic mapping:
 
 - `nganh-xay-dung`
 - `nganh-phat-phap`
@@ -36,7 +36,7 @@ The runtime could not access the 10 uploaded images from the current ChatGPT con
 - `nganh-livestream-nguoi-mau`
 - `xay-kenh-nhan-hieu`
 
-The migration preserves existing `thumbnail_url` and `cover_image_url`; admins can upload or paste final URLs in the service dialog.
+The migration preserves existing `thumbnail_url` and `cover_image_url`; admins can upload or paste final URLs in the service dialog. The service dialog uses the existing `SystemImageStorage.SaveServiceThumbnailAsync` workflow, which stores thumbnails under the app's existing `/uploads/system/` public static file convention.
 
 ## DB Changes
 
@@ -87,12 +87,15 @@ Admin service management now allows editing:
 - short description
 - description
 - thumbnail URL
+- thumbnail upload/replace with preview
 - cover image URL
 - service type / engine
 - status
 - sort order
 
-`service_code` remains read-only after creation. The services page shows thumbnail, service name, short description, engine badge, enabled/disabled status, sort order, and sell price summary. A new `Giá bán` dialog manages service-level sell price rows.
+`service_code` is editable for a new service and read-only after creation. New service codes are normalized to uppercase and must use only uppercase letters, digits, and underscores. The services page shows thumbnail, service name, short description, engine badge, enabled/disabled status, sort order, and sell price summary. A new `Giá bán` dialog manages service-level sell price rows.
+
+`workflow_code` remains optional for backward compatibility and is shown under the advanced/internal section instead of as a primary customer-facing setting.
 
 ## Customer Behavior
 
@@ -114,6 +117,8 @@ Legacy `TIMELAPSE`, `RVIDEO`, and `RDANCE` records are not deleted. They remain 
 
 ## Validation
 
-- `dotnet build TodoX.Dashboard.sln -c Release /p:UseSharedCompilation=false`: passed with existing Razor generated-code CS8669 warnings.
-- `dotnet test TodoX.Web.Tests/TodoX.Web.Tests.csproj -c Release /p:UseSharedCompilation=false`: passed, 349 tests.
+- `git diff --check`: passed. Git reported line-ending normalization warnings only.
+- `dotnet build TodoX.Dashboard.sln -c Release /p:UseSharedCompilation=false`: passed with 45 existing CS8669 Razor generated-code warnings and 0 errors.
+- `dotnet test TodoX.Web.Tests/TodoX.Web.Tests.csproj -c Release /p:UseSharedCompilation=false`: passed, 351/351 tests.
 - `dotnet publish TodoX.Web/TodoX.Web.csproj -c Release --no-restore -o artifacts/publish/todox-dashboard /p:UseSharedCompilation=false`: passed.
+- Publish output: `D:\todoX\Dashboard-web\TodoXPortal\todoX-Dashboard-SaaS\artifacts\publish\todox-dashboard`.

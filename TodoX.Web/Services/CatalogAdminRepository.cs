@@ -112,6 +112,11 @@ public sealed class CatalogAdminRepository
     public async Task<Guid> InsertServiceAsync(ServiceDto s)
     {
         s.ServiceType = TodoXServiceEngineTypes.Normalize(s.ServiceType);
+        s.ServiceCode = NormalizeServiceCode(s.ServiceCode);
+        if (await ServiceCodeExistsAsync(s.ServiceCode))
+        {
+            throw new InvalidOperationException("Mã dịch vụ đã tồn tại.");
+        }
 
         using var conn = await _factory.OpenAsync();
         var id = Guid.NewGuid();
@@ -144,6 +149,7 @@ public sealed class CatalogAdminRepository
     public async Task UpdateServiceAsync(ServiceDto s)
     {
         s.ServiceType = TodoXServiceEngineTypes.Normalize(s.ServiceType);
+        s.ServiceCode = NormalizeServiceCode(s.ServiceCode);
 
         using var conn = await _factory.OpenAsync();
         await conn.ExecuteAsync(
@@ -176,6 +182,22 @@ public sealed class CatalogAdminRepository
         using var conn = await _factory.OpenAsync();
         // pricing tiers & assets cascade on service delete.
         await conn.ExecuteAsync("DELETE FROM catalog.services WHERE id=@id;", new { id });
+    }
+
+    private static string NormalizeServiceCode(string? code)
+    {
+        var normalized = (code ?? string.Empty).Trim().ToUpperInvariant();
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            throw new InvalidOperationException("Mã dịch vụ không được để trống.");
+        }
+
+        if (!normalized.All(c => char.IsAsciiLetterUpper(c) || char.IsDigit(c) || c == '_'))
+        {
+            throw new InvalidOperationException("Mã dịch vụ chỉ được dùng chữ in hoa, số và dấu gạch dưới.");
+        }
+
+        return normalized;
     }
 
     // ---------- Pricing tiers ----------

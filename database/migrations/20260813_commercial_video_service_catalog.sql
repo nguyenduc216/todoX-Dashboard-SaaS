@@ -1,6 +1,8 @@
 ﻿-- Commercial video service catalog bootstrap.
 -- Safe to run multiple times.
 -- Preserves existing catalog.services rows and admin-customized thumbnail/service metadata when already set.
+-- Thumbnail manifest keys are documented in TodoX.Web/docs/commercial-thumbnail-manifest.md.
+-- This migration does not invent thumbnail URLs when bundled image files are unavailable.
 -- Seeds 10 commercial services and editable bootstrap sell prices.
 
 CREATE TABLE IF NOT EXISTS catalog.service_sell_prices (
