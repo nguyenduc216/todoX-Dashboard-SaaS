@@ -21,7 +21,6 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
         WriteIndented = false
     };
 
-    private readonly IAiProviderService _providers;
     private readonly AiProviderRepository _providerRepository;
     private readonly IProviderCredentialResolver _credentials;
     private readonly IProviderCredentialRepository _credentialRepository;
@@ -33,7 +32,6 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
     private readonly ILogger<TimelapseProviderRuntime> _logger;
 
     public TimelapseProviderRuntime(
-        IAiProviderService providers,
         AiProviderRepository providerRepository,
         IProviderCredentialResolver credentials,
         IProviderCredentialRepository credentialRepository,
@@ -44,7 +42,6 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
         IOptions<TimelapseProviderWorkerOptions> options,
         ILogger<TimelapseProviderRuntime> logger)
     {
-        _providers = providers;
         _providerRepository = providerRepository;
         _credentials = credentials;
         _credentialRepository = credentialRepository;
@@ -66,7 +63,15 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
                 return;
             }
 
-            var status = await PollAsync(item.ProviderCode, item.ProviderTaskId, AiProviderCatalog.SceneImageGeneration, item.ProviderModel, ct);
+            var status = await PollAsync(
+                item.ProviderCode,
+                item.ProviderTaskId,
+                _options.ImageCapabilityCode,
+                _options.ImageModelName,
+                isImage: true,
+                "Chưa cấu hình model Seedream cho Timelapse.",
+                item.ProviderModel,
+                ct);
             _logger.LogInformation("TIMELAPSE_IMAGE_POLL jobId={JobId} progress={Progress} attempt={Attempt} taskId={TaskId} status={Status}",
                 item.JobId, item.ProgressPercent, item.Attempt, item.ProviderTaskId, status.NormalizedStatus);
             await _renderJobs.AddEventAsync(item.JobId, "TIMELAPSE_IMAGE_POLL", "Timelapse image task polled.",
@@ -125,7 +130,15 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
                 return;
             }
 
-            var status = await PollAsync(item.ProviderCode, item.ProviderTaskId, AiProviderCatalog.ImageToVideo, item.ProviderModel, ct);
+            var status = await PollAsync(
+                item.ProviderCode,
+                item.ProviderTaskId,
+                _options.VideoCapabilityCode,
+                _options.VideoModelName,
+                isImage: false,
+                "Chưa cấu hình model Seedance cho Timelapse.",
+                item.ProviderModel,
+                ct);
             _logger.LogInformation("TIMELAPSE_VIDEO_POLL jobId={JobId} clip={ClipIndex} attempt={Attempt} taskId={TaskId} status={Status}",
                 item.JobId, item.ClipIndex, item.Attempt, item.ProviderTaskId, status.NormalizedStatus);
             await _renderJobs.AddEventAsync(item.JobId, "TIMELAPSE_VIDEO_POLL", "Timelapse video task polled.",
@@ -177,7 +190,12 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
 
     private async Task SubmitImageAsync(TimelapseImageWorkItem item, CancellationToken ct)
     {
-        var provider = await Resolve79AiRuntimeAsync(AiProviderCatalog.SceneImageGeneration, ct);
+        var provider = await Resolve79AiRuntimeAsync(
+            _options.ImageCapabilityCode,
+            _options.ImageModelName,
+            isImage: true,
+            "Chưa cấu hình model Seedream cho Timelapse.",
+            ct: ct);
         var dependencyUrl = item.DependencyPublicUrl ?? item.Snapshot.OriginalImage.PublicUrl
             ?? throw new InvalidOperationException("Missing Timelapse dependency image URL.");
         var prompt = TimelapsePromptResolver.ResolveImagePrompt(item.Snapshot, item.ProgressPercent, item.PromptSnapshotJson);
@@ -198,7 +216,12 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
 
     private async Task SubmitVideoAsync(TimelapseVideoWorkItem item, CancellationToken ct)
     {
-        var provider = await Resolve79AiRuntimeAsync(AiProviderCatalog.ImageToVideo, ct);
+        var provider = await Resolve79AiRuntimeAsync(
+            _options.VideoCapabilityCode,
+            _options.VideoModelName,
+            isImage: false,
+            "Chưa cấu hình model Seedance cho Timelapse.",
+            ct: ct);
         if (string.IsNullOrWhiteSpace(item.StartPublicUrl) || string.IsNullOrWhiteSpace(item.EndPublicUrl))
         {
             throw new InvalidOperationException("Missing Timelapse start or end image URL.");
@@ -223,14 +246,29 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
             new { item.ClipIndex, item.Attempt, provider.ProviderCode, model = provider.Model, taskId = submit.TaskId }, ct: ct);
     }
 
-    private async Task<Ai79TaskStatusResult> PollAsync(string? providerCode, string? taskId, string capabilityCode, string? model, CancellationToken ct)
+    private async Task<Ai79TaskStatusResult> PollAsync(
+        string? providerCode,
+        string? taskId,
+        string capabilityCode,
+        string modelName,
+        bool isImage,
+        string unavailableMessage,
+        string? persistedModel,
+        CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(taskId))
         {
             throw new InvalidOperationException("Missing 79AI provider task id.");
         }
 
-        var provider = await Resolve79AiRuntimeAsync(capabilityCode, ct, providerCode, model);
+        var provider = await Resolve79AiRuntimeAsync(
+            capabilityCode,
+            modelName,
+            isImage,
+            unavailableMessage,
+            providerCode,
+            persistedModel,
+            ct);
         return await _taskClient.GetStatusAsync(new Ai79TaskStatusRequest(
             provider.BaseUrl,
             provider.PollPath,
@@ -240,13 +278,20 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
             ct);
     }
 
-    private async Task<Ai79RuntimeProvider> Resolve79AiRuntimeAsync(string capabilityCode, CancellationToken ct, string? expectedProviderCode = null, string? expectedModel = null)
+    private async Task<Ai79RuntimeProvider> Resolve79AiRuntimeAsync(
+        string capabilityCode,
+        string modelName,
+        bool isImage,
+        string unavailableMessage,
+        string? expectedProviderCode = null,
+        string? expectedModel = null,
+        CancellationToken ct = default)
     {
-        var option = await _providers.ResolveProviderForCapabilityAsync(capabilityCode, null, false, ct);
-        if (!string.Equals(option.ProviderCode, "79ai", StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidOperationException($"Timelapse requires configured 79AI provider for {capabilityCode}.");
-        }
+        var option = await _providerRepository.GetEnabledProviderModelAsync(
+            _options.ProviderCode,
+            capabilityCode,
+            modelName,
+            ct) ?? throw new InvalidOperationException(unavailableMessage);
 
         if (!string.IsNullOrWhiteSpace(expectedProviderCode)
             && !string.Equals(expectedProviderCode, option.ProviderCode, StringComparison.OrdinalIgnoreCase))
@@ -254,22 +299,28 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
             throw new InvalidOperationException("Persisted Timelapse task provider no longer matches configured 79AI provider.");
         }
 
+        if (!string.IsNullOrWhiteSpace(expectedModel)
+            && !string.Equals(expectedModel, option.ModelName, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Persisted Timelapse task model no longer matches the configured 79AI model.");
+        }
+
         var provider = await _providerRepository.GetProviderAsync(option.ProviderId, ct)
             ?? throw new InvalidOperationException("Configured 79AI provider was not found.");
         var capability = provider.Capabilities.FirstOrDefault(x => x.Id == option.ProviderCapabilityId)
             ?? throw new InvalidOperationException("Configured 79AI capability was not found.");
-        var credential = await _credentials.ResolveAsync("79ai", "access_token", ct);
+        var credential = await _credentials.ResolveAsync(option.ProviderCode, "access_token", ct);
         var account = await _credentialRepository.GetAccountByIdAsync(credential.ProviderAccountId, ct);
         var domain = FirstNonBlank(ReadString(account?.ConfigJson, "domain"), ReadString(capability.ConfigJson, "domain"), ReadString(provider.ConfigJson, "domain"), "79ai.net")!;
         var baseUrl = FirstNonBlank(provider.BaseUrl, ReadString(provider.ConfigJson, "base_url"), _options.Default79AiBaseUrl)!;
         var (submitPath, pollPath) = Resolve79AiPaths(
-            capabilityCode,
+            isImage,
             capability.ConfigJson,
             provider.ConfigJson,
             capability.EndpointPath,
             _options);
-        var model = FirstNonBlank(expectedModel, capability.ModelName, option.ModelName)
-            ?? throw new InvalidOperationException("Configured 79AI model is missing.");
+        var model = capability.ModelName
+            ?? throw new InvalidOperationException(unavailableMessage);
 
         return new Ai79RuntimeProvider(option.ProviderCode, model, baseUrl, submitPath, pollPath, domain, credential);
     }
@@ -310,16 +361,16 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
     }
 
     private static (string SubmitPath, string PollPath) Resolve79AiPaths(
-        string capabilityCode,
+        bool isImage,
         string? capabilityConfigJson,
         string? providerConfigJson,
         string? capabilityEndpointPath,
         TimelapseProviderWorkerOptions options)
     {
-        var expected = string.Equals(capabilityCode, AiProviderCatalog.SceneImageGeneration, StringComparison.OrdinalIgnoreCase)
+        var expected = isImage
             ? (SubmitPath: options.DefaultImageSubmitPath, PollPath: options.DefaultImagePollPath)
             : (SubmitPath: options.DefaultVideoSubmitPath, PollPath: options.DefaultVideoPollPath);
-        var verified = string.Equals(capabilityCode, AiProviderCatalog.SceneImageGeneration, StringComparison.OrdinalIgnoreCase)
+        var verified = isImage
             ? (SubmitPath: "/generateImage", PollPath: "/image")
             : (SubmitPath: "/create-video", PollPath: "/video");
 
@@ -339,12 +390,12 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
 
         if (configuredSubmit is not null && !PathsEqual(configuredSubmit, expected.SubmitPath))
         {
-            throw new InvalidOperationException($"79AI {capabilityCode} submit endpoint is not the verified production path.");
+            throw new InvalidOperationException($"79AI Timelapse {(isImage ? "image" : "video")} submit endpoint is not the verified production path.");
         }
 
         if (configuredPoll is not null && !PathsEqual(configuredPoll, expected.PollPath))
         {
-            throw new InvalidOperationException($"79AI {capabilityCode} poll endpoint is not the verified production path.");
+            throw new InvalidOperationException($"79AI Timelapse {(isImage ? "image" : "video")} poll endpoint is not the verified production path.");
         }
 
         return expected;

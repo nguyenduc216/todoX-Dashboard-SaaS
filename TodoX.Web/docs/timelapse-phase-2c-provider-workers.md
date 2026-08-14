@@ -6,15 +6,15 @@ Phase 2C adds production workers for the existing Phase 2B Timelapse workflow. I
 
 ## Image Provider Path
 
-`TimelapseImageWorker` claims one `RENDERING` image stage attempt and calls `TimelapseProviderRuntime`. The runtime resolves the configured TodoX provider for `scene_image_generation` and requires `provider_code=79ai`. Credentials are resolved with `ProviderCredentialResolver.ResolveAsync("79ai", "access_token")`; secrets are never stored in request/response JSON or logs.
+`TimelapseImageWorker` claims one `RENDERING` image stage attempt and calls `TimelapseProviderRuntime`. The runtime resolves the exact internal route `79ai / image_generation / seedream_5_0`. It does not use `scene_image_generation`, provider defaults, or priority fallback. Credentials are resolved with `ProviderCredentialResolver.ResolveAsync("79ai", "access_token")`; secrets are never stored in request/response JSON or logs.
 
 The image prompt is resolved server-side from the persisted Phase 2B profile snapshot (`prompt_snapshot_json`) plus the stage progress. The dependency image comes from the completed later stage, such as 100 -> 70 -> 35 -> 0.
 
 ## Video Provider Path
 
-`TimelapseVideoWorker` claims one `RENDERING` clip attempt and resolves the configured TodoX provider for `image_to_video`, also requiring 79AI. It submits the completed start and end image URLs for the clip, duration 6 seconds, runtime mode, and ratio.
+`TimelapseVideoWorker` claims one `RENDERING` clip attempt and resolves the exact internal route `79ai / image_to_video / seedance_20_pro`. It submits the completed start and end image URLs for the clip, duration 6 seconds, runtime mode, and ratio.
 
-This preserves the configured 79AI model/capability behavior instead of switching to another provider.
+Customer `standard` maps to Seedance `fast`; customer `premium` maps to Seedance `professional`. Global provider defaults are intentionally ignored, and the runtime fails clearly if either explicit 79AI model is unavailable or disabled.
 
 ## Submit/Poll Contract
 

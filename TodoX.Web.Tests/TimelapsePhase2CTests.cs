@@ -20,6 +20,11 @@ public class TimelapsePhase2CTests
         Assert.Contains("\"TimelapseProviderWorkers\"", ReadSource("TodoX.Web", "appsettings.json"), StringComparison.Ordinal);
         Assert.Contains("\"DefaultImageSubmitPath\": \"/generateImage\"", ReadSource("TodoX.Web", "appsettings.json"), StringComparison.Ordinal);
         Assert.Contains("\"DefaultVideoSubmitPath\": \"/create-video\"", ReadSource("TodoX.Web", "appsettings.json"), StringComparison.Ordinal);
+        Assert.Contains("\"ProviderCode\": \"79ai\"", ReadSource("TodoX.Web", "appsettings.json"), StringComparison.Ordinal);
+        Assert.Contains("\"ImageCapabilityCode\": \"image_generation\"", ReadSource("TodoX.Web", "appsettings.json"), StringComparison.Ordinal);
+        Assert.Contains("\"ImageModelName\": \"seedream_5_0\"", ReadSource("TodoX.Web", "appsettings.json"), StringComparison.Ordinal);
+        Assert.Contains("\"VideoCapabilityCode\": \"image_to_video\"", ReadSource("TodoX.Web", "appsettings.json"), StringComparison.Ordinal);
+        Assert.Contains("\"VideoModelName\": \"seedance_20_pro\"", ReadSource("TodoX.Web", "appsettings.json"), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -39,14 +44,95 @@ public class TimelapsePhase2CTests
     {
         var source = ReadSource("TodoX.Web", "Services", "Timelapse", "TimelapseProviderRuntime.cs");
 
-        Assert.Contains("ResolveAsync(\"79ai\", \"access_token\"", source);
-        Assert.Contains("Timelapse requires configured 79AI provider", source);
+        Assert.Contains("_credentials.ResolveAsync(option.ProviderCode, \"access_token\"", source);
+        Assert.Contains("GetEnabledProviderModelAsync", source);
         Assert.Contains("/generateImage", source);
         Assert.Contains("/create-video", source);
         Assert.Contains("/image", source);
         Assert.Contains("/video", source);
+        Assert.DoesNotContain("ResolveProviderForCapabilityAsync", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("AiProviderCatalog.SceneImageGeneration", source, StringComparison.Ordinal);
         Assert.DoesNotContain("YEScale", source, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("SubmitAndWaitAsync", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Runtime_ResolvesOnlyExplicitEnabled79AiModels()
+    {
+        var runtime = ReadSource("TodoX.Web", "Services", "Timelapse", "TimelapseProviderRuntime.cs");
+        var options = ReadSource("TodoX.Web", "Services", "Timelapse", "TimelapseProviderWorkerOptions.cs");
+        var repository = ReadSource("TodoX.Web", "Services", "AiProviders", "AiProviderRepository.cs");
+
+        Assert.Contains("ProviderCode { get; set; } = \"79ai\"", options, StringComparison.Ordinal);
+        Assert.Contains("ImageCapabilityCode { get; set; } = \"image_generation\"", options, StringComparison.Ordinal);
+        Assert.Contains("ImageModelName { get; set; } = \"seedream_5_0\"", options, StringComparison.Ordinal);
+        Assert.Contains("VideoCapabilityCode { get; set; } = \"image_to_video\"", options, StringComparison.Ordinal);
+        Assert.Contains("VideoModelName { get; set; } = \"seedance_20_pro\"", options, StringComparison.Ordinal);
+
+        Assert.Contains("p.provider_code = @providerCode", repository, StringComparison.Ordinal);
+        Assert.Contains("c.capability_code = @capabilityCode", repository, StringComparison.Ordinal);
+        Assert.Contains("c.model_name = @modelName", repository, StringComparison.Ordinal);
+        Assert.Contains("p.enabled = true", repository, StringComparison.Ordinal);
+        Assert.Contains("c.enabled = true", repository, StringComparison.Ordinal);
+        Assert.DoesNotContain("GetDefaultAsync", runtime, StringComparison.Ordinal);
+        Assert.DoesNotContain("GetFirstByPriorityAsync", runtime, StringComparison.Ordinal);
+
+        Assert.Contains("Chưa cấu hình model Seedream cho Timelapse.", runtime, StringComparison.Ordinal);
+        Assert.Contains("Chưa cấu hình model Seedance cho Timelapse.", runtime, StringComparison.Ordinal);
+        Assert.DoesNotContain("google_image_gen_banana_2_cheap", runtime, StringComparison.Ordinal);
+        Assert.DoesNotContain("ImageAICreativeRender", runtime, StringComparison.Ordinal);
+        Assert.DoesNotContain("grok", runtime, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("veo", runtime, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("omni", runtime, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void TimelapseVideoContract_MapsCustomerModesAndKeepsSixSecondDuration()
+    {
+        Assert.Equal("fast", TodoX.Web.Models.Timelapse.TimelapseRequestRules.FastMode);
+        Assert.Equal("professional", TodoX.Web.Models.Timelapse.TimelapseRequestRules.ProfessionalMode);
+        Assert.Equal(
+            TodoX.Web.Models.Catalog.ServiceSellPriceQualityTiers.Standard,
+            TodoX.Web.Models.Timelapse.TimelapseSellPricing.QualityTierForMode(TodoX.Web.Models.Timelapse.TimelapseRequestRules.FastMode));
+        Assert.Equal(
+            TodoX.Web.Models.Catalog.ServiceSellPriceQualityTiers.Premium,
+            TodoX.Web.Models.Timelapse.TimelapseSellPricing.QualityTierForMode(TodoX.Web.Models.Timelapse.TimelapseRequestRules.ProfessionalMode));
+        Assert.Equal(6, TodoX.Web.Models.Timelapse.TimelapseRequestRules.RuntimeClipDurationSeconds);
+    }
+
+    [Fact]
+    public void SeedanceMigration_IsIdempotentInternalAndDoesNotChangeGlobalDefaults()
+    {
+        var migration = ReadSource("database", "manual", "ai-provider-catalog", "05_seed_79ai_seedance_timelapse_capability.sql");
+
+        Assert.Contains("WHERE provider_code = '79ai'", migration, StringComparison.Ordinal);
+        Assert.Contains("capability_code = 'image_to_video'", migration, StringComparison.Ordinal);
+        Assert.Contains("model_name = 'seedance_20_pro'", migration, StringComparison.Ordinal);
+        Assert.Contains("IF NOT FOUND THEN", migration, StringComparison.Ordinal);
+        Assert.Contains("'Seedance 2.0'", migration, StringComparison.Ordinal);
+        Assert.Contains("'/create-video'", migration, StringComparison.Ordinal);
+        Assert.Contains("'poll_path', '/video'", migration, StringComparison.Ordinal);
+        Assert.Contains("'fast', 'fast_2', 'professional', 'professional_2'", migration, StringComparison.Ordinal);
+        Assert.Contains("ARRAY[4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]", migration, StringComparison.Ordinal);
+        Assert.Contains("'480p', '720p', '1080p'", migration, StringComparison.Ordinal);
+        Assert.Contains("is_default = false", migration, StringComparison.Ordinal);
+        Assert.Contains("false, true, false", migration, StringComparison.Ordinal);
+        Assert.DoesNotContain("unit_cost_points = EXCLUDED", migration, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ImageRetry_PreservesJobAndCreatesANewAttemptForExplicitRuntime()
+    {
+        var workflow = ReadSource("TodoX.Web", "Services", "Timelapse", "TimelapseWorkflowService.cs");
+        var workerRepository = ReadSource("TodoX.Web", "Services", "Timelapse", "TimelapseWorkerRepository.cs");
+        var runtime = ReadSource("TodoX.Web", "Services", "Timelapse", "TimelapseProviderRuntime.cs");
+
+        Assert.Contains("RetryImageAsync(Guid jobId", workflow, StringComparison.Ordinal);
+        Assert.Contains("active_attempt=active_attempt+1", workflow, StringComparison.Ordinal);
+        Assert.Contains("INSERT INTO timelapse.timelapse_image_stage_versions", workflow, StringComparison.Ordinal);
+        Assert.Contains("provider_task_id=NULL", workerRepository, StringComparison.Ordinal);
+        Assert.Contains("_options.ImageCapabilityCode", runtime, StringComparison.Ordinal);
+        Assert.Contains("_options.ImageModelName", runtime, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -57,7 +143,9 @@ public class TimelapsePhase2CTests
         Assert.Contains("if (string.IsNullOrWhiteSpace(item.ProviderTaskId))", source);
         Assert.Contains("SubmitImageAsync(item, ct)", source);
         Assert.Contains("SubmitVideoAsync(item, ct)", source);
-        Assert.Contains("PollAsync(item.ProviderCode, item.ProviderTaskId", source);
+        Assert.Contains("var status = await PollAsync(", source);
+        Assert.Contains("item.ProviderCode,", source);
+        Assert.Contains("item.ProviderTaskId,", source);
         Assert.Contains("ReleaseImageClaimAsync", source);
         Assert.Contains("ReleaseVideoClaimAsync", source);
     }

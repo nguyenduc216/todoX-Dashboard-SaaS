@@ -340,6 +340,26 @@ public sealed class AiProviderRepository
             """, new { capabilityId });
     }
 
+    public async Task<ProviderOptionDto?> GetEnabledProviderModelAsync(
+        string providerCode,
+        string capabilityCode,
+        string modelName,
+        CancellationToken ct = default)
+    {
+        using var conn = await _factory.OpenAsync(ct);
+        return await conn.QuerySingleOrDefaultAsync<ProviderOptionDto>(
+            $"""
+            {ProviderOptionSelect}
+             WHERE p.provider_code = @providerCode
+               AND c.capability_code = @capabilityCode
+               AND c.model_name = @modelName
+               AND p.enabled = true
+               AND c.enabled = true
+             LIMIT 1;
+            """,
+            new { providerCode, capabilityCode, modelName });
+    }
+
     public async Task<long> InsertUsageLogAsync(AiProviderUsageLog log, CancellationToken ct = default)
     {
         using var conn = await _factory.OpenAsync(ct);

@@ -1,6 +1,6 @@
 # Timelapse Production Preflight
 
-Date: 2026-08-13
+Date: 2026-08-14
 
 Scope: 79AI and Timelapse Phase 2C only. Phase 2B stage graph, retry rules, pricing, n8n, RVideo, RDance, and provider credential architecture were not redesigned.
 
@@ -21,6 +21,19 @@ The production-shaped `TodoX.Web/appsettings.json` explicitly enables both gates
 
 No secret or access token is included in this report.
 
+## Explicit Timelapse Routing
+
+Timelapse does not use global provider defaults or priority fallback.
+
+| Operation | Provider | Capability | Model |
+|---|---|---|---|
+| Image generation | `79ai` | `image_generation` | `seedream_5_0` |
+| Image-to-video | `79ai` | `image_to_video` | `seedance_20_pro` |
+
+The image route does not use the TodoX `scene_image_generation` abstraction, ImageAICreativeRender, YEScale, or the maintenance Nano Banana model. The video route does not fall back to YEScale, Grok, Veo, or Omni.
+
+The 79AI catalog sync writes provider models and model capabilities to the catalog model tables. It does not automatically create the legacy runtime route row in `public.todox_ai_provider_capability`; the standalone idempotent script `database/manual/ai-provider-catalog/05_seed_79ai_seedance_timelapse_capability.sql` supplies the missing Seedance route without changing credentials, provider pricing, customer sell pricing, or global defaults.
+
 ## Verified 79AI Contract
 
 The Timelapse adapter uses the verified 79AI base URL and paths:
@@ -36,7 +49,7 @@ The access token is resolved at runtime through `IProviderCredentialResolver` wi
 
 Image submit fields are `access_token`, `domain`, `model`, `prompt`, `image`, and configured options such as `ratio`.
 
-Video submit fields are `access_token`, `domain`, `model`, `prompt`, `mode`, `duration`, `ratio`, `image` (start image), and `image_2` (end image). The configured Seedance model is preserved.
+Video submit fields are `access_token`, `domain`, `model`, `prompt`, `mode`, `duration`, `ratio`, `image` (start image), and `image_2` (end image). The configured Seedance model is `seedance_20_pro`. Customer standard maps to `fast`, premium maps to `professional`, and clip duration remains 6 seconds.
 
 The runtime rejects configured submit/poll paths that do not match the verified image or video contract.
 
@@ -83,12 +96,12 @@ Before customer release, run one `CONSTRUCTION_VIDEO` job with three scenes and 
 - `timelapse.timelapse_final_outputs`
 - `render.render_jobs`
 
-No source migration or database change is required by this preflight.
+The Seedance capability script must be reviewed and run manually in each target environment before enabling production Timelapse workers. No production database was modified by this code task.
 
 ## Validation
 
 - `dotnet build TodoX.Dashboard.sln -c Release`: passed.
-- `dotnet test TodoX.Web.Tests/TodoX.Web.Tests.csproj -c Release`: passed, 400 tests.
+- `dotnet test TodoX.Web.Tests/TodoX.Web.Tests.csproj -c Release`: passed, 413 tests.
 - `dotnet publish TodoX.Web/TodoX.Web.csproj -c Release --no-restore -o artifacts/publish/todox-dashboard`: passed.
 - `git diff --check`: passed.
 - `dotnet format TodoX.Dashboard.sln --verify-no-changes --no-restore`: failed on pre-existing whitespace findings in unrelated files; no unrelated files were changed.
