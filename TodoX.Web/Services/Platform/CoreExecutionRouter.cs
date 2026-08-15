@@ -4,7 +4,7 @@ public interface ICoreExecutionRouter
 {
     bool CanHandle(string serviceCode);
 
-    Task DispatchAsync(CoreJobDispatchContext context, CancellationToken ct = default);
+    Task<CoreExecutionResult> DispatchAsync(CoreJobDispatchContext context, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -38,7 +38,7 @@ public sealed class CoreExecutionRouter : ICoreExecutionRouter
     public bool CanHandle(string serviceCode)
         => !string.IsNullOrWhiteSpace(serviceCode) && _adapters.ContainsKey(serviceCode.Trim());
 
-    public Task DispatchAsync(CoreJobDispatchContext context, CancellationToken ct = default)
+    public Task<CoreExecutionResult> DispatchAsync(CoreJobDispatchContext context, CancellationToken ct = default)
     {
         if (!_adapters.TryGetValue(context.ServiceCode.Trim(), out var adapter))
         {

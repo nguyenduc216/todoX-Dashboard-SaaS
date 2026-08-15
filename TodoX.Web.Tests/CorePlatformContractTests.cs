@@ -153,9 +153,10 @@ public sealed class CorePlatformContractTests
             null,
             null);
 
-        await router.DispatchAsync(context);
+        var result = await router.DispatchAsync(context);
 
         Assert.Same(context, adapter.LastContext);
+        Assert.Equal(CoreExecutionDisposition.Completed, result.Disposition);
     }
 
     [Fact]
@@ -178,10 +179,10 @@ public sealed class CorePlatformContractTests
         public string ServiceCode { get; }
         public CoreJobDispatchContext? LastContext { get; private set; }
 
-        public Task DispatchAsync(CoreJobDispatchContext context, CancellationToken ct = default)
+        public Task<CoreExecutionResult> DispatchAsync(CoreJobDispatchContext context, CancellationToken ct = default)
         {
             LastContext = context;
-            return Task.CompletedTask;
+            return Task.FromResult(CoreExecutionResult.Completed());
         }
     }
 }

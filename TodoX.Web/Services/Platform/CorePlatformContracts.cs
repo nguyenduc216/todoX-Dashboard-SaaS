@@ -88,7 +88,8 @@ public sealed record CoreJobView(
     string? ErrorMessage,
     DateTime CreatedAt,
     DateTime? UpdatedAt,
-    DateTime? CompletedAt);
+    DateTime? CompletedAt,
+    CoreExecutionCorrelation? Execution = null);
 
 public sealed record CoreJobListRequest(
     int Page = 1,
@@ -168,7 +169,49 @@ public interface ICoreJobExecutionAdapter
 {
     string ServiceCode { get; }
 
-    Task DispatchAsync(CoreJobDispatchContext context, CancellationToken ct = default);
+    Task<CoreExecutionResult> DispatchAsync(CoreJobDispatchContext context, CancellationToken ct = default);
+}
+
+public enum CoreExecutionDisposition
+{
+    Completed,
+    Deferred
+}
+
+public sealed record CoreExecutionResult(
+    CoreExecutionDisposition Disposition,
+    JsonElement? Output = null,
+    string? ExecutionSystem = null,
+    string? ExternalExecutionId = null,
+    string? Adapter = null,
+    string? Message = null,
+    JsonElement? Metadata = null)
+{
+    public static CoreExecutionResult Completed(
+        JsonElement? output = null,
+        string? message = null)
+        => new(CoreExecutionDisposition.Completed, Output: output, Message: message);
+
+    public static CoreExecutionResult Deferred(
+        string executionSystem,
+        string externalExecutionId,
+        string? adapter = null,
+        string? message = null,
+        JsonElement? metadata = null)
+        => new(
+            CoreExecutionDisposition.Deferred,
+            ExecutionSystem: executionSystem,
+            ExternalExecutionId: externalExecutionId,
+            Adapter: adapter,
+            Message: message,
+            Metadata: metadata);
+}
+
+public enum CoreFailureBillingPolicy
+{
+    ReleaseReservation,
+    KeepCharge,
+    RefundCharge
 }
 
 public sealed record CoreJobDispatchContext(

@@ -9,11 +9,18 @@ namespace TodoX.Web.Services.Platform;
 /// </summary>
 public sealed class CoreServiceJobHandler : IRenderJobHandler
 {
-    private readonly ICoreExecutionRouter _router;
+    private static readonly CoreExecutionAuthority Authority =
+        CoreExecutionAuthority.Trusted(nameof(CoreServiceJobHandler));
 
-    public CoreServiceJobHandler(ICoreExecutionRouter router)
+    private readonly ICoreExecutionRouter _router;
+    private readonly ICoreJobCompletionService _completion;
+
+    public CoreServiceJobHandler(
+        ICoreExecutionRouter router,
+        ICoreJobCompletionService completion)
     {
         _router = router;
+        _completion = completion;
     }
 
     public string JobType => RenderJobTypes.CoreService;
@@ -44,7 +51,7 @@ public sealed class CoreServiceJobHandler : IRenderJobHandler
                 $"Service '{envelope.ServiceCode}' is registered in the catalog but has no execution adapter.");
         }
 
-        await _router.DispatchAsync(new CoreJobDispatchContext(
+        var result = await _router.DispatchAsync(new CoreJobDispatchContext(
             job.Id,
             envelope.ServiceId,
             envelope.ServiceCode,
@@ -57,7 +64,38 @@ public sealed class CoreServiceJobHandler : IRenderJobHandler
             envelope.Payload,
             envelope.Prompt,
             envelope.References), ct);
+
+        switch (result.Disposition)
+        {
+            case CoreExecutionDisposition.Completed:
+                await _completion.CompleteAsync(Authority, new CoreJobCompleteRequest(
+                    job.Id,
+                    result.Output ?? JsonSerializer.SerializeToElement(new { }, new JsonSerializerOptions(JsonSerializerDefaults.Web)),
+                    result.Message), ct);
+                throw new RenderJobDeferredException("Core job completed by Core completion service.");
+
+            case CoreExecutionDisposition.Deferred:
+                await _completion.MarkDeferredAsync(
+                    Authority,
+                    job.Id,
+                    new CoreExecutionCorrelation(
+                        Required(result.ExecutionSystem, nameof(result.ExecutionSystem)),
+                        Required(result.ExternalExecutionId, nameof(result.ExternalExecutionId)),
+                        result.Adapter,
+                        result.Metadata),
+                    result.Message,
+                    ct);
+                throw new RenderJobDeferredException(result.Message ?? "Core job deferred to external execution runtime.");
+
+            default:
+                throw new InvalidOperationException($"Unsupported Core execution disposition '{result.Disposition}'.");
+        }
     }
+
+    private static string Required(string? value, string name)
+        => string.IsNullOrWhiteSpace(value)
+            ? throw new InvalidOperationException($"Core execution result is missing {name}.")
+            : value.Trim();
 }
 
 public sealed class CoreServiceJobEnvelope

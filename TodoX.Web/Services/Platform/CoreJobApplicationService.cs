@@ -377,14 +377,18 @@ public sealed class CoreJobApplicationService : ICoreJobApplicationService
             throw new InvalidOperationException("Only failed Core jobs can be retried.");
         }
 
-        var release = await _billing.RefundOrReleaseAsync(
-            source.Id,
-            "Release or refund source job before retry.",
-            markCancelled: false,
-            ct);
-        if (!release.Success)
+        var billingState = await _billing.GetBillingStateAsync(source.Id, ct);
+        if (ShouldReleaseSourceOnBusinessRetry(billingState?.PointStatus))
         {
-            throw new InvalidOperationException(release.ErrorMessage ?? "Source job billing could not be released.");
+            var release = await _billing.RefundOrReleaseAsync(
+                source.Id,
+                "Release source pending reservation before business retry.",
+                markCancelled: false,
+                ct);
+            if (!release.Success)
+            {
+                throw new InvalidOperationException(release.ErrorMessage ?? "Source job billing could not be released.");
+            }
         }
 
         var envelope = DeserializeEnvelope(source.InputJson);
@@ -510,8 +514,48 @@ public sealed class CoreJobApplicationService : ICoreJobApplicationService
             row.ErrorMessage,
             row.CreatedAt,
             row.UpdatedAt,
-            row.CompletedAt);
+            row.CompletedAt,
+            ParseExecutionCorrelation(row.OptionsJson));
     }
+
+    private static CoreExecutionCorrelation? ParseExecutionCorrelation(string optionsJson)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(string.IsNullOrWhiteSpace(optionsJson) ? "{}" : optionsJson);
+            if (!document.RootElement.TryGetProperty("execution", out var execution)
+                || execution.ValueKind != JsonValueKind.Object)
+            {
+                return null;
+            }
+
+            var system = ReadJsonString(execution, "system");
+            var externalId = ReadJsonString(execution, "external_execution_id");
+            if (string.IsNullOrWhiteSpace(system) || string.IsNullOrWhiteSpace(externalId))
+            {
+                return null;
+            }
+
+            JsonElement? metadata = execution.TryGetProperty("metadata", out var metadataValue)
+                                    && metadataValue.ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined)
+                ? metadataValue.Clone()
+                : null;
+            return new CoreExecutionCorrelation(
+                system,
+                externalId,
+                ReadJsonString(execution, "adapter"),
+                metadata);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static string? ReadJsonString(JsonElement element, string name)
+        => element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : null;
 
     internal static bool RequiresIdempotencyKey(string channel)
         => channel is CoreChannelCodes.Zalo
@@ -521,6 +565,9 @@ public sealed class CoreJobApplicationService : ICoreJobApplicationService
 
     internal static bool CanCancelStatus(string status)
         => status is not (RenderJobStatuses.Completed or RenderJobStatuses.Failed or RenderJobStatuses.Cancelled);
+
+    internal static bool ShouldReleaseSourceOnBusinessRetry(string? pointStatus)
+        => pointStatus == RenderPointStatuses.Pending;
 
     internal static string BuildIdempotencyLockName(
         CoreRequestContext context,
@@ -604,6 +651,7 @@ public sealed class CoreJobApplicationService : ICoreJobApplicationService
                r.input_json::text AS InputJson,
                r.prompt_json::text AS PromptJson,
                r.reference_json::text AS ReferenceJson,
+               COALESCE(r.options, '{}'::jsonb)::text AS OptionsJson,
                r.output_json::text AS OutputJson,
                r.error_code AS ErrorCode,
                r.error_message AS ErrorMessage,
@@ -635,6 +683,7 @@ public sealed class CoreJobApplicationService : ICoreJobApplicationService
         public string InputJson { get; init; } = "{}";
         public string PromptJson { get; init; } = "{}";
         public string ReferenceJson { get; init; } = "[]";
+        public string OptionsJson { get; init; } = "{}";
         public string OutputJson { get; init; } = "[]";
         public string? ErrorCode { get; init; }
         public string? ErrorMessage { get; init; }

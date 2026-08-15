@@ -15,6 +15,7 @@ public static class CorePlatformServiceCollectionExtensions
         services.AddScoped<ICoreServiceCatalogService, CoreServiceCatalogService>();
         services.AddScoped<ICoreBillingService, CoreBillingService>();
         services.AddScoped<ICoreJobApplicationService, CoreJobApplicationService>();
+        services.AddScoped<ICoreJobCompletionService, CoreJobCompletionService>();
         services.AddScoped<ICoreExecutionRouter, CoreExecutionRouter>();
         services.AddScoped<ICoreApiCallerResolver, CoreApiCallerResolver>();
         services.AddScoped<IRenderJobHandler, CoreServiceJobHandler>();
