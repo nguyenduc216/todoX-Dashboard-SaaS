@@ -79,6 +79,11 @@ public sealed class RenderJobDto
 
 public static class RenderJobTypes
 {
+    /// <summary>
+    /// Canonical platform job type. The service identity lives in the core envelope/service_id and
+    /// execution is delegated through ICoreJobExecutionAdapter.
+    /// </summary>
+    public const string CoreService = "core_service";
     public const string Timelapse = "timelapse";
     public const string RenderVideoBatch = "render_video_job";
     public const string RenderSceneVideo = "render_scene_video";
