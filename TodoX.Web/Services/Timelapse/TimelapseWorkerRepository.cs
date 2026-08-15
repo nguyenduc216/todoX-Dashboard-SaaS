@@ -16,6 +16,8 @@ public interface ITimelapseWorkerRepository
     Task SaveImageCompletedAsync(Guid stageId, int attempt, Guid mediaId, string objectKey, string publicUrl, string responseJson, CancellationToken ct = default);
     Task SaveVideoCompletedAsync(Guid clipId, int attempt, Guid mediaId, string objectKey, string publicUrl, string responseJson, CancellationToken ct = default);
     Task SaveFinalizerCompletedAsync(Guid finalOutputId, Guid jobId, Guid mediaId, string objectKey, string publicUrl, string responseJson, CancellationToken ct = default);
+    Task SaveImageSubmitFailedAsync(Guid stageId, int attempt, string providerCode, string model, string? errorCode, string errorMessage, string requestJson, string responseJson, CancellationToken ct = default);
+    Task SaveVideoSubmitFailedAsync(Guid clipId, int attempt, string providerCode, string model, string? errorCode, string errorMessage, string requestJson, string responseJson, CancellationToken ct = default);
     Task SaveImageFailedAsync(Guid stageId, int attempt, string? errorCode, string errorMessage, string responseJson, CancellationToken ct = default);
     Task SaveVideoFailedAsync(Guid clipId, int attempt, string? errorCode, string errorMessage, string responseJson, CancellationToken ct = default);
     Task SaveFinalizerFailedAsync(Guid finalOutputId, Guid jobId, string? errorCode, string errorMessage, string responseJson, CancellationToken ct = default);
@@ -281,10 +283,16 @@ public sealed class TimelapseWorkerRepository : ITimelapseWorkerRepository
     }
 
     public Task SaveImageFailedAsync(Guid stageId, int attempt, string? errorCode, string errorMessage, string responseJson, CancellationToken ct = default)
-        => UpdateOperationFailedAsync("timelapse.timelapse_image_stages", "timelapse.timelapse_image_stage_versions", "image_stage_id", stageId, attempt, errorCode, errorMessage, responseJson, ct);
+        => UpdateOperationFailedAsync("timelapse.timelapse_image_stages", "timelapse.timelapse_image_stage_versions", "image_stage_id", stageId, attempt, errorCode, errorMessage, responseJson, null, null, null, false, ct);
 
     public Task SaveVideoFailedAsync(Guid clipId, int attempt, string? errorCode, string errorMessage, string responseJson, CancellationToken ct = default)
-        => UpdateOperationFailedAsync("timelapse.timelapse_video_clips", "timelapse.timelapse_video_clip_versions", "video_clip_id", clipId, attempt, errorCode, errorMessage, responseJson, ct);
+        => UpdateOperationFailedAsync("timelapse.timelapse_video_clips", "timelapse.timelapse_video_clip_versions", "video_clip_id", clipId, attempt, errorCode, errorMessage, responseJson, null, null, null, false, ct);
+
+    public Task SaveImageSubmitFailedAsync(Guid stageId, int attempt, string providerCode, string model, string? errorCode, string errorMessage, string requestJson, string responseJson, CancellationToken ct = default)
+        => UpdateOperationFailedAsync("timelapse.timelapse_image_stages", "timelapse.timelapse_image_stage_versions", "image_stage_id", stageId, attempt, errorCode, errorMessage, responseJson, requestJson, providerCode, model, true, ct);
+
+    public Task SaveVideoSubmitFailedAsync(Guid clipId, int attempt, string providerCode, string model, string? errorCode, string errorMessage, string requestJson, string responseJson, CancellationToken ct = default)
+        => UpdateOperationFailedAsync("timelapse.timelapse_video_clips", "timelapse.timelapse_video_clip_versions", "video_clip_id", clipId, attempt, errorCode, errorMessage, responseJson, requestJson, providerCode, model, true, ct);
 
     public async Task SaveFinalizerFailedAsync(Guid finalOutputId, Guid jobId, string? errorCode, string errorMessage, string responseJson, CancellationToken ct = default)
     {
@@ -417,7 +425,20 @@ public sealed class TimelapseWorkerRepository : ITimelapseWorkerRepository
             new { id, attempt, mediaId, objectKey, publicUrl, responseJson });
     }
 
-    private async Task UpdateOperationFailedAsync(string table, string versionTable, string versionFk, Guid id, int attempt, string? errorCode, string errorMessage, string responseJson, CancellationToken ct)
+    private async Task UpdateOperationFailedAsync(
+        string table,
+        string versionTable,
+        string versionFk,
+        Guid id,
+        int attempt,
+        string? errorCode,
+        string errorMessage,
+        string responseJson,
+        string? requestJson,
+        string? providerCode,
+        string? model,
+        bool clearProviderTaskId,
+        CancellationToken ct)
     {
         await _tenant.EnsureLoadedAsync(ct);
         using var conn = await _factory.OpenAsync(ct);
@@ -426,6 +447,9 @@ public sealed class TimelapseWorkerRepository : ITimelapseWorkerRepository
             $"""
             UPDATE {table}
                SET status='FAILED',
+                   provider_code=COALESCE(@providerCode, provider_code),
+                   provider_model=COALESCE(@model, provider_model),
+                   provider_task_id=CASE WHEN @clearProviderTaskId THEN NULL ELSE provider_task_id END,
                    error_code=@errorCode,
                    error_message=@errorMessage,
                    updated_at=now()
@@ -434,6 +458,13 @@ public sealed class TimelapseWorkerRepository : ITimelapseWorkerRepository
 
             UPDATE {versionTable}
                SET status='FAILED',
+                   provider_code=COALESCE(@providerCode, provider_code),
+                   provider_model=COALESCE(@model, provider_model),
+                   provider_task_id=CASE WHEN @clearProviderTaskId THEN NULL ELSE provider_task_id END,
+                   request_json=CASE
+                       WHEN @requestJson IS NULL THEN request_json
+                       ELSE CAST(@requestJson AS jsonb)
+                   END,
                    error_code=@errorCode,
                    error_message=@errorMessage,
                    response_json=CAST(@responseJson AS jsonb),
@@ -442,7 +473,19 @@ public sealed class TimelapseWorkerRepository : ITimelapseWorkerRepository
                AND attempt=@attempt
                AND status='RENDERING';
             """,
-            new { id, attempt, errorCode, errorMessage = Clip(errorMessage), responseJson }, tx);
+            new
+            {
+                id,
+                attempt,
+                providerCode,
+                model,
+                clearProviderTaskId,
+                requestJson,
+                errorCode,
+                errorMessage = Clip(errorMessage),
+                responseJson
+            },
+            tx);
 
         var jobId = await conn.QuerySingleOrDefaultAsync<Guid?>($"SELECT job_id FROM {table} WHERE id=@id;", new { id }, tx);
         if (jobId is not null)

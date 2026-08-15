@@ -151,6 +151,47 @@ public class TimelapsePhase2CTests
     }
 
     [Fact]
+    public void FailedSubmit_PersistsSanitizedRequestAndResponseWithoutProviderTaskId()
+    {
+        var runtime = ReadSource("TodoX.Web", "Services", "Timelapse", "TimelapseProviderRuntime.cs");
+        var repository = ReadSource("TodoX.Web", "Services", "Timelapse", "TimelapseWorkerRepository.cs");
+
+        Assert.Contains("catch (Ai79TaskSubmitException ex)", runtime, StringComparison.Ordinal);
+        Assert.Contains("SaveImageSubmitFailedAsync(", runtime, StringComparison.Ordinal);
+        Assert.Contains("SaveVideoSubmitFailedAsync(", runtime, StringComparison.Ordinal);
+        Assert.Contains("request.SanitizedJson", runtime, StringComparison.Ordinal);
+        Assert.Contains("ex.SanitizedResponseJson", runtime, StringComparison.Ordinal);
+        Assert.Contains("TryAddSubmitFailureEventAsync", runtime, StringComparison.Ordinal);
+
+        Assert.Contains("provider_task_id=CASE WHEN @clearProviderTaskId THEN NULL ELSE provider_task_id END", repository, StringComparison.Ordinal);
+        Assert.Contains("request_json=CASE", repository, StringComparison.Ordinal);
+        Assert.Contains("ELSE CAST(@requestJson AS jsonb)", repository, StringComparison.Ordinal);
+        Assert.Contains("response_json=CAST(@responseJson AS jsonb)", repository, StringComparison.Ordinal);
+        Assert.Contains("SaveImageSubmitFailedAsync", repository, StringComparison.Ordinal);
+        Assert.Contains("SaveVideoSubmitFailedAsync", repository, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ImageSubmitDiagnostics_ContainVerifiedSeedreamRequestContractWithoutSecret()
+    {
+        var runtime = ReadSource("TodoX.Web", "Services", "Timelapse", "TimelapseProviderRuntime.cs");
+        var options = ReadSource("TodoX.Web", "Services", "Timelapse", "TimelapseProviderWorkerOptions.cs");
+
+        Assert.Contains("ImageModelName { get; set; } = \"seedream_5_0\"", options, StringComparison.Ordinal);
+        Assert.Contains("DefaultImageReferenceField { get; set; } = \"image\"", options, StringComparison.Ordinal);
+        Assert.Contains("provider.ProviderCode", runtime, StringComparison.Ordinal);
+        Assert.Contains("provider.Model", runtime, StringComparison.Ordinal);
+        Assert.Contains("provider.BaseUrl", runtime, StringComparison.Ordinal);
+        Assert.Contains("endpointPath = provider.SubmitPath", runtime, StringComparison.Ordinal);
+        Assert.Contains("provider.Domain", runtime, StringComparison.Ordinal);
+        Assert.Contains("prompt,", runtime, StringComparison.Ordinal);
+        Assert.Contains("images,", runtime, StringComparison.Ordinal);
+        Assert.Contains("firstImageField,", runtime, StringComparison.Ordinal);
+        Assert.Contains("options", runtime, StringComparison.Ordinal);
+        Assert.DoesNotContain("provider.Credential.Secret", runtime[runtime.IndexOf("var sanitized = JsonSerializer.Serialize", StringComparison.Ordinal)..], StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Runtime_PersistsProviderOutputsToTodoXMedia()
     {
         var source = ReadSource("TodoX.Web", "Services", "Timelapse", "TimelapseProviderRuntime.cs");

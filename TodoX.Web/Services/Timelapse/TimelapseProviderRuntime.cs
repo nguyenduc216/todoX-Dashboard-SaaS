@@ -206,7 +206,42 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
             ["ratio"] = item.Snapshot.Ratio
         }, _options.DefaultImageReferenceField, null);
 
-        var submit = await _taskClient.SubmitAsync(request.Raw, ct);
+        Ai79TaskSubmitResult submit;
+        try
+        {
+            submit = await _taskClient.SubmitAsync(request.Raw, ct);
+        }
+        catch (Ai79TaskSubmitException ex)
+        {
+            await _repo.SaveImageSubmitFailedAsync(
+                item.Id,
+                item.Attempt,
+                provider.ProviderCode,
+                provider.Model,
+                ex.ErrorCode ?? "submit_failed",
+                ex.ErrorMessage,
+                request.SanitizedJson,
+                ex.SanitizedResponseJson,
+                ct);
+            _logger.LogError(
+                ex,
+                "TIMELAPSE_IMAGE_SUBMIT_FAILED jobId={JobId} progress={Progress} attempt={Attempt} provider={ProviderCode} model={Model} httpStatus={HttpStatus} errorCode={ErrorCode}",
+                item.JobId,
+                item.ProgressPercent,
+                item.Attempt,
+                provider.ProviderCode,
+                provider.Model,
+                ex.HttpStatusCode is null ? null : (int)ex.HttpStatusCode,
+                ex.ErrorCode);
+            await TryAddSubmitFailureEventAsync(
+                item.JobId,
+                "TIMELAPSE_IMAGE_FAILED",
+                "Timelapse image submit failed.",
+                new { item.ProgressPercent, item.Attempt, provider.ProviderCode, model = provider.Model, errorCode = ex.ErrorCode, errorMessage = ex.ErrorMessage },
+                ct);
+            return;
+        }
+
         await _repo.SaveImageSubmittedAsync(item.Id, item.Attempt, provider.ProviderCode, provider.Model, submit.TaskId, request.SanitizedJson, submit.SanitizedResponseJson, ct);
         _logger.LogInformation("TIMELAPSE_IMAGE_SUBMIT jobId={JobId} progress={Progress} attempt={Attempt} provider={ProviderCode} model={Model} taskId={TaskId}",
             item.JobId, item.ProgressPercent, item.Attempt, provider.ProviderCode, provider.Model, submit.TaskId);
@@ -238,7 +273,42 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
             ["end_progress_percent"] = item.EndProgressPercent.ToString()
         }, _options.DefaultVideoStartImageField, _options.DefaultVideoEndImageField);
 
-        var submit = await _taskClient.SubmitAsync(request.Raw, ct);
+        Ai79TaskSubmitResult submit;
+        try
+        {
+            submit = await _taskClient.SubmitAsync(request.Raw, ct);
+        }
+        catch (Ai79TaskSubmitException ex)
+        {
+            await _repo.SaveVideoSubmitFailedAsync(
+                item.Id,
+                item.Attempt,
+                provider.ProviderCode,
+                provider.Model,
+                ex.ErrorCode ?? "submit_failed",
+                ex.ErrorMessage,
+                request.SanitizedJson,
+                ex.SanitizedResponseJson,
+                ct);
+            _logger.LogError(
+                ex,
+                "TIMELAPSE_VIDEO_SUBMIT_FAILED jobId={JobId} clip={ClipIndex} attempt={Attempt} provider={ProviderCode} model={Model} httpStatus={HttpStatus} errorCode={ErrorCode}",
+                item.JobId,
+                item.ClipIndex,
+                item.Attempt,
+                provider.ProviderCode,
+                provider.Model,
+                ex.HttpStatusCode is null ? null : (int)ex.HttpStatusCode,
+                ex.ErrorCode);
+            await TryAddSubmitFailureEventAsync(
+                item.JobId,
+                "TIMELAPSE_VIDEO_FAILED",
+                "Timelapse video submit failed.",
+                new { item.ClipIndex, item.Attempt, provider.ProviderCode, model = provider.Model, errorCode = ex.ErrorCode, errorMessage = ex.ErrorMessage },
+                ct);
+            return;
+        }
+
         await _repo.SaveVideoSubmittedAsync(item.Id, item.Attempt, provider.ProviderCode, provider.Model, submit.TaskId, request.SanitizedJson, submit.SanitizedResponseJson, ct);
         _logger.LogInformation("TIMELAPSE_VIDEO_SUBMIT jobId={JobId} clip={ClipIndex} attempt={Attempt} provider={ProviderCode} model={Model} taskId={TaskId}",
             item.JobId, item.ClipIndex, item.Attempt, provider.ProviderCode, provider.Model, submit.TaskId);
@@ -416,6 +486,18 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
         await _repo.SaveVideoFailedAsync(item.Id, item.Attempt, errorCode, errorMessage, responseJson, ct);
         await _renderJobs.AddEventAsync(item.JobId, "TIMELAPSE_VIDEO_FAILED", "Timelapse video task failed.",
             new { item.ClipIndex, item.Attempt, taskId = item.ProviderTaskId, errorCode, errorMessage }, "error", ct);
+    }
+
+    private async Task TryAddSubmitFailureEventAsync(Guid jobId, string eventType, string message, object metadata, CancellationToken ct)
+    {
+        try
+        {
+            await _renderJobs.AddEventAsync(jobId, eventType, message, metadata, "error", ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "TIMELAPSE_SUBMIT_FAILURE_EVENT_WRITE_FAILED jobId={JobId} eventType={EventType}", jobId, eventType);
+        }
     }
 
     private static string BuildObjectKey(Guid jobId, string fileName)

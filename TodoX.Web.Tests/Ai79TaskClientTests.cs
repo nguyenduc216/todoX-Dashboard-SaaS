@@ -104,10 +104,10 @@ public sealed class Ai79TaskClientTests
     [Fact]
     public async Task Submit_DoesNotTreatUnrelatedIdAsTaskId()
     {
-        var handler = new RecordingJsonHandler("""{"data":{"id":"model-row-1","status":"ok"}}""");
+        var handler = new RecordingJsonHandler("""{"data":{"id":"model-row-1","status":"ok","access_token":"secret-token"}}""");
         var client = new Ai79TaskClient(new HttpClient(handler));
 
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => client.SubmitAsync(new Ai79TaskSubmitRequest(
+        var ex = await Assert.ThrowsAsync<Ai79TaskSubmitException>(() => client.SubmitAsync(new Ai79TaskSubmitRequest(
             "https://api.gommo.net/ai",
             "/generateImage",
             "secret-token",
@@ -118,7 +118,38 @@ public sealed class Ai79TaskClientTests
             new Dictionary<string, string?>(),
             "image")));
 
-        Assert.Contains("missing task_id", ex.Message, StringComparison.Ordinal);
+        Assert.Equal("missing_task_id", ex.ErrorCode);
+        Assert.Equal(HttpStatusCode.OK, ex.HttpStatusCode);
+        Assert.Contains("missing async task identifier", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("model-row-1", ex.SanitizedResponseJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("secret-token", ex.SanitizedResponseJson, StringComparison.Ordinal);
+        Assert.Contains("***", ex.SanitizedResponseJson, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Submit_Http200ProviderErrorSurfacesSafeMessageAndRetainsResponse()
+    {
+        var handler = new RecordingJsonHandler("""
+            {"success":false,"error":{"code":"invalid_model","message":"Model is unavailable"},"access_token":"secret-token"}
+            """);
+        var client = new Ai79TaskClient(new HttpClient(handler));
+
+        var ex = await Assert.ThrowsAsync<Ai79TaskSubmitException>(() => client.SubmitAsync(new Ai79TaskSubmitRequest(
+            "https://api.gommo.net/ai",
+            "/generateImage",
+            "secret-token",
+            "79ai.net",
+            "seedream_5_0",
+            "prompt",
+            ["https://cdn.example/source.png"],
+            new Dictionary<string, string?> { ["ratio"] = "16:9" },
+            "image")));
+
+        Assert.Equal("invalid_model", ex.ErrorCode);
+        Assert.Equal(HttpStatusCode.OK, ex.HttpStatusCode);
+        Assert.Equal("79AI image submit failed: Model is unavailable", ex.ErrorMessage);
+        Assert.Contains("invalid_model", ex.SanitizedResponseJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("secret-token", ex.SanitizedResponseJson, StringComparison.Ordinal);
     }
 
     private static async Task<Ai79TaskStatusResult> PollAsync(string path, string json)

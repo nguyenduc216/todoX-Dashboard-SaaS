@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
 
@@ -29,6 +30,28 @@ public sealed record Ai79TaskStatusRequest(
     string TaskId);
 
 public sealed record Ai79TaskSubmitResult(string TaskId, string SanitizedResponseJson);
+
+public sealed class Ai79TaskSubmitException : InvalidOperationException
+{
+    public Ai79TaskSubmitException(
+        string errorMessage,
+        string sanitizedResponseJson,
+        HttpStatusCode? httpStatusCode = null,
+        string? errorCode = null,
+        Exception? innerException = null)
+        : base(errorMessage, innerException)
+    {
+        ErrorMessage = errorMessage;
+        SanitizedResponseJson = sanitizedResponseJson;
+        HttpStatusCode = httpStatusCode;
+        ErrorCode = errorCode;
+    }
+
+    public string SanitizedResponseJson { get; }
+    public HttpStatusCode? HttpStatusCode { get; }
+    public string? ErrorCode { get; }
+    public string ErrorMessage { get; }
+}
 
 public sealed record Ai79TaskStatusResult(
     string NormalizedStatus,
@@ -107,16 +130,65 @@ public sealed class Ai79TaskClient : IAi79TaskClient
 
         using var body = new FormUrlEncodedContent(form);
         using var response = await _httpClient.PostAsync(BuildUri(request.BaseUrl, request.EndpointPath), body, ct);
-        var json = await ReadJsonAsync(response, ct);
-        using var document = JsonDocument.Parse(json);
-        var sanitized = SanitizeSecretJson(document.RootElement, request.AccessToken);
-        var taskId = FindTaskId(document.RootElement);
-        if (string.IsNullOrWhiteSpace(taskId))
+        var json = await response.Content.ReadAsStringAsync(ct);
+        if (string.IsNullOrWhiteSpace(json))
         {
-            throw new InvalidOperationException("79AI submit response missing task_id.");
+            throw new Ai79TaskSubmitException(
+                "79AI submit response was empty.",
+                JsonSerializer.Serialize(string.Empty, JsonOptions),
+                response.StatusCode,
+                response.IsSuccessStatusCode ? "empty_response" : $"http_{(int)response.StatusCode}");
         }
 
-        return new Ai79TaskSubmitResult(taskId!, sanitized);
+        JsonDocument document;
+        try
+        {
+            document = JsonDocument.Parse(json);
+        }
+        catch (JsonException ex)
+        {
+            throw new Ai79TaskSubmitException(
+                "79AI submit response was not valid JSON.",
+                JsonSerializer.Serialize(SanitizeText(json, request.AccessToken), JsonOptions),
+                response.StatusCode,
+                response.IsSuccessStatusCode ? "invalid_json" : $"http_{(int)response.StatusCode}",
+                ex);
+        }
+
+        using (document)
+        {
+            var sanitized = SanitizeSecretJson(document.RootElement, request.AccessToken);
+            var taskId = FindTaskId(document.RootElement);
+            var providerError = FindSubmitError(document.RootElement, string.IsNullOrWhiteSpace(taskId), request.AccessToken);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorCode = providerError?.ErrorCode ?? $"http_{(int)response.StatusCode}";
+                var errorMessage = providerError?.ErrorMessage
+                    ?? $"79AI submit returned HTTP {(int)response.StatusCode}.";
+                throw new Ai79TaskSubmitException(errorMessage, sanitized, response.StatusCode, errorCode);
+            }
+
+            if (providerError is not null)
+            {
+                throw new Ai79TaskSubmitException(
+                    $"79AI {ResolveOperationName(request.EndpointPath)} submit failed: {providerError.ErrorMessage}",
+                    sanitized,
+                    response.StatusCode,
+                    providerError.ErrorCode ?? "provider_error");
+            }
+
+            if (string.IsNullOrWhiteSpace(taskId))
+            {
+                throw new Ai79TaskSubmitException(
+                    "79AI submit response missing async task identifier.",
+                    sanitized,
+                    response.StatusCode,
+                    "missing_task_id");
+            }
+
+            return new Ai79TaskSubmitResult(taskId!, sanitized);
+        }
     }
 
     public async Task<Ai79TaskStatusResult> GetStatusAsync(Ai79TaskStatusRequest request, CancellationToken ct = default)
@@ -324,6 +396,68 @@ public sealed class Ai79TaskClient : IAi79TaskClient
         return null;
     }
 
+    private static SubmitError? FindSubmitError(JsonElement element, bool taskIdMissing, string accessToken)
+    {
+        var errorCode = FindErrorValue(element, "error_code", "errorCode", "code");
+        var errorMessage = FindErrorValue(element, "error_message", "errorMessage", "message", "msg");
+        var scalarError = FindErrorValue(element, "error", "errors");
+        var status = FindStatus(element);
+        var success = FindString(element, "success");
+
+        var hasErrorPayload = HasNonEmptyNamedValue(element, "error", "errors");
+        var successIsFalse = string.Equals(success, "false", StringComparison.OrdinalIgnoreCase)
+                             || string.Equals(success, "0", StringComparison.OrdinalIgnoreCase);
+        var statusIsFailed = string.Equals(
+            Ai79TaskStatusNormalizer.Normalize(status),
+            Ai79TaskStatusNormalizer.Failed,
+            StringComparison.Ordinal);
+        var codeIsFailure = !string.IsNullOrWhiteSpace(errorCode)
+                            && !string.Equals(errorCode, "0", StringComparison.OrdinalIgnoreCase)
+                            && !string.Equals(errorCode, "200", StringComparison.OrdinalIgnoreCase)
+                            && !string.Equals(errorCode, "ok", StringComparison.OrdinalIgnoreCase)
+                            && !string.Equals(errorCode, "success", StringComparison.OrdinalIgnoreCase);
+        var messageOnlyFailure = taskIdMissing
+                                 && (!string.IsNullOrWhiteSpace(errorMessage) || !string.IsNullOrWhiteSpace(scalarError));
+
+        if (!hasErrorPayload && !successIsFalse && !statusIsFailed && !codeIsFailure && !messageOnlyFailure)
+        {
+            return null;
+        }
+
+        var message = FirstNonBlank(errorMessage, scalarError, errorCode, status, "Provider rejected the request.")!;
+        return new SubmitError(
+            errorCode,
+            SanitizeText(message, accessToken));
+    }
+
+    private static bool HasNonEmptyNamedValue(JsonElement element, params string[] names)
+    {
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var property in element.EnumerateObject())
+            {
+                if (names.Contains(property.Name, StringComparer.OrdinalIgnoreCase)
+                    && property.Value.ValueKind is not JsonValueKind.Null
+                    && property.Value.ValueKind is not JsonValueKind.Undefined
+                    && property.Value.GetRawText() is not "\"\"" and not "[]" and not "{}")
+                {
+                    return true;
+                }
+
+                if (HasNonEmptyNamedValue(property.Value, names))
+                {
+                    return true;
+                }
+            }
+        }
+        else if (element.ValueKind == JsonValueKind.Array)
+        {
+            return element.EnumerateArray().Any(item => HasNonEmptyNamedValue(item, names));
+        }
+
+        return false;
+    }
+
     private static string? ScalarString(JsonElement value)
         => value.ValueKind == JsonValueKind.String
             ? value.GetString()
@@ -403,4 +537,19 @@ public sealed class Ai79TaskClient : IAi79TaskClient
         => name.Contains("token", StringComparison.OrdinalIgnoreCase)
            || name.Contains("secret", StringComparison.OrdinalIgnoreCase)
            || name.Contains("key", StringComparison.OrdinalIgnoreCase);
+
+    private static string ResolveOperationName(string endpointPath)
+        => endpointPath.Contains("generateImage", StringComparison.OrdinalIgnoreCase) ? "image"
+            : endpointPath.Contains("video", StringComparison.OrdinalIgnoreCase) ? "video"
+            : "task";
+
+    private static string SanitizeText(string value, string accessToken)
+        => string.IsNullOrEmpty(accessToken)
+            ? value
+            : value.Replace(accessToken, "***", StringComparison.Ordinal);
+
+    private static string? FirstNonBlank(params string?[] values)
+        => values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim();
+
+    private sealed record SubmitError(string? ErrorCode, string ErrorMessage);
 }
