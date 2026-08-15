@@ -257,12 +257,14 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
         }
 
         var prompt = TimelapsePromptResolver.ResolveVideoPrompt(item.Snapshot, item.ClipIndex, item.StartProgressPercent, item.EndProgressPercent);
+        var resolution = ResolveVideoResolution(item.VideoMode);
         var request = BuildSubmitRequest(provider, prompt, [item.StartPublicUrl!, item.EndPublicUrl!], new Dictionary<string, string?>
         {
             ["type"] = "video",
             ["duration"] = item.DurationSeconds.ToString(),
             ["mode"] = item.VideoMode,
             ["ratio"] = NormalizeRatio(item.Ratio),
+            ["resolution"] = resolution,
             ["start_progress_percent"] = item.StartProgressPercent.ToString(),
             ["end_progress_percent"] = item.EndProgressPercent.ToString()
         }, Ai79TaskOperation.Video, _options.DefaultVideoStartImageField, _options.DefaultVideoEndImageField);
@@ -308,6 +310,18 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
             item.JobId, item.ClipIndex, item.Attempt, provider.ProviderCode, provider.Model, submit.TaskId);
         await _renderJobs.AddEventAsync(item.JobId, "TIMELAPSE_VIDEO_SUBMIT", "Timelapse video task submitted to 79AI.",
             new { item.ClipIndex, item.Attempt, provider.ProviderCode, model = provider.Model, taskId = submit.TaskId }, ct: ct);
+    }
+
+    private string ResolveVideoResolution(string? videoMode)
+    {
+        var configuredResolution = videoMode?.Trim().ToLowerInvariant() switch
+        {
+            TimelapseRequestRules.FastMode => _options.DefaultVideoResolution,
+            TimelapseRequestRules.ProfessionalMode => _options.DefaultVideoResolution,
+            _ => _options.DefaultVideoResolution
+        };
+
+        return TimelapseProviderWorkerOptions.NormalizeVideoResolution(configuredResolution);
     }
 
     private async Task<Ai79TaskStatusResult> PollAsync(

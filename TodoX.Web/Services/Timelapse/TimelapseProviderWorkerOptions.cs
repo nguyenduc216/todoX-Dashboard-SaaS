@@ -2,6 +2,14 @@ namespace TodoX.Web.Services.Timelapse;
 
 public sealed class TimelapseProviderWorkerOptions
 {
+    private static readonly HashSet<string> SupportedVideoResolutions =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            "480p",
+            "720p",
+            "1080p"
+        };
+
     public const string SectionName = "TimelapseProviderWorkers";
 
     public bool Enabled { get; set; } = true;
@@ -27,4 +35,17 @@ public sealed class TimelapseProviderWorkerOptions
     public string DefaultImageProjectId { get; set; } = "default";
     public string DefaultVideoStartImageField { get; set; } = "image";
     public string DefaultVideoEndImageField { get; set; } = "image_2";
+    public string DefaultVideoResolution { get; set; } = "720p";
+
+    internal static string NormalizeVideoResolution(string? resolution)
+    {
+        var normalized = resolution?.Trim().ToLowerInvariant();
+        if (normalized is null || !SupportedVideoResolutions.Contains(normalized))
+        {
+            throw new InvalidOperationException(
+                "Cấu hình độ phân giải video Timelapse không hợp lệ. Giá trị hỗ trợ: 480p, 720p, 1080p.");
+        }
+
+        return normalized;
+    }
 }

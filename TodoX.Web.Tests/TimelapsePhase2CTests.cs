@@ -25,6 +25,7 @@ public class TimelapsePhase2CTests
         Assert.Contains("\"ImageModelName\": \"seedream_5_0\"", ReadSource("TodoX.Web", "appsettings.json"), StringComparison.Ordinal);
         Assert.Contains("\"VideoCapabilityCode\": \"image_to_video\"", ReadSource("TodoX.Web", "appsettings.json"), StringComparison.Ordinal);
         Assert.Contains("\"VideoModelName\": \"seedance_20_pro\"", ReadSource("TodoX.Web", "appsettings.json"), StringComparison.Ordinal);
+        Assert.Contains("\"DefaultVideoResolution\": \"720p\"", ReadSource("TodoX.Web", "appsettings.json"), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -105,6 +106,76 @@ public class TimelapsePhase2CTests
             TodoX.Web.Models.Catalog.ServiceSellPriceQualityTiers.Premium,
             TodoX.Web.Models.Timelapse.TimelapseSellPricing.QualityTierForMode(TodoX.Web.Models.Timelapse.TimelapseRequestRules.ProfessionalMode));
         Assert.Equal(6, TodoX.Web.Models.Timelapse.TimelapseRequestRules.RuntimeClipDurationSeconds);
+    }
+
+    [Theory]
+    [InlineData("480p", "480p")]
+    [InlineData("720p", "720p")]
+    [InlineData("1080p", "1080p")]
+    [InlineData(" 720P ", "720p")]
+    public void VideoResolution_NormalizesSupportedProviderValues(string input, string expected)
+    {
+        Assert.Equal(expected, TimelapseProviderWorkerOptions.NormalizeVideoResolution(input));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("4k")]
+    [InlineData("hd")]
+    public void VideoResolution_RejectsInvalidConfigurationBeforeSubmit(string? input)
+    {
+        var error = Assert.Throws<InvalidOperationException>(
+            () => TimelapseProviderWorkerOptions.NormalizeVideoResolution(input));
+
+        Assert.Contains("480p, 720p, 1080p", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SeedanceVideoSubmit_IncludesValidatedResolutionAndSanitizedDiagnostics()
+    {
+        var runtime = ReadSource("TodoX.Web", "Services", "Timelapse", "TimelapseProviderRuntime.cs");
+        var options = ReadSource("TodoX.Web", "Services", "Timelapse", "TimelapseProviderWorkerOptions.cs");
+        var submitStart = runtime.IndexOf("private async Task SubmitVideoAsync", StringComparison.Ordinal);
+        var submitEnd = runtime.IndexOf("private string ResolveVideoResolution", submitStart, StringComparison.Ordinal);
+        var submit = runtime[submitStart..submitEnd];
+
+        Assert.Contains("DefaultVideoResolution { get; set; } = \"720p\"", options, StringComparison.Ordinal);
+        Assert.Contains("var resolution = ResolveVideoResolution(item.VideoMode);", submit, StringComparison.Ordinal);
+        Assert.Contains("[\"duration\"] = item.DurationSeconds.ToString()", submit, StringComparison.Ordinal);
+        Assert.Contains("[\"mode\"] = item.VideoMode", submit, StringComparison.Ordinal);
+        Assert.Contains("[\"ratio\"] = NormalizeRatio(item.Ratio)", submit, StringComparison.Ordinal);
+        Assert.Contains("[\"resolution\"] = resolution", submit, StringComparison.Ordinal);
+        Assert.Contains("[item.StartPublicUrl!, item.EndPublicUrl!]", submit, StringComparison.Ordinal);
+        Assert.Contains("_options.DefaultVideoStartImageField", submit, StringComparison.Ordinal);
+        Assert.Contains("_options.DefaultVideoEndImageField", submit, StringComparison.Ordinal);
+        Assert.Contains("request.SanitizedJson", submit, StringComparison.Ordinal);
+
+        var validationIndex = submit.IndexOf("ResolveVideoResolution(item.VideoMode)", StringComparison.Ordinal);
+        var providerSubmitIndex = submit.IndexOf("_taskClient.SubmitAsync", StringComparison.Ordinal);
+        Assert.True(validationIndex >= 0 && validationIndex < providerSubmitIndex);
+
+        var diagnosticsStart = runtime.IndexOf("private SubmitRequestEnvelope BuildSubmitRequest", StringComparison.Ordinal);
+        var diagnosticsEnd = runtime.IndexOf("private async Task<ImageReferencePayload>", diagnosticsStart, StringComparison.Ordinal);
+        var diagnostics = runtime[diagnosticsStart..diagnosticsEnd];
+        Assert.Contains("provider.ProviderCode", diagnostics, StringComparison.Ordinal);
+        Assert.Contains("provider.Model", diagnostics, StringComparison.Ordinal);
+        Assert.Contains("images,", diagnostics, StringComparison.Ordinal);
+        Assert.Contains("options", diagnostics, StringComparison.Ordinal);
+        Assert.DoesNotContain("provider.Credential.Secret", diagnostics[diagnostics.IndexOf("var sanitized", StringComparison.Ordinal)..], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SeedanceVideoRetry_ReentersResolutionAwareSubmitPath()
+    {
+        var workflow = ReadSource("TodoX.Web", "Services", "Timelapse", "TimelapseWorkflowService.cs");
+        var runtime = ReadSource("TodoX.Web", "Services", "Timelapse", "TimelapseProviderRuntime.cs");
+
+        Assert.Contains("RetryVideoAsync(Guid jobId", workflow, StringComparison.Ordinal);
+        Assert.Contains("StartReadyVideosAsync(conn, tx, jobId)", workflow, StringComparison.Ordinal);
+        Assert.Contains("if (string.IsNullOrWhiteSpace(item.ProviderTaskId))", runtime, StringComparison.Ordinal);
+        Assert.Contains("SubmitVideoAsync(item, ct)", runtime, StringComparison.Ordinal);
+        Assert.Contains("[\"resolution\"] = resolution", runtime, StringComparison.Ordinal);
     }
 
     [Fact]
