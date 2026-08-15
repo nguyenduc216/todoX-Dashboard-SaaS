@@ -6,12 +6,12 @@ namespace TodoX.Web.Tests;
 
 public sealed class Ai79TaskClientTests
 {
-    [Fact]
-    public async Task ImageSubmit_UsesVerifiedGenerateImageContractAndParsesNestedTaskId()
+    [Theory]
+    [InlineData("""{"imageInfo":{"id_base":"abc123"}}""")]
+    [InlineData("""{"data":{"imageInfo":{"id_base":"abc123"}}}""")]
+    public async Task ImageSubmit_UsesVerifiedGenerateImageContractAndParsesIdBase(string responseJson)
     {
-        var handler = new RecordingJsonHandler("""
-            {"code":0,"data":{"task_id":"img-task-001","status":"SUBMITTED","access_token":"secret-token"}}
-            """);
+        var handler = new RecordingJsonHandler(responseJson);
         var client = new Ai79TaskClient(new HttpClient(handler));
 
         var result = await client.SubmitAsync(new Ai79TaskSubmitRequest(
@@ -19,22 +19,39 @@ public sealed class Ai79TaskClientTests
             "/generateImage",
             "secret-token",
             "79ai.net",
-            "image-model",
+            "seedream_5_0",
             "construction progress",
-            ["https://cdn.example/source.png"],
-            new Dictionary<string, string?> { ["ratio"] = "9:16" },
-            "image"));
+            ["data:image/jpeg;base64,AQID"],
+            new Dictionary<string, string?>
+            {
+                ["action_type"] = "create",
+                ["editImage"] = "true",
+                ["project_id"] = "default",
+                ["subjects"] = "[]",
+                ["ratio"] = "9_16",
+                ["mode"] = "vip",
+                ["resolution"] = "2k"
+            },
+            Ai79TaskOperation.Image,
+            "base64Image"));
 
-        Assert.Equal("img-task-001", result.TaskId);
+        Assert.Equal("abc123", result.TaskId);
         Assert.DoesNotContain("secret-token", result.SanitizedResponseJson, StringComparison.Ordinal);
         var request = Assert.Single(handler.Requests);
         Assert.Equal("https://api.gommo.net/ai/generateImage", request.Uri);
         Assert.Contains("access_token=secret-token", request.Body, StringComparison.Ordinal);
         Assert.Contains("domain=79ai.net", request.Body, StringComparison.Ordinal);
-        Assert.Contains("model=image-model", request.Body, StringComparison.Ordinal);
+        Assert.Contains("model=seedream_5_0", request.Body, StringComparison.Ordinal);
         Assert.Contains("prompt=construction+progress", request.Body, StringComparison.Ordinal);
-        Assert.Contains("image=https%3A%2F%2Fcdn.example%2Fsource.png", request.Body, StringComparison.Ordinal);
-        Assert.Contains("ratio=9%3A16", request.Body, StringComparison.Ordinal);
+        Assert.Contains("action_type=create", request.Body, StringComparison.Ordinal);
+        Assert.Contains("editImage=true", request.Body, StringComparison.Ordinal);
+        Assert.Contains("base64Image=data%3Aimage%2Fjpeg%3Bbase64%2CAQID", request.Body, StringComparison.Ordinal);
+        Assert.Contains("project_id=default", request.Body, StringComparison.Ordinal);
+        Assert.Contains("subjects=%5B%5D", request.Body, StringComparison.Ordinal);
+        Assert.Contains("ratio=9_16", request.Body, StringComparison.Ordinal);
+        Assert.Contains("mode=vip", request.Body, StringComparison.Ordinal);
+        Assert.Contains("resolution=2k", request.Body, StringComparison.Ordinal);
+        Assert.DoesNotContain("image=https", request.Body, StringComparison.Ordinal);
         Assert.DoesNotContain("images=", request.Body, StringComparison.Ordinal);
     }
 
@@ -53,6 +70,7 @@ public sealed class Ai79TaskClientTests
             "transition prompt",
             ["https://cdn.example/start.png", "https://cdn.example/end.png"],
             new Dictionary<string, string?> { ["mode"] = "fast", ["duration"] = "6", ["ratio"] = "16:9" },
+            Ai79TaskOperation.Video,
             "image",
             "image_2"));
 
@@ -72,18 +90,28 @@ public sealed class Ai79TaskClientTests
     [InlineData("""{"task":{"request_id":"img-task-001","state":"processing"}}""")]
     public async Task ImagePoll_RunningFixtureNormalizesToRunning(string json)
     {
-        var result = await PollAsync("/image", json);
+        var result = await PollAsync("/image", json, Ai79TaskOperation.Image);
 
         Assert.Equal(Ai79TaskStatusNormalizer.Running, result.NormalizedStatus);
         Assert.Null(result.OutputUrl);
     }
 
     [Theory]
-    [InlineData("""{"data":{"task_id":"img-task-001","status":"SUCCESS","image_url":"https://cdn.example/out.png"}}""", "https://cdn.example/out.png")]
-    [InlineData("""{"result":{"task_id":"video-task-001","task_status":"COMPLETED","video_url":"https://cdn.example/out.mp4"}}""", "https://cdn.example/out.mp4")]
-    public async Task Poll_SuccessFixtureExtractsOutputUrl(string json, string expectedUrl)
+    [InlineData("""{"status":"SUCCESS","url":"https://cdn.example/out.png"}""")]
+    [InlineData("""{"imageInfo":{"status":"SUCCESS","url":"https://cdn.example/out.png"}}""")]
+    public async Task ImagePoll_SuccessFixturesUseIdBaseAndExtractOutput(string json)
     {
-        var result = await PollAsync("/video", json);
+        var result = await PollAsync("/image", json, Ai79TaskOperation.Image);
+
+        Assert.Equal(Ai79TaskStatusNormalizer.Success, result.NormalizedStatus);
+        Assert.Equal("https://cdn.example/out.png", result.OutputUrl);
+    }
+
+    [Theory]
+    [InlineData("""{"result":{"task_id":"video-task-001","task_status":"COMPLETED","video_url":"https://cdn.example/out.mp4"}}""", "https://cdn.example/out.mp4")]
+    public async Task VideoPoll_SuccessFixtureExtractsOutputUrl(string json, string expectedUrl)
+    {
+        var result = await PollAsync("/video", json, Ai79TaskOperation.Video);
 
         Assert.Equal(Ai79TaskStatusNormalizer.Success, result.NormalizedStatus);
         Assert.Equal(expectedUrl, result.OutputUrl);
@@ -94,7 +122,7 @@ public sealed class Ai79TaskClientTests
     [InlineData("""{"response":{"state":"ERROR","errorCode":"provider_error","errorMessage":"Provider failed"}}""", "provider_error", "Provider failed")]
     public async Task Poll_FailureFixtureExtractsSafeError(string json, string code, string message)
     {
-        var result = await PollAsync("/image", json);
+        var result = await PollAsync("/image", json, Ai79TaskOperation.Image);
 
         Assert.Equal(Ai79TaskStatusNormalizer.Failed, result.NormalizedStatus);
         Assert.Equal(code, result.ErrorCode);
@@ -116,6 +144,7 @@ public sealed class Ai79TaskClientTests
             "prompt",
             ["https://cdn.example/source.png"],
             new Dictionary<string, string?>(),
+            Ai79TaskOperation.Image,
             "image")));
 
         Assert.Equal("missing_task_id", ex.ErrorCode);
@@ -143,6 +172,7 @@ public sealed class Ai79TaskClientTests
             "prompt",
             ["https://cdn.example/source.png"],
             new Dictionary<string, string?> { ["ratio"] = "16:9" },
+            Ai79TaskOperation.Image,
             "image")));
 
         Assert.Equal("invalid_model", ex.ErrorCode);
@@ -152,7 +182,7 @@ public sealed class Ai79TaskClientTests
         Assert.DoesNotContain("secret-token", ex.SanitizedResponseJson, StringComparison.Ordinal);
     }
 
-    private static async Task<Ai79TaskStatusResult> PollAsync(string path, string json)
+    private static async Task<Ai79TaskStatusResult> PollAsync(string path, string json, Ai79TaskOperation operation)
     {
         var handler = new RecordingJsonHandler(json);
         var client = new Ai79TaskClient(new HttpClient(handler));
@@ -162,11 +192,22 @@ public sealed class Ai79TaskClientTests
             path,
             "secret-token",
             "79ai.net",
-            "task-001"));
+            "abc123",
+            operation));
 
         var request = Assert.Single(handler.Requests);
         Assert.Equal($"https://api.gommo.net/ai{path}", request.Uri);
-        Assert.Contains("task_id=task-001", request.Body, StringComparison.Ordinal);
+        if (operation == Ai79TaskOperation.Image)
+        {
+            Assert.Contains("id_base=abc123", request.Body, StringComparison.Ordinal);
+            Assert.DoesNotContain("task_id=abc123", request.Body, StringComparison.Ordinal);
+        }
+        else
+        {
+            Assert.Contains("task_id=abc123", request.Body, StringComparison.Ordinal);
+            Assert.DoesNotContain("id_base=abc123", request.Body, StringComparison.Ordinal);
+        }
+
         Assert.DoesNotContain("secret-token", result.SanitizedResponseJson, StringComparison.Ordinal);
         return result;
     }

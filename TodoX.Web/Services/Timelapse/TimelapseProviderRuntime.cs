@@ -196,15 +196,9 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
             isImage: true,
             "Chưa cấu hình model Seedream cho Timelapse.",
             ct: ct);
-        var dependencyUrl = item.DependencyPublicUrl ?? item.Snapshot.OriginalImage.PublicUrl
-            ?? throw new InvalidOperationException("Missing Timelapse dependency image URL.");
+        var reference = await ResolveImageReferenceAsync(item, ct);
         var prompt = TimelapsePromptResolver.ResolveImagePrompt(item.Snapshot, item.ProgressPercent, item.PromptSnapshotJson);
-        var request = BuildSubmitRequest(provider, prompt, [dependencyUrl], new Dictionary<string, string?>
-        {
-            ["type"] = "image",
-            ["progress_percent"] = item.ProgressPercent.ToString(),
-            ["ratio"] = item.Snapshot.Ratio
-        }, _options.DefaultImageReferenceField, null);
+        var request = BuildImageSubmitRequest(provider, prompt, reference, NormalizeImageRatio(item.Snapshot.Ratio));
 
         Ai79TaskSubmitResult submit;
         try
@@ -271,7 +265,7 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
             ["ratio"] = NormalizeRatio(item.Ratio),
             ["start_progress_percent"] = item.StartProgressPercent.ToString(),
             ["end_progress_percent"] = item.EndProgressPercent.ToString()
-        }, _options.DefaultVideoStartImageField, _options.DefaultVideoEndImageField);
+        }, Ai79TaskOperation.Video, _options.DefaultVideoStartImageField, _options.DefaultVideoEndImageField);
 
         Ai79TaskSubmitResult submit;
         try
@@ -344,7 +338,8 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
             provider.PollPath,
             provider.Credential.Secret,
             provider.Domain,
-            taskId),
+            taskId,
+            isImage ? Ai79TaskOperation.Image : Ai79TaskOperation.Video),
             ct);
     }
 
@@ -391,8 +386,86 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
             _options);
         var model = capability.ModelName
             ?? throw new InvalidOperationException(unavailableMessage);
+        var imageMode = isImage
+            ? FirstNonBlank(
+                ReadString(capability.ConfigJson, "mode"),
+                ReadString(capability.ConfigJson, "default_mode"),
+                ReadString(provider.ConfigJson, "image_mode"),
+                ReadString(provider.ConfigJson, "default_image_mode"),
+                _options.DefaultImageMode)
+            : null;
+        var imageResolution = isImage
+            ? FirstNonBlank(
+                ReadString(capability.ConfigJson, "resolution"),
+                ReadString(capability.ConfigJson, "default_resolution"),
+                ReadString(provider.ConfigJson, "image_resolution"),
+                ReadString(provider.ConfigJson, "default_image_resolution"),
+                _options.DefaultImageResolution)
+            : null;
 
-        return new Ai79RuntimeProvider(option.ProviderCode, model, baseUrl, submitPath, pollPath, domain, credential);
+        return new Ai79RuntimeProvider(
+            option.ProviderCode,
+            model,
+            baseUrl,
+            submitPath,
+            pollPath,
+            domain,
+            credential,
+            imageMode,
+            imageResolution);
+    }
+
+    private SubmitRequestEnvelope BuildImageSubmitRequest(
+        Ai79RuntimeProvider provider,
+        string prompt,
+        ImageReferencePayload reference,
+        string ratio)
+    {
+        var mode = provider.ImageMode
+            ?? throw new InvalidOperationException("Missing 79AI Timelapse image mode.");
+        var resolution = provider.ImageResolution
+            ?? throw new InvalidOperationException("Missing 79AI Timelapse image resolution.");
+        var options = new Dictionary<string, string?>
+        {
+            ["action_type"] = "create",
+            ["editImage"] = "true",
+            ["project_id"] = _options.DefaultImageProjectId,
+            ["subjects"] = "[]",
+            ["ratio"] = ratio,
+            ["resolution"] = resolution,
+            ["mode"] = mode
+        };
+        var raw = new Ai79TaskSubmitRequest(
+            provider.BaseUrl,
+            provider.SubmitPath,
+            provider.Credential.Secret,
+            provider.Domain,
+            provider.Model,
+            prompt,
+            [reference.DataUri],
+            options,
+            Ai79TaskOperation.Image,
+            _options.DefaultImageReferenceField);
+        var sanitized = JsonSerializer.Serialize(new
+        {
+            provider.ProviderCode,
+            provider.Model,
+            provider.BaseUrl,
+            endpointPath = provider.SubmitPath,
+            provider.Domain,
+            prompt,
+            action_type = "create",
+            editImage = true,
+            project_id = _options.DefaultImageProjectId,
+            subjects = Array.Empty<string>(),
+            ratio,
+            resolution,
+            mode,
+            base64ImagePresent = true,
+            base64ImageMime = reference.MimeType,
+            base64ImageBytes = reference.Bytes
+        }, JsonOptions);
+        return new SubmitRequestEnvelope(raw, sanitized);
     }
 
     private SubmitRequestEnvelope BuildSubmitRequest(
@@ -400,6 +473,7 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
         string prompt,
         IReadOnlyList<string> images,
         IReadOnlyDictionary<string, string?> options,
+        Ai79TaskOperation operation,
         string? firstImageField,
         string? secondImageField)
     {
@@ -412,6 +486,7 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
             prompt,
             images,
             options,
+            operation,
             firstImageField,
             secondImageField);
         var sanitized = JsonSerializer.Serialize(new
@@ -428,6 +503,49 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
             options
         }, JsonOptions);
         return new SubmitRequestEnvelope(raw, sanitized);
+    }
+
+    private async Task<ImageReferencePayload> ResolveImageReferenceAsync(TimelapseImageWorkItem item, CancellationToken ct)
+    {
+        MediaFileDto? media = null;
+        var mediaId = item.DependencyMediaId;
+        if (mediaId is null || mediaId == Guid.Empty)
+        {
+            mediaId = item.Snapshot.OriginalImage.MediaId;
+        }
+
+        if (mediaId is Guid id && id != Guid.Empty)
+        {
+            media = await _media.GetAsync(id, ct);
+        }
+
+        if (media is null && !string.IsNullOrWhiteSpace(item.DependencyObjectKey))
+        {
+            media = await _media.GetByObjectKeyAsync(item.DependencyObjectKey, ct);
+        }
+
+        var dependencyUrl = item.DependencyPublicUrl ?? item.Snapshot.OriginalImage.PublicUrl;
+        if (media is null && !string.IsNullOrWhiteSpace(dependencyUrl))
+        {
+            media = await _media.GetByPublicUrlAsync(dependencyUrl, ct);
+        }
+
+        if (media is null || !media.IsActive)
+        {
+            throw new InvalidOperationException("Missing Timelapse dependency image in TodoX media storage.");
+        }
+
+        var bytes = await _media.ReadBytesAsync(media.Id, ct);
+        if (bytes is null || bytes.Length == 0)
+        {
+            throw new InvalidOperationException("Timelapse dependency image content could not be read.");
+        }
+
+        var mimeType = NormalizeImageMime(media.MimeType ?? item.Snapshot.OriginalImage.MimeType);
+        return new ImageReferencePayload(
+            $"data:{mimeType};base64,{Convert.ToBase64String(bytes)}",
+            mimeType,
+            bytes.Length);
     }
 
     private static (string SubmitPath, string PollPath) Resolve79AiPaths(
@@ -506,6 +624,24 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
     private static string NormalizeRatio(string? ratio)
         => string.Equals(ratio, TimelapseRequestRules.PortraitRatio, StringComparison.OrdinalIgnoreCase) ? "9:16" : "16:9";
 
+    private static string NormalizeImageRatio(string? ratio)
+        => (ratio ?? string.Empty).Trim() switch
+        {
+            "16:9" or "16_9" => "16_9",
+            "9:16" or "9_16" => "9_16",
+            "1:1" or "1_1" => "1_1",
+            _ => throw new InvalidOperationException("Unsupported 79AI Timelapse image ratio.")
+        };
+
+    private static string NormalizeImageMime(string? mimeType)
+        => (mimeType ?? string.Empty).Trim().ToLowerInvariant() switch
+        {
+            "image/jpeg" or "image/jpg" => "image/jpeg",
+            "image/png" => "image/png",
+            "image/webp" => "image/webp",
+            _ => throw new InvalidOperationException("Timelapse dependency media is not a supported image.")
+        };
+
     private static string? FirstNonBlank(params string?[] values)
         => values.FirstOrDefault(x => !string.IsNullOrWhiteSpace(x))?.Trim();
 
@@ -533,6 +669,8 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
 
     private sealed record SubmitRequestEnvelope(Ai79TaskSubmitRequest Raw, string SanitizedJson);
 
+    private sealed record ImageReferencePayload(string DataUri, string MimeType, int Bytes);
+
     private sealed record Ai79RuntimeProvider(
         string ProviderCode,
         string Model,
@@ -540,7 +678,9 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
         string SubmitPath,
         string PollPath,
         string Domain,
-        ResolvedProviderCredential Credential);
+        ResolvedProviderCredential Credential,
+        string? ImageMode,
+        string? ImageResolution);
 }
 
 public static class TimelapsePromptResolver

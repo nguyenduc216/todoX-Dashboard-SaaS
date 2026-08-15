@@ -178,17 +178,29 @@ public class TimelapsePhase2CTests
         var options = ReadSource("TodoX.Web", "Services", "Timelapse", "TimelapseProviderWorkerOptions.cs");
 
         Assert.Contains("ImageModelName { get; set; } = \"seedream_5_0\"", options, StringComparison.Ordinal);
-        Assert.Contains("DefaultImageReferenceField { get; set; } = \"image\"", options, StringComparison.Ordinal);
+        Assert.Contains("DefaultImageReferenceField { get; set; } = \"base64Image\"", options, StringComparison.Ordinal);
+        Assert.Contains("DefaultImageMode { get; set; } = \"vip\"", options, StringComparison.Ordinal);
+        Assert.Contains("DefaultImageResolution { get; set; } = \"2k\"", options, StringComparison.Ordinal);
         Assert.Contains("provider.ProviderCode", runtime, StringComparison.Ordinal);
         Assert.Contains("provider.Model", runtime, StringComparison.Ordinal);
         Assert.Contains("provider.BaseUrl", runtime, StringComparison.Ordinal);
         Assert.Contains("endpointPath = provider.SubmitPath", runtime, StringComparison.Ordinal);
         Assert.Contains("provider.Domain", runtime, StringComparison.Ordinal);
         Assert.Contains("prompt,", runtime, StringComparison.Ordinal);
-        Assert.Contains("images,", runtime, StringComparison.Ordinal);
-        Assert.Contains("firstImageField,", runtime, StringComparison.Ordinal);
-        Assert.Contains("options", runtime, StringComparison.Ordinal);
-        Assert.DoesNotContain("provider.Credential.Secret", runtime[runtime.IndexOf("var sanitized = JsonSerializer.Serialize", StringComparison.Ordinal)..], StringComparison.Ordinal);
+        Assert.Contains("action_type = \"create\"", runtime, StringComparison.Ordinal);
+        Assert.Contains("editImage = true", runtime, StringComparison.Ordinal);
+        Assert.Contains("subjects = Array.Empty<string>()", runtime, StringComparison.Ordinal);
+        Assert.Contains("base64ImagePresent = true", runtime, StringComparison.Ordinal);
+        Assert.Contains("base64ImageMime = reference.MimeType", runtime, StringComparison.Ordinal);
+        Assert.Contains("base64ImageBytes = reference.Bytes", runtime, StringComparison.Ordinal);
+        Assert.Contains("ResolveImageReferenceAsync", runtime, StringComparison.Ordinal);
+        Assert.Contains("_media.ReadBytesAsync(media.Id", runtime, StringComparison.Ordinal);
+        var imageBuilderStart = runtime.IndexOf("private SubmitRequestEnvelope BuildImageSubmitRequest", StringComparison.Ordinal);
+        var imageBuilderEnd = runtime.IndexOf("private SubmitRequestEnvelope BuildSubmitRequest", imageBuilderStart, StringComparison.Ordinal);
+        var imageBuilder = runtime[imageBuilderStart..imageBuilderEnd];
+        var sanitizedStart = imageBuilder.IndexOf("var sanitized = JsonSerializer.Serialize", StringComparison.Ordinal);
+        Assert.DoesNotContain("progress_percent", imageBuilder, StringComparison.Ordinal);
+        Assert.DoesNotContain("provider.Credential.Secret", imageBuilder[sanitizedStart..], StringComparison.Ordinal);
     }
 
     [Fact]
@@ -229,6 +241,8 @@ public class TimelapsePhase2CTests
         Assert.Contains("DefaultVideoStartImageField", runtime, StringComparison.Ordinal);
         Assert.Contains("DefaultVideoEndImageField", runtime, StringComparison.Ordinal);
         Assert.Contains("request.Images.Count > 2", client, StringComparison.Ordinal);
+        Assert.Contains("request.Operation == Ai79TaskOperation.Image ? \"id_base\" : \"task_id\"", client, StringComparison.Ordinal);
+        Assert.Contains("FindImageIdBase", client, StringComparison.Ordinal);
         Assert.DoesNotContain("FindString(document.RootElement, \"task_id\", \"taskId\", \"request_id\", \"requestId\", \"id\")", client, StringComparison.Ordinal);
     }
 

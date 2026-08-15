@@ -21,7 +21,10 @@ public sealed class TimelapseProviderWorkerOptions
     public string DefaultImagePollPath { get; set; } = "/image";
     public string DefaultVideoSubmitPath { get; set; } = "/create-video";
     public string DefaultVideoPollPath { get; set; } = "/video";
-    public string DefaultImageReferenceField { get; set; } = "image";
+    public string DefaultImageReferenceField { get; set; } = "base64Image";
+    public string DefaultImageMode { get; set; } = "vip";
+    public string DefaultImageResolution { get; set; } = "2k";
+    public string DefaultImageProjectId { get; set; } = "default";
     public string DefaultVideoStartImageField { get; set; } = "image";
     public string DefaultVideoEndImageField { get; set; } = "image_2";
 }

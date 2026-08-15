@@ -10,6 +10,12 @@ public interface IAi79TaskClient
     Task<Ai79TaskStatusResult> GetStatusAsync(Ai79TaskStatusRequest request, CancellationToken ct = default);
 }
 
+public enum Ai79TaskOperation
+{
+    Image,
+    Video
+}
+
 public sealed record Ai79TaskSubmitRequest(
     string BaseUrl,
     string EndpointPath,
@@ -19,6 +25,7 @@ public sealed record Ai79TaskSubmitRequest(
     string Prompt,
     IReadOnlyList<string> Images,
     IReadOnlyDictionary<string, string?> Options,
+    Ai79TaskOperation Operation,
     string? FirstImageField = null,
     string? SecondImageField = null);
 
@@ -27,7 +34,8 @@ public sealed record Ai79TaskStatusRequest(
     string EndpointPath,
     string AccessToken,
     string Domain,
-    string TaskId);
+    string TaskId,
+    Ai79TaskOperation Operation);
 
 public sealed record Ai79TaskSubmitResult(string TaskId, string SanitizedResponseJson);
 
@@ -158,7 +166,7 @@ public sealed class Ai79TaskClient : IAi79TaskClient
         using (document)
         {
             var sanitized = SanitizeSecretJson(document.RootElement, request.AccessToken);
-            var taskId = FindTaskId(document.RootElement);
+            var taskId = FindTaskId(document.RootElement, request.Operation);
             var providerError = FindSubmitError(document.RootElement, string.IsNullOrWhiteSpace(taskId), request.AccessToken);
 
             if (!response.IsSuccessStatusCode)
@@ -199,7 +207,7 @@ public sealed class Ai79TaskClient : IAi79TaskClient
         {
             ["access_token"] = request.AccessToken,
             ["domain"] = request.Domain,
-            ["task_id"] = request.TaskId
+            [request.Operation == Ai79TaskOperation.Image ? "id_base" : "task_id"] = request.TaskId
         };
 
         using var body = new FormUrlEncodedContent(form);
@@ -278,7 +286,51 @@ public sealed class Ai79TaskClient : IAi79TaskClient
         return null;
     }
 
-    private static string? FindTaskId(JsonElement element)
+    private static string? FindTaskId(JsonElement element, Ai79TaskOperation operation)
+    {
+        if (operation == Ai79TaskOperation.Image)
+        {
+            var imageId = FindImageIdBase(element);
+            if (!string.IsNullOrWhiteSpace(imageId))
+            {
+                return imageId;
+            }
+        }
+
+        return FindTaskIdAlias(element);
+    }
+
+    private static string? FindImageIdBase(JsonElement element)
+    {
+        if (element.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        if (element.TryGetProperty("imageInfo", out var imageInfo)
+            && imageInfo.ValueKind == JsonValueKind.Object
+            && imageInfo.TryGetProperty("id_base", out var directId))
+        {
+            var value = ScalarString(directId);
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+        }
+
+        if (element.TryGetProperty("data", out var data)
+            && data.ValueKind == JsonValueKind.Object
+            && data.TryGetProperty("imageInfo", out var nestedImageInfo)
+            && nestedImageInfo.ValueKind == JsonValueKind.Object
+            && nestedImageInfo.TryGetProperty("id_base", out var nestedId))
+        {
+            return ScalarString(nestedId);
+        }
+
+        return null;
+    }
+
+    private static string? FindTaskIdAlias(JsonElement element)
     {
         if (element.ValueKind == JsonValueKind.Object)
         {
@@ -298,7 +350,7 @@ public sealed class Ai79TaskClient : IAi79TaskClient
             {
                 if (element.TryGetProperty(containerName, out var child))
                 {
-                    var found = FindTaskId(child);
+                    var found = FindTaskIdAlias(child);
                     if (!string.IsNullOrWhiteSpace(found))
                     {
                         return found;
@@ -310,7 +362,7 @@ public sealed class Ai79TaskClient : IAi79TaskClient
         {
             foreach (var item in element.EnumerateArray())
             {
-                var found = FindTaskId(item);
+                var found = FindTaskIdAlias(item);
                 if (!string.IsNullOrWhiteSpace(found))
                 {
                     return found;
@@ -337,7 +389,7 @@ public sealed class Ai79TaskClient : IAi79TaskClient
                 }
             }
 
-            foreach (var containerName in new[] { "task", "data", "result", "response" })
+            foreach (var containerName in new[] { "imageInfo", "task", "data", "result", "response" })
             {
                 if (element.TryGetProperty(containerName, out var child))
                 {
