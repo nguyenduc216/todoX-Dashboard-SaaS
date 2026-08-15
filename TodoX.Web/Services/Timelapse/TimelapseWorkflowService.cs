@@ -84,7 +84,7 @@ public sealed class TimelapseWorkflowService : ITimelapseWorkflowService
             {
                 snapshot.ProfileCode,
                 snapshot.SceneCount,
-                generatedImageCount = snapshot.SceneCount,
+                generatedImageCount = TimelapseStageGraphBuilder.Build(snapshot.SceneCount).GeneratedImageOrder.Count,
                 promptProfileFields = "to_jsonb(public.todox_timelapse_prompt_profiles)"
             }, ct: ct);
 

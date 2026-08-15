@@ -277,7 +277,7 @@ public sealed class ConstructionTimelapseCoreTests
         Assert.Equal(new[] { 0, 35, 70, 100 }, TimelapseRequestRules.GetProgressMapping(3));
         Assert.Equal(new[] { 0, 25, 50, 75, 100 }, TimelapseRequestRules.GetProgressMapping(4));
         Assert.Equal(new[] { 0, 20, 40, 60, 80, 100 }, TimelapseRequestRules.GetProgressMapping(5));
-        Assert.Equal(new[] { 0, 25, 40, 55, 70, 85, 100 }, TimelapseRequestRules.GetProgressMapping(6));
+        Assert.Equal(new[] { 0, 25, 40, 55, 70, 75, 90, 100 }, TimelapseRequestRules.GetProgressMapping(6));
     }
 
     private static CoreJobDispatchContext CreateContext(

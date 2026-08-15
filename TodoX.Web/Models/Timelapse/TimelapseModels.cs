@@ -311,7 +311,7 @@ public static class TimelapseRequestRules
         3 => [0, 35, 70, 100],
         4 => [0, 25, 50, 75, 100],
         5 => [0, 20, 40, 60, 80, 100],
-        6 => [0, 25, 40, 55, 70, 85, 100],
+        6 => [0, 25, 40, 55, 70, 75, 90, 100],
         _ => throw new ArgumentOutOfRangeException(nameof(sceneCount), "Scene count must be from 3 to 6.")
     };
 

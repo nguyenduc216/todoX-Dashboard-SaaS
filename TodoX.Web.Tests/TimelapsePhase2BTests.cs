@@ -9,16 +9,28 @@ public class TimelapsePhase2BTests
     [InlineData(3, new[] { 0, 35, 70, 100 }, new[] { 70, 35, 0 })]
     [InlineData(4, new[] { 0, 25, 50, 75, 100 }, new[] { 75, 50, 25, 0 })]
     [InlineData(5, new[] { 0, 20, 40, 60, 80, 100 }, new[] { 80, 60, 40, 20, 0 })]
-    [InlineData(6, new[] { 0, 25, 40, 55, 70, 85, 100 }, new[] { 85, 70, 55, 40, 25, 0 })]
+    [InlineData(6, new[] { 0, 25, 40, 55, 70, 75, 90, 100 }, new[] { 90, 75, 70, 55, 40, 25, 0 })]
     public void StageGraph_BuildsImagesVideosAndReverseGenerationOrder(int sceneCount, int[] images, int[] generatedOrder)
     {
         var graph = TimelapseStageGraphBuilder.Build(sceneCount);
 
         Assert.Equal(images, graph.ImageProgressions);
-        Assert.Equal(sceneCount, graph.VideoClips.Count);
+        Assert.Equal(images.Length - 1, graph.VideoClips.Count);
         Assert.Equal(generatedOrder, graph.GeneratedImageOrder);
         Assert.DoesNotContain(100, graph.GeneratedImageOrder);
         Assert.Equal(images.Zip(images.Skip(1), (start, end) => (start, end)), graph.VideoClips.Select(x => (x.StartProgressPercent, x.EndProgressPercent)));
+    }
+
+    [Fact]
+    public void SixScenePreset_UsesConstructionCheckpointDefinitionWithSevenClips()
+    {
+        var graph = TimelapseStageGraphBuilder.Build(6);
+
+        Assert.Equal(new[] { 0, 25, 40, 55, 70, 75, 90, 100 }, graph.ImageProgressions);
+        Assert.Equal(7, graph.GeneratedImageOrder.Count);
+        Assert.Equal(7, graph.VideoClips.Count);
+        Assert.Equal((0, 25), (graph.VideoClips[0].StartProgressPercent, graph.VideoClips[0].EndProgressPercent));
+        Assert.Equal((90, 100), (graph.VideoClips[^1].StartProgressPercent, graph.VideoClips[^1].EndProgressPercent));
     }
 
     [Fact]

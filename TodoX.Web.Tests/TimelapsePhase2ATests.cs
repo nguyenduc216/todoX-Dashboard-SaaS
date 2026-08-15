@@ -36,7 +36,7 @@ public class TimelapsePhase2ATests
     [InlineData(3, new[] { 0, 35, 70, 100 })]
     [InlineData(4, new[] { 0, 25, 50, 75, 100 })]
     [InlineData(5, new[] { 0, 20, 40, 60, 80, 100 })]
-    [InlineData(6, new[] { 0, 25, 40, 55, 70, 85, 100 })]
+    [InlineData(6, new[] { 0, 25, 40, 55, 70, 75, 90, 100 })]
     public void ProgressMappings_AreFixedBySceneCount(int sceneCount, int[] expected)
     {
         Assert.Equal(expected, TimelapseRequestRules.GetProgressMapping(sceneCount));
