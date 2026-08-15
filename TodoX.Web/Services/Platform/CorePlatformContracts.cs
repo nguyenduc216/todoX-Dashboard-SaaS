@@ -47,7 +47,8 @@ public sealed record CoreRequestContext(
     Guid? UserId,
     string Channel,
     string? ClientId = null,
-    string? ExternalRequestId = null)
+    string? ExternalRequestId = null,
+    bool IsTrustedInternal = false)
 {
     public string NormalizedChannel => CoreChannelCodes.Normalize(Channel);
 }
@@ -70,18 +71,47 @@ public sealed record CoreJobView(
     Guid JobId,
     Guid? ServiceId,
     string ServiceCode,
+    Guid? CustomerId,
+    Guid? UserId,
     string Status,
     string Channel,
+    string? OperationType,
+    string? LogicalRequestId,
+    string? CurrentStep,
     int ProgressPercent,
     decimal PointCostEstimate,
     decimal PointCostCharged,
     string PointStatus,
+    Guid? RetryOfJobId,
     JsonElement Output,
     string? ErrorCode,
     string? ErrorMessage,
     DateTime CreatedAt,
     DateTime? UpdatedAt,
     DateTime? CompletedAt);
+
+public sealed record CoreJobListRequest(
+    int Page = 1,
+    int PageSize = 20,
+    string? Status = null,
+    string? ServiceCode = null);
+
+public sealed record CoreJobListResult(
+    IReadOnlyList<CoreJobView> Items,
+    int Page,
+    int PageSize,
+    int Total);
+
+public sealed record CoreRetryJobRequest(string? IdempotencyKey = null);
+
+public sealed record CoreCancelJobRequest(string? Reason = null);
+
+public sealed record CoreServicePriceView(
+    string AssetType,
+    string QualityTier,
+    int? DurationSeconds,
+    decimal SellPoints,
+    string? DisplayLabel);
 
 /// <summary>
 /// A stable catalog projection shared by Dashboard, Zalo Mini App, Telegram and partner clients.
@@ -96,8 +126,39 @@ public sealed record CoreServiceView(
     string? WorkflowCode,
     string? ThumbnailUrl,
     JsonElement FormSchema,
+    IReadOnlyList<CoreServicePriceView> Prices,
     bool Enabled,
     int SortOrder);
+
+public static class CoreJobAccess
+{
+    public static void EnsureAuthenticated(CoreRequestContext context)
+    {
+        var channel = context.NormalizedChannel;
+        if (context.IsTrustedInternal && channel == CoreChannelCodes.System)
+        {
+            return;
+        }
+
+        if (context.CustomerId is null)
+        {
+            throw new UnauthorizedAccessException("A resolved customer identity is required.");
+        }
+    }
+
+    public static bool CanAccess(CoreRequestContext context, Guid? jobCustomerId)
+    {
+        var channel = context.NormalizedChannel;
+        if (context.IsTrustedInternal && channel == CoreChannelCodes.System)
+        {
+            return true;
+        }
+
+        return context.CustomerId is Guid customerId
+            && jobCustomerId is Guid ownerCustomerId
+            && customerId == ownerCustomerId;
+    }
+}
 
 /// <summary>
 /// Boundary between the TodoX core and service-specific execution runtimes. Timelapse/RVideo/RDance

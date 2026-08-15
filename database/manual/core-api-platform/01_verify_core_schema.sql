@@ -13,6 +13,7 @@ WITH required_render_columns(column_name) AS (
         ('operation_type'),
         ('source_type'),
         ('status'),
+        ('current_step'),
         ('progress_percent'),
         ('input_json'),
         ('prompt_json'),

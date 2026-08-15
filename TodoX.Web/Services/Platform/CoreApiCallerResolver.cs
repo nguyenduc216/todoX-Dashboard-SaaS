@@ -41,6 +41,15 @@ public sealed class CoreApiCallerResolver : ICoreApiCallerResolver
 
             // Validate at the boundary so unknown transport/channel values never reach the business layer.
             _ = context.NormalizedChannel;
+            try
+            {
+                CoreJobAccess.EnsureAuthenticated(context);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return null;
+            }
+
             return context;
         }
 

@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Dapper;
 using TodoX.Web.Data;
@@ -9,12 +11,25 @@ public interface ICoreJobApplicationService
 {
     Task<CoreJobView> CreateAsync(CoreRequestContext context, CoreCreateJobRequest request, CancellationToken ct = default);
     Task<CoreJobView?> GetAsync(CoreRequestContext context, Guid jobId, CancellationToken ct = default);
+    Task<CoreJobListResult> ListAsync(CoreRequestContext context, CoreJobListRequest request, CancellationToken ct = default);
+    Task<CoreJobView> CancelAsync(CoreRequestContext context, Guid jobId, string? reason = null, CancellationToken ct = default);
+    Task<CoreJobView> RetryAsync(CoreRequestContext context, Guid jobId, CoreRetryJobRequest request, CancellationToken ct = default);
+}
+
+public sealed class CoreInsufficientBalanceException : InvalidOperationException
+{
+    public CoreInsufficientBalanceException(Guid jobId, string message)
+        : base(message)
+    {
+        JobId = jobId;
+    }
+
+    public Guid JobId { get; }
 }
 
 /// <summary>
-/// Canonical application boundary for creating TodoX jobs from Dashboard, Zalo, Telegram,
-/// partner APIs and future clients. It owns transport-neutral validation and idempotency, while
-/// execution remains delegated to CoreServiceJobHandler -> ICoreJobExecutionAdapter.
+/// Canonical transport-neutral job lifecycle shared by Dashboard and API transports.
+/// Service validation, pricing, idempotency, caller scoping and billing happen here.
 /// </summary>
 public sealed class CoreJobApplicationService : ICoreJobApplicationService
 {
@@ -22,22 +37,34 @@ public sealed class CoreJobApplicationService : ICoreJobApplicationService
     private readonly TodoXConnectionFactory _factory;
     private readonly TenantContext _tenant;
     private readonly ICoreServiceCatalogService _catalog;
+    private readonly ICoreBillingService _billing;
 
     public CoreJobApplicationService(
         TodoXConnectionFactory factory,
         TenantContext tenant,
-        ICoreServiceCatalogService catalog)
+        ICoreServiceCatalogService catalog,
+        ICoreBillingService billing)
     {
         _factory = factory;
         _tenant = tenant;
         _catalog = catalog;
+        _billing = billing;
     }
 
-    public async Task<CoreJobView> CreateAsync(
+    public Task<CoreJobView> CreateAsync(
         CoreRequestContext context,
         CoreCreateJobRequest request,
         CancellationToken ct = default)
+        => CreateInternalAsync(context, request, retryOfJobId: null, ct);
+
+    private async Task<CoreJobView> CreateInternalAsync(
+        CoreRequestContext context,
+        CoreCreateJobRequest request,
+        Guid? retryOfJobId,
+        CancellationToken ct)
     {
+        CoreJobAccess.EnsureAuthenticated(context);
+
         if (string.IsNullOrWhiteSpace(request.ServiceCode))
         {
             throw new ArgumentException("Service code is required.", nameof(request));
@@ -65,36 +92,37 @@ public sealed class CoreJobApplicationService : ICoreJobApplicationService
                 nameof(request));
         }
 
+        var logicalRequestId = idempotencyKey is null
+            ? null
+            : BuildLogicalRequestId(context, service.ServiceCode, idempotencyKey);
+        var estimate = await _billing.EstimateAsync(context, service, request.Input, ct);
+
         await _tenant.EnsureLoadedAsync(ct);
         using var conn = await _factory.OpenAsync(ct);
         using var tx = conn.BeginTransaction();
 
-        if (idempotencyKey is not null)
+        if (logicalRequestId is not null)
         {
             await conn.ExecuteAsync(new CommandDefinition(
                 "SELECT pg_advisory_xact_lock(hashtextextended(@lockName, 0));",
-                new { lockName = BuildIdempotencyLockName(context, service.ServiceCode, idempotencyKey) },
+                new { lockName = $"core-service-job:{logicalRequestId}" },
                 tx,
                 cancellationToken: ct));
 
             var existing = await conn.QuerySingleOrDefaultAsync<CoreJobRow>(new CommandDefinition(
                 SelectSql +
                 """
-                 WHERE r.job_type = @jobType
-                   AND r.service_id = @serviceId
-                   AND r.source_type = @sourceType
+                 WHERE r.tenant_id = @tenantId
+                   AND r.job_type = @jobType
                    AND r.logical_request_id = @logicalRequestId
-                   AND r.customer_id IS NOT DISTINCT FROM @customerId
                  ORDER BY r.created_at DESC
                  LIMIT 1;
                 """,
                 new
                 {
+                    tenantId = _tenant.TenantId,
                     jobType = RenderJobTypes.CoreService,
-                    serviceId = service.Id,
-                    sourceType = channel,
-                    logicalRequestId = idempotencyKey,
-                    customerId = context.CustomerId
+                    logicalRequestId
                 },
                 tx,
                 cancellationToken: ct));
@@ -106,6 +134,7 @@ public sealed class CoreJobApplicationService : ICoreJobApplicationService
             }
         }
 
+        var jobId = Guid.NewGuid();
         var envelope = new CoreServiceJobEnvelope
         {
             ServiceId = service.Id,
@@ -128,34 +157,54 @@ public sealed class CoreJobApplicationService : ICoreJobApplicationService
                 channel,
                 client_id = NormalizeOptional(context.ClientId),
                 external_request_id = NormalizeOptional(context.ExternalRequestId),
-                service_code = service.ServiceCode
+                service_code = service.ServiceCode,
+                retry_of_job_id = retryOfJobId
+            },
+            billing = new
+            {
+                estimate.QualityTier,
+                estimate.ImageCount,
+                estimate.SceneCount,
+                estimate.DurationSeconds
             }
         }, JsonOptions);
 
+        var initialPointStatus = estimate.ChargeRequired
+            ? RenderPointStatuses.Pending
+            : RenderPointStatuses.NotRequired;
         var row = await conn.QuerySingleAsync<CoreJobRow>(new CommandDefinition(
             """
             INSERT INTO render.render_jobs
-                (tenant_id, customer_id, user_id, service_id,
+                (id, tenant_id, customer_id, user_id, service_id,
                  logical_request_id, job_type, operation_type, source_type,
-                 status, progress_percent, priority,
+                 status, current_step, progress_percent, priority,
                  input_json, prompt_json, reference_json, output_json, options,
                  point_cost_estimate, point_cost_charged, point_status,
-                 max_attempts, queued_at, created_at)
+                 retry_of_job_id, max_attempts, queued_at, created_at)
             VALUES
-                (@tenantId, @customerId, @userId, @serviceId,
+                (@jobId, @tenantId, @customerId, @userId, @serviceId,
                  @logicalRequestId, @jobType, @operationType, @sourceType,
-                 'queued', 0, @priority,
+                 'draft', 'billing', 0, @priority,
                  CAST(@inputJson AS jsonb), CAST(@promptJson AS jsonb), CAST(@referenceJson AS jsonb), '[]'::jsonb, CAST(@optionsJson AS jsonb),
-                 0, 0, 'not_required',
-                 1, now(), now())
+                 @pointCostEstimate, 0, @pointStatus,
+                 @retryOfJobId, 1, now(), now())
             RETURNING id AS Id,
                       service_id AS ServiceId,
+                      customer_id AS CustomerId,
+                      user_id AS UserId,
                       status AS Status,
                       source_type AS SourceType,
+                      operation_type AS OperationType,
+                      logical_request_id AS LogicalRequestId,
+                      current_step AS CurrentStep,
                       progress_percent AS ProgressPercent,
                       point_cost_estimate AS PointCostEstimate,
                       point_cost_charged AS PointCostCharged,
                       point_status AS PointStatus,
+                      retry_of_job_id AS RetryOfJobId,
+                      input_json::text AS InputJson,
+                      prompt_json::text AS PromptJson,
+                      reference_json::text AS ReferenceJson,
                       output_json::text AS OutputJson,
                       error_code AS ErrorCode,
                       error_message AS ErrorMessage,
@@ -165,11 +214,12 @@ public sealed class CoreJobApplicationService : ICoreJobApplicationService
             """,
             new
             {
+                jobId,
                 tenantId = _tenant.TenantId,
                 customerId = context.CustomerId,
                 userId = context.UserId,
                 serviceId = service.Id,
-                logicalRequestId = idempotencyKey,
+                logicalRequestId,
                 jobType = RenderJobTypes.CoreService,
                 operationType = service.ServiceType,
                 sourceType = channel,
@@ -177,65 +227,253 @@ public sealed class CoreJobApplicationService : ICoreJobApplicationService
                 inputJson,
                 promptJson,
                 referenceJson,
-                optionsJson
+                optionsJson,
+                pointCostEstimate = estimate.EstimatedPoints,
+                pointStatus = initialPointStatus,
+                retryOfJobId
             },
             tx,
             cancellationToken: ct));
 
-        await conn.ExecuteAsync(new CommandDefinition(
-            """
-            INSERT INTO render.render_job_events
-                (job_id, tenant_id, event_type, level, message, data_json, created_at)
-            VALUES
-                (@jobId, @tenantId, 'JOB_QUEUED', 'info', 'Core service job queued.',
-                 CAST(@eventData AS jsonb), now());
-            """,
+        await AddEventAsync(conn, tx, row.Id, "CORE_JOB_CREATED", "Core service job created in billing stage.",
             new
             {
-                jobId = row.Id,
-                tenantId = _tenant.TenantId,
-                eventData = JsonSerializer.Serialize(new
-                {
-                    service_code = service.ServiceCode,
-                    channel,
-                    idempotency_key = idempotencyKey
-                }, JsonOptions)
-            },
-            tx,
-            cancellationToken: ct));
-
+                service_code = service.ServiceCode,
+                channel,
+                logical_request_id = logicalRequestId,
+                point_cost_estimate = estimate.EstimatedPoints,
+                retry_of_job_id = retryOfJobId
+            });
         tx.Commit();
-        row.ServiceCode = service.ServiceCode;
-        return Map(row);
+
+        var reservation = await _billing.ReserveAsync(row.Id, context, estimate, ct);
+        if (!reservation.Success)
+        {
+            throw new CoreInsufficientBalanceException(row.Id, reservation.ErrorMessage ?? "Core billing reservation failed.");
+        }
+
+        return await GetAsync(context, row.Id, ct)
+            ?? throw new InvalidOperationException("Core job disappeared after billing reservation.");
     }
 
     public async Task<CoreJobView?> GetAsync(CoreRequestContext context, Guid jobId, CancellationToken ct = default)
     {
-        var channel = context.NormalizedChannel;
+        CoreJobAccess.EnsureAuthenticated(context);
+        await _tenant.EnsureLoadedAsync(ct);
         using var conn = await _factory.OpenAsync(ct);
         var row = await conn.QuerySingleOrDefaultAsync<CoreJobRow>(new CommandDefinition(
             SelectSql +
             """
              WHERE r.id = @jobId
+               AND r.tenant_id = @tenantId
                AND r.job_type = @jobType
                AND (
-                    @isSystem = true
-                    OR (r.customer_id IS NOT DISTINCT FROM @customerId AND @customerId IS NOT NULL)
-                    OR (r.user_id IS NOT DISTINCT FROM @userId AND @userId IS NOT NULL)
+                    @trustedInternal = true
+                    OR (r.customer_id = @customerId AND @customerId IS NOT NULL)
                )
              LIMIT 1;
             """,
             new
             {
                 jobId,
+                tenantId = _tenant.TenantId,
                 jobType = RenderJobTypes.CoreService,
-                isSystem = channel == CoreChannelCodes.System,
-                customerId = context.CustomerId,
-                userId = context.UserId
+                trustedInternal = IsTrustedInternal(context),
+                customerId = context.CustomerId
             },
             cancellationToken: ct));
 
         return row is null ? null : Map(row);
+    }
+
+    public async Task<CoreJobListResult> ListAsync(
+        CoreRequestContext context,
+        CoreJobListRequest request,
+        CancellationToken ct = default)
+    {
+        CoreJobAccess.EnsureAuthenticated(context);
+        await _tenant.EnsureLoadedAsync(ct);
+        var page = Math.Max(1, request.Page);
+        var pageSize = Math.Clamp(request.PageSize, 1, 100);
+        var offset = (page - 1) * pageSize;
+        var where = new StringBuilder(
+            """
+             WHERE r.tenant_id=@tenantId
+               AND r.job_type=@jobType
+               AND (@trustedInternal=true OR (r.customer_id=@customerId AND @customerId IS NOT NULL))
+            """);
+        var parameters = new DynamicParameters(new
+        {
+            tenantId = _tenant.TenantId,
+            jobType = RenderJobTypes.CoreService,
+            trustedInternal = IsTrustedInternal(context),
+            customerId = context.CustomerId,
+            limit = pageSize,
+            offset
+        });
+
+        if (!string.IsNullOrWhiteSpace(request.Status))
+        {
+            var status = NormalizeStatusFilter(request.Status);
+            where.AppendLine(" AND r.status=@status");
+            parameters.Add("status", status);
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.ServiceCode))
+        {
+            where.AppendLine(" AND upper(s.service_code)=upper(@serviceCode)");
+            parameters.Add("serviceCode", request.ServiceCode.Trim());
+        }
+
+        using var conn = await _factory.OpenAsync(ct);
+        var total = await conn.ExecuteScalarAsync<int>(new CommandDefinition(
+            "SELECT count(*) FROM render.render_jobs r LEFT JOIN catalog.services s ON s.id=r.service_id" + where,
+            parameters,
+            cancellationToken: ct));
+        var rows = await conn.QueryAsync<CoreJobRow>(new CommandDefinition(
+            SelectSql + where + " ORDER BY r.created_at DESC, r.id DESC LIMIT @limit OFFSET @offset;",
+            parameters,
+            cancellationToken: ct));
+        return new CoreJobListResult(rows.Select(Map).ToList(), page, pageSize, total);
+    }
+
+    public async Task<CoreJobView> CancelAsync(
+        CoreRequestContext context,
+        Guid jobId,
+        string? reason = null,
+        CancellationToken ct = default)
+    {
+        var current = await GetAsync(context, jobId, ct)
+            ?? throw new KeyNotFoundException("Core job was not found.");
+        if (!CanCancelStatus(current.Status))
+        {
+            throw new InvalidOperationException($"Terminal job '{current.Status}' cannot be cancelled.");
+        }
+
+        var result = await _billing.RefundOrReleaseAsync(
+            jobId,
+            string.IsNullOrWhiteSpace(reason) ? "Core job cancelled by caller." : reason.Trim(),
+            markCancelled: true,
+            ct);
+        if (!result.Success)
+        {
+            throw new InvalidOperationException(result.ErrorMessage ?? "Core job cancellation failed.");
+        }
+
+        return await GetAsync(context, jobId, ct)
+            ?? throw new InvalidOperationException("Core job disappeared after cancellation.");
+    }
+
+    public async Task<CoreJobView> RetryAsync(
+        CoreRequestContext context,
+        Guid jobId,
+        CoreRetryJobRequest request,
+        CancellationToken ct = default)
+    {
+        var source = await GetRowScopedAsync(context, jobId, ct)
+            ?? throw new KeyNotFoundException("Core job was not found.");
+        if (source.Status != RenderJobStatuses.Failed)
+        {
+            throw new InvalidOperationException("Only failed Core jobs can be retried.");
+        }
+
+        var release = await _billing.RefundOrReleaseAsync(
+            source.Id,
+            "Release or refund source job before retry.",
+            markCancelled: false,
+            ct);
+        if (!release.Success)
+        {
+            throw new InvalidOperationException(release.ErrorMessage ?? "Source job billing could not be released.");
+        }
+
+        var envelope = DeserializeEnvelope(source.InputJson);
+        var retryContext = context with { Channel = source.SourceType ?? context.NormalizedChannel };
+        var retryKey = NormalizeIdempotencyKey(request.IdempotencyKey ?? context.ExternalRequestId);
+        if (RequiresIdempotencyKey(retryContext.NormalizedChannel) && retryKey is null)
+        {
+            throw new ArgumentException("IdempotencyKey is required when retrying an external Core job.", nameof(request));
+        }
+
+        retryKey ??= $"retry-{source.Id:N}-{Guid.NewGuid():N}";
+        return await CreateInternalAsync(
+            retryContext,
+            new CoreCreateJobRequest
+            {
+                ServiceCode = source.ServiceCode ?? envelope.ServiceCode,
+                Input = envelope.Payload.Clone(),
+                Prompt = envelope.Prompt?.Clone(),
+                References = envelope.References?.Clone(),
+                Priority = source.Priority,
+                IdempotencyKey = $"retry:{source.Id:N}:{retryKey}"
+            },
+            source.Id,
+            ct);
+    }
+
+    private async Task<CoreJobRow?> GetRowScopedAsync(
+        CoreRequestContext context,
+        Guid jobId,
+        CancellationToken ct)
+    {
+        CoreJobAccess.EnsureAuthenticated(context);
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        return await conn.QuerySingleOrDefaultAsync<CoreJobRow>(new CommandDefinition(
+            SelectSql +
+            """
+             WHERE r.id=@jobId
+               AND r.tenant_id=@tenantId
+               AND r.job_type=@jobType
+               AND (@trustedInternal=true OR (r.customer_id=@customerId AND @customerId IS NOT NULL))
+             LIMIT 1;
+            """,
+            new
+            {
+                jobId,
+                tenantId = _tenant.TenantId,
+                jobType = RenderJobTypes.CoreService,
+                trustedInternal = IsTrustedInternal(context),
+                customerId = context.CustomerId
+            },
+            cancellationToken: ct));
+    }
+
+    private async Task AddEventAsync(
+        System.Data.IDbConnection conn,
+        System.Data.IDbTransaction tx,
+        Guid jobId,
+        string eventType,
+        string message,
+        object data)
+        => await conn.ExecuteAsync(
+            """
+            INSERT INTO render.render_job_events
+                (job_id, tenant_id, event_type, level, message, data_json, created_at)
+            VALUES
+                (@jobId, @tenantId, @eventType, 'info', @message, CAST(@data AS jsonb), now());
+            """,
+            new
+            {
+                jobId,
+                tenantId = _tenant.TenantId,
+                eventType,
+                message,
+                data = JsonSerializer.Serialize(data, JsonOptions)
+            },
+            tx);
+
+    private static CoreServiceJobEnvelope DeserializeEnvelope(string inputJson)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<CoreServiceJobEnvelope>(inputJson, JsonOptions)
+                ?? throw new InvalidOperationException("Core job input envelope is empty.");
+        }
+        catch (JsonException ex)
+        {
+            throw new InvalidOperationException("Core job input envelope is invalid.", ex);
+        }
     }
 
     private static CoreJobView Map(CoreJobRow row)
@@ -255,12 +493,18 @@ public sealed class CoreJobApplicationService : ICoreJobApplicationService
             row.Id,
             row.ServiceId,
             row.ServiceCode ?? string.Empty,
+            row.CustomerId,
+            row.UserId,
             row.Status,
             row.SourceType ?? CoreChannelCodes.System,
+            row.OperationType,
+            row.LogicalRequestId,
+            row.CurrentStep,
             row.ProgressPercent,
             row.PointCostEstimate,
             row.PointCostCharged,
             row.PointStatus,
+            row.RetryOfJobId,
             output,
             row.ErrorCode,
             row.ErrorMessage,
@@ -275,17 +519,50 @@ public sealed class CoreJobApplicationService : ICoreJobApplicationService
             or CoreChannelCodes.Partner
             or CoreChannelCodes.Api;
 
+    internal static bool CanCancelStatus(string status)
+        => status is not (RenderJobStatuses.Completed or RenderJobStatuses.Failed or RenderJobStatuses.Cancelled);
+
     internal static string BuildIdempotencyLockName(
         CoreRequestContext context,
         string serviceCode,
         string idempotencyKey)
-        => string.Join(':',
-            "core-service-job",
+        => $"core-service-job:{BuildLogicalRequestId(context, serviceCode, idempotencyKey)}";
+
+    internal static string BuildLogicalRequestId(
+        CoreRequestContext context,
+        string serviceCode,
+        string idempotencyKey)
+    {
+        var scope = string.Join(':',
             context.NormalizedChannel,
             context.CustomerId?.ToString("N") ?? "no-customer",
             NormalizeOptional(context.ClientId) ?? "no-client",
             serviceCode.Trim().ToUpperInvariant(),
             idempotencyKey);
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(scope));
+        return $"core:{context.NormalizedChannel}:{Convert.ToHexString(hash).ToLowerInvariant()}";
+    }
+
+    private static string NormalizeStatusFilter(string status)
+    {
+        var normalized = status.Trim().ToLowerInvariant();
+        return normalized switch
+        {
+            RenderJobStatuses.Draft
+                or RenderJobStatuses.Queued
+                or RenderJobStatuses.Preparing
+                or RenderJobStatuses.Rendering
+                or RenderJobStatuses.PostProcessing
+                or RenderJobStatuses.PendingReconciliation
+                or RenderJobStatuses.Completed
+                or RenderJobStatuses.Failed
+                or RenderJobStatuses.Cancelled => normalized,
+            _ => throw new ArgumentOutOfRangeException(nameof(status), $"Unsupported Core job status '{status}'.")
+        };
+    }
+
+    private static bool IsTrustedInternal(CoreRequestContext context)
+        => context.IsTrustedInternal && context.NormalizedChannel == CoreChannelCodes.System;
 
     private static string? NormalizeIdempotencyKey(string? value)
     {
@@ -311,12 +588,22 @@ public sealed class CoreJobApplicationService : ICoreJobApplicationService
         SELECT r.id AS Id,
                r.service_id AS ServiceId,
                s.service_code AS ServiceCode,
+               r.customer_id AS CustomerId,
+               r.user_id AS UserId,
                r.status AS Status,
+               r.priority AS Priority,
                r.source_type AS SourceType,
+               r.operation_type AS OperationType,
+               r.logical_request_id AS LogicalRequestId,
+               r.current_step AS CurrentStep,
                r.progress_percent AS ProgressPercent,
                r.point_cost_estimate AS PointCostEstimate,
                r.point_cost_charged AS PointCostCharged,
                r.point_status AS PointStatus,
+               r.retry_of_job_id AS RetryOfJobId,
+               r.input_json::text AS InputJson,
+               r.prompt_json::text AS PromptJson,
+               r.reference_json::text AS ReferenceJson,
                r.output_json::text AS OutputJson,
                r.error_code AS ErrorCode,
                r.error_message AS ErrorMessage,
@@ -329,20 +616,30 @@ public sealed class CoreJobApplicationService : ICoreJobApplicationService
 
     private sealed class CoreJobRow
     {
-        public Guid Id { get; set; }
-        public Guid? ServiceId { get; set; }
-        public string? ServiceCode { get; set; }
-        public string Status { get; set; } = RenderJobStatuses.Queued;
-        public string? SourceType { get; set; }
-        public int ProgressPercent { get; set; }
-        public decimal PointCostEstimate { get; set; }
-        public decimal PointCostCharged { get; set; }
-        public string PointStatus { get; set; } = RenderPointStatuses.NotRequired;
-        public string OutputJson { get; set; } = "[]";
-        public string? ErrorCode { get; set; }
-        public string? ErrorMessage { get; set; }
-        public DateTime CreatedAt { get; set; }
-        public DateTime? UpdatedAt { get; set; }
-        public DateTime? CompletedAt { get; set; }
+        public Guid Id { get; init; }
+        public Guid? ServiceId { get; init; }
+        public string? ServiceCode { get; init; }
+        public Guid? CustomerId { get; init; }
+        public Guid? UserId { get; init; }
+        public string Status { get; init; } = RenderJobStatuses.Queued;
+        public int Priority { get; init; }
+        public string? SourceType { get; init; }
+        public string? OperationType { get; init; }
+        public string? LogicalRequestId { get; init; }
+        public string? CurrentStep { get; init; }
+        public int ProgressPercent { get; init; }
+        public decimal PointCostEstimate { get; init; }
+        public decimal PointCostCharged { get; init; }
+        public string PointStatus { get; init; } = RenderPointStatuses.NotRequired;
+        public Guid? RetryOfJobId { get; init; }
+        public string InputJson { get; init; } = "{}";
+        public string PromptJson { get; init; } = "{}";
+        public string ReferenceJson { get; init; } = "[]";
+        public string OutputJson { get; init; } = "[]";
+        public string? ErrorCode { get; init; }
+        public string? ErrorMessage { get; init; }
+        public DateTime CreatedAt { get; init; }
+        public DateTime? UpdatedAt { get; init; }
+        public DateTime? CompletedAt { get; init; }
     }
 }

@@ -79,6 +79,20 @@ public sealed class CoreServiceCatalogService : ICoreServiceCatalogService
             }
         }
 
+        IReadOnlyList<CoreServicePriceView> prices = Array.Empty<CoreServicePriceView>();
+        if (!string.IsNullOrWhiteSpace(row.PricesJson))
+        {
+            try
+            {
+                prices = JsonSerializer.Deserialize<List<CoreServicePriceView>>(row.PricesJson, JsonOptions)
+                    ?? new List<CoreServicePriceView>();
+            }
+            catch (JsonException)
+            {
+                prices = Array.Empty<CoreServicePriceView>();
+            }
+        }
+
         return new CoreServiceView(
             row.Id,
             row.ServiceCode,
@@ -88,6 +102,7 @@ public sealed class CoreServiceCatalogService : ICoreServiceCatalogService
             row.WorkflowCode,
             row.ThumbnailUrl,
             formSchema,
+            prices,
             row.Enabled,
             row.SortOrder);
     }
@@ -105,6 +120,18 @@ public sealed class CoreServiceCatalogService : ICoreServiceCatalogService
                s.workflow_code AS WorkflowCode,
                s.thumbnail_url AS ThumbnailUrl,
                COALESCE(s.default_options->'form_schema', '{}'::jsonb)::text AS FormSchemaJson,
+               COALESCE((
+                   SELECT jsonb_agg(jsonb_build_object(
+                       'assetType', p.asset_type,
+                       'qualityTier', p.quality_tier,
+                       'durationSeconds', p.duration_seconds,
+                       'sellPoints', p.sell_points,
+                       'displayLabel', p.display_label
+                   ) ORDER BY p.sort_order, p.asset_type, p.quality_tier, p.duration_seconds)
+                     FROM catalog.service_sell_prices p
+                    WHERE p.service_id = s.id
+                      AND p.is_active = true
+               ), '[]'::jsonb)::text AS PricesJson,
                CASE WHEN lower(s.status) = 'active' THEN true ELSE false END AS Enabled,
                s.sort_order AS SortOrder
           FROM catalog.services s
@@ -120,6 +147,7 @@ public sealed class CoreServiceCatalogService : ICoreServiceCatalogService
         public string? WorkflowCode { get; set; }
         public string? ThumbnailUrl { get; set; }
         public string FormSchemaJson { get; set; } = "{}";
+        public string PricesJson { get; set; } = "[]";
         public bool Enabled { get; set; }
         public int SortOrder { get; set; }
     }

@@ -13,6 +13,7 @@ public static class CorePlatformServiceCollectionExtensions
     public static IServiceCollection AddTodoXCorePlatform(this IServiceCollection services)
     {
         services.AddScoped<ICoreServiceCatalogService, CoreServiceCatalogService>();
+        services.AddScoped<ICoreBillingService, CoreBillingService>();
         services.AddScoped<ICoreJobApplicationService, CoreJobApplicationService>();
         services.AddScoped<ICoreExecutionRouter, CoreExecutionRouter>();
         services.AddScoped<ICoreApiCallerResolver, CoreApiCallerResolver>();

@@ -53,6 +53,37 @@ public sealed class CoreApiCallerResolverTests
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => resolver.ResolveAsync(http.Request));
     }
 
+    [Fact]
+    public async Task ResolveAsync_RejectsExternalContextWithoutCustomerIdentity()
+    {
+        var resolver = new CoreApiCallerResolver(new ICoreApiCallerAuthenticator[]
+        {
+            new FakeAuthenticator(true, new CoreRequestContext(null, Guid.NewGuid(), CoreChannelCodes.Partner))
+        });
+
+        var result = await resolver.ResolveAsync(new DefaultHttpContext().Request);
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public async Task ResolveAsync_AllowsTrustedSystemContextWithoutCustomerIdentity()
+    {
+        var trusted = new CoreRequestContext(
+            null,
+            Guid.NewGuid(),
+            CoreChannelCodes.System,
+            IsTrustedInternal: true);
+        var resolver = new CoreApiCallerResolver(new ICoreApiCallerAuthenticator[]
+        {
+            new FakeAuthenticator(true, trusted)
+        });
+
+        var result = await resolver.ResolveAsync(new DefaultHttpContext().Request);
+
+        Assert.Equal(trusted, result);
+    }
+
     private sealed class FakeAuthenticator : ICoreApiCallerAuthenticator
     {
         private readonly bool _canHandle;
