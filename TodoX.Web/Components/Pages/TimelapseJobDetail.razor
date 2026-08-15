@@ -175,7 +175,7 @@
                                         <div class="stage-card-header">
                                             <strong>@image.ProgressPercent%</strong>
                                             <MudChip T="string" Size="Size.Small" Color="@OperationColor(image.Status)" Class="@($"tl-status-badge {OperationStateClass(image.Status)}")">
-                                                @if (IsPendingOperation(image.Status))
+                                                @if (IsRenderingOperation(image.Status))
                                                 {
                                                     <span class="tl-status-dot" aria-hidden="true"></span>
                                                 }
@@ -200,8 +200,15 @@
                                                     </span>
                                                     <strong>@ImageLoadingTitle(image)</strong>
                                                     <span>@ImagePlaceholderText(image)</span>
-                                                    <span class="tl-image-scan" aria-hidden="true"></span>
+                                                    @if (IsRenderingOperation(image.Status))
+                                                    {
+                                                        <span class="tl-image-scan" aria-hidden="true"></span>
+                                                    }
                                                 </div>
+                                                @if (IsRenderingOperation(image.Status))
+                                                {
+                                                    <span class="tl-active-scanline tl-image-scanline" aria-hidden="true"></span>
+                                                }
                                             }
                                             else
                                             {
@@ -284,7 +291,7 @@
                                         <div class="stage-card-header">
                                             <strong>@clip.StartProgressPercent% -> @clip.EndProgressPercent%</strong>
                                             <MudChip T="string" Size="Size.Small" Color="@OperationColor(clip.Status)" Class="@($"tl-status-badge {OperationStateClass(clip.Status)}")">
-                                                @if (IsPendingOperation(clip.Status))
+                                                @if (IsRenderingOperation(clip.Status))
                                                 {
                                                     <span class="tl-status-dot" aria-hidden="true"></span>
                                                 }
@@ -308,10 +315,17 @@
                                                     </span>
                                                     <strong>@VideoLoadingTitle(clip)</strong>
                                                     <span>@VideoPlaceholderText(clip)</span>
-                                                    <span class="tl-video-wave" aria-hidden="true">
-                                                        <i></i><i></i><i></i><i></i><i></i>
-                                                    </span>
+                                                    @if (IsRenderingOperation(clip.Status))
+                                                    {
+                                                        <span class="tl-video-wave" aria-hidden="true">
+                                                            <i></i><i></i><i></i><i></i><i></i>
+                                                        </span>
+                                                    }
                                                 </div>
+                                                @if (IsRenderingOperation(clip.Status))
+                                                {
+                                                    <span class="tl-active-scanline tl-video-scanline" aria-hidden="true"></span>
+                                                }
                                             }
                                             else
                                             {
@@ -824,6 +838,9 @@
     private static bool IsPendingOperation(string? status)
         => status is TimelapseOperationStatuses.Waiting or TimelapseOperationStatuses.Rendering;
 
+    private static bool IsRenderingOperation(string? status)
+        => status == TimelapseOperationStatuses.Rendering;
+
     private static string OperationStateClass(string? status)
         => status switch
         {
@@ -840,7 +857,7 @@
         var classes = $"stage-preview {baseClass} {OperationStateClass(status)}";
         return status switch
         {
-            TimelapseOperationStatuses.Rendering => $"{classes} tl-loading-skeleton tl-loading-shimmer tl-pulse tl-flash-soft",
+            TimelapseOperationStatuses.Rendering => $"{classes} tl-loading-skeleton tl-active-render",
             TimelapseOperationStatuses.Waiting => $"{classes} tl-loading-skeleton tl-loading-shimmer",
             _ => classes
         };

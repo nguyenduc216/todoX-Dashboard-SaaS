@@ -113,6 +113,9 @@ public class TimelapsePhase2BTests
         Assert.Contains("tl-pulse", detail, StringComparison.Ordinal);
         Assert.Contains("tl-flash-soft", detail, StringComparison.Ordinal);
         Assert.Contains("tl-status-dot", detail, StringComparison.Ordinal);
+        Assert.Contains("tl-active-render", detail, StringComparison.Ordinal);
+        Assert.Contains("tl-active-scanline", detail, StringComparison.Ordinal);
+        Assert.Contains("IsRenderingOperation", detail, StringComparison.Ordinal);
         Assert.Contains("OperationStateClass", detail, StringComparison.Ordinal);
         Assert.Contains("is-waiting", detail, StringComparison.Ordinal);
         Assert.Contains("is-rendering", detail, StringComparison.Ordinal);
@@ -149,6 +152,12 @@ public class TimelapsePhase2BTests
         Assert.Contains(".tl-pulse", detailCss, StringComparison.Ordinal);
         Assert.Contains(".tl-flash-soft", detailCss, StringComparison.Ordinal);
         Assert.Contains(".tl-video-wave", detailCss, StringComparison.Ordinal);
+        Assert.Contains(".tl-active-render", detailCss, StringComparison.Ordinal);
+        Assert.Contains(".tl-image-scanline", detailCss, StringComparison.Ordinal);
+        Assert.Contains(".tl-video-scanline", detailCss, StringComparison.Ordinal);
+        Assert.Contains("tl-active-border-pulse", detailCss, StringComparison.Ordinal);
+        Assert.Contains("tl-active-sweep", detailCss, StringComparison.Ordinal);
+        Assert.Contains("tl-preview-scan-down", detailCss, StringComparison.Ordinal);
         Assert.Contains(".tl-final-loading", detailCss, StringComparison.Ordinal);
         Assert.Contains("@media (prefers-reduced-motion: reduce)", detailCss, StringComparison.Ordinal);
 
