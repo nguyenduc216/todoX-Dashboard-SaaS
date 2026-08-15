@@ -24,6 +24,35 @@ public sealed class CorePlatformContractTests
         Assert.Throws<ArgumentOutOfRangeException>(() => CoreChannelCodes.Normalize("random-client"));
     }
 
+    [Theory]
+    [InlineData(CoreChannelCodes.Zalo, true)]
+    [InlineData(CoreChannelCodes.Telegram, true)]
+    [InlineData(CoreChannelCodes.Partner, true)]
+    [InlineData(CoreChannelCodes.Api, true)]
+    [InlineData(CoreChannelCodes.Dashboard, false)]
+    [InlineData(CoreChannelCodes.System, false)]
+    public void ExternalChannels_RequireIdempotency(string channel, bool expected)
+    {
+        Assert.Equal(expected, CoreJobApplicationService.RequiresIdempotencyKey(channel));
+    }
+
+    [Fact]
+    public void IdempotencyLock_IsScopedByCallerAndService()
+    {
+        var customerId = Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+        var zalo = new CoreRequestContext(customerId, null, CoreChannelCodes.Zalo, "mini-app", "req-001");
+        var partner = new CoreRequestContext(customerId, null, CoreChannelCodes.Partner, "partner-a", "req-001");
+
+        var zaloLock = CoreJobApplicationService.BuildIdempotencyLockName(zalo, "TIMELAPSE", "req-001");
+        var partnerLock = CoreJobApplicationService.BuildIdempotencyLockName(partner, "TIMELAPSE", "req-001");
+        var otherServiceLock = CoreJobApplicationService.BuildIdempotencyLockName(zalo, "RDANCE", "req-001");
+
+        Assert.NotEqual(zaloLock, partnerLock);
+        Assert.NotEqual(zaloLock, otherServiceLock);
+        Assert.Contains("zalo", zaloLock);
+        Assert.Contains("TIMELAPSE", zaloLock);
+    }
+
     [Fact]
     public async Task ExecutionRouter_RoutesByServiceCodeCaseInsensitively()
     {
