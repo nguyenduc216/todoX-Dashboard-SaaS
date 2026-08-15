@@ -113,20 +113,6 @@
     overflow-wrap: anywhere;
 }
 
-.tl-video-dependency-row {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    min-width: 0;
-    color: rgba(255, 255, 255, 0.84);
-    font-size: 0.82rem;
-}
-
-.tl-video-dependency-row span {
-    min-width: 0;
-    overflow-wrap: anywhere;
-}
-
 .tl-image-meta-row {
     display: grid;
     grid-template-columns: 36px minmax(0, 1fr);
@@ -429,14 +415,25 @@
     font-size: 0.875rem;
 }
 
-.clip-thumbs {
+.clip-input-thumbnails {
     display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 8px;
+    grid-template-columns: minmax(72px, 88px) 20px minmax(72px, 88px);
+    align-items: center;
+    justify-content: start;
+    gap: 6px;
+    width: min(100%, 208px);
+    min-width: 0;
 }
 
-.clip-thumbs img,
-.clip-thumbs span {
+.clip-input-reference {
+    display: grid;
+    gap: 5px;
+    width: 100%;
+    min-width: 0;
+}
+
+.clip-input-image,
+.clip-input-placeholder {
     display: grid;
     place-items: center;
     width: 100%;
@@ -445,6 +442,20 @@
     background: rgba(255, 255, 255, 0.08);
     object-fit: cover;
     font-size: 0.8rem;
+    overflow: hidden;
+}
+
+.clip-input-label {
+    color: rgba(255, 255, 255, 0.82);
+    font-size: 0.75rem;
+    line-height: 1.25;
+    overflow-wrap: anywhere;
+    text-align: center;
+}
+
+.clip-input-arrow {
+    justify-self: center;
+    color: rgba(128, 203, 196, 0.82);
 }
 
 .final-video {
@@ -705,6 +716,11 @@
 
     .tl-image-meta-row {
         grid-template-columns: 40px minmax(0, 1fr);
+    }
+
+    .clip-input-thumbnails {
+        grid-template-columns: minmax(72px, 80px) 18px minmax(72px, 80px);
+        width: min(100%, 190px);
     }
 
     .tl-final-loading {

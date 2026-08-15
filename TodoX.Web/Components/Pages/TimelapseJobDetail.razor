@@ -321,10 +321,6 @@
                                                 @FormatOperationStatus(clip.Status)
                                             </MudChip>
                                         </div>
-                                        <div class="clip-thumbs">
-                                            @RenderImageThumb(clip.StartProgressPercent)
-                                            @RenderImageThumb(clip.EndProgressPercent)
-                                        </div>
                                         <div class="@PreviewClass("video-preview", clip.Status)">
                                             @if (TimelapseVideoOrchestration.HasCompletedPreview(clip))
                                             {
@@ -356,12 +352,18 @@
                                                 <span>@VideoPlaceholderText(clip)</span>
                                             }
                                         </div>
-                                        <div class="tl-video-card-footer">
-                                            <div class="tl-video-dependency-row">
-                                                <span>Ảnh đầu @clip.StartProgressPercent%</span>
-                                                <MudIcon Icon="@Icons.Material.Filled.ArrowForward" Size="Size.Small" />
-                                                <span>Ảnh cuối @clip.EndProgressPercent%</span>
+                                        <div class="clip-input-thumbnails" aria-label="Ảnh tham chiếu đầu và cuối">
+                                            <div class="clip-input-reference">
+                                                @RenderImageThumb(clip.StartProgressPercent)
+                                                <span class="clip-input-label">Ảnh đầu @clip.StartProgressPercent%</span>
                                             </div>
+                                            <MudIcon Icon="@Icons.Material.Filled.ArrowForward" Size="Size.Small" Class="clip-input-arrow" />
+                                            <div class="clip-input-reference">
+                                                @RenderImageThumb(clip.EndProgressPercent)
+                                                <span class="clip-input-label">Ảnh cuối @clip.EndProgressPercent%</span>
+                                            </div>
+                                        </div>
+                                        <div class="tl-video-card-footer">
                                             <MudText Typo="Typo.caption" Color="Color.Secondary">@FormatClipStartedAt(clip)</MudText>
                                             @if (clip.CompletedAt.HasValue)
                                             {
@@ -798,12 +800,14 @@
             builder.OpenElement(0, "img");
             builder.AddAttribute(1, "src", image.PublicUrl);
             builder.AddAttribute(2, "alt", $"{progress}%");
+            builder.AddAttribute(3, "class", "clip-input-image");
             builder.CloseElement();
             return;
         }
 
-        builder.OpenElement(3, "span");
-        builder.AddContent(4, $"{progress}%");
+        builder.OpenElement(4, "span");
+        builder.AddAttribute(5, "class", "clip-input-placeholder");
+        builder.AddContent(6, $"{progress}%");
         builder.CloseElement();
     };
 
