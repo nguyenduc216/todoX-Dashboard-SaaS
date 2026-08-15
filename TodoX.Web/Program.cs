@@ -3,6 +3,7 @@ using TodoX.Web.Data;
 using TodoX.Web.Models;
 using TodoX.Web.Services;
 using TodoX.Web.Services.Render;
+using TodoX.Web.Services.Platform;
 using TodoX.Web.Services.Reup;
 using TodoX.Web.Services.AiCharacters;
 using TodoX.Web.Services.AiProviders.Kie;
@@ -34,6 +35,7 @@ builder.Services.AddCors(options =>
 builder.Services.AddSingleton<TodoXConnectionFactory>();
 builder.Services.AddSingleton<TodoXAutomationConnectionFactory>();
 builder.Services.AddSingleton<TenantContext>();
+builder.Services.AddTodoXCorePlatform();
 builder.Services.AddSingleton<PasswordHasher>();
 builder.Services.AddScoped<AccountRepository>();
 builder.Services.AddScoped<CustomerRepository>();
@@ -420,6 +422,11 @@ app.MapPost("/api/ai/cost/estimate", async (
     var result = await pricing.EstimateAsync(request, ct);
     return Results.Json(result);
 });
+
+if (app.Configuration.GetValue("CoreApi:Enabled", false))
+{
+    app.MapTodoXCoreApiV1();
+}
 
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
