@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using TodoX.Web.Services.Render;
 
 namespace TodoX.Web.Services.Platform;
 
@@ -11,8 +12,9 @@ public static class CorePlatformServiceCollectionExtensions
     public static IServiceCollection AddTodoXCorePlatform(this IServiceCollection services)
     {
         services.AddScoped<ICoreServiceCatalogService, CoreServiceCatalogService>();
+        services.AddScoped<ICoreJobApplicationService, CoreJobApplicationService>();
         services.AddScoped<ICoreExecutionRouter, CoreExecutionRouter>();
-        services.AddScoped<CoreServiceJobHandler>();
+        services.AddScoped<IRenderJobHandler, CoreServiceJobHandler>();
         return services;
     }
 }
