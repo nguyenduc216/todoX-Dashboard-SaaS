@@ -157,6 +157,7 @@ public static class TimelapseOperationStatuses
 
 public sealed class TimelapseStageImage
 {
+    public Guid Id { get; set; }
     public int StageIndex { get; set; }
     public int ProgressPercent { get; set; }
     public bool IsOriginal { get; set; }
@@ -168,6 +169,11 @@ public sealed class TimelapseStageImage
     public string? ObjectKey { get; set; }
     public string? ProviderTaskId { get; set; }
     public string? ErrorMessage { get; set; }
+    public string PromptSnapshotJson { get; set; } = "{}";
+    public string EffectivePrompt { get; set; } = string.Empty;
+    public bool HasCustomerPromptOverride { get; set; }
+    public DateTime? StartedAt { get; set; }
+    public DateTime? CompletedAt { get; set; }
 }
 
 public sealed class TimelapseVideoClip
@@ -282,6 +288,14 @@ public sealed record TimelapseInvalidationPlan(
     IReadOnlyList<TimelapseVideoEdge> VideoClips,
     bool FinalOutput);
 
+public sealed record TimelapseRerenderImpact(
+    int SelectedProgressPercent,
+    IReadOnlyList<int> ImageProgressesToInvalidate,
+    IReadOnlyList<int> VideoClipIndexesToInvalidate,
+    bool InvalidatesFinalOutput);
+
+public sealed record TimelapseImagePromptDialogResult(string Prompt, bool Rerender);
+
 public static class TimelapseStageGraphBuilder
 {
     public static TimelapseStageGraph Build(int sceneCount)
@@ -332,6 +346,31 @@ public static class TimelapseStageGraphBuilder
             Array.Empty<int>(),
             clip is null ? Array.Empty<TimelapseVideoEdge>() : new[] { clip },
             true);
+    }
+}
+
+public static class TimelapseRerenderImpactPlanner
+{
+    public static TimelapseRerenderImpact Plan(int sceneCount, int progressPercent)
+    {
+        var graph = TimelapseStageGraphBuilder.Build(sceneCount);
+        if (progressPercent >= 100 || !graph.GeneratedImageOrder.Contains(progressPercent))
+        {
+            throw new InvalidOperationException("Ảnh thành phẩm 100% không thể render lại bằng AI.");
+        }
+
+        var invalidation = TimelapseStageGraphBuilder.PlanImageRerender(sceneCount, progressPercent);
+        var images = new[] { progressPercent }
+            .Concat(invalidation.ImageProgressions)
+            .Distinct()
+            .OrderByDescending(x => x)
+            .ToArray();
+
+        return new TimelapseRerenderImpact(
+            progressPercent,
+            images,
+            invalidation.VideoClips.Select(x => x.ClipIndex).Distinct().OrderBy(x => x).ToArray(),
+            invalidation.FinalOutput);
     }
 }
 

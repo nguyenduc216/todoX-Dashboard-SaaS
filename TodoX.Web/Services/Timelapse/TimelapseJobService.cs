@@ -23,6 +23,7 @@ public interface ITimelapseJobService
     Task<IReadOnlyList<TimelapseJobView>> ListOwnedAsync(CurrentUserSession currentUser, CancellationToken ct = default);
     Task<TimelapseJobView> StartOrResumeAsync(Guid jobId, CurrentUserSession currentUser, CancellationToken ct = default);
     Task<TimelapseJobView> RetryImageAsync(Guid jobId, int progressPercent, CurrentUserSession currentUser, CancellationToken ct = default);
+    Task<TimelapseJobView> UpdateImagePromptAsync(Guid jobId, Guid imageStageId, string prompt, bool rerender, CurrentUserSession currentUser, CancellationToken ct = default);
     Task<TimelapseJobView> RetryVideoAsync(Guid jobId, int clipIndex, CurrentUserSession currentUser, CancellationToken ct = default);
     Task<TimelapseJobView> StartFinalizerAsync(Guid jobId, CurrentUserSession currentUser, CancellationToken ct = default);
 }
@@ -246,6 +247,7 @@ public sealed class TimelapseJobService : ITimelapseJobService
 
         var view = ToView(row, currentUser);
         view.Workflow = await _workflow.GetStateAsync(jobId, ct);
+        HydrateImagePrompts(view);
         return view;
     }
 
@@ -275,6 +277,7 @@ public sealed class TimelapseJobService : ITimelapseJobService
         var view = await RequireOwnedAsync(jobId, currentUser, ct);
         view.Workflow = await _workflow.StartOrResumeAsync(jobId, view.Snapshot, currentUser, ct);
         view.Status = view.Workflow.ParentStatus;
+        HydrateImagePrompts(view);
         return view;
     }
 
@@ -283,6 +286,29 @@ public sealed class TimelapseJobService : ITimelapseJobService
         var view = await RequireOwnedAsync(jobId, currentUser, ct);
         view.Workflow = await _workflow.RetryImageAsync(jobId, progressPercent, view.Snapshot, currentUser, ct);
         view.Status = view.Workflow.ParentStatus;
+        HydrateImagePrompts(view);
+        return view;
+    }
+
+    public async Task<TimelapseJobView> UpdateImagePromptAsync(
+        Guid jobId,
+        Guid imageStageId,
+        string prompt,
+        bool rerender,
+        CurrentUserSession currentUser,
+        CancellationToken ct = default)
+    {
+        var view = await RequireOwnedAsync(jobId, currentUser, ct);
+        view.Workflow = await _workflow.UpdateImagePromptAsync(
+            jobId,
+            imageStageId,
+            prompt,
+            rerender,
+            view.Snapshot,
+            currentUser,
+            ct);
+        view.Status = view.Workflow.ParentStatus;
+        HydrateImagePrompts(view);
         return view;
     }
 
@@ -291,6 +317,7 @@ public sealed class TimelapseJobService : ITimelapseJobService
         var view = await RequireOwnedAsync(jobId, currentUser, ct);
         view.Workflow = await _workflow.RetryVideoAsync(jobId, clipIndex, view.Snapshot, currentUser, ct);
         view.Status = view.Workflow.ParentStatus;
+        HydrateImagePrompts(view);
         return view;
     }
 
@@ -299,6 +326,7 @@ public sealed class TimelapseJobService : ITimelapseJobService
         var view = await RequireOwnedAsync(jobId, currentUser, ct);
         view.Workflow = await _workflow.StartFinalizerAsync(jobId, view.Snapshot, currentUser, ct);
         view.Status = view.Workflow.ParentStatus;
+        HydrateImagePrompts(view);
         return view;
     }
 
@@ -341,6 +369,18 @@ public sealed class TimelapseJobService : ITimelapseJobService
 
     private static string NormalizeTitle(string? title)
         => string.IsNullOrWhiteSpace(title) ? "Video Timelapse" : title.Trim();
+
+    private static void HydrateImagePrompts(TimelapseJobView view)
+    {
+        foreach (var image in view.Workflow.Images.Where(x => !x.IsOriginal))
+        {
+            image.EffectivePrompt = TimelapsePromptResolver.ResolveImagePrompt(
+                view.Snapshot,
+                image.ProgressPercent,
+                image.PromptSnapshotJson);
+            image.HasCustomerPromptOverride = TimelapsePromptSnapshot.GetCustomerOverride(image.PromptSnapshotJson) is not null;
+        }
+    }
 
     private sealed class OwnedTimelapseJobRow
     {

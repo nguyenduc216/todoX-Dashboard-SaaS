@@ -13,6 +13,7 @@ public interface ITimelapseWorkflowService
     Task<TimelapseWorkflowState> GetStateAsync(Guid jobId, CancellationToken ct = default);
     Task<TimelapseWorkflowState> StartOrResumeAsync(Guid jobId, TimelapseJobSnapshot snapshot, CurrentUserSession currentUser, CancellationToken ct = default);
     Task<TimelapseWorkflowState> RetryImageAsync(Guid jobId, int progressPercent, TimelapseJobSnapshot snapshot, CurrentUserSession currentUser, CancellationToken ct = default);
+    Task<TimelapseWorkflowState> UpdateImagePromptAsync(Guid jobId, Guid imageStageId, string prompt, bool rerender, TimelapseJobSnapshot snapshot, CurrentUserSession currentUser, CancellationToken ct = default);
     Task<TimelapseWorkflowState> RetryVideoAsync(Guid jobId, int clipIndex, TimelapseJobSnapshot snapshot, CurrentUserSession currentUser, CancellationToken ct = default);
     Task<TimelapseWorkflowState> StartFinalizerAsync(Guid jobId, TimelapseJobSnapshot snapshot, CurrentUserSession currentUser, CancellationToken ct = default);
 }
@@ -90,44 +91,175 @@ public sealed class TimelapseWorkflowService : ITimelapseWorkflowService
     }
 
     public async Task<TimelapseWorkflowState> RetryImageAsync(Guid jobId, int progressPercent, TimelapseJobSnapshot snapshot, CurrentUserSession currentUser, CancellationToken ct = default)
+        => await UpdateImageStageAsync(jobId, null, progressPercent, null, false, true, snapshot, currentUser, ct);
+
+    public async Task<TimelapseWorkflowState> UpdateImagePromptAsync(
+        Guid jobId,
+        Guid imageStageId,
+        string prompt,
+        bool rerender,
+        TimelapseJobSnapshot snapshot,
+        CurrentUserSession currentUser,
+        CancellationToken ct = default)
+        => await UpdateImageStageAsync(jobId, imageStageId, null, prompt, true, rerender, snapshot, currentUser, ct);
+
+    private async Task<TimelapseWorkflowState> UpdateImageStageAsync(
+        Guid jobId,
+        Guid? imageStageId,
+        int? requestedProgressPercent,
+        string? prompt,
+        bool updatePrompt,
+        bool rerender,
+        TimelapseJobSnapshot snapshot,
+        CurrentUserSession currentUser,
+        CancellationToken ct)
     {
         EnsureCustomer(currentUser);
-        if (progressPercent >= 100)
-        {
-            throw new InvalidOperationException("Ảnh gốc 100% không thể render lại bằng AI.");
-        }
-
         await _tenant.EnsureLoadedAsync(ct);
+
         using var conn = await _factory.OpenAsync(ct);
         using var tx = conn.BeginTransaction();
         await LockJobAsync(conn, tx, jobId);
 
+        var stage = await conn.QuerySingleOrDefaultAsync<EditableImageStageRow>(
+            """
+            SELECT id AS Id,
+                   progress_percent AS ProgressPercent,
+                   is_original AS IsOriginal,
+                   status AS Status,
+                   prompt_snapshot_json::text AS PromptSnapshotJson
+              FROM timelapse.timelapse_image_stages
+             WHERE tenant_id=@tenant
+               AND job_id=@jobId
+               AND (@imageStageId IS NULL OR id=@imageStageId)
+               AND (@progressPercent IS NULL OR progress_percent=@progressPercent)
+             FOR UPDATE;
+            """,
+            new
+            {
+                tenant = _tenant.TenantId,
+                jobId,
+                imageStageId,
+                progressPercent = requestedProgressPercent
+            }, tx);
+        if (stage is null)
+        {
+            throw new InvalidOperationException("Không tìm thấy ảnh Timelapse thuộc job này.");
+        }
+
+        if (stage.IsOriginal || stage.ProgressPercent >= 100)
+        {
+            throw new InvalidOperationException("Ảnh thành phẩm 100% không thể chỉnh prompt hoặc render lại bằng AI.");
+        }
+
+        if (updatePrompt && !TimelapsePromptSnapshot.CanEdit(stage.Status))
+        {
+            throw new InvalidOperationException("Không thể chỉnh prompt khi ảnh đang render.");
+        }
+
         var state = await ReadStateAsync(conn, jobId, tx);
-        if (state.HasActiveOperations)
+        if (rerender && state.HasActiveOperations)
         {
             throw new InvalidOperationException("Vui lòng chờ tác vụ đang chạy hoàn tất trước khi render lại.");
         }
 
-        var plan = TimelapseStageGraphBuilder.PlanImageRerender(snapshot.SceneCount, progressPercent);
+        if (updatePrompt)
+        {
+            var updatedPromptSnapshot = TimelapsePromptSnapshot.WithCustomerOverride(stage.PromptSnapshotJson, prompt!);
+            await conn.ExecuteAsync(
+                """
+                UPDATE timelapse.timelapse_image_stages
+                   SET prompt_snapshot_json=CAST(@promptSnapshotJson AS jsonb),
+                       updated_at=now()
+                 WHERE id=@stageId
+                   AND tenant_id=@tenant
+                   AND job_id=@jobId;
+                """,
+                new
+                {
+                    promptSnapshotJson = updatedPromptSnapshot,
+                    stageId = stage.Id,
+                    tenant = _tenant.TenantId,
+                    jobId
+                }, tx);
+        }
+
+        if (!rerender)
+        {
+            tx.Commit();
+            await AddPromptUpdatedEventAsync(jobId, stage, ct);
+            return await GetStateAsync(jobId, ct);
+        }
+
+        var impact = TimelapseRerenderImpactPlanner.Plan(snapshot.SceneCount, stage.ProgressPercent);
         await conn.ExecuteAsync(
             """
             UPDATE timelapse.timelapse_image_stages
-               SET status='INVALIDATED', result_media_id=NULL, object_key=NULL, public_url=NULL, updated_at=now()
+               SET status='INVALIDATED',
+                   provider_code=NULL,
+                   provider_model=NULL,
+                   provider_task_id=NULL,
+                   result_media_id=NULL,
+                   object_key=NULL,
+                   public_url=NULL,
+                   error_code=NULL,
+                   error_message=NULL,
+                   started_at=NULL,
+                   completed_at=NULL,
+                   updated_at=now()
              WHERE job_id=@jobId
                AND progress_percent = ANY(@progress);
             """,
-            new { jobId, progress = plan.ImageProgressions.Concat(new[] { progressPercent }).Distinct().ToArray() }, tx);
-        await InvalidateVideosAsync(conn, tx, jobId, plan.VideoClips);
+            new { jobId, progress = impact.ImageProgressesToInvalidate.ToArray() }, tx);
+
+        var graph = TimelapseStageGraphBuilder.Build(snapshot.SceneCount);
+        var affectedClips = graph.VideoClips
+            .Where(x => impact.VideoClipIndexesToInvalidate.Contains(x.ClipIndex))
+            .ToArray();
+        await InvalidateVideosAsync(conn, tx, jobId, affectedClips);
         await InvalidateFinalAsync(conn, tx, jobId);
+        await conn.ExecuteAsync(
+            """
+            UPDATE render.render_jobs
+               SET status=@status,
+                   completed_at=NULL,
+                   updated_at=now()
+             WHERE id=@jobId
+               AND tenant_id=@tenant;
+            """,
+            new { jobId, tenant = _tenant.TenantId, status = TimelapseParentStatuses.GeneratingImages }, tx);
         await StartNextImageIfReadyAsync(conn, tx, jobId);
         tx.Commit();
 
-        await _renderJobs.AddEventAsync(jobId, "TIMELAPSE_IMAGE_RERENDER_REQUESTED",
+        if (updatePrompt)
+        {
+            await AddPromptUpdatedEventAsync(jobId, stage, ct);
+        }
+
+        await _renderJobs.AddEventAsync(
+            jobId,
+            "TIMELAPSE_IMAGE_RERENDER_REQUESTED",
             "Customer requested image rerender; dependent earlier images and related videos were invalidated.",
-            new { progressPercent, invalidImages = plan.ImageProgressions, invalidVideos = plan.VideoClips }, ct: ct);
+            new
+            {
+                imageStageId = stage.Id,
+                progressPercent = stage.ProgressPercent,
+                invalidImages = impact.ImageProgressesToInvalidate,
+                invalidVideos = impact.VideoClipIndexesToInvalidate,
+                impact.InvalidatesFinalOutput
+            },
+            ct: ct);
 
         return await GetStateAsync(jobId, ct);
     }
+
+    private Task AddPromptUpdatedEventAsync(Guid jobId, EditableImageStageRow stage, CancellationToken ct)
+        => _renderJobs.AddEventAsync(
+            jobId,
+            "TIMELAPSE_IMAGE_PROMPT_UPDATED",
+            "Customer updated the prompt override for a Timelapse image stage.",
+            new { imageStageId = stage.Id, progressPercent = stage.ProgressPercent },
+            ct: ct);
 
     public async Task<TimelapseWorkflowState> RetryVideoAsync(Guid jobId, int clipIndex, TimelapseJobSnapshot snapshot, CurrentUserSession currentUser, CancellationToken ct = default)
     {
@@ -299,7 +431,19 @@ public sealed class TimelapseWorkflowService : ITimelapseWorkflowService
         }
 
         var attempt = await conn.QuerySingleAsync<int>(
-            "UPDATE timelapse.timelapse_image_stages SET active_attempt=active_attempt+1, status='RENDERING', started_at=now(), updated_at=now() WHERE id=@id RETURNING active_attempt;",
+            """
+            UPDATE timelapse.timelapse_image_stages
+               SET active_attempt=active_attempt+1,
+                   status='RENDERING',
+                   provider_task_id=NULL,
+                   error_code=NULL,
+                   error_message=NULL,
+                   started_at=now(),
+                   completed_at=NULL,
+                   updated_at=now()
+             WHERE id=@id
+             RETURNING active_attempt;
+            """,
             new { stage.Id }, tx);
         await conn.ExecuteAsync(
             """
@@ -373,7 +517,18 @@ public sealed class TimelapseWorkflowService : ITimelapseWorkflowService
         await conn.ExecuteAsync(
             """
             UPDATE timelapse.timelapse_video_clips
-               SET status='INVALIDATED', result_media_id=NULL, object_key=NULL, public_url=NULL, updated_at=now()
+               SET status='INVALIDATED',
+                   provider_code=NULL,
+                   provider_model=NULL,
+                   provider_task_id=NULL,
+                   result_media_id=NULL,
+                   object_key=NULL,
+                   public_url=NULL,
+                   error_code=NULL,
+                   error_message=NULL,
+                   started_at=NULL,
+                   completed_at=NULL,
+                   updated_at=now()
              WHERE job_id=@jobId
                AND clip_index = ANY(@clipIndexes);
             """,
@@ -398,7 +553,8 @@ public sealed class TimelapseWorkflowService : ITimelapseWorkflowService
 
         var images = (await conn.QueryAsync<TimelapseStageImage>(
             """
-            SELECT stage_index AS StageIndex,
+            SELECT id AS Id,
+                   stage_index AS StageIndex,
                    progress_percent AS ProgressPercent,
                    is_original AS IsOriginal,
                    depends_on_progress_percent AS DependsOnProgressPercent,
@@ -408,7 +564,10 @@ public sealed class TimelapseWorkflowService : ITimelapseWorkflowService
                    public_url AS PublicUrl,
                    object_key AS ObjectKey,
                    provider_task_id AS ProviderTaskId,
-                   error_message AS ErrorMessage
+                   error_message AS ErrorMessage,
+                   prompt_snapshot_json::text AS PromptSnapshotJson,
+                   started_at AS StartedAt,
+                   completed_at AS CompletedAt
               FROM timelapse.timelapse_image_stages
              WHERE job_id=@jobId
              ORDER BY progress_percent;
@@ -526,5 +685,14 @@ public sealed class TimelapseWorkflowService : ITimelapseWorkflowService
         public Guid Id { get; set; }
         public int ProgressPercent { get; set; }
         public int? DependsOnProgressPercent { get; set; }
+    }
+
+    private sealed class EditableImageStageRow
+    {
+        public Guid Id { get; set; }
+        public int ProgressPercent { get; set; }
+        public bool IsOriginal { get; set; }
+        public string Status { get; set; } = string.Empty;
+        public string PromptSnapshotJson { get; set; } = "{}";
     }
 }

@@ -687,6 +687,12 @@ public static class TimelapsePromptResolver
 {
     public static string ResolveImagePrompt(TimelapseJobSnapshot snapshot, int progressPercent, string promptSnapshotJson)
     {
+        var customerOverride = TimelapsePromptSnapshot.GetCustomerOverride(promptSnapshotJson);
+        if (!string.IsNullOrWhiteSpace(customerOverride))
+        {
+            return customerOverride;
+        }
+
         var profileText = ExtractProfilePrompt(promptSnapshotJson);
         return string.Join("\n", new[]
         {

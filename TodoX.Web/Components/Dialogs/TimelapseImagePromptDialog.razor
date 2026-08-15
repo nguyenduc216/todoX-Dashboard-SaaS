@@ -1,0 +1,123 @@
+@using TodoX.Web.Models.Timelapse
+@using TodoX.Web.Services.Timelapse
+
+<MudDialog Class="timelapse-prompt-dialog">
+    <TitleContent>
+        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+            <MudIcon Icon="@Icons.Material.Filled.EditNote" Color="Color.Warning" />
+            <MudText Typo="Typo.h6">Prompt ảnh @Image.ProgressPercent%</MudText>
+        </MudStack>
+    </TitleContent>
+    <DialogContent>
+        <MudStack Spacing="3">
+            <div class="timelapse-prompt-summary">
+                @if (!string.IsNullOrWhiteSpace(Image.PublicUrl))
+                {
+                    <img src="@Image.PublicUrl" alt="@($"Ảnh Timelapse {Image.ProgressPercent}%")" />
+                }
+                else
+                {
+                    <div class="timelapse-prompt-placeholder">
+                        <MudIcon Icon="@Icons.Material.Filled.Image" Size="Size.Large" />
+                    </div>
+                }
+                <div>
+                    <MudText Typo="Typo.subtitle1">Stage @Image.ProgressPercent%</MudText>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">
+                        @StatusLabel · Lần render @Math.Max(Image.Attempt, 1)
+                    </MudText>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">
+                        @(Image.HasCustomerPromptOverride ? "Nguồn: prompt khách hàng" : "Nguồn: profile Timelapse")
+                    </MudText>
+                </div>
+            </div>
+
+            @if (IsRendering)
+            {
+                <MudAlert Severity="Severity.Warning" Dense="true">
+                    Ảnh đang render. Bạn có thể xem prompt nhưng không thể chỉnh sửa cho đến khi tác vụ hoàn tất.
+                </MudAlert>
+            }
+            else if (Image.Status == TimelapseOperationStatuses.Completed)
+            {
+                <MudAlert Severity="Severity.Info" Dense="true">
+                    Prompt mới chỉ có hiệu lực khi bạn Render lại ảnh này.
+                </MudAlert>
+            }
+            else if (Image.Status == TimelapseOperationStatuses.Failed)
+            {
+                <MudAlert Severity="Severity.Warning" Dense="true">
+                    Bạn có thể chỉnh prompt và bấm Lưu &amp; Render lại.
+                </MudAlert>
+            }
+
+            <MudTextField T="string"
+                          Label="Prompt hình ảnh"
+                          @bind-Value="_prompt"
+                          Variant="Variant.Outlined"
+                          Lines="12"
+                          Disabled="@IsRendering"
+                          Required="true"
+                          Counter="@TimelapsePromptSnapshot.MaxPromptLength"
+                          MaxLength="@TimelapsePromptSnapshot.MaxPromptLength"
+                          Class="timelapse-prompt-editor" />
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton Variant="Variant.Text" OnClick="Close" autofocus>Đóng</MudButton>
+        <MudButton Variant="Variant.Outlined"
+                   Color="Color.Warning"
+                   StartIcon="@Icons.Material.Filled.Save"
+                   Disabled="@(!CanSave)"
+                   OnClick="SaveOnly">
+            Lưu prompt
+        </MudButton>
+        @if (CanRerender)
+        {
+            <MudButton Class="todox-primary-btn"
+                       StartIcon="@Icons.Material.Filled.Refresh"
+                       Disabled="@(!CanSave)"
+                       OnClick="SaveAndRerender">
+                Lưu &amp; Render lại
+            </MudButton>
+        }
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter, EditorRequired] public TimelapseStageImage Image { get; set; } = new();
+
+    private string _prompt = string.Empty;
+    private bool IsRendering => Image.Status == TimelapseOperationStatuses.Rendering;
+    private bool CanRerender
+        => Image.Status is TimelapseOperationStatuses.Failed
+            or TimelapseOperationStatuses.Completed;
+    private bool CanSave
+        => !IsRendering
+           && !string.IsNullOrWhiteSpace(_prompt)
+           && _prompt.Trim().Length <= TimelapsePromptSnapshot.MaxPromptLength;
+    private string StatusLabel => Image.Status switch
+    {
+        TimelapseOperationStatuses.Waiting => "Đang chờ",
+        TimelapseOperationStatuses.Rendering => "Đang xử lý",
+        TimelapseOperationStatuses.Completed => "Hoàn thành",
+        TimelapseOperationStatuses.Failed => "Thất bại",
+        TimelapseOperationStatuses.Invalidated => "Cần tạo lại",
+        _ => Image.Status
+    };
+
+    protected override void OnInitialized()
+    {
+        _prompt = Image.EffectivePrompt;
+    }
+
+    private void SaveOnly()
+        => MudDialog.Close(DialogResult.Ok(new TimelapseImagePromptDialogResult(_prompt, false)));
+
+    private void SaveAndRerender()
+        => MudDialog.Close(DialogResult.Ok(new TimelapseImagePromptDialogResult(_prompt, true)));
+
+    private void Close() => MudDialog.Cancel();
+}

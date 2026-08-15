@@ -1,0 +1,57 @@
+@using TodoX.Web.Models.Timelapse
+
+<MudDialog Class="timelapse-rerender-dialog">
+    <TitleContent>
+        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+            <MudIcon Icon="@Icons.Material.Filled.WarningAmber" Color="Color.Warning" />
+            <MudText Typo="Typo.h6">Xác nhận render lại ảnh @Impact.SelectedProgressPercent%</MudText>
+        </MudStack>
+    </TitleContent>
+    <DialogContent>
+        <MudStack Spacing="3">
+            <MudText Typo="Typo.body1">
+                Ảnh @Impact.SelectedProgressPercent% là ảnh nguồn của các bước phía sau. Khi render lại ảnh này,
+                hệ thống sẽ tự động tạo lại các ảnh phụ thuộc và video liên quan theo đúng thứ tự.
+            </MudText>
+
+            <div class="timelapse-impact-summary">
+                <div>
+                    <MudIcon Icon="@Icons.Material.Filled.Image" />
+                    <span>Ảnh tạo lại</span>
+                    <strong>@string.Join(", ", Impact.ImageProgressesToInvalidate.Select(x => $"{x}%"))</strong>
+                </div>
+                <div>
+                    <MudIcon Icon="@Icons.Material.Filled.Movie" />
+                    <span>Video bị ảnh hưởng</span>
+                    <strong>@Impact.VideoClipIndexesToInvalidate.Count clip</strong>
+                </div>
+                <div>
+                    <MudIcon Icon="@Icons.Material.Filled.MovieFilter" />
+                    <span>Video hoàn chỉnh</span>
+                    <strong>@(Impact.InvalidatesFinalOutput ? "Sẽ mất hiệu lực" : "Không đổi")</strong>
+                </div>
+            </div>
+
+            <MudAlert Severity="Severity.Warning" Dense="true">
+                Các kết quả cũ vẫn được giữ trong lịch sử phiên bản, nhưng sẽ không còn được xem là kết quả hiện hành.
+            </MudAlert>
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton Variant="Variant.Text" OnClick="Cancel" autofocus>Hủy</MudButton>
+        <MudButton Class="todox-primary-btn"
+                   StartIcon="@Icons.Material.Filled.Refresh"
+                   OnClick="Confirm">
+            Xác nhận render lại
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter, EditorRequired] public TimelapseRerenderImpact Impact { get; set; } = default!;
+
+    private void Confirm() => MudDialog.Close(DialogResult.Ok(true));
+    private void Cancel() => MudDialog.Cancel();
+}

@@ -1,0 +1,37 @@
+.timelapse-prompt-summary {
+    display: grid;
+    grid-template-columns: 112px minmax(0, 1fr);
+    align-items: center;
+    gap: 14px;
+}
+
+.timelapse-prompt-summary img,
+.timelapse-prompt-placeholder {
+    width: 112px;
+    aspect-ratio: 16 / 10;
+    border: 1px solid rgba(255, 193, 7, 0.28);
+    border-radius: 6px;
+    background: #171a1f;
+    object-fit: cover;
+}
+
+.timelapse-prompt-placeholder {
+    display: grid;
+    place-items: center;
+    color: #ffca28;
+}
+
+.timelapse-prompt-editor {
+    min-width: 0;
+}
+
+@media (max-width: 600px) {
+    .timelapse-prompt-summary {
+        grid-template-columns: 84px minmax(0, 1fr);
+    }
+
+    .timelapse-prompt-summary img,
+    .timelapse-prompt-placeholder {
+        width: 84px;
+    }
+}

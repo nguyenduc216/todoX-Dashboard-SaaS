@@ -89,6 +89,7 @@ public class TimelapsePhase2BTests
     public void TimelapsePhase2B_SourceContracts_ArePresent()
     {
         var detail = ReadSource("TodoX.Web", "Components", "Pages", "TimelapseJobDetail.razor");
+        var detailCss = ReadSource("TodoX.Web", "Components", "Pages", "TimelapseJobDetail.razor.css");
         var workflow = ReadSource("TodoX.Web", "Services", "Timelapse", "TimelapseWorkflowService.cs");
         var profiles = ReadSource("TodoX.Web", "Services", "Timelapse", "TimelapseProfileRepository.cs");
         var migration = ReadSource("database", "migrations", "20260813_timelapse_phase_2b_render_workflow.sql");
@@ -103,6 +104,21 @@ public class TimelapsePhase2BTests
         Assert.Contains("Icons.Material.Filled.Movie", detail, StringComparison.Ordinal);
         Assert.Contains("Đang tạo ảnh...", detail, StringComparison.Ordinal);
         Assert.Contains("Đang tạo video...", detail, StringComparison.Ordinal);
+        Assert.Contains("Đang render clip", detail, StringComparison.Ordinal);
+        Assert.Contains("Đang ghép video cuối cùng...", detail, StringComparison.Ordinal);
+        Assert.Contains("Đang chờ hoàn thiện kết quả...", detail, StringComparison.Ordinal);
+        Assert.Contains("TimelapseParentStatuses.Finalizing", detail, StringComparison.Ordinal);
+        Assert.Contains("tl-loading-skeleton", detail, StringComparison.Ordinal);
+        Assert.Contains("tl-loading-shimmer", detail, StringComparison.Ordinal);
+        Assert.Contains("tl-pulse", detail, StringComparison.Ordinal);
+        Assert.Contains("tl-flash-soft", detail, StringComparison.Ordinal);
+        Assert.Contains("tl-status-dot", detail, StringComparison.Ordinal);
+        Assert.Contains("OperationStateClass", detail, StringComparison.Ordinal);
+        Assert.Contains("is-waiting", detail, StringComparison.Ordinal);
+        Assert.Contains("is-rendering", detail, StringComparison.Ordinal);
+        Assert.Contains("image-stage-card", detail, StringComparison.Ordinal);
+        Assert.Contains("video-stage-card", detail, StringComparison.Ordinal);
+        Assert.Contains("role=\"status\"", detail, StringComparison.Ordinal);
         Assert.Contains("Hoàn thành video", detail, StringComparison.Ordinal);
         Assert.Contains("Tải video", detail, StringComparison.Ordinal);
         Assert.Contains("PeriodicTimer(TimeSpan.FromSeconds(4))", detail, StringComparison.Ordinal);
@@ -113,6 +129,7 @@ public class TimelapsePhase2BTests
         Assert.Contains("await RefreshJobStateAsync()", detail, StringComparison.Ordinal);
         Assert.Contains("@bind-ActivePanelIndex=\"_activeTabIndex\"", detail, StringComparison.Ordinal);
         Assert.Contains("_activeTabIndex = 1", detail, StringComparison.Ordinal);
+        Assert.Contains("KeepPanelsAlive=\"true\"", detail, StringComparison.Ordinal);
         Assert.Contains("EnsureImageCards", detail, StringComparison.Ordinal);
         Assert.Contains("EnsureVideoCards", detail, StringComparison.Ordinal);
         Assert.Contains("private int CompletedImages => ImageCards.Count", detail, StringComparison.Ordinal);
@@ -126,6 +143,14 @@ public class TimelapsePhase2BTests
         Assert.Contains("TimelapseSellPricing.CustomerQualityLabel", detail, StringComparison.Ordinal);
         Assert.DoesNotContain("Fast", detail, StringComparison.Ordinal);
         Assert.DoesNotContain("Professional", detail, StringComparison.Ordinal);
+
+        Assert.Contains(".tl-loading-shimmer", detailCss, StringComparison.Ordinal);
+        Assert.Contains(".tl-loading-skeleton", detailCss, StringComparison.Ordinal);
+        Assert.Contains(".tl-pulse", detailCss, StringComparison.Ordinal);
+        Assert.Contains(".tl-flash-soft", detailCss, StringComparison.Ordinal);
+        Assert.Contains(".tl-video-wave", detailCss, StringComparison.Ordinal);
+        Assert.Contains(".tl-final-loading", detailCss, StringComparison.Ordinal);
+        Assert.Contains("@media (prefers-reduced-motion: reduce)", detailCss, StringComparison.Ordinal);
 
         Assert.Contains("pg_advisory_xact_lock", workflow, StringComparison.Ordinal);
         Assert.Contains("GetRenderProfileAsync", workflow, StringComparison.Ordinal);

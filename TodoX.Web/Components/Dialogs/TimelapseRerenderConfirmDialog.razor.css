@@ -1,0 +1,35 @@
+.timelapse-impact-summary {
+    display: grid;
+    gap: 8px;
+}
+
+.timelapse-impact-summary > div {
+    display: grid;
+    grid-template-columns: 24px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    padding: 10px 12px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.035);
+}
+
+.timelapse-impact-summary .mud-icon-root {
+    color: #ffca28;
+}
+
+.timelapse-impact-summary strong {
+    text-align: right;
+}
+
+@media (max-width: 600px) {
+    .timelapse-impact-summary > div {
+        grid-template-columns: 22px minmax(0, 1fr);
+    }
+
+    .timelapse-impact-summary strong {
+        grid-column: 2;
+        text-align: left;
+    }
+}
