@@ -49,6 +49,7 @@
     border-radius: 8px;
     background: rgba(255, 255, 255, 0.035);
     transition: border-color 180ms ease, box-shadow 180ms ease, background-color 180ms ease;
+    min-width: 0;
 }
 
 .stage-card-header {
@@ -56,6 +57,11 @@
     align-items: center;
     justify-content: space-between;
     gap: 8px;
+    min-width: 0;
+}
+
+.stage-card-header strong {
+    overflow-wrap: anywhere;
 }
 
 .stage-preview {
@@ -72,6 +78,8 @@
 
 .video-preview {
     aspect-ratio: 16 / 9;
+    width: 100%;
+    min-width: 0;
 }
 
 .timelapse-refresh-warning {
@@ -90,6 +98,33 @@
     margin-top: auto;
     padding-top: 2px;
     border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.tl-video-card-footer {
+    display: grid;
+    gap: 3px;
+    min-width: 0;
+    margin-top: auto;
+    padding-top: 8px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.tl-video-card-footer ::deep .mud-typography {
+    overflow-wrap: anywhere;
+}
+
+.tl-video-dependency-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    color: rgba(255, 255, 255, 0.84);
+    font-size: 0.82rem;
+}
+
+.tl-video-dependency-row span {
+    min-width: 0;
+    overflow-wrap: anywhere;
 }
 
 .tl-image-meta-row {
@@ -381,6 +416,13 @@
     height: 100%;
     max-height: 220px;
     object-fit: cover;
+}
+
+.video-preview video {
+    display: block;
+    min-width: 0;
+    border-radius: inherit;
+    background: #090c10;
 }
 
 .stage-preview span {

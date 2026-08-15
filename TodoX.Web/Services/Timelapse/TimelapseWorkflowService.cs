@@ -15,6 +15,7 @@ public interface ITimelapseWorkflowService
     Task<TimelapseWorkflowState> RetryImageAsync(Guid jobId, int progressPercent, TimelapseJobSnapshot snapshot, CurrentUserSession currentUser, CancellationToken ct = default);
     Task<TimelapseWorkflowState> UpdateImagePromptAsync(Guid jobId, Guid imageStageId, string prompt, bool rerender, TimelapseJobSnapshot snapshot, CurrentUserSession currentUser, CancellationToken ct = default);
     Task<TimelapseWorkflowState> RetryVideoAsync(Guid jobId, int clipIndex, TimelapseJobSnapshot snapshot, CurrentUserSession currentUser, CancellationToken ct = default);
+    Task<TimelapseWorkflowState> ConfirmVideoRenderAsync(Guid jobId, TimelapseJobSnapshot snapshot, CurrentUserSession currentUser, CancellationToken ct = default);
     Task<TimelapseWorkflowState> StartFinalizerAsync(Guid jobId, TimelapseJobSnapshot snapshot, CurrentUserSession currentUser, CancellationToken ct = default);
 }
 
@@ -87,6 +88,47 @@ public sealed class TimelapseWorkflowService : ITimelapseWorkflowService
                 promptProfileFields = "to_jsonb(public.todox_timelapse_prompt_profiles)"
             }, ct: ct);
 
+        return await GetStateAsync(jobId, ct);
+    }
+
+    public async Task<TimelapseWorkflowState> ConfirmVideoRenderAsync(
+        Guid jobId,
+        TimelapseJobSnapshot snapshot,
+        CurrentUserSession currentUser,
+        CancellationToken ct = default)
+    {
+        EnsureCustomer(currentUser);
+        if (!snapshot.RequireVideoConfirmation)
+        {
+            return await GetStateAsync(jobId, ct);
+        }
+
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        using var tx = conn.BeginTransaction();
+        await LockJobAsync(conn, tx, jobId);
+        await conn.ExecuteAsync(
+            """
+            UPDATE render.render_jobs
+               SET input_json=jsonb_set(
+                       COALESCE(input_json, '{}'::jsonb),
+                       '{videoRenderConfirmed}',
+                       'true'::jsonb,
+                       true),
+                   updated_at=now()
+             WHERE id=@jobId
+               AND tenant_id=@tenant;
+            """,
+            new { jobId, tenant = _tenant.TenantId }, tx);
+        await StartReadyVideosAsync(conn, tx, jobId);
+        tx.Commit();
+
+        await _renderJobs.AddEventAsync(
+            jobId,
+            "TIMELAPSE_VIDEO_RENDER_CONFIRMED",
+            "Customer confirmed Timelapse video rendering.",
+            new { readyClipsStarted = true },
+            ct: ct);
         return await GetStateAsync(jobId, ct);
     }
 
@@ -424,68 +466,66 @@ public sealed class TimelapseWorkflowService : ITimelapseWorkflowService
             """,
             new { jobId }, tx);
 
-        if (stage is null)
+        if (stage is not null)
         {
-            await StartReadyVideosAsync(conn, tx, jobId);
-            return;
+            var attempt = await conn.QuerySingleAsync<int>(
+                """
+                UPDATE timelapse.timelapse_image_stages
+                   SET active_attempt=active_attempt+1,
+                       status='RENDERING',
+                       provider_task_id=NULL,
+                       error_code=NULL,
+                       error_message=NULL,
+                       started_at=now(),
+                       completed_at=NULL,
+                       updated_at=now()
+                 WHERE id=@id
+                 RETURNING active_attempt;
+                """,
+                new { stage.Id }, tx);
+            await conn.ExecuteAsync(
+                """
+                INSERT INTO timelapse.timelapse_image_stage_versions
+                    (tenant_id, image_stage_id, job_id, attempt, status, prompt_snapshot_json, request_json, started_at)
+                SELECT tenant_id, id, job_id, @attempt, 'RENDERING', prompt_snapshot_json,
+                       jsonb_build_object('progress_percent', progress_percent, 'depends_on_progress_percent', depends_on_progress_percent),
+                       now()
+                  FROM timelapse.timelapse_image_stages
+                 WHERE id=@id
+                ON CONFLICT (image_stage_id, attempt) DO NOTHING;
+                """,
+                new { stage.Id, attempt }, tx);
         }
 
-        var attempt = await conn.QuerySingleAsync<int>(
-            """
-            UPDATE timelapse.timelapse_image_stages
-               SET active_attempt=active_attempt+1,
-                   status='RENDERING',
-                   provider_task_id=NULL,
-                   error_code=NULL,
-                   error_message=NULL,
-                   started_at=now(),
-                   completed_at=NULL,
-                   updated_at=now()
-             WHERE id=@id
-             RETURNING active_attempt;
-            """,
-            new { stage.Id }, tx);
-        await conn.ExecuteAsync(
-            """
-            INSERT INTO timelapse.timelapse_image_stage_versions
-                (tenant_id, image_stage_id, job_id, attempt, status, prompt_snapshot_json, request_json, started_at)
-            SELECT tenant_id, id, job_id, @attempt, 'RENDERING', prompt_snapshot_json,
-                   jsonb_build_object('progress_percent', progress_percent, 'depends_on_progress_percent', depends_on_progress_percent),
-                   now()
-              FROM timelapse.timelapse_image_stages
-             WHERE id=@id
-            ON CONFLICT (image_stage_id, attempt) DO NOTHING;
-            """,
-            new { stage.Id, attempt }, tx);
+        await StartReadyVideosAsync(conn, tx, jobId);
     }
 
     private async Task StartReadyVideosAsync(System.Data.IDbConnection conn, System.Data.IDbTransaction tx, Guid jobId)
     {
-        var incompleteImages = await conn.QuerySingleAsync<int>(
-            "SELECT count(*) FROM timelapse.timelapse_image_stages WHERE job_id=@jobId AND status <> 'COMPLETED';",
-            new { jobId }, tx);
-        if (incompleteImages > 0)
-        {
-            return;
-        }
-
-        await conn.ExecuteAsync(
-            """
-            UPDATE render.render_jobs
-               SET status=@status, updated_at=now()
-             WHERE id=@jobId AND tenant_id=@tenant;
-            """,
-            new { jobId, tenant = _tenant.TenantId, status = TimelapseParentStatuses.GeneratingVideos }, tx);
-
         var clips = (await conn.QueryAsync<(Guid Id, int ClipIndex)>(
             """
-            SELECT id AS Id, clip_index AS ClipIndex
-              FROM timelapse.timelapse_video_clips
-             WHERE job_id=@jobId
-               AND status IN ('WAITING','FAILED','INVALIDATED')
-             ORDER BY clip_index;
+            SELECT c.id AS Id, c.clip_index AS ClipIndex
+              FROM timelapse.timelapse_video_clips c
+              JOIN timelapse.timelapse_image_stages start_img
+                ON start_img.job_id=c.job_id
+               AND start_img.progress_percent=c.start_progress_percent
+               AND start_img.status='COMPLETED'
+              JOIN timelapse.timelapse_image_stages end_img
+                ON end_img.job_id=c.job_id
+               AND end_img.progress_percent=c.end_progress_percent
+               AND end_img.status='COMPLETED'
+              JOIN render.render_jobs j
+                ON j.id=c.job_id
+               AND j.tenant_id=@tenant
+             WHERE c.job_id=@jobId
+               AND c.status IN ('WAITING','INVALIDATED')
+               AND (
+                   COALESCE((j.input_json->>'requireVideoConfirmation')::boolean, false)=false
+                   OR COALESCE((j.input_json->>'videoRenderConfirmed')::boolean, false)=true
+               )
+             ORDER BY c.clip_index;
             """,
-            new { jobId }, tx)).ToList();
+            new { jobId, tenant = _tenant.TenantId }, tx)).ToList();
 
         foreach (var clip in clips)
         {
@@ -504,6 +544,56 @@ public sealed class TimelapseWorkflowService : ITimelapseWorkflowService
                 ON CONFLICT (video_clip_id, attempt) DO NOTHING;
                 """,
                 new { clip.Id, attempt }, tx);
+        }
+
+        var incompleteImages = await conn.QuerySingleAsync<int>(
+            """
+            SELECT count(*)
+              FROM timelapse.timelapse_image_stages
+             WHERE job_id=@jobId
+               AND is_original=false
+               AND status <> 'COMPLETED';
+            """,
+            new { jobId }, tx);
+        if (incompleteImages == 0)
+        {
+            await conn.ExecuteAsync(
+                """
+                UPDATE render.render_jobs
+                   SET status=CASE
+                           WHEN EXISTS (
+                               SELECT 1
+                                 FROM timelapse.timelapse_video_clips
+                                WHERE job_id=@jobId
+                                  AND status='RENDERING')
+                               THEN @generatingVideos
+                           WHEN EXISTS (
+                               SELECT 1
+                                 FROM timelapse.timelapse_video_clips
+                                WHERE job_id=@jobId
+                                  AND status='FAILED')
+                               THEN @failed
+                           WHEN NOT EXISTS (
+                               SELECT 1
+                                 FROM timelapse.timelapse_video_clips
+                                WHERE job_id=@jobId
+                                  AND status <> 'COMPLETED')
+                               THEN @videosReady
+                           ELSE @imagesReady
+                       END,
+                       updated_at=now()
+                 WHERE id=@jobId
+                   AND tenant_id=@tenant;
+                """,
+                new
+                {
+                    jobId,
+                    tenant = _tenant.TenantId,
+                    failed = TimelapseParentStatuses.Failed,
+                    imagesReady = TimelapseParentStatuses.ImagesReady,
+                    generatingVideos = TimelapseParentStatuses.GeneratingVideos,
+                    videosReady = TimelapseParentStatuses.VideosReady
+                }, tx);
         }
     }
 
@@ -584,7 +674,9 @@ public sealed class TimelapseWorkflowService : ITimelapseWorkflowService
                    public_url AS PublicUrl,
                    object_key AS ObjectKey,
                    provider_task_id AS ProviderTaskId,
-                   error_message AS ErrorMessage
+                   error_message AS ErrorMessage,
+                   started_at AS StartedAt,
+                   completed_at AS CompletedAt
               FROM timelapse.timelapse_video_clips
              WHERE job_id=@jobId
              ORDER BY clip_index;
@@ -610,6 +702,26 @@ public sealed class TimelapseWorkflowService : ITimelapseWorkflowService
                         || videos.Any(x => TimelapseOperationStatuses.IsActive(x.Status))
                         || TimelapseOperationStatuses.IsActive(final?.Status);
         var videosReady = videos.Count > 0 && videos.All(x => TimelapseOperationStatuses.IsCurrentCompleted(x.Status));
+        var imageProgress = TimelapseProgress.CalculateImageProgress(images);
+        var readyVideoCount = videos.Count(clip =>
+            clip.Status is TimelapseOperationStatuses.Waiting or TimelapseOperationStatuses.Invalidated
+            && TimelapseVideoOrchestration.IsReady(clip, images));
+        var requiresVideoConfirmation = await conn.QuerySingleAsync<bool>(
+            """
+            SELECT COALESCE((input_json->>'requireVideoConfirmation')::boolean, false)
+              FROM render.render_jobs
+             WHERE id=@jobId
+               AND tenant_id=@tenant;
+            """,
+            new { jobId, tenant = _tenant.TenantId }, tx);
+        var videoRenderConfirmed = await conn.QuerySingleAsync<bool>(
+            """
+            SELECT COALESCE((input_json->>'videoRenderConfirmed')::boolean, false)
+              FROM render.render_jobs
+             WHERE id=@jobId
+               AND tenant_id=@tenant;
+            """,
+            new { jobId, tenant = _tenant.TenantId }, tx);
         var canEdit = !hasActive && TimelapseParentStatuses.IsEditableStopped(parent);
         var canStart = !hasActive
                        && !string.Equals(parent, TimelapseParentStatuses.Completed, StringComparison.OrdinalIgnoreCase)
@@ -626,8 +738,11 @@ public sealed class TimelapseWorkflowService : ITimelapseWorkflowService
             CanEditRequest = canEdit,
             CanStartRender = canStart,
             CanFinalize = videosReady && !hasActive && final?.Status != TimelapseOperationStatuses.Completed,
+            RequiresVideoConfirmation = requiresVideoConfirmation,
+            CanConfirmVideoRender = requiresVideoConfirmation && !videoRenderConfirmed && readyVideoCount > 0,
+            ReadyVideoCount = readyVideoCount,
             GeneratedImageCount = images.Count(x => !x.IsOriginal),
-            CurrentStep = BuildCurrentStep(images, videos, final)
+            CurrentStep = BuildCurrentStep(images, videos, final, imageProgress)
         };
     }
 
@@ -647,12 +762,13 @@ public sealed class TimelapseWorkflowService : ITimelapseWorkflowService
     private static string BuildCurrentStep(
         IReadOnlyList<TimelapseStageImage> images,
         IReadOnlyList<TimelapseVideoClip> videos,
-        TimelapseFinalOutput? final)
+        TimelapseFinalOutput? final,
+        TimelapseImageProgressSummary imageProgress)
     {
         var image = images.FirstOrDefault(x => TimelapseOperationStatuses.IsActive(x.Status));
         if (image is not null)
         {
-            return $"Đang tạo ảnh {image.ProgressPercent}%";
+            return $"Tiến độ ảnh: {imageProgress.Percent}% · Đang tạo ảnh {image.ProgressPercent}%";
         }
 
         var video = videos.FirstOrDefault(x => TimelapseOperationStatuses.IsActive(x.Status));
@@ -666,7 +782,21 @@ public sealed class TimelapseWorkflowService : ITimelapseWorkflowService
             return "Đang hoàn thiện video";
         }
 
-        return "Đang chờ thao tác";
+        if (imageProgress.Total > 0 && imageProgress.Completed < imageProgress.Total)
+        {
+            return images.Any(x => x.Status == TimelapseOperationStatuses.Failed)
+                ? $"Tiến độ ảnh: {imageProgress.Percent}% · Cần tạo lại ảnh lỗi"
+                : $"Tiến độ ảnh: {imageProgress.Percent}% · Đang chờ";
+        }
+
+        if (videos.Count > 0 && videos.All(x => TimelapseOperationStatuses.IsCurrentCompleted(x.Status)))
+        {
+            return "Video đã sẵn sàng";
+        }
+
+        return imageProgress.Total > 0 && imageProgress.Percent == 100
+            ? "Ảnh đã sẵn sàng"
+            : "Chưa bắt đầu";
     }
 
     private static async Task LockJobAsync(System.Data.IDbConnection conn, System.Data.IDbTransaction tx, Guid jobId)

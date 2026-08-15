@@ -134,9 +134,13 @@ public sealed class TimelapseWorkerRepository : ITimelapseWorkerRepository
               FROM timelapse.timelapse_video_clips c
               JOIN render.render_jobs j ON j.id=c.job_id
               JOIN timelapse.timelapse_image_stages start_img
-                ON start_img.job_id=c.job_id AND start_img.progress_percent=c.start_progress_percent
+                ON start_img.job_id=c.job_id
+               AND start_img.progress_percent=c.start_progress_percent
+               AND start_img.status='COMPLETED'
               JOIN timelapse.timelapse_image_stages end_img
-                ON end_img.job_id=c.job_id AND end_img.progress_percent=c.end_progress_percent
+                ON end_img.job_id=c.job_id
+               AND end_img.progress_percent=c.end_progress_percent
+               AND end_img.status='COMPLETED'
               JOIN candidate picked ON picked.id=c.id
              WHERE v.video_clip_id=c.id
                AND v.attempt=c.active_attempt
@@ -344,10 +348,52 @@ public sealed class TimelapseWorkerRepository : ITimelapseWorkerRepository
         using var conn = await _factory.OpenAsync(ct);
         using var tx = conn.BeginTransaction();
         await LockJobAsync(conn, tx, jobId);
-        var incomplete = await conn.QuerySingleAsync<int>(
-            "SELECT count(*) FROM timelapse.timelapse_video_clips WHERE job_id=@jobId AND status <> 'COMPLETED';",
+        var statusCounts = await conn.QuerySingleAsync<(int Active, int Failed, int IncompleteVideos)>(
+            """
+            SELECT
+                (
+                    SELECT count(*)
+                      FROM timelapse.timelapse_image_stages
+                     WHERE job_id=@jobId
+                       AND status='RENDERING'
+                ) + (
+                    SELECT count(*)
+                      FROM timelapse.timelapse_video_clips
+                     WHERE job_id=@jobId
+                       AND status='RENDERING'
+                ) AS Active,
+                (
+                    SELECT count(*)
+                      FROM timelapse.timelapse_image_stages
+                     WHERE job_id=@jobId
+                       AND status='FAILED'
+                ) + (
+                    SELECT count(*)
+                      FROM timelapse.timelapse_video_clips
+                     WHERE job_id=@jobId
+                       AND status='FAILED'
+                ) AS Failed,
+                (
+                    SELECT count(*)
+                      FROM timelapse.timelapse_video_clips
+                     WHERE job_id=@jobId
+                       AND status <> 'COMPLETED'
+                ) AS IncompleteVideos;
+            """,
             new { jobId }, tx);
-        if (incomplete == 0)
+        if (statusCounts.Active == 0 && statusCounts.Failed > 0)
+        {
+            await conn.ExecuteAsync(
+                """
+                UPDATE render.render_jobs
+                   SET status=@status,
+                       updated_at=now()
+                 WHERE id=@jobId
+                   AND tenant_id=@tenant;
+                """,
+                new { jobId, tenant = _tenant.TenantId, status = TimelapseParentStatuses.Failed }, tx);
+        }
+        else if (statusCounts.IncompleteVideos == 0)
         {
             await conn.ExecuteAsync(
                 """
@@ -551,60 +597,54 @@ public sealed class TimelapseWorkerRepository : ITimelapseWorkerRepository
             """,
             new { jobId }, tx);
 
-        if (stage is null)
+        if (stage is not null)
         {
-            await StartReadyVideosAsync(conn, tx, jobId);
-            return;
+            var attempt = await conn.QuerySingleAsync<int>(
+                "UPDATE timelapse.timelapse_image_stages SET active_attempt=active_attempt+1, status='RENDERING', provider_task_id=NULL, started_at=now(), updated_at=now() WHERE id=@id RETURNING active_attempt;",
+                new { stage.Id }, tx);
+            await conn.ExecuteAsync(
+                """
+                INSERT INTO timelapse.timelapse_image_stage_versions
+                    (tenant_id, image_stage_id, job_id, attempt, status, prompt_snapshot_json, request_json, started_at)
+                SELECT tenant_id, id, job_id, @attempt, 'RENDERING', prompt_snapshot_json,
+                       jsonb_build_object('progress_percent', progress_percent, 'depends_on_progress_percent', depends_on_progress_percent),
+                       now()
+                  FROM timelapse.timelapse_image_stages
+                 WHERE id=@id
+                ON CONFLICT (image_stage_id, attempt) DO NOTHING;
+                """,
+                new { stage.Id, attempt }, tx);
         }
 
-        var attempt = await conn.QuerySingleAsync<int>(
-            "UPDATE timelapse.timelapse_image_stages SET active_attempt=active_attempt+1, status='RENDERING', provider_task_id=NULL, started_at=now(), updated_at=now() WHERE id=@id RETURNING active_attempt;",
-            new { stage.Id }, tx);
-        await conn.ExecuteAsync(
-            """
-            INSERT INTO timelapse.timelapse_image_stage_versions
-                (tenant_id, image_stage_id, job_id, attempt, status, prompt_snapshot_json, request_json, started_at)
-            SELECT tenant_id, id, job_id, @attempt, 'RENDERING', prompt_snapshot_json,
-                   jsonb_build_object('progress_percent', progress_percent, 'depends_on_progress_percent', depends_on_progress_percent),
-                   now()
-              FROM timelapse.timelapse_image_stages
-             WHERE id=@id
-            ON CONFLICT (image_stage_id, attempt) DO NOTHING;
-            """,
-            new { stage.Id, attempt }, tx);
+        await StartReadyVideosAsync(conn, tx, jobId);
     }
 
     private async Task StartReadyVideosAsync(IDbConnection conn, IDbTransaction tx, Guid jobId)
     {
-        var incompleteImages = await conn.QuerySingleAsync<int>(
-            "SELECT count(*) FROM timelapse.timelapse_image_stages WHERE job_id=@jobId AND status <> 'COMPLETED';",
-            new { jobId }, tx);
-        if (incompleteImages > 0)
-        {
-            return;
-        }
-
-        await conn.ExecuteAsync(
-            """
-            UPDATE render.render_jobs
-               SET status=@imagesReady, updated_at=now()
-             WHERE id=@jobId AND tenant_id=@tenant;
-
-            UPDATE render.render_jobs
-               SET status=@generatingVideos, updated_at=now()
-             WHERE id=@jobId AND tenant_id=@tenant;
-            """,
-            new { jobId, tenant = _tenant.TenantId, imagesReady = TimelapseParentStatuses.ImagesReady, generatingVideos = TimelapseParentStatuses.GeneratingVideos }, tx);
-
         var clips = (await conn.QueryAsync<(Guid Id, int ClipIndex)>(
             """
-            SELECT id AS Id, clip_index AS ClipIndex
-              FROM timelapse.timelapse_video_clips
-             WHERE job_id=@jobId
-               AND status IN ('WAITING','FAILED','INVALIDATED')
-             ORDER BY clip_index;
+            SELECT c.id AS Id, c.clip_index AS ClipIndex
+              FROM timelapse.timelapse_video_clips c
+              JOIN timelapse.timelapse_image_stages start_img
+                ON start_img.job_id=c.job_id
+               AND start_img.progress_percent=c.start_progress_percent
+               AND start_img.status='COMPLETED'
+              JOIN timelapse.timelapse_image_stages end_img
+                ON end_img.job_id=c.job_id
+               AND end_img.progress_percent=c.end_progress_percent
+               AND end_img.status='COMPLETED'
+              JOIN render.render_jobs j
+                ON j.id=c.job_id
+               AND j.tenant_id=@tenant
+             WHERE c.job_id=@jobId
+               AND c.status IN ('WAITING','INVALIDATED')
+               AND (
+                   COALESCE((j.input_json->>'requireVideoConfirmation')::boolean, false)=false
+                   OR COALESCE((j.input_json->>'videoRenderConfirmed')::boolean, false)=true
+               )
+             ORDER BY c.clip_index;
             """,
-            new { jobId }, tx)).ToList();
+            new { jobId, tenant = _tenant.TenantId }, tx)).ToList();
 
         foreach (var clip in clips)
         {
@@ -623,6 +663,56 @@ public sealed class TimelapseWorkerRepository : ITimelapseWorkerRepository
                 ON CONFLICT (video_clip_id, attempt) DO NOTHING;
                 """,
                 new { clip.Id, attempt }, tx);
+        }
+
+        var incompleteImages = await conn.QuerySingleAsync<int>(
+            """
+            SELECT count(*)
+              FROM timelapse.timelapse_image_stages
+             WHERE job_id=@jobId
+               AND is_original=false
+               AND status <> 'COMPLETED';
+            """,
+            new { jobId }, tx);
+        if (incompleteImages == 0)
+        {
+            await conn.ExecuteAsync(
+                """
+                UPDATE render.render_jobs
+                   SET status=CASE
+                           WHEN EXISTS (
+                               SELECT 1
+                                 FROM timelapse.timelapse_video_clips
+                                WHERE job_id=@jobId
+                                  AND status='RENDERING')
+                               THEN @generatingVideos
+                           WHEN EXISTS (
+                               SELECT 1
+                                 FROM timelapse.timelapse_video_clips
+                                WHERE job_id=@jobId
+                                  AND status='FAILED')
+                               THEN @failed
+                           WHEN NOT EXISTS (
+                               SELECT 1
+                                 FROM timelapse.timelapse_video_clips
+                                WHERE job_id=@jobId
+                                  AND status <> 'COMPLETED')
+                               THEN @videosReady
+                           ELSE @imagesReady
+                       END,
+                       updated_at=now()
+                 WHERE id=@jobId
+                   AND tenant_id=@tenant;
+                """,
+                new
+                {
+                    jobId,
+                    tenant = _tenant.TenantId,
+                    failed = TimelapseParentStatuses.Failed,
+                    imagesReady = TimelapseParentStatuses.ImagesReady,
+                    generatingVideos = TimelapseParentStatuses.GeneratingVideos,
+                    videosReady = TimelapseParentStatuses.VideosReady
+                }, tx);
         }
     }
 

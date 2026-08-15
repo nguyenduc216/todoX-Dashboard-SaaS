@@ -37,6 +37,13 @@ public class TimelapsePhase2CTests
         Assert.Contains("provider_task_id", source);
         Assert.Contains("AdvanceAfterImageCompletedAsync", source);
         Assert.Contains("AdvanceAfterVideoCompletedAsync", source);
+        Assert.Contains("start_img.status='COMPLETED'", source, StringComparison.Ordinal);
+        Assert.Contains("end_img.status='COMPLETED'", source, StringComparison.Ordinal);
+        Assert.Contains("requireVideoConfirmation", source, StringComparison.Ordinal);
+        Assert.Contains("videoRenderConfirmed", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("c.status IN ('WAITING','FAILED','INVALIDATED')", source, StringComparison.Ordinal);
+        Assert.Contains("statusCounts.Active == 0 && statusCounts.Failed > 0", source, StringComparison.Ordinal);
+        Assert.Contains("status <> 'COMPLETED'", source, StringComparison.Ordinal);
     }
 
     [Fact]

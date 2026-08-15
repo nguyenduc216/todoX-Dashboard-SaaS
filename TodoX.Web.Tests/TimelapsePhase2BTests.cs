@@ -86,6 +86,98 @@ public class TimelapsePhase2BTests
     }
 
     [Fact]
+    public void ImageProgress_ExcludesOriginalAndCalculatesCompletedGeneratedStages()
+    {
+        var images = new[]
+        {
+            Stage(0, TimelapseOperationStatuses.Completed),
+            Stage(25, TimelapseOperationStatuses.Completed),
+            Stage(50, TimelapseOperationStatuses.Completed),
+            Stage(75, TimelapseOperationStatuses.Rendering),
+            Stage(100, TimelapseOperationStatuses.Completed, isOriginal: true)
+        };
+
+        var progress = TimelapseProgress.CalculateImageProgress(images);
+
+        Assert.Equal(3, progress.Completed);
+        Assert.Equal(4, progress.Total);
+        Assert.Equal(75, progress.Percent);
+    }
+
+    [Fact]
+    public void VideoReadiness_RequiresBothBoundaryImages()
+    {
+        var clip = new TimelapseVideoClip
+        {
+            StartProgressPercent = 75,
+            EndProgressPercent = 100
+        };
+        var readyImages = new[]
+        {
+            Stage(75, TimelapseOperationStatuses.Completed),
+            Stage(100, TimelapseOperationStatuses.Completed, isOriginal: true)
+        };
+        var missingStartImage = new[]
+        {
+            Stage(75, TimelapseOperationStatuses.Rendering),
+            Stage(100, TimelapseOperationStatuses.Completed, isOriginal: true)
+        };
+
+        Assert.True(TimelapseVideoOrchestration.IsReady(clip, readyImages));
+        Assert.False(TimelapseVideoOrchestration.IsReady(clip, missingStartImage));
+    }
+
+    [Fact]
+    public void VideoReadiness_HonorsConfirmationGate()
+    {
+        var clip = new TimelapseVideoClip
+        {
+            StartProgressPercent = 75,
+            EndProgressPercent = 100
+        };
+        var images = new[]
+        {
+            Stage(75, TimelapseOperationStatuses.Completed),
+            Stage(100, TimelapseOperationStatuses.Completed, isOriginal: true)
+        };
+
+        Assert.False(TimelapseVideoOrchestration.IsReady(clip, images, requiresConfirmation: true));
+        Assert.True(TimelapseVideoOrchestration.IsReady(clip, images, requiresConfirmation: true, videoRenderConfirmed: true));
+    }
+
+    [Fact]
+    public void CompletedVideoPreview_RequiresCompletedStatusAndPublicUrl()
+    {
+        Assert.True(TimelapseVideoOrchestration.HasCompletedPreview(new TimelapseVideoClip
+        {
+            Status = TimelapseOperationStatuses.Completed,
+            PublicUrl = "/media/timelapse/clip.mp4"
+        }));
+        Assert.False(TimelapseVideoOrchestration.HasCompletedPreview(new TimelapseVideoClip
+        {
+            Status = TimelapseOperationStatuses.Rendering,
+            PublicUrl = "/media/timelapse/clip.mp4"
+        }));
+        Assert.False(TimelapseVideoOrchestration.HasCompletedPreview(new TimelapseVideoClip
+        {
+            Status = TimelapseOperationStatuses.Completed
+        }));
+    }
+
+    [Theory]
+    [InlineData(TimelapseParentStatuses.Draft, "Bản nháp")]
+    [InlineData(TimelapseParentStatuses.GeneratingImages, "Đang tạo ảnh")]
+    [InlineData(TimelapseParentStatuses.ImagesReady, "Ảnh đã sẵn sàng")]
+    [InlineData(TimelapseParentStatuses.GeneratingVideos, "Đang tạo video")]
+    [InlineData(TimelapseParentStatuses.VideosReady, "Video đã sẵn sàng")]
+    [InlineData(TimelapseParentStatuses.Finalizing, "Đang ghép video")]
+    [InlineData(TimelapseParentStatuses.Completed, "Hoàn thành")]
+    [InlineData(TimelapseParentStatuses.Failed, "Thất bại")]
+    [InlineData(TimelapseParentStatuses.Paused, "Tạm dừng")]
+    public void ParentStatusText_IsCustomerFriendlyVietnamese(string status, string expected)
+        => Assert.Equal(expected, TimelapseStatusText.Parent(status));
+
+    [Fact]
     public void TimelapsePhase2B_SourceContracts_ArePresent()
     {
         var detail = ReadSource("TodoX.Web", "Components", "Pages", "TimelapseJobDetail.razor");
@@ -104,7 +196,7 @@ public class TimelapsePhase2BTests
         Assert.Contains("Icons.Material.Filled.Movie", detail, StringComparison.Ordinal);
         Assert.Contains("Đang tạo ảnh...", detail, StringComparison.Ordinal);
         Assert.Contains("Đang tạo video...", detail, StringComparison.Ordinal);
-        Assert.Contains("Đang render clip", detail, StringComparison.Ordinal);
+        Assert.Contains("Đang tạo video", detail, StringComparison.Ordinal);
         Assert.Contains("Đang ghép video cuối cùng...", detail, StringComparison.Ordinal);
         Assert.Contains("Đang chờ hoàn thiện kết quả...", detail, StringComparison.Ordinal);
         Assert.Contains("TimelapseParentStatuses.Finalizing", detail, StringComparison.Ordinal);
@@ -135,14 +227,23 @@ public class TimelapsePhase2BTests
         Assert.Contains("KeepPanelsAlive=\"true\"", detail, StringComparison.Ordinal);
         Assert.Contains("EnsureImageCards", detail, StringComparison.Ordinal);
         Assert.Contains("EnsureVideoCards", detail, StringComparison.Ordinal);
-        Assert.Contains("private int CompletedImages => ImageCards.Count", detail, StringComparison.Ordinal);
+        Assert.Contains("TimelapseProgress.CalculateImageProgress(ImageCards)", detail, StringComparison.Ordinal);
+        Assert.Contains("ImageProgress.Completed", detail, StringComparison.Ordinal);
+        Assert.Contains("ImageProgress.Percent", detail, StringComparison.Ordinal);
         Assert.Contains("private int CompletedVideos => VideoCards.Count", detail, StringComparison.Ordinal);
-        Assert.Contains("private int TotalImages => ImageCards.Count", detail, StringComparison.Ordinal);
         Assert.Contains("private int TotalVideos => VideoCards.Count", detail, StringComparison.Ordinal);
         Assert.Contains("Đang chờ render", detail, StringComparison.Ordinal);
-        Assert.Contains("Đang chờ ảnh đầu vào", detail, StringComparison.Ordinal);
+        Assert.Contains("Đang chờ ảnh", detail, StringComparison.Ordinal);
+        Assert.Contains("hoàn thành", detail, StringComparison.Ordinal);
         Assert.Contains("ImageFailureCount", detail, StringComparison.Ordinal);
         Assert.Contains("VideoFailureCount", detail, StringComparison.Ordinal);
+        Assert.Contains("@foreach (var clip in VideoCards)", detail, StringComparison.Ordinal);
+        Assert.Contains("TimelapseVideoOrchestration.HasCompletedPreview", detail, StringComparison.Ordinal);
+        Assert.Contains("FormatClipStartedAt", detail, StringComparison.Ordinal);
+        Assert.Contains("clip.CompletedAt", detail, StringComparison.Ordinal);
+        Assert.Contains("Bắt đầu tạo video", detail, StringComparison.Ordinal);
+        Assert.Contains("ConfirmVideoRenderAsync", detail, StringComparison.Ordinal);
+        Assert.Contains("Hệ thống tiếp tục xử lý kể cả khi bạn rời trang.", detail, StringComparison.Ordinal);
         Assert.Contains("TimelapseSellPricing.CustomerQualityLabel", detail, StringComparison.Ordinal);
         Assert.DoesNotContain("Fast", detail, StringComparison.Ordinal);
         Assert.DoesNotContain("Professional", detail, StringComparison.Ordinal);
@@ -173,7 +274,15 @@ public class TimelapsePhase2BTests
         Assert.Contains("TIMELAPSE_RENDER_STARTED", workflow, StringComparison.Ordinal);
         Assert.Contains("TIMELAPSE_IMAGE_RERENDER_REQUESTED", workflow, StringComparison.Ordinal);
         Assert.Contains("TIMELAPSE_VIDEO_RERENDER_REQUESTED", workflow, StringComparison.Ordinal);
+        Assert.Contains("TIMELAPSE_VIDEO_RENDER_CONFIRMED", workflow, StringComparison.Ordinal);
         Assert.Contains("TIMELAPSE_FINALIZER_STARTED", workflow, StringComparison.Ordinal);
+        Assert.Contains("start_img.status='COMPLETED'", workflow, StringComparison.Ordinal);
+        Assert.Contains("end_img.status='COMPLETED'", workflow, StringComparison.Ordinal);
+        Assert.Contains("requireVideoConfirmation", workflow, StringComparison.Ordinal);
+        Assert.Contains("videoRenderConfirmed", workflow, StringComparison.Ordinal);
+        Assert.Contains("input_json=jsonb_set", workflow, StringComparison.Ordinal);
+        Assert.Contains("started_at AS StartedAt", workflow, StringComparison.Ordinal);
+        Assert.Contains("completed_at AS CompletedAt", workflow, StringComparison.Ordinal);
 
         Assert.Contains("to_jsonb(p)::text AS ProfileJson", profiles, StringComparison.Ordinal);
         Assert.Contains("public.todox_timelapse_prompt_profiles", profiles, StringComparison.Ordinal);
@@ -191,6 +300,14 @@ public class TimelapsePhase2BTests
 
         Assert.Contains("AddScoped<ITimelapseWorkflowService, TimelapseWorkflowService>", program, StringComparison.Ordinal);
     }
+
+    private static TimelapseStageImage Stage(int progress, string status, bool isOriginal = false)
+        => new()
+        {
+            ProgressPercent = progress,
+            Status = status,
+            IsOriginal = isOriginal
+        };
 
     private static string ReadSource(params string[] parts)
     {

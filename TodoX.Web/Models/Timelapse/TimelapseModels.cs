@@ -76,6 +76,7 @@ public sealed class TimelapseCreateRequest
     public int SceneCount { get; set; } = 3;
     public string VideoMode { get; set; } = TimelapseRequestRules.FastMode;
     public string Ratio { get; set; } = TimelapseRequestRules.LandscapeRatio;
+    public bool RequireVideoConfirmation { get; set; }
 }
 
 public sealed class TimelapseOriginalImageSnapshot
@@ -99,6 +100,8 @@ public sealed class TimelapseJobSnapshot
     public string VideoMode { get; set; } = TimelapseRequestRules.FastMode;
     public string Ratio { get; set; } = TimelapseRequestRules.LandscapeRatio;
     public string Title { get; set; } = "Video Timelapse";
+    public bool RequireVideoConfirmation { get; set; }
+    public bool VideoRenderConfirmed { get; set; }
     public TimelapseSellPriceSnapshot? SellPrice { get; set; }
     public TimelapseOriginalImageSnapshot OriginalImage { get; set; } = new();
 }
@@ -188,6 +191,8 @@ public sealed class TimelapseVideoClip
     public string? ObjectKey { get; set; }
     public string? ProviderTaskId { get; set; }
     public string? ErrorMessage { get; set; }
+    public DateTime? StartedAt { get; set; }
+    public DateTime? CompletedAt { get; set; }
 }
 
 public sealed class TimelapseFinalOutput
@@ -213,8 +218,81 @@ public sealed class TimelapseWorkflowState
     public bool CanEditRequest { get; set; } = true;
     public bool CanStartRender { get; set; } = true;
     public bool CanFinalize { get; set; }
+    public bool RequiresVideoConfirmation { get; set; }
+    public bool CanConfirmVideoRender { get; set; }
+    public int ReadyVideoCount { get; set; }
     public int GeneratedImageCount { get; set; }
     public string CurrentStep { get; set; } = "Chưa bắt đầu";
+}
+
+public sealed record TimelapseImageProgressSummary(int Completed, int Total, int Percent);
+
+public static class TimelapseProgress
+{
+    public static TimelapseImageProgressSummary CalculateImageProgress(IEnumerable<TimelapseStageImage> images)
+    {
+        var generated = images
+            .Where(x => !x.IsOriginal && x.ProgressPercent < 100)
+            .ToArray();
+        var completed = generated.Count(x => TimelapseOperationStatuses.IsCurrentCompleted(x.Status));
+        var percent = generated.Length == 0 ? 0 : completed * 100 / generated.Length;
+        return new TimelapseImageProgressSummary(completed, generated.Length, percent);
+    }
+}
+
+public static class TimelapseVideoOrchestration
+{
+    public static bool IsReady(
+        TimelapseVideoClip clip,
+        IEnumerable<TimelapseStageImage> images,
+        bool requiresConfirmation = false,
+        bool videoRenderConfirmed = false)
+    {
+        if (requiresConfirmation && !videoRenderConfirmed)
+        {
+            return false;
+        }
+
+        var completedProgress = images
+            .Where(x => TimelapseOperationStatuses.IsCurrentCompleted(x.Status))
+            .Select(x => x.ProgressPercent)
+            .ToHashSet();
+        return completedProgress.Contains(clip.StartProgressPercent)
+               && completedProgress.Contains(clip.EndProgressPercent);
+    }
+
+    public static bool HasCompletedPreview(TimelapseVideoClip clip)
+        => TimelapseOperationStatuses.IsCurrentCompleted(clip.Status)
+           && !string.IsNullOrWhiteSpace(clip.PublicUrl);
+}
+
+public static class TimelapseStatusText
+{
+    public static string Parent(string? status)
+        => status?.ToUpperInvariant() switch
+        {
+            TimelapseParentStatuses.Draft => "Bản nháp",
+            TimelapseParentStatuses.GeneratingImages => "Đang tạo ảnh",
+            TimelapseParentStatuses.ImagesReady => "Ảnh đã sẵn sàng",
+            TimelapseParentStatuses.GeneratingVideos => "Đang tạo video",
+            TimelapseParentStatuses.VideosReady => "Video đã sẵn sàng",
+            TimelapseParentStatuses.Finalizing => "Đang ghép video",
+            TimelapseParentStatuses.Completed => "Hoàn thành",
+            TimelapseParentStatuses.Failed => "Thất bại",
+            TimelapseParentStatuses.Paused => "Tạm dừng",
+            _ => "Chưa bắt đầu"
+        };
+
+    public static string Operation(string? status)
+        => status?.ToUpperInvariant() switch
+        {
+            TimelapseOperationStatuses.Waiting => "Đang chờ",
+            TimelapseOperationStatuses.Rendering => "Đang xử lý",
+            TimelapseOperationStatuses.Completed => "Hoàn thành",
+            TimelapseOperationStatuses.Failed => "Thất bại",
+            TimelapseOperationStatuses.Invalidated => "Cần tạo lại",
+            _ => "Chưa bắt đầu"
+        };
 }
 
 public static class TimelapseRequestRules
