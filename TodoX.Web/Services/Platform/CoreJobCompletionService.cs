@@ -116,7 +116,10 @@ public sealed class CoreJobCompletionService : ICoreJobCompletionService
             """
             UPDATE render.render_jobs
                SET status='rendering',
-                   current_step='external_execution',
+                   current_step=CASE
+                       WHEN progress_percent > 1 THEN current_step
+                       ELSE 'external_execution'
+                   END,
                    progress_percent=GREATEST(progress_percent, 1),
                    options=jsonb_set(
                        COALESCE(options, '{}'::jsonb),
@@ -129,7 +132,8 @@ public sealed class CoreJobCompletionService : ICoreJobCompletionService
              WHERE id=@jobId
                AND tenant_id=@tenant
                AND job_type=@jobType
-               AND status NOT IN ('completed','failed','cancelled');
+               AND status NOT IN ('completed','failed','cancelled')
+               AND progress_percent < @progress;
             """,
             new
             {

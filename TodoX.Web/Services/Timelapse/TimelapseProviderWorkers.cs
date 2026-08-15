@@ -107,7 +107,9 @@ public sealed class TimelapseFinalizerWorker : BackgroundService
                 var item = await repo.ClaimFinalizerAsync(workerKey, claimFor, ct);
                 if (item is null)
                 {
-                    return false;
+                    return await scope.ServiceProvider
+                        .GetRequiredService<ITimelapseCoreLifecycleBridge>()
+                        .ReconcileCompletionAsync(ct);
                 }
 
                 await scope.ServiceProvider.GetRequiredService<ITimelapseFinalizerRuntime>().ProcessAsync(item, ct);

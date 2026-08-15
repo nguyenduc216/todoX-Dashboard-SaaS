@@ -91,6 +91,7 @@ public sealed class TimelapseJobSnapshot
 {
     public int SchemaVersion { get; set; } = 1;
     public string Engine { get; set; } = TodoXServiceEngineTypes.Timelapse;
+    public Guid? CoreJobId { get; set; }
     public Guid ServiceId { get; set; }
     public string ServiceCode { get; set; } = string.Empty;
     public string ProfileCode { get; set; } = string.Empty;

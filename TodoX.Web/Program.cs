@@ -56,6 +56,9 @@ builder.Services.AddScoped<ITimelapseWorkflowService, TimelapseWorkflowService>(
 builder.Services.AddScoped<ITimelapseJobService, TimelapseJobService>();
 builder.Services.Configure<TimelapseProviderWorkerOptions>(builder.Configuration.GetSection(TimelapseProviderWorkerOptions.SectionName));
 builder.Services.AddScoped<ITimelapseWorkerRepository, TimelapseWorkerRepository>();
+builder.Services.AddScoped<ITimelapseCoreLifecycleBridge, TimelapseCoreLifecycleBridge>();
+builder.Services.AddScoped<IConstructionTimelapseExecutionBridge, ConstructionTimelapseExecutionBridge>();
+builder.Services.AddScoped<ICoreJobExecutionAdapter, ConstructionTimelapseAdapter>();
 builder.Services.AddScoped<ITimelapseProviderRuntime, TimelapseProviderRuntime>();
 builder.Services.AddScoped<ITimelapseFinalizerRuntime, TimelapseFinalizerRuntime>();
 builder.Services.AddHttpClient<TodoX.Web.Services.AiProviders.IAi79TaskClient, TodoX.Web.Services.AiProviders.Ai79TaskClient>();

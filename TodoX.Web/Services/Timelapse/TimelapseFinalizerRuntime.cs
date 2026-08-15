@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text;
 using Microsoft.Extensions.Options;
 using TodoX.Web.Services.Media;
+using TodoX.Web.Services.Platform;
 using TodoX.Web.Services.Render;
 
 namespace TodoX.Web.Services.Timelapse;
@@ -17,6 +18,7 @@ public sealed class TimelapseFinalizerRuntime : ITimelapseFinalizerRuntime
     private readonly IConfiguration _config;
     private readonly IMediaFileService _media;
     private readonly ITimelapseWorkerRepository _repo;
+    private readonly ITimelapseCoreLifecycleBridge _coreLifecycle;
     private readonly IRenderJobService _renderJobs;
     private readonly ILogger<TimelapseFinalizerRuntime> _logger;
 
@@ -25,6 +27,7 @@ public sealed class TimelapseFinalizerRuntime : ITimelapseFinalizerRuntime
         IConfiguration config,
         IMediaFileService media,
         ITimelapseWorkerRepository repo,
+        ITimelapseCoreLifecycleBridge coreLifecycle,
         IRenderJobService renderJobs,
         ILogger<TimelapseFinalizerRuntime> logger)
     {
@@ -32,6 +35,7 @@ public sealed class TimelapseFinalizerRuntime : ITimelapseFinalizerRuntime
         _config = config;
         _media = media;
         _repo = repo;
+        _coreLifecycle = coreLifecycle;
         _renderJobs = renderJobs;
         _logger = logger;
     }
@@ -102,6 +106,12 @@ public sealed class TimelapseFinalizerRuntime : ITimelapseFinalizerRuntime
                 item.JobId, item.Version, clips.Count, media.Id);
             await _renderJobs.AddEventAsync(item.JobId, "TIMELAPSE_FINALIZER_COMPLETE", "Timelapse final video saved to TodoX media.",
                 new { item.Version, mediaId = media.Id, clipOrder = clips.Select(x => x.ClipIndex).ToArray() }, ct: ct);
+            await _coreLifecycle.CompleteAsync(
+                item,
+                media.Id,
+                media.ObjectKey!,
+                media.PublicUrl ?? media.FileUrl!,
+                ct);
         }
         catch (Exception ex)
         {
@@ -109,6 +119,13 @@ public sealed class TimelapseFinalizerRuntime : ITimelapseFinalizerRuntime
             await _repo.SaveFinalizerFailedAsync(item.Id, item.JobId, ex.GetType().Name, ex.Message, "{}", ct);
             await _renderJobs.AddEventAsync(item.JobId, "TIMELAPSE_FINALIZER_FAILED", "Timelapse finalizer failed.",
                 new { item.Version, errorCode = ex.GetType().Name, errorMessage = ex.Message }, "error", ct);
+            await _coreLifecycle.FailAsync(
+                item.JobId,
+                item.Snapshot,
+                ex.GetType().Name,
+                ex.Message,
+                CoreFailureBillingPolicy.KeepCharge,
+                ct);
         }
         finally
         {

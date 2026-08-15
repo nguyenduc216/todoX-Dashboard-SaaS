@@ -146,7 +146,8 @@ public sealed class CorePlatformLifecycleSourceTests
         var source = ReadSource("TodoX.Web", "Services", "Platform", "CoreJobCompletionService.cs");
 
         Assert.Contains("SET status='rendering'", source, StringComparison.Ordinal);
-        Assert.Contains("current_step='external_execution'", source, StringComparison.Ordinal);
+        Assert.Contains("WHEN progress_percent > 1 THEN current_step", source, StringComparison.Ordinal);
+        Assert.Contains("ELSE 'external_execution'", source, StringComparison.Ordinal);
         Assert.Contains("progress_percent=GREATEST(progress_percent, 1)", source, StringComparison.Ordinal);
         Assert.Contains("options=jsonb_set(", source, StringComparison.Ordinal);
         Assert.Contains("external_execution_id", source, StringComparison.Ordinal);
@@ -197,6 +198,7 @@ public sealed class CorePlatformLifecycleSourceTests
 
         Assert.Contains("request.ProgressPercent is < 0 or > 100", source, StringComparison.Ordinal);
         Assert.Contains("status NOT IN ('completed','failed','cancelled')", source, StringComparison.Ordinal);
+        Assert.Contains("progress_percent < @progress", source, StringComparison.Ordinal);
         Assert.Contains("if (changed > 0)", source, StringComparison.Ordinal);
         Assert.Contains("\"CORE_JOB_PROGRESS\"", source, StringComparison.Ordinal);
         Assert.Contains("WHEN lower(@step)='post_processing' THEN 'post_processing'", source, StringComparison.Ordinal);

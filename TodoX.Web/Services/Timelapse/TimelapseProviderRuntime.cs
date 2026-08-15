@@ -4,6 +4,7 @@ using TodoX.Web.Models;
 using TodoX.Web.Models.Timelapse;
 using TodoX.Web.Services.AiProviders;
 using TodoX.Web.Services.Media;
+using TodoX.Web.Services.Platform;
 using TodoX.Web.Services.Render;
 
 namespace TodoX.Web.Services.Timelapse;
@@ -27,6 +28,7 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
     private readonly IAi79TaskClient _taskClient;
     private readonly IMediaFileService _media;
     private readonly ITimelapseWorkerRepository _repo;
+    private readonly ITimelapseCoreLifecycleBridge _coreLifecycle;
     private readonly IRenderJobService _renderJobs;
     private readonly TimelapseProviderWorkerOptions _options;
     private readonly ILogger<TimelapseProviderRuntime> _logger;
@@ -38,6 +40,7 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
         IAi79TaskClient taskClient,
         IMediaFileService media,
         ITimelapseWorkerRepository repo,
+        ITimelapseCoreLifecycleBridge coreLifecycle,
         IRenderJobService renderJobs,
         IOptions<TimelapseProviderWorkerOptions> options,
         ILogger<TimelapseProviderRuntime> logger)
@@ -48,6 +51,7 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
         _taskClient = taskClient;
         _media = media;
         _repo = repo;
+        _coreLifecycle = coreLifecycle;
         _renderJobs = renderJobs;
         _options = options.Value;
         _logger = logger;
@@ -111,6 +115,12 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
             await _renderJobs.AddEventAsync(item.JobId, "TIMELAPSE_IMAGE_COMPLETE", "Timelapse image saved to TodoX media.",
                 new { item.ProgressPercent, item.Attempt, taskId = item.ProviderTaskId, mediaId = media.Id }, ct: ct);
             await _repo.AdvanceAfterImageCompletedAsync(item.JobId, ct);
+            await _coreLifecycle.AdvanceAsync(
+                item.JobId,
+                item.UserId,
+                item.CustomerId,
+                item.Snapshot,
+                ct);
         }
         catch (Exception ex)
         {
@@ -179,6 +189,12 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
             await _renderJobs.AddEventAsync(item.JobId, "TIMELAPSE_VIDEO_COMPLETE", "Timelapse video clip saved to TodoX media.",
                 new { item.ClipIndex, item.Attempt, taskId = item.ProviderTaskId, mediaId = media.Id }, ct: ct);
             await _repo.AdvanceAfterVideoCompletedAsync(item.JobId, ct);
+            await _coreLifecycle.AdvanceAsync(
+                item.JobId,
+                item.UserId,
+                item.CustomerId,
+                item.Snapshot,
+                ct);
         }
         catch (Exception ex)
         {
@@ -232,6 +248,13 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
                 "TIMELAPSE_IMAGE_FAILED",
                 "Timelapse image submit failed.",
                 new { item.ProgressPercent, item.Attempt, provider.ProviderCode, model = provider.Model, errorCode = ex.ErrorCode, errorMessage = ex.ErrorMessage },
+                ct);
+            await _coreLifecycle.FailAsync(
+                item.JobId,
+                item.Snapshot,
+                ex.ErrorCode ?? "submit_failed",
+                ex.ErrorMessage,
+                CoreFailureBillingPolicy.ReleaseReservation,
                 ct);
             return;
         }
@@ -301,6 +324,13 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
                 "TIMELAPSE_VIDEO_FAILED",
                 "Timelapse video submit failed.",
                 new { item.ClipIndex, item.Attempt, provider.ProviderCode, model = provider.Model, errorCode = ex.ErrorCode, errorMessage = ex.ErrorMessage },
+                ct);
+            await _coreLifecycle.FailAsync(
+                item.JobId,
+                item.Snapshot,
+                ex.ErrorCode ?? "submit_failed",
+                ex.ErrorMessage,
+                CoreFailureBillingPolicy.ReleaseReservation,
                 ct);
             return;
         }
@@ -611,6 +641,13 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
         await _repo.SaveImageFailedAsync(item.Id, item.Attempt, errorCode, errorMessage, responseJson, ct);
         await _renderJobs.AddEventAsync(item.JobId, "TIMELAPSE_IMAGE_FAILED", "Timelapse image task failed.",
             new { item.ProgressPercent, item.Attempt, taskId = item.ProviderTaskId, errorCode, errorMessage }, "error", ct);
+        await _coreLifecycle.FailAsync(
+            item.JobId,
+            item.Snapshot,
+            errorCode,
+            errorMessage,
+            FailurePolicy(item.ProviderTaskId),
+            ct);
     }
 
     private async Task FailVideoAsync(TimelapseVideoWorkItem item, string? errorCode, string errorMessage, string responseJson, CancellationToken ct)
@@ -618,7 +655,19 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
         await _repo.SaveVideoFailedAsync(item.Id, item.Attempt, errorCode, errorMessage, responseJson, ct);
         await _renderJobs.AddEventAsync(item.JobId, "TIMELAPSE_VIDEO_FAILED", "Timelapse video task failed.",
             new { item.ClipIndex, item.Attempt, taskId = item.ProviderTaskId, errorCode, errorMessage }, "error", ct);
+        await _coreLifecycle.FailAsync(
+            item.JobId,
+            item.Snapshot,
+            errorCode,
+            errorMessage,
+            FailurePolicy(item.ProviderTaskId),
+            ct);
     }
+
+    internal static CoreFailureBillingPolicy FailurePolicy(string? providerTaskId)
+        => string.IsNullOrWhiteSpace(providerTaskId)
+            ? CoreFailureBillingPolicy.ReleaseReservation
+            : CoreFailureBillingPolicy.KeepCharge;
 
     private async Task TryAddSubmitFailureEventAsync(Guid jobId, string eventType, string message, object metadata, CancellationToken ct)
     {
