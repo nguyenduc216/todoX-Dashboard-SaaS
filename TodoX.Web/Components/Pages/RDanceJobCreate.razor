@@ -10,14 +10,14 @@
 @inject NavigationManager Navigation
 @inject ISnackbar Snackbar
 
-<PageTitle>Tạo job rDance</PageTitle>
+<PageTitle>Video nhảy quảng cáo thời trang</PageTitle>
 
 <MudStack Spacing="3" Class="rdance-create-page">
     <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="flex-wrap">
         <MudIconButton Icon="@Icons.Material.Filled.ArrowBack" Color="Color.Default" OnClick="@(() => Navigation.NavigateTo("/create"))" />
         <div>
-            <MudText Typo="Typo.h4" Class="todox-page-title">rDance Thời Trang</MudText>
-            <MudText Typo="Typo.body1" Class="todox-page-subtitle">Tạo draft job RDance và chọn video chuyển động ban đầu.</MudText>
+            <MudText Typo="Typo.h4" Class="todox-page-title">Video nhảy quảng cáo thời trang</MudText>
+            <MudText Typo="Typo.body1" Class="todox-page-subtitle">Tạo video quảng cáo thời trang từ chuyển động TikTok hoặc video MP4.</MudText>
         </div>
     </MudStack>
 
@@ -40,7 +40,7 @@
             <MudItem xs="12" lg="7">
                 <MudPaper Class="todox-card pa-4" rounded="true">
                     <MudStack Spacing="3">
-                        <MudTextField T="string" Label="Tên job" Variant="Variant.Outlined" @bind-Value="_title" Disabled="@_busy" />
+                        <MudTextField T="string" Label="Tên video" Variant="Variant.Outlined" @bind-Value="_title" Disabled="@_busy" />
                         <MudSelect T="string" Label="Danh mục thời trang" Variant="Variant.Outlined" @bind-Value="_category" Disabled="@_busy">
                             <MudSelectItem Value="@("shirt")">Áo</MudSelectItem>
                             <MudSelectItem Value="@("pants")">Quần</MudSelectItem>
@@ -89,10 +89,10 @@
             <MudItem xs="12" lg="5">
                 <MudPaper Class="todox-card pa-4" rounded="true">
                     <MudStack Spacing="2">
-                        <MudText Typo="Typo.overline">LUỒNG JOB</MudText>
-                        <MudText Typo="Typo.h6">Draft RDance job</MudText>
+                        <MudText Typo="Typo.overline">THÔNG TIN DỊCH VỤ</MudText>
+                        <MudText Typo="Typo.h6">Video nhảy quảng cáo thời trang</MudText>
                         <MudList T="string" Dense="true">
-                            <MudListItem T="string">Service: rDance Thời Trang</MudListItem>
+                            <MudListItem T="string">Dịch vụ: Video nhảy quảng cáo thời trang</MudListItem>
                             <MudListItem T="string">Provider: 79AI</MudListItem>
                             <MudListItem T="string">Model: Kling Motion Control</MudListItem>
                             <MudListItem T="string">Tỷ lệ: 9:16</MudListItem>
@@ -102,7 +102,7 @@
                                    StartIcon="@Icons.Material.Filled.MovieCreation"
                                    Disabled="@(_busy || !CanSubmitSource)"
                                    OnClick="CreateDraftAndOpenAsync">
-                            Tạo draft và tiếp tục
+                            Tạo video và tiếp tục
                         </MudButton>
                     </MudStack>
                 </MudPaper>
@@ -115,7 +115,7 @@
     [SupplyParameterFromQuery] public Guid? ServiceId { get; set; }
     [SupplyParameterFromQuery] public string? ServiceCode { get; set; }
 
-    private string _title = "rDance Thời Trang";
+    private string _title = "Video nhảy quảng cáo thời trang";
     private string _category = "shirt";
     private string _tiktokUrl = string.Empty;
     private string? _readinessError;
@@ -142,12 +142,12 @@
             if (!route.ProviderCode.Equals(DanceSellConstants.ProviderCode, StringComparison.OrdinalIgnoreCase)
                 || !route.ModelName.Equals(DanceSellConstants.Model, StringComparison.OrdinalIgnoreCase))
             {
-                _readinessError = "RDance chưa được cấu hình provider Motion Control.";
+                _readinessError = "Dịch vụ video nhảy quảng cáo thời trang chưa được cấu hình Motion Control.";
             }
         }
         catch
         {
-            _readinessError = "RDance chưa được cấu hình provider Motion Control.";
+            _readinessError = "Dịch vụ video nhảy quảng cáo thời trang chưa được cấu hình Motion Control.";
         }
     }
 
@@ -255,7 +255,7 @@
     }
 
     private string BuildPrompt()
-        => $"Create a fashion dance video. Category: {_category}. Preserve identity, face, anatomy and product design. Dress the person in the supplied product, keep colors, patterns and logos consistent, follow the staged motion naturally, no text, watermark, extra people or duplicated limbs.";
+        => $"Create a fashion dance advertising video. Category: {_category}. Preserve identity, face, anatomy and product design. Dress the person in the supplied product, keep colors, patterns and logos consistent, follow the staged motion naturally, no text, watermark, extra people or duplicated limbs.";
 
     private void OnMotionDragEnter(DragEventArgs _) => _motionDragActive = true;
     private void OnMotionDragLeave(DragEventArgs _) => _motionDragActive = false;
