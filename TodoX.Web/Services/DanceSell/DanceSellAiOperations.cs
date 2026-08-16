@@ -150,18 +150,16 @@ public sealed class DanceSellProviderCatalog : IDanceSellProviderCatalog
             var rows = await conn.QueryAsync<DanceSellProviderRouteDto>(
                 """
                 SELECT id AS Id, feature_code AS FeatureCode, operation_type AS OperationType,
-                       provider_code AS ProviderCode, provider_capability_id AS ProviderCapabilityId,
-                       provider_account_id AS ProviderAccountId, model_name AS ModelName, priority AS Priority,
-                       is_default AS IsDefault, enabled AS Enabled, allow_user_select AS AllowUserSelect,
-                       config_json::text AS ConfigJson
+                       provider_code AS ProviderCode, model_name AS ModelName, model_mode AS ModelMode,
+                       route_priority AS Priority, is_default AS IsDefault, enabled AS Enabled,
+                       fallback_on AS FallbackOn, config_json::text AS ConfigJson
                   FROM public.todox_ai_feature_provider_route
                  WHERE feature_code = @featureCode
                    AND operation_type = @operationType
                    AND enabled = true
-                   AND (@userSelectableOnly = false OR allow_user_select = true)
-                 ORDER BY is_default DESC, priority, provider_code, model_name;
+                 ORDER BY is_default DESC, route_priority, provider_code, model_name;
                 """,
-                new { featureCode = DanceSellConstants.FeatureCode, operationType, userSelectableOnly });
+                new { featureCode = DanceSellConstants.FeatureCode, operationType });
             var list = rows.ToList();
             if (list.Count > 0)
             {
@@ -229,6 +227,7 @@ public sealed class DanceSellProviderCatalog : IDanceSellProviderCatalog
             Enabled = true,
             IsDefault = true,
             AllowUserSelect = true,
+            FallbackOn = Array.Empty<string>(),
             ConfigJson = JsonSerializer.Serialize(new
             {
                 source = "code_fallback_until_manual_sql_seeded",

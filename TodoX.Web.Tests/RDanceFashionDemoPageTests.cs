@@ -11,9 +11,13 @@ public sealed class RDanceFashionDemoPageTests
         var page = ReadStrictUtf8(Path.Combine(FindRepoRoot(), "TodoX.Web", "Components", "Pages", "RDanceFashionDemo.razor"));
 
         Assert.Contains("@page \"/rdance-fashion-demo\"", page, StringComparison.Ordinal);
+        Assert.Contains("<PageTitle>Video nhảy quảng cáo thời trang</PageTitle>", page, StringComparison.Ordinal);
+        Assert.Contains("Đang chuyển tới trang video nhảy quảng cáo thời trang", page, StringComparison.Ordinal);
         Assert.Contains("Navigation.NavigateTo(\"/jobs/rdance/new\", replace: true)", page, StringComparison.Ordinal);
         Assert.DoesNotContain("MudTabs", page, StringComparison.Ordinal);
         Assert.DoesNotContain("UploadMotionAsync", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("RDance", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("rDance", page, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -32,16 +36,19 @@ public sealed class RDanceFashionDemoPageTests
             "StageTikTokAndOpenAsync",
             "OnMotionSelected",
             "Navigation.NavigateTo($\"/jobs/rdance/{job.Id}\")",
-            "Tạo draft và tiếp tục",
+            "Video nhảy quảng cáo thời trang",
+            "Tạo video và tiếp tục",
             "Kéo thả video MP4 vào đây",
             "Chỉ hỗ trợ video MP4.",
-            "RDance chưa được cấu hình provider Motion Control."
+            "Dịch vụ video nhảy quảng cáo thời trang chưa được cấu hình Motion Control."
         })
         {
             Assert.Contains(expected, page, StringComparison.Ordinal);
         }
 
         Assert.DoesNotContain("/rdance-fashion-demo", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("RDance", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("rDance", page, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -69,7 +76,11 @@ public sealed class RDanceFashionDemoPageTests
             "ShowMessageBoxAsync",
             "Kling Motion Control",
             "Provider chính: 79AI",
-            "Bạn không có quyền xem job RDance này.",
+            "Video nhảy quảng cáo thời trang",
+            "Dịch vụ: Video nhảy quảng cáo thời trang",
+            "Lịch sử video quảng cáo thời trang",
+            "Bạn không có quyền xem video này.",
+            "Không tìm thấy video quảng cáo thời trang.",
             "CancelAsync",
             "RetryAsync"
         })
@@ -81,6 +92,8 @@ public sealed class RDanceFashionDemoPageTests
         Assert.DoesNotContain("Task.Delay(500)", page, StringComparison.Ordinal);
         Assert.DoesNotContain("/rdance-fashion-demo", page, StringComparison.Ordinal);
         Assert.DoesNotContain("await Task.Delay", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("RDance", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("rDance", page, StringComparison.Ordinal);
         Assert.Contains("NavigateTo(\"/jobs/rdance/new\")", page, StringComparison.Ordinal);
     }
 
@@ -93,7 +106,7 @@ public sealed class RDanceFashionDemoPageTests
         {
             "IDanceSellPhase2Service DanceJobs",
             "DanceJobs.ListAsync(currentUser, 100)",
-            "rDance Thời Trang",
+            "Video nhảy quảng cáo thời trang",
             "$\"/jobs/rdance/{x.Id}\"",
             "Navigation.NavigateTo(context.Route)"
         })
@@ -120,6 +133,29 @@ public sealed class RDanceFashionDemoPageTests
     }
 
     [Fact]
+    public void ProviderCatalogRouteQueryUsesProductionSchema()
+    {
+        var root = FindRepoRoot();
+        var source = ReadStrictUtf8(Path.Combine(root, "TodoX.Web", "Services", "DanceSell", "DanceSellAiOperations.cs"));
+        var queryStart = source.IndexOf("SELECT id AS Id, feature_code AS FeatureCode", StringComparison.Ordinal);
+        Assert.True(queryStart >= 0, "Expected DanceSell provider route SELECT query.");
+        var queryEnd = source.IndexOf("ORDER BY is_default DESC", queryStart, StringComparison.Ordinal);
+        Assert.True(queryEnd > queryStart, "Expected provider route ORDER BY clause.");
+        var query = source[queryStart..source.IndexOf(';', queryEnd)];
+
+        Assert.Contains("provider_code AS ProviderCode", query, StringComparison.Ordinal);
+        Assert.Contains("model_name AS ModelName", query, StringComparison.Ordinal);
+        Assert.Contains("model_mode AS ModelMode", query, StringComparison.Ordinal);
+        Assert.Contains("route_priority AS Priority", query, StringComparison.Ordinal);
+        Assert.Contains("fallback_on AS FallbackOn", query, StringComparison.Ordinal);
+        Assert.Contains("ORDER BY is_default DESC, route_priority, provider_code, model_name", query, StringComparison.Ordinal);
+        Assert.DoesNotContain("provider_capability_id", query, StringComparison.Ordinal);
+        Assert.DoesNotContain("provider_account_id", query, StringComparison.Ordinal);
+        Assert.DoesNotContain("allow_user_select", query, StringComparison.Ordinal);
+        Assert.DoesNotContain(" priority AS Priority", query, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void RouteSeedMakes79AiPrimaryAndKieBackup()
     {
         var root = FindRepoRoot();
@@ -131,6 +167,12 @@ public sealed class RDanceFashionDemoPageTests
         Assert.Contains("'local_composite'", sql, StringComparison.Ordinal);
         Assert.Contains("\"motion_video_field\":\"video\"", sql, StringComparison.Ordinal);
         Assert.Contains("is_default = false", sql, StringComparison.Ordinal);
+        Assert.Contains("model_mode", sql, StringComparison.Ordinal);
+        Assert.Contains("route_priority", sql, StringComparison.Ordinal);
+        Assert.Contains("fallback_on", sql, StringComparison.Ordinal);
+        Assert.DoesNotContain("provider_capability_id", sql, StringComparison.Ordinal);
+        Assert.DoesNotContain("provider_account_id", sql, StringComparison.Ordinal);
+        Assert.DoesNotContain("allow_user_select", sql, StringComparison.Ordinal);
         Assert.Contains("No verified 79AI image-edit model", sql, StringComparison.Ordinal);
     }
 

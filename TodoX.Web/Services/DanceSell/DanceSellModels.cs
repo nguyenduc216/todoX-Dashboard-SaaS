@@ -370,10 +370,12 @@ public sealed class DanceSellProviderRouteDto
     public Guid? ProviderCapabilityId { get; set; }
     public Guid? ProviderAccountId { get; set; }
     public string ModelName { get; set; } = DanceSellConstants.Model;
+    public string? ModelMode { get; set; }
     public int Priority { get; set; } = 100;
     public bool IsDefault { get; set; }
     public bool Enabled { get; set; }
     public bool AllowUserSelect { get; set; }
+    public string[] FallbackOn { get; set; } = Array.Empty<string>();
     public string ConfigJson { get; set; } = "{}";
     public string DisplayName => $"{ProviderCode} / {ModelName}";
 }

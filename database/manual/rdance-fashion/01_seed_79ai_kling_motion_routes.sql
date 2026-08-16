@@ -1,5 +1,5 @@
 -- Generated for manual review only. Do not execute automatically.
--- The generic DanceSell engine is the runtime for rDance Fashion.
+-- The generic DanceSell engine is the runtime for the fashion advertising dance video service.
 
 UPDATE public.todox_ai_feature_provider_route
    SET is_default = false,
@@ -9,17 +9,17 @@ UPDATE public.todox_ai_feature_provider_route
    AND operation_type = 'reference_image';
 
 INSERT INTO public.todox_ai_feature_provider_route
-    (feature_code, operation_type, provider_code, provider_account_id, model_name,
-     priority, is_default, enabled, allow_user_select, config_json)
+    (feature_code, operation_type, provider_code, model_name, model_mode,
+     route_priority, is_default, enabled, fallback_on, config_json)
 SELECT 'dance_sell',
        'reference_image',
        'local_composite',
-       NULL,
        'local_composite',
+       NULL,
        10,
        true,
        true,
-       false,
+       ARRAY[]::text[],
        '{"capability":"reference_image_generation","displayName":"Local reference composite"}'::jsonb
  WHERE NOT EXISTS (
      SELECT 1
@@ -37,17 +37,17 @@ UPDATE public.todox_ai_feature_provider_route
    AND operation_type = 'motion_video';
 
 INSERT INTO public.todox_ai_feature_provider_route
-    (feature_code, operation_type, provider_code, provider_account_id, model_name,
-     priority, is_default, enabled, allow_user_select, config_json)
+    (feature_code, operation_type, provider_code, model_name, model_mode,
+     route_priority, is_default, enabled, fallback_on, config_json)
 SELECT 'dance_sell',
        'motion_video',
        '79ai',
-       NULL,
        'kling_video_motion',
+       NULL,
        10,
        true,
        true,
-       false,
+       ARRAY[]::text[],
        '{"capability":"image_to_video","displayName":"Kling Motion Control","submit_path":"/create-video","poll_path":"/video","reference_image_field":"image","motion_video_field":"video"}'::jsonb
  WHERE NOT EXISTS (
      SELECT 1
@@ -59,10 +59,10 @@ SELECT 'dance_sell',
  );
 
 UPDATE public.todox_ai_feature_provider_route
-   SET priority = 10,
+   SET route_priority = 10,
        is_default = true,
        enabled = true,
-       allow_user_select = false,
+       fallback_on = ARRAY[]::text[],
        config_json = COALESCE(config_json, '{}'::jsonb) || '{"capability":"image_to_video","displayName":"Kling Motion Control","submit_path":"/create-video","poll_path":"/video","reference_image_field":"image","motion_video_field":"video"}'::jsonb,
        updated_at = now()
  WHERE feature_code = 'dance_sell'
@@ -71,10 +71,10 @@ UPDATE public.todox_ai_feature_provider_route
    AND model_name = 'kling_video_motion';
 
 UPDATE public.todox_ai_feature_provider_route
-   SET priority = 100,
+   SET route_priority = 100,
        is_default = false,
        enabled = true,
-       allow_user_select = false,
+       fallback_on = ARRAY['provider_error','timeout']::text[],
        updated_at = now()
  WHERE feature_code = 'dance_sell'
    AND operation_type = 'motion_video'
@@ -83,8 +83,8 @@ UPDATE public.todox_ai_feature_provider_route
 
 -- No verified 79AI image-edit model is present in the repository catalog audit.
 -- Keep reference generation on the existing local composite path until one is configured.
-SELECT feature_code, operation_type, provider_code, model_name, priority, is_default, enabled
+SELECT feature_code, operation_type, provider_code, model_name, model_mode, route_priority, is_default, enabled, fallback_on
   FROM public.todox_ai_feature_provider_route
  WHERE feature_code = 'dance_sell'
    AND operation_type IN ('reference_image', 'motion_video')
- ORDER BY operation_type, priority, provider_code, model_name;
+ ORDER BY operation_type, route_priority, provider_code, model_name;

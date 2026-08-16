@@ -93,7 +93,7 @@ public sealed class CommercialVideoServiceCatalogTests
         Assert.Equal(TodoX.Web.Models.Timelapse.CustomerServiceDestination.RDanceCreator, rDanceRoute.Destination);
         Assert.NotNull(rDanceRoute.Route);
         Assert.StartsWith("/jobs/rdance/new", rDanceRoute.Route);
-        Assert.NotEqual("Dịch vụ RDance đang hoàn thiện.", rDanceRoute.Message);
+        Assert.Null(rDanceRoute.Message);
         Assert.DoesNotContain("ApplyFixedDefinition", adminRepo, StringComparison.Ordinal);
         Assert.Contains("TodoXServiceEngineTypes.Normalize(s.ServiceType)", adminRepo, StringComparison.Ordinal);
         Assert.Contains("@bind-Value=\"_model.ServiceName\"", adminDialog, StringComparison.Ordinal);

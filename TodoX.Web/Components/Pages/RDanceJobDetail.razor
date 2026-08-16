@@ -17,11 +17,11 @@
 @inject NavigationManager Navigation
 @implements IDisposable
 
-<PageTitle>rDance Thời Trang</PageTitle>
+<PageTitle>Video nhảy quảng cáo thời trang</PageTitle>
 
 <MudStack Spacing="3" Class="rdance-fashion-page">
-    <MudText Typo="Typo.h4" Class="todox-page-title">rDance Thời Trang</MudText>
-    <MudText Typo="Typo.body1" Class="todox-page-subtitle">Tạo video thời trang từ chuyển động TikTok hoặc video MP4.</MudText>
+    <MudText Typo="Typo.h4" Class="todox-page-title">Video nhảy quảng cáo thời trang</MudText>
+    <MudText Typo="Typo.body1" Class="todox-page-subtitle">Tạo video quảng cáo thời trang từ chuyển động TikTok hoặc video MP4.</MudText>
 
     @if (!AuthState.IsInitialized)
     {
@@ -121,7 +121,7 @@
                         <MudPaper Class="todox-panel pa-4">
                             <MudText Typo="Typo.h6">Đầu ra</MudText>
                             <MudList T="string" Dense="true">
-                                <MudListItem T="string">Dịch vụ: rDance Thời Trang</MudListItem>
+                                <MudListItem T="string">Dịch vụ: Video nhảy quảng cáo thời trang</MudListItem>
                                 <MudListItem T="string">Tỷ lệ: 9:16</MudListItem>
                                 <MudListItem T="string">Định dạng: MP4</MudListItem>
                                 <MudListItem T="string">Model: Kling Motion Control</MudListItem>
@@ -193,7 +193,7 @@
                         <MudPaper Class="todox-panel pa-4">
                             <MudText Typo="Typo.h6">Tóm tắt render</MudText>
                             <MudList T="string" Dense="true">
-                                <MudListItem T="string">Dịch vụ: rDance Thời Trang</MudListItem>
+                                <MudListItem T="string">Dịch vụ: Video nhảy quảng cáo thời trang</MudListItem>
                                 <MudListItem T="string">Provider chính: 79AI</MudListItem>
                                 <MudListItem T="string">Model: Kling Motion Control</MudListItem>
                                 <MudListItem T="string">Tỷ lệ: 9:16</MudListItem>
@@ -222,7 +222,7 @@
                     else
                     {
                         <MudPaper Class="todox-panel pa-4">
-                            <MudText Typo="Typo.h6">Video thời trang</MudText>
+                            <MudText Typo="Typo.h6">Video nhảy quảng cáo thời trang</MudText>
                             <video src="@_job.ResultVideoUrl" controls playsinline class="rdance-result-player"></video>
                             <MudStack Row="true" Class="flex-wrap gap-2 mt-3">
                                 <MudButton Variant="Variant.Filled" Color="Color.Warning" OnClick="@(() => JS.InvokeVoidAsync("open", _job.ResultVideoUrl))">Xem video</MudButton>
@@ -231,12 +231,12 @@
                             </MudStack>
                         </MudPaper>
                     }
-                    <MudText Typo="Typo.h6">Lịch sử rDance Fashion</MudText>
+                    <MudText Typo="Typo.h6">Lịch sử video quảng cáo thời trang</MudText>
                     @foreach (var item in _history)
                     {
                         <MudPaper Class="todox-panel pa-3" Outlined="true">
                             <MudStack Row="true" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
-                                <MudText>@(item.Title ?? "rDance Thời Trang")</MudText>
+                                <MudText>@(item.Title ?? "Video nhảy quảng cáo thời trang")</MudText>
                                 <MudChip T="string" Color="@StatusColor(item.Status)" Size="Size.Small">@item.Status</MudChip>
                                 <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="@(() => OpenAsync(item.Id))">Mở</MudButton>
                             </MudStack>
@@ -253,7 +253,7 @@
 
     private int _tabIndex;
     private bool _busy;
-    private string _title = "rDance Thời Trang";
+    private string _title = "Video nhảy quảng cáo thời trang";
     private string _category = "shirt";
     private string _tiktokUrl = string.Empty;
     private DanceSellJobDto? _job;
@@ -323,7 +323,7 @@
             if (!motionRoute.ProviderCode.Equals(DanceSellConstants.ProviderCode, StringComparison.OrdinalIgnoreCase)
                 || !motionRoute.ModelName.Equals(DanceSellConstants.Model, StringComparison.OrdinalIgnoreCase))
             {
-                _readinessError = "RDance chưa được cấu hình provider Motion Control.";
+                _readinessError = "Dịch vụ video nhảy quảng cáo thời trang chưa được cấu hình Motion Control.";
             }
 
             _motionRoutes = new[] { motionRoute };
@@ -331,7 +331,7 @@
         catch (Exception)
         {
             _motionRoutes = Array.Empty<DanceSellProviderRouteDto>();
-            _readinessError = "RDance chưa được cấu hình provider Motion Control.";
+            _readinessError = "Dịch vụ video nhảy quảng cáo thời trang chưa được cấu hình Motion Control.";
         }
 
         try
@@ -346,8 +346,8 @@
             _job = null;
             _latestReference = null;
             _loadError = ex.Message == "DANCE_SELL_UNAUTHORIZED"
-                ? "Bạn không có quyền xem job RDance này."
-                : "Không tìm thấy job RDance.";
+                ? "Bạn không có quyền xem video này."
+                : "Không tìm thấy video quảng cáo thời trang.";
         }
 
         _history = await DanceSell.ListAsync(AuthState.CurrentUser, 30);
@@ -375,7 +375,7 @@
 
         if (_job is null)
         {
-            throw new InvalidOperationException("Không tìm thấy job RDance.");
+            throw new InvalidOperationException("Không tìm thấy video quảng cáo thời trang.");
         }
     }
 

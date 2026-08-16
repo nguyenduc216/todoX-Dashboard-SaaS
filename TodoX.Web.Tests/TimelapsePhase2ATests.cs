@@ -36,7 +36,10 @@ public class TimelapsePhase2ATests
             }
         }
 
-        Assert.NotEqual("Dịch vụ RDance đang hoàn thiện.", route.Message);
+        if (engineType == TodoXServiceEngineTypes.RDance)
+        {
+            Assert.Null(route.Message);
+        }
     }
 
     [Theory]
