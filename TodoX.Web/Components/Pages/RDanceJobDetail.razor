@@ -275,6 +275,7 @@
         && _job?.MotionVideoMediaId is not null
         && _job?.PreparedReferenceStatus == DanceSellReferenceStatuses.Approved;
     private bool IsActive => _job?.Status is DanceSellJobStatuses.Queued or DanceSellJobStatuses.Submitted or DanceSellJobStatuses.Rendering;
+    private long MaxImageBytes => (long)Math.Max(1, DanceOptions.CurrentValue.MaxImageMb) * 1024 * 1024;
     private long MaxMotionVideoBytes => (long)Math.Max(1, DanceOptions.CurrentValue.MaxVideoMb) * 1024 * 1024;
     private string MaxMotionVideoLabel => $"{Math.Max(1, DanceOptions.CurrentValue.MaxVideoMb)}MB";
     private string MotionUploadZoneClass => $"rdance-upload-zone{(_motionDragActive ? " is-dragging" : string.Empty)}{(_busy ? " is-busy" : string.Empty)}";
@@ -404,18 +405,18 @@
         _motionFileName = file.Name;
         _motionFileSize = file.Size;
         _motionUploadError = null;
-        await UploadAsync(args, (bytes, uploadedFile) => DanceSell.UploadMotionAsync(_job!.Id, bytes, uploadedFile.Name, uploadedFile.ContentType, AuthState.CurrentUser!));
+        await UploadAsync(args, MaxMotionVideoBytes, (bytes, uploadedFile) => DanceSell.UploadMotionAsync(_job!.Id, bytes, uploadedFile.Name, uploadedFile.ContentType, AuthState.CurrentUser!));
     }
 
-    private Task OnCharacterSelected(InputFileChangeEventArgs args) => UploadAsync(args, (bytes, file) => DanceSell.UploadCharacterAsync(_job!.Id, bytes, file.Name, file.ContentType, AuthState.CurrentUser!));
-    private Task OnProductSelected(InputFileChangeEventArgs args) => UploadAsync(args, (bytes, file) => DanceSell.UploadProductAsync(_job!.Id, bytes, file.Name, file.ContentType, AuthState.CurrentUser!));
+    private Task OnCharacterSelected(InputFileChangeEventArgs args) => UploadAsync(args, MaxImageBytes, (bytes, file) => DanceSell.UploadCharacterAsync(_job!.Id, bytes, file.Name, file.ContentType, AuthState.CurrentUser!));
+    private Task OnProductSelected(InputFileChangeEventArgs args) => UploadAsync(args, MaxImageBytes, (bytes, file) => DanceSell.UploadProductAsync(_job!.Id, bytes, file.Name, file.ContentType, AuthState.CurrentUser!));
 
-    private async Task UploadAsync(InputFileChangeEventArgs args, Func<byte[], IBrowserFile, Task<DanceSellJobDto>> save)
+    private async Task UploadAsync(InputFileChangeEventArgs args, long maxBytes, Func<byte[], IBrowserFile, Task<DanceSellJobDto>> save)
         => await RunAsync(async () =>
         {
             await EnsureDraftAsync();
             var file = args.File;
-            await using var input = file.OpenReadStream(MaxMotionVideoBytes);
+            await using var input = file.OpenReadStream(maxBytes);
             using var buffer = new MemoryStream();
             await input.CopyToAsync(buffer);
             _job = await save(buffer.ToArray(), file);

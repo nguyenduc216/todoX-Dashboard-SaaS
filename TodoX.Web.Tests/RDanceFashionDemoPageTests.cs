@@ -110,7 +110,11 @@ public sealed class RDanceFashionDemoPageTests
         Assert.Contains("class=\"@MotionUploadZoneClass\"", page, StringComparison.Ordinal);
         Assert.Contains("rdance-hidden-file-input", page, StringComparison.Ordinal);
         Assert.Contains("ValidateMotionVideo(file)", page, StringComparison.Ordinal);
-        Assert.Contains("OpenReadStream(MaxMotionVideoBytes)", page, StringComparison.Ordinal);
+        Assert.Contains("private long MaxImageBytes", page, StringComparison.Ordinal);
+        Assert.Contains("UploadAsync(args, MaxMotionVideoBytes", page, StringComparison.Ordinal);
+        Assert.Contains("OnCharacterSelected(InputFileChangeEventArgs args) => UploadAsync(args, MaxImageBytes", page, StringComparison.Ordinal);
+        Assert.Contains("OnProductSelected(InputFileChangeEventArgs args) => UploadAsync(args, MaxImageBytes", page, StringComparison.Ordinal);
+        Assert.Contains("file.OpenReadStream(maxBytes)", page, StringComparison.Ordinal);
         Assert.Contains("Video vượt quá dung lượng cho phép.", page, StringComparison.Ordinal);
         Assert.Contains("Video chuyển động đã sẵn sàng", page, StringComparison.Ordinal);
     }
