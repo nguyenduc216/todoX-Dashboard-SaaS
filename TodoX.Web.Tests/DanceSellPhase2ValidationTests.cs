@@ -79,6 +79,8 @@ public sealed class DanceSellPhase2ValidationTests
         Assert.Contains("ReferenceLocks.GetOrAdd", service, StringComparison.Ordinal);
         Assert.Contains("ReferenceVersionMatches", service, StringComparison.Ordinal);
         Assert.Contains("IsCurrentSourceAsync", service, StringComparison.Ordinal);
+        Assert.Contains("RecoverStaleGenerationAsync", service, StringComparison.Ordinal);
+        Assert.Contains("StaleReferenceGenerationThreshold", service, StringComparison.Ordinal);
         Assert.Contains("PrepareCharacterReferenceAsync", service, StringComparison.Ordinal);
         Assert.Contains("await GenerateAsync(job.Id, user, ct)", service, StringComparison.Ordinal);
         Assert.Contains("Status = DanceSellReferenceStatuses.Ready", service, StringComparison.Ordinal);
@@ -87,6 +89,53 @@ public sealed class DanceSellPhase2ValidationTests
         Assert.Contains("prepared_reference_media_id=NULL", repository, StringComparison.Ordinal);
         Assert.Contains("prepared_reference_approved_at=NULL", repository, StringComparison.Ordinal);
         Assert.Contains("reference_approved_at=NULL", repository, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ReferenceGenerateAsync_CatchesAllPostGeneratingSetupStages()
+    {
+        var root = FindRepoRoot();
+        var service = File.ReadAllText(Path.Combine(root, "TodoX.Web/Services/DanceSell/DanceSellPhase2Services.cs"));
+        var generate = GetMethodSection(service, "GenerateAsync");
+
+        foreach (var stage in new[]
+        {
+            "\"resolve_route\"",
+            "\"estimate_cost\"",
+            "\"next_attempt\"",
+            "\"create_operation\"",
+            "\"read_character\"",
+            "\"read_product\"",
+            "\"composite\"",
+            "\"save_media\""
+        })
+        {
+            Assert.Contains(stage, generate, StringComparison.Ordinal);
+        }
+
+        Assert.Contains("await _repo.UpdateReferenceStatusAsync(job.Id, DanceSellReferenceStatuses.Generating", generate, StringComparison.Ordinal);
+        Assert.Contains("catch (Exception ex)", generate, StringComparison.Ordinal);
+        Assert.Contains("DanceSellReferenceStatuses.Failed", generate, StringComparison.Ordinal);
+        Assert.Contains("DanceSell optional reference operation metadata failed", service, StringComparison.Ordinal);
+        Assert.Contains("TryCreateFailedReferenceVersionAsync", service, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void StaleGeneratingRecovery_RequiresNoActiveVersionOrOperationBeforeRetry()
+    {
+        var root = FindRepoRoot();
+        var service = File.ReadAllText(Path.Combine(root, "TodoX.Web/Services/DanceSell/DanceSellPhase2Services.cs"));
+        var recovery = GetMethodSection(service, "RecoverStaleGenerationAsync");
+        var operations = File.ReadAllText(Path.Combine(root, "TodoX.Web/Services/DanceSell/DanceSellAiOperations.cs"));
+
+        Assert.Contains("job.PreparedReferenceStatus != DanceSellReferenceStatuses.Generating", recovery, StringComparison.Ordinal);
+        Assert.Contains("StaleReferenceGenerationThreshold", recovery, StringComparison.Ordinal);
+        Assert.Contains("hasActiveVersion", recovery, StringComparison.Ordinal);
+        Assert.Contains("HasActiveOperationAsync", recovery, StringComparison.Ordinal);
+        Assert.Contains("DanceSellReferenceStatuses.Failed", recovery, StringComparison.Ordinal);
+        Assert.Contains("stale_generation", recovery, StringComparison.Ordinal);
+        Assert.Contains("Task<bool> HasActiveOperationAsync", operations, StringComparison.Ordinal);
+        Assert.Contains("status IN ('queued','submitted','generating')", operations, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -136,7 +185,27 @@ public sealed class DanceSellPhase2ValidationTests
 
     private static string GetMethodSection(string source, string methodName)
     {
-        var start = source.IndexOf(methodName, StringComparison.Ordinal);
+        var start = source.IndexOf($"public async Task<DanceSellReferenceVersionDto> {methodName}(", StringComparison.Ordinal);
+        if (start < 0)
+        {
+            start = source.IndexOf($"public async Task<DanceSellJobDto> {methodName}(", StringComparison.Ordinal);
+        }
+
+        if (start < 0)
+        {
+            start = source.IndexOf($"private async Task<bool> {methodName}(", StringComparison.Ordinal);
+        }
+
+        if (start < 0)
+        {
+            start = source.IndexOf($"private async Task<DanceSellJobDto> {methodName}(", StringComparison.Ordinal);
+        }
+
+        if (start < 0)
+        {
+            start = source.IndexOf($"private async Task {methodName}(", StringComparison.Ordinal);
+        }
+
         Assert.True(start >= 0, $"Could not locate {methodName}.");
         var nextMethod = source.IndexOf("\n    private ", start + methodName.Length, StringComparison.Ordinal);
         return nextMethod > start ? source[start..nextMethod] : source[start..];

@@ -260,6 +260,9 @@ public sealed class DanceSellRenderHandlerTests
         public Task<int> GetNextAttemptNoAsync(Guid danceSellJobId, string operationType, CancellationToken ct = default)
             => Task.FromResult(1);
 
+        public Task<bool> HasActiveOperationAsync(Guid danceSellJobId, string operationType, CancellationToken ct = default)
+            => Task.FromResult(false);
+
         public Task MarkSubmittedAsync(Guid operationId, string providerTaskId, string responseJson, CancellationToken ct = default) => Task.CompletedTask;
         public Task MarkCompletedAsync(Guid operationId, string providerStatus, string responseJson, decimal? creditsConsumed, string? resultUrl, CancellationToken ct = default) => Task.CompletedTask;
         public Task MarkFailedAsync(Guid operationId, string providerStatus, string? responseJson, string errorCode, string errorMessage, CancellationToken ct = default) => Task.CompletedTask;

@@ -250,6 +250,7 @@ public interface IDanceSellOperationRepository
 {
     Task<DanceSellProviderOperationDto?> UpsertOperationAsync(DanceSellProviderOperationDto operation, CancellationToken ct = default);
     Task<int> GetNextAttemptNoAsync(Guid danceSellJobId, string operationType, CancellationToken ct = default);
+    Task<bool> HasActiveOperationAsync(Guid danceSellJobId, string operationType, CancellationToken ct = default);
     Task MarkSubmittedAsync(Guid operationId, string providerTaskId, string responseJson, CancellationToken ct = default);
     Task MarkCompletedAsync(Guid operationId, string providerStatus, string responseJson, decimal? creditsConsumed, string? resultUrl, CancellationToken ct = default);
     Task MarkFailedAsync(Guid operationId, string providerStatus, string? responseJson, string errorCode, string errorMessage, CancellationToken ct = default);
@@ -344,6 +345,29 @@ public sealed class DanceSellOperationRepository : IDanceSellOperationRepository
                   FROM dance_sell.dance_sell_provider_operations
                  WHERE dance_sell_job_id = @danceSellJobId
                    AND operation_type = @operationType;
+                """,
+                new { danceSellJobId, operationType });
+        }
+        catch (PostgresException ex) when (IsSchemaMissing(ex))
+        {
+            throw SchemaNotReady(ex);
+        }
+    }
+
+    public async Task<bool> HasActiveOperationAsync(Guid danceSellJobId, string operationType, CancellationToken ct = default)
+    {
+        try
+        {
+            using var conn = await _factory.OpenAsync(ct);
+            return await conn.ExecuteScalarAsync<bool>(
+                """
+                SELECT EXISTS (
+                    SELECT 1
+                      FROM dance_sell.dance_sell_provider_operations
+                     WHERE dance_sell_job_id = @danceSellJobId
+                       AND operation_type = @operationType
+                       AND status IN ('queued','submitted','generating')
+                );
                 """,
                 new { danceSellJobId, operationType });
         }
