@@ -114,7 +114,13 @@ public sealed class TimelapseFinalizerRuntime : ITimelapseFinalizerRuntime
                 publicUrl = media.PublicUrl ?? media.FileUrl,
                 ffmpeg = "concat_demuxer_copy"
             });
-            await _repo.SaveFinalizerCompletedAsync(item.Id, item.JobId, media.Id, media.ObjectKey!, media.PublicUrl ?? media.FileUrl!, responseJson, ct);
+            if (!await _repo.SaveFinalizerCompletedAsync(item.Id, item.JobId, media.Id, media.ObjectKey!, media.PublicUrl ?? media.FileUrl!, responseJson, ct))
+            {
+                _logger.LogWarning("TIMELAPSE_FINALIZER_COMPLETE_STALE jobId={JobId} version={Version}",
+                    item.JobId, item.Version);
+                return;
+            }
+
             _logger.LogInformation("TIMELAPSE_FINALIZER_COMPLETE jobId={JobId} version={Version} clips={ClipCount} mediaId={MediaId}",
                 item.JobId, item.Version, clips.Count, media.Id);
             await _renderJobs.AddEventAsync(item.JobId, "TIMELAPSE_FINALIZER_COMPLETE", "Timelapse final video saved to TodoX media.",
@@ -129,9 +135,13 @@ public sealed class TimelapseFinalizerRuntime : ITimelapseFinalizerRuntime
         catch (Exception ex)
         {
             _logger.LogError(ex, "TIMELAPSE_FINALIZER_FAILED jobId={JobId} version={Version}", item.JobId, item.Version);
-            await _repo.SaveFinalizerFailedAsync(item.Id, item.JobId, ex.GetType().Name, ex.Message, "{}", ct);
+            var saved = await _repo.SaveFinalizerFailedAsync(item.Id, item.JobId, ex.GetType().Name, ex.Message, "{}", ct);
             await _renderJobs.AddEventAsync(item.JobId, "TIMELAPSE_FINALIZER_FAILED", "Timelapse finalizer failed.",
                 new { item.Version, errorCode = ex.GetType().Name, errorMessage = ex.Message }, "error", ct);
+            if (!saved)
+            {
+                return;
+            }
             await _coreLifecycle.FailAsync(
                 item.JobId,
                 item.Snapshot,

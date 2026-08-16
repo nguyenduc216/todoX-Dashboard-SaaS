@@ -164,6 +164,11 @@
     border-color: rgba(41, 182, 246, 0.38);
 }
 
+.timelapse-stage-card.is-cancelled {
+    border-color: rgba(255, 167, 38, 0.34);
+    background: rgba(255, 167, 38, 0.035);
+}
+
 .image-preview {
     color: #ffca28;
 }
@@ -365,6 +370,12 @@
 .tl-status-badge.is-rendering {
     color: #ffd180;
     background-color: rgba(255, 167, 38, 0.16);
+}
+
+.tl-status-badge.is-cancelled {
+    color: #ffcc80;
+    background-color: rgba(255, 152, 0, 0.14);
+    border: 1px solid rgba(255, 183, 77, 0.18);
 }
 
 .tl-status-dot {

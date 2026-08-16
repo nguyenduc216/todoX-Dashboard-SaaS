@@ -52,6 +52,16 @@
                 <MudText Typo="Typo.body1" Class="todox-page-subtitle">@_job.Snapshot.ServiceCode · @_job.Workflow.CurrentStep</MudText>
             </div>
             <MudSpacer />
+            @if (CanCancelJob)
+            {
+                <MudButton Variant="Variant.Outlined"
+                           Color="Color.Error"
+                           StartIcon="@Icons.Material.Filled.StopCircle"
+                           Disabled="@_busy"
+                           OnClick="CancelJobAsync">
+                    DỪNG TOÀN BỘ
+                </MudButton>
+            }
             <MudChip T="string" Color="@StatusColor(_job.Workflow.ParentStatus)">@TimelapseStatusText.Parent(_job.Workflow.ParentStatus)</MudChip>
         </MudStack>
 
@@ -267,7 +277,7 @@
                                         {
                                             <MudText Typo="Typo.caption" Color="Color.Secondary">Đang chờ ảnh @image.DependsOnProgressPercent% hoàn thành</MudText>
                                         }
-                                        @if (!string.IsNullOrWhiteSpace(image.ErrorMessage))
+                                        @if (image.Status != TimelapseOperationStatuses.Cancelled && !string.IsNullOrWhiteSpace(image.ErrorMessage))
                                         {
                                             <MudAlert Severity="Severity.Error" Dense="true">@FriendlyOperationError(image.ErrorMessage, "ảnh")</MudAlert>
                                         }
@@ -278,7 +288,18 @@
                                                        StartIcon="@Icons.Material.Filled.Refresh"
                                                        Disabled="@_busy"
                                                        OnClick="@(() => RetryImageAsync(image))">
-                                                Render lại
+                                                @(image.Status == TimelapseOperationStatuses.Cancelled ? "TẠO LẠI" : "Render lại")
+                                            </MudButton>
+                                        }
+                                        @if (!image.IsOriginal && CanCancelOperation(image.Status))
+                                        {
+                                            <MudButton Size="Size.Small"
+                                                       Variant="Variant.Text"
+                                                       Color="Color.Error"
+                                                       StartIcon="@Icons.Material.Filled.StopCircle"
+                                                       Disabled="@_busy"
+                                                       OnClick="@(() => CancelImageAsync(image))">
+                                                DỪNG
                                             </MudButton>
                                         }
                                     </div>
@@ -373,14 +394,25 @@
                                             }
                                             <MudText Typo="Typo.caption" Color="Color.Secondary">@TimelapseRequestRules.RuntimeClipDurationSeconds giây · @TimelapseSellPricing.CustomerQualityLabel(_job.Snapshot.VideoMode) · @FormatRatio(_job.Snapshot.Ratio)</MudText>
                                         </div>
-                                        @if (!string.IsNullOrWhiteSpace(clip.ErrorMessage))
+                                        @if (clip.Status != TimelapseOperationStatuses.Cancelled && !string.IsNullOrWhiteSpace(clip.ErrorMessage))
                                         {
                                             <MudAlert Severity="Severity.Error" Dense="true">@FriendlyOperationError(clip.ErrorMessage, "video")</MudAlert>
                                         }
                                         @if (CanRetry(clip.Status))
                                         {
                                             <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh" Disabled="@_busy" OnClick="@(() => RetryVideoAsync(clip.ClipIndex))">
-                                                Render lại
+                                                @(clip.Status == TimelapseOperationStatuses.Cancelled ? "RENDER LẠI" : "Render lại")
+                                            </MudButton>
+                                        }
+                                        @if (CanCancelOperation(clip.Status))
+                                        {
+                                            <MudButton Size="Size.Small"
+                                                       Variant="Variant.Text"
+                                                       Color="Color.Error"
+                                                       StartIcon="@Icons.Material.Filled.StopCircle"
+                                                       Disabled="@_busy"
+                                                       OnClick="@(() => CancelVideoAsync(clip.ClipIndex))">
+                                                DỪNG
                                             </MudButton>
                                         }
                                     </div>
@@ -468,6 +500,11 @@
         => EnsureVideoCards();
     private int ImageFailureCount => ImageCards.Count(x => x.Status == TimelapseOperationStatuses.Failed);
     private int VideoFailureCount => VideoCards.Count(x => x.Status == TimelapseOperationStatuses.Failed);
+    private bool CanCancelJob
+        => _job?.Workflow.HasActiveOperations == true
+           || _job?.Workflow.ParentStatus is TimelapseParentStatuses.GeneratingImages
+               or TimelapseParentStatuses.GeneratingVideos
+               or TimelapseParentStatuses.Finalizing;
     private bool IsFinalOutputLoading
         => _job?.Workflow.FinalOutput?.Status is TimelapseOperationStatuses.Waiting or TimelapseOperationStatuses.Rendering
            || string.Equals(_job?.Workflow.FinalOutput?.Status, TimelapseParentStatuses.Finalizing, StringComparison.OrdinalIgnoreCase)
@@ -724,6 +761,60 @@
         });
     }
 
+    private async Task CancelJobAsync()
+    {
+        if (AuthState.CurrentUser is null || !await ConfirmCancelJobAsync())
+        {
+            return;
+        }
+
+        await RunActionAsync(async () =>
+        {
+            _job = await Jobs.CancelJobAsync(JobId, AuthState.CurrentUser);
+            Snackbar.Add("Đã dừng toàn bộ tác vụ Timelapse.", Severity.Warning);
+        });
+    }
+
+    private async Task CancelImageAsync(TimelapseStageImage image)
+    {
+        if (AuthState.CurrentUser is null)
+        {
+            return;
+        }
+
+        await RunActionAsync(async () =>
+        {
+            _job = await Jobs.CancelImageAsync(JobId, image.ProgressPercent, AuthState.CurrentUser);
+            _activeTabIndex = 1;
+            Snackbar.Add($"Đã dừng ảnh {image.ProgressPercent}%.", Severity.Warning);
+        });
+    }
+
+    private async Task CancelVideoAsync(int clipIndex)
+    {
+        if (AuthState.CurrentUser is null)
+        {
+            return;
+        }
+
+        await RunActionAsync(async () =>
+        {
+            _job = await Jobs.CancelVideoAsync(JobId, clipIndex, AuthState.CurrentUser);
+            _activeTabIndex = 1;
+            Snackbar.Add($"Đã dừng video clip {clipIndex}.", Severity.Warning);
+        });
+    }
+
+    private async Task<bool> ConfirmCancelJobAsync()
+    {
+        var confirmed = await DialogService.ShowMessageBoxAsync(
+            "Dừng toàn bộ tác vụ?",
+            "Các ảnh/video đã hoàn thành vẫn được giữ lại. Tác vụ đã gửi sang nhà cung cấp có thể vẫn tiếp tục xử lý và phát sinh chi phí.",
+            yesText: "DỪNG TẤT CẢ",
+            cancelText: "HỦY");
+        return confirmed == true;
+    }
+
     private async Task RunActionAsync(Func<Task> action)
     {
         _busy = true;
@@ -871,6 +962,9 @@
     private static bool IsRenderingOperation(string? status)
         => status == TimelapseOperationStatuses.Rendering;
 
+    private static bool CanCancelOperation(string? status)
+        => status is TimelapseOperationStatuses.Waiting or TimelapseOperationStatuses.Rendering;
+
     private static string OperationStateClass(string? status)
         => status switch
         {
@@ -879,6 +973,7 @@
             TimelapseOperationStatuses.Completed => "is-completed",
             TimelapseOperationStatuses.Failed => "is-failed",
             TimelapseOperationStatuses.Invalidated => "is-invalidated",
+            TimelapseOperationStatuses.Cancelled => "is-cancelled",
             _ => "is-unknown"
         };
 
@@ -899,11 +994,11 @@
             : "Không thể cập nhật trạng thái mới nhất. Hệ thống sẽ thử lại.";
 
     private static bool CanRetry(string status)
-        => status is TimelapseOperationStatuses.Failed or TimelapseOperationStatuses.Completed or TimelapseOperationStatuses.Invalidated;
+        => status is TimelapseOperationStatuses.Failed or TimelapseOperationStatuses.Completed or TimelapseOperationStatuses.Invalidated or TimelapseOperationStatuses.Cancelled;
 
     private bool CanRetryImage(string status)
         => _job?.Workflow.HasActiveOperations != true
-           && status is TimelapseOperationStatuses.Failed or TimelapseOperationStatuses.Completed;
+           && status is TimelapseOperationStatuses.Failed or TimelapseOperationStatuses.Completed or TimelapseOperationStatuses.Cancelled;
 
     private static bool CanOpenPrompt(TimelapseStageImage image)
         => !image.IsOriginal
@@ -923,6 +1018,7 @@
         {
             TimelapseParentStatuses.Completed => Color.Success,
             TimelapseParentStatuses.Failed => Color.Error,
+            TimelapseParentStatuses.Cancelled => Color.Warning,
             TimelapseParentStatuses.GeneratingImages or TimelapseParentStatuses.GeneratingVideos or TimelapseParentStatuses.Finalizing => Color.Warning,
             _ => Color.Default
         };
@@ -934,6 +1030,7 @@
             TimelapseOperationStatuses.Failed => Color.Error,
             TimelapseOperationStatuses.Rendering => Color.Warning,
             TimelapseOperationStatuses.Invalidated => Color.Info,
+            TimelapseOperationStatuses.Cancelled => Color.Warning,
             _ => Color.Default
         };
 

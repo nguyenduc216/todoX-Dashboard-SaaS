@@ -15,6 +15,9 @@ public interface ITimelapseWorkflowService
     Task<TimelapseWorkflowState> RetryImageAsync(Guid jobId, int progressPercent, TimelapseJobSnapshot snapshot, CurrentUserSession currentUser, CancellationToken ct = default);
     Task<TimelapseWorkflowState> UpdateImagePromptAsync(Guid jobId, Guid imageStageId, string prompt, bool rerender, TimelapseJobSnapshot snapshot, CurrentUserSession currentUser, CancellationToken ct = default);
     Task<TimelapseWorkflowState> RetryVideoAsync(Guid jobId, int clipIndex, TimelapseJobSnapshot snapshot, CurrentUserSession currentUser, CancellationToken ct = default);
+    Task<TimelapseWorkflowState> CancelJobAsync(Guid jobId, TimelapseJobSnapshot snapshot, CurrentUserSession currentUser, CancellationToken ct = default);
+    Task<TimelapseWorkflowState> CancelImageAsync(Guid jobId, int progressPercent, TimelapseJobSnapshot snapshot, CurrentUserSession currentUser, CancellationToken ct = default);
+    Task<TimelapseWorkflowState> CancelVideoAsync(Guid jobId, int clipIndex, TimelapseJobSnapshot snapshot, CurrentUserSession currentUser, CancellationToken ct = default);
     Task<TimelapseWorkflowState> ConfirmVideoRenderAsync(Guid jobId, TimelapseJobSnapshot snapshot, CurrentUserSession currentUser, CancellationToken ct = default);
     Task<TimelapseWorkflowState> StartFinalizerAsync(Guid jobId, TimelapseJobSnapshot snapshot, CurrentUserSession currentUser, CancellationToken ct = default);
 }
@@ -322,6 +325,185 @@ public sealed class TimelapseWorkflowService : ITimelapseWorkflowService
         return await GetStateAsync(jobId, ct);
     }
 
+    public async Task<TimelapseWorkflowState> CancelJobAsync(Guid jobId, TimelapseJobSnapshot snapshot, CurrentUserSession currentUser, CancellationToken ct = default)
+    {
+        EnsureCustomer(currentUser);
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        using var tx = conn.BeginTransaction();
+        await LockJobAsync(conn, tx, jobId);
+
+        await CancelImagesAsync(conn, tx, jobId, null);
+        await CancelVideosAsync(conn, tx, jobId, null);
+        await CancelFinalizerAsync(conn, tx, jobId);
+        await conn.ExecuteAsync(
+            """
+            UPDATE render.render_jobs
+               SET status=@status,
+                   cancel_reason=@reason,
+                   cancelled_at=now(),
+                   completed_at=COALESCE(completed_at, now()),
+                   updated_at=now()
+             WHERE id=@jobId
+               AND tenant_id=@tenant
+               AND status <> @completed;
+            """,
+            new
+            {
+                jobId,
+                tenant = _tenant.TenantId,
+                status = RenderJobStatuses.Cancelled,
+                completed = RenderJobStatuses.Completed,
+                reason = "user_requested"
+            }, tx);
+        tx.Commit();
+
+        await _renderJobs.AddEventAsync(
+            jobId,
+            "TIMELAPSE_JOB_CANCELLED",
+            "Customer cancelled the Timelapse job.",
+            new { jobId, userId = currentUser.UserId, reason = "user_requested" },
+            "warning",
+            ct);
+
+        return await GetStateAsync(jobId, ct);
+    }
+
+    public async Task<TimelapseWorkflowState> CancelImageAsync(Guid jobId, int progressPercent, TimelapseJobSnapshot snapshot, CurrentUserSession currentUser, CancellationToken ct = default)
+    {
+        EnsureCustomer(currentUser);
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        using var tx = conn.BeginTransaction();
+        await LockJobAsync(conn, tx, jobId);
+
+        var stage = await conn.QuerySingleOrDefaultAsync<EditableImageStageRow>(
+            """
+            SELECT id AS Id,
+                   progress_percent AS ProgressPercent,
+                   is_original AS IsOriginal,
+                   status AS Status,
+                   prompt_snapshot_json::text AS PromptSnapshotJson
+              FROM timelapse.timelapse_image_stages
+             WHERE tenant_id=@tenant
+               AND job_id=@jobId
+               AND progress_percent=@progressPercent
+             FOR UPDATE;
+            """,
+            new { tenant = _tenant.TenantId, jobId, progressPercent }, tx);
+        if (stage is null || stage.IsOriginal || stage.ProgressPercent >= 100)
+        {
+            throw new InvalidOperationException("Không tìm thấy ảnh Timelapse có thể dừng.");
+        }
+
+        if (stage.Status == TimelapseOperationStatuses.Completed)
+        {
+            throw new InvalidOperationException("Ảnh đã hoàn thành nên không thể dừng.");
+        }
+
+        if (!IsCancellableOperation(stage.Status))
+        {
+            throw new InvalidOperationException("Ảnh này không ở trạng thái có thể dừng.");
+        }
+
+        var impact = TimelapseRerenderImpactPlanner.Plan(snapshot.SceneCount, stage.ProgressPercent);
+        var cancelledProgress = impact.ImageProgressesToInvalidate
+            .Append(stage.ProgressPercent)
+            .Distinct()
+            .ToArray();
+        await CancelImagesAsync(conn, tx, jobId, cancelledProgress);
+
+        var graph = TimelapseStageGraphBuilder.Build(snapshot.SceneCount);
+        var affectedClipIndexes = graph.VideoClips
+            .Where(x => cancelledProgress.Contains(x.StartProgressPercent) || cancelledProgress.Contains(x.EndProgressPercent))
+            .Select(x => x.ClipIndex)
+            .Distinct()
+            .ToArray();
+        await CancelVideosAsync(conn, tx, jobId, affectedClipIndexes);
+        await CancelFinalizerAsync(conn, tx, jobId);
+        await SetParentStoppedIfNoActiveAsync(conn, tx, jobId);
+        tx.Commit();
+
+        await _renderJobs.AddEventAsync(
+            jobId,
+            "TIMELAPSE_IMAGE_CANCELLED",
+            "Customer cancelled a Timelapse image stage.",
+            new
+            {
+                jobId,
+                progressPercent = stage.ProgressPercent,
+                cancelledProgress,
+                cancelledClipIndexes = affectedClipIndexes,
+                userId = currentUser.UserId,
+                reason = "user_requested"
+            },
+            "warning",
+            ct);
+
+        return await GetStateAsync(jobId, ct);
+    }
+
+    public async Task<TimelapseWorkflowState> CancelVideoAsync(Guid jobId, int clipIndex, TimelapseJobSnapshot snapshot, CurrentUserSession currentUser, CancellationToken ct = default)
+    {
+        EnsureCustomer(currentUser);
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        using var tx = conn.BeginTransaction();
+        await LockJobAsync(conn, tx, jobId);
+
+        var clip = await conn.QuerySingleOrDefaultAsync<VideoRetryClipRow>(
+            """
+            SELECT id AS Id,
+                   clip_index AS ClipIndex,
+                   start_progress_percent AS StartProgressPercent,
+                   end_progress_percent AS EndProgressPercent,
+                   status AS Status,
+                   active_attempt AS ActiveAttempt
+              FROM timelapse.timelapse_video_clips
+             WHERE tenant_id=@tenant
+               AND job_id=@jobId
+               AND clip_index=@clipIndex
+             FOR UPDATE;
+            """,
+            new { tenant = _tenant.TenantId, jobId, clipIndex }, tx);
+        if (clip is null)
+        {
+            throw new InvalidOperationException("Không tìm thấy video clip Timelapse thuộc job này.");
+        }
+
+        if (clip.Status == TimelapseOperationStatuses.Completed)
+        {
+            throw new InvalidOperationException("Video clip đã hoàn thành nên không thể dừng.");
+        }
+
+        if (!IsCancellableOperation(clip.Status))
+        {
+            throw new InvalidOperationException("Video clip này không ở trạng thái có thể dừng.");
+        }
+
+        await CancelVideosAsync(conn, tx, jobId, new[] { clip.ClipIndex });
+        await CancelFinalizerAsync(conn, tx, jobId);
+        await SetParentStoppedIfNoActiveAsync(conn, tx, jobId);
+        tx.Commit();
+
+        await _renderJobs.AddEventAsync(
+            jobId,
+            "TIMELAPSE_VIDEO_CANCELLED",
+            "Customer cancelled a Timelapse video clip.",
+            new
+            {
+                jobId,
+                clipIndex = clip.ClipIndex,
+                attempt = clip.ActiveAttempt,
+                userId = currentUser.UserId,
+                reason = "user_requested"
+            },
+            "warning",
+            ct);
+
+        return await GetStateAsync(jobId, ct);
+    }
+
     private async Task EnsureVideoRetryAllowedAsync(System.Data.IDbConnection conn, System.Data.IDbTransaction tx, Guid jobId, int clipIndex)
     {
         var clip = await conn.QuerySingleOrDefaultAsync<VideoRetryClipRow>(
@@ -351,7 +533,8 @@ public sealed class TimelapseWorkflowService : ITimelapseWorkflowService
 
         if (clip.Status is not TimelapseOperationStatuses.Failed
             and not TimelapseOperationStatuses.Completed
-            and not TimelapseOperationStatuses.Invalidated)
+            and not TimelapseOperationStatuses.Invalidated
+            and not TimelapseOperationStatuses.Cancelled)
         {
             throw new InvalidOperationException("Video clip này chưa sẵn sàng để render lại.");
         }
@@ -726,6 +909,124 @@ public sealed class TimelapseWorkflowService : ITimelapseWorkflowService
             """,
             new { jobId }, tx);
 
+    private static async Task CancelImagesAsync(System.Data.IDbConnection conn, System.Data.IDbTransaction tx, Guid jobId, IReadOnlyList<int>? progress)
+    {
+        await conn.ExecuteAsync(
+            """
+            WITH cancelled AS (
+                UPDATE timelapse.timelapse_image_stages
+                   SET status='CANCELLED',
+                       error_code='user_cancelled',
+                       error_message='User requested cancellation.',
+                       completed_at=COALESCE(completed_at, now()),
+                       updated_at=now()
+                 WHERE job_id=@jobId
+                   AND is_original=false
+                   AND status IN ('WAITING','RENDERING','INVALIDATED','FAILED')
+                   AND (@progress::integer[] IS NULL OR progress_percent = ANY(@progress::integer[]))
+                 RETURNING id, active_attempt
+            )
+            UPDATE timelapse.timelapse_image_stage_versions v
+               SET status='CANCELLED',
+                   request_json=COALESCE(v.request_json, jsonb_build_object()) - 'worker_claim',
+                   error_code='user_cancelled',
+                   error_message='User requested cancellation.',
+                   completed_at=COALESCE(v.completed_at, now()),
+                   updated_at=now()
+              FROM cancelled c
+             WHERE v.image_stage_id=c.id
+               AND v.attempt=c.active_attempt
+               AND v.status IN ('WAITING','RENDERING','INVALIDATED','FAILED');
+            """,
+            new { jobId, progress = progress?.ToArray() }, tx);
+    }
+
+    private static async Task CancelVideosAsync(System.Data.IDbConnection conn, System.Data.IDbTransaction tx, Guid jobId, IReadOnlyList<int>? clipIndexes)
+    {
+        await conn.ExecuteAsync(
+            """
+            WITH cancelled AS (
+                UPDATE timelapse.timelapse_video_clips
+                   SET status='CANCELLED',
+                       error_code='user_cancelled',
+                       error_message='User requested cancellation.',
+                       completed_at=COALESCE(completed_at, now()),
+                       updated_at=now()
+                 WHERE job_id=@jobId
+                   AND status IN ('WAITING','RENDERING','INVALIDATED','FAILED')
+                   AND (@clipIndexes::integer[] IS NULL OR clip_index = ANY(@clipIndexes::integer[]))
+                 RETURNING id, active_attempt
+            )
+            UPDATE timelapse.timelapse_video_clip_versions v
+               SET status='CANCELLED',
+                   request_json=COALESCE(v.request_json, jsonb_build_object()) - 'worker_claim',
+                   error_code='user_cancelled',
+                   error_message='User requested cancellation.',
+                   completed_at=COALESCE(v.completed_at, now()),
+                   updated_at=now()
+              FROM cancelled c
+             WHERE v.video_clip_id=c.id
+               AND v.attempt=c.active_attempt
+               AND v.status IN ('WAITING','RENDERING','INVALIDATED','FAILED');
+            """,
+            new { jobId, clipIndexes = clipIndexes?.ToArray() }, tx);
+    }
+
+    private static async Task CancelFinalizerAsync(System.Data.IDbConnection conn, System.Data.IDbTransaction tx, Guid jobId)
+        => await conn.ExecuteAsync(
+            """
+            UPDATE timelapse.timelapse_final_outputs
+               SET status='CANCELLED',
+                   request_json=COALESCE(request_json, jsonb_build_object()) - 'worker_claim',
+                   error_code='user_cancelled',
+                   error_message='User requested cancellation.',
+                   completed_at=COALESCE(completed_at, now()),
+                   updated_at=now()
+             WHERE job_id=@jobId
+               AND status IN ('WAITING','RENDERING','INVALIDATED','FAILED');
+            """,
+            new { jobId }, tx);
+
+    private async Task SetParentStoppedIfNoActiveAsync(System.Data.IDbConnection conn, System.Data.IDbTransaction tx, Guid jobId)
+    {
+        var active = await conn.QuerySingleAsync<int>(
+            """
+            SELECT
+                (SELECT count(*) FROM timelapse.timelapse_image_stages WHERE job_id=@jobId AND status='RENDERING')
+              + (SELECT count(*) FROM timelapse.timelapse_video_clips WHERE job_id=@jobId AND status='RENDERING')
+              + (SELECT count(*) FROM timelapse.timelapse_final_outputs WHERE job_id=@jobId AND status='RENDERING');
+            """,
+            new { jobId }, tx);
+        if (active == 0)
+        {
+            await conn.ExecuteAsync(
+                """
+                UPDATE render.render_jobs
+                   SET status=@status,
+                       cancel_reason=COALESCE(cancel_reason, @reason),
+                       cancelled_at=COALESCE(cancelled_at, now()),
+                       updated_at=now()
+                 WHERE id=@jobId
+                   AND tenant_id=@tenant
+                   AND status <> @completed;
+                """,
+                new
+                {
+                    jobId,
+                    tenant = _tenant.TenantId,
+                    status = RenderJobStatuses.Cancelled,
+                    completed = RenderJobStatuses.Completed,
+                    reason = "user_requested"
+                }, tx);
+        }
+    }
+
+    private static bool IsCancellableOperation(string? status)
+        => status is TimelapseOperationStatuses.Rendering
+            or TimelapseOperationStatuses.Waiting
+            or TimelapseOperationStatuses.Invalidated
+            or TimelapseOperationStatuses.Failed;
+
     private async Task<TimelapseWorkflowState> ReadStateAsync(System.Data.IDbConnection conn, Guid jobId, System.Data.IDbTransaction? tx = null)
     {
         var parent = await conn.QuerySingleOrDefaultAsync<string?>(
@@ -816,12 +1117,13 @@ public sealed class TimelapseWorkflowService : ITimelapseWorkflowService
         var canEdit = !hasActive && TimelapseParentStatuses.IsEditableStopped(parent);
         var canStart = !hasActive
                        && !string.Equals(parent, TimelapseParentStatuses.Completed, StringComparison.OrdinalIgnoreCase)
-                       && (!images.Any() || images.Any(x => x.Status is TimelapseOperationStatuses.Waiting or TimelapseOperationStatuses.Failed or TimelapseOperationStatuses.Invalidated)
-                           || videos.Any(x => x.Status is TimelapseOperationStatuses.Waiting or TimelapseOperationStatuses.Failed or TimelapseOperationStatuses.Invalidated));
+                       && (!images.Any() || images.Any(x => x.Status is TimelapseOperationStatuses.Waiting or TimelapseOperationStatuses.Failed or TimelapseOperationStatuses.Invalidated or TimelapseOperationStatuses.Cancelled)
+                           || videos.Any(x => x.Status is TimelapseOperationStatuses.Waiting or TimelapseOperationStatuses.Failed or TimelapseOperationStatuses.Invalidated or TimelapseOperationStatuses.Cancelled));
 
+        var normalizedParent = NormalizeParentStatus(parent);
         return new TimelapseWorkflowState
         {
-            ParentStatus = NormalizeParentStatus(parent),
+            ParentStatus = normalizedParent,
             Images = images,
             Videos = videos,
             FinalOutput = final,
@@ -833,7 +1135,9 @@ public sealed class TimelapseWorkflowService : ITimelapseWorkflowService
             CanConfirmVideoRender = requiresVideoConfirmation && !videoRenderConfirmed && readyVideoCount > 0,
             ReadyVideoCount = readyVideoCount,
             GeneratedImageCount = images.Count(x => !x.IsOriginal),
-            CurrentStep = BuildCurrentStep(images, videos, final, imageProgress)
+            CurrentStep = normalizedParent == TimelapseParentStatuses.Cancelled
+                ? "Đã dừng"
+                : BuildCurrentStep(images, videos, final, imageProgress)
         };
     }
 
@@ -843,6 +1147,7 @@ public sealed class TimelapseWorkflowService : ITimelapseWorkflowService
             RenderJobStatuses.Draft => TimelapseParentStatuses.Draft,
             RenderJobStatuses.Failed => TimelapseParentStatuses.Failed,
             RenderJobStatuses.Completed => TimelapseParentStatuses.Completed,
+            RenderJobStatuses.Cancelled => TimelapseParentStatuses.Cancelled,
             "paused" => TimelapseParentStatuses.Paused,
             _ when string.Equals(status, TimelapseParentStatuses.GeneratingImages, StringComparison.OrdinalIgnoreCase) => TimelapseParentStatuses.GeneratingImages,
             _ when string.Equals(status, TimelapseParentStatuses.GeneratingVideos, StringComparison.OrdinalIgnoreCase) => TimelapseParentStatuses.GeneratingVideos,
@@ -856,6 +1161,13 @@ public sealed class TimelapseWorkflowService : ITimelapseWorkflowService
         TimelapseFinalOutput? final,
         TimelapseImageProgressSummary imageProgress)
     {
+        if (images.Any(x => x.Status == TimelapseOperationStatuses.Cancelled)
+            || videos.Any(x => x.Status == TimelapseOperationStatuses.Cancelled)
+            || final?.Status == TimelapseOperationStatuses.Cancelled)
+        {
+            return "Đã dừng";
+        }
+
         var image = images.FirstOrDefault(x => TimelapseOperationStatuses.IsActive(x.Status));
         if (image is not null)
         {

@@ -53,7 +53,7 @@ public class TimelapsePhase2CTests
     {
         var source = ReadSource("TodoX.Web", "Services", "Timelapse", "TimelapseWorkerRepository.cs");
         var methodStart = source.IndexOf("public async Task<TimelapseFinalizerWorkItem?> ClaimFinalizerAsync", StringComparison.Ordinal);
-        var methodEnd = source.IndexOf("public async Task SaveFinalizerCompletedAsync", methodStart, StringComparison.Ordinal);
+        var methodEnd = source.IndexOf("public async Task<bool> SaveFinalizerCompletedAsync", methodStart, StringComparison.Ordinal);
         var claimSql = source[methodStart..methodEnd];
 
         Assert.Contains("WITH candidate AS", claimSql, StringComparison.Ordinal);
@@ -790,6 +790,86 @@ public class TimelapsePhase2CTests
         Assert.Contains("animation: tl-finalizing-progress-scan 2.6s ease-in-out infinite !important;", overlayCss, StringComparison.Ordinal);
         Assert.Contains("@keyframes tl-finalizing-piece-breathe", overlayCss, StringComparison.Ordinal);
         Assert.Contains("@keyframes tl-finalizing-frame-breathe", overlayCss, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TimelapseCancellation_StatusModelUsesCanonicalCancelledState()
+    {
+        Assert.Equal("CANCELLED", TodoX.Web.Models.Timelapse.TimelapseOperationStatuses.Cancelled);
+        Assert.Equal("CANCELLED", TodoX.Web.Models.Timelapse.TimelapseParentStatuses.Cancelled);
+        Assert.Equal("cancelled", TodoX.Web.Services.Render.RenderJobStatuses.Cancelled);
+        Assert.Equal("Đã dừng", TodoX.Web.Models.Timelapse.TimelapseStatusText.Operation(TodoX.Web.Models.Timelapse.TimelapseOperationStatuses.Cancelled));
+        Assert.Equal("Đã dừng", TodoX.Web.Models.Timelapse.TimelapseStatusText.Parent(TodoX.Web.Models.Timelapse.TimelapseParentStatuses.Cancelled));
+    }
+
+    [Fact]
+    public void TimelapseCancellation_WorkflowCancelsJobImageVideoAndKeepsMedia()
+    {
+        var workflow = ReadSource("TodoX.Web", "Services", "Timelapse", "TimelapseWorkflowService.cs");
+
+        Assert.Contains("CancelJobAsync(Guid jobId", workflow, StringComparison.Ordinal);
+        Assert.Contains("CancelImageAsync(Guid jobId, int progressPercent", workflow, StringComparison.Ordinal);
+        Assert.Contains("CancelVideoAsync(Guid jobId, int clipIndex", workflow, StringComparison.Ordinal);
+        Assert.Contains("TIMELAPSE_JOB_CANCELLED", workflow, StringComparison.Ordinal);
+        Assert.Contains("TIMELAPSE_IMAGE_CANCELLED", workflow, StringComparison.Ordinal);
+        Assert.Contains("TIMELAPSE_VIDEO_CANCELLED", workflow, StringComparison.Ordinal);
+        Assert.Contains("status='CANCELLED'", workflow, StringComparison.Ordinal);
+        Assert.Contains("request_json=COALESCE(v.request_json, jsonb_build_object()) - 'worker_claim'", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("result_media_id=NULL", workflow[workflow.IndexOf("private static async Task CancelImagesAsync", StringComparison.Ordinal)..], StringComparison.Ordinal);
+        Assert.Contains("cancel_reason=@reason", workflow, StringComparison.Ordinal);
+        Assert.Contains("status = RenderJobStatuses.Cancelled", workflow, StringComparison.Ordinal);
+        Assert.Contains("return \"Đã dừng\";", workflow, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TimelapseCancellation_WorkerClaimsAndRaceGuardsRespectCancelledOperations()
+    {
+        var repository = ReadSource("TodoX.Web", "Services", "Timelapse", "TimelapseWorkerRepository.cs");
+
+        Assert.Contains("AND j.status <> 'cancelled'", repository, StringComparison.Ordinal);
+        Assert.Contains("AND active_attempt=@attempt", repository, StringComparison.Ordinal);
+        Assert.Contains("AND status='RENDERING'", repository, StringComparison.Ordinal);
+        Assert.Contains("SELECT EXISTS (SELECT 1 FROM {versionTable} WHERE {versionFk}=@id AND attempt=@attempt AND status='FAILED')", repository, StringComparison.Ordinal);
+        Assert.Contains("AND EXISTS (", repository, StringComparison.Ordinal);
+        Assert.Contains("FROM timelapse.timelapse_final_outputs", repository, StringComparison.Ordinal);
+        Assert.Contains("AND status='COMPLETED'", repository, StringComparison.Ordinal);
+        Assert.Contains("AND status='FAILED'", repository, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TimelapseCancellation_UiShowsStopAndRetryControlsWithoutCompletedStop()
+    {
+        var razor = ReadSource("TodoX.Web", "Components", "Pages", "TimelapseJobDetail.razor");
+        var css = ReadSource("TodoX.Web", "Components", "Pages", "TimelapseJobDetail.razor.css");
+
+        Assert.Contains("CanCancelJob", razor, StringComparison.Ordinal);
+        Assert.Contains("OnClick=\"CancelJobAsync\"", razor, StringComparison.Ordinal);
+        Assert.Contains("CancelImageAsync(image)", razor, StringComparison.Ordinal);
+        Assert.Contains("CancelVideoAsync(clip.ClipIndex)", razor, StringComparison.Ordinal);
+        Assert.Contains("CanCancelOperation(string? status)", razor, StringComparison.Ordinal);
+        Assert.Contains("status is TimelapseOperationStatuses.Waiting or TimelapseOperationStatuses.Rendering", razor, StringComparison.Ordinal);
+        Assert.Contains("TimelapseOperationStatuses.Cancelled ? \"TẠO LẠI\"", razor, StringComparison.Ordinal);
+        Assert.Contains("TimelapseOperationStatuses.Cancelled ? \"RENDER LẠI\"", razor, StringComparison.Ordinal);
+        Assert.Contains("image.Status != TimelapseOperationStatuses.Cancelled", razor, StringComparison.Ordinal);
+        Assert.Contains("clip.Status != TimelapseOperationStatuses.Cancelled", razor, StringComparison.Ordinal);
+        Assert.Contains("is-cancelled", razor, StringComparison.Ordinal);
+        Assert.Contains(".timelapse-stage-card.is-cancelled", css, StringComparison.Ordinal);
+        Assert.Contains(".tl-status-badge.is-cancelled", css, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TimelapseCancellation_ManualMigrationAddsCancelledToAllStatusChecks()
+    {
+        var migration = ReadSource("database", "manual", "timelapse-cancellation", "01_add_cancelled_status.sql");
+
+        Assert.Contains("ck_timelapse_image_stage_status", migration, StringComparison.Ordinal);
+        Assert.Contains("ck_timelapse_image_stage_version_status", migration, StringComparison.Ordinal);
+        Assert.Contains("ck_timelapse_video_clip_status", migration, StringComparison.Ordinal);
+        Assert.Contains("ck_timelapse_video_clip_version_status", migration, StringComparison.Ordinal);
+        Assert.Contains("ck_timelapse_final_output_status", migration, StringComparison.Ordinal);
+        Assert.Equal(5, migration.Split("'CANCELLED'").Length - 1);
+        Assert.Contains("DROP CONSTRAINT IF EXISTS", migration, StringComparison.Ordinal);
+        Assert.Contains("ADD CONSTRAINT", migration, StringComparison.Ordinal);
     }
 
     [Fact]

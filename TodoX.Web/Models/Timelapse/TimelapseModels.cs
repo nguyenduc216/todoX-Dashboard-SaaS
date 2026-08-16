@@ -137,11 +137,13 @@ public static class TimelapseParentStatuses
     public const string Completed = "COMPLETED";
     public const string Paused = "PAUSED";
     public const string Failed = "FAILED";
+    public const string Cancelled = "CANCELLED";
 
     public static bool IsEditableStopped(string? status)
         => string.Equals(status, Draft, StringComparison.OrdinalIgnoreCase)
            || string.Equals(status, Paused, StringComparison.OrdinalIgnoreCase)
-           || string.Equals(status, Failed, StringComparison.OrdinalIgnoreCase);
+           || string.Equals(status, Failed, StringComparison.OrdinalIgnoreCase)
+           || string.Equals(status, Cancelled, StringComparison.OrdinalIgnoreCase);
 }
 
 public static class TimelapseOperationStatuses
@@ -151,6 +153,7 @@ public static class TimelapseOperationStatuses
     public const string Completed = "COMPLETED";
     public const string Failed = "FAILED";
     public const string Invalidated = "INVALIDATED";
+    public const string Cancelled = "CANCELLED";
 
     public static bool IsActive(string? status)
         => string.Equals(status, Rendering, StringComparison.OrdinalIgnoreCase);
@@ -281,6 +284,7 @@ public static class TimelapseStatusText
             TimelapseParentStatuses.Completed => "Hoàn thành",
             TimelapseParentStatuses.Failed => "Thất bại",
             TimelapseParentStatuses.Paused => "Tạm dừng",
+            TimelapseParentStatuses.Cancelled => "Đã dừng",
             _ => "Chưa bắt đầu"
         };
 
@@ -292,6 +296,7 @@ public static class TimelapseStatusText
             TimelapseOperationStatuses.Completed => "Hoàn thành",
             TimelapseOperationStatuses.Failed => "Thất bại",
             TimelapseOperationStatuses.Invalidated => "Cần tạo lại",
+            TimelapseOperationStatuses.Cancelled => "Đã dừng",
             _ => "Chưa bắt đầu"
         };
 }

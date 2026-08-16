@@ -113,7 +113,13 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
                 item.TenantId,
                 ct);
 
-            await _repo.SaveImageCompletedAsync(item.Id, item.Attempt, media.Id, media.ObjectKey!, media.PublicUrl ?? media.FileUrl!, status.SanitizedResponseJson, ct);
+            if (!await _repo.SaveImageCompletedAsync(item.Id, item.Attempt, media.Id, media.ObjectKey!, media.PublicUrl ?? media.FileUrl!, status.SanitizedResponseJson, ct))
+            {
+                _logger.LogWarning("TIMELAPSE_IMAGE_COMPLETE_STALE jobId={JobId} progress={Progress} attempt={Attempt} taskId={TaskId}",
+                    item.JobId, item.ProgressPercent, item.Attempt, item.ProviderTaskId);
+                return;
+            }
+
             _logger.LogInformation("TIMELAPSE_IMAGE_COMPLETE jobId={JobId} progress={Progress} attempt={Attempt} taskId={TaskId} mediaId={MediaId}",
                 item.JobId, item.ProgressPercent, item.Attempt, item.ProviderTaskId, media.Id);
             await _renderJobs.AddEventAsync(item.JobId, "TIMELAPSE_IMAGE_COMPLETE", "Timelapse image saved to TodoX media.",
@@ -205,7 +211,13 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
                 item.TenantId,
                 ct);
 
-            await _repo.SaveVideoCompletedAsync(item.Id, item.Attempt, media.Id, media.ObjectKey!, media.PublicUrl ?? media.FileUrl!, status.SanitizedResponseJson, ct);
+            if (!await _repo.SaveVideoCompletedAsync(item.Id, item.Attempt, media.Id, media.ObjectKey!, media.PublicUrl ?? media.FileUrl!, status.SanitizedResponseJson, ct))
+            {
+                _logger.LogWarning("TIMELAPSE_VIDEO_COMPLETE_STALE jobId={JobId} clip={ClipIndex} attempt={Attempt} taskId={TaskId}",
+                    item.JobId, item.ClipIndex, item.Attempt, item.ProviderTaskId);
+                return;
+            }
+
             _logger.LogInformation("TIMELAPSE_VIDEO_COMPLETE jobId={JobId} clip={ClipIndex} attempt={Attempt} taskId={TaskId} mediaId={MediaId}",
                 item.JobId, item.ClipIndex, item.Attempt, item.ProviderTaskId, media.Id);
             await _renderJobs.AddEventAsync(item.JobId, "TIMELAPSE_VIDEO_COMPLETE", "Timelapse video clip saved to TodoX media.",
@@ -263,7 +275,7 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
         }
         catch (Ai79TaskSubmitException ex)
         {
-            await _repo.SaveImageSubmitFailedAsync(
+            var saved = await _repo.SaveImageSubmitFailedAsync(
                 item.Id,
                 item.Attempt,
                 provider.ProviderCode,
@@ -283,6 +295,12 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
                 provider.Model,
                 ex.HttpStatusCode is null ? null : (int)ex.HttpStatusCode,
                 ex.ErrorCode);
+            if (!saved)
+            {
+                _logger.LogWarning("TIMELAPSE_IMAGE_SUBMIT_FAILED_STALE jobId={JobId} progress={Progress} attempt={Attempt} taskId={TaskId}",
+                    item.JobId, item.ProgressPercent, item.Attempt, item.ProviderTaskId);
+                return;
+            }
             await TryAddSubmitFailureEventAsync(
                 item.JobId,
                 "TIMELAPSE_IMAGE_FAILED",
@@ -370,7 +388,7 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
         }
         catch (Ai79TaskSubmitException ex)
         {
-            await _repo.SaveVideoSubmitFailedAsync(
+            var saved = await _repo.SaveVideoSubmitFailedAsync(
                 item.Id,
                 item.Attempt,
                 provider.ProviderCode,
@@ -390,6 +408,12 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
                 provider.Model,
                 ex.HttpStatusCode is null ? null : (int)ex.HttpStatusCode,
                 ex.ErrorCode);
+            if (!saved)
+            {
+                _logger.LogWarning("TIMELAPSE_VIDEO_SUBMIT_FAILED_STALE jobId={JobId} clip={ClipIndex} attempt={Attempt} taskId={TaskId}",
+                    item.JobId, item.ClipIndex, item.Attempt, item.ProviderTaskId);
+                return;
+            }
             await TryAddSubmitFailureEventAsync(
                 item.JobId,
                 "TIMELAPSE_VIDEO_FAILED",
@@ -891,9 +915,15 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
 
     private async Task FailImageAsync(TimelapseImageWorkItem item, string? errorCode, string errorMessage, string responseJson, CancellationToken ct)
     {
-        await _repo.SaveImageFailedAsync(item.Id, item.Attempt, errorCode, errorMessage, responseJson, ct);
+        var saved = await _repo.SaveImageFailedAsync(item.Id, item.Attempt, errorCode, errorMessage, responseJson, ct);
         await _renderJobs.AddEventAsync(item.JobId, "TIMELAPSE_IMAGE_FAILED", "Timelapse image task failed.",
             new { item.ProgressPercent, item.Attempt, taskId = item.ProviderTaskId, errorCode, errorMessage }, "error", ct);
+        if (!saved)
+        {
+            _logger.LogWarning("TIMELAPSE_IMAGE_FAILED_STALE jobId={JobId} progress={Progress} attempt={Attempt} taskId={TaskId}",
+                item.JobId, item.ProgressPercent, item.Attempt, item.ProviderTaskId);
+            return;
+        }
         await _coreLifecycle.FailAsync(
             item.JobId,
             item.Snapshot,
@@ -905,9 +935,15 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
 
     private async Task FailVideoAsync(TimelapseVideoWorkItem item, string? errorCode, string errorMessage, string responseJson, CancellationToken ct)
     {
-        await _repo.SaveVideoFailedAsync(item.Id, item.Attempt, errorCode, errorMessage, responseJson, ct);
+        var saved = await _repo.SaveVideoFailedAsync(item.Id, item.Attempt, errorCode, errorMessage, responseJson, ct);
         await _renderJobs.AddEventAsync(item.JobId, "TIMELAPSE_VIDEO_FAILED", "Timelapse video task failed.",
             new { item.ClipIndex, item.Attempt, taskId = item.ProviderTaskId, errorCode, errorMessage }, "error", ct);
+        if (!saved)
+        {
+            _logger.LogWarning("TIMELAPSE_VIDEO_FAILED_STALE jobId={JobId} clip={ClipIndex} attempt={Attempt} taskId={TaskId}",
+                item.JobId, item.ClipIndex, item.Attempt, item.ProviderTaskId);
+            return;
+        }
         await _coreLifecycle.FailAsync(
             item.JobId,
             item.Snapshot,

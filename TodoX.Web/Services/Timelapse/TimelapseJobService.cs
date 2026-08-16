@@ -25,6 +25,9 @@ public interface ITimelapseJobService
     Task<TimelapseJobView> RetryImageAsync(Guid jobId, int progressPercent, CurrentUserSession currentUser, CancellationToken ct = default);
     Task<TimelapseJobView> UpdateImagePromptAsync(Guid jobId, Guid imageStageId, string prompt, bool rerender, CurrentUserSession currentUser, CancellationToken ct = default);
     Task<TimelapseJobView> RetryVideoAsync(Guid jobId, int clipIndex, CurrentUserSession currentUser, CancellationToken ct = default);
+    Task<TimelapseJobView> CancelJobAsync(Guid jobId, CurrentUserSession currentUser, CancellationToken ct = default);
+    Task<TimelapseJobView> CancelImageAsync(Guid jobId, int progressPercent, CurrentUserSession currentUser, CancellationToken ct = default);
+    Task<TimelapseJobView> CancelVideoAsync(Guid jobId, int clipIndex, CurrentUserSession currentUser, CancellationToken ct = default);
     Task<TimelapseJobView> ConfirmVideoRenderAsync(Guid jobId, CurrentUserSession currentUser, CancellationToken ct = default);
     Task<TimelapseJobView> StartFinalizerAsync(Guid jobId, CurrentUserSession currentUser, CancellationToken ct = default);
 }
@@ -318,6 +321,33 @@ public sealed class TimelapseJobService : ITimelapseJobService
     {
         var view = await RequireOwnedAsync(jobId, currentUser, ct);
         view.Workflow = await _workflow.RetryVideoAsync(jobId, clipIndex, view.Snapshot, currentUser, ct);
+        view.Status = view.Workflow.ParentStatus;
+        HydrateImagePrompts(view);
+        return view;
+    }
+
+    public async Task<TimelapseJobView> CancelJobAsync(Guid jobId, CurrentUserSession currentUser, CancellationToken ct = default)
+    {
+        var view = await RequireOwnedAsync(jobId, currentUser, ct);
+        view.Workflow = await _workflow.CancelJobAsync(jobId, view.Snapshot, currentUser, ct);
+        view.Status = view.Workflow.ParentStatus;
+        HydrateImagePrompts(view);
+        return view;
+    }
+
+    public async Task<TimelapseJobView> CancelImageAsync(Guid jobId, int progressPercent, CurrentUserSession currentUser, CancellationToken ct = default)
+    {
+        var view = await RequireOwnedAsync(jobId, currentUser, ct);
+        view.Workflow = await _workflow.CancelImageAsync(jobId, progressPercent, view.Snapshot, currentUser, ct);
+        view.Status = view.Workflow.ParentStatus;
+        HydrateImagePrompts(view);
+        return view;
+    }
+
+    public async Task<TimelapseJobView> CancelVideoAsync(Guid jobId, int clipIndex, CurrentUserSession currentUser, CancellationToken ct = default)
+    {
+        var view = await RequireOwnedAsync(jobId, currentUser, ct);
+        view.Workflow = await _workflow.CancelVideoAsync(jobId, clipIndex, view.Snapshot, currentUser, ct);
         view.Status = view.Workflow.ParentStatus;
         HydrateImagePrompts(view);
         return view;
