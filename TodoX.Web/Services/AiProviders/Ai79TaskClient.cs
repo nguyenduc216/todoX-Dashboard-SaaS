@@ -296,8 +296,47 @@ public sealed class Ai79TaskClient : IAi79TaskClient
                 return imageId;
             }
         }
+        else
+        {
+            var videoId = FindVideoIdBase(element);
+            if (!string.IsNullOrWhiteSpace(videoId))
+            {
+                return videoId;
+            }
+        }
 
         return FindTaskIdAlias(element);
+    }
+
+    private static string? FindVideoIdBase(JsonElement element)
+    {
+        if (element.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        if (element.TryGetProperty("id_base", out var directId))
+        {
+            var value = ScalarString(directId);
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+        }
+
+        foreach (var containerName in new[] { "videoInfo", "data" })
+        {
+            if (element.TryGetProperty(containerName, out var child))
+            {
+                var found = FindVideoIdBase(child);
+                if (!string.IsNullOrWhiteSpace(found))
+                {
+                    return found;
+                }
+            }
+        }
+
+        return null;
     }
 
     private static string? FindImageIdBase(JsonElement element)

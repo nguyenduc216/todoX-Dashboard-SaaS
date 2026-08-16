@@ -86,6 +86,80 @@ public sealed class Ai79TaskClientTests
     }
 
     [Theory]
+    [InlineData("""{"success":true,"id_base":"45d9f48d8741edb7","message":"Gửi yêu cầu tạo video thành công, chờ hoàn thành trong ít phút.","videoInfo":{"mode":"fast","model":"seedance_20_pro"}}""")]
+    [InlineData("""{"success":true,"videoInfo":{"id_base":"45d9f48d8741edb7","mode":"fast","model":"seedance_20_pro"},"message":"Gửi yêu cầu tạo video thành công, chờ hoàn thành trong ít phút."}""")]
+    [InlineData("""{"success":true,"data":{"id_base":"45d9f48d8741edb7"},"message":"Gửi yêu cầu tạo video thành công, chờ hoàn thành trong ít phút."}""")]
+    public async Task VideoSubmit_ParsesIdBaseAndDoesNotTreatSuccessMessageAsError(string responseJson)
+    {
+        var handler = new RecordingJsonHandler(responseJson);
+        var client = new Ai79TaskClient(new HttpClient(handler));
+
+        var result = await client.SubmitAsync(new Ai79TaskSubmitRequest(
+            "https://api.gommo.net/ai",
+            "/create-video",
+            "secret-token",
+            "79ai.net",
+            "seedance_20_pro",
+            "transition prompt",
+            ["https://cdn.example/start.png", "https://cdn.example/end.png"],
+            new Dictionary<string, string?> { ["mode"] = "fast", ["duration"] = "6", ["ratio"] = "16:9", ["resolution"] = "720p" },
+            Ai79TaskOperation.Video,
+            "image",
+            "image_2"));
+
+        Assert.Equal("45d9f48d8741edb7", result.TaskId);
+        Assert.Contains("message", result.SanitizedResponseJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("secret-token", result.SanitizedResponseJson, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("""{"task_id":"video-task-001"}""", "video-task-001")]
+    [InlineData("""{"data":{"request_id":"video-request-001"}}""", "video-request-001")]
+    public async Task VideoSubmit_KeepsLegacyAsyncTaskAliases(string responseJson, string expectedTaskId)
+    {
+        var handler = new RecordingJsonHandler(responseJson);
+        var client = new Ai79TaskClient(new HttpClient(handler));
+
+        var result = await client.SubmitAsync(new Ai79TaskSubmitRequest(
+            "https://api.gommo.net/ai",
+            "/create-video",
+            "secret-token",
+            "79ai.net",
+            "seedance_20_pro",
+            "transition prompt",
+            ["https://cdn.example/start.png", "https://cdn.example/end.png"],
+            new Dictionary<string, string?> { ["mode"] = "fast", ["duration"] = "6", ["ratio"] = "16:9" },
+            Ai79TaskOperation.Video,
+            "image",
+            "image_2"));
+
+        Assert.Equal(expectedTaskId, result.TaskId);
+    }
+
+    [Fact]
+    public async Task VideoSubmit_ProviderErrorStillThrowsWhenResolutionIsMissing()
+    {
+        var handler = new RecordingJsonHandler("""{"error":600,"message":"Thiếu tùy chọn bắt buộc \"resolution\"."}""");
+        var client = new Ai79TaskClient(new HttpClient(handler));
+
+        var ex = await Assert.ThrowsAsync<Ai79TaskSubmitException>(() => client.SubmitAsync(new Ai79TaskSubmitRequest(
+            "https://api.gommo.net/ai",
+            "/create-video",
+            "secret-token",
+            "79ai.net",
+            "seedance_20_pro",
+            "transition prompt",
+            ["https://cdn.example/start.png", "https://cdn.example/end.png"],
+            new Dictionary<string, string?> { ["mode"] = "fast", ["duration"] = "6", ["ratio"] = "16:9" },
+            Ai79TaskOperation.Video,
+            "image",
+            "image_2")));
+
+        Assert.Equal("provider_error", ex.ErrorCode);
+        Assert.Contains("resolution", ex.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
     [InlineData("""{"data":{"task_id":"img-task-001","status":"RUNNING"}}""")]
     [InlineData("""{"task":{"request_id":"img-task-001","state":"processing"}}""")]
     public async Task ImagePoll_RunningFixtureNormalizesToRunning(string json)

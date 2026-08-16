@@ -325,6 +325,50 @@ public class TimelapsePhase2CTests
     }
 
     [Fact]
+    public void TimelapseDetailUi_ConstrainsVideoCardsAndInputThumbnails()
+    {
+        var razor = ReadSource("TodoX.Web", "Components", "Pages", "TimelapseJobDetail.razor");
+        var css = ReadSource("TodoX.Web", "Components", "Pages", "TimelapseJobDetail.razor.css");
+
+        Assert.Contains("video-stage-card", razor, StringComparison.Ordinal);
+        Assert.Contains("class=\"clip-input-thumbnails\"", razor, StringComparison.Ordinal);
+        Assert.Contains("@RenderImageThumb(clip.StartProgressPercent)", razor, StringComparison.Ordinal);
+        Assert.Contains("@RenderImageThumb(clip.EndProgressPercent)", razor, StringComparison.Ordinal);
+        Assert.Contains("clip-input-image", razor, StringComparison.Ordinal);
+
+        Assert.Contains(".timelapse-stage-grid > *", css, StringComparison.Ordinal);
+        Assert.Contains("min-width: 0;", css, StringComparison.Ordinal);
+        Assert.Contains("max-width: 100%;", css, StringComparison.Ordinal);
+        Assert.Contains("overflow: hidden;", css, StringComparison.Ordinal);
+        Assert.Contains("grid-template-columns: minmax(72px, 88px) 20px minmax(72px, 88px);", css, StringComparison.Ordinal);
+        Assert.Contains("height: auto;", css, StringComparison.Ordinal);
+        Assert.Contains("object-fit: cover;", css, StringComparison.Ordinal);
+        Assert.Contains("aspect-ratio: 16 / 9;", css, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TimelapseDetailUi_StrengthensRenderingOnlyAnimationAndPreservesReducedMotion()
+    {
+        var razor = ReadSource("TodoX.Web", "Components", "Pages", "TimelapseJobDetail.razor");
+        var css = ReadSource("TodoX.Web", "Components", "Pages", "TimelapseJobDetail.razor.css");
+
+        Assert.Contains("TimelapseOperationStatuses.Rendering => $\"{classes} tl-loading-skeleton tl-active-render\"", razor, StringComparison.Ordinal);
+        Assert.Contains("TimelapseOperationStatuses.Waiting => $\"{classes} tl-loading-skeleton tl-loading-shimmer\"", razor, StringComparison.Ordinal);
+        Assert.Contains("tl-active-scanline tl-image-scanline", razor, StringComparison.Ordinal);
+        Assert.Contains("tl-active-scanline tl-video-scanline", razor, StringComparison.Ordinal);
+        Assert.Contains("tl-video-wave", razor, StringComparison.Ordinal);
+        Assert.Contains("tl-status-dot", razor, StringComparison.Ordinal);
+
+        Assert.Contains(".tl-active-render::after", css, StringComparison.Ordinal);
+        Assert.Contains("rgba(4, 8, 12, 0.5)", css, StringComparison.Ordinal);
+        Assert.Contains("rgba(255, 224, 130, 0.78)", css, StringComparison.Ordinal);
+        Assert.Contains("rgba(128, 222, 234, 0.76)", css, StringComparison.Ordinal);
+        Assert.Contains("height: 3px;", css, StringComparison.Ordinal);
+        Assert.Contains("width: 3px;", css, StringComparison.Ordinal);
+        Assert.Contains("@media (prefers-reduced-motion: reduce)", css, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ProviderStatusNormalizer_MapsKnownStatuses()
     {
         Assert.Equal(Ai79TaskStatusNormalizer.Success, Ai79TaskStatusNormalizer.Normalize("SUCCESS"));
