@@ -509,7 +509,7 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
                 ReadString(provider.ConfigJson, "default_image_mode"),
                 _options.DefaultImageMode)
             : null;
-        var imageResolution = isImage
+        var configuredImageResolution = isImage
             ? FirstNonBlank(
                 ReadString(capability.ConfigJson, "resolution"),
                 ReadString(capability.ConfigJson, "default_resolution"),
@@ -517,6 +517,18 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
                 ReadString(provider.ConfigJson, "default_image_resolution"),
                 _options.DefaultImageResolution)
             : null;
+        var imageResolution = isImage
+            ? TimelapseProviderWorkerOptions.NormalizeImageResolution(model, configuredImageResolution)
+            : null;
+        if (isImage && !string.Equals(configuredImageResolution?.Trim(), imageResolution, StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogWarning(
+                "TIMELAPSE_IMAGE_RESOLUTION_NORMALIZED provider={ProviderCode} model={Model} configured={ConfiguredResolution} normalized={NormalizedResolution}",
+                option.ProviderCode,
+                model,
+                string.IsNullOrWhiteSpace(configuredImageResolution) ? "<empty>" : configuredImageResolution,
+                imageResolution);
+        }
 
         return new Ai79RuntimeProvider(
             option.ProviderCode,

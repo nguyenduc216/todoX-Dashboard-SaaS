@@ -155,6 +155,30 @@ public class TimelapsePhase2CTests
         Assert.Contains("480p, 720p, 1080p", error.Message, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData(null, "2k")]
+    [InlineData("", "2k")]
+    [InlineData("1k", "2k")]
+    [InlineData(" 1K ", "2k")]
+    [InlineData("2k", "2k")]
+    [InlineData("4K", "4k")]
+    public void SeedreamImageResolution_NormalizesLiveProviderValuesBeforeSubmit(string? input, string expected)
+    {
+        Assert.Equal(expected, TimelapseProviderWorkerOptions.NormalizeImageResolution("seedream_5_0", input));
+    }
+
+    [Theory]
+    [InlineData("720p")]
+    [InlineData("8k")]
+    [InlineData("hd")]
+    public void SeedreamImageResolution_RejectsUnsupportedProviderValuesBeforeSubmit(string input)
+    {
+        var error = Assert.Throws<InvalidOperationException>(
+            () => TimelapseProviderWorkerOptions.NormalizeImageResolution("seedream_5_0", input));
+
+        Assert.Contains("2k, 4k", error.Message, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void SeedanceVideoSubmit_IncludesValidatedResolutionAndSanitizedDiagnostics()
     {
@@ -289,7 +313,10 @@ public class TimelapsePhase2CTests
         Assert.Contains("DefaultImageUploadPath { get; set; } = \"/image-upload\"", options, StringComparison.Ordinal);
         Assert.Contains("DefaultImageReferenceField { get; set; } = \"base64Image\"", options, StringComparison.Ordinal);
         Assert.Contains("DefaultImageMode { get; set; } = \"vip\"", options, StringComparison.Ordinal);
-        Assert.Contains("DefaultImageResolution { get; set; } = \"1k\"", options, StringComparison.Ordinal);
+        Assert.Contains("DefaultImageResolution { get; set; } = \"2k\"", options, StringComparison.Ordinal);
+        Assert.Contains("\"DefaultImageResolution\": \"2k\"", ReadSource("TodoX.Web", "appsettings.json"), StringComparison.Ordinal);
+        Assert.Contains("NormalizeImageResolution(model, configuredImageResolution)", runtime, StringComparison.Ordinal);
+        Assert.Contains("TIMELAPSE_IMAGE_RESOLUTION_NORMALIZED", runtime, StringComparison.Ordinal);
         Assert.Contains("provider.ProviderCode", runtime, StringComparison.Ordinal);
         Assert.Contains("provider.Model", runtime, StringComparison.Ordinal);
         Assert.Contains("provider.BaseUrl", runtime, StringComparison.Ordinal);
@@ -308,6 +335,8 @@ public class TimelapsePhase2CTests
         var imageBuilderEnd = runtime.IndexOf("private SubmitRequestEnvelope BuildSubmitRequest", imageBuilderStart, StringComparison.Ordinal);
         var imageBuilder = runtime[imageBuilderStart..imageBuilderEnd];
         var sanitizedStart = imageBuilder.IndexOf("var sanitized = JsonSerializer.Serialize", StringComparison.Ordinal);
+        Assert.Contains("[\"resolution\"] = resolution", imageBuilder, StringComparison.Ordinal);
+        Assert.Contains("resolution,", imageBuilder, StringComparison.Ordinal);
         Assert.DoesNotContain("progress_percent", imageBuilder, StringComparison.Ordinal);
         Assert.DoesNotContain("provider.Credential.Secret", imageBuilder[sanitizedStart..], StringComparison.Ordinal);
     }

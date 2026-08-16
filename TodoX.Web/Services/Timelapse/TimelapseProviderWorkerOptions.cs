@@ -2,12 +2,21 @@ namespace TodoX.Web.Services.Timelapse;
 
 public sealed class TimelapseProviderWorkerOptions
 {
+    private const string Seedream50ModelName = "seedream_5_0";
+
     private static readonly HashSet<string> SupportedVideoResolutions =
         new(StringComparer.OrdinalIgnoreCase)
         {
             "480p",
             "720p",
             "1080p"
+        };
+
+    private static readonly HashSet<string> Seedream50ImageResolutions =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            "2k",
+            "4k"
         };
 
     public const string SectionName = "TimelapseProviderWorkers";
@@ -33,7 +42,7 @@ public sealed class TimelapseProviderWorkerOptions
     public string DefaultVideoPollPath { get; set; } = "/video";
     public string DefaultImageReferenceField { get; set; } = "base64Image";
     public string DefaultImageMode { get; set; } = "vip";
-    public string DefaultImageResolution { get; set; } = "1k";
+    public string DefaultImageResolution { get; set; } = "2k";
     public string DefaultImageProjectId { get; set; } = "default";
     public string DefaultVideoResolution { get; set; } = "720p";
 
@@ -44,6 +53,33 @@ public sealed class TimelapseProviderWorkerOptions
         {
             throw new InvalidOperationException(
                 "Cấu hình độ phân giải video Timelapse không hợp lệ. Giá trị hỗ trợ: 480p, 720p, 1080p.");
+        }
+
+        return normalized;
+    }
+
+    internal static string NormalizeImageResolution(string? modelName, string? resolution)
+    {
+        var normalized = resolution?.Trim().ToLowerInvariant();
+        if (string.Equals(modelName, Seedream50ModelName, StringComparison.OrdinalIgnoreCase))
+        {
+            if (string.IsNullOrWhiteSpace(normalized) || string.Equals(normalized, "1k", StringComparison.OrdinalIgnoreCase))
+            {
+                return "2k";
+            }
+
+            if (Seedream50ImageResolutions.Contains(normalized))
+            {
+                return normalized;
+            }
+
+            throw new InvalidOperationException(
+                "Cấu hình độ phân giải ảnh Timelapse cho seedream_5_0 không hợp lệ. Giá trị hỗ trợ: 2k, 4k.");
+        }
+
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            throw new InvalidOperationException("Cấu hình độ phân giải ảnh Timelapse không được để trống.");
         }
 
         return normalized;
