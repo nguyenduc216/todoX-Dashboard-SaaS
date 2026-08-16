@@ -101,6 +101,39 @@ public sealed class Ai79TaskClientTests
         Assert.DoesNotContain("image_2=", request.Body, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task ImageUpload_UsesConstructionTimelapseOriginalImageContractAndParsesImageInfo()
+    {
+        var handler = new RecordingJsonHandler("""{"imageInfo":{"id_base":"original-id","url":"https://cdn.example/original.jpg","project_id":"default","file_name":"original.jpg"},"access_token":"secret-token"}""");
+        var client = new Ai79TaskClient(new HttpClient(handler));
+
+        var result = await client.UploadImageAsync(new Ai79ImageUploadRequest(
+            "https://api.gommo.net/ai",
+            "/image-upload",
+            "secret-token",
+            "79ai.net",
+            "AQIDBA==",
+            "default",
+            "original.jpg",
+            4));
+
+        Assert.Equal("original-id", result.IdBase);
+        Assert.Equal("https://cdn.example/original.jpg", result.Url);
+        Assert.Equal("default", result.ProjectId);
+        Assert.Equal("original.jpg", result.FileName);
+        Assert.DoesNotContain("secret-token", result.SanitizedResponseJson, StringComparison.Ordinal);
+
+        var request = Assert.Single(handler.Requests);
+        Assert.Equal("https://api.gommo.net/ai/image-upload", request.Uri);
+        Assert.Contains("access_token=secret-token", request.Body, StringComparison.Ordinal);
+        Assert.Contains("domain=79ai.net", request.Body, StringComparison.Ordinal);
+        Assert.Contains("data=AQIDBA%3D%3D", request.Body, StringComparison.Ordinal);
+        Assert.Contains("project_id=default", request.Body, StringComparison.Ordinal);
+        Assert.Contains("file_name=original.jpg", request.Body, StringComparison.Ordinal);
+        Assert.Contains("size=4", request.Body, StringComparison.Ordinal);
+        Assert.DoesNotContain("data%3Aimage", request.Body, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData("""{"success":true,"id_base":"45d9f48d8741edb7","message":"Gửi yêu cầu tạo video thành công, chờ hoàn thành trong ít phút.","videoInfo":{"mode":"fast","model":"seedance_20_pro"}}""")]
     [InlineData("""{"success":true,"videoInfo":{"id_base":"45d9f48d8741edb7","mode":"fast","model":"seedance_20_pro"},"message":"Gửi yêu cầu tạo video thành công, chờ hoàn thành trong ít phút."}""")]
@@ -208,11 +241,58 @@ public sealed class Ai79TaskClientTests
         Assert.Equal(expectedUrl, result.OutputUrl);
     }
 
+    [Fact]
+    public async Task VideoPoll_FallsBackToVideosListAndMatchesProviderTaskId()
+    {
+        var handler = new RecordingJsonHandler(
+            """{"message":"single lookup did not include videoInfo"}""",
+            """{"videoInfo":[{"id_base":"other","status":"MEDIA_GENERATION_STATUS_SUCCESSFUL","download_url":"https://cdn.example/other.mp4"},{"id_base":"abc123","generation_status":"MEDIA_GENERATION_COMPLETED","file_url":"https://cdn.example/final.mp4","url":"https://cdn.example/input-image.jpg"}]}""");
+        var client = new Ai79TaskClient(new HttpClient(handler));
+
+        var result = await client.GetStatusAsync(new Ai79TaskStatusRequest(
+            "https://api.gommo.net/ai",
+            "/video",
+            "secret-token",
+            "79ai.net",
+            "abc123",
+            Ai79TaskOperation.Video));
+
+        Assert.Equal(Ai79TaskStatusNormalizer.Success, result.NormalizedStatus);
+        Assert.Equal("https://cdn.example/final.mp4", result.OutputUrl);
+        Assert.Equal(2, handler.Requests.Count);
+        Assert.Equal("https://api.gommo.net/ai/video", handler.Requests[0].Uri);
+        Assert.Contains("videoId=abc123", handler.Requests[0].Body, StringComparison.Ordinal);
+        Assert.Equal("https://api.gommo.net/ai/videos", handler.Requests[1].Uri);
+        Assert.DoesNotContain("videoId=abc123", handler.Requests[1].Body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task VideoPoll_MatchesVideoInfoArrayFromPrimaryResponseWithoutFallback()
+    {
+        var handler = new RecordingJsonHandler(
+            """{"videoInfo":[{"id_base":"other","status":"MEDIA_GENERATION_STATUS_SUCCESSFUL","download_url":"https://cdn.example/other.mp4"},{"id_base":"abc123","status":"MEDIA_GENERATION_STATUS_SUCCESSFUL","download_url":"https://cdn.example/final.mp4"}]}""");
+        var client = new Ai79TaskClient(new HttpClient(handler));
+
+        var result = await client.GetStatusAsync(new Ai79TaskStatusRequest(
+            "https://api.gommo.net/ai",
+            "/video",
+            "secret-token",
+            "79ai.net",
+            "abc123",
+            Ai79TaskOperation.Video));
+
+        Assert.Equal(Ai79TaskStatusNormalizer.Success, result.NormalizedStatus);
+        Assert.Equal("https://cdn.example/final.mp4", result.OutputUrl);
+        Assert.Single(handler.Requests);
+    }
+
     [Theory]
     [InlineData("MEDIA_GENERATION_STATUS_SUCCESSFUL", Ai79TaskStatusNormalizer.Success)]
     [InlineData("MEDIA_GENERATION_COMPLETED", Ai79TaskStatusNormalizer.Success)]
     [InlineData("MEDIA_GENERATION_STATUS_FAILED", Ai79TaskStatusNormalizer.Failed)]
     [InlineData("MEDIA_GENERATION_FAILED", Ai79TaskStatusNormalizer.Failed)]
+    [InlineData("REJECTED", Ai79TaskStatusNormalizer.Failed)]
+    [InlineData("CANCELLED", Ai79TaskStatusNormalizer.Failed)]
     [InlineData("MEDIA_GENERATION_STATUS_PROCESSING", Ai79TaskStatusNormalizer.Running)]
     public void ProviderStatusNormalizer_Maps79AiMediaGenerationStatuses(string status, string expected)
     {

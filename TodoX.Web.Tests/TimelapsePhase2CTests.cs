@@ -19,6 +19,7 @@ public class TimelapsePhase2CTests
         Assert.Contains("TimelapseProviderWorkerOptions", workers);
         Assert.Contains("\"TimelapseProviderWorkers\"", ReadSource("TodoX.Web", "appsettings.json"), StringComparison.Ordinal);
         Assert.Contains("\"DefaultImageSubmitPath\": \"/generateImage\"", ReadSource("TodoX.Web", "appsettings.json"), StringComparison.Ordinal);
+        Assert.Contains("\"DefaultImageUploadPath\": \"/image-upload\"", ReadSource("TodoX.Web", "appsettings.json"), StringComparison.Ordinal);
         Assert.Contains("\"DefaultVideoSubmitPath\": \"/create-video\"", ReadSource("TodoX.Web", "appsettings.json"), StringComparison.Ordinal);
         Assert.Contains("\"ProviderCode\": \"79ai\"", ReadSource("TodoX.Web", "appsettings.json"), StringComparison.Ordinal);
         Assert.Contains("\"ImageCapabilityCode\": \"image_generation\"", ReadSource("TodoX.Web", "appsettings.json"), StringComparison.Ordinal);
@@ -146,8 +147,8 @@ public class TimelapsePhase2CTests
         Assert.Contains("[\"mode\"] = item.VideoMode", submit, StringComparison.Ordinal);
         Assert.Contains("[\"ratio\"] = NormalizeRatio(item.Ratio)", submit, StringComparison.Ordinal);
         Assert.Contains("[\"resolution\"] = resolution", submit, StringComparison.Ordinal);
-        Assert.Contains("var startDescriptor = BuildVideoImageDescriptor", submit, StringComparison.Ordinal);
-        Assert.Contains("var endDescriptor = BuildVideoImageDescriptor", submit, StringComparison.Ordinal);
+        Assert.Contains("var startDescriptor = await BuildVideoImageDescriptorAsync", submit, StringComparison.Ordinal);
+        Assert.Contains("var endDescriptor = await BuildVideoImageDescriptorAsync", submit, StringComparison.Ordinal);
         Assert.Contains("JsonSerializer.Serialize(new[] { startDescriptor, endDescriptor }", submit, StringComparison.Ordinal);
         Assert.Contains("[\"privacy\"] = \"PRIVATE\"", submit, StringComparison.Ordinal);
         Assert.Contains("[\"translate_to_en\"] = \"false\"", submit, StringComparison.Ordinal);
@@ -262,9 +263,10 @@ public class TimelapsePhase2CTests
         var options = ReadSource("TodoX.Web", "Services", "Timelapse", "TimelapseProviderWorkerOptions.cs");
 
         Assert.Contains("ImageModelName { get; set; } = \"seedream_5_0\"", options, StringComparison.Ordinal);
+        Assert.Contains("DefaultImageUploadPath { get; set; } = \"/image-upload\"", options, StringComparison.Ordinal);
         Assert.Contains("DefaultImageReferenceField { get; set; } = \"base64Image\"", options, StringComparison.Ordinal);
         Assert.Contains("DefaultImageMode { get; set; } = \"vip\"", options, StringComparison.Ordinal);
-        Assert.Contains("DefaultImageResolution { get; set; } = \"2k\"", options, StringComparison.Ordinal);
+        Assert.Contains("DefaultImageResolution { get; set; } = \"1k\"", options, StringComparison.Ordinal);
         Assert.Contains("provider.ProviderCode", runtime, StringComparison.Ordinal);
         Assert.Contains("provider.Model", runtime, StringComparison.Ordinal);
         Assert.Contains("provider.BaseUrl", runtime, StringComparison.Ordinal);
@@ -323,8 +325,9 @@ public class TimelapsePhase2CTests
         var runtime = ReadSource("TodoX.Web", "Services", "Timelapse", "TimelapseProviderRuntime.cs");
 
         Assert.Contains("[\"images\"] = imagesJson", runtime, StringComparison.Ordinal);
-        Assert.Contains("BuildVideoImageDescriptor", runtime, StringComparison.Ordinal);
-        Assert.Contains("Missing 79AI imageInfo.id_base", runtime, StringComparison.Ordinal);
+        Assert.Contains("BuildVideoImageDescriptorAsync", runtime, StringComparison.Ordinal);
+        Assert.Contains("UploadImageAsync", runtime, StringComparison.Ordinal);
+        Assert.Contains("DefaultImageUploadPath", runtime, StringComparison.Ordinal);
         Assert.Contains("request.Images.Count > 2", client, StringComparison.Ordinal);
         Assert.Contains("request.Operation == Ai79TaskOperation.Image ? \"id_base\" : \"videoId\"", client, StringComparison.Ordinal);
         Assert.Contains("FindImageIdBase", client, StringComparison.Ordinal);
@@ -339,31 +342,55 @@ public class TimelapsePhase2CTests
         var client = ReadSource("TodoX.Web", "Services", "AiProviders", "Ai79TaskClient.cs");
         var report = ReadSource("docs", "core-platform", "reports", "construction-video-n8n-contract-port-report.md");
 
-        Assert.Contains("todoX-rendervideo-04-video-worker [v52.7.2 max 60s_model clean layout].json", report, StringComparison.Ordinal);
+        Assert.Contains("todox_timelapse_05_video_submit_v4.4_worker_anchor_prompt.json", report, StringComparison.Ordinal);
+        Assert.DoesNotContain("todoX-rendervideo-04-video-worker", report, StringComparison.Ordinal);
         Assert.Contains("POST /create-video", report, StringComparison.Ordinal);
         Assert.Contains("POST /video", report, StringComparison.Ordinal);
+        Assert.Contains("POST /videos", report, StringComparison.Ordinal);
+        Assert.Contains("POST /image-upload", report, StringComparison.Ordinal);
         Assert.Contains("images JSON descriptor", report, StringComparison.OrdinalIgnoreCase);
 
         Assert.Contains("start_v.response_json::text AS StartResponseJson", repo, StringComparison.Ordinal);
         Assert.Contains("end_v.response_json::text AS EndResponseJson", repo, StringComparison.Ordinal);
         Assert.Contains("string? StartResponseJson", repo, StringComparison.Ordinal);
         Assert.Contains("string? EndResponseJson", repo, StringComparison.Ordinal);
+        Assert.Contains("start_img.prompt_snapshot_json::text AS StartPromptSnapshotJson", repo, StringComparison.Ordinal);
+        Assert.Contains("end_img.prompt_snapshot_json::text AS EndPromptSnapshotJson", repo, StringComparison.Ordinal);
 
         Assert.Contains("[\"images\"] = imagesJson", runtime, StringComparison.Ordinal);
         Assert.Contains("new[] { startDescriptor, endDescriptor }", runtime, StringComparison.Ordinal);
         Assert.Contains("ExtractImageIdBase", runtime, StringComparison.Ordinal);
+        Assert.Contains("UploadImageAsync", runtime, StringComparison.Ordinal);
         Assert.Contains("ResolveProviderImageUrl", runtime, StringComparison.Ordinal);
         Assert.Contains("TIMELAPSE_VIDEO_POLL_TRANSIENT", runtime, StringComparison.Ordinal);
         Assert.Contains("catch (OperationCanceledException ex)", runtime, StringComparison.Ordinal);
         Assert.Contains("ReleaseVideoClaimAsync(item.Id, item.Attempt, CancellationToken.None)", runtime, StringComparison.Ordinal);
 
         Assert.Contains("\"videoId\"", client, StringComparison.Ordinal);
+        Assert.Contains("ResolveVideosListPath", client, StringComparison.Ordinal);
+        Assert.Contains("TryFindVideoInfoById", client, StringComparison.Ordinal);
         Assert.Contains("FindVideoOutputUrl", client, StringComparison.Ordinal);
         Assert.Contains("videoInfo", client, StringComparison.Ordinal);
         Assert.Contains("MEDIA_GENERATION_STATUS_SUCCESSFUL", client, StringComparison.Ordinal);
         Assert.Contains("MEDIA_GENERATION_COMPLETED", client, StringComparison.Ordinal);
         Assert.Contains("MEDIA_GENERATION_STATUS_FAILED", client, StringComparison.Ordinal);
         Assert.Contains("MEDIA_GENERATION_FAILED", client, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void VideoPrompt_UsesStrictConstructionContinuityRulesAndSixSceneMapping()
+    {
+        var runtime = ReadSource("TodoX.Web", "Services", "Timelapse", "TimelapseProviderRuntime.cs");
+        var models = ReadSource("TodoX.Web", "Models", "Timelapse", "TimelapseModels.cs");
+
+        Assert.Contains("Use @image1 as the exact starting frame and @image2 as the exact ending frame.", runtime, StringComparison.Ordinal);
+        Assert.Contains("same building, architecture, footprint, floor count, window/opening layout, roof geometry, camera, lens, perspective, framing, and environment", runtime, StringComparison.Ordinal);
+        Assert.Contains("Never remove permanent elements visible in @image1.", runtime, StringComparison.Ordinal);
+        Assert.Contains("Do not demolish, reset, rebuild from scratch", runtime, StringComparison.Ordinal);
+        Assert.Contains("Only add or advance work necessary to reach @image2.", runtime, StringComparison.Ordinal);
+        Assert.Contains("The final frame must converge visually to @image2.", runtime, StringComparison.Ordinal);
+        Assert.Contains("Workers may move naturally", runtime, StringComparison.Ordinal);
+        Assert.Contains("6 => [0, 25, 40, 55, 70, 75, 90, 100]", models, StringComparison.Ordinal);
     }
 
     [Fact]

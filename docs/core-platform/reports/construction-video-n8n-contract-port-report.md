@@ -1,120 +1,136 @@
-# Construction Video n8n Contract Port Report
+# Construction Timelapse n8n Contract Port Report
 
 Date: 2026-08-16
 
 ## Source Of Truth
 
-Stable workflow audited:
+Audited released Construction Timelapse workflow folder:
 
-`D:\todoX\79AI\rvideo\todoX-rendervideo-04-video-worker [v52.7.2 max 60s_model clean layout].json`
+`D:\todoX\workflow\Released\contruction-timeslapse`
 
-This is the latest stable RVideo video worker in the `D:\todoX\79AI\rvideo` package. It is newer than the v52.6 stable package and contains the active max-60s video worker contract.
+Workflow files audited:
 
-## n8n Submit Contract
+- `todox_timelapse_02_input_profile_mode_v5.json`
+- `todox_timelapse_03_image_worker_v5_hierarchical_reverse.json`
+- `todox_timelapse_05_video_submit_v4.4_worker_anchor_prompt.json`
+- `todox_timelapse_05P_poller_v5.json`
+- `todox_timelapse_06_finalize_v6.9_legacy_es5_compatible.json`
+- `todox_timelapse_07_retry_v5.5_grouped_layout.json`
 
-Video submit calls:
+This report intentionally does not use the RVideo worker as source of truth.
+
+## Exact Node Names
+
+- Original image upload: `79AI - Upload Original`
+- Generated image submit: `79AI - Create Progress Frame`
+- Generated image parser: `Parse Create Image`
+- Start/end input and prompt builder: `Route Clip`
+- Seedance video submit: `79AI - Create Video Clip`
+- Video submit response parser: `Inspect 79AI Create Response`
+- Video poll: `79AI - Check Video Once`
+- Video poll fallback: `79AI - List Videos Fallback`
+- Poll classifier: `Classify Poll Result`
+- Retry handler: `DB - Prepare Video Retry`, `Trigger Video Submit Retry`, `Trigger Video Poller`
+- Finalizer: `DB - Claim FINALIZING`, `Prepare FFmpeg Merge`, `Run FFmpeg Merge Direct`, `DB - Mark COMPLETED`
+
+## Submit Contract
+
+Generated progress image submit:
+
+`POST /generateImage`
+
+Fields: `access_token`, `domain`, `action_type=create`, `model`, `prompt`, `editImage=true`, `base64Image`, `project_id=default`, `subjects=[]`, `ratio`, `resolution=1k`, `mode=vip`.
+
+Seedance video submit:
 
 `POST /create-video`
 
-Form fields:
+Fields: `access_token`, `domain`, `model`, `privacy=PRIVATE`, `prompt`, `translate_to_en=false`, `project_id=default`, `ratio`, `resolution`, `duration`, `mode`, `images`.
 
-- `access_token`
-- `domain`
-- `model`
-- `privacy`
-- `prompt`
-- `translate_to_en=false`
-- `project_id`
-- `ratio`
-- `resolution`
-- `duration`
-- `mode`
-- `images`
+`images` is an images JSON descriptor array in deterministic order: start image, then end image. Each descriptor contains exactly `id_base`, `project_id`, `url`, and `file_name`. The Timelapse video path does not use `image` or `image_2`.
 
-Important porting point: the stable n8n worker submits an images JSON descriptor array. It does not submit separate `image` and `image_2` fields.
+## Image Handling
 
-TodoX C# now builds a two-item `images` JSON descriptor in deterministic order:
+Original/customer image handling comes from node `79AI - Upload Original`:
 
-1. start image
-2. end image
+`POST /image-upload`
 
-Each descriptor contains:
+Fields: `access_token`, `domain`, `data` as raw base64 without a data URI prefix, `project_id=default`, `file_name`, and `size`.
 
-- `id_base`
-- `project_id`
-- `url`
-- `file_name`
+The upload response must contain `imageInfo.id_base` and `imageInfo.url`. C# now uploads/registers a TodoX media image with 79AI when the persisted image stage response does not already contain `imageInfo.id_base`. It does not fake provider ids and does not use TodoX media ids as 79AI ids.
 
-The C# runtime reads `imageInfo.id_base` from stored 79AI image response JSON. It does not fake or synthesize provider ids. If an input image has no deterministic 79AI `id_base`, submit fails locally with a clear configuration/data error before calling 79AI.
+Generated image handling comes from `Parse Create Image`: C# uses the persisted 79AI image response `imageInfo.id_base` and URL when present.
 
-## n8n Poll Contract
+All URLs sent to 79AI video submit are validated as absolute HTTP(S) URLs and are resolved from configured public URL settings when TodoX stores a relative upload URL.
 
-Video poll calls:
+## Poll Contract
+
+Primary poll:
 
 `POST /video`
 
-Form fields:
+Fields: `access_token`, `domain`, `videoId`.
 
-- `access_token`
-- `domain`
-- `videoId`
+Fallback poll:
 
-TodoX C# now sends `videoId` for video poll. Image poll still sends `id_base`.
+`POST /videos`
 
-## Status Contract
+Fields: `access_token`, `domain`. C# only uses the fallback row that matches the existing `provider_task_id`/`videoId`.
 
-Success statuses:
+Image poll remains `POST /image` with `id_base`.
 
-- `MEDIA_GENERATION_STATUS_SUCCESSFUL`
-- `MEDIA_GENERATION_COMPLETED`
-- `SUCCESS`
-- `COMPLETED`
+## Status And Output URL
 
-Failure statuses:
+Success statuses: `MEDIA_GENERATION_STATUS_SUCCESSFUL`, `MEDIA_GENERATION_COMPLETED`, `SUCCESS`, `SUCCEEDED`, `COMPLETED`, `COMPLETE`, `DONE`.
 
-- `MEDIA_GENERATION_STATUS_FAILED`
-- `MEDIA_GENERATION_FAILED`
-- `FAILED`
-- `FAILURE`
-- `ERROR`
-- `CANCELLED`
-- `CANCELED`
-- `REJECTED`
+Failure statuses: `MEDIA_GENERATION_STATUS_FAILED`, `MEDIA_GENERATION_FAILED`, `FAILURE`, `FAILED`, `ERROR`, `REJECTED`, `CANCELLED`, `CANCELED`.
 
-Other pending/unknown statuses remain `RUNNING` instead of being treated as terminal failure.
+Other pending/unknown statuses remain `RUNNING`.
 
-## Output URL Contract
+Video output URL is read only from video-specific containers and fields: `download_url`, `downloadUrl`, `video_url`, `videoUrl`, `source_url`, `sourceUrl`, `file_url`, `fileUrl`, `output_url`, `outputUrl`, and `url`.
 
-Video output URL parsing now prioritizes video-specific fields:
+Equivalent `data.videoInfo`, `body.videoInfo`, and `body.data.videoInfo` shapes are supported. C# does not recursively scan arbitrary response URLs for video output, avoiding accidental input image URL pickup.
 
-- `videoInfo.download_url`
-- `videoInfo.downloadUrl`
-- `videoInfo.url`
-- equivalent `data.videoInfo` and `body.data.videoInfo` shapes
+## Continuity Prompt
 
-The parser avoids arbitrary recursive URL search for video output so it does not accidentally pick an unrelated image or input URL.
+Prompt semantics were ported from `Route Clip`: start/end progress, profile JSON semantics, endpoint anchor rule, worker rule, and strict chain rule.
 
-## Prompt Semantics
+C# now enforces `@image1` as the exact opening anchor, `@image2` as the exact closing anchor, same building/architecture/footprint/floor count/windows/openings/roof geometry/camera/lens/perspective/framing/environment, no demolition/reset/rebuild/disappearing/reappearing structure/duplicate build/scene cut/architecture morph, never remove permanent elements visible in `@image1`, only advance work necessary to reach `@image2`, and final convergence to `@image2`.
 
-The C# runtime preserves TodoX Timelapse profile semantics and clip start/end progress in the provider prompt. It sends a server-side prompt only; no customer UI provider/model options were introduced.
+## Business Rules
 
-## Cancellation And Transient Poll Errors
+The Construction Timelapse scene mappings remain:
 
-Cancellation and transient poll errors release the worker claim instead of marking the clip as `FAILED`.
+- 3: `0,35,70,100`
+- 4: `0,25,50,75,100`
+- 5: `0,20,40,60,80,100`
+- 6: `0,25,40,55,70,75,90,100`
 
-Transient poll failures include HTTP timeout/rate-limit/5xx responses from the provider poll endpoint. Existing submitted provider tasks keep their provider task id and can be polled again by a later worker claim.
+In current code, `SceneCount` means the selected TodoX product preset. For the 6-scene preset, the authoritative product mapping contains eight checkpoints and therefore seven video clips.
 
-Submit failures still persist sanitized request/response diagnostics and fail the current operation according to the existing lifecycle policy.
+## C# Changes
 
-## Scope Confirmation
+- Added 79AI `/image-upload` client method for original image registration.
+- Added video poll fallback to `/videos` with exact provider task id matching.
+- Added `DefaultImageUploadPath=/image-upload`.
+- Aligned default Timelapse image resolution with n8n `resolution=1k`.
+- Updated video submit descriptor building to upload TodoX media when no persisted `imageInfo.id_base` exists.
+- Added prompt snapshot fields to video work-item claim so video prompt can use the Timelapse profile data.
+- Strengthened server-side video prompt continuity rules.
 
-No changes were made to:
+## Cancellation And Transient Handling
 
-- DB schema
-- provider/model selection
-- Core billing
-- retry target-aware semantics
-- scene mapping
-- finalizer behavior
-- UI
-- production deployment
+Existing worker behavior is preserved: cancellation and transient HTTP 408, 429, 500, 502, 503, and 504 poll failures release the claim, keep `provider_task_id`, and do not overwrite useful `response_json` with `{}`.
+
+## Tests And Build
+
+Regression coverage added/updated for original image `/image-upload`, generated image id_base, video `images` descriptor order, `videoId` poll, `/videos` fallback, success/failure statuses, output URL parsing, strict continuity prompt, 6-scene mapping, and Construction Timelapse workflow source guard.
+
+Validation commands and final commit SHA are recorded in the task response.
+
+## Remaining Risks
+
+- Real 79AI smoke testing is still required to verify live provider acceptance.
+- Existing production failed task recovery depends on retry/resume leaving `provider_task_id` intact for clips that already submitted successfully.
+
+Ready for smoke test after deploy: YES.

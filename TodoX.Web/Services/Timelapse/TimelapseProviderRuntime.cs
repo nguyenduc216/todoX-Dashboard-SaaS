@@ -319,10 +319,29 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
             throw new InvalidOperationException("Missing Timelapse start or end image URL.");
         }
 
-        var prompt = TimelapsePromptResolver.ResolveVideoPrompt(item.Snapshot, item.ClipIndex, item.StartProgressPercent, item.EndProgressPercent);
+        var prompt = TimelapsePromptResolver.ResolveVideoPrompt(
+            item.Snapshot,
+            item.ClipIndex,
+            item.StartProgressPercent,
+            item.EndProgressPercent,
+            FirstNonBlank(item.StartPromptSnapshotJson, item.EndPromptSnapshotJson));
         var resolution = ResolveVideoResolution(item.VideoMode);
-        var startDescriptor = BuildVideoImageDescriptor(item.StartProgressPercent, item.StartPublicUrl!, item.StartObjectKey, item.StartResponseJson);
-        var endDescriptor = BuildVideoImageDescriptor(item.EndProgressPercent, item.EndPublicUrl!, item.EndObjectKey, item.EndResponseJson);
+        var startDescriptor = await BuildVideoImageDescriptorAsync(
+            provider,
+            item.StartProgressPercent,
+            item.StartMediaId,
+            item.StartPublicUrl!,
+            item.StartObjectKey,
+            item.StartResponseJson,
+            ct);
+        var endDescriptor = await BuildVideoImageDescriptorAsync(
+            provider,
+            item.EndProgressPercent,
+            item.EndMediaId,
+            item.EndPublicUrl!,
+            item.EndObjectKey,
+            item.EndResponseJson,
+            ct);
         var imagesJson = JsonSerializer.Serialize(new[] { startDescriptor, endDescriptor }, JsonOptions);
         var request = BuildSubmitRequest(provider, prompt, [], new Dictionary<string, string?>
         {
@@ -683,18 +702,69 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
     private static bool PathsEqual(string left, string right)
         => string.Equals(left.Trim().TrimStart('/'), right.Trim().TrimStart('/'), StringComparison.OrdinalIgnoreCase);
 
-    private VideoImageDescriptor BuildVideoImageDescriptor(int progressPercent, string publicUrl, string? objectKey, string? responseJson)
+    private async Task<VideoImageDescriptor> BuildVideoImageDescriptorAsync(
+        Ai79RuntimeProvider provider,
+        int progressPercent,
+        Guid? mediaId,
+        string publicUrl,
+        string? objectKey,
+        string? responseJson,
+        CancellationToken ct)
     {
         var idBase = ExtractImageIdBase(responseJson);
-        if (string.IsNullOrWhiteSpace(idBase))
-        {
-            throw new InvalidOperationException($"Missing 79AI imageInfo.id_base for Timelapse video endpoint at {progressPercent}%.");
-        }
-
-        var projectId = FirstNonBlank(ExtractImageInfoString(responseJson, "project_id"), _options.DefaultImageProjectId)!;
         var url = ResolveProviderImageUrl(FirstNonBlank(ExtractImageInfoString(responseJson, "url"), publicUrl)!);
         var fileName = FirstNonBlank(ExtractImageInfoString(responseJson, "file_name"), ExtractFileName(url), objectKey, $"timelapse-{progressPercent}.png")!;
-        return new VideoImageDescriptor(idBase, projectId, url, fileName);
+        if (!string.IsNullOrWhiteSpace(idBase))
+        {
+            var projectId = FirstNonBlank(ExtractImageInfoString(responseJson, "project_id"), _options.DefaultImageProjectId)!;
+            return new VideoImageDescriptor(idBase!, projectId, url, fileName);
+        }
+
+        var media = await ResolveVideoInputMediaAsync(mediaId, objectKey, publicUrl, ct);
+        var bytes = await _media.ReadBytesAsync(media.Id, ct);
+        if (bytes is null || bytes.Length == 0)
+        {
+            throw new InvalidOperationException($"Timelapse video input image content could not be read for {progressPercent}%.");
+        }
+
+        var upload = await _taskClient.UploadImageAsync(new Ai79ImageUploadRequest(
+            provider.BaseUrl,
+            _options.DefaultImageUploadPath,
+            provider.Credential.Secret,
+            provider.Domain,
+            Convert.ToBase64String(bytes),
+            _options.DefaultImageProjectId,
+            FirstNonBlank(media.FileName, fileName, $"timelapse-{progressPercent}.jpg")!,
+            bytes.Length),
+            ct);
+        var uploadedUrl = ResolveProviderImageUrl(upload.Url);
+        return new VideoImageDescriptor(upload.IdBase, upload.ProjectId, uploadedUrl, upload.FileName);
+    }
+
+    private async Task<MediaFileDto> ResolveVideoInputMediaAsync(Guid? mediaId, string? objectKey, string publicUrl, CancellationToken ct)
+    {
+        MediaFileDto? media = null;
+        if (mediaId is Guid id && id != Guid.Empty)
+        {
+            media = await _media.GetAsync(id, ct);
+        }
+
+        if (media is null && !string.IsNullOrWhiteSpace(objectKey))
+        {
+            media = await _media.GetByObjectKeyAsync(objectKey, ct);
+        }
+
+        if (media is null && !string.IsNullOrWhiteSpace(publicUrl))
+        {
+            media = await _media.GetByPublicUrlAsync(publicUrl, ct);
+        }
+
+        if (media is null || !media.IsActive)
+        {
+            throw new InvalidOperationException("Missing Timelapse video input image in TodoX media storage.");
+        }
+
+        return media;
     }
 
     private string ResolveProviderImageUrl(string value)
@@ -934,14 +1004,24 @@ public static class TimelapsePromptResolver
         }.Where(x => !string.IsNullOrWhiteSpace(x)));
     }
 
-    public static string ResolveVideoPrompt(TimelapseJobSnapshot snapshot, int clipIndex, int startProgress, int endProgress)
+    public static string ResolveVideoPrompt(
+        TimelapseJobSnapshot snapshot,
+        int clipIndex,
+        int startProgress,
+        int endProgress,
+        string? promptSnapshotJson = null)
         => string.Join("\n", new[]
         {
+            ExtractProfilePrompt(promptSnapshotJson ?? string.Empty),
             $"Use the configured TodoX Construction Timelapse profile semantics for {snapshot.ProfileName}.",
             $"Create clip {clipIndex} as a smooth construction progress transition from {startProgress}% to {endProgress}%.",
-            "Use the first image as the exact starting frame and the second image as the exact ending frame.",
-            "Preserve the same building identity, camera angle, perspective, lens, lighting direction, structural layout, facade geometry, and surrounding environment.",
-            "Show believable construction progress only; do not morph the building into a different design.",
+            "Use @image1 as the exact starting frame and @image2 as the exact ending frame.",
+            "The scene must remain the same building, architecture, footprint, floor count, window/opening layout, roof geometry, camera, lens, perspective, framing, and environment.",
+            "Never remove permanent elements visible in @image1.",
+            "Do not demolish, reset, rebuild from scratch, duplicate, morph, or scene-cut the construction.",
+            "Only add or advance work necessary to reach @image2.",
+            "The final frame must converge visually to @image2.",
+            "Workers may move naturally and perform temporary construction actions, but they must not alter the architecture randomly.",
             "No subtitles, no captions, no watermarks, no logos, no UI, no text overlays.",
             $"Duration requirement: exactly {TimelapseRequestRules.RuntimeClipDurationSeconds} seconds."
         });

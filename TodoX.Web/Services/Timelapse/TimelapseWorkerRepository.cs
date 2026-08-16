@@ -169,10 +169,12 @@ public sealed class TimelapseWorkerRepository : ITimelapseWorkerRepository
                        start_img.result_media_id AS StartMediaId,
                        start_img.public_url AS StartPublicUrl,
                        start_img.object_key AS StartObjectKey,
+                       start_img.prompt_snapshot_json::text AS StartPromptSnapshotJson,
                        start_v.response_json::text AS StartResponseJson,
                        end_img.result_media_id AS EndMediaId,
                        end_img.public_url AS EndPublicUrl,
                        end_img.object_key AS EndObjectKey,
+                       end_img.prompt_snapshot_json::text AS EndPromptSnapshotJson,
                        end_v.response_json::text AS EndResponseJson;
             """,
             new { tenant = _tenant.TenantId, workerKey, claimFor = ToPgInterval(claimFor) }, tx);
@@ -778,10 +780,12 @@ public sealed class TimelapseWorkerRepository : ITimelapseWorkerRepository
             row.StartMediaId,
             row.StartPublicUrl,
             row.StartObjectKey,
+            row.StartPromptSnapshotJson,
             row.StartResponseJson,
             row.EndMediaId,
             row.EndPublicUrl,
             row.EndObjectKey,
+            row.EndPromptSnapshotJson,
             row.EndResponseJson);
 
     private sealed class ImageStageRow
@@ -831,10 +835,12 @@ public sealed class TimelapseWorkerRepository : ITimelapseWorkerRepository
         public Guid? StartMediaId { get; set; }
         public string? StartPublicUrl { get; set; }
         public string? StartObjectKey { get; set; }
+        public string? StartPromptSnapshotJson { get; set; }
         public string? StartResponseJson { get; set; }
         public Guid? EndMediaId { get; set; }
         public string? EndPublicUrl { get; set; }
         public string? EndObjectKey { get; set; }
+        public string? EndPromptSnapshotJson { get; set; }
         public string? EndResponseJson { get; set; }
     }
 
@@ -889,10 +895,12 @@ public sealed record TimelapseVideoWorkItem(
     Guid? StartMediaId,
     string? StartPublicUrl,
     string? StartObjectKey,
+    string? StartPromptSnapshotJson,
     string? StartResponseJson,
     Guid? EndMediaId,
     string? EndPublicUrl,
     string? EndObjectKey,
+    string? EndPromptSnapshotJson,
     string? EndResponseJson);
 
 public sealed record TimelapseFinalizerWorkItem(

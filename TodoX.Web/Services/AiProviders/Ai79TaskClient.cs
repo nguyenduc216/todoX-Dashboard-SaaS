@@ -7,6 +7,7 @@ namespace TodoX.Web.Services.AiProviders;
 public interface IAi79TaskClient
 {
     Task<Ai79TaskSubmitResult> SubmitAsync(Ai79TaskSubmitRequest request, CancellationToken ct = default);
+    Task<Ai79ImageUploadResult> UploadImageAsync(Ai79ImageUploadRequest request, CancellationToken ct = default);
     Task<Ai79TaskStatusResult> GetStatusAsync(Ai79TaskStatusRequest request, CancellationToken ct = default);
 }
 
@@ -38,6 +39,23 @@ public sealed record Ai79TaskStatusRequest(
     Ai79TaskOperation Operation);
 
 public sealed record Ai79TaskSubmitResult(string TaskId, string SanitizedResponseJson);
+
+public sealed record Ai79ImageUploadRequest(
+    string BaseUrl,
+    string EndpointPath,
+    string AccessToken,
+    string Domain,
+    string DataBase64,
+    string ProjectId,
+    string FileName,
+    long SizeBytes);
+
+public sealed record Ai79ImageUploadResult(
+    string IdBase,
+    string Url,
+    string ProjectId,
+    string FileName,
+    string SanitizedResponseJson);
 
 public sealed class Ai79TaskSubmitException : InvalidOperationException
 {
@@ -220,6 +238,87 @@ public sealed class Ai79TaskClient : IAi79TaskClient
         }
     }
 
+    public async Task<Ai79ImageUploadResult> UploadImageAsync(Ai79ImageUploadRequest request, CancellationToken ct = default)
+    {
+        var form = new Dictionary<string, string>
+        {
+            ["access_token"] = request.AccessToken,
+            ["domain"] = request.Domain,
+            ["data"] = request.DataBase64,
+            ["project_id"] = request.ProjectId,
+            ["file_name"] = request.FileName,
+            ["size"] = request.SizeBytes.ToString()
+        };
+
+        using var body = new FormUrlEncodedContent(form);
+        using var response = await _httpClient.PostAsync(BuildUri(request.BaseUrl, request.EndpointPath), body, ct);
+        var json = await response.Content.ReadAsStringAsync(ct);
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            throw new Ai79TaskSubmitException(
+                "79AI image upload response was empty.",
+                JsonSerializer.Serialize(string.Empty, JsonOptions),
+                response.StatusCode,
+                response.IsSuccessStatusCode ? "empty_response" : $"http_{(int)response.StatusCode}");
+        }
+
+        JsonDocument document;
+        try
+        {
+            document = JsonDocument.Parse(json);
+        }
+        catch (JsonException ex)
+        {
+            throw new Ai79TaskSubmitException(
+                "79AI image upload response was not valid JSON.",
+                JsonSerializer.Serialize(SanitizeText(json, request.AccessToken), JsonOptions),
+                response.StatusCode,
+                response.IsSuccessStatusCode ? "invalid_json" : $"http_{(int)response.StatusCode}",
+                ex);
+        }
+
+        using (document)
+        {
+            var sanitized = SanitizeSecretJson(document.RootElement, request.AccessToken);
+            var providerError = FindSubmitError(document.RootElement, taskIdMissing: false, request.AccessToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new Ai79TaskSubmitException(
+                    providerError?.ErrorMessage ?? $"79AI image upload returned HTTP {(int)response.StatusCode}.",
+                    sanitized,
+                    response.StatusCode,
+                    providerError?.ErrorCode ?? $"http_{(int)response.StatusCode}");
+            }
+
+            if (providerError is not null)
+            {
+                throw new Ai79TaskSubmitException(
+                    $"79AI image upload failed: {providerError.ErrorMessage}",
+                    sanitized,
+                    response.StatusCode,
+                    providerError.ErrorCode ?? "provider_error");
+            }
+
+            var idBase = FindImageInfoString(document.RootElement, "id_base");
+            var url = FindImageInfoString(document.RootElement, "url");
+            if (string.IsNullOrWhiteSpace(idBase) || string.IsNullOrWhiteSpace(url))
+            {
+                throw new Ai79TaskSubmitException(
+                    "79AI image upload response missing imageInfo.id_base or imageInfo.url.",
+                    sanitized,
+                    response.StatusCode,
+                    "missing_image_info");
+            }
+
+            return new Ai79ImageUploadResult(
+                idBase!,
+                url!,
+                FirstNonBlank(FindImageInfoString(document.RootElement, "project_id"), request.ProjectId)!,
+                FirstNonBlank(FindImageInfoString(document.RootElement, "file_name"), request.FileName)!,
+                sanitized);
+        }
+    }
+
     public async Task<Ai79TaskStatusResult> GetStatusAsync(Ai79TaskStatusRequest request, CancellationToken ct = default)
     {
         var path = request.EndpointPath.Replace("{task_id}", Uri.EscapeDataString(request.TaskId), StringComparison.OrdinalIgnoreCase)
@@ -235,15 +334,46 @@ public sealed class Ai79TaskClient : IAi79TaskClient
         using var response = await _httpClient.PostAsync(BuildUri(request.BaseUrl, path), body, ct);
         var json = await ReadJsonAsync(response, request.AccessToken, ct);
         using var document = JsonDocument.Parse(json);
-        var sanitized = SanitizeSecretJson(document.RootElement, request.AccessToken);
-        var status = Ai79TaskStatusNormalizer.Normalize(FindStatus(document.RootElement));
-        var outputUrl = request.Operation == Ai79TaskOperation.Video
-            ? FindVideoOutputUrl(document.RootElement)
-            : FindUrl(document.RootElement);
-        var errorCode = FindErrorValue(document.RootElement, "error_code", "errorCode", "code");
-        var errorMessage = FindErrorValue(document.RootElement, "error_message", "errorMessage", "message", "msg");
+        JsonElement statusRoot = document.RootElement;
+        JsonDocument? fallbackDocument = null;
+        if (request.Operation == Ai79TaskOperation.Video
+            && TryFindVideoInfoById(statusRoot, request.TaskId, out var primaryMatchedInfo))
+        {
+            statusRoot = primaryMatchedInfo;
+        }
+        else if (request.Operation == Ai79TaskOperation.Video && !HasSingleVideoInfo(statusRoot))
+        {
+            var fallbackPath = ResolveVideosListPath(path);
+            using var fallbackBody = new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["access_token"] = request.AccessToken,
+                ["domain"] = request.Domain
+            });
+            using var fallbackResponse = await _httpClient.PostAsync(BuildUri(request.BaseUrl, fallbackPath), fallbackBody, ct);
+            var fallbackJson = await ReadJsonAsync(fallbackResponse, request.AccessToken, ct);
+            fallbackDocument = JsonDocument.Parse(fallbackJson);
+            if (TryFindVideoInfoById(fallbackDocument.RootElement, request.TaskId, out var matchedInfo))
+            {
+                statusRoot = matchedInfo;
+            }
+            else
+            {
+                statusRoot = fallbackDocument.RootElement;
+            }
+        }
 
-        return new Ai79TaskStatusResult(status, sanitized, outputUrl, errorCode, errorMessage);
+        using (fallbackDocument)
+        {
+            var sanitized = SanitizeSecretJson(statusRoot, request.AccessToken);
+            var status = Ai79TaskStatusNormalizer.Normalize(FindStatus(statusRoot));
+            var outputUrl = request.Operation == Ai79TaskOperation.Video
+                ? FindVideoOutputUrl(statusRoot)
+                : FindUrl(statusRoot);
+            var errorCode = FindErrorValue(statusRoot, "error_code", "errorCode", "code");
+            var errorMessage = FindErrorValue(statusRoot, "error_message", "errorMessage", "message", "msg");
+
+            return new Ai79TaskStatusResult(status, sanitized, outputUrl, errorCode, errorMessage);
+        }
     }
 
     private static Uri BuildUri(string baseUrl, string path)
@@ -444,7 +574,7 @@ public sealed class Ai79TaskClient : IAi79TaskClient
     {
         if (element.ValueKind == JsonValueKind.Object)
         {
-            foreach (var name in new[] { "status", "state", "task_status", "taskStatus" })
+            foreach (var name in new[] { "status", "state", "task_status", "taskStatus", "generation_status", "generationStatus" })
             {
                 if (element.TryGetProperty(name, out var value))
                 {
@@ -634,7 +764,7 @@ public sealed class Ai79TaskClient : IAi79TaskClient
     {
         foreach (var container in VideoStatusContainers(root))
         {
-            var found = FindFirstDirectUrl(container, "download_url", "downloadUrl", "url", "video_url", "videoUrl", "result_url", "resultUrl");
+            var found = FindFirstDirectUrl(container, "download_url", "downloadUrl", "video_url", "videoUrl", "source_url", "sourceUrl", "file_url", "fileUrl", "output_url", "outputUrl", "url");
             if (found is not null)
             {
                 return found;
@@ -646,8 +776,6 @@ public sealed class Ai79TaskClient : IAi79TaskClient
 
     private static IEnumerable<JsonElement> VideoStatusContainers(JsonElement root)
     {
-        yield return root;
-
         if (root.ValueKind != JsonValueKind.Object)
         {
             yield break;
@@ -658,10 +786,7 @@ public sealed class Ai79TaskClient : IAi79TaskClient
                      new[] { "videoInfo" },
                      new[] { "data", "videoInfo" },
                      new[] { "body", "videoInfo" },
-                     new[] { "body", "data", "videoInfo" },
-                     new[] { "data" },
-                     new[] { "body" },
-                     new[] { "body", "data" }
+                     new[] { "body", "data", "videoInfo" }
                  })
         {
             if (TryGetPath(root, path, out var value))
@@ -669,6 +794,117 @@ public sealed class Ai79TaskClient : IAi79TaskClient
                 yield return value;
             }
         }
+
+        if (LooksLikeVideoInfo(root))
+        {
+            yield return root;
+        }
+    }
+
+    private static bool HasSingleVideoInfo(JsonElement root)
+    {
+        foreach (var path in new[] { new[] { "videoInfo" }, new[] { "body", "videoInfo" }, new[] { "data", "videoInfo" }, new[] { "body", "data", "videoInfo" } })
+        {
+            if (TryGetPath(root, path, out var info)
+                && ((info.ValueKind == JsonValueKind.Object && info.EnumerateObject().Any())
+                    || (info.ValueKind == JsonValueKind.Array && info.GetArrayLength() > 0)))
+            {
+                return true;
+            }
+        }
+
+        return LooksLikeVideoInfo(root);
+    }
+
+    private static bool TryFindVideoInfoById(JsonElement root, string taskId, out JsonElement matched)
+    {
+        var target = taskId.Trim();
+        if (root.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in root.EnumerateArray())
+            {
+                if (VideoObjectId(item) == target)
+                {
+                    matched = item;
+                    return true;
+                }
+            }
+        }
+        else if (root.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var name in new[] { "videoInfo", "data", "videos", "items", "rows", "list", "results" })
+            {
+                if (root.TryGetProperty(name, out var child) && TryFindVideoInfoById(child, target, out matched))
+                {
+                    return true;
+                }
+            }
+
+            if (VideoObjectId(root) == target)
+            {
+                matched = root;
+                return true;
+            }
+        }
+
+        matched = default;
+        return false;
+    }
+
+    private static string? VideoObjectId(JsonElement element)
+        => element.ValueKind == JsonValueKind.Object
+            ? FirstNonBlank(
+                element.TryGetProperty("id_base", out var idBase) ? ScalarString(idBase) : null,
+                element.TryGetProperty("id", out var id) ? ScalarString(id) : null,
+                element.TryGetProperty("videoId", out var videoId) ? ScalarString(videoId) : null,
+                element.TryGetProperty("video_id", out var videoIdSnake) ? ScalarString(videoIdSnake) : null,
+                element.TryGetProperty("task_id", out var taskId) ? ScalarString(taskId) : null)
+            : null;
+
+    private static bool LooksLikeVideoInfo(JsonElement element)
+        => element.ValueKind == JsonValueKind.Object
+           && (!string.IsNullOrWhiteSpace(VideoObjectId(element))
+               || element.TryGetProperty("download_url", out _)
+               || element.TryGetProperty("downloadUrl", out _)
+               || element.TryGetProperty("video_url", out _)
+               || element.TryGetProperty("videoUrl", out _));
+
+    private static string ResolveVideosListPath(string videoPath)
+    {
+        var trimmed = videoPath.Trim();
+        return trimmed.EndsWith("/video", StringComparison.OrdinalIgnoreCase)
+            ? trimmed[..^"/video".Length] + "/videos"
+            : "/videos";
+    }
+
+    private static string? FindImageInfoString(JsonElement element, string fieldName)
+    {
+        if (element.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        foreach (var path in new[]
+                 {
+                     new[] { "imageInfo" },
+                     new[] { "body", "imageInfo" },
+                     new[] { "data", "imageInfo" },
+                     new[] { "body", "data", "imageInfo" }
+                 })
+        {
+            if (TryGetPath(element, path, out var imageInfo)
+                && imageInfo.ValueKind == JsonValueKind.Object
+                && imageInfo.TryGetProperty(fieldName, out var value))
+            {
+                var found = ScalarString(value);
+                if (!string.IsNullOrWhiteSpace(found))
+                {
+                    return found;
+                }
+            }
+        }
+
+        return null;
     }
 
     private static bool TryGetPath(JsonElement element, IReadOnlyList<string> path, out JsonElement value)

@@ -26,15 +26,14 @@ public sealed class TimelapseProviderWorkerOptions
     public string VideoModelName { get; set; } = "seedance_20_pro";
     public string Default79AiBaseUrl { get; set; } = "https://api.gommo.net/ai";
     public string DefaultImageSubmitPath { get; set; } = "/generateImage";
+    public string DefaultImageUploadPath { get; set; } = "/image-upload";
     public string DefaultImagePollPath { get; set; } = "/image";
     public string DefaultVideoSubmitPath { get; set; } = "/create-video";
     public string DefaultVideoPollPath { get; set; } = "/video";
     public string DefaultImageReferenceField { get; set; } = "base64Image";
     public string DefaultImageMode { get; set; } = "vip";
-    public string DefaultImageResolution { get; set; } = "2k";
+    public string DefaultImageResolution { get; set; } = "1k";
     public string DefaultImageProjectId { get; set; } = "default";
-    public string DefaultVideoStartImageField { get; set; } = "image";
-    public string DefaultVideoEndImageField { get; set; } = "image_2";
     public string DefaultVideoResolution { get; set; } = "720p";
 
     internal static string NormalizeVideoResolution(string? resolution)
