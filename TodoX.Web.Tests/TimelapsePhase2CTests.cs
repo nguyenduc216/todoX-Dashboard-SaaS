@@ -351,6 +351,76 @@ public class TimelapsePhase2CTests
         Assert.Contains("FFmpeg concat timed out after", source, StringComparison.Ordinal);
         Assert.Contains("stderr={Stderr}", source, StringComparison.Ordinal);
         Assert.Contains("SaveFinalizerFailedAsync", source, StringComparison.Ordinal);
+        Assert.Contains("Utf8NoBom", source, StringComparison.Ordinal);
+        Assert.Contains("new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)", source, StringComparison.Ordinal);
+        Assert.Contains("BuildConcatFile(paths), Utf8NoBom", source, StringComparison.Ordinal);
+        Assert.Contains("Path.GetFullPath(path)", source, StringComparison.Ordinal);
+        Assert.Contains(".Replace('\\\\', '/')", source, StringComparison.Ordinal);
+        Assert.Contains("TIMELAPSE_FINALIZER_FFMPEG_START", source, StringComparison.Ordinal);
+        Assert.Contains("TIMELAPSE_FINALIZER_FFMPEG_CLIP", source, StringComparison.Ordinal);
+        Assert.Contains("BuildFfmpegFailureMessage", source, StringComparison.Ordinal);
+        Assert.Contains("ExtractUsefulFfmpegTail", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("BuildConcatFile(paths), Encoding.UTF8", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task FinalizerConcatFile_UsesUtf8NoBomAndNormalizedFfmpegPaths()
+    {
+        var concat = TimelapseFinalizerRuntime.BuildConcatFile(new[]
+        {
+            @"H:\folder\clip-1.mp4",
+            @"H:\folder\clip-2.mp4",
+            @"H:\O'Brien\clip-3.mp4"
+        });
+
+        var lines = concat.Split(Environment.NewLine);
+        Assert.Equal("file 'H:/folder/clip-1.mp4'", lines[0]);
+        Assert.Equal("file 'H:/folder/clip-2.mp4'", lines[1]);
+        Assert.Equal("file 'H:/O'\\''Brien/clip-3.mp4'", lines[2]);
+        Assert.All(lines, line => Assert.StartsWith("file '", line, StringComparison.Ordinal));
+        Assert.DoesNotContain(@"H:\folder", concat, StringComparison.Ordinal);
+
+        var concatPath = Path.Combine(Path.GetTempPath(), $"todox-concat-{Guid.NewGuid():N}.txt");
+        try
+        {
+            await File.WriteAllTextAsync(concatPath, concat, TimelapseFinalizerRuntime.Utf8NoBom);
+            var bytes = await File.ReadAllBytesAsync(concatPath);
+
+            Assert.True(bytes.Length > 3);
+            Assert.False(bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF);
+            Assert.Empty(TimelapseFinalizerRuntime.Utf8NoBom.GetPreamble());
+        }
+        finally
+        {
+            if (File.Exists(concatPath))
+            {
+                File.Delete(concatPath);
+            }
+        }
+    }
+
+    [Fact]
+    public void FinalizerFfmpegErrorMessage_RemovesBannerAndKeepsUsefulTail()
+    {
+        var stderr = string.Join('\n', new[]
+        {
+            "ffmpeg version 7.1-full_build-www.gyan.dev Copyright",
+            "built with gcc 14.2.0",
+            "configuration: --enable-gpl --enable-version3 --enable-static",
+            "libavutil      59. 39.100 / 59. 39.100",
+            "libavcodec     61. 19.100 / 61. 19.100",
+            "[concat @ 000001] Impossible to open 'H:/folder/clip.mp4'",
+            "concat.txt: Invalid data found when processing input"
+        });
+
+        var sanitized = TimelapseFinalizerRuntime.BuildFfmpegFailureMessage("FFmpeg concat failed.", stderr);
+
+        Assert.DoesNotContain("ffmpeg version", sanitized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("configuration:", sanitized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("libavcodec", sanitized, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Impossible to open", sanitized, StringComparison.Ordinal);
+        Assert.Contains("Invalid data found when processing input", sanitized, StringComparison.Ordinal);
+        Assert.True(sanitized.Length <= 2000);
     }
 
     [Fact]

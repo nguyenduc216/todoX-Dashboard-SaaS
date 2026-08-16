@@ -14,6 +14,8 @@ public interface ITimelapseFinalizerRuntime
 
 public sealed class TimelapseFinalizerRuntime : ITimelapseFinalizerRuntime
 {
+    internal static readonly Encoding Utf8NoBom = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+
     private readonly IWebHostEnvironment _env;
     private readonly IConfiguration _config;
     private readonly IMediaFileService _media;
@@ -80,8 +82,16 @@ public sealed class TimelapseFinalizerRuntime : ITimelapseFinalizerRuntime
             }
 
             var concatPath = Path.Combine(tempDir, "concat.txt");
-            await File.WriteAllTextAsync(concatPath, BuildConcatFile(paths), Encoding.UTF8, ct);
+            await File.WriteAllTextAsync(concatPath, BuildConcatFile(paths), Utf8NoBom, ct);
             var outputPath = Path.Combine(tempDir, "final.mp4");
+            _logger.LogInformation("TIMELAPSE_FINALIZER_FFMPEG_START jobId={JobId} version={Version} clips={ClipCount} concatPath={ConcatPath} outputPath={OutputPath}",
+                item.JobId, item.Version, paths.Count, concatPath, outputPath);
+            foreach (var path in paths)
+            {
+                _logger.LogInformation("TIMELAPSE_FINALIZER_FFMPEG_CLIP jobId={JobId} version={Version} path={ClipPath}",
+                    item.JobId, item.Version, path);
+            }
+
             await RunFfmpegAsync(concatPath, outputPath, ct);
             var bytes = await File.ReadAllBytesAsync(outputPath, ct);
             var objectKey = $"timelapse/{DateTime.UtcNow:yyyyMM}/{item.JobId:N}/final-v{item.Version}.mp4";
@@ -194,21 +204,65 @@ public sealed class TimelapseFinalizerRuntime : ITimelapseFinalizerRuntime
             var timeoutStderr = await ReadProcessOutputAsync(stderrTask);
             _ = await ReadProcessOutputAsync(stdoutTask);
             var timeoutMessage = $"FFmpeg concat timed out after {timeoutSeconds} seconds.";
-            _logger.LogError("{TimeoutMessage} stderr={Stderr}", timeoutMessage, TruncateForLog(timeoutStderr));
-            throw new TimeoutException($"{timeoutMessage} Stderr: {TruncateForLog(timeoutStderr)}");
+            _logger.LogError("{TimeoutMessage} stderr={Stderr}", timeoutMessage, timeoutStderr);
+            throw new TimeoutException(BuildFfmpegFailureMessage(timeoutMessage, timeoutStderr));
         }
 
         var stderr = await ReadProcessOutputAsync(stderrTask);
         _ = await ReadProcessOutputAsync(stdoutTask);
         if (process.ExitCode != 0 || !File.Exists(outputPath))
         {
-            _logger.LogError("FFmpeg concat failed with exit code {ExitCode}. stderr={Stderr}", process.ExitCode, TruncateForLog(stderr));
-            throw new InvalidOperationException($"FFmpeg concat failed with exit code {process.ExitCode}: {TruncateForLog(stderr)}");
+            _logger.LogError("FFmpeg concat failed with exit code {ExitCode}. stderr={Stderr}", process.ExitCode, stderr);
+            throw new InvalidOperationException(BuildFfmpegFailureMessage($"FFmpeg concat failed with exit code {process.ExitCode}.", stderr));
         }
     }
 
-    private static string BuildConcatFile(IEnumerable<string> paths)
-        => string.Join(Environment.NewLine, paths.Select(path => $"file '{path.Replace("'", "'\\''")}'"));
+    internal static string BuildConcatFile(IEnumerable<string> paths)
+        => string.Join(
+            Environment.NewLine,
+            paths.Select(path =>
+            {
+                var normalized = Path.GetFullPath(path)
+                    .Replace('\\', '/')
+                    .Replace("'", "'\\''");
+
+                return $"file '{normalized}'";
+            }));
+
+    internal static string BuildFfmpegFailureMessage(string prefix, string? stderr)
+    {
+        var tail = ExtractUsefulFfmpegTail(stderr);
+        var message = string.IsNullOrWhiteSpace(tail)
+            ? prefix
+            : $"{prefix} {tail}";
+
+        return TruncateForLog(message);
+    }
+
+    internal static string ExtractUsefulFfmpegTail(string? stderr, int maxLines = 16)
+    {
+        if (string.IsNullOrWhiteSpace(stderr))
+        {
+            return string.Empty;
+        }
+
+        var usefulLines = stderr
+            .Split(new[] { "\r\n", "\n" }, StringSplitOptions.None)
+            .Select(line => line.Trim())
+            .Where(line => !string.IsNullOrWhiteSpace(line))
+            .Where(line => !IsFfmpegBannerLine(line))
+            .TakeLast(maxLines);
+
+        return string.Join(Environment.NewLine, usefulLines);
+    }
+
+    private static bool IsFfmpegBannerLine(string line)
+        => line.StartsWith("ffmpeg version", StringComparison.OrdinalIgnoreCase)
+           || line.StartsWith("built with", StringComparison.OrdinalIgnoreCase)
+           || line.StartsWith("configuration:", StringComparison.OrdinalIgnoreCase)
+           || line.StartsWith("libav", StringComparison.OrdinalIgnoreCase)
+           || line.StartsWith("libsw", StringComparison.OrdinalIgnoreCase)
+           || line.StartsWith("libpostproc", StringComparison.OrdinalIgnoreCase);
 
     private static void TryDeleteDirectory(string path)
     {
