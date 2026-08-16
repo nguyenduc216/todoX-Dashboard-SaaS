@@ -10,7 +10,7 @@ public class TimelapsePhase2ATests
     [Theory]
     [InlineData(TodoXServiceEngineTypes.Timelapse, CustomerServiceDestination.TimelapseCreator, "/jobs/timelapse/new")]
     [InlineData(TodoXServiceEngineTypes.RVideo, CustomerServiceDestination.RVideoCreator, null)]
-    [InlineData(TodoXServiceEngineTypes.RDance, CustomerServiceDestination.RDanceCreator, null)]
+    [InlineData(TodoXServiceEngineTypes.RDance, CustomerServiceDestination.RDanceCreator, "/rdance-fashion-demo")]
     public void CustomerServiceRouting_UsesEngineType(
         string engineType,
         CustomerServiceDestination expectedDestination,
@@ -27,9 +27,14 @@ public class TimelapsePhase2ATests
         else
         {
             Assert.StartsWith(expectedRoute, route.Route);
-            Assert.Contains($"serviceId={serviceId}", route.Route);
-            Assert.Contains("serviceCode=CONSTRUCTION_VIDEO", route.Route);
+            if (route.Route.Contains("?", StringComparison.Ordinal))
+            {
+                Assert.Contains($"serviceId={serviceId}", route.Route);
+                Assert.Contains("serviceCode=CONSTRUCTION_VIDEO", route.Route);
+            }
         }
+
+        Assert.NotEqual("Dịch vụ RDance đang hoàn thiện.", route.Message);
     }
 
     [Theory]

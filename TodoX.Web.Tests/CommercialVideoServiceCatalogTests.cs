@@ -86,6 +86,12 @@ public sealed class CommercialVideoServiceCatalogTests
         Assert.Contains("OrderBy(x => x.SortOrder)", create, StringComparison.Ordinal);
         Assert.Contains("ThenBy(x => x.DisplayName, StringComparer.OrdinalIgnoreCase)", create, StringComparison.Ordinal);
         Assert.Contains("CustomerServiceRouting.Resolve(service.ServiceType, service.Id, service.ServiceCode)", create, StringComparison.Ordinal);
+        Assert.Contains("Navigation.NavigateTo(route.Route)", create, StringComparison.Ordinal);
+        var rDanceRoute = TodoX.Web.Models.Timelapse.CustomerServiceRouting.Resolve(TodoXServiceEngineTypes.RDance, Guid.NewGuid(), "RDANCE_FASHION");
+        Assert.Equal(TodoX.Web.Models.Timelapse.CustomerServiceDestination.RDanceCreator, rDanceRoute.Destination);
+        Assert.NotNull(rDanceRoute.Route);
+        Assert.StartsWith("/rdance-fashion-demo", rDanceRoute.Route);
+        Assert.NotEqual("Dịch vụ RDance đang hoàn thiện.", rDanceRoute.Message);
         Assert.DoesNotContain("ApplyFixedDefinition", adminRepo, StringComparison.Ordinal);
         Assert.Contains("TodoXServiceEngineTypes.Normalize(s.ServiceType)", adminRepo, StringComparison.Ordinal);
         Assert.Contains("@bind-Value=\"_model.ServiceName\"", adminDialog, StringComparison.Ordinal);

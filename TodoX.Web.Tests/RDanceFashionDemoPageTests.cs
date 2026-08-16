@@ -19,6 +19,7 @@ public sealed class RDanceFashionDemoPageTests
             "MudTabPanel Text=\"Kết quả\"",
             "IDanceSellPhase2Service",
             "IDanceSellReferenceImageService",
+            "IDanceSellProviderCatalog",
             "InputFile",
             "StageTikTokAsync",
             "GenerateReferenceAsync",
@@ -38,6 +39,17 @@ public sealed class RDanceFashionDemoPageTests
         Assert.DoesNotContain("Task.Delay(500)", page, StringComparison.Ordinal);
         Assert.DoesNotContain("/resources/mockup/rdance-fashion", page, StringComparison.Ordinal);
         Assert.DoesNotContain("await Task.Delay", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PageShowsProviderReadinessGuardWithoutHidingCatalogRoute()
+    {
+        var page = ReadStrictUtf8(Path.Combine(FindRepoRoot(), "TodoX.Web", "Components", "Pages", "RDanceFashionDemo.razor"));
+
+        Assert.Contains("RDance chưa được cấu hình provider Motion Control.", page, StringComparison.Ordinal);
+        Assert.Contains("ProviderCatalog.GetDefaultRouteAsync(DanceSellOperationTypes.MotionVideo)", page, StringComparison.Ordinal);
+        Assert.Contains("_readinessError", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("Dịch vụ RDance đang hoàn thiện.", page, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -61,6 +73,8 @@ public sealed class RDanceFashionDemoPageTests
         Assert.Contains("'79ai'", sql, StringComparison.Ordinal);
         Assert.Contains("'kling_video_motion'", sql, StringComparison.Ordinal);
         Assert.Contains("'kling-2.6/motion-control'", sql, StringComparison.Ordinal);
+        Assert.Contains("'local_composite'", sql, StringComparison.Ordinal);
+        Assert.Contains("\"motion_video_field\":\"video\"", sql, StringComparison.Ordinal);
         Assert.Contains("is_default = false", sql, StringComparison.Ordinal);
         Assert.Contains("No verified 79AI image-edit model", sql, StringComparison.Ordinal);
     }

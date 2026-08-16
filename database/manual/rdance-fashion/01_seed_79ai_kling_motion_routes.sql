@@ -31,17 +31,6 @@ SELECT 'dance_sell',
  );
 
 UPDATE public.todox_ai_feature_provider_route
-   SET priority = 10,
-       is_default = true,
-       enabled = true,
-       allow_user_select = false,
-       updated_at = now()
- WHERE feature_code = 'dance_sell'
-   AND operation_type = 'motion_video'
-   AND provider_code = '79ai'
-   AND model_name = 'kling_video_motion';
-
-UPDATE public.todox_ai_feature_provider_route
    SET is_default = false,
        updated_at = now()
  WHERE feature_code = 'dance_sell'
@@ -68,6 +57,18 @@ SELECT 'dance_sell',
         AND provider_code = '79ai'
         AND model_name = 'kling_video_motion'
  );
+
+UPDATE public.todox_ai_feature_provider_route
+   SET priority = 10,
+       is_default = true,
+       enabled = true,
+       allow_user_select = false,
+       config_json = COALESCE(config_json, '{}'::jsonb) || '{"capability":"image_to_video","displayName":"Kling Motion Control","submit_path":"/create-video","poll_path":"/video","reference_image_field":"image","motion_video_field":"video"}'::jsonb,
+       updated_at = now()
+ WHERE feature_code = 'dance_sell'
+   AND operation_type = 'motion_video'
+   AND provider_code = '79ai'
+   AND model_name = 'kling_video_motion';
 
 UPDATE public.todox_ai_feature_provider_route
    SET priority = 100,
