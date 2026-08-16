@@ -1,0 +1,31 @@
+<div class="tl-processing-mask @(IsVideo ? "is-video" : "is-image")"
+     role="status"
+     aria-live="polite">
+    <span class="tl-processing-flash" aria-hidden="true"></span>
+    <span class="tl-processing-beam" aria-hidden="true"></span>
+    <span class="tl-processing-scan" aria-hidden="true"></span>
+
+    <span class="tl-processing-center">
+        <span class="tl-processing-spinner">
+            <MudIcon Icon="@(IsVideo ? Icons.Material.Filled.MovieCreation : Icons.Material.Filled.AutoAwesome)"
+                     Size="Size.Large" />
+        </span>
+        <strong class="tl-processing-text">
+            @(Label ?? (IsVideo ? "Đang tạo video" : "Đang tạo ảnh"))
+            <span class="tl-processing-dots" aria-hidden="true">
+                <i></i><i></i><i></i>
+            </span>
+        </strong>
+        @if (IsVideo)
+        {
+            <span class="tl-processing-wave" aria-hidden="true">
+                <i></i><i></i><i></i><i></i><i></i>
+            </span>
+        }
+    </span>
+</div>
+
+@code {
+    [Parameter] public bool IsVideo { get; set; }
+    [Parameter] public string? Label { get; set; }
+}
