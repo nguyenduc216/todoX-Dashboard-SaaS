@@ -356,31 +356,41 @@ public class TimelapsePhase2CTests
 
         Assert.Contains("TimelapseOperationStatuses.Rendering => $\"{classes} tl-loading-skeleton tl-active-render\"", razor, StringComparison.Ordinal);
         Assert.Contains("TimelapseOperationStatuses.Waiting => $\"{classes} tl-loading-skeleton tl-loading-shimmer\"", razor, StringComparison.Ordinal);
-        Assert.Contains("tl-active-scanline tl-image-scanline", razor, StringComparison.Ordinal);
-        Assert.Contains("tl-active-scanline tl-video-scanline", razor, StringComparison.Ordinal);
-        Assert.Contains("tl-video-wave", razor, StringComparison.Ordinal);
-        Assert.Contains("tl-status-dot", razor, StringComparison.Ordinal);
         Assert.Contains("RenderProcessingOverlay(isVideo: false)", razor, StringComparison.Ordinal);
         Assert.Contains("RenderProcessingOverlay(isVideo: true)", razor, StringComparison.Ordinal);
         Assert.Contains("tl-processing-overlay", razor, StringComparison.Ordinal);
-        Assert.Contains("Đang xử lý...", razor, StringComparison.Ordinal);
+        Assert.Contains("tl-processing-sweep", razor, StringComparison.Ordinal);
+        Assert.Contains("tl-processing-scan", razor, StringComparison.Ordinal);
+        Assert.Contains("tl-processing-spinner", razor, StringComparison.Ordinal);
+        Assert.Contains("tl-processing-text", razor, StringComparison.Ordinal);
+        Assert.Contains("tl-processing-dots", razor, StringComparison.Ordinal);
+        Assert.Contains("tl-processing-wave", razor, StringComparison.Ordinal);
+        Assert.Contains("isVideo ? \"Đang tạo video\" : \"Đang tạo ảnh\"", razor, StringComparison.Ordinal);
 
-        Assert.Contains(".tl-active-render::after", css, StringComparison.Ordinal);
         Assert.Contains(".tl-processing-overlay", css, StringComparison.Ordinal);
         Assert.Contains(".tl-processing-overlay.is-video", css, StringComparison.Ordinal);
         Assert.Contains(".tl-processing-sweep", css, StringComparison.Ordinal);
         Assert.Contains(".tl-processing-scan", css, StringComparison.Ordinal);
-        Assert.Contains(".tl-processing-center", css, StringComparison.Ordinal);
-        Assert.Contains("rgba(4, 8, 12, 0.5)", css, StringComparison.Ordinal);
-        Assert.Contains("rgba(255, 224, 130, 0.78)", css, StringComparison.Ordinal);
-        Assert.Contains("rgba(128, 222, 234, 0.76)", css, StringComparison.Ordinal);
-        Assert.Contains("height: 3px;", css, StringComparison.Ordinal);
-        Assert.Contains("width: 3px;", css, StringComparison.Ordinal);
+        Assert.Contains(".tl-processing-spinner", css, StringComparison.Ordinal);
+        Assert.Contains(".tl-processing-text", css, StringComparison.Ordinal);
+        Assert.Contains(".tl-processing-dots", css, StringComparison.Ordinal);
+        Assert.Contains(".tl-processing-wave", css, StringComparison.Ordinal);
+        Assert.Contains("@keyframes tl-processing-sweep", css, StringComparison.Ordinal);
+        Assert.Contains("@keyframes tl-processing-scan-down", css, StringComparison.Ordinal);
+        Assert.Contains("@keyframes tl-processing-scan-across", css, StringComparison.Ordinal);
+        Assert.Contains("@keyframes tl-processing-overlay-pulse", css, StringComparison.Ordinal);
+        Assert.Contains("@keyframes tl-processing-spin", css, StringComparison.Ordinal);
+        Assert.Contains("@keyframes tl-processing-text-shimmer", css, StringComparison.Ordinal);
+        Assert.Contains("@keyframes tl-processing-dots", css, StringComparison.Ordinal);
+        Assert.Contains("@keyframes tl-processing-wave", css, StringComparison.Ordinal);
+        Assert.Contains("transform: rotate(360deg);", css, StringComparison.Ordinal);
+        Assert.Contains("transform: translateY(3400%);", css, StringComparison.Ordinal);
+        Assert.Contains("transform: translateX(3400%);", css, StringComparison.Ordinal);
+        Assert.Contains("repeat(auto-fill, minmax(260px, 320px))", css, StringComparison.Ordinal);
         Assert.Contains("@media (prefers-reduced-motion: reduce)", css, StringComparison.Ordinal);
-        Assert.Contains(".tl-processing-overlay {", css, StringComparison.Ordinal);
         Assert.Contains("background: rgba(4, 8, 12, 0.58);", css, StringComparison.Ordinal);
+        Assert.DoesNotContain(".clip-input-thumbnails", css, StringComparison.Ordinal);
     }
-
     [Fact]
     public void VideoRetry_IsTargetAwareAndKeepsConcurrencyGuards()
     {

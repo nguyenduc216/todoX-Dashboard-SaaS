@@ -806,19 +806,44 @@
         builder.OpenElement(10, "span");
         builder.AddAttribute(11, "class", "tl-processing-center");
         builder.OpenElement(12, "span");
-        builder.AddAttribute(13, "class", "tl-processing-icon");
-        builder.OpenComponent<MudIcon>(14);
-        builder.AddAttribute(15, "Icon", isVideo ? Icons.Material.Filled.MovieCreation : Icons.Material.Filled.AutoAwesome);
-        builder.AddAttribute(16, "Size", Size.Large);
+        builder.AddAttribute(13, "class", "tl-processing-spinner");
+        builder.OpenElement(14, "span");
+        builder.AddAttribute(15, "class", "tl-processing-icon");
+        builder.OpenComponent<MudIcon>(16);
+        builder.AddAttribute(17, "Icon", isVideo ? Icons.Material.Filled.MovieCreation : Icons.Material.Filled.AutoAwesome);
+        builder.AddAttribute(18, "Size", Size.Large);
         builder.CloseComponent();
         builder.CloseElement();
-        builder.OpenElement(17, "strong");
-        builder.AddContent(18, "Đang xử lý...");
         builder.CloseElement();
+        builder.OpenElement(19, "strong");
+        builder.AddAttribute(20, "class", "tl-processing-text");
+        builder.AddContent(21, isVideo ? "Đang tạo video" : "Đang tạo ảnh");
+        builder.OpenElement(22, "span");
+        builder.AddAttribute(23, "class", "tl-processing-dots");
+        builder.AddAttribute(24, "aria-hidden", "true");
+        for (var i = 0; i < 3; i++)
+        {
+            builder.OpenElement(25 + i * 2, "i");
+            builder.AddAttribute(26 + i * 2, "aria-hidden", "true");
+            builder.CloseElement();
+        }
+        builder.CloseElement();
+        builder.CloseElement();
+        if (isVideo)
+        {
+            builder.OpenElement(32, "span");
+            builder.AddAttribute(33, "class", "tl-processing-wave");
+            builder.AddAttribute(34, "aria-hidden", "true");
+            for (var i = 0; i < 5; i++)
+            {
+                builder.OpenElement(35 + i * 2, "i");
+                builder.CloseElement();
+            }
+            builder.CloseElement();
+        }
         builder.CloseElement();
         builder.CloseElement();
     };
-
     private IReadOnlyList<TimelapseStageImage> EnsureImageCards()
     {
         if (_job is null)
