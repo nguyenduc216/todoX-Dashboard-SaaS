@@ -2,11 +2,14 @@ namespace TodoX.Web.Services.DanceSell;
 
 public static class DanceSellConstants
 {
-    public const string ProviderCode = "kie";
-    public const string CapabilityCode = "motion_control_video";
+    public const string ProviderCode = "79ai";
+    public const string KieProviderCode = "kie";
+    public const string CapabilityCode = "image_to_video";
+    public const string KieCapabilityCode = "motion_control_video";
     public const string ReferenceCapabilityCode = "reference_image_generation";
     public const string FeatureCode = "dance_sell";
-    public const string Model = "kling-2.6/motion-control";
+    public const string Model = "kling_video_motion";
+    public const string KieMotionModel = "kling-2.6/motion-control";
     public const string ReferenceModel = "gpt-image-2-image-to-image";
     public const string BillingEnabledConfigKey = "dance_sell_billing_enabled";
     public const string AllowCodeProviderFallbackConfigKey = "dance_sell_allow_code_provider_fallback";

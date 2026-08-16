@@ -86,7 +86,7 @@ public sealed class KieDanceSellReferenceProvider : IDanceSellReferenceProvider
     }
 
     public bool Supports(DanceSellProviderRouteDto route)
-        => route.ProviderCode.Equals(DanceSellConstants.ProviderCode, StringComparison.OrdinalIgnoreCase);
+        => route.ProviderCode.Equals(DanceSellConstants.KieProviderCode, StringComparison.OrdinalIgnoreCase);
 
     public async Task<ProviderTaskSubmitResult> SubmitAsync(DanceSellReferenceProviderRequest request, CancellationToken ct)
     {
@@ -223,7 +223,7 @@ public sealed class DanceSellProviderCatalog : IDanceSellProviderCatalog
             OperationType = operationType,
             ProviderCode = DanceSellConstants.ProviderCode,
             ModelName = operationType == DanceSellOperationTypes.ReferenceImage
-                ? DanceSellConstants.ReferenceModel
+                ? "local_composite"
                 : DanceSellConstants.Model,
             Priority = 100,
             Enabled = true,
@@ -796,7 +796,7 @@ public sealed class AiProviderBalanceClientFactory : IAiProviderBalanceClientFac
 public sealed class KieBalanceClient : IAiProviderBalanceClient
 {
     public bool SupportsProvider(string providerCode)
-        => providerCode.Equals(DanceSellConstants.ProviderCode, StringComparison.OrdinalIgnoreCase);
+        => providerCode.Equals(DanceSellConstants.KieProviderCode, StringComparison.OrdinalIgnoreCase);
 
     public Task<ProviderBalanceResult> FetchBalanceAsync(ProviderAccountDto account, CancellationToken ct)
         => Task.FromResult(new ProviderBalanceResult
