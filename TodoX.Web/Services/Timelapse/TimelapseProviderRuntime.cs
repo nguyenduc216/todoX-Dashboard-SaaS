@@ -222,7 +222,14 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
                 item.JobId, item.ClipIndex, item.Attempt, item.ProviderTaskId, media.Id);
             await _renderJobs.AddEventAsync(item.JobId, "TIMELAPSE_VIDEO_COMPLETE", "Timelapse video clip saved to TodoX media.",
                 new { item.ClipIndex, item.Attempt, taskId = item.ProviderTaskId, mediaId = media.Id }, ct: ct);
-            await _repo.AdvanceAfterVideoCompletedAsync(item.JobId, ct);
+            var finalizerStarted = await _repo.AdvanceAfterVideoCompletedAsync(item.JobId, ct);
+            if (finalizerStarted)
+            {
+                await _renderJobs.AddEventAsync(item.JobId, "TIMELAPSE_FINALIZER_AUTO_STARTED",
+                    "Final merge operation was queued automatically after all Timelapse video clips completed.",
+                    new { item.ClipIndex, item.Attempt, taskId = item.ProviderTaskId }, ct: ct);
+            }
+
             await _coreLifecycle.AdvanceAsync(
                 item.JobId,
                 item.UserId,

@@ -526,13 +526,6 @@
                                     </div>
                                 }
                             </div>
-                            <MudButton Variant="Variant.Filled"
-                                       Color="Color.Warning"
-                                       StartIcon="@Icons.Material.Filled.MovieFilter"
-                                       Disabled="@(!_job.Workflow.CanFinalize || _busy)"
-                                       OnClick="StartFinalizerAsync">
-                                Hoàn thành video
-                            </MudButton>
                         </MudStack>
                     </MudPaper>
                 </MudStack>
@@ -642,7 +635,7 @@
            || _job?.Workflow.ParentStatus == TimelapseParentStatuses.Finalizing;
     private string FinalLoadingTitle
         => _job?.Workflow.ParentStatus == TimelapseParentStatuses.Finalizing
-            ? "Đang ghép video cuối cùng..."
+            ? "Đang hoàn thiện video..."
             : "Đang chờ hoàn thiện kết quả...";
     private const string FinalLoadingSubtitle = "Hệ thống tiếp tục xử lý kể cả khi bạn rời trang.";
     private string StartButtonLabel => _job?.Workflow.HasActiveOperations == true

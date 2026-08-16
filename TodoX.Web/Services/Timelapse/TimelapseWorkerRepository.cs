@@ -24,7 +24,7 @@ public interface ITimelapseWorkerRepository
     Task ReleaseImageClaimAsync(Guid stageId, int attempt, CancellationToken ct = default);
     Task ReleaseVideoClaimAsync(Guid clipId, int attempt, CancellationToken ct = default);
     Task AdvanceAfterImageCompletedAsync(Guid jobId, CancellationToken ct = default);
-    Task AdvanceAfterVideoCompletedAsync(Guid jobId, CancellationToken ct = default);
+    Task<bool> AdvanceAfterVideoCompletedAsync(Guid jobId, CancellationToken ct = default);
 }
 
 public sealed class TimelapseWorkerRepository : ITimelapseWorkerRepository
@@ -394,13 +394,13 @@ public sealed class TimelapseWorkerRepository : ITimelapseWorkerRepository
         tx.Commit();
     }
 
-    public async Task AdvanceAfterVideoCompletedAsync(Guid jobId, CancellationToken ct = default)
+    public async Task<bool> AdvanceAfterVideoCompletedAsync(Guid jobId, CancellationToken ct = default)
     {
         await _tenant.EnsureLoadedAsync(ct);
         using var conn = await _factory.OpenAsync(ct);
         using var tx = conn.BeginTransaction();
         await LockJobAsync(conn, tx, jobId);
-        var statusCounts = await conn.QuerySingleAsync<(int Active, int Failed, int IncompleteVideos)>(
+        var statusCounts = await conn.QuerySingleAsync<(int Active, int Failed, int TotalVideos, int IncompleteVideos)>(
             """
             SELECT
                 (
@@ -411,6 +411,11 @@ public sealed class TimelapseWorkerRepository : ITimelapseWorkerRepository
                 ) + (
                     SELECT count(*)
                       FROM timelapse.timelapse_video_clips
+                     WHERE job_id=@jobId
+                       AND status='RENDERING'
+                ) + (
+                    SELECT count(*)
+                      FROM timelapse.timelapse_final_outputs
                      WHERE job_id=@jobId
                        AND status='RENDERING'
                 ) AS Active,
@@ -429,10 +434,16 @@ public sealed class TimelapseWorkerRepository : ITimelapseWorkerRepository
                     SELECT count(*)
                       FROM timelapse.timelapse_video_clips
                      WHERE job_id=@jobId
+                ) AS TotalVideos,
+                (
+                    SELECT count(*)
+                      FROM timelapse.timelapse_video_clips
+                     WHERE job_id=@jobId
                        AND status <> 'COMPLETED'
                 ) AS IncompleteVideos;
             """,
             new { jobId }, tx);
+        var finalizerStarted = false;
         if (statusCounts.Active == 0 && statusCounts.Failed > 0)
         {
             await conn.ExecuteAsync(
@@ -445,19 +456,153 @@ public sealed class TimelapseWorkerRepository : ITimelapseWorkerRepository
                 """,
                 new { jobId, tenant = _tenant.TenantId, status = TimelapseParentStatuses.Failed }, tx);
         }
-        else if (statusCounts.IncompleteVideos == 0)
+        else if (statusCounts.TotalVideos > 0 && statusCounts.IncompleteVideos == 0)
         {
-            await conn.ExecuteAsync(
-                """
-                UPDATE render.render_jobs
-                   SET status=@status,
-                       updated_at=now()
-                 WHERE id=@jobId
-                   AND tenant_id=@tenant;
-                """,
-                new { jobId, tenant = _tenant.TenantId, status = TimelapseParentStatuses.VideosReady }, tx);
+            finalizerStarted = await TryStartFinalizerIfReadyAsync(conn, tx, jobId);
+            if (!finalizerStarted)
+            {
+                await conn.ExecuteAsync(
+                    """
+                    UPDATE render.render_jobs
+                       SET status=CASE
+                               WHEN EXISTS (
+                                   SELECT 1
+                                     FROM timelapse.timelapse_final_outputs
+                                    WHERE job_id=@jobId
+                                      AND status='RENDERING')
+                                   THEN @finalizing
+                               WHEN EXISTS (
+                                   SELECT 1
+                                     FROM timelapse.timelapse_final_outputs
+                                    WHERE job_id=@jobId
+                                      AND status='COMPLETED')
+                                   THEN @completed
+                               ELSE @videosReady
+                           END,
+                           updated_at=now()
+                     WHERE id=@jobId
+                       AND tenant_id=@tenant;
+                    """,
+                    new
+                    {
+                        jobId,
+                        tenant = _tenant.TenantId,
+                        finalizing = TimelapseParentStatuses.Finalizing,
+                        completed = TimelapseParentStatuses.Completed,
+                        videosReady = TimelapseParentStatuses.VideosReady
+                    }, tx);
+            }
         }
         tx.Commit();
+        return finalizerStarted;
+    }
+
+    private async Task<bool> TryStartFinalizerIfReadyAsync(IDbConnection conn, IDbTransaction tx, Guid jobId)
+    {
+        var readiness = await conn.QuerySingleAsync<FinalizerReadinessRow>(
+            """
+            SELECT
+                (
+                    SELECT count(*)
+                      FROM timelapse.timelapse_video_clips
+                     WHERE tenant_id=@tenant
+                       AND job_id=@jobId
+                ) AS TotalVideos,
+                (
+                    SELECT count(*)
+                      FROM timelapse.timelapse_video_clips
+                     WHERE tenant_id=@tenant
+                       AND job_id=@jobId
+                       AND status='COMPLETED'
+                ) AS CompletedVideos,
+                EXISTS (
+                    SELECT 1
+                      FROM timelapse.timelapse_final_outputs
+                     WHERE tenant_id=@tenant
+                       AND job_id=@jobId
+                       AND status='RENDERING'
+                ) AS HasRenderingFinal,
+                EXISTS (
+                    SELECT 1
+                      FROM timelapse.timelapse_final_outputs
+                     WHERE tenant_id=@tenant
+                       AND job_id=@jobId
+                       AND status='COMPLETED'
+                ) AS HasCompletedFinal,
+                COALESCE((
+                    SELECT max(version) + 1
+                      FROM timelapse.timelapse_final_outputs
+                     WHERE job_id=@jobId
+                ), 1) AS NextVersion,
+                j.input_json::text AS SnapshotJson
+              FROM render.render_jobs j
+             WHERE j.id=@jobId
+               AND j.tenant_id=@tenant;
+            """,
+            new { tenant = _tenant.TenantId, jobId }, tx);
+
+        if (readiness.TotalVideos == 0
+            || readiness.CompletedVideos != readiness.TotalVideos
+            || readiness.HasRenderingFinal
+            || readiness.HasCompletedFinal)
+        {
+            return false;
+        }
+
+        var clips = (await conn.QueryAsync<FinalizerClipOrderRow>(
+            """
+            SELECT clip_index AS ClipIndex,
+                   start_progress_percent AS StartProgressPercent,
+                   end_progress_percent AS EndProgressPercent,
+                   duration_seconds AS DurationSeconds,
+                   video_mode AS VideoMode,
+                   ratio AS Ratio
+              FROM timelapse.timelapse_video_clips
+             WHERE tenant_id=@tenant
+               AND job_id=@jobId
+               AND status='COMPLETED'
+             ORDER BY clip_index;
+            """,
+            new { tenant = _tenant.TenantId, jobId }, tx)).ToList();
+
+        var snapshot = DeserializeSnapshot(readiness.SnapshotJson);
+        var requestJson = JsonSerializer.Serialize(new
+        {
+            startedBy = "auto_video_completion",
+            clipOrder = clips.Select(x => new
+            {
+                x.ClipIndex,
+                x.StartProgressPercent,
+                x.EndProgressPercent
+            }).ToArray(),
+            snapshot.Ratio,
+            snapshot.VideoMode,
+            durationSeconds = clips.FirstOrDefault()?.DurationSeconds ?? TimelapseRequestRules.RuntimeClipDurationSeconds
+        }, JsonOptions);
+
+        await conn.ExecuteAsync(
+            """
+            INSERT INTO timelapse.timelapse_final_outputs
+                (tenant_id, job_id, version, status, request_json)
+            VALUES
+                (@tenant, @jobId, @version, 'RENDERING', CAST(@requestJson AS jsonb));
+
+            UPDATE render.render_jobs
+               SET status=@status,
+                   updated_at=now()
+             WHERE id=@jobId
+               AND tenant_id=@tenant;
+            """,
+            new
+            {
+                tenant = _tenant.TenantId,
+                jobId,
+                version = readiness.NextVersion,
+                requestJson,
+                status = TimelapseParentStatuses.Finalizing
+            }, tx);
+
+        return true;
     }
 
     private async Task UpdateStageSubmittedAsync(string table, string versionTable, string versionFk, Guid id, int attempt, string providerCode, string model, string taskId, string requestJson, string responseJson, CancellationToken ct)
@@ -847,6 +992,26 @@ public sealed class TimelapseWorkerRepository : ITimelapseWorkerRepository
     private sealed class ImageStageRow
     {
         public Guid Id { get; set; }
+    }
+
+    private sealed class FinalizerReadinessRow
+    {
+        public int TotalVideos { get; set; }
+        public int CompletedVideos { get; set; }
+        public bool HasRenderingFinal { get; set; }
+        public bool HasCompletedFinal { get; set; }
+        public int NextVersion { get; set; }
+        public string SnapshotJson { get; set; } = "{}";
+    }
+
+    private sealed class FinalizerClipOrderRow
+    {
+        public int ClipIndex { get; set; }
+        public int StartProgressPercent { get; set; }
+        public int EndProgressPercent { get; set; }
+        public int DurationSeconds { get; set; }
+        public string VideoMode { get; set; } = TimelapseRequestRules.FastMode;
+        public string Ratio { get; set; } = TimelapseRequestRules.LandscapeRatio;
     }
 
     private sealed class ImageRow

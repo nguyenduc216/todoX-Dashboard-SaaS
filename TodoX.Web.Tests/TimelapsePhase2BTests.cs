@@ -239,7 +239,7 @@ public class TimelapsePhase2BTests
         Assert.Contains("Đang tạo ảnh...", detail, StringComparison.Ordinal);
         Assert.Contains("Đang tạo video...", detail, StringComparison.Ordinal);
         Assert.Contains("Đang tạo video", detail, StringComparison.Ordinal);
-        Assert.Contains("Đang ghép video cuối cùng...", detail, StringComparison.Ordinal);
+        Assert.Contains("Đang hoàn thiện video...", detail, StringComparison.Ordinal);
         Assert.Contains("Đang chờ hoàn thiện kết quả...", detail, StringComparison.Ordinal);
         Assert.Contains("TimelapseParentStatuses.Finalizing", detail, StringComparison.Ordinal);
         Assert.Contains("tl-loading-skeleton", detail, StringComparison.Ordinal);
@@ -255,7 +255,7 @@ public class TimelapsePhase2BTests
         Assert.Contains("image-stage-card", detail, StringComparison.Ordinal);
         Assert.Contains("video-stage-card", detail, StringComparison.Ordinal);
         Assert.Contains("role=\"status\"", detail, StringComparison.Ordinal);
-        Assert.Contains("Hoàn thành video", detail, StringComparison.Ordinal);
+        Assert.DoesNotContain("Hoàn thành video", detail, StringComparison.Ordinal);
         Assert.Contains("Tải video", detail, StringComparison.Ordinal);
         Assert.Contains("PeriodicTimer(TimeSpan.FromSeconds(4))", detail, StringComparison.Ordinal);
         Assert.Contains("LoadInitialAsync", detail, StringComparison.Ordinal);

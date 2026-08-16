@@ -49,6 +49,63 @@ public class TimelapsePhase2CTests
     }
 
     [Fact]
+    public void VideoCompletion_AutomaticallyStartsFinalizerWhenAllCurrentClipsComplete()
+    {
+        var repository = ReadSource("TodoX.Web", "Services", "Timelapse", "TimelapseWorkerRepository.cs");
+        var runtime = ReadSource("TodoX.Web", "Services", "Timelapse", "TimelapseProviderRuntime.cs");
+        var razor = ReadSource("TodoX.Web", "Components", "Pages", "TimelapseJobDetail.razor");
+
+        var advanceStart = repository.IndexOf("public async Task<bool> AdvanceAfterVideoCompletedAsync", StringComparison.Ordinal);
+        var advanceEnd = repository.IndexOf("private async Task<bool> TryStartFinalizerIfReadyAsync", advanceStart, StringComparison.Ordinal);
+        Assert.True(advanceStart >= 0 && advanceEnd > advanceStart, "Expected video completion advancement method.");
+        var advance = repository[advanceStart..advanceEnd];
+
+        Assert.Contains("await LockJobAsync(conn, tx, jobId);", advance, StringComparison.Ordinal);
+        Assert.Contains("statusCounts.TotalVideos > 0 && statusCounts.IncompleteVideos == 0", advance, StringComparison.Ordinal);
+        Assert.Contains("finalizerStarted = await TryStartFinalizerIfReadyAsync(conn, tx, jobId)", advance, StringComparison.Ordinal);
+        Assert.Contains("return finalizerStarted;", advance, StringComparison.Ordinal);
+        Assert.Contains("finalizing = TimelapseParentStatuses.Finalizing", advance, StringComparison.Ordinal);
+        Assert.Contains("completed = TimelapseParentStatuses.Completed", advance, StringComparison.Ordinal);
+
+        Assert.Contains("var finalizerStarted = await _repo.AdvanceAfterVideoCompletedAsync(item.JobId, ct);", runtime, StringComparison.Ordinal);
+        Assert.Contains("TIMELAPSE_FINALIZER_AUTO_STARTED", runtime, StringComparison.Ordinal);
+        Assert.Contains("queued automatically after all Timelapse video clips completed", runtime, StringComparison.Ordinal);
+
+        Assert.DoesNotContain("Hoàn thành video", razor, StringComparison.Ordinal);
+        Assert.Contains("Đang hoàn thiện video...", razor, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AutoFinalizerReadiness_IsIdempotentAndVersionedForRetry()
+    {
+        var repository = ReadSource("TodoX.Web", "Services", "Timelapse", "TimelapseWorkerRepository.cs");
+        var workflow = ReadSource("TodoX.Web", "Services", "Timelapse", "TimelapseWorkflowService.cs");
+
+        var helperStart = repository.IndexOf("private async Task<bool> TryStartFinalizerIfReadyAsync", StringComparison.Ordinal);
+        var helperEnd = repository.IndexOf("private async Task UpdateStageSubmittedAsync", helperStart, StringComparison.Ordinal);
+        Assert.True(helperStart >= 0 && helperEnd > helperStart, "Expected auto-finalizer helper.");
+        var helper = repository[helperStart..helperEnd];
+
+        Assert.Contains("TotalVideos == 0", helper, StringComparison.Ordinal);
+        Assert.Contains("CompletedVideos != readiness.TotalVideos", helper, StringComparison.Ordinal);
+        Assert.Contains("HasRenderingFinal", helper, StringComparison.Ordinal);
+        Assert.Contains("HasCompletedFinal", helper, StringComparison.Ordinal);
+        Assert.Contains("COALESCE((", helper, StringComparison.Ordinal);
+        Assert.Contains("SELECT max(version) + 1", helper, StringComparison.Ordinal);
+        Assert.Contains("startedBy = \"auto_video_completion\"", helper, StringComparison.Ordinal);
+        Assert.Contains("INSERT INTO timelapse.timelapse_final_outputs", helper, StringComparison.Ordinal);
+        Assert.Contains("status=@status", helper, StringComparison.Ordinal);
+        Assert.Contains("status = TimelapseParentStatuses.Finalizing", helper, StringComparison.Ordinal);
+
+        var retryStart = workflow.IndexOf("public async Task<TimelapseWorkflowState> RetryVideoAsync", StringComparison.Ordinal);
+        var retryEnd = workflow.IndexOf("public async Task<TimelapseWorkflowState> StartFinalizerAsync", retryStart, StringComparison.Ordinal);
+        var retry = workflow[retryStart..retryEnd];
+        Assert.Contains("await CancelFinalizerAsync(conn, tx, jobId);", retry, StringComparison.Ordinal);
+        Assert.Contains("await InvalidateFinalAsync(conn, tx, jobId);", retry, StringComparison.Ordinal);
+        Assert.Contains("StartReadyVideosAsync(conn, tx, jobId)", retry, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void FinalizerClaimSql_DoesNotReferenceUpdateAliasInsideJoinOn()
     {
         var source = ReadSource("TodoX.Web", "Services", "Timelapse", "TimelapseWorkerRepository.cs");
