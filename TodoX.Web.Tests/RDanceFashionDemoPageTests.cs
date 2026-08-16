@@ -125,11 +125,50 @@ public sealed class RDanceFashionDemoPageTests
         Assert.Contains("ValidateMotionVideo(file)", page, StringComparison.Ordinal);
         Assert.Contains("private long MaxImageBytes", page, StringComparison.Ordinal);
         Assert.Contains("UploadAsync(args, MaxMotionVideoBytes", page, StringComparison.Ordinal);
-        Assert.Contains("OnCharacterSelected(InputFileChangeEventArgs args) => UploadAsync(args, MaxImageBytes", page, StringComparison.Ordinal);
-        Assert.Contains("OnProductSelected(InputFileChangeEventArgs args) => UploadAsync(args, MaxImageBytes", page, StringComparison.Ordinal);
+        Assert.Contains("private async Task OnCharacterSelected(InputFileChangeEventArgs args)", page, StringComparison.Ordinal);
+        Assert.Contains("DanceSell.UploadCharacterAsync(_job!.Id, bytes, file.Name, file.ContentType, AuthState.CurrentUser!)", page, StringComparison.Ordinal);
+        Assert.Contains("private async Task OnProductSelected(InputFileChangeEventArgs args)", page, StringComparison.Ordinal);
+        Assert.Contains("DanceSell.UploadProductAsync(_job!.Id, bytes, file.Name, file.ContentType, AuthState.CurrentUser!)", page, StringComparison.Ordinal);
         Assert.Contains("file.OpenReadStream(maxBytes)", page, StringComparison.Ordinal);
         Assert.Contains("Video vượt quá dung lượng cho phép.", page, StringComparison.Ordinal);
         Assert.Contains("Video chuyển động đã sẵn sàng", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RDanceDetailPageUsesCustomImageUploadZonesAndReferenceCopy()
+    {
+        var page = ReadStrictUtf8(Path.Combine(FindRepoRoot(), "TodoX.Web", "Components", "Pages", "RDanceJobDetail.razor"));
+
+        foreach (var expected in new[]
+        {
+            "class=\"@CharacterImageUploadZoneClass\"",
+            "class=\"@ProductImageUploadZoneClass\"",
+            "Icons.Material.Filled.CloudUpload",
+            "Kéo thả ảnh vào đây",
+            "hoặc bấm để chọn ảnh",
+            "PNG / JPG / JPEG / WEBP · tối đa @MaxImageLabel",
+            "Thay ảnh",
+            "private const string AcceptedImageTypes = \"image/png,image/jpeg,image/webp\"",
+            "private string MaxImageLabel",
+            "private bool _characterDragActive",
+            "private bool _productDragActive",
+            "OnCharacterDragEnter",
+            "OnProductDragEnter",
+            "Ảnh dùng để tạo video",
+            "AI sẽ kết hợp ảnh người mẫu và ảnh sản phẩm để tạo ảnh dùng cho video.",
+            "Ảnh người mẫu sẽ được dùng trực tiếp để tạo video.",
+            "Tạo ảnh AI",
+            "Dùng ảnh người mẫu",
+            "Duyệt ảnh",
+            "Đã duyệt"
+        })
+        {
+            Assert.Contains(expected, page, StringComparison.Ordinal);
+        }
+
+        Assert.DoesNotContain("<MudText Typo=\"Typo.h6\">Ảnh tham chiếu</MudText>", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("<InputFile OnChange=\"OnCharacterSelected\"", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("<InputFile OnChange=\"OnProductSelected\"", page, StringComparison.Ordinal);
     }
 
     [Fact]

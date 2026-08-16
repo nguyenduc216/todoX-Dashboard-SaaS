@@ -139,33 +139,80 @@
                     <MudItem xs="12" md="4">
                         <MudPaper Class="todox-panel pa-4">
                             <MudText Typo="Typo.h6">Ảnh người mẫu *</MudText>
-                            @Preview(_job?.CharacterImageUrl, "Ảnh người mẫu")
-                            <InputFile OnChange="OnCharacterSelected" accept="image/png,image/jpeg,image/webp" disabled="@_busy" />
+                            @if (!string.IsNullOrWhiteSpace(_job?.CharacterImageUrl))
+                            {
+                                @Preview(_job.CharacterImageUrl, "Ảnh người mẫu")
+                            }
+                            <label class="@CharacterImageUploadZoneClass" @ondragenter="OnCharacterDragEnter" @ondragleave="OnCharacterDragLeave" @ondragover:preventDefault="true" @ondrop:preventDefault="true" @ondrop="OnCharacterDrop">
+                                <InputFile class="rdance-hidden-file-input" OnChange="OnCharacterSelected" accept="@AcceptedImageTypes" disabled="@_busy" />
+                                <span class="rdance-upload-icon">
+                                    @if (_busy)
+                                    {
+                                        <MudProgressCircular Indeterminate="true" Size="Size.Small" Color="Color.Warning" />
+                                    }
+                                    else
+                                    {
+                                        <MudIcon Icon="@Icons.Material.Filled.CloudUpload" Size="Size.Large" />
+                                    }
+                                </span>
+                                <span class="rdance-upload-title">@(!string.IsNullOrWhiteSpace(_job?.CharacterImageUrl) ? "Thay ảnh" : "Kéo thả ảnh vào đây")</span>
+                                @if (string.IsNullOrWhiteSpace(_job?.CharacterImageUrl))
+                                {
+                                    <span class="rdance-upload-subtitle">hoặc bấm để chọn ảnh</span>
+                                }
+                                <span class="rdance-upload-limit">PNG / JPG / JPEG / WEBP · tối đa @MaxImageLabel</span>
+                            </label>
                         </MudPaper>
                     </MudItem>
                     <MudItem xs="12" md="4">
                         <MudPaper Class="todox-panel pa-4">
                             <MudText Typo="Typo.h6">Ảnh sản phẩm (tuỳ chọn)</MudText>
-                            @Preview(_job?.ProductImageUrl, "Ảnh sản phẩm")
-                            <InputFile OnChange="OnProductSelected" accept="image/png,image/jpeg,image/webp" disabled="@_busy" />
+                            @if (!string.IsNullOrWhiteSpace(_job?.ProductImageUrl))
+                            {
+                                @Preview(_job.ProductImageUrl, "Ảnh sản phẩm")
+                            }
+                            <label class="@ProductImageUploadZoneClass" @ondragenter="OnProductDragEnter" @ondragleave="OnProductDragLeave" @ondragover:preventDefault="true" @ondrop:preventDefault="true" @ondrop="OnProductDrop">
+                                <InputFile class="rdance-hidden-file-input" OnChange="OnProductSelected" accept="@AcceptedImageTypes" disabled="@_busy" />
+                                <span class="rdance-upload-icon">
+                                    @if (_busy)
+                                    {
+                                        <MudProgressCircular Indeterminate="true" Size="Size.Small" Color="Color.Warning" />
+                                    }
+                                    else
+                                    {
+                                        <MudIcon Icon="@Icons.Material.Filled.CloudUpload" Size="Size.Large" />
+                                    }
+                                </span>
+                                <span class="rdance-upload-title">@(!string.IsNullOrWhiteSpace(_job?.ProductImageUrl) ? "Thay ảnh" : "Kéo thả ảnh vào đây")</span>
+                                @if (string.IsNullOrWhiteSpace(_job?.ProductImageUrl))
+                                {
+                                    <span class="rdance-upload-subtitle">hoặc bấm để chọn ảnh</span>
+                                }
+                                <span class="rdance-upload-limit">PNG / JPG / JPEG / WEBP · tối đa @MaxImageLabel</span>
+                            </label>
                         </MudPaper>
                     </MudItem>
                     <MudItem xs="12" md="4">
                         <MudPaper Class="todox-panel pa-4">
-                            <MudText Typo="Typo.h6">Ảnh tham chiếu</MudText>
-                            @Preview(_job?.PreparedReferenceUrl, "Ảnh tham chiếu")
+                            <MudText Typo="Typo.h6">Ảnh dùng để tạo video</MudText>
+                            <MudText Typo="Typo.body2" Class="rdance-reference-help">@ReferenceHelpText</MudText>
+                            @Preview(_job?.PreparedReferenceUrl, "Ảnh dùng để tạo video")
                             <MudChip T="string" Color="@ReferenceColor" Size="Size.Small">@ReferenceLabel</MudChip>
-                            @if (_job?.ProductMediaId is not null)
+                            @if (_job?.PreparedReferenceStatus == DanceSellReferenceStatuses.Approved)
                             {
-                                <MudButton Variant="Variant.Filled" Color="Color.Warning" Disabled="@_busy" OnClick="GenerateReferenceAsync">Tạo ảnh</MudButton>
+                                <MudChip T="string" Color="Color.Success" Size="Size.Small">Đã duyệt</MudChip>
+                            }
+                            else if (_latestReference?.Status == DanceSellReferenceStatuses.Ready)
+                            {
+                                <MudButton Variant="Variant.Outlined" Color="Color.Warning" Disabled="@_busy" OnClick="ApproveLatestReferenceAsync">Duyệt ảnh</MudButton>
+                            }
+                            else if (_job?.ProductMediaId is not null)
+                            {
+                                <MudButton Variant="Variant.Filled" Color="Color.Warning" Disabled="@_busy" OnClick="GenerateReferenceAsync">Tạo ảnh AI</MudButton>
                             }
                             else
                             {
                                 <MudButton Variant="Variant.Filled" Color="Color.Warning" Disabled="@(_busy || _job?.CharacterMediaId is null)" OnClick="ApproveCharacterAsync">Dùng ảnh người mẫu</MudButton>
-                            }
-                            @if (_latestReference?.Status == DanceSellReferenceStatuses.Ready)
-                            {
-                                <MudButton Variant="Variant.Outlined" Color="Color.Warning" Disabled="@_busy" OnClick="ApproveLatestReferenceAsync">Duyệt ảnh</MudButton>
                             }
                         </MudPaper>
                     </MudItem>
@@ -268,17 +315,26 @@
     private long? _motionFileSize;
     private string? _motionUploadError;
     private bool _motionDragActive;
+    private bool _characterDragActive;
+    private bool _productDragActive;
     private CancellationTokenSource? _pollCts;
     private PeriodicTimer? _pollTimer;
 
+    private const string AcceptedImageTypes = "image/png,image/jpeg,image/webp";
     private bool CanRender => _job?.Status is not (DanceSellJobStatuses.Queued or DanceSellJobStatuses.Submitted or DanceSellJobStatuses.Rendering)
         && _job?.MotionVideoMediaId is not null
         && _job?.PreparedReferenceStatus == DanceSellReferenceStatuses.Approved;
     private bool IsActive => _job?.Status is DanceSellJobStatuses.Queued or DanceSellJobStatuses.Submitted or DanceSellJobStatuses.Rendering;
     private long MaxImageBytes => (long)Math.Max(1, DanceOptions.CurrentValue.MaxImageMb) * 1024 * 1024;
     private long MaxMotionVideoBytes => (long)Math.Max(1, DanceOptions.CurrentValue.MaxVideoMb) * 1024 * 1024;
+    private string MaxImageLabel => $"{Math.Max(1, DanceOptions.CurrentValue.MaxImageMb)}MB";
     private string MaxMotionVideoLabel => $"{Math.Max(1, DanceOptions.CurrentValue.MaxVideoMb)}MB";
     private string MotionUploadZoneClass => $"rdance-upload-zone{(_motionDragActive ? " is-dragging" : string.Empty)}{(_busy ? " is-busy" : string.Empty)}";
+    private string CharacterImageUploadZoneClass => $"rdance-upload-zone rdance-image-upload-zone{(_characterDragActive ? " is-dragging" : string.Empty)}{(_busy ? " is-busy" : string.Empty)}";
+    private string ProductImageUploadZoneClass => $"rdance-upload-zone rdance-image-upload-zone{(_productDragActive ? " is-dragging" : string.Empty)}{(_busy ? " is-busy" : string.Empty)}";
+    private string ReferenceHelpText => _job?.ProductMediaId is not null
+        ? "AI sẽ kết hợp ảnh người mẫu và ảnh sản phẩm để tạo ảnh dùng cho video."
+        : "Ảnh người mẫu sẽ được dùng trực tiếp để tạo video.";
     private string? MotionSourceName => !string.IsNullOrWhiteSpace(_motionFileName)
         ? _motionFileName
         : _job?.MotionSourceType == DanceSellMotionSourceTypes.TikTok
@@ -408,8 +464,17 @@
         await UploadAsync(args, MaxMotionVideoBytes, (bytes, uploadedFile) => DanceSell.UploadMotionAsync(_job!.Id, bytes, uploadedFile.Name, uploadedFile.ContentType, AuthState.CurrentUser!));
     }
 
-    private Task OnCharacterSelected(InputFileChangeEventArgs args) => UploadAsync(args, MaxImageBytes, (bytes, file) => DanceSell.UploadCharacterAsync(_job!.Id, bytes, file.Name, file.ContentType, AuthState.CurrentUser!));
-    private Task OnProductSelected(InputFileChangeEventArgs args) => UploadAsync(args, MaxImageBytes, (bytes, file) => DanceSell.UploadProductAsync(_job!.Id, bytes, file.Name, file.ContentType, AuthState.CurrentUser!));
+    private async Task OnCharacterSelected(InputFileChangeEventArgs args)
+    {
+        _characterDragActive = false;
+        await UploadAsync(args, MaxImageBytes, (bytes, file) => DanceSell.UploadCharacterAsync(_job!.Id, bytes, file.Name, file.ContentType, AuthState.CurrentUser!));
+    }
+
+    private async Task OnProductSelected(InputFileChangeEventArgs args)
+    {
+        _productDragActive = false;
+        await UploadAsync(args, MaxImageBytes, (bytes, file) => DanceSell.UploadProductAsync(_job!.Id, bytes, file.Name, file.ContentType, AuthState.CurrentUser!));
+    }
 
     private async Task UploadAsync(InputFileChangeEventArgs args, long maxBytes, Func<byte[], IBrowserFile, Task<DanceSellJobDto>> save)
         => await RunAsync(async () =>
@@ -448,6 +513,12 @@
     private void OnMotionDragEnter(DragEventArgs _) => _motionDragActive = true;
     private void OnMotionDragLeave(DragEventArgs _) => _motionDragActive = false;
     private void OnMotionDrop(DragEventArgs _) => _motionDragActive = false;
+    private void OnCharacterDragEnter(DragEventArgs _) => _characterDragActive = true;
+    private void OnCharacterDragLeave(DragEventArgs _) => _characterDragActive = false;
+    private void OnCharacterDrop(DragEventArgs _) => _characterDragActive = false;
+    private void OnProductDragEnter(DragEventArgs _) => _productDragActive = true;
+    private void OnProductDragLeave(DragEventArgs _) => _productDragActive = false;
+    private void OnProductDrop(DragEventArgs _) => _productDragActive = false;
 
     private async Task GenerateReferenceAsync() => await RunAsync(async () =>
     {
@@ -618,6 +689,8 @@
     .rdance-upload-icon { display: grid; place-items: center; width: 48px; height: 48px; color: #f5b540; border-radius: 999px; background: rgba(245,181,64,.14); }
     .rdance-upload-title { font-weight: 700; }
     .rdance-upload-subtitle, .rdance-upload-limit { color: rgba(255,255,255,.62); font-size: .875rem; }
+    .rdance-image-upload-zone { min-height: 154px; margin-top: 12px; }
+    .rdance-reference-help { margin: 8px 0 4px; color: rgba(255,255,255,.68); }
     .rdance-motion-file { border-color: rgba(245,181,64,.28) !important; background: rgba(255,255,255,.035); }
     .rdance-motion-file-copy { min-width: 0; }
     .rdance-replace-button { position: relative; display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 0 12px; overflow: hidden; border: 1px solid rgba(245,181,64,.55); border-radius: 8px; color: #f5b540; font-size: .8125rem; font-weight: 700; text-transform: uppercase; cursor: pointer; }
