@@ -938,6 +938,93 @@ public class TimelapsePhase2CTests
     }
 
     [Fact]
+    public void TimelapseDraftEdit_UiExposesPrefilledFormBeforeRenderOnly()
+    {
+        var razor = ReadSource("TodoX.Web", "Components", "Pages", "TimelapseJobDetail.razor");
+        var css = ReadSource("TodoX.Web", "Components", "Pages", "TimelapseJobDetail.razor.css");
+
+        Assert.Contains("CHỈNH SỬA YÊU CẦU", razor, StringComparison.Ordinal);
+        Assert.Contains("StartIcon=\"@Icons.Material.Filled.EditNote\"", razor, StringComparison.Ordinal);
+        Assert.Contains("CanEditFullRequest", razor, StringComparison.Ordinal);
+        Assert.Contains("string.Equals(_job.Status, RenderJobStatuses.Draft", razor, StringComparison.Ordinal);
+        Assert.Contains("_job.Workflow.Images.Count == 0", razor, StringComparison.Ordinal);
+        Assert.Contains("_job.Workflow.Videos.Count == 0", razor, StringComparison.Ordinal);
+        Assert.Contains("_job.Workflow.FinalOutput is null", razor, StringComparison.Ordinal);
+        Assert.Contains("_editingRequest", razor, StringComparison.Ordinal);
+        Assert.Contains("StartEditRequestAsync", razor, StringComparison.Ordinal);
+        Assert.Contains("Profiles.GetEnabledProfilesAsync", razor, StringComparison.Ordinal);
+        Assert.Contains("Title = _job.Snapshot.Title", razor, StringComparison.Ordinal);
+        Assert.Contains("ProfileCode = _job.Snapshot.ProfileCode", razor, StringComparison.Ordinal);
+        Assert.Contains("SceneCount = _job.Snapshot.SceneCount", razor, StringComparison.Ordinal);
+        Assert.Contains("VideoMode = _job.Snapshot.VideoMode", razor, StringComparison.Ordinal);
+        Assert.Contains("Ratio = _job.Snapshot.Ratio", razor, StringComparison.Ordinal);
+        Assert.Contains("_editPreviewUrl = _job.Snapshot.OriginalImage.PublicUrl", razor, StringComparison.Ordinal);
+        Assert.Contains("OnEditImageSelected", razor, StringComparison.Ordinal);
+        Assert.Contains("JPG, PNG hoặc WebP", razor, StringComparison.Ordinal);
+        Assert.Contains("Bỏ các thay đổi chưa lưu?", razor, StringComparison.Ordinal);
+        Assert.Contains("TIẾP TỤC CHỈNH", razor, StringComparison.Ordinal);
+        Assert.Contains("BỎ THAY ĐỔI", razor, StringComparison.Ordinal);
+        Assert.Contains(".timelapse-action-row", css, StringComparison.Ordinal);
+        Assert.Contains("@media (max-width: 700px)", css, StringComparison.Ordinal);
+        Assert.Contains("flex-direction: column;", css, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TimelapseDraftEdit_ServiceUpdatesExistingSnapshotAndRecalculatesPrice()
+    {
+        var service = ReadSource("TodoX.Web", "Services", "Timelapse", "TimelapseJobService.cs");
+        var methodStart = service.IndexOf("public async Task<TimelapseJobView> UpdateDraftAsync", StringComparison.Ordinal);
+        var methodEnd = service.IndexOf("public async Task<TimelapseJobView> StartOrResumeAsync", methodStart, StringComparison.Ordinal);
+        var updateDraft = service[methodStart..methodEnd];
+
+        Assert.Contains("RequireOwnedAsync(jobId, currentUser, ct)", updateDraft, StringComparison.Ordinal);
+        Assert.Contains("TimelapseRequestRules.Validate(request", updateDraft, StringComparison.Ordinal);
+        Assert.Contains("pg_advisory_xact_lock", updateDraft, StringComparison.Ordinal);
+        Assert.Contains("timelapse.timelapse_image_stages", updateDraft, StringComparison.Ordinal);
+        Assert.Contains("timelapse.timelapse_video_clips", updateDraft, StringComparison.Ordinal);
+        Assert.Contains("timelapse.timelapse_final_outputs", updateDraft, StringComparison.Ordinal);
+        Assert.Contains("RenderJobStatuses.Draft", updateDraft, StringComparison.Ordinal);
+        Assert.Contains("_sellPrices.ResolveVideoScenePriceAsync", updateDraft, StringComparison.Ordinal);
+        Assert.Contains("TimelapseSellPricing.EstimateVideoSubtotal", updateDraft, StringComparison.Ordinal);
+        Assert.Contains("ProgressMapping = TimelapseRequestRules.GetProgressMapping(request.SceneCount)", updateDraft, StringComparison.Ordinal);
+        Assert.Contains("VideoRenderConfirmed = false", updateDraft, StringComparison.Ordinal);
+        Assert.Contains("_media.SaveAsync", updateDraft, StringComparison.Ordinal);
+        Assert.Contains("UPDATE render.render_jobs", updateDraft, StringComparison.Ordinal);
+        Assert.Contains("input_json=CAST(@inputJson AS jsonb)", updateDraft, StringComparison.Ordinal);
+        Assert.Contains("reference_json=CAST(@referenceJson AS jsonb)", updateDraft, StringComparison.Ordinal);
+        Assert.Contains("TIMELAPSE_DRAFT_UPDATED", updateDraft, StringComparison.Ordinal);
+        Assert.DoesNotContain("EnqueueAsync", updateDraft, StringComparison.Ordinal);
+        Assert.DoesNotContain("StartOrResumeAsync(jobId", updateDraft, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TimelapseDraftEdit_StartUsesLatestSavedSnapshotAndSceneMappingStaysCanonical()
+    {
+        var service = ReadSource("TodoX.Web", "Services", "Timelapse", "TimelapseJobService.cs");
+        var razor = ReadSource("TodoX.Web", "Components", "Pages", "TimelapseJobDetail.razor");
+        var startStart = service.IndexOf("public async Task<TimelapseJobView> StartOrResumeAsync", StringComparison.Ordinal);
+        var startEnd = service.IndexOf("public async Task<TimelapseJobView> RetryImageAsync", startStart, StringComparison.Ordinal);
+        var start = service[startStart..startEnd];
+
+        Assert.Contains("var view = await RequireOwnedAsync(jobId, currentUser, ct);", start, StringComparison.Ordinal);
+        Assert.Contains("_workflow.StartOrResumeAsync(jobId, view.Snapshot, currentUser, ct)", start, StringComparison.Ordinal);
+        Assert.Contains("Disabled=\"@(!_job.Workflow.CanStartRender || _busy || _editingRequest)\"", razor, StringComparison.Ordinal);
+        Assert.Equal(
+            new[] { 0, 35, 70, 100 },
+            TodoX.Web.Models.Timelapse.TimelapseRequestRules.GetProgressMapping(3));
+        Assert.Equal(
+            new[] { 0, 25, 50, 75, 100 },
+            TodoX.Web.Models.Timelapse.TimelapseRequestRules.GetProgressMapping(4));
+        Assert.Equal(
+            new[] { 0, 20, 40, 60, 80, 100 },
+            TodoX.Web.Models.Timelapse.TimelapseRequestRules.GetProgressMapping(5));
+        Assert.Equal(
+            new[] { 0, 25, 40, 55, 70, 75, 90, 100 },
+            TodoX.Web.Models.Timelapse.TimelapseRequestRules.GetProgressMapping(6));
+        Assert.Equal(7, TodoX.Web.Models.Timelapse.TimelapseStageGraphBuilder.Build(6).VideoClips.Count);
+    }
+
+    [Fact]
     public void ProviderStatusNormalizer_MapsKnownStatuses()
     {
         Assert.Equal(Ai79TaskStatusNormalizer.Success, Ai79TaskStatusNormalizer.Normalize("SUCCESS"));

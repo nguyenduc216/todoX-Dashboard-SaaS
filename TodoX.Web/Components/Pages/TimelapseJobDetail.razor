@@ -1,11 +1,14 @@
 @page "/jobs/timelapse/{JobId:guid}"
 @implements IDisposable
+@using Microsoft.AspNetCore.Components.Forms
 @using TodoX.Web.Models.Timelapse
 @using TodoX.Web.Services.Timelapse
+@using TodoX.Web.Services.Render
 @using TodoX.Web.Components.Dialogs
 @using TodoX.Web.Components.Timelapse
 @inject AuthStateService AuthState
 @inject ITimelapseJobService Jobs
+@inject ITimelapseProfileRepository Profiles
 @inject NavigationManager Navigation
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
@@ -91,6 +94,99 @@
                 <MudGrid Class="mt-3">
                     <MudItem xs="12" lg="8">
                         <MudPaper Class="todox-card pa-4" rounded="true">
+                            @if (_editingRequest)
+                            {
+                                <MudStack Spacing="3" Class="timelapse-edit-form">
+                                    <MudTextField T="string" Label="Tên job" Value="@_editRequest.Title" ValueChanged="SetEditTitle" Variant="Variant.Outlined" />
+
+                                    <MudStack Spacing="1">
+                                        <MudText Typo="Typo.subtitle2">Ảnh thành phẩm / ảnh tham chiếu</MudText>
+                                        <label class="timelapse-upload-card @(_editImageFile is not null ? "has-file" : string.Empty)">
+                                            <InputFile OnChange="OnEditImageSelected" accept="image/png,image/jpeg,image/webp" disabled="@_busy" />
+                                            @if (!string.IsNullOrWhiteSpace(_editPreviewUrl))
+                                            {
+                                                <img src="@_editPreviewUrl" alt="Ảnh tham chiếu đã chọn" />
+                                            }
+                                            else
+                                            {
+                                                <MudIcon Icon="@Icons.Material.Filled.CloudUpload" Size="Size.Large" />
+                                            }
+                                            <span class="upload-primary">Chọn ảnh thay thế</span>
+                                            <span class="upload-secondary">Bấm để tải ảnh lên</span>
+                                            <span class="upload-helper">JPG, PNG hoặc WebP · tối đa 10MB</span>
+                                        </label>
+                                        @if (_editImageFile is not null)
+                                        {
+                                            <MudText Typo="Typo.caption" Color="Color.Success">@_editImageFile.Name</MudText>
+                                        }
+                                    </MudStack>
+
+                                    <MudSelect T="string" Label="Loại công trình" Value="@_editRequest.ProfileCode" ValueChanged="SetEditProfile" Variant="Variant.Outlined" Required="true">
+                                        @foreach (var profile in _profiles)
+                                        {
+                                            <MudSelectItem T="string" Value="@profile.ProfileCode">@profile.ProfileName</MudSelectItem>
+                                        }
+                                    </MudSelect>
+
+                                    <MudStack Spacing="1">
+                                        <MudText Typo="Typo.subtitle2">Số scene</MudText>
+                                        <div class="timelapse-option-grid scene-options">
+                                            @foreach (var count in TimelapseRequestRules.AllowedSceneCounts)
+                                            {
+                                                <button type="button" class="timelapse-option @(IsEditSceneSelected(count) ? "selected" : string.Empty)" @onclick="() => SelectEditSceneCount(count)">
+                                                    <strong>@count scene</strong>
+                                                </button>
+                                            }
+                                        </div>
+                                    </MudStack>
+
+                                    <MudStack Spacing="1">
+                                        <MudText Typo="Typo.subtitle2">Chất lượng</MudText>
+                                        <div class="timelapse-option-grid quality-options">
+                                            <button type="button" class="timelapse-option @(IsEditModeSelected(StandardModeValue) ? "selected" : string.Empty)" @onclick="() => SelectEditMode(StandardModeValue)">
+                                                <strong>TIÊU CHUẨN</strong>
+                                                <span>Tối ưu chi phí, tốc độ xử lý nhanh</span>
+                                            </button>
+                                            <button type="button" class="timelapse-option @(IsEditModeSelected(PremiumModeValue) ? "selected" : string.Empty)" @onclick="() => SelectEditMode(PremiumModeValue)">
+                                                <strong>CAO CẤP</strong>
+                                                <span>Chất lượng xử lý cao hơn</span>
+                                            </button>
+                                        </div>
+                                    </MudStack>
+
+                                    <MudStack Spacing="1">
+                                        <MudText Typo="Typo.subtitle2">Tỷ lệ</MudText>
+                                        <div class="timelapse-option-grid ratio-options">
+                                            <button type="button" class="timelapse-option @(IsEditRatioSelected(TimelapseRequestRules.LandscapeRatio) ? "selected" : string.Empty)" @onclick="() => SelectEditRatio(TimelapseRequestRules.LandscapeRatio)">
+                                                <strong>16:9</strong>
+                                                <span>Ngang</span>
+                                            </button>
+                                            <button type="button" class="timelapse-option @(IsEditRatioSelected(TimelapseRequestRules.PortraitRatio) ? "selected" : string.Empty)" @onclick="() => SelectEditRatio(TimelapseRequestRules.PortraitRatio)">
+                                                <strong>9:16</strong>
+                                                <span>Dọc</span>
+                                            </button>
+                                        </div>
+                                    </MudStack>
+
+                                    <MudStack Row="true" Spacing="2" Class="timelapse-action-row">
+                                        <MudButton Variant="Variant.Outlined"
+                                                   StartIcon="@Icons.Material.Filled.Close"
+                                                   Disabled="@_busy"
+                                                   OnClick="CancelEditRequestAsync">
+                                            Hủy
+                                        </MudButton>
+                                        <MudButton Class="todox-primary-btn"
+                                                   Variant="Variant.Filled"
+                                                   StartIcon="@Icons.Material.Filled.Save"
+                                                   Disabled="@_busy"
+                                                   OnClick="SaveRequestEditsAsync">
+                                            Lưu thay đổi
+                                        </MudButton>
+                                    </MudStack>
+                                </MudStack>
+                            }
+                            else
+                            {
                             <MudStack Spacing="3">
                                 <MudTextField T="string" Label="Tên job" Value="@_job.Snapshot.Title" Variant="Variant.Outlined" Disabled="true" />
 
@@ -134,6 +230,7 @@
                                     </MudAlert>
                                 }
                             </MudStack>
+                            }
                         </MudPaper>
                     </MudItem>
 
@@ -155,13 +252,24 @@
                                         <strong>@FormatPoints(_job.Snapshot.SellPrice.TotalPoints) todoX</strong>
                                     </div>
                                 }
-                                <MudButton Class="todox-primary-btn"
-                                           Variant="Variant.Filled"
-                                           StartIcon="@Icons.Material.Filled.MovieCreation"
-                                           Disabled="@(!_job.Workflow.CanStartRender || _busy)"
-                                           OnClick="StartOrResumeAsync">
-                                    @StartButtonLabel
-                                </MudButton>
+                                <MudStack Row="true" Spacing="2" Class="timelapse-action-row">
+                                    @if (CanEditFullRequest)
+                                    {
+                                        <MudButton Variant="Variant.Outlined"
+                                                   StartIcon="@Icons.Material.Filled.EditNote"
+                                                   Disabled="@_busy"
+                                                   OnClick="StartEditRequestAsync">
+                                            CHỈNH SỬA YÊU CẦU
+                                        </MudButton>
+                                    }
+                                    <MudButton Class="todox-primary-btn"
+                                               Variant="Variant.Filled"
+                                               StartIcon="@Icons.Material.Filled.MovieCreation"
+                                               Disabled="@(!_job.Workflow.CanStartRender || _busy || _editingRequest)"
+                                               OnClick="StartOrResumeAsync">
+                                        @StartButtonLabel
+                                    </MudButton>
+                                </MudStack>
                             </MudStack>
                         </MudPaper>
                     </MudItem>
@@ -481,12 +589,28 @@
 @code {
     [Parameter] public Guid JobId { get; set; }
 
+    private const long MaxImageBytes = 10 * 1024 * 1024;
+    private const string StandardModeValue = "fast";
+    private const string PremiumModeValue = "professional";
+    private static readonly HashSet<string> AllowedImageContentTypes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "image/jpeg",
+        "image/png",
+        "image/webp"
+    };
+
     private TimelapseJobView? _job;
     private PeriodicTimer? _pollTimer;
     private CancellationTokenSource? _pollCts;
+    private TimelapseCreateRequest _editRequest = new();
+    private IReadOnlyList<TimelapseProfileDto> _profiles = Array.Empty<TimelapseProfileDto>();
+    private IBrowserFile? _editImageFile;
+    private string? _editPreviewUrl;
     private bool _initialLoading = true;
     private bool _busy;
     private bool _refreshing;
+    private bool _editingRequest;
+    private bool _requestDirty;
     private string? _refreshError;
     private string? _loadError;
     private int _activeTabIndex;
@@ -505,6 +629,13 @@
            || _job?.Workflow.ParentStatus is TimelapseParentStatuses.GeneratingImages
                or TimelapseParentStatuses.GeneratingVideos
                or TimelapseParentStatuses.Finalizing;
+    private bool CanEditFullRequest
+        => _job is not null
+           && _job.Workflow.CanEditRequest
+           && string.Equals(_job.Status, RenderJobStatuses.Draft, StringComparison.OrdinalIgnoreCase)
+           && _job.Workflow.Images.Count == 0
+           && _job.Workflow.Videos.Count == 0
+           && _job.Workflow.FinalOutput is null;
     private bool IsFinalOutputLoading
         => _job?.Workflow.FinalOutput?.Status is TimelapseOperationStatuses.Waiting or TimelapseOperationStatuses.Rendering
            || string.Equals(_job?.Workflow.FinalOutput?.Status, TimelapseParentStatuses.Finalizing, StringComparison.OrdinalIgnoreCase)
@@ -623,6 +754,195 @@
             _activeTabIndex = 1;
         });
     }
+
+    private async Task StartEditRequestAsync()
+    {
+        if (_job is null || !CanEditFullRequest)
+        {
+            Snackbar.Add("Yêu cầu chỉ có thể chỉnh sửa trước khi bắt đầu render.", Severity.Warning);
+            return;
+        }
+
+        try
+        {
+            _profiles = await Profiles.GetEnabledProfilesAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Không tải được profile Timelapse: {ex.Message}", Severity.Error);
+            return;
+        }
+
+        _editRequest = new TimelapseCreateRequest
+        {
+            ServiceId = _job.Snapshot.ServiceId,
+            ServiceCode = _job.Snapshot.ServiceCode,
+            Title = _job.Snapshot.Title,
+            ProfileCode = _job.Snapshot.ProfileCode,
+            SceneCount = _job.Snapshot.SceneCount,
+            VideoMode = _job.Snapshot.VideoMode,
+            Ratio = _job.Snapshot.Ratio,
+            RequireVideoConfirmation = _job.Snapshot.RequireVideoConfirmation
+        };
+        _editImageFile = null;
+        _editPreviewUrl = _job.Snapshot.OriginalImage.PublicUrl;
+        _requestDirty = false;
+        _editingRequest = true;
+        _activeTabIndex = 0;
+    }
+
+    private async Task OnEditImageSelected(InputFileChangeEventArgs args)
+    {
+        _editImageFile = args.File;
+        if (!ValidateEditImage(showSnackbar: true))
+        {
+            _editImageFile = null;
+            return;
+        }
+
+        await using var stream = _editImageFile!.OpenReadStream(MaxImageBytes);
+        await using var buffer = new MemoryStream();
+        await stream.CopyToAsync(buffer);
+        _editPreviewUrl = $"data:{_editImageFile.ContentType};base64,{Convert.ToBase64String(buffer.ToArray())}";
+        _requestDirty = true;
+    }
+
+    private bool ValidateEditImage(bool showSnackbar)
+    {
+        if (_editImageFile is null)
+        {
+            return false;
+        }
+
+        if (_editImageFile.Size <= 0 || _editImageFile.Size > MaxImageBytes)
+        {
+            if (showSnackbar)
+            {
+                Snackbar.Add("Ảnh phải có dung lượng tối đa 10MB.", Severity.Warning);
+            }
+            return false;
+        }
+
+        if (!AllowedImageContentTypes.Contains(_editImageFile.ContentType))
+        {
+            if (showSnackbar)
+            {
+                Snackbar.Add("Chỉ hỗ trợ JPG, PNG hoặc WebP.", Severity.Warning);
+            }
+            return false;
+        }
+
+        return true;
+    }
+
+    private async Task SaveRequestEditsAsync()
+    {
+        if (_job is null || AuthState.CurrentUser is null)
+        {
+            return;
+        }
+
+        if (!CanEditFullRequest)
+        {
+            Snackbar.Add("Yêu cầu chỉ có thể chỉnh sửa trước khi bắt đầu render.", Severity.Warning);
+            return;
+        }
+
+        if (_editImageFile is not null && !ValidateEditImage(showSnackbar: true))
+        {
+            return;
+        }
+
+        var errors = TimelapseRequestRules.Validate(_editRequest, _editImageFile is not null || _job.Snapshot.OriginalImage.MediaId != Guid.Empty);
+        if (errors.Count > 0)
+        {
+            Snackbar.Add(errors[0], Severity.Warning);
+            return;
+        }
+
+        await RunActionAsync(async () =>
+        {
+            byte[]? imageBytes = null;
+            if (_editImageFile is not null)
+            {
+                await using var stream = _editImageFile.OpenReadStream(MaxImageBytes);
+                await using var buffer = new MemoryStream();
+                await stream.CopyToAsync(buffer);
+                imageBytes = buffer.ToArray();
+            }
+
+            _job = await Jobs.UpdateDraftAsync(
+                JobId,
+                _editRequest,
+                imageBytes,
+                _editImageFile?.Name,
+                _editImageFile?.ContentType,
+                AuthState.CurrentUser);
+            _editingRequest = false;
+            _requestDirty = false;
+            _editImageFile = null;
+            _editPreviewUrl = _job.Snapshot.OriginalImage.PublicUrl;
+            _activeTabIndex = 0;
+            Snackbar.Add("Đã cập nhật yêu cầu Timelapse.", Severity.Success);
+        });
+    }
+
+    private async Task CancelEditRequestAsync()
+    {
+        if (_requestDirty)
+        {
+            var confirmed = await DialogService.ShowMessageBoxAsync(
+                "Bỏ các thay đổi chưa lưu?",
+                "Yêu cầu sẽ quay lại phiên bản đã lưu gần nhất.",
+                yesText: "BỎ THAY ĐỔI",
+                cancelText: "TIẾP TỤC CHỈNH");
+            if (confirmed != true)
+            {
+                return;
+            }
+        }
+
+        _editingRequest = false;
+        _requestDirty = false;
+        _editImageFile = null;
+        _editPreviewUrl = null;
+    }
+
+    private void SetEditTitle(string? title)
+    {
+        _editRequest.Title = title;
+        _requestDirty = true;
+    }
+
+    private void SetEditProfile(string? profileCode)
+    {
+        _editRequest.ProfileCode = profileCode ?? string.Empty;
+        _requestDirty = true;
+    }
+
+    private void SelectEditSceneCount(int sceneCount)
+    {
+        _editRequest.SceneCount = sceneCount;
+        _requestDirty = true;
+    }
+
+    private void SelectEditMode(string mode)
+    {
+        _editRequest.VideoMode = mode;
+        _requestDirty = true;
+    }
+
+    private void SelectEditRatio(string ratio)
+    {
+        _editRequest.Ratio = ratio;
+        _requestDirty = true;
+    }
+
+    private bool IsEditSceneSelected(int sceneCount) => _editRequest.SceneCount == sceneCount;
+
+    private bool IsEditModeSelected(string mode) => string.Equals(_editRequest.VideoMode, mode, StringComparison.OrdinalIgnoreCase);
+
+    private bool IsEditRatioSelected(string ratio) => string.Equals(_editRequest.Ratio, ratio, StringComparison.OrdinalIgnoreCase);
 
     private async Task OpenImagePromptAsync(TimelapseStageImage image)
     {
