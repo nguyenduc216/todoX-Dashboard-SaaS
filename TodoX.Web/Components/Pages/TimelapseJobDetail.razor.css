@@ -911,19 +911,17 @@
     }
 }
 
+/* Dev smoke diagnostic: window.matchMedia('(prefers-reduced-motion: reduce)').matches */
 @media (prefers-reduced-motion: reduce) {
     .timelapse-stage-card.is-rendering,
     .stage-preview.is-rendering,
     .tl-loading-shimmer::before,
     .tl-active-render::before,
     .tl-flash-soft::after,
-    .tl-processing-overlay,
     .tl-processing-sweep,
     .tl-processing-scan,
-    .tl-processing-spinner,
     .tl-processing-icon,
     .tl-processing-text,
-    .tl-processing-dots i,
     .tl-processing-wave i,
     .tl-pulse .tl-loading-icon,
     .tl-active-render .tl-loading-icon,
@@ -952,10 +950,15 @@
     .tl-processing-overlay {
         background: rgba(4, 8, 12, 0.58);
         box-shadow: inset 0 0 0 2px rgba(255, 213, 79, 0.48);
+        animation: tl-processing-overlay-pulse 2.4s ease-in-out infinite !important;
     }
 
     .tl-processing-overlay.is-video {
         box-shadow: inset 0 0 0 2px rgba(128, 222, 234, 0.46);
+    }
+
+    .tl-processing-spinner {
+        animation: tl-processing-spin 2.4s linear infinite !important;
     }
 
     .tl-processing-text {
@@ -966,6 +969,7 @@
     .tl-processing-dots i {
         opacity: 1;
         transform: none;
+        animation: tl-processing-dots 1.6s ease-in-out infinite !important;
     }
 
     .tl-processing-wave i {

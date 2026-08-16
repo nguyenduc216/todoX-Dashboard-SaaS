@@ -389,8 +389,26 @@ public class TimelapsePhase2CTests
         Assert.Contains("repeat(auto-fill, minmax(260px, 320px))", css, StringComparison.Ordinal);
         Assert.Contains("@media (prefers-reduced-motion: reduce)", css, StringComparison.Ordinal);
         Assert.Contains("background: rgba(4, 8, 12, 0.58);", css, StringComparison.Ordinal);
+        Assert.Contains("window.matchMedia('(prefers-reduced-motion: reduce)').matches", css, StringComparison.Ordinal);
         Assert.DoesNotContain(".clip-input-thumbnails", css, StringComparison.Ordinal);
+
+        var reducedMotionStart = css.IndexOf("@media (prefers-reduced-motion: reduce)", StringComparison.Ordinal);
+        var nextMedia = css.IndexOf("@media (max-width: 1050px)", reducedMotionStart, StringComparison.Ordinal);
+        var reducedMotion = css[reducedMotionStart..nextMedia];
+        var blanketDisableEnd = reducedMotion.IndexOf("animation: none !important;", StringComparison.Ordinal);
+        var blanketDisable = reducedMotion[..blanketDisableEnd];
+
+        Assert.DoesNotContain(".tl-processing-overlay,", blanketDisable, StringComparison.Ordinal);
+        Assert.DoesNotContain(".tl-processing-spinner,", blanketDisable, StringComparison.Ordinal);
+        Assert.DoesNotContain(".tl-processing-dots i,", blanketDisable, StringComparison.Ordinal);
+        Assert.Contains(".tl-processing-sweep", blanketDisable, StringComparison.Ordinal);
+        Assert.Contains(".tl-processing-scan", blanketDisable, StringComparison.Ordinal);
+        Assert.Contains(".tl-processing-wave i", blanketDisable, StringComparison.Ordinal);
+        Assert.Contains("animation: tl-processing-overlay-pulse 2.4s ease-in-out infinite !important;", reducedMotion, StringComparison.Ordinal);
+        Assert.Contains("animation: tl-processing-spin 2.4s linear infinite !important;", reducedMotion, StringComparison.Ordinal);
+        Assert.Contains("animation: tl-processing-dots 1.6s ease-in-out infinite !important;", reducedMotion, StringComparison.Ordinal);
     }
+
     [Fact]
     public void VideoRetry_IsTargetAwareAndKeepsConcurrencyGuards()
     {
