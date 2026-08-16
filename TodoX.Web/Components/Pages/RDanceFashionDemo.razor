@@ -1,5 +1,7 @@
 @page "/rdance-fashion-demo"
 @using Microsoft.AspNetCore.Components.Forms
+@using Microsoft.AspNetCore.Components.Web
+@using Microsoft.Extensions.Options
 @using TodoX.Web.Services.DanceSell
 @inject AuthStateService AuthState
 @inject IDanceSellPhase2Service DanceSell
@@ -7,6 +9,7 @@
 @inject IDanceSellRepository DanceRepo
 @inject IDanceSellCostEstimator Costs
 @inject IDanceSellProviderCatalog ProviderCatalog
+@inject IOptionsMonitor<DanceSellPhase2Options> DanceOptions
 @inject IDialogService DialogService
 @inject ISnackbar Snackbar
 @inject WalletService Wallet
@@ -56,7 +59,47 @@
                                 </MudButton>
                                 <MudDivider />
                                 <MudText Typo="Typo.subtitle2">Hoặc tải video chuyển động MP4</MudText>
-                                <InputFile OnChange="OnMotionSelected" accept="video/mp4" disabled="@_busy" />
+                                <label class="@MotionUploadZoneClass" @ondragenter="OnMotionDragEnter" @ondragleave="OnMotionDragLeave" @ondragover:preventDefault="true" @ondrop:preventDefault="true" @ondrop="OnMotionDrop">
+                                    <InputFile class="rdance-hidden-file-input" OnChange="OnMotionSelected" accept="video/mp4" disabled="@_busy" />
+                                    <span class="rdance-upload-icon">
+                                        @if (_busy)
+                                        {
+                                            <MudProgressCircular Indeterminate="true" Size="Size.Small" Color="Color.Warning" />
+                                        }
+                                        else
+                                        {
+                                            <MudIcon Icon="@Icons.Material.Filled.CloudUpload" Size="Size.Large" />
+                                        }
+                                    </span>
+                                    <span class="rdance-upload-title">Kéo thả video MP4 vào đây</span>
+                                    <span class="rdance-upload-subtitle">hoặc bấm để chọn video</span>
+                                    <span class="rdance-upload-limit">MP4 · tối đa @MaxMotionVideoLabel</span>
+                                </label>
+                                @if (!string.IsNullOrWhiteSpace(_motionUploadError))
+                                {
+                                    <MudAlert Severity="Severity.Error" Dense="true">@_motionUploadError</MudAlert>
+                                }
+                                @if (!string.IsNullOrWhiteSpace(MotionSourceName))
+                                {
+                                    <MudPaper Outlined="true" Class="rdance-motion-file pa-3">
+                                        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
+                                            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1" Class="rdance-motion-file-copy">
+                                                <MudIcon Icon="@Icons.Material.Filled.Movie" Size="Size.Small" />
+                                                <MudText Typo="Typo.body2">@MotionSourceName</MudText>
+                                                @if (_motionFileSize is long size)
+                                                {
+                                                    <MudText Typo="Typo.caption">@FormatBytes(size)</MudText>
+                                                }
+                                            </MudStack>
+                                            <MudChip T="string" Color="Color.Success" Size="Size.Small">Video chuyển động đã sẵn sàng</MudChip>
+                                            <label class="rdance-replace-button">
+                                                <MudIcon Icon="@Icons.Material.Filled.Sync" Size="Size.Small" />
+                                                <span>Thay video</span>
+                                                <InputFile class="rdance-hidden-file-input" OnChange="OnMotionSelected" accept="video/mp4" disabled="@_busy" />
+                                            </label>
+                                        </MudStack>
+                                    </MudPaper>
+                                }
                                 @if (!string.IsNullOrWhiteSpace(_job?.MotionVideoUrl))
                                 {
                                     <video src="@_job.MotionVideoUrl" controls muted playsinline class="rdance-media-player"></video>
@@ -213,6 +256,10 @@
     private DanceSellCostEstimate? _estimate;
     private decimal? _balance;
     private string? _readinessError;
+    private string? _motionFileName;
+    private long? _motionFileSize;
+    private string? _motionUploadError;
+    private bool _motionDragActive;
     private CancellationTokenSource? _pollCts;
     private PeriodicTimer? _pollTimer;
 
@@ -220,6 +267,16 @@
         && _job?.MotionVideoMediaId is not null
         && _job?.PreparedReferenceStatus == DanceSellReferenceStatuses.Approved;
     private bool IsActive => _job?.Status is DanceSellJobStatuses.Queued or DanceSellJobStatuses.Submitted or DanceSellJobStatuses.Rendering;
+    private long MaxMotionVideoBytes => (long)Math.Max(1, DanceOptions.CurrentValue.MaxVideoMb) * 1024 * 1024;
+    private string MaxMotionVideoLabel => $"{Math.Max(1, DanceOptions.CurrentValue.MaxVideoMb)}MB";
+    private string MotionUploadZoneClass => $"rdance-upload-zone{(_motionDragActive ? " is-dragging" : string.Empty)}{(_busy ? " is-busy" : string.Empty)}";
+    private string? MotionSourceName => !string.IsNullOrWhiteSpace(_motionFileName)
+        ? _motionFileName
+        : _job?.MotionSourceType == DanceSellMotionSourceTypes.TikTok
+            ? "TikTok MP4"
+            : !string.IsNullOrWhiteSpace(_job?.MotionVideoUrl)
+                ? "Video MP4"
+                : null;
     private string ReferenceLabel => _job?.PreparedReferenceStatus switch
     {
         DanceSellReferenceStatuses.Approved => "Đã duyệt",
@@ -292,10 +349,31 @@
     {
         await EnsureDraftAsync();
         _job = await DanceSell.StageTikTokAsync(_job!.Id, _tiktokUrl, AuthState.CurrentUser!);
+        _motionFileName = "TikTok MP4";
+        _motionFileSize = null;
+        _motionUploadError = null;
         Snackbar.Add("Đã staging video TikTok.", Severity.Success);
     });
 
-    private Task OnMotionSelected(InputFileChangeEventArgs args) => UploadAsync(args, (bytes, file) => DanceSell.UploadMotionAsync(_job!.Id, bytes, file.Name, file.ContentType, AuthState.CurrentUser!));
+    private async Task OnMotionSelected(InputFileChangeEventArgs args)
+    {
+        _motionDragActive = false;
+        var file = args.File;
+        var error = ValidateMotionVideo(file);
+        if (!string.IsNullOrWhiteSpace(error))
+        {
+            _motionUploadError = error;
+            Snackbar.Add(error, Severity.Error);
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
+        _motionFileName = file.Name;
+        _motionFileSize = file.Size;
+        _motionUploadError = null;
+        await UploadAsync(args, (bytes, uploadedFile) => DanceSell.UploadMotionAsync(_job!.Id, bytes, uploadedFile.Name, uploadedFile.ContentType, AuthState.CurrentUser!));
+    }
+
     private Task OnCharacterSelected(InputFileChangeEventArgs args) => UploadAsync(args, (bytes, file) => DanceSell.UploadCharacterAsync(_job!.Id, bytes, file.Name, file.ContentType, AuthState.CurrentUser!));
     private Task OnProductSelected(InputFileChangeEventArgs args) => UploadAsync(args, (bytes, file) => DanceSell.UploadProductAsync(_job!.Id, bytes, file.Name, file.ContentType, AuthState.CurrentUser!));
 
@@ -304,12 +382,38 @@
         {
             await EnsureDraftAsync();
             var file = args.File;
-            await using var input = file.OpenReadStream(600L * 1024 * 1024);
+            await using var input = file.OpenReadStream(MaxMotionVideoBytes);
             using var buffer = new MemoryStream();
             await input.CopyToAsync(buffer);
             _job = await save(buffer.ToArray(), file);
             Snackbar.Add("Tải tệp thành công.", Severity.Success);
         });
+
+    private string? ValidateMotionVideo(IBrowserFile file)
+    {
+        if (file.Size <= 0)
+        {
+            return "Video không hợp lệ.";
+        }
+
+        if (file.Size > MaxMotionVideoBytes)
+        {
+            return "Video vượt quá dung lượng cho phép.";
+        }
+
+        if (string.IsNullOrWhiteSpace(file.Name)
+            || (!file.ContentType.Equals("video/mp4", StringComparison.OrdinalIgnoreCase)
+                && !Path.GetExtension(file.Name).Equals(".mp4", StringComparison.OrdinalIgnoreCase)))
+        {
+            return "Chỉ hỗ trợ video MP4.";
+        }
+
+        return null;
+    }
+
+    private void OnMotionDragEnter(DragEventArgs _) => _motionDragActive = true;
+    private void OnMotionDragLeave(DragEventArgs _) => _motionDragActive = false;
+    private void OnMotionDrop(DragEventArgs _) => _motionDragActive = false;
 
     private async Task GenerateReferenceAsync() => await RunAsync(async () =>
     {
@@ -390,6 +494,10 @@
         _latestReference = null;
         _estimate = null;
         _balance = null;
+        _motionFileName = null;
+        _motionFileSize = null;
+        _motionUploadError = null;
+        _motionDragActive = false;
         _tabIndex = 0;
         return InvokeAsync(StateHasChanged);
     }
@@ -424,6 +532,18 @@
 
     private string BuildPrompt()
         => $"Create a fashion dance video. Category: {_category}. Preserve identity, face, anatomy and product design. Dress the person in the supplied product, keep colors, patterns and logos consistent, follow the staged motion naturally, no text, watermark, extra people or duplicated limbs.";
+
+    private static string FormatBytes(long bytes)
+    {
+        if (bytes >= 1024L * 1024 * 1024)
+        {
+            return $"{bytes / 1024d / 1024d / 1024d:0.##} GB";
+        }
+
+        return bytes >= 1024L * 1024
+            ? $"{bytes / 1024d / 1024d:0.##} MB"
+            : $"{bytes / 1024d:0.##} KB";
+    }
 
     private static RenderFragment Preview(string? url, string alt) => @<div class="rdance-media-preview">
         @if (!string.IsNullOrWhiteSpace(url))
@@ -471,6 +591,19 @@
 
 <style>
     .rdance-fashion-page { min-width: 0; }
+    .rdance-source-divider { display: flex; align-items: center; gap: 12px; color: rgba(255,255,255,.55); font-size: .75rem; font-weight: 700; letter-spacing: 0; }
+    .rdance-source-divider::before, .rdance-source-divider::after { content: ""; flex: 1; height: 1px; background: rgba(255,255,255,.12); }
+    .rdance-upload-zone { position: relative; display: grid; place-items: center; gap: 6px; min-height: 188px; padding: 24px 18px; overflow: hidden; border: 1px dashed rgba(245, 181, 64, .72); border-radius: 8px; background: linear-gradient(180deg, rgba(245,181,64,.12), rgba(255,255,255,.035)); color: rgba(255,255,255,.88); text-align: center; cursor: pointer; transition: border-color .18s ease, background .18s ease, box-shadow .18s ease, transform .18s ease; }
+    .rdance-upload-zone:hover, .rdance-upload-zone:focus-within, .rdance-upload-zone.is-dragging { border-color: #f5b540; background: linear-gradient(180deg, rgba(245,181,64,.2), rgba(42,194,177,.08)); box-shadow: 0 0 0 1px rgba(245,181,64,.24), 0 18px 44px rgba(0,0,0,.22); }
+    .rdance-upload-zone.is-busy { cursor: progress; opacity: .82; }
+    .rdance-hidden-file-input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+    .rdance-hidden-file-input:disabled { cursor: not-allowed; }
+    .rdance-upload-icon { display: grid; place-items: center; width: 48px; height: 48px; color: #f5b540; border-radius: 999px; background: rgba(245,181,64,.14); }
+    .rdance-upload-title { font-weight: 700; }
+    .rdance-upload-subtitle, .rdance-upload-limit { color: rgba(255,255,255,.62); font-size: .875rem; }
+    .rdance-motion-file { border-color: rgba(245,181,64,.28) !important; background: rgba(255,255,255,.035); }
+    .rdance-motion-file-copy { min-width: 0; }
+    .rdance-replace-button { position: relative; display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 0 12px; overflow: hidden; border: 1px solid rgba(245,181,64,.55); border-radius: 8px; color: #f5b540; font-size: .8125rem; font-weight: 700; text-transform: uppercase; cursor: pointer; }
     .rdance-media-preview { aspect-ratio: 9 / 12; display: grid; place-items: center; overflow: hidden; border-radius: 8px; background: rgba(255,255,255,.05); margin: 12px 0; }
     .rdance-media-preview img { width: 100%; height: 100%; object-fit: contain; }
     .rdance-media-player, .rdance-result-player { width: 100%; max-height: 520px; border-radius: 8px; background: #090d12; }
