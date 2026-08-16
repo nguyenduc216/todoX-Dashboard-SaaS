@@ -52,7 +52,7 @@ public sealed class DanceSellRepository : IDanceSellRepository
             """
             INSERT INTO dance_sell.dance_sell_jobs
                 (tenant_id, customer_id, user_id, logical_request_id, title, prompt,
-                 character_image_url, motion_video_url, mode, character_orientation,
+                 character_image_url, motion_video_url, mode, orientation,
                  placement_mode, custom_placement_instruction, reference_mode, image_prompt,
                  reference_provider_code, reference_provider_model, motion_provider_code, motion_provider_model,
                  current_stage, billing_status, refund_status, status, request_json, created_by, updated_by,
@@ -132,7 +132,7 @@ public sealed class DanceSellRepository : IDanceSellRepository
             """
             INSERT INTO dance_sell.dance_sell_jobs
                 (id, tenant_id, customer_id, user_id, render_job_id, logical_request_id, status,
-                 prompt, character_image_url, motion_video_url, mode, character_orientation,
+                 prompt, character_image_url, motion_video_url, mode, orientation,
                  provider_code, provider_model, request_json, created_at, updated_at)
             VALUES
                 (@id, @tenant, @customer, @user, @renderJobId, @logicalRequestId, 'queued',
@@ -272,7 +272,7 @@ public sealed class DanceSellRepository : IDanceSellRepository
                    motion_provider_code=@motionProviderCode,
                    motion_provider_model=@motionProviderModel,
                    mode=@mode,
-                   character_orientation=@orientation,
+                   orientation=@orientation,
                    updated_at=now()
              WHERE id=@id;
             """,
