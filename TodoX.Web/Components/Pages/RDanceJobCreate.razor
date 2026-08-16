@@ -1,0 +1,277 @@
+@page "/jobs/rdance/new"
+@using Microsoft.AspNetCore.Components.Forms
+@using Microsoft.AspNetCore.Components.Web
+@using Microsoft.Extensions.Options
+@using TodoX.Web.Services.DanceSell
+@inject AuthStateService AuthState
+@inject IDanceSellPhase2Service DanceSell
+@inject IDanceSellProviderCatalog ProviderCatalog
+@inject IOptionsMonitor<DanceSellPhase2Options> DanceOptions
+@inject NavigationManager Navigation
+@inject ISnackbar Snackbar
+
+<PageTitle>Tạo job rDance</PageTitle>
+
+<MudStack Spacing="3" Class="rdance-create-page">
+    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="flex-wrap">
+        <MudIconButton Icon="@Icons.Material.Filled.ArrowBack" Color="Color.Default" OnClick="@(() => Navigation.NavigateTo("/create"))" />
+        <div>
+            <MudText Typo="Typo.h4" Class="todox-page-title">rDance Thời Trang</MudText>
+            <MudText Typo="Typo.body1" Class="todox-page-subtitle">Tạo draft job RDance và chọn video chuyển động ban đầu.</MudText>
+        </div>
+    </MudStack>
+
+    @if (!AuthState.IsInitialized)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+    }
+    else if (AuthState.CurrentUser is not { IsCustomer: true })
+    {
+        <MudAlert Severity="Severity.Warning">Vui lòng đăng nhập bằng tài khoản khách hàng.</MudAlert>
+    }
+    else
+    {
+        @if (!string.IsNullOrWhiteSpace(_readinessError))
+        {
+            <MudAlert Severity="Severity.Error">@_readinessError</MudAlert>
+        }
+
+        <MudGrid>
+            <MudItem xs="12" lg="7">
+                <MudPaper Class="todox-card pa-4" rounded="true">
+                    <MudStack Spacing="3">
+                        <MudTextField T="string" Label="Tên job" Variant="Variant.Outlined" @bind-Value="_title" Disabled="@_busy" />
+                        <MudSelect T="string" Label="Danh mục thời trang" Variant="Variant.Outlined" @bind-Value="_category" Disabled="@_busy">
+                            <MudSelectItem Value="@("shirt")">Áo</MudSelectItem>
+                            <MudSelectItem Value="@("pants")">Quần</MudSelectItem>
+                            <MudSelectItem Value="@("dress")">Váy</MudSelectItem>
+                            <MudSelectItem Value="@("set")">Set đồ</MudSelectItem>
+                            <MudSelectItem Value="@("outerwear")">Áo khoác</MudSelectItem>
+                            <MudSelectItem Value="@("other")">Khác</MudSelectItem>
+                        </MudSelect>
+
+                        <MudTextField T="string" Label="Link TikTok" Variant="Variant.Outlined" @bind-Value="_tiktokUrl" Disabled="@_busy" />
+                        <MudButton Variant="Variant.Outlined"
+                                   Color="Color.Warning"
+                                   StartIcon="@Icons.Material.Filled.Link"
+                                   Disabled="@(_busy || !CanSubmitSource || string.IsNullOrWhiteSpace(_tiktokUrl))"
+                                   OnClick="StageTikTokAndOpenAsync">
+                            Tải và kiểm tra video
+                        </MudButton>
+
+                        <div class="rdance-source-divider"><span>HOẶC</span></div>
+
+                        <label class="@MotionUploadZoneClass" @ondragenter="OnMotionDragEnter" @ondragleave="OnMotionDragLeave" @ondragover:preventDefault="true" @ondrop:preventDefault="true" @ondrop="OnMotionDrop">
+                            <InputFile class="rdance-hidden-file-input" OnChange="OnMotionSelected" accept="video/mp4" disabled="@(_busy || !CanSubmitSource)" />
+                            <span class="rdance-upload-icon">
+                                @if (_busy)
+                                {
+                                    <MudProgressCircular Indeterminate="true" Size="Size.Small" Color="Color.Warning" />
+                                }
+                                else
+                                {
+                                    <MudIcon Icon="@Icons.Material.Filled.CloudUpload" Size="Size.Large" />
+                                }
+                            </span>
+                            <span class="rdance-upload-title">Kéo thả video MP4 vào đây</span>
+                            <span class="rdance-upload-subtitle">hoặc bấm để chọn video</span>
+                            <span class="rdance-upload-limit">MP4 · tối đa @MaxMotionVideoLabel</span>
+                        </label>
+
+                        @if (!string.IsNullOrWhiteSpace(_motionUploadError))
+                        {
+                            <MudAlert Severity="Severity.Error" Dense="true">@_motionUploadError</MudAlert>
+                        }
+                    </MudStack>
+                </MudPaper>
+            </MudItem>
+
+            <MudItem xs="12" lg="5">
+                <MudPaper Class="todox-card pa-4" rounded="true">
+                    <MudStack Spacing="2">
+                        <MudText Typo="Typo.overline">LUỒNG JOB</MudText>
+                        <MudText Typo="Typo.h6">Draft RDance job</MudText>
+                        <MudList T="string" Dense="true">
+                            <MudListItem T="string">Service: rDance Thời Trang</MudListItem>
+                            <MudListItem T="string">Provider: 79AI</MudListItem>
+                            <MudListItem T="string">Model: Kling Motion Control</MudListItem>
+                            <MudListItem T="string">Tỷ lệ: 9:16</MudListItem>
+                        </MudList>
+                        <MudButton Variant="Variant.Filled"
+                                   Color="Color.Warning"
+                                   StartIcon="@Icons.Material.Filled.MovieCreation"
+                                   Disabled="@(_busy || !CanSubmitSource)"
+                                   OnClick="CreateDraftAndOpenAsync">
+                            Tạo draft và tiếp tục
+                        </MudButton>
+                    </MudStack>
+                </MudPaper>
+            </MudItem>
+        </MudGrid>
+    }
+</MudStack>
+
+@code {
+    [SupplyParameterFromQuery] public Guid? ServiceId { get; set; }
+    [SupplyParameterFromQuery] public string? ServiceCode { get; set; }
+
+    private string _title = "rDance Thời Trang";
+    private string _category = "shirt";
+    private string _tiktokUrl = string.Empty;
+    private string? _readinessError;
+    private string? _motionUploadError;
+    private bool _motionDragActive;
+    private bool _busy;
+
+    private bool CanSubmitSource => string.IsNullOrWhiteSpace(_readinessError);
+    private long MaxMotionVideoBytes => (long)Math.Max(1, DanceOptions.CurrentValue.MaxVideoMb) * 1024 * 1024;
+    private string MaxMotionVideoLabel => $"{Math.Max(1, DanceOptions.CurrentValue.MaxVideoMb)}MB";
+    private string MotionUploadZoneClass => $"rdance-upload-zone{(_motionDragActive ? " is-dragging" : string.Empty)}{(_busy ? " is-busy" : string.Empty)}";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await CheckReadinessAsync();
+    }
+
+    private async Task CheckReadinessAsync()
+    {
+        _readinessError = null;
+        try
+        {
+            var route = await ProviderCatalog.GetDefaultRouteAsync(DanceSellOperationTypes.MotionVideo);
+            if (!route.ProviderCode.Equals(DanceSellConstants.ProviderCode, StringComparison.OrdinalIgnoreCase)
+                || !route.ModelName.Equals(DanceSellConstants.Model, StringComparison.OrdinalIgnoreCase))
+            {
+                _readinessError = "RDance chưa được cấu hình provider Motion Control.";
+            }
+        }
+        catch
+        {
+            _readinessError = "RDance chưa được cấu hình provider Motion Control.";
+        }
+    }
+
+    private async Task CreateDraftAndOpenAsync()
+        => await RunAsync(async () =>
+        {
+            var job = await CreateDraftAsync();
+            Navigation.NavigateTo($"/jobs/rdance/{job.Id}");
+        });
+
+    private async Task StageTikTokAndOpenAsync()
+        => await RunAsync(async () =>
+        {
+            var job = await CreateDraftAsync();
+            job = await DanceSell.StageTikTokAsync(job.Id, _tiktokUrl, AuthState.CurrentUser!);
+            Navigation.NavigateTo($"/jobs/rdance/{job.Id}");
+        });
+
+    private async Task OnMotionSelected(InputFileChangeEventArgs args)
+    {
+        _motionDragActive = false;
+        var file = args.File;
+        var error = ValidateMotionVideo(file);
+        if (!string.IsNullOrWhiteSpace(error))
+        {
+            _motionUploadError = error;
+            Snackbar.Add(error, Severity.Error);
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
+        _motionUploadError = null;
+        await RunAsync(async () =>
+        {
+            var job = await CreateDraftAsync();
+            await using var input = file.OpenReadStream(MaxMotionVideoBytes);
+            using var buffer = new MemoryStream();
+            await input.CopyToAsync(buffer);
+            job = await DanceSell.UploadMotionAsync(job.Id, buffer.ToArray(), file.Name, file.ContentType, AuthState.CurrentUser!);
+            Navigation.NavigateTo($"/jobs/rdance/{job.Id}");
+        });
+    }
+
+    private async Task<DanceSellJobDto> CreateDraftAsync()
+    {
+        if (!string.IsNullOrWhiteSpace(_readinessError))
+        {
+            throw new InvalidOperationException(_readinessError);
+        }
+
+        return await DanceSell.CreateJobAsync(new DanceSellCreateJobRequest
+        {
+            Title = _title,
+            Prompt = BuildPrompt(),
+            PlacementMode = DanceSellPlacementModes.WearProduct,
+            ReferenceMode = DanceSellReferenceModes.GenerateReference,
+            Mode = "720p",
+            CharacterOrientation = "image"
+        }, AuthState.CurrentUser!);
+    }
+
+    private string? ValidateMotionVideo(IBrowserFile file)
+    {
+        if (file.Size <= 0)
+        {
+            return "Video không hợp lệ.";
+        }
+
+        if (file.Size > MaxMotionVideoBytes)
+        {
+            return "Video vượt quá dung lượng cho phép.";
+        }
+
+        if (string.IsNullOrWhiteSpace(file.Name)
+            || (!file.ContentType.Equals("video/mp4", StringComparison.OrdinalIgnoreCase)
+                && !Path.GetExtension(file.Name).Equals(".mp4", StringComparison.OrdinalIgnoreCase)))
+        {
+            return "Chỉ hỗ trợ video MP4.";
+        }
+
+        return null;
+    }
+
+    private async Task RunAsync(Func<Task> action)
+    {
+        if (_busy || AuthState.CurrentUser is not { IsCustomer: true })
+        {
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            await action();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private string BuildPrompt()
+        => $"Create a fashion dance video. Category: {_category}. Preserve identity, face, anatomy and product design. Dress the person in the supplied product, keep colors, patterns and logos consistent, follow the staged motion naturally, no text, watermark, extra people or duplicated limbs.";
+
+    private void OnMotionDragEnter(DragEventArgs _) => _motionDragActive = true;
+    private void OnMotionDragLeave(DragEventArgs _) => _motionDragActive = false;
+    private void OnMotionDrop(DragEventArgs _) => _motionDragActive = false;
+}
+
+<style>
+    .rdance-create-page { min-width: 0; }
+    .rdance-source-divider { display: flex; align-items: center; gap: 12px; color: rgba(255,255,255,.55); font-size: .75rem; font-weight: 700; letter-spacing: 0; }
+    .rdance-source-divider::before, .rdance-source-divider::after { content: ""; flex: 1; height: 1px; background: rgba(255,255,255,.12); }
+    .rdance-upload-zone { position: relative; display: grid; place-items: center; gap: 6px; min-height: 188px; padding: 24px 18px; overflow: hidden; border: 1px dashed rgba(245, 181, 64, .72); border-radius: 8px; background: linear-gradient(180deg, rgba(245,181,64,.12), rgba(255,255,255,.035)); color: rgba(255,255,255,.88); text-align: center; cursor: pointer; transition: border-color .18s ease, background .18s ease, box-shadow .18s ease; }
+    .rdance-upload-zone:hover, .rdance-upload-zone:focus-within, .rdance-upload-zone.is-dragging { border-color: #f5b540; background: linear-gradient(180deg, rgba(245,181,64,.2), rgba(42,194,177,.08)); box-shadow: 0 0 0 1px rgba(245,181,64,.24), 0 18px 44px rgba(0,0,0,.22); }
+    .rdance-upload-zone.is-busy { cursor: progress; opacity: .82; }
+    .rdance-hidden-file-input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+    .rdance-hidden-file-input:disabled { cursor: not-allowed; }
+    .rdance-upload-icon { display: grid; place-items: center; width: 48px; height: 48px; color: #f5b540; border-radius: 999px; background: rgba(245,181,64,.14); }
+    .rdance-upload-title { font-weight: 700; }
+    .rdance-upload-subtitle, .rdance-upload-limit { color: rgba(255,255,255,.62); font-size: .875rem; }
+</style>

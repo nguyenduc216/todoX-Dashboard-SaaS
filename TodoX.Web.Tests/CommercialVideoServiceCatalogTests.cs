@@ -92,7 +92,7 @@ public sealed class CommercialVideoServiceCatalogTests
         var rDanceRoute = TodoX.Web.Models.Timelapse.CustomerServiceRouting.Resolve(TodoXServiceEngineTypes.RDance, Guid.NewGuid(), "RDANCE_FASHION");
         Assert.Equal(TodoX.Web.Models.Timelapse.CustomerServiceDestination.RDanceCreator, rDanceRoute.Destination);
         Assert.NotNull(rDanceRoute.Route);
-        Assert.StartsWith("/rdance-fashion-demo", rDanceRoute.Route);
+        Assert.StartsWith("/jobs/rdance/new", rDanceRoute.Route);
         Assert.NotEqual("Dịch vụ RDance đang hoàn thiện.", rDanceRoute.Message);
         Assert.DoesNotContain("ApplyFixedDefinition", adminRepo, StringComparison.Ordinal);
         Assert.Contains("TodoXServiceEngineTypes.Normalize(s.ServiceType)", adminRepo, StringComparison.Ordinal);
@@ -103,6 +103,7 @@ public sealed class CommercialVideoServiceCatalogTests
         Assert.Contains("private static IReadOnlyList<ServiceDto> SortServices", servicesPage, StringComparison.Ordinal);
         Assert.Contains("ThenBy(x => x.ServiceName, StringComparer.OrdinalIgnoreCase)", servicesPage, StringComparison.Ordinal);
         Assert.Contains("ServiceSellPricesDialog", servicesPage, StringComparison.Ordinal);
+        Assert.DoesNotContain("/rdance-fashion-demo", create, StringComparison.Ordinal);
     }
 
     [Fact]

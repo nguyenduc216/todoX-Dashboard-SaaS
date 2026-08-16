@@ -349,50 +349,6 @@
             }
         }
 
-        if (!existingCodes.Contains("health_video_demo"))
-        {
-            var healthVideoItem = BuildHealthVideoDemoItem();
-            var aiStudio = list.FirstOrDefault(g => g.Code.Equals("ai_studio", StringComparison.OrdinalIgnoreCase));
-            if (aiStudio is not null)
-            {
-                healthVideoItem.GroupId = aiStudio.Id;
-                aiStudio.Items.Add(healthVideoItem);
-            }
-        }
-
-        if (!existingCodes.Contains("construction_video_demo"))
-        {
-            var constructionVideoItem = BuildConstructionVideoDemoItem();
-            var aiStudio = list.FirstOrDefault(g => g.Code.Equals("ai_studio", StringComparison.OrdinalIgnoreCase));
-            if (aiStudio is not null)
-            {
-                constructionVideoItem.GroupId = aiStudio.Id;
-                aiStudio.Items.Add(constructionVideoItem);
-            }
-        }
-
-        if (!existingCodes.Contains("rdance_fashion_demo"))
-        {
-            var rDanceFashionItem = BuildRDanceFashionDemoItem();
-            var aiStudio = list.FirstOrDefault(g => g.Code.Equals("ai_studio", StringComparison.OrdinalIgnoreCase));
-            if (aiStudio is not null)
-            {
-                rDanceFashionItem.GroupId = aiStudio.Id;
-                aiStudio.Items.Add(rDanceFashionItem);
-            }
-        }
-
-        if (!existingCodes.Contains("real_estate_video_demo"))
-        {
-            var realEstateVideoItem = BuildRealEstateVideoDemoItem();
-            var aiStudio = list.FirstOrDefault(g => g.Code.Equals("ai_studio", StringComparison.OrdinalIgnoreCase));
-            if (aiStudio is not null)
-            {
-                realEstateVideoItem.GroupId = aiStudio.Id;
-                aiStudio.Items.Add(realEstateVideoItem);
-            }
-        }
-
         return list;
     }
 
@@ -422,62 +378,6 @@
             VisibilityPolicy = "admin_avatar_manager",
             MatchAll = false,
             SortOrder = 36
-        };
-
-    private static NavigationMenuItemDto BuildHealthVideoDemoItem()
-        => new()
-        {
-            Id = Guid.NewGuid(),
-            Code = "health_video_demo",
-            Title = "Video Sức Khoẻ",
-            Href = "/health-video-demo",
-            IconKey = "HealthAndSafety",
-            ModuleKeys = Array.Empty<string>(),
-            VisibilityPolicy = "always",
-            MatchAll = false,
-            SortOrder = 22
-        };
-
-    private static NavigationMenuItemDto BuildConstructionVideoDemoItem()
-        => new()
-        {
-            Id = Guid.NewGuid(),
-            Code = "construction_video_demo",
-            Title = "Video Xây Dựng",
-            Href = "/construction-video-demo",
-            IconKey = "Engineering",
-            ModuleKeys = Array.Empty<string>(),
-            VisibilityPolicy = "always",
-            MatchAll = false,
-            SortOrder = 21
-        };
-
-    private static NavigationMenuItemDto BuildRDanceFashionDemoItem()
-        => new()
-        {
-            Id = Guid.NewGuid(),
-            Code = "rdance_fashion_demo",
-            Title = "rDance Thời Trang",
-            Href = "/rdance-fashion-demo",
-            IconKey = "Checkroom",
-            ModuleKeys = Array.Empty<string>(),
-            VisibilityPolicy = "always",
-            MatchAll = false,
-            SortOrder = 23
-        };
-
-    private static NavigationMenuItemDto BuildRealEstateVideoDemoItem()
-        => new()
-        {
-            Id = Guid.NewGuid(),
-            Code = "real_estate_video_demo",
-            Title = "Video Bất Động Sản",
-            Href = "/real-estate-video-demo",
-            IconKey = "Apartment",
-            ModuleKeys = Array.Empty<string>(),
-            VisibilityPolicy = "always",
-            MatchAll = false,
-            SortOrder = 24
         };
 
     private static NavigationMenuGroupDto CloneGroup(NavigationMenuGroupDto group)
@@ -598,10 +498,6 @@
             Group("ai_studio", "AI Studio", "AutoFixHigh", 40, true,
                 Item("admin_avatar_manager", "Quản lý avatar mẫu", "/admin/avatar-manager", "FaceRetouchingNatural", new[] { "settings", "services" }, "admin_avatar_manager", sort: 10),
                 Item("render_jobs", "Render Jobs", "/render-jobs", "Movie", new[] { "render_jobs" }, sort: 20),
-                Item("construction_video_demo", "Video Xây Dựng", "/construction-video-demo", "Engineering", Array.Empty<string>(), "always", sort: 21),
-                Item("health_video_demo", "Video Sức Khoẻ", "/health-video-demo", "HealthAndSafety", Array.Empty<string>(), "always", sort: 22),
-                Item("rdance_fashion_demo", "rDance Thời Trang", "/rdance-fashion-demo", "Checkroom", Array.Empty<string>(), "always", sort: 23),
-                Item("real_estate_video_demo", "Video Bất Động Sản", "/real-estate-video-demo", "Apartment", Array.Empty<string>(), "always", sort: 24),
                 Item("render_video_jobs", "Render Video Job", "/render-video-jobs", "VideoLibrary", Array.Empty<string>(), "always", false, 25),
                 Item("prompt_templates", "Quản lý prompt", "/settings/prompt-templates", "AutoFixHigh", new[] { "prompt_templates", "settings", "app_settings" }, sort: 30),
                 Item("ai_providers", "AI Providers", "/admin/ai-providers", "Api", new[] { "settings", "services", "api_providers" }, "admin_avatar_manager", sort: 35)),
