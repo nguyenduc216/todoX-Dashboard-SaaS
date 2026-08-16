@@ -29,7 +29,7 @@ public static class CustomerServiceRouting
 
         if (string.Equals(engineType, TodoXServiceEngineTypes.RDance, StringComparison.OrdinalIgnoreCase))
         {
-            return new(CustomerServiceDestination.RDanceCreator, null, "Dịch vụ RDance đang hoàn thiện.");
+            return new(CustomerServiceDestination.RDanceCreator, BuildRoute("/rdance-fashion-demo", serviceId, serviceCode), null);
         }
 
         return new(CustomerServiceDestination.Unavailable, null, "Dịch vụ hiện chưa khả dụng.");
