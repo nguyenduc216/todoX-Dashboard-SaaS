@@ -394,6 +394,119 @@ public class TimelapsePhase2CTests
     }
 
     [Fact]
+    public void VideoPrompt_DoesNotSerializeProfileMetadataAndFitsProviderBudget()
+    {
+        var largeMetadata = new string('x', 5600);
+        var profileSnapshot = """
+            {
+              "profileJson": {
+                "id": 1,
+                "enabled": true,
+                "category": "construction_exterior",
+                "select_no": 1,
+                "created_at": "2026-08-16T00:00:00Z",
+                "updated_at": "2026-08-16T01:00:00Z",
+                "metadata_blob": "__LARGE_METADATA__",
+                "phase_rules": [
+                  {
+                    "min_progress": 75,
+                    "max_progress": 100,
+                    "phase_goal": "finish exterior envelope and final facade details",
+                    "prompt_fragment": "Install roof panels carefully and finish facade surfaces.",
+                    "worker_actions": "installing roof panels, sealing facade joints",
+                    "must_exist": ["finished roof", "clean facade"],
+                    "must_not_exist": ["demolition debris"]
+                  }
+                ],
+                "continuity_rules": {
+                  "must_preserve": ["same facade rhythm", "same roof pitch"],
+                  "must_avoid": ["new windows", "camera jump"]
+                },
+                "video_generation": {
+                  "video_clip_prompt_template": "Profile detail: {{phase_goal}}. Actions: {{worker_actions}}. Preserve: {{must_preserve}}. Avoid: {{must_avoid}}. {{prompt_fragment}}"
+                }
+              }
+            }
+            """.Replace("__LARGE_METADATA__", largeMetadata, StringComparison.Ordinal);
+        var snapshot = new TodoX.Web.Models.Timelapse.TimelapseJobSnapshot
+        {
+            ProfileName = "Construction Exterior",
+            SceneCount = 6,
+            ProgressMapping = TodoX.Web.Models.Timelapse.TimelapseRequestRules.GetProgressMapping(6)
+        };
+
+        var oldRepresentativeLength = profileSnapshot.Length
+                                      + TimelapsePromptResolver.ResolveVideoPrompt(snapshot, 4, 75, 100).Length;
+        var prompt = TimelapsePromptResolver.ResolveVideoPromptEnvelope(snapshot, 4, 75, 100, profileSnapshot);
+
+        Assert.True(oldRepresentativeLength > 5000);
+        Assert.True(prompt.Prompt.Length <= TimelapsePromptResolver.MaxProviderPromptLength);
+        Assert.Contains("Install roof panels carefully", prompt.Prompt, StringComparison.Ordinal);
+        Assert.Contains("finish exterior envelope", prompt.Prompt, StringComparison.Ordinal);
+        Assert.Contains("Use @image1 as the exact starting frame and @image2 as the exact ending frame.", prompt.Prompt, StringComparison.Ordinal);
+        Assert.Contains("Never remove permanent elements visible in @image1.", prompt.Prompt, StringComparison.Ordinal);
+        Assert.Contains("Do not demolish, reset, rebuild from scratch", prompt.Prompt, StringComparison.Ordinal);
+        Assert.Contains("The final frame must converge visually to @image2.", prompt.Prompt, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"id\": 1", prompt.Prompt, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"enabled\": true", prompt.Prompt, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"created_at\"", prompt.Prompt, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"updated_at\"", prompt.Prompt, StringComparison.Ordinal);
+        Assert.False(prompt.ProfilePromptTruncated);
+    }
+
+    [Fact]
+    public void VideoPrompt_TrimsOnlyOptionalProfileTextAndDiagnosticsArePersisted()
+    {
+        var longFragment = new string('a', 8000);
+        var profileSnapshot = """
+            {
+              "ProfileJson": {
+                "phase_rules": [
+                  {
+                    "min_progress": 0,
+                    "max_progress": 100,
+                    "phase_goal": "advance construction",
+                    "prompt_fragment": "__LONG_FRAGMENT__",
+                    "worker_actions": "installing materials"
+                  }
+                ],
+                "video_generation": {
+                  "video_clip_prompt_template": "{{prompt_fragment}}"
+                }
+              }
+            }
+            """.Replace("__LONG_FRAGMENT__", longFragment, StringComparison.Ordinal);
+        var snapshot = new TodoX.Web.Models.Timelapse.TimelapseJobSnapshot
+        {
+            ProfileName = "Construction Exterior",
+            SceneCount = 6
+        };
+        var runtime = ReadSource("TodoX.Web", "Services", "Timelapse", "TimelapseProviderRuntime.cs");
+
+        var prompt = TimelapsePromptResolver.ResolveVideoPromptEnvelope(snapshot, 4, 75, 100, profileSnapshot);
+
+        Assert.True(prompt.Prompt.Length <= TimelapsePromptResolver.MaxProviderPromptLength);
+        Assert.True(prompt.ProfilePromptTruncated);
+        Assert.Contains("Use @image1 as the exact starting frame and @image2 as the exact ending frame.", prompt.Prompt, StringComparison.Ordinal);
+        Assert.Contains("The final frame must converge visually to @image2.", prompt.Prompt, StringComparison.Ordinal);
+        Assert.Contains("prompt_length = prompt.Prompt.Length", runtime, StringComparison.Ordinal);
+        Assert.Contains("profile_prompt_length = prompt.ProfilePromptLength", runtime, StringComparison.Ordinal);
+        Assert.Contains("profile_prompt_truncated = prompt.ProfilePromptTruncated", runtime, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void VideoProfilePrompt_DoesNotUseRawJsonFallback()
+    {
+        var runtime = ReadSource("TodoX.Web", "Services", "Timelapse", "TimelapseProviderRuntime.cs");
+        var videoExtractorStart = runtime.IndexOf("private static string ExtractVideoProfilePrompt", StringComparison.Ordinal);
+        var videoExtractorEnd = runtime.IndexOf("private static JsonElement? ExtractProfileJsonElement", videoExtractorStart, StringComparison.Ordinal);
+        var videoExtractor = runtime[videoExtractorStart..videoExtractorEnd];
+
+        Assert.DoesNotContain("GetRawText", videoExtractor, StringComparison.Ordinal);
+        Assert.DoesNotContain("metadata_blob", videoExtractor, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void TimelapseDetailUi_RemovesVideoInputThumbnailsAndKeepsPreviewConstrained()
     {
         var razor = ReadSource("TodoX.Web", "Components", "Pages", "TimelapseJobDetail.razor");

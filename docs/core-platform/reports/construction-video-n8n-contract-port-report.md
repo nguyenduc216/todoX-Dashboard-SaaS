@@ -97,6 +97,31 @@ Prompt semantics were ported from `Route Clip`: start/end progress, profile JSON
 
 C# now enforces `@image1` as the exact opening anchor, `@image2` as the exact closing anchor, same building/architecture/footprint/floor count/windows/openings/roof geometry/camera/lens/perspective/framing/environment, no demolition/reset/rebuild/disappearing/reappearing structure/duplicate build/scene cut/architecture morph, never remove permanent elements visible in `@image1`, only advance work necessary to reach `@image2`, and final convergence to `@image2`.
 
+`Route Clip` uses these profile fields for the video prompt:
+
+- `phase_rules[].phase_goal`
+- `phase_rules[].prompt_fragment`
+- `phase_rules[].worker_actions`
+- `phase_rules[].must_exist`
+- `phase_rules[].must_not_exist`
+- fallback `scene_templates[].phase_goal`
+- fallback `scene_templates[].prompt_fragment`
+- `continuity_rules.must_preserve`
+- `continuity_rules.must_avoid`
+- `video_generation.video_clip_prompt_template`
+- `profile_name` / `prompt_profile_code`
+
+It does not serialize the full profile JSON object into the provider prompt. C# now follows that behavior and ignores metadata fields such as ids, enabled flags, categories, select order, timestamps, and other database/configuration fields not used by the model.
+
+Provider prompt budget:
+
+- maximum sent to 79AI: 4200 characters
+- mandatory anchor/strict continuity rules are always preserved
+- optional profile-derived text is fit into the remaining budget
+- `request_json` includes `prompt_length`, `profile_prompt_length`, and `profile_prompt_truncated`
+
+This fixes the live failure where the previous resolver prepended the entire profile JSON object, pushing clip 4 prompt length beyond the 79AI 5000-character limit.
+
 ## Business Rules
 
 The Construction Timelapse scene mappings remain:

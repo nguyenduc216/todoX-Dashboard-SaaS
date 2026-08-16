@@ -319,7 +319,7 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
             throw new InvalidOperationException("Missing Timelapse start or end image URL.");
         }
 
-        var prompt = TimelapsePromptResolver.ResolveVideoPrompt(
+        var prompt = TimelapsePromptResolver.ResolveVideoPromptEnvelope(
             item.Snapshot,
             item.ClipIndex,
             item.StartProgressPercent,
@@ -343,7 +343,7 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
             item.EndResponseJson,
             ct);
         var imagesJson = JsonSerializer.Serialize(new[] { startDescriptor, endDescriptor }, JsonOptions);
-        var request = BuildSubmitRequest(provider, prompt, [], new Dictionary<string, string?>
+        var request = BuildSubmitRequest(provider, prompt.Prompt, [], new Dictionary<string, string?>
         {
             ["type"] = "video",
             ["duration"] = item.DurationSeconds.ToString(),
@@ -356,7 +356,12 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
             ["images"] = imagesJson,
             ["start_progress_percent"] = item.StartProgressPercent.ToString(),
             ["end_progress_percent"] = item.EndProgressPercent.ToString()
-        }, Ai79TaskOperation.Video, null, null);
+        }, Ai79TaskOperation.Video, null, null, new
+        {
+            prompt_length = prompt.Prompt.Length,
+            profile_prompt_length = prompt.ProfilePromptLength,
+            profile_prompt_truncated = prompt.ProfilePromptTruncated
+        });
 
         Ai79TaskSubmitResult submit;
         try
@@ -585,7 +590,8 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
         IReadOnlyDictionary<string, string?> options,
         Ai79TaskOperation operation,
         string? firstImageField,
-        string? secondImageField)
+        string? secondImageField,
+        object? promptDiagnostics = null)
     {
         var raw = new Ai79TaskSubmitRequest(
             provider.BaseUrl,
@@ -610,7 +616,9 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
             images,
             firstImageField,
             secondImageField,
-            options
+            options,
+            prompt_length = prompt.Length,
+            promptDiagnostics
         }, JsonOptions);
         return new SubmitRequestEnvelope(raw, sanitized);
     }
@@ -987,6 +995,8 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
 
 public static class TimelapsePromptResolver
 {
+    public const int MaxProviderPromptLength = 4200;
+
     public static string ResolveImagePrompt(TimelapseJobSnapshot snapshot, int progressPercent, string promptSnapshotJson)
     {
         var customerOverride = TimelapsePromptSnapshot.GetCustomerOverride(promptSnapshotJson);
@@ -1010,9 +1020,47 @@ public static class TimelapsePromptResolver
         int startProgress,
         int endProgress,
         string? promptSnapshotJson = null)
+        => ResolveVideoPromptEnvelope(snapshot, clipIndex, startProgress, endProgress, promptSnapshotJson).Prompt;
+
+    public static TimelapseVideoPromptEnvelope ResolveVideoPromptEnvelope(
+        TimelapseJobSnapshot snapshot,
+        int clipIndex,
+        int startProgress,
+        int endProgress,
+        string? promptSnapshotJson = null)
+    {
+        var optionalProfilePrompt = ExtractVideoProfilePrompt(
+            promptSnapshotJson ?? string.Empty,
+            snapshot,
+            clipIndex,
+            startProgress,
+            endProgress);
+        var mandatoryPrompt = BuildMandatoryVideoPrompt(snapshot, clipIndex, startProgress, endProgress);
+        var separatorLength = string.IsNullOrWhiteSpace(optionalProfilePrompt) ? 0 : 2;
+        var remaining = MaxProviderPromptLength - mandatoryPrompt.Length - separatorLength;
+        if (remaining < 0)
+        {
+            throw new InvalidOperationException("Mandatory Timelapse video prompt exceeds provider prompt budget.");
+        }
+
+        var fittedProfilePrompt = FitOptionalPrompt(optionalProfilePrompt, remaining, out var truncated);
+        var finalPrompt = string.IsNullOrWhiteSpace(fittedProfilePrompt)
+            ? mandatoryPrompt
+            : string.Join("\n\n", fittedProfilePrompt, mandatoryPrompt);
+
+        return new TimelapseVideoPromptEnvelope(
+            finalPrompt,
+            optionalProfilePrompt.Length,
+            truncated);
+    }
+
+    private static string BuildMandatoryVideoPrompt(
+        TimelapseJobSnapshot snapshot,
+        int clipIndex,
+        int startProgress,
+        int endProgress)
         => string.Join("\n", new[]
         {
-            ExtractProfilePrompt(promptSnapshotJson ?? string.Empty),
             $"Use the configured TodoX Construction Timelapse profile semantics for {snapshot.ProfileName}.",
             $"Create clip {clipIndex} as a smooth construction progress transition from {startProgress}% to {endProgress}%.",
             "Use @image1 as the exact starting frame and @image2 as the exact ending frame.",
@@ -1026,6 +1074,25 @@ public static class TimelapsePromptResolver
             $"Duration requirement: exactly {TimelapseRequestRules.RuntimeClipDurationSeconds} seconds."
         });
 
+    private static string FitOptionalPrompt(string optionalPrompt, int maxLength, out bool truncated)
+    {
+        truncated = false;
+        var value = CleanText(optionalPrompt) ?? string.Empty;
+        if (value.Length == 0 || maxLength <= 0)
+        {
+            truncated = value.Length > 0;
+            return string.Empty;
+        }
+
+        if (value.Length <= maxLength)
+        {
+            return value;
+        }
+
+        truncated = true;
+        return value[..maxLength].TrimEnd();
+    }
+
     private static string ExtractProfilePrompt(string promptSnapshotJson)
     {
         if (string.IsNullOrWhiteSpace(promptSnapshotJson))
@@ -1038,12 +1105,12 @@ public static class TimelapsePromptResolver
             using var doc = JsonDocument.Parse(promptSnapshotJson);
             if (doc.RootElement.TryGetProperty("profileJson", out var camel))
             {
-                return ExtractPromptField(camel);
+                return ExtractImagePromptField(camel);
             }
 
             if (doc.RootElement.TryGetProperty("ProfileJson", out var pascal))
             {
-                return ExtractPromptField(pascal);
+                return ExtractImagePromptField(pascal);
             }
         }
         catch (JsonException)
@@ -1054,7 +1121,212 @@ public static class TimelapsePromptResolver
         return string.Empty;
     }
 
-    private static string ExtractPromptField(JsonElement element)
+    private static string ExtractVideoProfilePrompt(
+        string promptSnapshotJson,
+        TimelapseJobSnapshot snapshot,
+        int clipIndex,
+        int startProgress,
+        int endProgress)
+    {
+        var profile = ExtractProfileJsonElement(promptSnapshotJson);
+        if (profile is null || profile.Value.ValueKind != JsonValueKind.Object)
+        {
+            return string.Empty;
+        }
+
+        var endStage = clipIndex;
+        var target = ResolveTargetRule(profile.Value, endProgress, endStage);
+        var phaseGoal = CleanText(ReadString(target, "phase_goal") ?? "advance strictly to the next state") ?? string.Empty;
+        var promptFragment = CleanText(ReadString(target, "prompt_fragment")) ?? string.Empty;
+        var workerActions = CleanText(ReadString(target, "worker_actions")
+            ?? "appropriate workers actively measuring, installing, carrying materials, painting, cleaning, or adjusting elements relevant to this phase") ?? string.Empty;
+        var mustExist = ListToText(ReadElement(target, "must_exist"));
+        var mustNotExist = ListToText(ReadElement(target, "must_not_exist"));
+
+        JsonElement? continuity = profile.Value.TryGetProperty("continuity_rules", out var continuityValue)
+            && continuityValue.ValueKind == JsonValueKind.Object
+                ? continuityValue
+                : null;
+        var mustPreserve = ListToText(ReadElement(continuity, "must_preserve"));
+        var mustAvoid = ListToText(ReadElement(continuity, "must_avoid"));
+
+        JsonElement? videoGeneration = profile.Value.TryGetProperty("video_generation", out var videoGenerationValue)
+            && videoGenerationValue.ValueKind == JsonValueKind.Object
+                ? videoGenerationValue
+                : null;
+        var template = CleanText(ReadString(videoGeneration, "video_clip_prompt_template"))
+            ?? "One continuous monotonic timelapse from @image1 at {{start_progress}}% to @image2 at {{end_progress}}%.";
+
+        var values = new Dictionary<string, string>
+        {
+            ["{{start_progress}}"] = startProgress.ToString(),
+            ["{{end_progress}}"] = endProgress.ToString(),
+            ["{{phase_goal}}"] = phaseGoal,
+            ["{{prompt_fragment}}"] = promptFragment,
+            ["{{worker_actions}}"] = workerActions,
+            ["{{must_exist}}"] = mustExist,
+            ["{{must_not_exist}}"] = mustNotExist,
+            ["{{must_preserve}}"] = mustPreserve,
+            ["{{must_avoid}}"] = mustAvoid,
+            ["{{profile_name}}"] = CleanText(snapshot.ProfileName) ?? "Timelapse"
+        };
+
+        foreach (var pair in values)
+        {
+            template = template.Replace(pair.Key, pair.Value, StringComparison.Ordinal);
+        }
+
+        return CleanText(template) ?? string.Empty;
+    }
+
+    private static JsonElement? ExtractProfileJsonElement(string promptSnapshotJson)
+    {
+        if (string.IsNullOrWhiteSpace(promptSnapshotJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(promptSnapshotJson);
+            if (doc.RootElement.TryGetProperty("profileJson", out var camel))
+            {
+                return ParseProfileElement(camel);
+            }
+
+            if (doc.RootElement.TryGetProperty("ProfileJson", out var pascal))
+            {
+                return ParseProfileElement(pascal);
+            }
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+
+        return null;
+    }
+
+    private static JsonElement? ParseProfileElement(JsonElement element)
+    {
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            return element.Clone();
+        }
+
+        if (element.ValueKind == JsonValueKind.String)
+        {
+            var text = element.GetString();
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return null;
+            }
+
+            try
+            {
+                using var doc = JsonDocument.Parse(text);
+                return doc.RootElement.ValueKind == JsonValueKind.Object
+                    ? doc.RootElement.Clone()
+                    : null;
+            }
+            catch (JsonException)
+            {
+                return null;
+            }
+        }
+
+        return null;
+    }
+
+    private static JsonElement ResolveTargetRule(JsonElement profile, int endProgress, int endStage)
+    {
+        if (profile.TryGetProperty("phase_rules", out var rules) && rules.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var rule in rules.EnumerateArray())
+            {
+                var min = ReadNumber(rule, "min_progress") ?? 0;
+                var max = ReadNumber(rule, "max_progress") ?? 100;
+                if (endProgress >= min && endProgress <= max)
+                {
+                    return rule;
+                }
+            }
+        }
+
+        if (profile.TryGetProperty("scene_templates", out var scenes) && scenes.ValueKind == JsonValueKind.Array)
+        {
+            var index = Math.Max(0, Math.Min(scenes.GetArrayLength() - 1, endStage));
+            if (scenes.GetArrayLength() > 0)
+            {
+                return scenes[index];
+            }
+        }
+
+        return default;
+    }
+
+    private static string? ReadString(JsonElement? element, string name)
+        => element is { ValueKind: JsonValueKind.Object } objectElement
+           && objectElement.TryGetProperty(name, out var value)
+           && value.ValueKind == JsonValueKind.String
+            ? CleanText(value.GetString())
+            : null;
+
+    private static int? ReadNumber(JsonElement element, string name)
+    {
+        if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty(name, out var value))
+        {
+            return null;
+        }
+
+        if (value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var number))
+        {
+            return number;
+        }
+
+        return value.ValueKind == JsonValueKind.String
+               && int.TryParse(value.GetString(), out var parsed)
+            ? parsed
+            : null;
+    }
+
+    private static JsonElement? ReadElement(JsonElement? element, string name)
+        => element is { ValueKind: JsonValueKind.Object } objectElement
+           && objectElement.TryGetProperty(name, out var value)
+            ? value
+            : null;
+
+    private static string ListToText(JsonElement? element)
+    {
+        if (element is null)
+        {
+            return string.Empty;
+        }
+
+        if (element.Value.ValueKind == JsonValueKind.Array)
+        {
+            return string.Join(", ", element.Value.EnumerateArray()
+                .Select(value => value.ValueKind == JsonValueKind.String ? CleanText(value.GetString()) : null)
+                .Where(value => !string.IsNullOrWhiteSpace(value)));
+        }
+
+        return element.Value.ValueKind == JsonValueKind.String
+            ? CleanText(element.Value.GetString()) ?? string.Empty
+            : string.Empty;
+    }
+
+    private static string? CleanText(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var normalized = string.Join(" ", value.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        return normalized.Length == 0 ? null : normalized;
+    }
+
+    private static string ExtractImagePromptField(JsonElement element)
     {
         if (element.ValueKind == JsonValueKind.String)
         {
@@ -1075,3 +1347,8 @@ public static class TimelapsePromptResolver
         return element.GetRawText();
     }
 }
+
+public sealed record TimelapseVideoPromptEnvelope(
+    string Prompt,
+    int ProfilePromptLength,
+    bool ProfilePromptTruncated);
