@@ -56,6 +56,31 @@ public sealed class DanceSellRepositoryTests
     }
 
     [Fact]
+    public void TikTokStagingSql_KeepsOriginalSourceUrlSeparateFromStagedMp4Url()
+    {
+        var source = ReadRepositorySource();
+        var updateTikTok = GetMethodSection(source, "UpdateMotionTikTokAsync");
+        var updateMotion = GetMethodSection(source, "UpdateMotionAsync");
+
+        Assert.Contains("UpdateMotionAsync(id, DanceSellMotionSourceTypes.TikTok, sourceUrl", updateTikTok, StringComparison.Ordinal);
+        Assert.Contains("motion_source_url=@sourceUrl", updateMotion, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("motion_video_url=@publicUrl", updateMotion, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ResetReferenceSql_InvalidatesPreviouslyApprovedReferenceWhenSourceImageChanges()
+    {
+        var source = ReadRepositorySource();
+        var section = GetMethodSection(source, "ResetReferenceAsync");
+
+        Assert.Contains("prepared_reference_status=@status", section, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("prepared_reference_media_id=NULL", section, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("prepared_reference_url=NULL", section, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("prepared_reference_approved_at=NULL", section, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("reference_approved_at=NULL", section, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void UpdateCompletedAsyncSql_DoesNotReferenceMissingStatusParameter()
     {
         Assert.DoesNotContain("@status", DanceSellRepository.UpdateCompletedSql, StringComparison.OrdinalIgnoreCase);

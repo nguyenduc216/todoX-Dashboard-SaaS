@@ -62,6 +62,21 @@
                                 <MudButton Variant="Variant.Outlined" Color="Color.Warning" Disabled="@(_busy || string.IsNullOrWhiteSpace(_tiktokUrl))" OnClick="StageTikTokAsync">
                                     Tải và kiểm tra video
                                 </MudButton>
+                                @if (HasTikTokSource)
+                                {
+                                    <MudPaper Outlined="true" Class="rdance-motion-file pa-3">
+                                        <MudStack Spacing="1">
+                                            <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
+                                                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1" Class="rdance-motion-file-copy">
+                                                    <MudIcon Icon="@Icons.Material.Filled.MusicNote" Size="Size.Small" />
+                                                    <MudText Typo="Typo.body2">Nguồn chuyển động: TikTok</MudText>
+                                                </MudStack>
+                                                <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning" OnClick="OpenTikTokAsync">Mở TikTok</MudButton>
+                                            </MudStack>
+                                            <MudText Typo="Typo.caption" Class="rdance-source-url">Link gốc: @_job?.MotionSourceUrl</MudText>
+                                        </MudStack>
+                                    </MudPaper>
+                                }
                                 <MudDivider />
                                 <MudText Typo="Typo.subtitle2">Hoặc tải video chuyển động MP4</MudText>
                                 <label class="@MotionUploadZoneClass" @ondragenter="OnMotionDragEnter" @ondragleave="OnMotionDragLeave" @ondragover:preventDefault="true" @ondrop:preventDefault="true" @ondrop="OnMotionDrop">
@@ -206,13 +221,9 @@
                             {
                                 <MudButton Variant="Variant.Outlined" Color="Color.Warning" Disabled="@_busy" OnClick="ApproveLatestReferenceAsync">Duyệt ảnh</MudButton>
                             }
-                            else if (_job?.ProductMediaId is not null)
+                            else if (_job?.PreparedReferenceStatus == DanceSellReferenceStatuses.Failed || _latestReference?.Status == DanceSellReferenceStatuses.Failed)
                             {
-                                <MudButton Variant="Variant.Filled" Color="Color.Warning" Disabled="@_busy" OnClick="GenerateReferenceAsync">Tạo ảnh AI</MudButton>
-                            }
-                            else
-                            {
-                                <MudButton Variant="Variant.Filled" Color="Color.Warning" Disabled="@(_busy || _job?.CharacterMediaId is null)" OnClick="ApproveCharacterAsync">Dùng ảnh người mẫu</MudButton>
+                                <MudButton Variant="Variant.Filled" Color="Color.Warning" Disabled="@(_busy || _job?.CharacterMediaId is null)" OnClick="AutoPrepareReferenceAsync">Tạo lại ảnh</MudButton>
                             }
                         </MudPaper>
                     </MudItem>
@@ -351,6 +362,7 @@
         _ => "Chưa có"
     };
     private Color ReferenceColor => _job?.PreparedReferenceStatus == DanceSellReferenceStatuses.Approved ? Color.Success : Color.Warning;
+    private bool HasTikTokSource => _job?.MotionSourceType == DanceSellMotionSourceTypes.TikTok && !string.IsNullOrWhiteSpace(_job.MotionSourceUrl);
 
     protected override void OnInitialized()
     {
@@ -393,6 +405,11 @@
         try
         {
             _job = await DanceSell.GetAsync(JobId, AuthState.CurrentUser);
+            if (_job.MotionSourceType == DanceSellMotionSourceTypes.TikTok
+                && !string.IsNullOrWhiteSpace(_job.MotionSourceUrl))
+            {
+                _tiktokUrl = _job.MotionSourceUrl;
+            }
             var versions = await DanceRepo.ListReferenceVersionsAsync(_job.Id);
             _latestReference = versions.OrderByDescending(x => x.VersionNo).FirstOrDefault();
             await RefreshEstimateAsync();
@@ -439,11 +456,23 @@
     {
         await EnsureDraftAsync();
         _job = await DanceSell.StageTikTokAsync(_job!.Id, _tiktokUrl, AuthState.CurrentUser!);
+        _tiktokUrl = _job.MotionSourceUrl ?? _tiktokUrl;
         _motionFileName = "TikTok MP4";
         _motionFileSize = null;
         _motionUploadError = null;
         Snackbar.Add("Đã staging video TikTok.", Severity.Success);
+        await ReloadAsync();
     });
+
+    private Task OpenTikTokAsync()
+    {
+        if (!string.IsNullOrWhiteSpace(_job?.MotionSourceUrl))
+        {
+            Navigation.NavigateTo(_job.MotionSourceUrl, forceLoad: true);
+        }
+
+        return Task.CompletedTask;
+    }
 
     private async Task OnMotionSelected(InputFileChangeEventArgs args)
     {
@@ -461,23 +490,34 @@
         _motionFileName = file.Name;
         _motionFileSize = file.Size;
         _motionUploadError = null;
-        await UploadAsync(args, MaxMotionVideoBytes, (bytes, uploadedFile) => DanceSell.UploadMotionAsync(_job!.Id, bytes, uploadedFile.Name, uploadedFile.ContentType, AuthState.CurrentUser!));
+        if (await UploadAsync(args, MaxMotionVideoBytes, (bytes, uploadedFile) => DanceSell.UploadMotionAsync(_job!.Id, bytes, uploadedFile.Name, uploadedFile.ContentType, AuthState.CurrentUser!)))
+        {
+            await ReloadAsync();
+        }
     }
 
     private async Task OnCharacterSelected(InputFileChangeEventArgs args)
     {
         _characterDragActive = false;
-        await UploadAsync(args, MaxImageBytes, (bytes, file) => DanceSell.UploadCharacterAsync(_job!.Id, bytes, file.Name, file.ContentType, AuthState.CurrentUser!));
+        if (await UploadAsync(args, MaxImageBytes, (bytes, file) => DanceSell.UploadCharacterAsync(_job!.Id, bytes, file.Name, file.ContentType, AuthState.CurrentUser!)))
+        {
+            await AutoPrepareReferenceAsync();
+        }
     }
 
     private async Task OnProductSelected(InputFileChangeEventArgs args)
     {
         _productDragActive = false;
-        await UploadAsync(args, MaxImageBytes, (bytes, file) => DanceSell.UploadProductAsync(_job!.Id, bytes, file.Name, file.ContentType, AuthState.CurrentUser!));
+        if (await UploadAsync(args, MaxImageBytes, (bytes, file) => DanceSell.UploadProductAsync(_job!.Id, bytes, file.Name, file.ContentType, AuthState.CurrentUser!)))
+        {
+            await AutoPrepareReferenceAsync();
+        }
     }
 
-    private async Task UploadAsync(InputFileChangeEventArgs args, long maxBytes, Func<byte[], IBrowserFile, Task<DanceSellJobDto>> save)
-        => await RunAsync(async () =>
+    private async Task<bool> UploadAsync(InputFileChangeEventArgs args, long maxBytes, Func<byte[], IBrowserFile, Task<DanceSellJobDto>> save)
+    {
+        var saved = false;
+        await RunAsync(async () =>
         {
             await EnsureDraftAsync();
             var file = args.File;
@@ -485,8 +525,28 @@
             using var buffer = new MemoryStream();
             await input.CopyToAsync(buffer);
             _job = await save(buffer.ToArray(), file);
+            saved = true;
             Snackbar.Add("Tải tệp thành công.", Severity.Success);
         });
+        return saved;
+    }
+
+    private async Task AutoPrepareReferenceAsync()
+    {
+        if (_job is null || _busy)
+        {
+            return;
+        }
+
+        await RunAsync(async () =>
+        {
+            await EnsureDraftAsync();
+            _job = await References.AutoPrepareAsync(_job!.Id, AuthState.CurrentUser!);
+            var versions = await DanceRepo.ListReferenceVersionsAsync(_job.Id);
+            _latestReference = versions.OrderByDescending(x => x.VersionNo).FirstOrDefault();
+            await RefreshEstimateAsync();
+        });
+    }
 
     private string? ValidateMotionVideo(IBrowserFile file)
     {
@@ -519,13 +579,6 @@
     private void OnProductDragEnter(DragEventArgs _) => _productDragActive = true;
     private void OnProductDragLeave(DragEventArgs _) => _productDragActive = false;
     private void OnProductDrop(DragEventArgs _) => _productDragActive = false;
-
-    private async Task GenerateReferenceAsync() => await RunAsync(async () =>
-    {
-        await UpdateBusinessAsync();
-        _latestReference = await References.GenerateAsync(_job!.Id, AuthState.CurrentUser!);
-        await ReloadAsync();
-    });
 
     private async Task ApproveCharacterAsync() => await RunAsync(async () =>
     {
@@ -693,6 +746,7 @@
     .rdance-reference-help { margin: 8px 0 4px; color: rgba(255,255,255,.68); }
     .rdance-motion-file { border-color: rgba(245,181,64,.28) !important; background: rgba(255,255,255,.035); }
     .rdance-motion-file-copy { min-width: 0; }
+    .rdance-source-url { overflow-wrap: anywhere; color: rgba(255,255,255,.68); }
     .rdance-replace-button { position: relative; display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 0 12px; overflow: hidden; border: 1px solid rgba(245,181,64,.55); border-radius: 8px; color: #f5b540; font-size: .8125rem; font-weight: 700; text-transform: uppercase; cursor: pointer; }
     .rdance-media-preview { aspect-ratio: 9 / 12; display: grid; place-items: center; overflow: hidden; border-radius: 8px; background: rgba(255,255,255,.05); margin: 12px 0; }
     .rdance-media-preview img { width: 100%; height: 100%; object-fit: contain; }

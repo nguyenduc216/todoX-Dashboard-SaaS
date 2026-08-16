@@ -70,9 +70,10 @@ public sealed class RDanceFashionDemoPageTests
             "IOptionsMonitor<DanceSellPhase2Options>",
             "DanceSell.GetAsync(JobId, AuthState.CurrentUser)",
             "StageTikTokAsync",
-            "GenerateReferenceAsync",
+            "AutoPrepareReferenceAsync",
             "ApproveLatestReferenceAsync",
             "ApproveCharacterAsync",
+            "OpenTikTokAsync",
             "ShowMessageBoxAsync",
             "Kling Motion Control",
             "Provider chính: 79AI",
@@ -94,6 +95,7 @@ public sealed class RDanceFashionDemoPageTests
         Assert.DoesNotContain("await Task.Delay", page, StringComparison.Ordinal);
         Assert.DoesNotContain("RDance", page, StringComparison.Ordinal);
         Assert.DoesNotContain("rDance", page, StringComparison.Ordinal);
+        Assert.Contains("MotionSourceUrl", page, StringComparison.Ordinal);
         Assert.Contains("NavigateTo(\"/jobs/rdance/new\")", page, StringComparison.Ordinal);
     }
 
@@ -129,6 +131,7 @@ public sealed class RDanceFashionDemoPageTests
         Assert.Contains("DanceSell.UploadCharacterAsync(_job!.Id, bytes, file.Name, file.ContentType, AuthState.CurrentUser!)", page, StringComparison.Ordinal);
         Assert.Contains("private async Task OnProductSelected(InputFileChangeEventArgs args)", page, StringComparison.Ordinal);
         Assert.Contains("DanceSell.UploadProductAsync(_job!.Id, bytes, file.Name, file.ContentType, AuthState.CurrentUser!)", page, StringComparison.Ordinal);
+        Assert.Contains("AutoPrepareReferenceAsync", page, StringComparison.Ordinal);
         Assert.Contains("file.OpenReadStream(maxBytes)", page, StringComparison.Ordinal);
         Assert.Contains("Video vượt quá dung lượng cho phép.", page, StringComparison.Ordinal);
         Assert.Contains("Video chuyển động đã sẵn sàng", page, StringComparison.Ordinal);
@@ -157,10 +160,15 @@ public sealed class RDanceFashionDemoPageTests
             "Ảnh dùng để tạo video",
             "AI sẽ kết hợp ảnh người mẫu và ảnh sản phẩm để tạo ảnh dùng cho video.",
             "Ảnh người mẫu sẽ được dùng trực tiếp để tạo video.",
-            "Tạo ảnh AI",
-            "Dùng ảnh người mẫu",
+            "Tạo lại ảnh",
             "Duyệt ảnh",
-            "Đã duyệt"
+            "Đã duyệt",
+            "Nguồn chuyển động: TikTok",
+            "Link gốc:",
+            "Mở TikTok",
+            "HasTikTokSource",
+            "_tiktokUrl = _job.MotionSourceUrl",
+            "await AutoPrepareReferenceAsync()"
         })
         {
             Assert.Contains(expected, page, StringComparison.Ordinal);
@@ -169,6 +177,8 @@ public sealed class RDanceFashionDemoPageTests
         Assert.DoesNotContain("<MudText Typo=\"Typo.h6\">Ảnh tham chiếu</MudText>", page, StringComparison.Ordinal);
         Assert.DoesNotContain("<InputFile OnChange=\"OnCharacterSelected\"", page, StringComparison.Ordinal);
         Assert.DoesNotContain("<InputFile OnChange=\"OnProductSelected\"", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("Tạo ảnh AI", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("Dùng ảnh người mẫu", page, StringComparison.Ordinal);
     }
 
     [Fact]

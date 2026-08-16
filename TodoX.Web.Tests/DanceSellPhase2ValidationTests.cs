@@ -54,6 +54,42 @@ public sealed class DanceSellPhase2ValidationTests
     }
 
     [Fact]
+    public void ReferenceRuntimeMigration_AddsOnlyCurrentRuntimeOperationContracts()
+    {
+        var root = FindRepoRoot();
+        var sql = File.ReadAllText(Path.Combine(root, "database/manual/rdance-fashion/02_fix_reference_runtime_contract.sql"));
+
+        Assert.Contains("CREATE TABLE IF NOT EXISTS dance_sell.dance_sell_provider_operations", sql, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("CREATE TABLE IF NOT EXISTS public.todox_ai_operation_assets", sql, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("dance_sell_provider_operations_attempt_idx", sql, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("todox_ai_operation_assets_unique_idx", sql, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("provider_capability_id uuid NULL", sql, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("provider_account_id uuid NULL", sql, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("timelapse", sql, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void AutoReferenceService_IsBackendSafeAndInvalidatesChangedSources()
+    {
+        var root = FindRepoRoot();
+        var service = File.ReadAllText(Path.Combine(root, "TodoX.Web/Services/DanceSell/DanceSellPhase2Services.cs"));
+        var repository = File.ReadAllText(Path.Combine(root, "TodoX.Web/Services/DanceSell/DanceSellRepository.cs"));
+
+        Assert.Contains("Task<DanceSellJobDto> AutoPrepareAsync", service, StringComparison.Ordinal);
+        Assert.Contains("ReferenceLocks.GetOrAdd", service, StringComparison.Ordinal);
+        Assert.Contains("ReferenceVersionMatches", service, StringComparison.Ordinal);
+        Assert.Contains("IsCurrentSourceAsync", service, StringComparison.Ordinal);
+        Assert.Contains("PrepareCharacterReferenceAsync", service, StringComparison.Ordinal);
+        Assert.Contains("await GenerateAsync(job.Id, user, ct)", service, StringComparison.Ordinal);
+        Assert.Contains("Status = DanceSellReferenceStatuses.Ready", service, StringComparison.Ordinal);
+        Assert.DoesNotContain("Status = DanceSellReferenceStatuses.Approved", GetMethodSection(service, "PrepareCharacterReferenceAsync"), StringComparison.Ordinal);
+        Assert.Contains("await _repo.ResetReferenceAsync(job.Id", service, StringComparison.Ordinal);
+        Assert.Contains("prepared_reference_media_id=NULL", repository, StringComparison.Ordinal);
+        Assert.Contains("prepared_reference_approved_at=NULL", repository, StringComparison.Ordinal);
+        Assert.Contains("reference_approved_at=NULL", repository, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void JsonBusinessRequest_DoesNotExposeProviderSecretsOrArbitraryProviderUrl()
     {
         var properties = typeof(DanceSellJsonBusinessRequest).GetProperties().Select(x => x.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -96,6 +132,14 @@ public sealed class DanceSellPhase2ValidationTests
         }
 
         throw new InvalidOperationException("Repository root not found.");
+    }
+
+    private static string GetMethodSection(string source, string methodName)
+    {
+        var start = source.IndexOf(methodName, StringComparison.Ordinal);
+        Assert.True(start >= 0, $"Could not locate {methodName}.");
+        var nextMethod = source.IndexOf("\n    private ", start + methodName.Length, StringComparison.Ordinal);
+        return nextMethod > start ? source[start..nextMethod] : source[start..];
     }
 
     private sealed class StaticOptionsMonitor<T> : IOptionsMonitor<T>

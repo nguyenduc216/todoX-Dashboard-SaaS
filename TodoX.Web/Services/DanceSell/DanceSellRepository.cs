@@ -20,6 +20,7 @@ public interface IDanceSellRepository
     Task UpdateDirectReferenceAsync(Guid id, Guid mediaId, string objectKey, string publicUrl, CancellationToken ct = default);
     Task UpdateMotionUploadAsync(Guid id, Guid mediaId, string objectKey, string publicUrl, CancellationToken ct = default);
     Task UpdateMotionTikTokAsync(Guid id, string sourceUrl, Guid mediaId, string objectKey, string publicUrl, CancellationToken ct = default);
+    Task ResetReferenceAsync(Guid id, string status = DanceSellReferenceStatuses.NotCreated, CancellationToken ct = default);
     Task UpdateReferenceStatusAsync(Guid id, string status, string? error = null, Guid? mediaId = null, string? objectKey = null, string? publicUrl = null, DateTime? approvedAt = null, CancellationToken ct = default);
     Task<IReadOnlyList<DanceSellReferenceVersionDto>> ListReferenceVersionsAsync(Guid danceSellJobId, CancellationToken ct = default);
     Task<DanceSellReferenceVersionDto?> GetReferenceVersionAsync(Guid versionId, CancellationToken ct = default);
@@ -327,6 +328,29 @@ public sealed class DanceSellRepository : IDanceSellRepository
 
     public async Task UpdateMotionTikTokAsync(Guid id, string sourceUrl, Guid mediaId, string objectKey, string publicUrl, CancellationToken ct = default)
         => await UpdateMotionAsync(id, DanceSellMotionSourceTypes.TikTok, sourceUrl, mediaId, objectKey, publicUrl, ct);
+
+    public async Task ResetReferenceAsync(Guid id, string status = DanceSellReferenceStatuses.NotCreated, CancellationToken ct = default)
+    {
+        using var conn = await _factory.OpenAsync(ct);
+        await conn.ExecuteAsync(
+            """
+            UPDATE dance_sell.dance_sell_jobs
+               SET prepared_reference_status=@status,
+                   source_stage_error=NULL,
+                   prepared_reference_media_id=NULL,
+                   prepared_reference_object_key=NULL,
+                   prepared_reference_url=NULL,
+                   prepared_reference_approved_at=NULL,
+                   reference_approved_at=NULL,
+                   current_stage=CASE
+                       WHEN @status='generating' THEN 'reference_generation'
+                       ELSE 'reference_inputs'
+                   END,
+                   updated_at=now()
+             WHERE id=@id;
+            """,
+            new { id, status });
+    }
 
     public async Task UpdateReferenceStatusAsync(Guid id, string status, string? error = null, Guid? mediaId = null, string? objectKey = null, string? publicUrl = null, DateTime? approvedAt = null, CancellationToken ct = default)
     {

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Collections.Concurrent;
 using Microsoft.Extensions.Options;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Formats.Png;
@@ -167,12 +168,15 @@ public sealed class DanceSellMotionSourceService : IDanceSellMotionSourceService
 public interface IDanceSellReferenceImageService
 {
     Task<DanceSellReferenceVersionDto> GenerateAsync(Guid jobId, CurrentUserSession user, CancellationToken ct = default);
+    Task<DanceSellJobDto> AutoPrepareAsync(Guid jobId, CurrentUserSession user, CancellationToken ct = default);
     Task<DanceSellJobDto> ApproveCharacterAsync(Guid jobId, CurrentUserSession user, CancellationToken ct = default);
     Task<DanceSellJobDto> ApproveAsync(Guid jobId, Guid versionId, CurrentUserSession user, CancellationToken ct = default);
 }
 
 public sealed class DanceSellReferenceImageService : IDanceSellReferenceImageService
 {
+    private static readonly ConcurrentDictionary<Guid, SemaphoreSlim> ReferenceLocks = new();
+
     private readonly IDanceSellRepository _repo;
     private readonly IMediaFileService _media;
     private readonly IDanceSellMotionSourceService _urls;
@@ -333,6 +337,11 @@ public sealed class DanceSellReferenceImageService : IDanceSellReferenceImageSer
                 CompletedAt = DateTime.UtcNow
             }, ct);
 
+            if (!await IsCurrentSourceAsync(job, ct))
+            {
+                return version;
+            }
+
             await _repo.UpdateReferenceStatusAsync(job.Id, DanceSellReferenceStatuses.Ready, null, saved.Id, saved.ObjectKey, providerUrl, ct: ct);
             if (operation is not null)
             {
@@ -352,7 +361,11 @@ public sealed class DanceSellReferenceImageService : IDanceSellReferenceImageSer
         }
         catch (Exception ex)
         {
-            await _repo.UpdateReferenceStatusAsync(job.Id, DanceSellReferenceStatuses.Failed, ex.Message, ct: ct);
+            if (await IsCurrentSourceAsync(job, ct))
+            {
+                await _repo.UpdateReferenceStatusAsync(job.Id, DanceSellReferenceStatuses.Failed, ex.Message, ct: ct);
+            }
+
             await _repo.CreateReferenceVersionAsync(new DanceSellReferenceVersionDto
             {
                 Id = Guid.NewGuid(),
@@ -377,6 +390,52 @@ public sealed class DanceSellReferenceImageService : IDanceSellReferenceImageSer
                 await _operations.MarkFailedAsync(operation.Id, "failed", DanceSellRepository.ToJson(new { error = ex.Message }), "DANCE_SELL_REFERENCE_FAILED", ex.Message, ct);
             }
             throw;
+        }
+    }
+
+    public async Task<DanceSellJobDto> AutoPrepareAsync(Guid jobId, CurrentUserSession user, CancellationToken ct = default)
+    {
+        var gate = ReferenceLocks.GetOrAdd(jobId, _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(ct);
+        try
+        {
+            var job = await RequireOwnedJobAsync(jobId, user, ct);
+            if (job.ReferenceMode == DanceSellReferenceModes.DirectReference
+                || job.CharacterMediaId is null
+                || string.IsNullOrWhiteSpace(job.CharacterImageUrl))
+            {
+                return job;
+            }
+
+            var versions = await _repo.ListReferenceVersionsAsync(job.Id, ct);
+            var reusable = versions.FirstOrDefault(version => ReferenceVersionMatches(version, job)
+                && version.Status is DanceSellReferenceStatuses.Generating or DanceSellReferenceStatuses.Ready or DanceSellReferenceStatuses.Approved);
+            if (reusable is not null)
+            {
+                if (reusable.Status == DanceSellReferenceStatuses.Ready && !string.IsNullOrWhiteSpace(reusable.PublicUrl))
+                {
+                    await _repo.UpdateReferenceStatusAsync(job.Id, DanceSellReferenceStatuses.Ready, null, reusable.MediaId, reusable.ObjectKey, reusable.PublicUrl, ct: ct);
+                    return await _repo.GetByIdAsync(job.Id, ct) ?? job;
+                }
+
+                return job;
+            }
+
+            if (job.ProductMediaId is null || string.IsNullOrWhiteSpace(job.ProductImageUrl))
+            {
+                return await PrepareCharacterReferenceAsync(job, user, versions, ct);
+            }
+
+            await GenerateAsync(job.Id, user, ct);
+            return await _repo.GetByIdAsync(job.Id, ct) ?? job;
+        }
+        finally
+        {
+            gate.Release();
+            if (gate.CurrentCount == 1)
+            {
+                ReferenceLocks.TryRemove(new KeyValuePair<Guid, SemaphoreSlim>(jobId, gate));
+            }
         }
     }
 
@@ -460,6 +519,51 @@ public sealed class DanceSellReferenceImageService : IDanceSellReferenceImageSer
             ct);
         return await _repo.GetByIdAsync(job.Id, ct) ?? job;
     }
+
+    private async Task<DanceSellJobDto> PrepareCharacterReferenceAsync(DanceSellJobDto job, CurrentUserSession user, IReadOnlyList<DanceSellReferenceVersionDto> versions, CancellationToken ct)
+    {
+        var version = await _repo.CreateReferenceVersionAsync(new DanceSellReferenceVersionDto
+        {
+            Id = Guid.NewGuid(),
+            DanceSellJobId = job.Id,
+            VersionNo = versions.Count == 0 ? 1 : versions.Max(x => x.VersionNo) + 1,
+            CharacterMediaId = job.CharacterMediaId,
+            ProductMediaId = null,
+            PlacementMode = job.PlacementMode ?? DanceSellPlacementModes.HoldProduct,
+            Prompt = job.Prompt,
+            ProviderCode = "local_composite",
+            ProviderModel = "character_input",
+            RequestJson = DanceSellRepository.ToJson(new { source = "character_input", job.CharacterMediaId }),
+            ResponseJson = DanceSellRepository.ToJson(new { source = "character_input", job.CharacterMediaId }),
+            MediaId = job.CharacterMediaId,
+            ObjectKey = job.CharacterObjectKey,
+            PublicUrl = job.CharacterImageUrl,
+            Status = DanceSellReferenceStatuses.Ready,
+            IsSelected = false,
+            CreatedBy = user.UserId,
+            CreatedAt = DateTime.UtcNow,
+            CompletedAt = DateTime.UtcNow
+        }, ct);
+
+        if (await IsCurrentSourceAsync(job, ct))
+        {
+            await _repo.UpdateReferenceStatusAsync(job.Id, DanceSellReferenceStatuses.Ready, null, version.MediaId, version.ObjectKey, version.PublicUrl, ct: ct);
+        }
+
+        return await _repo.GetByIdAsync(job.Id, ct) ?? job;
+    }
+
+    private async Task<bool> IsCurrentSourceAsync(DanceSellJobDto snapshot, CancellationToken ct)
+    {
+        var current = await _repo.GetByIdAsync(snapshot.Id, ct);
+        return current is not null
+               && current.CharacterMediaId == snapshot.CharacterMediaId
+               && current.ProductMediaId == snapshot.ProductMediaId;
+    }
+
+    private static bool ReferenceVersionMatches(DanceSellReferenceVersionDto version, DanceSellJobDto job)
+        => version.CharacterMediaId == job.CharacterMediaId
+           && version.ProductMediaId == job.ProductMediaId;
 
     private async Task<DanceSellJobDto> RequireOwnedJobAsync(Guid id, CurrentUserSession user, CancellationToken ct)
     {
@@ -649,7 +753,7 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
         await _tenant.EnsureLoadedAsync(ct);
         var media = await _media.SaveAsync(content, fileName, contentType, "dance_sell_character", user.UserId, user.CustomerId, _tenant.TenantId, ct);
         await _repo.UpdateCharacterAsync(job.Id, media.Id, media.ObjectKey ?? string.Empty, _motion.ToProviderUrl(media.PublicUrl ?? media.FileUrl), ct);
-        await _repo.UpdateReferenceStatusAsync(job.Id, DanceSellReferenceStatuses.NotCreated, ct: ct);
+        await _repo.ResetReferenceAsync(job.Id, ct: ct);
         return await _repo.GetByIdAsync(job.Id, ct) ?? job;
     }
 
@@ -664,7 +768,7 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
         await _tenant.EnsureLoadedAsync(ct);
         var media = await _media.SaveAsync(content, fileName, contentType, "dance_sell_product", user.UserId, user.CustomerId, _tenant.TenantId, ct);
         await _repo.UpdateProductAsync(job.Id, media.Id, media.ObjectKey ?? string.Empty, _motion.ToProviderUrl(media.PublicUrl ?? media.FileUrl), ct);
-        await _repo.UpdateReferenceStatusAsync(job.Id, DanceSellReferenceStatuses.NotCreated, ct: ct);
+        await _repo.ResetReferenceAsync(job.Id, ct: ct);
         return await _repo.GetByIdAsync(job.Id, ct) ?? job;
     }
 
