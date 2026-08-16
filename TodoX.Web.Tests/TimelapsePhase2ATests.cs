@@ -26,11 +26,13 @@ public class TimelapsePhase2ATests
         }
         else
         {
-            Assert.StartsWith(expectedRoute, route.Route);
-            if (route.Route.Contains("?", StringComparison.Ordinal))
+            Assert.NotNull(route.Route);
+            var actualRoute = route.Route!;
+            Assert.StartsWith(expectedRoute, actualRoute);
+            if (actualRoute.Contains("?", StringComparison.Ordinal))
             {
-                Assert.Contains($"serviceId={serviceId}", route.Route);
-                Assert.Contains("serviceCode=CONSTRUCTION_VIDEO", route.Route);
+                Assert.Contains($"serviceId={serviceId}", actualRoute);
+                Assert.Contains("serviceCode=CONSTRUCTION_VIDEO", actualRoute);
             }
         }
 

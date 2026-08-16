@@ -87,6 +87,8 @@ public sealed class CommercialVideoServiceCatalogTests
         Assert.Contains("ThenBy(x => x.DisplayName, StringComparer.OrdinalIgnoreCase)", create, StringComparison.Ordinal);
         Assert.Contains("CustomerServiceRouting.Resolve(service.ServiceType, service.Id, service.ServiceCode)", create, StringComparison.Ordinal);
         Assert.Contains("Navigation.NavigateTo(route.Route)", create, StringComparison.Ordinal);
+        Assert.Contains("_hasServiceUnavailableInfo", create, StringComparison.Ordinal);
+        Assert.Contains("Snackbar.Clear()", create, StringComparison.Ordinal);
         var rDanceRoute = TodoX.Web.Models.Timelapse.CustomerServiceRouting.Resolve(TodoXServiceEngineTypes.RDance, Guid.NewGuid(), "RDANCE_FASHION");
         Assert.Equal(TodoX.Web.Models.Timelapse.CustomerServiceDestination.RDanceCreator, rDanceRoute.Destination);
         Assert.NotNull(rDanceRoute.Route);

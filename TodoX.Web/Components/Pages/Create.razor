@@ -93,6 +93,7 @@
 @code {
     private IReadOnlyList<CatalogServiceView> _services = Array.Empty<CatalogServiceView>();
     private bool _loading = true;
+    private bool _hasServiceUnavailableInfo;
     private string? _error;
 
     protected override async Task OnInitializedAsync()
@@ -147,10 +148,17 @@
         var route = CustomerServiceRouting.Resolve(service.ServiceType, service.Id, service.ServiceCode);
         if (!string.IsNullOrWhiteSpace(route.Route))
         {
+            if (_hasServiceUnavailableInfo)
+            {
+                Snackbar.Clear();
+                _hasServiceUnavailableInfo = false;
+            }
+
             Navigation.NavigateTo(route.Route);
             return;
         }
 
+        _hasServiceUnavailableInfo = true;
         Snackbar.Add(route.Message ?? "Dịch vụ hiện chưa khả dụng.", Severity.Info);
     }
 }

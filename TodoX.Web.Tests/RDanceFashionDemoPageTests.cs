@@ -20,6 +20,7 @@ public sealed class RDanceFashionDemoPageTests
             "IDanceSellPhase2Service",
             "IDanceSellReferenceImageService",
             "IDanceSellProviderCatalog",
+            "IOptionsMonitor<DanceSellPhase2Options>",
             "InputFile",
             "StageTikTokAsync",
             "GenerateReferenceAsync",
@@ -39,6 +40,53 @@ public sealed class RDanceFashionDemoPageTests
         Assert.DoesNotContain("Task.Delay(500)", page, StringComparison.Ordinal);
         Assert.DoesNotContain("/resources/mockup/rdance-fashion", page, StringComparison.Ordinal);
         Assert.DoesNotContain("await Task.Delay", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PageUsesStyledMp4DropZoneInsteadOfRawMotionInput()
+    {
+        var page = ReadStrictUtf8(Path.Combine(FindRepoRoot(), "TodoX.Web", "Components", "Pages", "RDanceFashionDemo.razor"));
+
+        Assert.Contains("class=\"@MotionUploadZoneClass\"", page, StringComparison.Ordinal);
+        Assert.Contains("rdance-hidden-file-input", page, StringComparison.Ordinal);
+        Assert.Contains("OnChange=\"OnMotionSelected\" accept=\"video/mp4\"", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("<InputFile OnChange=\"OnMotionSelected\" accept=\"video/mp4\"", page, StringComparison.Ordinal);
+        Assert.Contains("Kéo thả video MP4 vào đây", page, StringComparison.Ordinal);
+        Assert.Contains("hoặc bấm để chọn video", page, StringComparison.Ordinal);
+        Assert.Contains("MP4 · tối đa @MaxMotionVideoLabel", page, StringComparison.Ordinal);
+        Assert.Contains("OnMotionDragEnter", page, StringComparison.Ordinal);
+        Assert.Contains("OnMotionDrop", page, StringComparison.Ordinal);
+        Assert.Contains("Thay video", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PageValidatesMotionUploadBeforeBackendUpload()
+    {
+        var page = ReadStrictUtf8(Path.Combine(FindRepoRoot(), "TodoX.Web", "Components", "Pages", "RDanceFashionDemo.razor"));
+
+        Assert.Contains("ValidateMotionVideo(file)", page, StringComparison.Ordinal);
+        Assert.Contains("file.Size > MaxMotionVideoBytes", page, StringComparison.Ordinal);
+        Assert.Contains("file.ContentType.Equals(\"video/mp4\"", page, StringComparison.Ordinal);
+        Assert.Contains("Path.GetExtension(file.Name).Equals(\".mp4\"", page, StringComparison.Ordinal);
+        Assert.Contains("Chỉ hỗ trợ video MP4.", page, StringComparison.Ordinal);
+        Assert.Contains("Video vượt quá dung lượng cho phép.", page, StringComparison.Ordinal);
+        Assert.Contains("DanceSell.UploadMotionAsync", page, StringComparison.Ordinal);
+        Assert.Contains("OpenReadStream(MaxMotionVideoBytes)", page, StringComparison.Ordinal);
+
+        Assert.True(page.IndexOf("ValidateMotionVideo(file)", StringComparison.Ordinal) < page.IndexOf("DanceSell.UploadMotionAsync", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void PageShowsMotionReadyStateAndContinueGate()
+    {
+        var page = ReadStrictUtf8(Path.Combine(FindRepoRoot(), "TodoX.Web", "Components", "Pages", "RDanceFashionDemo.razor"));
+
+        Assert.Contains("Video chuyển động đã sẵn sàng", page, StringComparison.Ordinal);
+        Assert.Contains("MotionSourceName", page, StringComparison.Ordinal);
+        Assert.Contains("_motionFileName", page, StringComparison.Ordinal);
+        Assert.Contains("_motionFileSize", page, StringComparison.Ordinal);
+        Assert.Contains("Disabled=\"@(_job?.MotionVideoMediaId is null || _busy)\"", page, StringComparison.Ordinal);
+        Assert.Contains("DanceSell.StageTikTokAsync", page, StringComparison.Ordinal);
     }
 
     [Fact]
