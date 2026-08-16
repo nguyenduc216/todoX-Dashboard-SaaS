@@ -549,14 +549,24 @@ public class TimelapsePhase2CTests
         Assert.DoesNotContain(".clip-input-thumbnails", pageCss, StringComparison.Ordinal);
 
         Assert.Contains("class=\"tl-processing-mask @(IsVideo ? \"is-video\" : \"is-image\")\"", overlay, StringComparison.Ordinal);
+        Assert.Contains("role=\"status\"", overlay, StringComparison.Ordinal);
+        Assert.Contains("aria-label=\"@(IsVideo ? \"Video processing\" : \"Image processing\")\"", overlay, StringComparison.Ordinal);
         Assert.Contains("tl-processing-flash", overlay, StringComparison.Ordinal);
         Assert.Contains("tl-processing-beam", overlay, StringComparison.Ordinal);
         Assert.Contains("tl-processing-scan", overlay, StringComparison.Ordinal);
         Assert.Contains("tl-processing-spinner", overlay, StringComparison.Ordinal);
         Assert.Contains("tl-processing-dots", overlay, StringComparison.Ordinal);
         Assert.Contains("tl-processing-wave", overlay, StringComparison.Ordinal);
-        Assert.Contains("Đang tạo video", overlay, StringComparison.Ordinal);
-        Assert.Contains("Đang tạo ảnh", overlay, StringComparison.Ordinal);
+        Assert.DoesNotContain("MudIcon", overlay, StringComparison.Ordinal);
+        Assert.DoesNotContain("MovieCreation", overlay, StringComparison.Ordinal);
+        Assert.DoesNotContain("AutoAwesome", overlay, StringComparison.Ordinal);
+        Assert.DoesNotContain("tl-processing-text", overlay, StringComparison.Ordinal);
+        Assert.DoesNotContain("\u0110ang t\u1ea1o video", overlay, StringComparison.Ordinal);
+        Assert.DoesNotContain("\u0110ang t\u1ea1o \u1ea3nh", overlay, StringComparison.Ordinal);
+        Assert.DoesNotContain("Äang táº¡o video", overlay, StringComparison.Ordinal);
+        Assert.DoesNotContain("Äang táº¡o áº£nh", overlay, StringComparison.Ordinal);
+        Assert.DoesNotContain("Ã„Âang tÃ¡ÂºÂ¡o video", overlay, StringComparison.Ordinal);
+        Assert.DoesNotContain("Ã„Âang tÃ¡ÂºÂ¡o Ã¡ÂºÂ£nh", overlay, StringComparison.Ordinal);
 
         Assert.Contains(".tl-processing-mask", overlayCss, StringComparison.Ordinal);
         Assert.Contains(".tl-processing-mask.is-video", overlayCss, StringComparison.Ordinal);
@@ -572,9 +582,13 @@ public class TimelapsePhase2CTests
         Assert.Contains("@keyframes tl-processing-scan-down", overlayCss, StringComparison.Ordinal);
         Assert.Contains("@keyframes tl-processing-scan-across", overlayCss, StringComparison.Ordinal);
         Assert.Contains("@keyframes tl-processing-spin", overlayCss, StringComparison.Ordinal);
-        Assert.Contains("@keyframes tl-processing-icon-pulse", overlayCss, StringComparison.Ordinal);
         Assert.Contains("@keyframes tl-processing-dots", overlayCss, StringComparison.Ordinal);
         Assert.Contains("@keyframes tl-processing-wave", overlayCss, StringComparison.Ordinal);
+        Assert.Contains("animation: tl-processing-spin 0.75s linear infinite;", overlayCss, StringComparison.Ordinal);
+        Assert.DoesNotContain("tl-processing-icon-pulse", overlayCss, StringComparison.Ordinal);
+        Assert.DoesNotContain("tl-processing-text-shimmer", overlayCss, StringComparison.Ordinal);
+        Assert.DoesNotContain(".tl-processing-text", overlayCss, StringComparison.Ordinal);
+        Assert.DoesNotContain(".mud-icon-root", overlayCss, StringComparison.Ordinal);
         Assert.Contains("transform: rotate(360deg);", overlayCss, StringComparison.Ordinal);
         Assert.Contains("@media (prefers-reduced-motion: reduce)", overlayCss, StringComparison.Ordinal);
         Assert.Contains("window.matchMedia('(prefers-reduced-motion: reduce)').matches", pageCss, StringComparison.Ordinal);
