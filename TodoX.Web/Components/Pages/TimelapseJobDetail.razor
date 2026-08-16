@@ -219,6 +219,10 @@
                                                 <MudIcon Icon="@Icons.Material.Filled.Image" Size="Size.Large" />
                                                 <span>@ImagePlaceholderText(image)</span>
                                             }
+                                            @if (IsRenderingOperation(image.Status))
+                                            {
+                                                @RenderProcessingOverlay(isVideo: false)
+                                            }
                                         </div>
                                         <div class="tl-image-card-footer">
                                             <div class="tl-image-meta-row">
@@ -322,7 +326,7 @@
                                             </MudChip>
                                         </div>
                                         <div class="@PreviewClass("video-preview", clip.Status)">
-                                            @if (TimelapseVideoOrchestration.HasCompletedPreview(clip))
+                                            @if (TimelapseVideoOrchestration.HasCompletedPreview(clip) || (IsRenderingOperation(clip.Status) && !string.IsNullOrWhiteSpace(clip.PublicUrl)))
                                             {
                                                 <video src="@clip.PublicUrl" controls playsinline preload="metadata"></video>
                                             }
@@ -351,17 +355,10 @@
                                                 <MudIcon Icon="@Icons.Material.Filled.Movie" Size="Size.Large" />
                                                 <span>@VideoPlaceholderText(clip)</span>
                                             }
-                                        </div>
-                                        <div class="clip-input-thumbnails" aria-label="Ảnh tham chiếu đầu và cuối">
-                                            <div class="clip-input-reference">
-                                                @RenderImageThumb(clip.StartProgressPercent)
-                                                <span class="clip-input-label">Ảnh đầu @clip.StartProgressPercent%</span>
-                                            </div>
-                                            <MudIcon Icon="@Icons.Material.Filled.ArrowForward" Size="Size.Small" Class="clip-input-arrow" />
-                                            <div class="clip-input-reference">
-                                                @RenderImageThumb(clip.EndProgressPercent)
-                                                <span class="clip-input-label">Ảnh cuối @clip.EndProgressPercent%</span>
-                                            </div>
+                                            @if (IsRenderingOperation(clip.Status))
+                                            {
+                                                @RenderProcessingOverlay(isVideo: true)
+                                            }
                                         </div>
                                         <div class="tl-video-card-footer">
                                             <MudText Typo="Typo.caption" Color="Color.Secondary">@FormatClipStartedAt(clip)</MudText>
@@ -792,22 +789,33 @@
         }
     }
 
-    private RenderFragment RenderImageThumb(int progress) => builder =>
+    private static RenderFragment RenderProcessingOverlay(bool isVideo) => builder =>
     {
-        var image = ImageCards.FirstOrDefault(x => x.ProgressPercent == progress);
-        if (!string.IsNullOrWhiteSpace(image?.PublicUrl))
-        {
-            builder.OpenElement(0, "img");
-            builder.AddAttribute(1, "src", image.PublicUrl);
-            builder.AddAttribute(2, "alt", $"{progress}%");
-            builder.AddAttribute(3, "class", "clip-input-image");
-            builder.CloseElement();
-            return;
-        }
-
+        builder.OpenElement(0, "div");
+        builder.AddAttribute(1, "class", isVideo ? "tl-processing-overlay is-video" : "tl-processing-overlay is-image");
+        builder.AddAttribute(2, "role", "status");
+        builder.AddAttribute(3, "aria-live", "polite");
         builder.OpenElement(4, "span");
-        builder.AddAttribute(5, "class", "clip-input-placeholder");
-        builder.AddContent(6, $"{progress}%");
+        builder.AddAttribute(5, "class", "tl-processing-sweep");
+        builder.AddAttribute(6, "aria-hidden", "true");
+        builder.CloseElement();
+        builder.OpenElement(7, "span");
+        builder.AddAttribute(8, "class", "tl-processing-scan");
+        builder.AddAttribute(9, "aria-hidden", "true");
+        builder.CloseElement();
+        builder.OpenElement(10, "span");
+        builder.AddAttribute(11, "class", "tl-processing-center");
+        builder.OpenElement(12, "span");
+        builder.AddAttribute(13, "class", "tl-processing-icon");
+        builder.OpenComponent<MudIcon>(14);
+        builder.AddAttribute(15, "Icon", isVideo ? Icons.Material.Filled.MovieCreation : Icons.Material.Filled.AutoAwesome);
+        builder.AddAttribute(16, "Size", Size.Large);
+        builder.CloseComponent();
+        builder.CloseElement();
+        builder.OpenElement(17, "strong");
+        builder.AddContent(18, "Đang xử lý...");
+        builder.CloseElement();
+        builder.CloseElement();
         builder.CloseElement();
     };
 

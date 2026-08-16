@@ -310,13 +310,7 @@ public sealed class TimelapseWorkflowService : ITimelapseWorkflowService
         using var conn = await _factory.OpenAsync(ct);
         using var tx = conn.BeginTransaction();
         await LockJobAsync(conn, tx, jobId);
-
-        var state = await ReadStateAsync(conn, jobId, tx);
-        if (state.HasActiveOperations)
-        {
-            throw new InvalidOperationException("Vui lòng chờ tác vụ đang chạy hoàn tất trước khi render lại.");
-        }
-
+        await EnsureVideoRetryAllowedAsync(conn, tx, jobId, clipIndex);
         await InvalidateVideosAsync(conn, tx, jobId, TimelapseStageGraphBuilder.PlanVideoRerender(snapshot.SceneCount, clipIndex).VideoClips);
         await InvalidateFinalAsync(conn, tx, jobId);
         await StartReadyVideosAsync(conn, tx, jobId);
@@ -326,6 +320,103 @@ public sealed class TimelapseWorkflowService : ITimelapseWorkflowService
             "Customer requested video clip rerender; final output was invalidated.", new { clipIndex }, ct: ct);
 
         return await GetStateAsync(jobId, ct);
+    }
+
+    private async Task EnsureVideoRetryAllowedAsync(System.Data.IDbConnection conn, System.Data.IDbTransaction tx, Guid jobId, int clipIndex)
+    {
+        var clip = await conn.QuerySingleOrDefaultAsync<VideoRetryClipRow>(
+            """
+            SELECT id AS Id,
+                   clip_index AS ClipIndex,
+                   start_progress_percent AS StartProgressPercent,
+                   end_progress_percent AS EndProgressPercent,
+                   status AS Status,
+                   active_attempt AS ActiveAttempt
+              FROM timelapse.timelapse_video_clips
+             WHERE tenant_id=@tenant
+               AND job_id=@jobId
+               AND clip_index=@clipIndex
+             FOR UPDATE;
+            """,
+            new { tenant = _tenant.TenantId, jobId, clipIndex }, tx);
+        if (clip is null)
+        {
+            throw new InvalidOperationException("Không tìm thấy video clip Timelapse thuộc job này.");
+        }
+
+        if (TimelapseOperationStatuses.IsActive(clip.Status))
+        {
+            throw new InvalidOperationException("Video clip này đang được tạo. Vui lòng chờ hoàn tất trước khi render lại.");
+        }
+
+        if (clip.Status is not TimelapseOperationStatuses.Failed
+            and not TimelapseOperationStatuses.Completed
+            and not TimelapseOperationStatuses.Invalidated)
+        {
+            throw new InvalidOperationException("Video clip này chưa sẵn sàng để render lại.");
+        }
+
+        var hasActiveCurrentAttempt = await conn.QuerySingleAsync<bool>(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                  FROM timelapse.timelapse_video_clip_versions
+                 WHERE video_clip_id=@clipId
+                   AND attempt=@attempt
+                   AND status='RENDERING'
+            );
+            """,
+            new { clipId = clip.Id, attempt = clip.ActiveAttempt }, tx);
+        if (hasActiveCurrentAttempt)
+        {
+            throw new InvalidOperationException("Video clip này đang có lần render đang chạy.");
+        }
+
+        var dependencyStatuses = (await conn.QueryAsync<ImageDependencyStatusRow>(
+            """
+            SELECT progress_percent AS ProgressPercent,
+                   status AS Status
+              FROM timelapse.timelapse_image_stages
+             WHERE tenant_id=@tenant
+               AND job_id=@jobId
+               AND progress_percent = ANY(@progress)
+             FOR UPDATE;
+            """,
+            new
+            {
+                tenant = _tenant.TenantId,
+                jobId,
+                progress = new[] { clip.StartProgressPercent, clip.EndProgressPercent }
+            }, tx)).ToDictionary(x => x.ProgressPercent);
+        EnsureCompletedDependency(dependencyStatuses, clip.StartProgressPercent);
+        EnsureCompletedDependency(dependencyStatuses, clip.EndProgressPercent);
+
+        var finalizerActive = await conn.QuerySingleAsync<bool>(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                  FROM timelapse.timelapse_final_outputs
+                 WHERE tenant_id=@tenant
+                   AND job_id=@jobId
+                   AND status='RENDERING'
+            );
+            """,
+            new { tenant = _tenant.TenantId, jobId }, tx);
+        if (finalizerActive)
+        {
+            throw new InvalidOperationException("Video cuối đang được hoàn thiện. Vui lòng chờ xong trước khi render lại clip.");
+        }
+    }
+
+    private static void EnsureCompletedDependency(
+        IReadOnlyDictionary<int, ImageDependencyStatusRow> statuses,
+        int progress)
+    {
+        if (!statuses.TryGetValue(progress, out var image)
+            || !TimelapseOperationStatuses.IsCurrentCompleted(image.Status))
+        {
+            throw new InvalidOperationException($"Ảnh phụ thuộc {progress}% chưa hoàn thành nên chưa thể render lại video clip này.");
+        }
     }
 
     public async Task<TimelapseWorkflowState> StartFinalizerAsync(Guid jobId, TimelapseJobSnapshot snapshot, CurrentUserSession currentUser, CancellationToken ct = default)
@@ -824,5 +915,21 @@ public sealed class TimelapseWorkflowService : ITimelapseWorkflowService
         public bool IsOriginal { get; set; }
         public string Status { get; set; } = string.Empty;
         public string PromptSnapshotJson { get; set; } = "{}";
+    }
+
+    private sealed class VideoRetryClipRow
+    {
+        public Guid Id { get; set; }
+        public int ClipIndex { get; set; }
+        public int StartProgressPercent { get; set; }
+        public int EndProgressPercent { get; set; }
+        public string Status { get; set; } = string.Empty;
+        public int ActiveAttempt { get; set; }
+    }
+
+    private sealed class ImageDependencyStatusRow
+    {
+        public int ProgressPercent { get; set; }
+        public string Status { get; set; } = string.Empty;
     }
 }

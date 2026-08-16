@@ -325,25 +325,27 @@ public class TimelapsePhase2CTests
     }
 
     [Fact]
-    public void TimelapseDetailUi_ConstrainsVideoCardsAndInputThumbnails()
+    public void TimelapseDetailUi_RemovesVideoInputThumbnailsAndKeepsPreviewConstrained()
     {
         var razor = ReadSource("TodoX.Web", "Components", "Pages", "TimelapseJobDetail.razor");
         var css = ReadSource("TodoX.Web", "Components", "Pages", "TimelapseJobDetail.razor.css");
 
         Assert.Contains("video-stage-card", razor, StringComparison.Ordinal);
-        Assert.Contains("class=\"clip-input-thumbnails\"", razor, StringComparison.Ordinal);
-        Assert.Contains("@RenderImageThumb(clip.StartProgressPercent)", razor, StringComparison.Ordinal);
-        Assert.Contains("@RenderImageThumb(clip.EndProgressPercent)", razor, StringComparison.Ordinal);
-        Assert.Contains("clip-input-image", razor, StringComparison.Ordinal);
+        Assert.Contains("PreviewClass(\"video-preview\"", razor, StringComparison.Ordinal);
+        Assert.DoesNotContain("class=\"clip-input-thumbnails\"", razor, StringComparison.Ordinal);
+        Assert.DoesNotContain("RenderImageThumb", razor, StringComparison.Ordinal);
+        Assert.DoesNotContain("clip-input-image", razor, StringComparison.Ordinal);
+        Assert.DoesNotContain("clip-input-placeholder", razor, StringComparison.Ordinal);
 
         Assert.Contains(".timelapse-stage-grid > *", css, StringComparison.Ordinal);
+        Assert.Contains("repeat(auto-fill, minmax(260px, 320px))", css, StringComparison.Ordinal);
         Assert.Contains("min-width: 0;", css, StringComparison.Ordinal);
         Assert.Contains("max-width: 100%;", css, StringComparison.Ordinal);
         Assert.Contains("overflow: hidden;", css, StringComparison.Ordinal);
-        Assert.Contains("grid-template-columns: minmax(72px, 88px) 20px minmax(72px, 88px);", css, StringComparison.Ordinal);
-        Assert.Contains("height: auto;", css, StringComparison.Ordinal);
         Assert.Contains("object-fit: cover;", css, StringComparison.Ordinal);
         Assert.Contains("aspect-ratio: 16 / 9;", css, StringComparison.Ordinal);
+        Assert.DoesNotContain(".clip-input-thumbnails", css, StringComparison.Ordinal);
+        Assert.DoesNotContain(".clip-input-reference", css, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -358,14 +360,52 @@ public class TimelapsePhase2CTests
         Assert.Contains("tl-active-scanline tl-video-scanline", razor, StringComparison.Ordinal);
         Assert.Contains("tl-video-wave", razor, StringComparison.Ordinal);
         Assert.Contains("tl-status-dot", razor, StringComparison.Ordinal);
+        Assert.Contains("RenderProcessingOverlay(isVideo: false)", razor, StringComparison.Ordinal);
+        Assert.Contains("RenderProcessingOverlay(isVideo: true)", razor, StringComparison.Ordinal);
+        Assert.Contains("tl-processing-overlay", razor, StringComparison.Ordinal);
+        Assert.Contains("Đang xử lý...", razor, StringComparison.Ordinal);
 
         Assert.Contains(".tl-active-render::after", css, StringComparison.Ordinal);
+        Assert.Contains(".tl-processing-overlay", css, StringComparison.Ordinal);
+        Assert.Contains(".tl-processing-overlay.is-video", css, StringComparison.Ordinal);
+        Assert.Contains(".tl-processing-sweep", css, StringComparison.Ordinal);
+        Assert.Contains(".tl-processing-scan", css, StringComparison.Ordinal);
+        Assert.Contains(".tl-processing-center", css, StringComparison.Ordinal);
         Assert.Contains("rgba(4, 8, 12, 0.5)", css, StringComparison.Ordinal);
         Assert.Contains("rgba(255, 224, 130, 0.78)", css, StringComparison.Ordinal);
         Assert.Contains("rgba(128, 222, 234, 0.76)", css, StringComparison.Ordinal);
         Assert.Contains("height: 3px;", css, StringComparison.Ordinal);
         Assert.Contains("width: 3px;", css, StringComparison.Ordinal);
         Assert.Contains("@media (prefers-reduced-motion: reduce)", css, StringComparison.Ordinal);
+        Assert.Contains(".tl-processing-overlay {", css, StringComparison.Ordinal);
+        Assert.Contains("background: rgba(4, 8, 12, 0.58);", css, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void VideoRetry_IsTargetAwareAndKeepsConcurrencyGuards()
+    {
+        var workflow = ReadSource("TodoX.Web", "Services", "Timelapse", "TimelapseWorkflowService.cs");
+        var retryStart = workflow.IndexOf("public async Task<TimelapseWorkflowState> RetryVideoAsync", StringComparison.Ordinal);
+        var retryEnd = workflow.IndexOf("public async Task<TimelapseWorkflowState> StartFinalizerAsync", retryStart, StringComparison.Ordinal);
+        var retry = workflow[retryStart..retryEnd];
+
+        Assert.Contains("await LockJobAsync(conn, tx, jobId);", retry, StringComparison.Ordinal);
+        Assert.Contains("await EnsureVideoRetryAllowedAsync(conn, tx, jobId, clipIndex);", retry, StringComparison.Ordinal);
+        Assert.DoesNotContain("state.HasActiveOperations", retry, StringComparison.Ordinal);
+        Assert.Contains("FOR UPDATE", retry, StringComparison.Ordinal);
+        Assert.Contains("clip_index=@clipIndex", retry, StringComparison.Ordinal);
+        Assert.Contains("TimelapseOperationStatuses.IsActive(clip.Status)", retry, StringComparison.Ordinal);
+        Assert.Contains("TimelapseOperationStatuses.Failed", retry, StringComparison.Ordinal);
+        Assert.Contains("TimelapseOperationStatuses.Completed", retry, StringComparison.Ordinal);
+        Assert.Contains("TimelapseOperationStatuses.Invalidated", retry, StringComparison.Ordinal);
+        Assert.Contains("timelapse.timelapse_video_clip_versions", retry, StringComparison.Ordinal);
+        Assert.Contains("attempt=@attempt", retry, StringComparison.Ordinal);
+        Assert.Contains("progress = new[] { clip.StartProgressPercent, clip.EndProgressPercent }", retry, StringComparison.Ordinal);
+        Assert.Contains("EnsureCompletedDependency(dependencyStatuses, clip.StartProgressPercent)", retry, StringComparison.Ordinal);
+        Assert.Contains("EnsureCompletedDependency(dependencyStatuses, clip.EndProgressPercent)", retry, StringComparison.Ordinal);
+        Assert.Contains("timelapse.timelapse_final_outputs", retry, StringComparison.Ordinal);
+        Assert.Contains("status='RENDERING'", retry, StringComparison.Ordinal);
+        Assert.Contains("StartReadyVideosAsync(conn, tx, jobId)", retry, StringComparison.Ordinal);
     }
 
     [Fact]

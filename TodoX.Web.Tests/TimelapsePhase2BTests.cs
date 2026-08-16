@@ -190,32 +190,31 @@ public class TimelapsePhase2BTests
         => Assert.Equal(expected, TimelapseStatusText.Parent(status));
 
     [Fact]
-    public void VideoCards_KeepMainPreviewSeparateFromCompactInputThumbnails()
+    public void VideoCards_UseMainPreviewWithoutInputThumbnails()
     {
         var detail = ReadSource("TodoX.Web", "Components", "Pages", "TimelapseJobDetail.razor");
         var css = ReadSource("TodoX.Web", "Components", "Pages", "TimelapseJobDetail.razor.css");
         var videoCardStart = detail.IndexOf("video-stage-card", StringComparison.Ordinal);
         var previewIndex = detail.IndexOf("PreviewClass(\"video-preview\"", videoCardStart, StringComparison.Ordinal);
-        var thumbnailsIndex = detail.IndexOf("class=\"clip-input-thumbnails\"", previewIndex, StringComparison.Ordinal);
-        var footerIndex = detail.IndexOf("class=\"tl-video-card-footer\"", thumbnailsIndex, StringComparison.Ordinal);
+        var footerIndex = detail.IndexOf("class=\"tl-video-card-footer\"", previewIndex, StringComparison.Ordinal);
 
         Assert.True(videoCardStart >= 0);
         Assert.True(previewIndex > videoCardStart);
-        Assert.True(thumbnailsIndex > previewIndex);
-        Assert.True(footerIndex > thumbnailsIndex);
-        Assert.Contains("Ảnh đầu @clip.StartProgressPercent%", detail, StringComparison.Ordinal);
-        Assert.Contains("Ảnh cuối @clip.EndProgressPercent%", detail, StringComparison.Ordinal);
-        Assert.Contains("clip-input-image", detail, StringComparison.Ordinal);
-        Assert.Contains("clip-input-placeholder", detail, StringComparison.Ordinal);
+        Assert.True(footerIndex > previewIndex);
+        Assert.DoesNotContain("class=\"clip-input-thumbnails\"", detail, StringComparison.Ordinal);
+        Assert.DoesNotContain("RenderImageThumb", detail, StringComparison.Ordinal);
+        Assert.DoesNotContain("Ảnh đầu @clip.StartProgressPercent%", detail, StringComparison.Ordinal);
+        Assert.DoesNotContain("Ảnh cuối @clip.EndProgressPercent%", detail, StringComparison.Ordinal);
+        Assert.DoesNotContain("clip-input-image", detail, StringComparison.Ordinal);
+        Assert.DoesNotContain("clip-input-placeholder", detail, StringComparison.Ordinal);
         Assert.DoesNotContain("class=\"clip-thumbs\"", detail, StringComparison.Ordinal);
 
         Assert.Contains(".video-preview {\n    aspect-ratio: 16 / 9;", css, StringComparison.Ordinal);
-        Assert.Contains("grid-template-columns: minmax(72px, 88px) 20px minmax(72px, 88px);", css, StringComparison.Ordinal);
-        Assert.Contains("width: min(100%, 208px);", css, StringComparison.Ordinal);
+        Assert.Contains("repeat(auto-fill, minmax(260px, 320px))", css, StringComparison.Ordinal);
         Assert.Contains("object-fit: cover;", css, StringComparison.Ordinal);
         Assert.Contains("overflow-wrap: anywhere;", css, StringComparison.Ordinal);
         Assert.Contains("@media (max-width: 700px)", css, StringComparison.Ordinal);
-        Assert.Contains("grid-template-columns: minmax(72px, 80px) 18px minmax(72px, 80px);", css, StringComparison.Ordinal);
+        Assert.DoesNotContain(".clip-input-thumbnails", css, StringComparison.Ordinal);
         Assert.DoesNotContain(".clip-thumbs img", css, StringComparison.Ordinal);
     }
 
