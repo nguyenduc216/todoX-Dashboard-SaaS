@@ -610,6 +610,55 @@ public class TimelapsePhase2CTests
     }
 
     [Fact]
+    public void TimelapseFinalizingOverlay_AnimatesVideoPiecesAndPreservesCompletedOutput()
+    {
+        var razor = ReadSource("TodoX.Web", "Components", "Pages", "TimelapseJobDetail.razor");
+        var pageCss = ReadSource("TodoX.Web", "Components", "Pages", "TimelapseJobDetail.razor.css");
+        var overlay = ReadSource("TodoX.Web", "Components", "Timelapse", "TimelapseFinalizingOverlay.razor");
+        var overlayCss = ReadSource("TodoX.Web", "Components", "Timelapse", "TimelapseFinalizingOverlay.razor.css");
+
+        Assert.Contains("IsFinalOutputLoading", razor, StringComparison.Ordinal);
+        Assert.Contains("TimelapseParentStatuses.Finalizing", razor, StringComparison.Ordinal);
+        Assert.Contains("<TimelapseFinalizingOverlay Title=\"@FinalLoadingTitle\" Subtitle=\"@FinalLoadingSubtitle\" />", razor, StringComparison.Ordinal);
+        Assert.Contains("<video src=\"@_job.Workflow.FinalOutput.PublicUrl\" controls playsinline class=\"final-video\"></video>", razor, StringComparison.Ordinal);
+        Assert.Contains("_job.Workflow.FinalOutput?.Status == TimelapseOperationStatuses.Completed", razor, StringComparison.Ordinal);
+        Assert.DoesNotContain("class=\"tl-final-loading", razor, StringComparison.Ordinal);
+        Assert.DoesNotContain(".tl-final-loading", pageCss, StringComparison.Ordinal);
+
+        Assert.Contains("class=\"tl-finalizing-shell\"", overlay, StringComparison.Ordinal);
+        Assert.Contains("role=\"status\"", overlay, StringComparison.Ordinal);
+        Assert.Contains("tl-finalizing-stage", overlay, StringComparison.Ordinal);
+        Assert.Contains("tl-finalizing-piece piece-1", overlay, StringComparison.Ordinal);
+        Assert.Contains("tl-finalizing-piece piece-2", overlay, StringComparison.Ordinal);
+        Assert.Contains("tl-finalizing-piece piece-3", overlay, StringComparison.Ordinal);
+        Assert.Contains("tl-finalizing-piece piece-4", overlay, StringComparison.Ordinal);
+        Assert.Contains("tl-finalizing-frame", overlay, StringComparison.Ordinal);
+        Assert.Contains("tl-finalizing-glow", overlay, StringComparison.Ordinal);
+        Assert.Contains("tl-finalizing-progress", overlay, StringComparison.Ordinal);
+        Assert.Contains("@Title", overlay, StringComparison.Ordinal);
+        Assert.Contains("@Subtitle", overlay, StringComparison.Ordinal);
+
+        Assert.Contains(".tl-finalizing-shell", overlayCss, StringComparison.Ordinal);
+        Assert.Contains(".tl-finalizing-piece", overlayCss, StringComparison.Ordinal);
+        Assert.Contains(".piece-1", overlayCss, StringComparison.Ordinal);
+        Assert.Contains(".piece-4", overlayCss, StringComparison.Ordinal);
+        Assert.Contains("--merge-x", overlayCss, StringComparison.Ordinal);
+        Assert.Contains("--merge-y", overlayCss, StringComparison.Ordinal);
+        Assert.Contains("@keyframes tl-finalizing-piece-merge", overlayCss, StringComparison.Ordinal);
+        Assert.Contains("@keyframes tl-finalizing-frame-lock", overlayCss, StringComparison.Ordinal);
+        Assert.Contains("@keyframes tl-finalizing-glow", overlayCss, StringComparison.Ordinal);
+        Assert.Contains("@keyframes tl-finalizing-scan", overlayCss, StringComparison.Ordinal);
+        Assert.Contains("@keyframes tl-finalizing-progress-scan", overlayCss, StringComparison.Ordinal);
+        Assert.Contains("animation: tl-finalizing-progress-scan 1.55s ease-in-out infinite;", overlayCss, StringComparison.Ordinal);
+        Assert.Contains("@media (prefers-reduced-motion: reduce)", overlayCss, StringComparison.Ordinal);
+        Assert.Contains("animation: tl-finalizing-piece-breathe 2.8s ease-in-out infinite !important;", overlayCss, StringComparison.Ordinal);
+        Assert.Contains("animation: tl-finalizing-frame-breathe 2.8s ease-in-out infinite !important;", overlayCss, StringComparison.Ordinal);
+        Assert.Contains("animation: tl-finalizing-progress-scan 2.6s ease-in-out infinite !important;", overlayCss, StringComparison.Ordinal);
+        Assert.Contains("@keyframes tl-finalizing-piece-breathe", overlayCss, StringComparison.Ordinal);
+        Assert.Contains("@keyframes tl-finalizing-frame-breathe", overlayCss, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void VideoRetry_IsTargetAwareAndKeepsConcurrencyGuards()
     {
         var workflow = ReadSource("TodoX.Web", "Services", "Timelapse", "TimelapseWorkflowService.cs");

@@ -243,8 +243,7 @@ public class TimelapsePhase2BTests
         Assert.Contains("TimelapseParentStatuses.Finalizing", detail, StringComparison.Ordinal);
         Assert.Contains("tl-loading-skeleton", detail, StringComparison.Ordinal);
         Assert.Contains("tl-loading-shimmer", detail, StringComparison.Ordinal);
-        Assert.Contains("tl-pulse", detail, StringComparison.Ordinal);
-        Assert.Contains("tl-flash-soft", detail, StringComparison.Ordinal);
+        Assert.Contains("TimelapseFinalizingOverlay", detail, StringComparison.Ordinal);
         Assert.Contains("tl-status-dot", detail, StringComparison.Ordinal);
         Assert.Contains("tl-active-render", detail, StringComparison.Ordinal);
         Assert.Contains("tl-active-scanline", detail, StringComparison.Ordinal);
@@ -300,7 +299,8 @@ public class TimelapsePhase2BTests
         Assert.Contains("tl-active-border-pulse", detailCss, StringComparison.Ordinal);
         Assert.Contains("tl-active-sweep", detailCss, StringComparison.Ordinal);
         Assert.Contains("tl-preview-scan-down", detailCss, StringComparison.Ordinal);
-        Assert.Contains(".tl-final-loading", detailCss, StringComparison.Ordinal);
+        Assert.Contains("<TimelapseFinalizingOverlay Title=\"@FinalLoadingTitle\" Subtitle=\"@FinalLoadingSubtitle\" />", detail, StringComparison.Ordinal);
+        Assert.DoesNotContain(".tl-final-loading", detailCss, StringComparison.Ordinal);
         Assert.Contains("@media (prefers-reduced-motion: reduce)", detailCss, StringComparison.Ordinal);
 
         Assert.Contains("pg_advisory_xact_lock", workflow, StringComparison.Ordinal);

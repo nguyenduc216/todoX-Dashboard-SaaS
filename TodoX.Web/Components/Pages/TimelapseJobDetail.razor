@@ -402,14 +402,7 @@
                 <MudPaper Class="todox-card pa-4 mt-3" rounded="true">
                     @if (IsFinalOutputLoading)
                     {
-                        <div class="tl-final-loading tl-loading-skeleton tl-loading-shimmer tl-pulse tl-flash-soft" role="status" aria-live="polite">
-                            <span class="tl-loading-icon tl-final-icon">
-                                <MudIcon Icon="@Icons.Material.Filled.MovieFilter" Size="Size.Large" />
-                            </span>
-                            <MudText Typo="Typo.h6">@FinalLoadingTitle</MudText>
-                            <MudText Typo="Typo.body2" Color="Color.Secondary">Hệ thống tiếp tục xử lý kể cả khi bạn rời trang.</MudText>
-                            <span class="tl-final-progress" aria-hidden="true"></span>
-                        </div>
+                        <TimelapseFinalizingOverlay Title="@FinalLoadingTitle" Subtitle="@FinalLoadingSubtitle" />
                     }
                     else if (_job.Workflow.FinalOutput?.Status == TimelapseOperationStatuses.Completed && !string.IsNullOrWhiteSpace(_job.Workflow.FinalOutput.PublicUrl))
                     {
@@ -483,6 +476,7 @@
         => _job?.Workflow.ParentStatus == TimelapseParentStatuses.Finalizing
             ? "Đang ghép video cuối cùng..."
             : "Đang chờ hoàn thiện kết quả...";
+    private const string FinalLoadingSubtitle = "Hệ thống tiếp tục xử lý kể cả khi bạn rời trang.";
     private string StartButtonLabel => _job?.Workflow.HasActiveOperations == true
         ? "Đang xử lý..."
         : _job?.Workflow.ParentStatus is TimelapseParentStatuses.Paused or TimelapseParentStatuses.Failed

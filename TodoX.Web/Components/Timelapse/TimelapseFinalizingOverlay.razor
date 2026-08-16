@@ -1,0 +1,23 @@
+<div class="tl-finalizing-shell" role="status" aria-live="polite">
+    <div class="tl-finalizing-stage" aria-hidden="true">
+        <span class="tl-finalizing-piece piece-1"></span>
+        <span class="tl-finalizing-piece piece-2"></span>
+        <span class="tl-finalizing-piece piece-3"></span>
+        <span class="tl-finalizing-piece piece-4"></span>
+        <span class="tl-finalizing-frame"></span>
+        <span class="tl-finalizing-scan"></span>
+        <span class="tl-finalizing-glow"></span>
+    </div>
+
+    <div class="tl-finalizing-copy">
+        <h3>@Title</h3>
+        <p>@Subtitle</p>
+    </div>
+
+    <span class="tl-finalizing-progress" aria-hidden="true"></span>
+</div>
+
+@code {
+    [Parameter] public string Title { get; set; } = string.Empty;
+    [Parameter] public string Subtitle { get; set; } = string.Empty;
+}
