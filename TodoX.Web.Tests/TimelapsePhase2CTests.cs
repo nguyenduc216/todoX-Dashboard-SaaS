@@ -873,6 +873,44 @@ public class TimelapsePhase2CTests
     }
 
     [Fact]
+    public void ImageRetry_IsTargetAwareAndDownstreamWaitingDoesNotHideRetry()
+    {
+        var workflow = ReadSource("TodoX.Web", "Services", "Timelapse", "TimelapseWorkflowService.cs");
+        var razor = ReadSource("TodoX.Web", "Components", "Pages", "TimelapseJobDetail.razor");
+
+        var updateStart = workflow.IndexOf("private async Task<TimelapseWorkflowState> UpdateImageStageAsync", StringComparison.Ordinal);
+        var updateEnd = workflow.IndexOf("private Task AddPromptUpdatedEventAsync", updateStart, StringComparison.Ordinal);
+        var update = workflow[updateStart..updateEnd];
+        Assert.DoesNotContain("state.HasActiveOperations", update, StringComparison.Ordinal);
+        Assert.Contains("await EnsureImageRetryAllowedAsync(conn, tx, jobId, stage, snapshot.SceneCount);", update, StringComparison.Ordinal);
+
+        var guardStart = workflow.IndexOf("private async Task EnsureImageRetryAllowedAsync", StringComparison.Ordinal);
+        var guardEnd = workflow.IndexOf("public async Task<TimelapseWorkflowState> RetryVideoAsync", guardStart, StringComparison.Ordinal);
+        var guard = workflow[guardStart..guardEnd];
+        Assert.Contains("TimelapseRerenderImpactPlanner.Plan(sceneCount, stage.ProgressPercent)", guard, StringComparison.Ordinal);
+        Assert.Contains("status='RENDERING'", guard, StringComparison.Ordinal);
+        Assert.Contains("progress_percent = ANY(@progress)", guard, StringComparison.Ordinal);
+        Assert.Contains("clip_index = ANY(@clipIndexes)", guard, StringComparison.Ordinal);
+        Assert.Contains("timelapse.timelapse_final_outputs", guard, StringComparison.Ordinal);
+        Assert.Contains("TimelapseOperationStatuses.Failed", guard, StringComparison.Ordinal);
+        Assert.Contains("TimelapseOperationStatuses.Completed", guard, StringComparison.Ordinal);
+        Assert.Contains("TimelapseOperationStatuses.Invalidated", guard, StringComparison.Ordinal);
+        Assert.Contains("TimelapseOperationStatuses.Cancelled", guard, StringComparison.Ordinal);
+        Assert.DoesNotContain("TimelapseOperationStatuses.Waiting", guard, StringComparison.Ordinal);
+
+        var canRetryStart = razor.IndexOf("private bool CanRetryImage", StringComparison.Ordinal);
+        var canRetryEnd = razor.IndexOf("private static bool CanOpenPrompt", canRetryStart, StringComparison.Ordinal);
+        var canRetry = razor[canRetryStart..canRetryEnd];
+        Assert.DoesNotContain("Workflow.HasActiveOperations", canRetry, StringComparison.Ordinal);
+        Assert.Contains("TimelapseOperationStatuses.Failed", canRetry, StringComparison.Ordinal);
+        Assert.Contains("TimelapseOperationStatuses.Cancelled", canRetry, StringComparison.Ordinal);
+        Assert.Contains("TimelapseOperationStatuses.Completed", canRetry, StringComparison.Ordinal);
+        Assert.Contains("TimelapseOperationStatuses.Invalidated", canRetry, StringComparison.Ordinal);
+        Assert.DoesNotContain("TimelapseOperationStatuses.Rendering", canRetry, StringComparison.Ordinal);
+        Assert.Contains("TimelapseOperationStatuses.Cancelled ? \"TẠO LẠI\"", razor, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void VideoRetry_IsTargetAwareAndKeepsConcurrencyGuards()
     {
         var workflow = ReadSource("TodoX.Web", "Services", "Timelapse", "TimelapseWorkflowService.cs");

@@ -202,12 +202,6 @@ public sealed class TimelapseWorkflowService : ITimelapseWorkflowService
             throw new InvalidOperationException("Không thể chỉnh prompt khi ảnh đang render.");
         }
 
-        var state = await ReadStateAsync(conn, jobId, tx);
-        if (rerender && state.HasActiveOperations)
-        {
-            throw new InvalidOperationException("Vui lòng chờ tác vụ đang chạy hoàn tất trước khi render lại.");
-        }
-
         if (updatePrompt)
         {
             var updatedPromptSnapshot = TimelapsePromptSnapshot.WithCustomerOverride(stage.PromptSnapshotJson, prompt!);
@@ -235,6 +229,8 @@ public sealed class TimelapseWorkflowService : ITimelapseWorkflowService
             await AddPromptUpdatedEventAsync(jobId, stage, ct);
             return await GetStateAsync(jobId, ct);
         }
+
+        await EnsureImageRetryAllowedAsync(conn, tx, jobId, stage, snapshot.SceneCount);
 
         var impact = TimelapseRerenderImpactPlanner.Plan(snapshot.SceneCount, stage.ProgressPercent);
         await conn.ExecuteAsync(
@@ -305,6 +301,72 @@ public sealed class TimelapseWorkflowService : ITimelapseWorkflowService
             "Customer updated the prompt override for a Timelapse image stage.",
             new { imageStageId = stage.Id, progressPercent = stage.ProgressPercent },
             ct: ct);
+
+    private async Task EnsureImageRetryAllowedAsync(
+        System.Data.IDbConnection conn,
+        System.Data.IDbTransaction tx,
+        Guid jobId,
+        EditableImageStageRow stage,
+        int sceneCount)
+    {
+        if (TimelapseOperationStatuses.IsActive(stage.Status))
+        {
+            throw new InvalidOperationException("Ảnh này đang được tạo. Vui lòng chờ hoàn tất trước khi render lại.");
+        }
+
+        if (stage.Status is not TimelapseOperationStatuses.Failed
+            and not TimelapseOperationStatuses.Completed
+            and not TimelapseOperationStatuses.Invalidated
+            and not TimelapseOperationStatuses.Cancelled)
+        {
+            throw new InvalidOperationException("Ảnh này chưa sẵn sàng để render lại.");
+        }
+
+        var finalizerActive = await conn.QuerySingleAsync<bool>(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                  FROM timelapse.timelapse_final_outputs
+                 WHERE tenant_id=@tenant
+                   AND job_id=@jobId
+                   AND status='RENDERING'
+            );
+            """,
+            new { tenant = _tenant.TenantId, jobId }, tx);
+        if (finalizerActive)
+        {
+            throw new InvalidOperationException("Video cuối đang được hoàn thiện. Vui lòng chờ xong trước khi render lại ảnh.");
+        }
+
+        var impact = TimelapseRerenderImpactPlanner.Plan(sceneCount, stage.ProgressPercent);
+        var activeConflicts = await conn.QuerySingleAsync<int>(
+            """
+            SELECT
+                (SELECT count(*)
+                   FROM timelapse.timelapse_image_stages
+                  WHERE tenant_id=@tenant
+                    AND job_id=@jobId
+                    AND progress_percent = ANY(@progress)
+                    AND status='RENDERING')
+              + (SELECT count(*)
+                   FROM timelapse.timelapse_video_clips
+                  WHERE tenant_id=@tenant
+                    AND job_id=@jobId
+                    AND clip_index = ANY(@clipIndexes)
+                    AND status='RENDERING');
+            """,
+            new
+            {
+                tenant = _tenant.TenantId,
+                jobId,
+                progress = impact.ImageProgressesToInvalidate.ToArray(),
+                clipIndexes = impact.VideoClipIndexesToInvalidate.ToArray()
+            }, tx);
+        if (activeConflicts > 0)
+        {
+            throw new InvalidOperationException("Một tác vụ phụ thuộc đang được xử lý. Vui lòng chờ xong trước khi render lại ảnh này.");
+        }
+    }
 
     public async Task<TimelapseWorkflowState> RetryVideoAsync(Guid jobId, int clipIndex, TimelapseJobSnapshot snapshot, CurrentUserSession currentUser, CancellationToken ct = default)
     {

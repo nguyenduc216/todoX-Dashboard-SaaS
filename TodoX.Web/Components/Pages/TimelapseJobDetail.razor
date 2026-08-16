@@ -997,8 +997,10 @@
         => status is TimelapseOperationStatuses.Failed or TimelapseOperationStatuses.Completed or TimelapseOperationStatuses.Invalidated or TimelapseOperationStatuses.Cancelled;
 
     private bool CanRetryImage(string status)
-        => _job?.Workflow.HasActiveOperations != true
-           && status is TimelapseOperationStatuses.Failed or TimelapseOperationStatuses.Completed or TimelapseOperationStatuses.Cancelled;
+        => status is TimelapseOperationStatuses.Failed
+            or TimelapseOperationStatuses.Completed
+            or TimelapseOperationStatuses.Invalidated
+            or TimelapseOperationStatuses.Cancelled;
 
     private static bool CanOpenPrompt(TimelapseStageImage image)
         => !image.IsOriginal
