@@ -20,6 +20,7 @@ public sealed class TimelapseFinalizerRuntime : ITimelapseFinalizerRuntime
     private readonly ITimelapseWorkerRepository _repo;
     private readonly ITimelapseCoreLifecycleBridge _coreLifecycle;
     private readonly IRenderJobService _renderJobs;
+    private readonly TimelapseProviderWorkerOptions _options;
     private readonly ILogger<TimelapseFinalizerRuntime> _logger;
 
     public TimelapseFinalizerRuntime(
@@ -29,6 +30,7 @@ public sealed class TimelapseFinalizerRuntime : ITimelapseFinalizerRuntime
         ITimelapseWorkerRepository repo,
         ITimelapseCoreLifecycleBridge coreLifecycle,
         IRenderJobService renderJobs,
+        IOptions<TimelapseProviderWorkerOptions> options,
         ILogger<TimelapseFinalizerRuntime> logger)
     {
         _env = env;
@@ -37,6 +39,7 @@ public sealed class TimelapseFinalizerRuntime : ITimelapseFinalizerRuntime
         _repo = repo;
         _coreLifecycle = coreLifecycle;
         _renderJobs = renderJobs;
+        _options = options.Value;
         _logger = logger;
     }
 
@@ -149,6 +152,8 @@ public sealed class TimelapseFinalizerRuntime : ITimelapseFinalizerRuntime
     private async Task RunFfmpegAsync(string concatPath, string outputPath, CancellationToken ct)
     {
         var ffmpeg = _config["VideoRender:FfmpegPath"] ?? _config["RenderQueue:FfmpegPath"] ?? "ffmpeg";
+        var timeoutSeconds = Math.Max(1, _options.FinalizerFfmpegTimeoutSeconds);
+        var timeout = TimeSpan.FromSeconds(timeoutSeconds);
         var startInfo = new ProcessStartInfo
         {
             FileName = ffmpeg,
@@ -168,14 +173,37 @@ public sealed class TimelapseFinalizerRuntime : ITimelapseFinalizerRuntime
         startInfo.ArgumentList.Add(outputPath);
 
         using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Could not start FFmpeg.");
-        var stderrTask = process.StandardError.ReadToEndAsync(ct);
-        var stdoutTask = process.StandardOutput.ReadToEndAsync(ct);
-        await process.WaitForExitAsync(ct);
-        var stderr = await stderrTask;
-        _ = await stdoutTask;
+        var stderrTask = process.StandardError.ReadToEndAsync();
+        var stdoutTask = process.StandardOutput.ReadToEndAsync();
+
+        using var timeoutCts = new CancellationTokenSource(timeout);
+        using var waitCts = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
+
+        try
+        {
+            await process.WaitForExitAsync(waitCts.Token);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            TryKillProcessTree(process);
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            TryKillProcessTree(process);
+            var timeoutStderr = await ReadProcessOutputAsync(stderrTask);
+            _ = await ReadProcessOutputAsync(stdoutTask);
+            var timeoutMessage = $"FFmpeg concat timed out after {timeoutSeconds} seconds.";
+            _logger.LogError("{TimeoutMessage} stderr={Stderr}", timeoutMessage, TruncateForLog(timeoutStderr));
+            throw new TimeoutException($"{timeoutMessage} Stderr: {TruncateForLog(timeoutStderr)}");
+        }
+
+        var stderr = await ReadProcessOutputAsync(stderrTask);
+        _ = await ReadProcessOutputAsync(stdoutTask);
         if (process.ExitCode != 0 || !File.Exists(outputPath))
         {
-            throw new InvalidOperationException($"FFmpeg concat failed with exit code {process.ExitCode}: {stderr}");
+            _logger.LogError("FFmpeg concat failed with exit code {ExitCode}. stderr={Stderr}", process.ExitCode, TruncateForLog(stderr));
+            throw new InvalidOperationException($"FFmpeg concat failed with exit code {process.ExitCode}: {TruncateForLog(stderr)}");
         }
     }
 
@@ -195,5 +223,43 @@ public sealed class TimelapseFinalizerRuntime : ITimelapseFinalizerRuntime
         {
             // Best-effort cleanup.
         }
+    }
+
+    private static async Task<string> ReadProcessOutputAsync(Task<string> outputTask)
+    {
+        try
+        {
+            var completed = await Task.WhenAny(outputTask, Task.Delay(TimeSpan.FromSeconds(5)));
+            return completed == outputTask ? await outputTask : string.Empty;
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
+
+    private static void TryKillProcessTree(Process process)
+    {
+        try
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+            }
+        }
+        catch
+        {
+            // Best-effort cleanup.
+        }
+    }
+
+    private static string TruncateForLog(string? value, int maxLength = 2000)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        return value.Length <= maxLength ? value : value[..maxLength] + "...";
     }
 }

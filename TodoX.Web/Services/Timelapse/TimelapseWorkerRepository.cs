@@ -208,9 +208,10 @@ public sealed class TimelapseWorkerRepository : ITimelapseWorkerRepository
                        true),
                    started_at=COALESCE(f.started_at, now()),
                    updated_at=now()
-              FROM render.render_jobs j
-              JOIN candidate c ON c.id=f.id
-             WHERE j.id=f.job_id
+              FROM render.render_jobs j,
+                   candidate c
+             WHERE c.id=f.id
+               AND j.id=f.job_id
              RETURNING f.id AS Id,
                        f.tenant_id AS TenantId,
                        f.job_id AS JobId,

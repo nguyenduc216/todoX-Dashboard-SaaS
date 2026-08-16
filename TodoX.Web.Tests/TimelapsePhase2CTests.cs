@@ -49,6 +49,29 @@ public class TimelapsePhase2CTests
     }
 
     [Fact]
+    public void FinalizerClaimSql_DoesNotReferenceUpdateAliasInsideJoinOn()
+    {
+        var source = ReadSource("TodoX.Web", "Services", "Timelapse", "TimelapseWorkerRepository.cs");
+        var methodStart = source.IndexOf("public async Task<TimelapseFinalizerWorkItem?> ClaimFinalizerAsync", StringComparison.Ordinal);
+        var methodEnd = source.IndexOf("public async Task SaveFinalizerCompletedAsync", methodStart, StringComparison.Ordinal);
+        var claimSql = source[methodStart..methodEnd];
+
+        Assert.Contains("WITH candidate AS", claimSql, StringComparison.Ordinal);
+        Assert.Contains("FOR UPDATE SKIP LOCKED", claimSql, StringComparison.Ordinal);
+        Assert.Contains("UPDATE timelapse.timelapse_final_outputs f", claimSql, StringComparison.Ordinal);
+        Assert.Contains("request_json=jsonb_set", claimSql, StringComparison.Ordinal);
+        Assert.Contains("'{worker_claim}'", claimSql, StringComparison.Ordinal);
+        Assert.Contains("started_at=COALESCE(f.started_at, now())", claimSql, StringComparison.Ordinal);
+        Assert.Contains("FROM render.render_jobs j", claimSql, StringComparison.Ordinal);
+        Assert.Contains("candidate c", claimSql, StringComparison.Ordinal);
+        Assert.Contains("WHERE c.id=f.id", claimSql, StringComparison.Ordinal);
+        Assert.Contains("AND j.id=f.job_id", claimSql, StringComparison.Ordinal);
+        Assert.Contains("RETURNING f.id AS Id", claimSql, StringComparison.Ordinal);
+        Assert.DoesNotContain("JOIN candidate c ON c.id=f.id", claimSql, StringComparison.Ordinal);
+        Assert.DoesNotContain("JOIN candidate c ON c.id = f.id", claimSql, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Runtime_Uses79AiCredentialResolverAndDoesNotUseYEScale()
     {
         var source = ReadSource("TodoX.Web", "Services", "Timelapse", "TimelapseProviderRuntime.cs");
@@ -306,6 +329,8 @@ public class TimelapsePhase2CTests
     {
         var source = ReadSource("TodoX.Web", "Services", "Timelapse", "TimelapseFinalizerRuntime.cs");
         var repo = ReadSource("TodoX.Web", "Services", "Timelapse", "TimelapseWorkerRepository.cs");
+        var options = ReadSource("TodoX.Web", "Services", "Timelapse", "TimelapseProviderWorkerOptions.cs");
+        var appsettings = ReadSource("TodoX.Web", "appsettings.json");
 
         Assert.Contains("OrderBy(x => x.ClipIndex)", source);
         Assert.Contains("-f", source);
@@ -316,6 +341,16 @@ public class TimelapsePhase2CTests
         Assert.Contains("SaveFinalizerCompletedAsync", source);
         Assert.Contains("Storage:Provider", source);
         Assert.Contains("requires local media storage", source);
+        Assert.Contains("IOptions<TimelapseProviderWorkerOptions>", source, StringComparison.Ordinal);
+        Assert.Contains("FinalizerFfmpegTimeoutSeconds { get; set; } = 120", options, StringComparison.Ordinal);
+        Assert.Contains("\"FinalizerFfmpegTimeoutSeconds\": 120", appsettings, StringComparison.Ordinal);
+        Assert.Contains("Math.Max(1, _options.FinalizerFfmpegTimeoutSeconds)", source, StringComparison.Ordinal);
+        Assert.Contains("new CancellationTokenSource(timeout)", source, StringComparison.Ordinal);
+        Assert.Contains("process.Kill(entireProcessTree: true)", source, StringComparison.Ordinal);
+        Assert.Contains("TimeoutException", source, StringComparison.Ordinal);
+        Assert.Contains("FFmpeg concat timed out after", source, StringComparison.Ordinal);
+        Assert.Contains("stderr={Stderr}", source, StringComparison.Ordinal);
+        Assert.Contains("SaveFinalizerFailedAsync", source, StringComparison.Ordinal);
     }
 
     [Fact]
