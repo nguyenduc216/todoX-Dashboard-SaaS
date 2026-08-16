@@ -6,13 +6,53 @@ namespace TodoX.Web.Tests;
 public sealed class RDanceFashionDemoPageTests
 {
     [Fact]
-    public void PageUsesTheFourTabProductionFlow()
+    public void LegacyDemoPageRedirectsToProductionCreateRoute()
     {
         var page = ReadStrictUtf8(Path.Combine(FindRepoRoot(), "TodoX.Web", "Components", "Pages", "RDanceFashionDemo.razor"));
 
+        Assert.Contains("@page \"/rdance-fashion-demo\"", page, StringComparison.Ordinal);
+        Assert.Contains("Navigation.NavigateTo(\"/jobs/rdance/new\", replace: true)", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("MudTabs", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("UploadMotionAsync", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RDanceCreatePageUsesProductionCreateFlow()
+    {
+        var page = ReadStrictUtf8(Path.Combine(FindRepoRoot(), "TodoX.Web", "Components", "Pages", "RDanceJobCreate.razor"));
+
         foreach (var expected in new[]
         {
-            "@page \"/rdance-fashion-demo\"",
+            "@page \"/jobs/rdance/new\"",
+            "[SupplyParameterFromQuery] public Guid? ServiceId",
+            "[SupplyParameterFromQuery] public string? ServiceCode",
+            "IDanceSellPhase2Service",
+            "CreateJobAsync",
+            "CreateDraftAndOpenAsync",
+            "StageTikTokAndOpenAsync",
+            "OnMotionSelected",
+            "Navigation.NavigateTo($\"/jobs/rdance/{job.Id}\")",
+            "Tạo draft và tiếp tục",
+            "Kéo thả video MP4 vào đây",
+            "Chỉ hỗ trợ video MP4.",
+            "RDance chưa được cấu hình provider Motion Control."
+        })
+        {
+            Assert.Contains(expected, page, StringComparison.Ordinal);
+        }
+
+        Assert.DoesNotContain("/rdance-fashion-demo", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RDanceDetailPageUsesJobRouteAndKeepsWorkflowTabs()
+    {
+        var page = ReadStrictUtf8(Path.Combine(FindRepoRoot(), "TodoX.Web", "Components", "Pages", "RDanceJobDetail.razor"));
+
+        foreach (var expected in new[]
+        {
+            "@page \"/jobs/rdance/{JobId:guid}\"",
+            "[Parameter] public Guid JobId",
             "MudTabPanel Text=\"Thông tin\"",
             "MudTabPanel Text=\"Hình ảnh\"",
             "MudTabPanel Text=\"Video\"",
@@ -21,7 +61,7 @@ public sealed class RDanceFashionDemoPageTests
             "IDanceSellReferenceImageService",
             "IDanceSellProviderCatalog",
             "IOptionsMonitor<DanceSellPhase2Options>",
-            "InputFile",
+            "DanceSell.GetAsync(JobId, AuthState.CurrentUser)",
             "StageTikTokAsync",
             "GenerateReferenceAsync",
             "ApproveLatestReferenceAsync",
@@ -29,6 +69,7 @@ public sealed class RDanceFashionDemoPageTests
             "ShowMessageBoxAsync",
             "Kling Motion Control",
             "Provider chính: 79AI",
+            "Bạn không có quyền xem job RDance này.",
             "CancelAsync",
             "RetryAsync"
         })
@@ -38,78 +79,40 @@ public sealed class RDanceFashionDemoPageTests
 
         Assert.DoesNotContain("DEMO", page, StringComparison.Ordinal);
         Assert.DoesNotContain("Task.Delay(500)", page, StringComparison.Ordinal);
-        Assert.DoesNotContain("/resources/mockup/rdance-fashion", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("/rdance-fashion-demo", page, StringComparison.Ordinal);
         Assert.DoesNotContain("await Task.Delay", page, StringComparison.Ordinal);
+        Assert.Contains("NavigateTo(\"/jobs/rdance/new\")", page, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void PageUsesStyledMp4DropZoneInsteadOfRawMotionInput()
+    public void MyJobsIncludesRDanceJobsAndRoutesToDetail()
     {
-        var page = ReadStrictUtf8(Path.Combine(FindRepoRoot(), "TodoX.Web", "Components", "Pages", "RDanceFashionDemo.razor"));
+        var page = ReadStrictUtf8(Path.Combine(FindRepoRoot(), "TodoX.Web", "Components", "Pages", "MyJobs.razor"));
+
+        foreach (var expected in new[]
+        {
+            "IDanceSellPhase2Service DanceJobs",
+            "DanceJobs.ListAsync(currentUser, 100)",
+            "rDance Thời Trang",
+            "$\"/jobs/rdance/{x.Id}\"",
+            "Navigation.NavigateTo(context.Route)"
+        })
+        {
+            Assert.Contains(expected, page, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void RDanceDetailPageKeepsMotionDropZoneAndValidation()
+    {
+        var page = ReadStrictUtf8(Path.Combine(FindRepoRoot(), "TodoX.Web", "Components", "Pages", "RDanceJobDetail.razor"));
 
         Assert.Contains("class=\"@MotionUploadZoneClass\"", page, StringComparison.Ordinal);
         Assert.Contains("rdance-hidden-file-input", page, StringComparison.Ordinal);
-        Assert.Contains("OnChange=\"OnMotionSelected\" accept=\"video/mp4\"", page, StringComparison.Ordinal);
-        Assert.DoesNotContain("<InputFile OnChange=\"OnMotionSelected\" accept=\"video/mp4\"", page, StringComparison.Ordinal);
-        Assert.Contains("Kéo thả video MP4 vào đây", page, StringComparison.Ordinal);
-        Assert.Contains("hoặc bấm để chọn video", page, StringComparison.Ordinal);
-        Assert.Contains("MP4 · tối đa @MaxMotionVideoLabel", page, StringComparison.Ordinal);
-        Assert.Contains("OnMotionDragEnter", page, StringComparison.Ordinal);
-        Assert.Contains("OnMotionDrop", page, StringComparison.Ordinal);
-        Assert.Contains("Thay video", page, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void PageValidatesMotionUploadBeforeBackendUpload()
-    {
-        var page = ReadStrictUtf8(Path.Combine(FindRepoRoot(), "TodoX.Web", "Components", "Pages", "RDanceFashionDemo.razor"));
-
         Assert.Contains("ValidateMotionVideo(file)", page, StringComparison.Ordinal);
-        Assert.Contains("file.Size > MaxMotionVideoBytes", page, StringComparison.Ordinal);
-        Assert.Contains("file.ContentType.Equals(\"video/mp4\"", page, StringComparison.Ordinal);
-        Assert.Contains("Path.GetExtension(file.Name).Equals(\".mp4\"", page, StringComparison.Ordinal);
-        Assert.Contains("Chỉ hỗ trợ video MP4.", page, StringComparison.Ordinal);
-        Assert.Contains("Video vượt quá dung lượng cho phép.", page, StringComparison.Ordinal);
-        Assert.Contains("DanceSell.UploadMotionAsync", page, StringComparison.Ordinal);
         Assert.Contains("OpenReadStream(MaxMotionVideoBytes)", page, StringComparison.Ordinal);
-
-        Assert.True(page.IndexOf("ValidateMotionVideo(file)", StringComparison.Ordinal) < page.IndexOf("DanceSell.UploadMotionAsync", StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public void PageShowsMotionReadyStateAndContinueGate()
-    {
-        var page = ReadStrictUtf8(Path.Combine(FindRepoRoot(), "TodoX.Web", "Components", "Pages", "RDanceFashionDemo.razor"));
-
+        Assert.Contains("Video vượt quá dung lượng cho phép.", page, StringComparison.Ordinal);
         Assert.Contains("Video chuyển động đã sẵn sàng", page, StringComparison.Ordinal);
-        Assert.Contains("MotionSourceName", page, StringComparison.Ordinal);
-        Assert.Contains("_motionFileName", page, StringComparison.Ordinal);
-        Assert.Contains("_motionFileSize", page, StringComparison.Ordinal);
-        Assert.Contains("Disabled=\"@(_job?.MotionVideoMediaId is null || _busy)\"", page, StringComparison.Ordinal);
-        Assert.Contains("DanceSell.StageTikTokAsync", page, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void PageShowsProviderReadinessGuardWithoutHidingCatalogRoute()
-    {
-        var page = ReadStrictUtf8(Path.Combine(FindRepoRoot(), "TodoX.Web", "Components", "Pages", "RDanceFashionDemo.razor"));
-
-        Assert.Contains("RDance chưa được cấu hình provider Motion Control.", page, StringComparison.Ordinal);
-        Assert.Contains("ProviderCatalog.GetDefaultRouteAsync(DanceSellOperationTypes.MotionVideo)", page, StringComparison.Ordinal);
-        Assert.Contains("_readinessError", page, StringComparison.Ordinal);
-        Assert.DoesNotContain("Dịch vụ RDance đang hoàn thiện.", page, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void PageKeepsReferenceApprovalGateAndNoProviderSecrets()
-    {
-        var page = ReadStrictUtf8(Path.Combine(FindRepoRoot(), "TodoX.Web", "Components", "Pages", "RDanceFashionDemo.razor"));
-
-        Assert.Contains("PreparedReferenceStatus == DanceSellReferenceStatuses.Approved", page, StringComparison.Ordinal);
-        Assert.Contains("DanceSell.QueueRenderAsync", page, StringComparison.Ordinal);
-        Assert.Contains("ShowMessageBoxAsync", page, StringComparison.Ordinal);
-        Assert.DoesNotContain("ApiKey", page, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("access_token", page, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

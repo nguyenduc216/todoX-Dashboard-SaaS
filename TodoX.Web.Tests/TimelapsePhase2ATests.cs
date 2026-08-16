@@ -10,7 +10,7 @@ public class TimelapsePhase2ATests
     [Theory]
     [InlineData(TodoXServiceEngineTypes.Timelapse, CustomerServiceDestination.TimelapseCreator, "/jobs/timelapse/new")]
     [InlineData(TodoXServiceEngineTypes.RVideo, CustomerServiceDestination.RVideoCreator, null)]
-    [InlineData(TodoXServiceEngineTypes.RDance, CustomerServiceDestination.RDanceCreator, "/rdance-fashion-demo")]
+    [InlineData(TodoXServiceEngineTypes.RDance, CustomerServiceDestination.RDanceCreator, "/jobs/rdance/new")]
     public void CustomerServiceRouting_UsesEngineType(
         string engineType,
         CustomerServiceDestination expectedDestination,

@@ -1,9 +1,11 @@
 @page "/jobs"
 @implements IDisposable
 @using TodoX.Web.Models.Timelapse
+@using TodoX.Web.Services.DanceSell
 @using TodoX.Web.Services.Timelapse
 @inject AuthStateService AuthState
-@inject ITimelapseJobService Jobs
+@inject ITimelapseJobService TimelapseJobs
+@inject IDanceSellPhase2Service DanceJobs
 @inject NavigationManager Navigation
 
 <PageTitle>Jobs của tôi</PageTitle>
@@ -12,7 +14,7 @@
     <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
         <div>
             <MudText Typo="Typo.h4" Class="todox-page-title">Jobs của tôi</MudText>
-            <MudText Typo="Typo.body1" Class="todox-page-subtitle">Các cấu hình video thuộc tài khoản của bạn.</MudText>
+            <MudText Typo="Typo.body1" Class="todox-page-subtitle">Các job video thuộc tài khoản của bạn.</MudText>
         </div>
         <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Add" OnClick="@(() => Navigation.NavigateTo("/create"))">
             Tạo video
@@ -47,17 +49,19 @@
             <HeaderContent>
                 <MudTh>Tiêu đề</MudTh>
                 <MudTh>Dịch vụ</MudTh>
+                <MudTh>Giai đoạn</MudTh>
                 <MudTh>Ngày tạo</MudTh>
-                <MudTh>Trạng thái</MudTh>
+                <MudTh>Điểm</MudTh>
                 <MudTh></MudTh>
             </HeaderContent>
             <RowTemplate>
-                <MudTd DataLabel="Tiêu đề">@context.Snapshot.Title</MudTd>
-                <MudTd DataLabel="Dịch vụ">Video Timelapse AI</MudTd>
+                <MudTd DataLabel="Tiêu đề">@context.Title</MudTd>
+                <MudTd DataLabel="Dịch vụ">@context.ServiceLabel</MudTd>
+                <MudTd DataLabel="Giai đoạn">@context.StageLabel</MudTd>
                 <MudTd DataLabel="Ngày tạo">@context.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</MudTd>
-                <MudTd DataLabel="Trạng thái"><MudChip T="string" Size="Size.Small" Color="Color.Warning">@context.Status</MudChip></MudTd>
+                <MudTd DataLabel="Điểm">@context.PointsLabel</MudTd>
                 <MudTd DataLabel="Hành động">
-                    <MudIconButton Icon="@Icons.Material.Filled.Visibility" title="Xem" OnClick="@(() => Navigation.NavigateTo($"/jobs/timelapse/{context.Id}"))" />
+                    <MudIconButton Icon="@Icons.Material.Filled.Visibility" title="Xem" OnClick="@(() => Navigation.NavigateTo(context.Route))" />
                 </MudTd>
             </RowTemplate>
         </MudTable>
@@ -65,7 +69,7 @@
 </MudStack>
 
 @code {
-    private IReadOnlyList<TimelapseJobView> _jobs = Array.Empty<TimelapseJobView>();
+    private IReadOnlyList<CustomerJobRow> _jobs = Array.Empty<CustomerJobRow>();
     private bool _loading = true;
 
     protected override async Task OnInitializedAsync()
@@ -85,13 +89,49 @@
     private async Task LoadJobsAsync()
     {
         _loading = true;
-        _jobs = Array.Empty<TimelapseJobView>();
+        _jobs = Array.Empty<CustomerJobRow>();
+
         if (AuthState.CurrentUser is { IsCustomer: true } currentUser)
         {
-            _jobs = await Jobs.ListOwnedAsync(currentUser);
+            var timelapseTask = TimelapseJobs.ListOwnedAsync(currentUser);
+            var danceTask = DanceJobs.ListAsync(currentUser, 100);
+            await Task.WhenAll(timelapseTask, danceTask);
+
+            var rows = timelapseTask.Result.Select(x => new CustomerJobRow(
+                    x.Id,
+                    x.Snapshot.Title,
+                    "Video Timelapse AI",
+                    TimelapseStatusText.Parent(x.Workflow.ParentStatus),
+                    x.Workflow.CurrentStep,
+                    x.CreatedAt,
+                    x.Snapshot.SellPrice?.TotalPoints is decimal points ? $"{points:0.##}" : "—",
+                    $"/jobs/timelapse/{x.Id}"))
+                .Concat(danceTask.Result.Select(x => new CustomerJobRow(
+                    x.Id,
+                    x.Title ?? "rDance Thời Trang",
+                    "rDance Thời Trang",
+                    x.Status,
+                    x.CurrentStage,
+                    x.CreatedAt,
+                    x.TotalTodoxPointsEstimated is decimal points ? $"{points:0.##}" : "—",
+                    $"/jobs/rdance/{x.Id}")))
+                .OrderByDescending(x => x.CreatedAt)
+                .ToList();
+
+            _jobs = rows;
         }
 
         _loading = false;
         await InvokeAsync(StateHasChanged);
     }
+
+    private sealed record CustomerJobRow(
+        Guid Id,
+        string Title,
+        string ServiceLabel,
+        string StatusLabel,
+        string StageLabel,
+        DateTime CreatedAt,
+        string PointsLabel,
+        string Route);
 }
