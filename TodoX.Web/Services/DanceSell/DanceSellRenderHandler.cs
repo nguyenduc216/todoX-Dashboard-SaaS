@@ -18,6 +18,11 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
     private readonly IDanceSellCompletionService _completion;
     private readonly IAiProviderService _providers;
     private readonly IDanceSellOperationRepository _operations;
+    private readonly IDanceSellProviderCatalog _routes;
+    private readonly AiProviderRepository _providerRepository;
+    private readonly IProviderCredentialResolver _credentials;
+    private readonly IProviderCredentialRepository _credentialRepository;
+    private readonly IAi79TaskClient _ai79;
     private readonly IOptionsMonitor<KieOptions> _options;
     private readonly ILogger<DanceSellRenderHandler> _logger;
 
@@ -32,6 +37,11 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
         IDanceSellCompletionService completion,
         IAiProviderService providers,
         IDanceSellOperationRepository operations,
+        IDanceSellProviderCatalog routes,
+        AiProviderRepository providerRepository,
+        IProviderCredentialResolver credentials,
+        IProviderCredentialRepository credentialRepository,
+        IAi79TaskClient ai79,
         IOptionsMonitor<KieOptions> options,
         ILogger<DanceSellRenderHandler> logger)
     {
@@ -43,6 +53,11 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
         _completion = completion;
         _providers = providers;
         _operations = operations;
+        _routes = routes;
+        _providerRepository = providerRepository;
+        _credentials = credentials;
+        _credentialRepository = credentialRepository;
+        _ai79 = ai79;
         _options = options;
         _logger = logger;
     }
@@ -66,16 +81,216 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
 
         if (string.IsNullOrWhiteSpace(danceJob.ProviderTaskId))
         {
+            if (Is79Ai(danceJob))
+            {
+                await Submit79AiAsync(job, danceJob, input.OperationId, ct);
+                return;
+            }
+
             await SubmitAsync(job, danceJob, input.OperationId, ct);
+            return;
+        }
+
+        if (Is79Ai(danceJob))
+        {
+            await Poll79AiAsync(job, danceJob, input.OperationId, ct);
             return;
         }
 
         await PollAsync(job, danceJob, input.OperationId, ct);
     }
 
+    private async Task Submit79AiAsync(RenderJobDto renderJob, DanceSellJobDto danceJob, Guid? operationId, CancellationToken ct)
+    {
+        var runtime = await Resolve79AiRuntimeAsync(danceJob, ct);
+        var request = new Ai79TaskSubmitRequest(
+            runtime.BaseUrl,
+            runtime.SubmitPath,
+            runtime.Credential.Secret,
+            runtime.Domain,
+            runtime.Model,
+            danceJob.Prompt,
+            [danceJob.PreparedReferenceUrl ?? danceJob.CharacterImageUrl],
+            new Dictionary<string, string?>
+            {
+                ["type"] = "video",
+                [runtime.MotionVideoField] = danceJob.MotionVideoUrl,
+                ["mode"] = danceJob.Mode,
+                ["ratio"] = "9:16"
+            },
+            Ai79TaskOperation.Video,
+            runtime.ReferenceImageField);
+        var requestJson = JsonSerializer.Serialize(new
+        {
+            providerCode = runtime.ProviderCode,
+            model = runtime.Model,
+            endpointPath = runtime.SubmitPath,
+            prompt = danceJob.Prompt,
+            referenceImage = danceJob.PreparedReferenceUrl ?? danceJob.CharacterImageUrl,
+            motionVideo = danceJob.MotionVideoUrl,
+            mode = danceJob.Mode,
+            ratio = "9:16"
+        }, KieJson.Options);
+
+        try
+        {
+            var submitted = await _ai79.SubmitAsync(request, ct);
+            await _repo.UpdateSubmittedAsync(danceJob.Id, requestJson, submitted.TaskId, submitted.SanitizedResponseJson, ct);
+            if (operationId is Guid existingOperationId)
+            {
+                await _operations.MarkSubmittedAsync(existingOperationId, submitted.TaskId, submitted.SanitizedResponseJson, ct);
+            }
+
+            await _renderJobs.AddEventAsync(renderJob.Id, "AI79_MOTION_TASK_SUBMITTED", "79AI Kling Motion Control task submitted.",
+                new { danceSellJobId = danceJob.Id, taskId = submitted.TaskId, runtime.Model }, ct: ct);
+            await LogUsageAsync(danceJob, renderJob, "submitted", submitted.TaskId, "submitted", null, null, ct);
+            await ScheduleNextPollAsync(renderJob, "79AI motion task submitted; polling scheduled.", ct);
+        }
+        catch (Ai79TaskSubmitException ex)
+        {
+            await FailAsync(renderJob, danceJob, ex.ErrorCode ?? "ai79_submit_failed", ex.ErrorMessage, ex.SanitizedResponseJson, permanent: true, ct);
+            throw new RenderJobTerminalFailureException(ex.Message, ex);
+        }
+    }
+
+    private async Task Poll79AiAsync(RenderJobDto renderJob, DanceSellJobDto danceJob, Guid? operationId, CancellationToken ct)
+    {
+        if (danceJob.PollCount >= Math.Max(1, _options.CurrentValue.MaxPollCount))
+        {
+            await FailAsync(renderJob, danceJob, "ai79_poll_timeout", "79AI motion poll max count reached.", danceJob.PollResponseJson, permanent: true, ct, DanceSellJobStatuses.Timeout);
+            throw new RenderJobTerminalFailureException("79AI motion poll max count reached.");
+        }
+
+        var runtime = await Resolve79AiRuntimeAsync(danceJob, ct);
+        try
+        {
+            var status = await _ai79.GetStatusAsync(new Ai79TaskStatusRequest(
+                runtime.BaseUrl,
+                runtime.PollPath,
+                runtime.Credential.Secret,
+                runtime.Domain,
+                danceJob.ProviderTaskId!,
+                Ai79TaskOperation.Video), ct);
+            if (status.NormalizedStatus == Ai79TaskStatusNormalizer.Success)
+            {
+                if (string.IsNullOrWhiteSpace(status.OutputUrl))
+                {
+                    await FailAsync(renderJob, danceJob, "missing_output", "79AI motion task completed without an output URL.", status.SanitizedResponseJson, permanent: true, ct);
+                    throw new RenderJobTerminalFailureException("79AI motion task completed without an output URL.");
+                }
+
+                await _completion.CompleteAsync(new DanceSellCompletionRequest
+                {
+                    DanceJob = danceJob,
+                    ProviderTaskId = danceJob.ProviderTaskId,
+                    ProviderStatus = status.NormalizedStatus,
+                    ResponseJson = status.SanitizedResponseJson,
+                    ResultVideoUrl = status.OutputUrl,
+                    ResultUrlCount = 1,
+                    Source = "poll"
+                }, ct);
+                if (operationId is Guid existingOperationId)
+                {
+                    await _operations.MarkCompletedAsync(existingOperationId, status.NormalizedStatus, status.SanitizedResponseJson, null, status.OutputUrl, ct);
+                    await _operations.UpsertAssetAsync(new AiOperationAssetDto
+                    {
+                        OperationId = existingOperationId,
+                        AssetRole = DanceSellAssetRoles.VideoOutput,
+                        PublicUrl = status.OutputUrl,
+                        ProviderUrl = status.OutputUrl,
+                        MimeType = "video/mp4",
+                        MetadataJson = DanceSellRepository.ToJson(new { source = "poll" })
+                    }, ct);
+                }
+
+                return;
+            }
+
+            if (status.NormalizedStatus == Ai79TaskStatusNormalizer.Failed)
+            {
+                var error = status.ErrorMessage ?? "79AI motion task failed.";
+                await FailAsync(renderJob, danceJob, status.ErrorCode ?? "ai79_task_failed", error, status.SanitizedResponseJson, permanent: true, ct);
+                throw new RenderJobTerminalFailureException(error);
+            }
+
+            var nextPoll = DateTime.UtcNow.Add(_options.CurrentValue.PollInterval);
+            await _repo.UpdatePollingAsync(danceJob.Id, status.NormalizedStatus, status.SanitizedResponseJson, danceJob.PollCount + 1, nextPoll, ct);
+            await _renderJobs.AddEventAsync(renderJob.Id, "AI79_MOTION_TASK_POLLING", "79AI Kling Motion Control task is still running.",
+                new { danceSellJobId = danceJob.Id, danceJob.ProviderTaskId, status = status.NormalizedStatus, pollCount = danceJob.PollCount + 1 }, ct: ct);
+            await ScheduleNextPollAsync(renderJob, "79AI motion task not terminal; next poll scheduled.", ct);
+        }
+        catch (RenderJobDeferredException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            await FailAsync(renderJob, danceJob, ex.GetType().Name, ex.Message, "{}", permanent: true, ct);
+            throw new RenderJobTerminalFailureException(ex.Message, ex);
+        }
+    }
+
+    private async Task<Ai79MotionRuntime> Resolve79AiRuntimeAsync(DanceSellJobDto job, CancellationToken ct)
+    {
+        var route = await _routes.ResolveAsync(DanceSellOperationTypes.MotionVideo, job.MotionProviderCode, job.MotionProviderModel, ct);
+        var provider = await _providerRepository.GetProviderByCodeAsync(route.ProviderCode, ct)
+            ?? throw new InvalidOperationException("DANCE_SELL_79AI_PROVIDER_NOT_CONFIGURED");
+        var credential = await _credentials.ResolveAsync(route.ProviderCode, "access_token", ct);
+        var account = await _credentialRepository.GetAccountByIdAsync(credential.ProviderAccountId, ct);
+        return new Ai79MotionRuntime(
+            route.ProviderCode,
+            route.ModelName,
+            FirstNonBlank(ReadConfigString(account?.ConfigJson, "base_url"), provider.BaseUrl, ReadConfigString(provider.ConfigJson, "base_url"), "https://api.gommo.net/ai")!,
+            FirstNonBlank(ReadConfigString(account?.ConfigJson, "domain"), ReadConfigString(provider.ConfigJson, "domain"), "79ai.net")!,
+            ReadConfigString(route.ConfigJson, "submit_path") ?? "/create-video",
+            ReadConfigString(route.ConfigJson, "poll_path") ?? "/video",
+            ReadConfigString(route.ConfigJson, "reference_image_field") ?? "image",
+            ReadConfigString(route.ConfigJson, "motion_video_field") ?? "video",
+            credential);
+    }
+
+    private static bool Is79Ai(DanceSellJobDto job)
+        => string.Equals(job.MotionProviderCode ?? job.ProviderCode, DanceSellConstants.ProviderCode, StringComparison.OrdinalIgnoreCase);
+
+    private sealed record Ai79MotionRuntime(
+        string ProviderCode,
+        string Model,
+        string BaseUrl,
+        string Domain,
+        string SubmitPath,
+        string PollPath,
+        string ReferenceImageField,
+        string MotionVideoField,
+        ResolvedProviderCredential Credential);
+
+    private static string? ReadConfigString(string? rawJson, string propertyName)
+    {
+        if (string.IsNullOrWhiteSpace(rawJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(rawJson);
+            return document.RootElement.ValueKind == JsonValueKind.Object
+                   && document.RootElement.TryGetProperty(propertyName, out var value)
+                   && value.ValueKind == JsonValueKind.String
+                ? value.GetString()
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static string? FirstNonBlank(params string?[] values)
+        => values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim();
+
     private async Task SubmitAsync(RenderJobDto renderJob, DanceSellJobDto danceJob, Guid? operationId, CancellationToken ct)
     {
-        var permit = await _rateLimiter.AcquireSubmitPermitAsync(DanceSellConstants.ProviderCode, ct);
+        var permit = await _rateLimiter.AcquireSubmitPermitAsync(DanceSellConstants.KieProviderCode, ct);
         if (!permit.Allowed)
         {
             await _renderJobs.ScheduleRetryAsync(renderJob.Id, permit.RetryAfter, KieErrorCodes.RateLimited, "KIE submit rate limit reached.", ct);
@@ -313,7 +528,9 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
         {
             CustomerId = DanceSellCompletionService.ToBigIntCustomerId(danceJob.CustomerId),
             ProviderCode = danceJob.MotionProviderCode ?? danceJob.ProviderCode,
-            CapabilityCode = DanceSellConstants.CapabilityCode,
+            CapabilityCode = string.Equals(danceJob.MotionProviderCode ?? danceJob.ProviderCode, DanceSellConstants.KieProviderCode, StringComparison.OrdinalIgnoreCase)
+                ? DanceSellConstants.KieCapabilityCode
+                : DanceSellConstants.CapabilityCode,
             FeatureCode = DanceSellConstants.FeatureCode,
             ModelName = danceJob.MotionProviderModel ?? danceJob.ProviderModel,
             RequestId = danceJob.LogicalRequestId,

@@ -167,6 +167,7 @@ public sealed class DanceSellMotionSourceService : IDanceSellMotionSourceService
 public interface IDanceSellReferenceImageService
 {
     Task<DanceSellReferenceVersionDto> GenerateAsync(Guid jobId, CurrentUserSession user, CancellationToken ct = default);
+    Task<DanceSellJobDto> ApproveCharacterAsync(Guid jobId, CurrentUserSession user, CancellationToken ct = default);
     Task<DanceSellJobDto> ApproveAsync(Guid jobId, Guid versionId, CurrentUserSession user, CancellationToken ct = default);
 }
 
@@ -414,6 +415,52 @@ public sealed class DanceSellReferenceImageService : IDanceSellReferenceImageSer
         return await _repo.GetByIdAsync(job.Id, ct) ?? job;
     }
 
+    public async Task<DanceSellJobDto> ApproveCharacterAsync(Guid jobId, CurrentUserSession user, CancellationToken ct = default)
+    {
+        var job = await RequireOwnedJobAsync(jobId, user, ct);
+        if (job.ProductMediaId is not null
+            || job.CharacterMediaId is null
+            || string.IsNullOrWhiteSpace(job.CharacterImageUrl))
+        {
+            throw new InvalidOperationException("DANCE_SELL_CHARACTER_REFERENCE_NOT_ALLOWED");
+        }
+
+        var versions = await _repo.ListReferenceVersionsAsync(job.Id, ct);
+        var version = await _repo.CreateReferenceVersionAsync(new DanceSellReferenceVersionDto
+        {
+            Id = Guid.NewGuid(),
+            DanceSellJobId = job.Id,
+            VersionNo = versions.Count == 0 ? 1 : versions.Max(x => x.VersionNo) + 1,
+            CharacterMediaId = job.CharacterMediaId,
+            PlacementMode = job.PlacementMode ?? DanceSellPlacementModes.HoldProduct,
+            Prompt = job.Prompt,
+            ProviderCode = "local_composite",
+            ProviderModel = "local_composite",
+            RequestJson = DanceSellRepository.ToJson(new { source = "character_input" }),
+            ResponseJson = DanceSellRepository.ToJson(new { source = "character_input", job.CharacterMediaId }),
+            MediaId = job.CharacterMediaId,
+            ObjectKey = job.CharacterObjectKey,
+            PublicUrl = job.CharacterImageUrl,
+            Status = DanceSellReferenceStatuses.Ready,
+            IsSelected = false,
+            CreatedBy = user.UserId,
+            CreatedAt = DateTime.UtcNow,
+            CompletedAt = DateTime.UtcNow
+        }, ct);
+
+        await _repo.SelectReferenceVersionAsync(job.Id, version.Id, ct);
+        await _repo.UpdateReferenceStatusAsync(
+            job.Id,
+            DanceSellReferenceStatuses.Approved,
+            null,
+            version.MediaId,
+            version.ObjectKey,
+            version.PublicUrl,
+            DateTime.UtcNow,
+            ct);
+        return await _repo.GetByIdAsync(job.Id, ct) ?? job;
+    }
+
     private async Task<DanceSellJobDto> RequireOwnedJobAsync(Guid id, CurrentUserSession user, CancellationToken ct)
     {
         var job = await _repo.GetByIdAsync(id, ct) ?? throw new InvalidOperationException("DANCE_SELL_NOT_FOUND");
@@ -473,6 +520,7 @@ public interface IDanceSellPhase2Service
     Task<DanceSellJobDto> StageTikTokAsync(Guid id, string sourceUrl, CurrentUserSession user, CancellationToken ct = default);
     Task<DanceSellJobDto> QueueRenderAsync(Guid id, CurrentUserSession user, CancellationToken ct = default);
     Task<DanceSellJobDto> RetryAsync(Guid id, CurrentUserSession user, CancellationToken ct = default);
+    Task<DanceSellJobDto> CancelAsync(Guid id, string reason, CurrentUserSession user, CancellationToken ct = default);
     Task<DanceSellJobDto> GetAsync(Guid id, CurrentUserSession user, CancellationToken ct = default);
     Task<IReadOnlyList<DanceSellJobDto>> ListAsync(CurrentUserSession user, int limit = 20, int offset = 0, CancellationToken ct = default);
 }
@@ -735,6 +783,23 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
         var retry = await _renderJobs.RetryAsync(job.RenderJobId.Value, user.UserId, ct)
             ?? throw new InvalidOperationException("DANCE_SELL_RENDER_ENQUEUE_FAILED");
         await _repo.SetRenderJobIdAsync(job.Id, retry.Id, ct);
+        return await _repo.GetByIdAsync(job.Id, ct) ?? job;
+    }
+
+    public async Task<DanceSellJobDto> CancelAsync(Guid id, string reason, CurrentUserSession user, CancellationToken ct = default)
+    {
+        var job = await RequireOwnedJobAsync(id, user, ct);
+        if (job.RenderJobId is null
+            || job.Status is not (DanceSellJobStatuses.Queued or DanceSellJobStatuses.Submitted or DanceSellJobStatuses.Rendering))
+        {
+            throw new InvalidOperationException("DANCE_SELL_CANCEL_NOT_ALLOWED");
+        }
+
+        if (!await _renderJobs.CancelAsync(job.RenderJobId.Value, reason, user.UserId, ct))
+        {
+            throw new InvalidOperationException("DANCE_SELL_CANCEL_FAILED");
+        }
+
         return await _repo.GetByIdAsync(job.Id, ct) ?? job;
     }
 

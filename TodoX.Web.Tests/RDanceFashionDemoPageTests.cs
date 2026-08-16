@@ -6,7 +6,7 @@ namespace TodoX.Web.Tests;
 public sealed class RDanceFashionDemoPageTests
 {
     [Fact]
-    public void PageHasTheTwoTabMockFlowAndLocalResources()
+    public void PageUsesTheFourTabProductionFlow()
     {
         var page = ReadStrictUtf8(Path.Combine(FindRepoRoot(), "TodoX.Web", "Components", "Pages", "RDanceFashionDemo.razor"));
 
@@ -14,38 +14,55 @@ public sealed class RDanceFashionDemoPageTests
         {
             "@page \"/rdance-fashion-demo\"",
             "MudTabPanel Text=\"Thông tin\"",
+            "MudTabPanel Text=\"Hình ảnh\"",
+            "MudTabPanel Text=\"Video\"",
             "MudTabPanel Text=\"Kết quả\"",
-            "https://www.tiktok.com/@kh.nh.n23/video/7666103921814850837",
-            "/resources/mockup/rdance-fashion/rdance-fashion-source.mp4",
-            "/resources/mockup/rdance-fashion/rdance-fashion-character.jpg",
-            "/resources/mockup/rdance-fashion/rdance-fashion-result.mp4",
-            "rdance-fashion-source-frame",
-            "<source src=\"@SourceVideoUrl\" type=\"video/mp4\" />",
-            "MudProgressCircular",
-            "MudProgressLinear",
-            "await Task.Delay(500);",
-            "Tải video"
+            "IDanceSellPhase2Service",
+            "IDanceSellReferenceImageService",
+            "InputFile",
+            "StageTikTokAsync",
+            "GenerateReferenceAsync",
+            "ApproveLatestReferenceAsync",
+            "ApproveCharacterAsync",
+            "ShowMessageBoxAsync",
+            "Kling Motion Control",
+            "Provider chính: 79AI",
+            "CancelAsync",
+            "RetryAsync"
         })
         {
             Assert.Contains(expected, page, StringComparison.Ordinal);
         }
 
-        Assert.DoesNotContain("TikTok API", page, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("MudTabPanel Text=\"Scene", page, StringComparison.Ordinal);
-        Assert.DoesNotContain("MudTabPanel Text=\"Video\"", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("DEMO", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("Task.Delay(500)", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("/resources/mockup/rdance-fashion", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("await Task.Delay", page, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void PageIsAuthenticatedAndRegisteredInNavigation()
+    public void PageKeepsReferenceApprovalGateAndNoProviderSecrets()
     {
-        var repoRoot = FindRepoRoot();
-        var page = ReadStrictUtf8(Path.Combine(repoRoot, "TodoX.Web", "Components", "Pages", "RDanceFashionDemo.razor"));
-        var layout = ReadStrictUtf8(Path.Combine(repoRoot, "TodoX.Web", "Components", "Layout", "MainLayout.razor"));
+        var page = ReadStrictUtf8(Path.Combine(FindRepoRoot(), "TodoX.Web", "Components", "Pages", "RDanceFashionDemo.razor"));
 
-        Assert.Contains("Vui lòng đăng nhập để mở trang này.", page, StringComparison.Ordinal);
-        Assert.Contains("rDance Thời Trang", layout, StringComparison.Ordinal);
-        Assert.Contains("/rdance-fashion-demo", layout, StringComparison.Ordinal);
-        Assert.Contains("Checkroom", layout, StringComparison.Ordinal);
+        Assert.Contains("PreparedReferenceStatus == DanceSellReferenceStatuses.Approved", page, StringComparison.Ordinal);
+        Assert.Contains("DanceSell.QueueRenderAsync", page, StringComparison.Ordinal);
+        Assert.Contains("ShowMessageBoxAsync", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("ApiKey", page, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("access_token", page, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void RouteSeedMakes79AiPrimaryAndKieBackup()
+    {
+        var root = FindRepoRoot();
+        var sql = ReadStrictUtf8(Path.Combine(root, "database", "manual", "rdance-fashion", "01_seed_79ai_kling_motion_routes.sql"));
+
+        Assert.Contains("'79ai'", sql, StringComparison.Ordinal);
+        Assert.Contains("'kling_video_motion'", sql, StringComparison.Ordinal);
+        Assert.Contains("'kling-2.6/motion-control'", sql, StringComparison.Ordinal);
+        Assert.Contains("is_default = false", sql, StringComparison.Ordinal);
+        Assert.Contains("No verified 79AI image-edit model", sql, StringComparison.Ordinal);
     }
 
     private static string ReadStrictUtf8(string file)

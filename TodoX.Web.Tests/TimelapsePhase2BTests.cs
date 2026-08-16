@@ -209,7 +209,8 @@ public class TimelapsePhase2BTests
         Assert.DoesNotContain("clip-input-placeholder", detail, StringComparison.Ordinal);
         Assert.DoesNotContain("class=\"clip-thumbs\"", detail, StringComparison.Ordinal);
 
-        Assert.Contains(".video-preview {\n    aspect-ratio: 16 / 9;", css, StringComparison.Ordinal);
+        var normalizedCss = css.ReplaceLineEndings("\n");
+        Assert.Contains(".video-preview {\n    aspect-ratio: 16 / 9;", normalizedCss, StringComparison.Ordinal);
         Assert.Contains("repeat(auto-fill, minmax(260px, 320px))", css, StringComparison.Ordinal);
         Assert.Contains("object-fit: cover;", css, StringComparison.Ordinal);
         Assert.Contains("overflow-wrap: anywhere;", css, StringComparison.Ordinal);

@@ -65,7 +65,7 @@ public static class DanceSellPhase1Endpoints
             MotionVideoUrl = body.VideoUrl,
             Mode = body.Mode,
             CharacterOrientation = body.CharacterOrientation,
-            ProviderCode = DanceSellConstants.ProviderCode,
+            ProviderCode = DanceSellConstants.KieProviderCode,
             ProviderModel = options.CurrentValue.MotionControlModel
         }, ct);
 
@@ -83,7 +83,7 @@ public static class DanceSellPhase1Endpoints
             Prompt = new { prompt = body.Prompt },
             References = new[] { body.ImageUrl, body.VideoUrl },
             LogCode = null,
-            ProviderCode = DanceSellConstants.ProviderCode,
+            ProviderCode = DanceSellConstants.KieProviderCode,
             ModelCode = options.CurrentValue.MotionControlModel,
             PointCostEstimate = 0,
             PointStatus = RenderPointStatuses.NotRequired,
