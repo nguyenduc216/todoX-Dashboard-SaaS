@@ -137,10 +137,16 @@ public sealed class TimelapseWorkerRepository : ITimelapseWorkerRepository
                 ON start_img.job_id=c.job_id
                AND start_img.progress_percent=c.start_progress_percent
                AND start_img.status='COMPLETED'
+              LEFT JOIN timelapse.timelapse_image_stage_versions start_v
+                ON start_v.image_stage_id=start_img.id
+               AND start_v.attempt=start_img.active_attempt
               JOIN timelapse.timelapse_image_stages end_img
                 ON end_img.job_id=c.job_id
                AND end_img.progress_percent=c.end_progress_percent
                AND end_img.status='COMPLETED'
+              LEFT JOIN timelapse.timelapse_image_stage_versions end_v
+                ON end_v.image_stage_id=end_img.id
+               AND end_v.attempt=end_img.active_attempt
               JOIN candidate picked ON picked.id=c.id
              WHERE v.video_clip_id=c.id
                AND v.attempt=c.active_attempt
@@ -163,9 +169,11 @@ public sealed class TimelapseWorkerRepository : ITimelapseWorkerRepository
                        start_img.result_media_id AS StartMediaId,
                        start_img.public_url AS StartPublicUrl,
                        start_img.object_key AS StartObjectKey,
+                       start_v.response_json::text AS StartResponseJson,
                        end_img.result_media_id AS EndMediaId,
                        end_img.public_url AS EndPublicUrl,
-                       end_img.object_key AS EndObjectKey;
+                       end_img.object_key AS EndObjectKey,
+                       end_v.response_json::text AS EndResponseJson;
             """,
             new { tenant = _tenant.TenantId, workerKey, claimFor = ToPgInterval(claimFor) }, tx);
         tx.Commit();
@@ -770,9 +778,11 @@ public sealed class TimelapseWorkerRepository : ITimelapseWorkerRepository
             row.StartMediaId,
             row.StartPublicUrl,
             row.StartObjectKey,
+            row.StartResponseJson,
             row.EndMediaId,
             row.EndPublicUrl,
-            row.EndObjectKey);
+            row.EndObjectKey,
+            row.EndResponseJson);
 
     private sealed class ImageStageRow
     {
@@ -821,9 +831,11 @@ public sealed class TimelapseWorkerRepository : ITimelapseWorkerRepository
         public Guid? StartMediaId { get; set; }
         public string? StartPublicUrl { get; set; }
         public string? StartObjectKey { get; set; }
+        public string? StartResponseJson { get; set; }
         public Guid? EndMediaId { get; set; }
         public string? EndPublicUrl { get; set; }
         public string? EndObjectKey { get; set; }
+        public string? EndResponseJson { get; set; }
     }
 
     private sealed class FinalizerRow
@@ -877,9 +889,11 @@ public sealed record TimelapseVideoWorkItem(
     Guid? StartMediaId,
     string? StartPublicUrl,
     string? StartObjectKey,
+    string? StartResponseJson,
     Guid? EndMediaId,
     string? EndPublicUrl,
-    string? EndObjectKey);
+    string? EndObjectKey,
+    string? EndResponseJson);
 
 public sealed record TimelapseFinalizerWorkItem(
     Guid Id,

@@ -146,9 +146,15 @@ public class TimelapsePhase2CTests
         Assert.Contains("[\"mode\"] = item.VideoMode", submit, StringComparison.Ordinal);
         Assert.Contains("[\"ratio\"] = NormalizeRatio(item.Ratio)", submit, StringComparison.Ordinal);
         Assert.Contains("[\"resolution\"] = resolution", submit, StringComparison.Ordinal);
-        Assert.Contains("[item.StartPublicUrl!, item.EndPublicUrl!]", submit, StringComparison.Ordinal);
-        Assert.Contains("_options.DefaultVideoStartImageField", submit, StringComparison.Ordinal);
-        Assert.Contains("_options.DefaultVideoEndImageField", submit, StringComparison.Ordinal);
+        Assert.Contains("var startDescriptor = BuildVideoImageDescriptor", submit, StringComparison.Ordinal);
+        Assert.Contains("var endDescriptor = BuildVideoImageDescriptor", submit, StringComparison.Ordinal);
+        Assert.Contains("JsonSerializer.Serialize(new[] { startDescriptor, endDescriptor }", submit, StringComparison.Ordinal);
+        Assert.Contains("[\"privacy\"] = \"PRIVATE\"", submit, StringComparison.Ordinal);
+        Assert.Contains("[\"translate_to_en\"] = \"false\"", submit, StringComparison.Ordinal);
+        Assert.Contains("[\"project_id\"] = _options.DefaultImageProjectId", submit, StringComparison.Ordinal);
+        Assert.Contains("[\"images\"] = imagesJson", submit, StringComparison.Ordinal);
+        Assert.Contains("Ai79TaskOperation.Video, null, null", submit, StringComparison.Ordinal);
+        Assert.DoesNotContain("[item.StartPublicUrl!, item.EndPublicUrl!]", submit, StringComparison.Ordinal);
         Assert.Contains("request.SanitizedJson", submit, StringComparison.Ordinal);
 
         var validationIndex = submit.IndexOf("ResolveVideoResolution(item.VideoMode)", StringComparison.Ordinal);
@@ -316,12 +322,48 @@ public class TimelapsePhase2CTests
         var client = ReadSource("TodoX.Web", "Services", "AiProviders", "Ai79TaskClient.cs");
         var runtime = ReadSource("TodoX.Web", "Services", "Timelapse", "TimelapseProviderRuntime.cs");
 
-        Assert.Contains("DefaultVideoStartImageField", runtime, StringComparison.Ordinal);
-        Assert.Contains("DefaultVideoEndImageField", runtime, StringComparison.Ordinal);
+        Assert.Contains("[\"images\"] = imagesJson", runtime, StringComparison.Ordinal);
+        Assert.Contains("BuildVideoImageDescriptor", runtime, StringComparison.Ordinal);
+        Assert.Contains("Missing 79AI imageInfo.id_base", runtime, StringComparison.Ordinal);
         Assert.Contains("request.Images.Count > 2", client, StringComparison.Ordinal);
-        Assert.Contains("request.Operation == Ai79TaskOperation.Image ? \"id_base\" : \"task_id\"", client, StringComparison.Ordinal);
+        Assert.Contains("request.Operation == Ai79TaskOperation.Image ? \"id_base\" : \"videoId\"", client, StringComparison.Ordinal);
         Assert.Contains("FindImageIdBase", client, StringComparison.Ordinal);
         Assert.DoesNotContain("FindString(document.RootElement, \"task_id\", \"taskId\", \"request_id\", \"requestId\", \"id\")", client, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Runtime_AuditsN8nVideoContractAndPortsSubmitPollCancellation()
+    {
+        var runtime = ReadSource("TodoX.Web", "Services", "Timelapse", "TimelapseProviderRuntime.cs");
+        var repo = ReadSource("TodoX.Web", "Services", "Timelapse", "TimelapseWorkerRepository.cs");
+        var client = ReadSource("TodoX.Web", "Services", "AiProviders", "Ai79TaskClient.cs");
+        var report = ReadSource("docs", "core-platform", "reports", "construction-video-n8n-contract-port-report.md");
+
+        Assert.Contains("todoX-rendervideo-04-video-worker [v52.7.2 max 60s_model clean layout].json", report, StringComparison.Ordinal);
+        Assert.Contains("POST /create-video", report, StringComparison.Ordinal);
+        Assert.Contains("POST /video", report, StringComparison.Ordinal);
+        Assert.Contains("images JSON descriptor", report, StringComparison.OrdinalIgnoreCase);
+
+        Assert.Contains("start_v.response_json::text AS StartResponseJson", repo, StringComparison.Ordinal);
+        Assert.Contains("end_v.response_json::text AS EndResponseJson", repo, StringComparison.Ordinal);
+        Assert.Contains("string? StartResponseJson", repo, StringComparison.Ordinal);
+        Assert.Contains("string? EndResponseJson", repo, StringComparison.Ordinal);
+
+        Assert.Contains("[\"images\"] = imagesJson", runtime, StringComparison.Ordinal);
+        Assert.Contains("new[] { startDescriptor, endDescriptor }", runtime, StringComparison.Ordinal);
+        Assert.Contains("ExtractImageIdBase", runtime, StringComparison.Ordinal);
+        Assert.Contains("ResolveProviderImageUrl", runtime, StringComparison.Ordinal);
+        Assert.Contains("TIMELAPSE_VIDEO_POLL_TRANSIENT", runtime, StringComparison.Ordinal);
+        Assert.Contains("catch (OperationCanceledException ex)", runtime, StringComparison.Ordinal);
+        Assert.Contains("ReleaseVideoClaimAsync(item.Id, item.Attempt, CancellationToken.None)", runtime, StringComparison.Ordinal);
+
+        Assert.Contains("\"videoId\"", client, StringComparison.Ordinal);
+        Assert.Contains("FindVideoOutputUrl", client, StringComparison.Ordinal);
+        Assert.Contains("videoInfo", client, StringComparison.Ordinal);
+        Assert.Contains("MEDIA_GENERATION_STATUS_SUCCESSFUL", client, StringComparison.Ordinal);
+        Assert.Contains("MEDIA_GENERATION_COMPLETED", client, StringComparison.Ordinal);
+        Assert.Contains("MEDIA_GENERATION_STATUS_FAILED", client, StringComparison.Ordinal);
+        Assert.Contains("MEDIA_GENERATION_FAILED", client, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -445,8 +487,12 @@ public class TimelapsePhase2CTests
     {
         Assert.Equal(Ai79TaskStatusNormalizer.Success, Ai79TaskStatusNormalizer.Normalize("SUCCESS"));
         Assert.Equal(Ai79TaskStatusNormalizer.Success, Ai79TaskStatusNormalizer.Normalize("completed"));
+        Assert.Equal(Ai79TaskStatusNormalizer.Success, Ai79TaskStatusNormalizer.Normalize("MEDIA_GENERATION_STATUS_SUCCESSFUL"));
+        Assert.Equal(Ai79TaskStatusNormalizer.Success, Ai79TaskStatusNormalizer.Normalize("MEDIA_GENERATION_COMPLETED"));
         Assert.Equal(Ai79TaskStatusNormalizer.Failed, Ai79TaskStatusNormalizer.Normalize("FAILURE"));
         Assert.Equal(Ai79TaskStatusNormalizer.Failed, Ai79TaskStatusNormalizer.Normalize("error"));
+        Assert.Equal(Ai79TaskStatusNormalizer.Failed, Ai79TaskStatusNormalizer.Normalize("MEDIA_GENERATION_STATUS_FAILED"));
+        Assert.Equal(Ai79TaskStatusNormalizer.Failed, Ai79TaskStatusNormalizer.Normalize("MEDIA_GENERATION_FAILED"));
         Assert.Equal(Ai79TaskStatusNormalizer.Running, Ai79TaskStatusNormalizer.Normalize("pending"));
         Assert.Equal(Ai79TaskStatusNormalizer.Running, Ai79TaskStatusNormalizer.Normalize(null));
     }

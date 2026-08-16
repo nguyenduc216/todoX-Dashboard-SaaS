@@ -56,10 +56,11 @@ public sealed class Ai79TaskClientTests
     }
 
     [Fact]
-    public async Task VideoSubmit_UsesVerifiedCreateVideoContractWithStartAndEndImages()
+    public async Task VideoSubmit_UsesVerifiedCreateVideoContractWithStartAndEndImageDescriptors()
     {
         var handler = new RecordingJsonHandler("""{"data":{"request_id":"video-task-001"}}""");
         var client = new Ai79TaskClient(new HttpClient(handler));
+        var imagesJson = """[{"id_base":"start-id","project_id":"default","url":"https://cdn.example/start.png","file_name":"start.png"},{"id_base":"end-id","project_id":"default","url":"https://cdn.example/end.png","file_name":"end.png"}]""";
 
         var result = await client.SubmitAsync(new Ai79TaskSubmitRequest(
             "https://api.gommo.net/ai",
@@ -68,21 +69,36 @@ public sealed class Ai79TaskClientTests
             "79ai.net",
             "seedance_20_pro",
             "transition prompt",
-            ["https://cdn.example/start.png", "https://cdn.example/end.png"],
-            new Dictionary<string, string?> { ["mode"] = "fast", ["duration"] = "6", ["ratio"] = "16:9" },
-            Ai79TaskOperation.Video,
-            "image",
-            "image_2"));
+            [],
+            new Dictionary<string, string?>
+            {
+                ["privacy"] = "PRIVATE",
+                ["translate_to_en"] = "false",
+                ["project_id"] = "default",
+                ["mode"] = "fast",
+                ["duration"] = "6",
+                ["ratio"] = "16:9",
+                ["resolution"] = "720p",
+                ["images"] = imagesJson
+            },
+            Ai79TaskOperation.Video));
 
         Assert.Equal("video-task-001", result.TaskId);
         var request = Assert.Single(handler.Requests);
         Assert.Equal("https://api.gommo.net/ai/create-video", request.Uri);
-        Assert.Contains("image=https%3A%2F%2Fcdn.example%2Fstart.png", request.Body, StringComparison.Ordinal);
-        Assert.Contains("image_2=https%3A%2F%2Fcdn.example%2Fend.png", request.Body, StringComparison.Ordinal);
+        Assert.Contains("images=", request.Body, StringComparison.Ordinal);
+        Assert.Contains("id_base", Uri.UnescapeDataString(request.Body), StringComparison.Ordinal);
+        Assert.Contains("start-id", Uri.UnescapeDataString(request.Body), StringComparison.Ordinal);
+        Assert.Contains("end-id", Uri.UnescapeDataString(request.Body), StringComparison.Ordinal);
+        Assert.Contains("privacy=PRIVATE", request.Body, StringComparison.Ordinal);
+        Assert.Contains("translate_to_en=false", request.Body, StringComparison.Ordinal);
+        Assert.Contains("project_id=default", request.Body, StringComparison.Ordinal);
         Assert.Contains("mode=fast", request.Body, StringComparison.Ordinal);
         Assert.Contains("duration=6", request.Body, StringComparison.Ordinal);
         Assert.Contains("ratio=16%3A9", request.Body, StringComparison.Ordinal);
-        Assert.DoesNotContain("images=", request.Body, StringComparison.Ordinal);
+        Assert.Contains("resolution=720p", request.Body, StringComparison.Ordinal);
+        Assert.DoesNotContain("image=https", request.Body, StringComparison.Ordinal);
+        Assert.DoesNotContain("image_2=", request.Body, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -182,13 +198,25 @@ public sealed class Ai79TaskClientTests
     }
 
     [Theory]
-    [InlineData("""{"result":{"task_id":"video-task-001","task_status":"COMPLETED","video_url":"https://cdn.example/out.mp4"}}""", "https://cdn.example/out.mp4")]
+    [InlineData("""{"videoInfo":{"status":"MEDIA_GENERATION_STATUS_SUCCESSFUL","download_url":"https://cdn.example/out.mp4","url":"https://cdn.example/fallback.mp4"}}""", "https://cdn.example/out.mp4")]
+    [InlineData("""{"data":{"videoInfo":{"status":"MEDIA_GENERATION_COMPLETED","downloadUrl":"https://cdn.example/out2.mp4"}}}""", "https://cdn.example/out2.mp4")]
     public async Task VideoPoll_SuccessFixtureExtractsOutputUrl(string json, string expectedUrl)
     {
         var result = await PollAsync("/video", json, Ai79TaskOperation.Video);
 
         Assert.Equal(Ai79TaskStatusNormalizer.Success, result.NormalizedStatus);
         Assert.Equal(expectedUrl, result.OutputUrl);
+    }
+
+    [Theory]
+    [InlineData("MEDIA_GENERATION_STATUS_SUCCESSFUL", Ai79TaskStatusNormalizer.Success)]
+    [InlineData("MEDIA_GENERATION_COMPLETED", Ai79TaskStatusNormalizer.Success)]
+    [InlineData("MEDIA_GENERATION_STATUS_FAILED", Ai79TaskStatusNormalizer.Failed)]
+    [InlineData("MEDIA_GENERATION_FAILED", Ai79TaskStatusNormalizer.Failed)]
+    [InlineData("MEDIA_GENERATION_STATUS_PROCESSING", Ai79TaskStatusNormalizer.Running)]
+    public void ProviderStatusNormalizer_Maps79AiMediaGenerationStatuses(string status, string expected)
+    {
+        Assert.Equal(expected, Ai79TaskStatusNormalizer.Normalize(status));
     }
 
     [Theory]
@@ -278,7 +306,8 @@ public sealed class Ai79TaskClientTests
         }
         else
         {
-            Assert.Contains("task_id=abc123", request.Body, StringComparison.Ordinal);
+            Assert.Contains("videoId=abc123", request.Body, StringComparison.Ordinal);
+            Assert.DoesNotContain("task_id=abc123", request.Body, StringComparison.Ordinal);
             Assert.DoesNotContain("id_base=abc123", request.Body, StringComparison.Ordinal);
         }
 

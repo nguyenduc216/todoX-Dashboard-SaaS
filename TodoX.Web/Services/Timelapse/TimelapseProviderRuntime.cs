@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
 using TodoX.Web.Models;
@@ -30,6 +31,7 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
     private readonly ITimelapseWorkerRepository _repo;
     private readonly ITimelapseCoreLifecycleBridge _coreLifecycle;
     private readonly IRenderJobService _renderJobs;
+    private readonly IConfiguration _configuration;
     private readonly TimelapseProviderWorkerOptions _options;
     private readonly ILogger<TimelapseProviderRuntime> _logger;
 
@@ -42,6 +44,7 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
         ITimelapseWorkerRepository repo,
         ITimelapseCoreLifecycleBridge coreLifecycle,
         IRenderJobService renderJobs,
+        IConfiguration configuration,
         IOptions<TimelapseProviderWorkerOptions> options,
         ILogger<TimelapseProviderRuntime> logger)
     {
@@ -53,6 +56,7 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
         _repo = repo;
         _coreLifecycle = coreLifecycle;
         _renderJobs = renderJobs;
+        _configuration = configuration;
         _options = options.Value;
         _logger = logger;
     }
@@ -121,6 +125,24 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
                 item.CustomerId,
                 item.Snapshot,
                 ct);
+        }
+        catch (OperationCanceledException ex)
+        {
+            _logger.LogWarning(ex, "TIMELAPSE_IMAGE_CANCELLED jobId={JobId} progress={Progress} attempt={Attempt} taskId={TaskId}",
+                item.JobId, item.ProgressPercent, item.Attempt, item.ProviderTaskId);
+            await _repo.ReleaseImageClaimAsync(item.Id, item.Attempt, CancellationToken.None);
+            if (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+        }
+        catch (Ai79TaskPollException ex) when (IsTransientPollFailure(ex))
+        {
+            _logger.LogWarning(ex, "TIMELAPSE_IMAGE_POLL_TRANSIENT jobId={JobId} progress={Progress} attempt={Attempt} taskId={TaskId}",
+                item.JobId, item.ProgressPercent, item.Attempt, item.ProviderTaskId);
+            await _repo.ReleaseImageClaimAsync(item.Id, item.Attempt, CancellationToken.None);
+            await _renderJobs.AddEventAsync(item.JobId, "TIMELAPSE_IMAGE_POLL_TRANSIENT", "Timelapse image poll had a transient provider error.",
+                new { item.ProgressPercent, item.Attempt, taskId = item.ProviderTaskId, httpStatus = ex.HttpStatusCode is null ? (int?)null : (int)ex.HttpStatusCode }, "warning", CancellationToken.None);
         }
         catch (Exception ex)
         {
@@ -195,6 +217,24 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
                 item.CustomerId,
                 item.Snapshot,
                 ct);
+        }
+        catch (OperationCanceledException ex)
+        {
+            _logger.LogWarning(ex, "TIMELAPSE_VIDEO_CANCELLED jobId={JobId} clip={ClipIndex} attempt={Attempt} taskId={TaskId}",
+                item.JobId, item.ClipIndex, item.Attempt, item.ProviderTaskId);
+            await _repo.ReleaseVideoClaimAsync(item.Id, item.Attempt, CancellationToken.None);
+            if (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+        }
+        catch (Ai79TaskPollException ex) when (IsTransientPollFailure(ex))
+        {
+            _logger.LogWarning(ex, "TIMELAPSE_VIDEO_POLL_TRANSIENT jobId={JobId} clip={ClipIndex} attempt={Attempt} taskId={TaskId}",
+                item.JobId, item.ClipIndex, item.Attempt, item.ProviderTaskId);
+            await _repo.ReleaseVideoClaimAsync(item.Id, item.Attempt, CancellationToken.None);
+            await _renderJobs.AddEventAsync(item.JobId, "TIMELAPSE_VIDEO_POLL_TRANSIENT", "Timelapse video poll had a transient provider error.",
+                new { item.ClipIndex, item.Attempt, taskId = item.ProviderTaskId, httpStatus = ex.HttpStatusCode is null ? (int?)null : (int)ex.HttpStatusCode }, "warning", CancellationToken.None);
         }
         catch (Exception ex)
         {
@@ -281,16 +321,23 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
 
         var prompt = TimelapsePromptResolver.ResolveVideoPrompt(item.Snapshot, item.ClipIndex, item.StartProgressPercent, item.EndProgressPercent);
         var resolution = ResolveVideoResolution(item.VideoMode);
-        var request = BuildSubmitRequest(provider, prompt, [item.StartPublicUrl!, item.EndPublicUrl!], new Dictionary<string, string?>
+        var startDescriptor = BuildVideoImageDescriptor(item.StartProgressPercent, item.StartPublicUrl!, item.StartObjectKey, item.StartResponseJson);
+        var endDescriptor = BuildVideoImageDescriptor(item.EndProgressPercent, item.EndPublicUrl!, item.EndObjectKey, item.EndResponseJson);
+        var imagesJson = JsonSerializer.Serialize(new[] { startDescriptor, endDescriptor }, JsonOptions);
+        var request = BuildSubmitRequest(provider, prompt, [], new Dictionary<string, string?>
         {
             ["type"] = "video",
             ["duration"] = item.DurationSeconds.ToString(),
             ["mode"] = item.VideoMode,
             ["ratio"] = NormalizeRatio(item.Ratio),
             ["resolution"] = resolution,
+            ["privacy"] = "PRIVATE",
+            ["translate_to_en"] = "false",
+            ["project_id"] = _options.DefaultImageProjectId,
+            ["images"] = imagesJson,
             ["start_progress_percent"] = item.StartProgressPercent.ToString(),
             ["end_progress_percent"] = item.EndProgressPercent.ToString()
-        }, Ai79TaskOperation.Video, _options.DefaultVideoStartImageField, _options.DefaultVideoEndImageField);
+        }, Ai79TaskOperation.Video, null, null);
 
         Ai79TaskSubmitResult submit;
         try
@@ -636,6 +683,122 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
     private static bool PathsEqual(string left, string right)
         => string.Equals(left.Trim().TrimStart('/'), right.Trim().TrimStart('/'), StringComparison.OrdinalIgnoreCase);
 
+    private VideoImageDescriptor BuildVideoImageDescriptor(int progressPercent, string publicUrl, string? objectKey, string? responseJson)
+    {
+        var idBase = ExtractImageIdBase(responseJson);
+        if (string.IsNullOrWhiteSpace(idBase))
+        {
+            throw new InvalidOperationException($"Missing 79AI imageInfo.id_base for Timelapse video endpoint at {progressPercent}%.");
+        }
+
+        var projectId = FirstNonBlank(ExtractImageInfoString(responseJson, "project_id"), _options.DefaultImageProjectId)!;
+        var url = ResolveProviderImageUrl(FirstNonBlank(ExtractImageInfoString(responseJson, "url"), publicUrl)!);
+        var fileName = FirstNonBlank(ExtractImageInfoString(responseJson, "file_name"), ExtractFileName(url), objectKey, $"timelapse-{progressPercent}.png")!;
+        return new VideoImageDescriptor(idBase, projectId, url, fileName);
+    }
+
+    private string ResolveProviderImageUrl(string value)
+    {
+        if (Uri.TryCreate(value, UriKind.Absolute, out var absolute)
+            && (absolute.Scheme == Uri.UriSchemeHttp || absolute.Scheme == Uri.UriSchemeHttps))
+        {
+            return absolute.ToString();
+        }
+
+        var publicBaseUrl = FirstNonBlank(
+            _configuration["TodoX:PublicBaseUrl"],
+            _configuration["App:PublicBaseUrl"],
+            _configuration["Storage:PublicBaseUrl"]);
+        if (!string.IsNullOrWhiteSpace(publicBaseUrl)
+            && Uri.TryCreate(new Uri(publicBaseUrl.TrimEnd('/') + "/", UriKind.Absolute), value.TrimStart('/'), out var resolved)
+            && (resolved.Scheme == Uri.UriSchemeHttp || resolved.Scheme == Uri.UriSchemeHttps))
+        {
+            return resolved.ToString();
+        }
+
+        throw new InvalidOperationException("Timelapse video input image URL must be an absolute HTTP(S) URL for 79AI.");
+    }
+
+    private static string? ExtractImageIdBase(string? responseJson)
+        => ExtractImageInfoString(responseJson, "id_base");
+
+    private static string? ExtractImageInfoString(string? responseJson, string fieldName)
+    {
+        if (string.IsNullOrWhiteSpace(responseJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(responseJson);
+            foreach (var imageInfo in ImageInfoContainers(doc.RootElement))
+            {
+                if (imageInfo.ValueKind == JsonValueKind.Object
+                    && imageInfo.TryGetProperty(fieldName, out var value))
+                {
+                    var found = ScalarString(value);
+                    if (!string.IsNullOrWhiteSpace(found))
+                    {
+                        return found;
+                    }
+                }
+            }
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+
+        return null;
+    }
+
+    private static IEnumerable<JsonElement> ImageInfoContainers(JsonElement root)
+    {
+        if (root.ValueKind != JsonValueKind.Object)
+        {
+            yield break;
+        }
+
+        if (root.TryGetProperty("imageInfo", out var imageInfo))
+        {
+            yield return imageInfo;
+        }
+
+        if (root.TryGetProperty("data", out var data)
+            && data.ValueKind == JsonValueKind.Object
+            && data.TryGetProperty("imageInfo", out var nestedImageInfo))
+        {
+            yield return nestedImageInfo;
+        }
+    }
+
+    private static string? ScalarString(JsonElement value)
+        => value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : value.ValueKind is JsonValueKind.Number or JsonValueKind.True or JsonValueKind.False
+                ? value.ToString()
+                : null;
+
+    private static string? ExtractFileName(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
+        {
+            return null;
+        }
+
+        var fileName = Path.GetFileName(uri.LocalPath);
+        return string.IsNullOrWhiteSpace(fileName) ? null : fileName;
+    }
+
+    private static bool IsTransientPollFailure(Ai79TaskPollException ex)
+        => ex.HttpStatusCode is HttpStatusCode.RequestTimeout
+            or HttpStatusCode.TooManyRequests
+            or HttpStatusCode.InternalServerError
+            or HttpStatusCode.BadGateway
+            or HttpStatusCode.ServiceUnavailable
+            or HttpStatusCode.GatewayTimeout;
+
     private async Task FailImageAsync(TimelapseImageWorkItem item, string? errorCode, string errorMessage, string responseJson, CancellationToken ct)
     {
         await _repo.SaveImageFailedAsync(item.Id, item.Attempt, errorCode, errorMessage, responseJson, ct);
@@ -734,6 +897,12 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
 
     private sealed record ImageReferencePayload(string DataUri, string MimeType, int Bytes);
 
+    private sealed record VideoImageDescriptor(
+        string id_base,
+        string project_id,
+        string url,
+        string file_name);
+
     private sealed record Ai79RuntimeProvider(
         string ProviderCode,
         string Model,
@@ -766,7 +935,16 @@ public static class TimelapsePromptResolver
     }
 
     public static string ResolveVideoPrompt(TimelapseJobSnapshot snapshot, int clipIndex, int startProgress, int endProgress)
-        => $"Use the configured Timelapse profile semantics for {snapshot.ProfileName}. Transition clip {clipIndex} from {startProgress}% to {endProgress}% construction progress.";
+        => string.Join("\n", new[]
+        {
+            $"Use the configured TodoX Construction Timelapse profile semantics for {snapshot.ProfileName}.",
+            $"Create clip {clipIndex} as a smooth construction progress transition from {startProgress}% to {endProgress}%.",
+            "Use the first image as the exact starting frame and the second image as the exact ending frame.",
+            "Preserve the same building identity, camera angle, perspective, lens, lighting direction, structural layout, facade geometry, and surrounding environment.",
+            "Show believable construction progress only; do not morph the building into a different design.",
+            "No subtitles, no captions, no watermarks, no logos, no UI, no text overlays.",
+            $"Duration requirement: exactly {TimelapseRequestRules.RuntimeClipDurationSeconds} seconds."
+        });
 
     private static string ExtractProfilePrompt(string promptSnapshotJson)
     {

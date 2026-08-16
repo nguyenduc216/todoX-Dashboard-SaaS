@@ -61,6 +61,25 @@ public sealed class Ai79TaskSubmitException : InvalidOperationException
     public string ErrorMessage { get; }
 }
 
+public sealed class Ai79TaskPollException : InvalidOperationException
+{
+    public Ai79TaskPollException(
+        string errorMessage,
+        HttpStatusCode? httpStatusCode = null,
+        string? sanitizedResponseJson = null,
+        Exception? innerException = null)
+        : base(errorMessage, innerException)
+    {
+        HttpStatusCode = httpStatusCode;
+        SanitizedResponseJson = sanitizedResponseJson ?? JsonSerializer.Serialize(string.Empty, JsonOptions);
+    }
+
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
+    public HttpStatusCode? HttpStatusCode { get; }
+    public string SanitizedResponseJson { get; }
+}
+
 public sealed record Ai79TaskStatusResult(
     string NormalizedStatus,
     string SanitizedResponseJson,
@@ -84,8 +103,10 @@ public static class Ai79TaskStatusNormalizer
 
         return value.ToUpperInvariant() switch
         {
-            "SUCCESS" or "SUCCEEDED" or "COMPLETED" or "COMPLETE" or "DONE" or "FINISHED" => Success,
-            "FAILURE" or "FAILED" or "ERROR" or "CANCELLED" or "CANCELED" => Failed,
+            "SUCCESS" or "SUCCEEDED" or "COMPLETED" or "COMPLETE" or "DONE" or "FINISHED"
+                or "MEDIA_GENERATION_STATUS_SUCCESSFUL" or "MEDIA_GENERATION_COMPLETED" => Success,
+            "FAILURE" or "FAILED" or "ERROR" or "CANCELLED" or "CANCELED" or "REJECTED"
+                or "MEDIA_GENERATION_STATUS_FAILED" or "MEDIA_GENERATION_FAILED" => Failed,
             _ => Running
         };
     }
@@ -207,16 +228,18 @@ public sealed class Ai79TaskClient : IAi79TaskClient
         {
             ["access_token"] = request.AccessToken,
             ["domain"] = request.Domain,
-            [request.Operation == Ai79TaskOperation.Image ? "id_base" : "task_id"] = request.TaskId
+            [request.Operation == Ai79TaskOperation.Image ? "id_base" : "videoId"] = request.TaskId
         };
 
         using var body = new FormUrlEncodedContent(form);
         using var response = await _httpClient.PostAsync(BuildUri(request.BaseUrl, path), body, ct);
-        var json = await ReadJsonAsync(response, ct);
+        var json = await ReadJsonAsync(response, request.AccessToken, ct);
         using var document = JsonDocument.Parse(json);
         var sanitized = SanitizeSecretJson(document.RootElement, request.AccessToken);
         var status = Ai79TaskStatusNormalizer.Normalize(FindStatus(document.RootElement));
-        var outputUrl = FindUrl(document.RootElement);
+        var outputUrl = request.Operation == Ai79TaskOperation.Video
+            ? FindVideoOutputUrl(document.RootElement)
+            : FindUrl(document.RootElement);
         var errorCode = FindErrorValue(document.RootElement, "error_code", "errorCode", "code");
         var errorMessage = FindErrorValue(document.RootElement, "error_message", "errorMessage", "message", "msg");
 
@@ -226,17 +249,22 @@ public sealed class Ai79TaskClient : IAi79TaskClient
     private static Uri BuildUri(string baseUrl, string path)
         => new(new Uri(baseUrl.TrimEnd('/') + "/"), path.TrimStart('/'));
 
-    private static async Task<string> ReadJsonAsync(HttpResponseMessage response, CancellationToken ct)
+    private static async Task<string> ReadJsonAsync(HttpResponseMessage response, string accessToken, CancellationToken ct)
     {
         var text = await response.Content.ReadAsStringAsync(ct);
         if (!response.IsSuccessStatusCode)
         {
-            throw new InvalidOperationException($"79AI task API returned HTTP {(int)response.StatusCode}.");
+            throw new Ai79TaskPollException(
+                $"79AI task API returned HTTP {(int)response.StatusCode}.",
+                response.StatusCode,
+                string.IsNullOrWhiteSpace(text)
+                    ? JsonSerializer.Serialize(string.Empty, JsonOptions)
+                    : JsonSerializer.Serialize(SanitizeText(text, accessToken), JsonOptions));
         }
 
         if (string.IsNullOrWhiteSpace(text))
         {
-            throw new InvalidOperationException("79AI task API returned an empty response.");
+            throw new Ai79TaskPollException("79AI task API returned an empty response.", response.StatusCode);
         }
 
         return text;
@@ -428,7 +456,7 @@ public sealed class Ai79TaskClient : IAi79TaskClient
                 }
             }
 
-            foreach (var containerName in new[] { "imageInfo", "task", "data", "result", "response" })
+            foreach (var containerName in new[] { "imageInfo", "videoInfo", "task", "data", "result", "response", "body" })
             {
                 if (element.TryGetProperty(containerName, out var child))
                 {
@@ -595,6 +623,83 @@ public sealed class Ai79TaskClient : IAi79TaskClient
                 if (found is not null)
                 {
                     return found;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static string? FindVideoOutputUrl(JsonElement root)
+    {
+        foreach (var container in VideoStatusContainers(root))
+        {
+            var found = FindFirstDirectUrl(container, "download_url", "downloadUrl", "url", "video_url", "videoUrl", "result_url", "resultUrl");
+            if (found is not null)
+            {
+                return found;
+            }
+        }
+
+        return null;
+    }
+
+    private static IEnumerable<JsonElement> VideoStatusContainers(JsonElement root)
+    {
+        yield return root;
+
+        if (root.ValueKind != JsonValueKind.Object)
+        {
+            yield break;
+        }
+
+        foreach (var path in new[]
+                 {
+                     new[] { "videoInfo" },
+                     new[] { "data", "videoInfo" },
+                     new[] { "body", "videoInfo" },
+                     new[] { "body", "data", "videoInfo" },
+                     new[] { "data" },
+                     new[] { "body" },
+                     new[] { "body", "data" }
+                 })
+        {
+            if (TryGetPath(root, path, out var value))
+            {
+                yield return value;
+            }
+        }
+    }
+
+    private static bool TryGetPath(JsonElement element, IReadOnlyList<string> path, out JsonElement value)
+    {
+        value = element;
+        foreach (var segment in path)
+        {
+            if (value.ValueKind != JsonValueKind.Object || !value.TryGetProperty(segment, out value))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static string? FindFirstDirectUrl(JsonElement element, params string[] names)
+    {
+        if (element.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        foreach (var name in names)
+        {
+            if (element.TryGetProperty(name, out var value))
+            {
+                var text = ScalarString(value);
+                if (IsHttpUrl(text))
+                {
+                    return text;
                 }
             }
         }
