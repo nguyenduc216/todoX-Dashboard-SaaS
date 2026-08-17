@@ -161,25 +161,29 @@ public sealed class DanceSellPhase2ValidationTests
         var prompt = GetMethodSection(service, "BuildReferencePrompt");
         var generate = GetMethodSection(service, "GenerateAsync");
 
-        Assert.Contains("Create ONE single photorealistic fashion try-on image.", prompt, StringComparison.Ordinal);
-        Assert.Contains("Preserve the same person from the character reference image.", prompt, StringComparison.Ordinal);
-        Assert.Contains("Preserve the same face, hairstyle, expression, skin tone, body proportions, pose direction, hand position, and overall studio or background feel as much as possible.", prompt, StringComparison.Ordinal);
-        Assert.Contains("The model MUST WEAR the exact clothing/product shown in the product image.", prompt, StringComparison.Ordinal);
-        Assert.Contains("The final outfit must visually read as the same outfit from the product image, not a similar one.", prompt, StringComparison.Ordinal);
-        Assert.Contains("same person", prompt, StringComparison.Ordinal);
-        Assert.Contains("face", prompt, StringComparison.Ordinal);
-        Assert.Contains("hairstyle", prompt, StringComparison.Ordinal);
-        Assert.Contains("body proportions", prompt, StringComparison.Ordinal);
-        Assert.Contains("A human viewer should immediately recognize that the model is wearing the exact outfit from the product image.", prompt, StringComparison.Ordinal);
+        Assert.Contains("VIRTUAL TRY-ON - PREVIEW ONLY.", prompt, StringComparison.Ordinal);
+        Assert.Contains("IMAGE 1 is the FIXED BASE BODY.", prompt, StringComparison.Ordinal);
+        Assert.Contains("Preserve the exact person identity, face, hairstyle, body shape, body pose, limb angles, shoulder alignment, head tilt, camera angle, framing, and background from IMAGE 1.", prompt, StringComparison.Ordinal);
+        Assert.Contains("Do NOT regenerate the person.", prompt, StringComparison.Ordinal);
+        Assert.Contains("Do NOT reinterpret or modify the pose.", prompt, StringComparison.Ordinal);
+        Assert.Contains("Only replace the clothing region on the body.", prompt, StringComparison.Ordinal);
+        Assert.Contains("IMAGE 2 is the CLOTHING SOURCE.", prompt, StringComparison.Ordinal);
+        Assert.Contains("Apply the clothing from IMAGE 2 onto the person in IMAGE 1.", prompt, StringComparison.Ordinal);
+        Assert.Contains("The person in IMAGE 1 must appear to be wearing the clothing from IMAGE 2.", prompt, StringComparison.Ordinal);
+        Assert.Contains("Clothing must conform naturally to the existing body pose in IMAGE 1.", prompt, StringComparison.Ordinal);
+        Assert.Contains("Match exactly: garment type, overall silhouette and shape, dominant colors, sleeve colors and trim colors, collar or neckline style, hem length, fabric appearance, graphic artwork, printed text, artwork placement, and artwork scale.", prompt, StringComparison.Ordinal);
+        Assert.Contains("If conflict occurs between clothing accuracy and clothing realism, prioritize preserving the exact body pose from IMAGE 1", prompt, StringComparison.Ordinal);
 
         foreach (var blocked in new[]
         {
             "Do not create a collage.",
-            "Do not create side-by-side images.",
-            "Do not create a split-screen composition.",
-            "Do not create an inset product thumbnail.",
-            "Do not display the product separately.",
-            "Do not invent a different outfit."
+            "Do not place IMAGE 2 beside the model.",
+            "Do not invent a different outfit.",
+            "Do not simplify the outfit.",
+            "Do not replace it with generic fashion clothing.",
+            "Do not change the pose.",
+            "Do not change the camera angle.",
+            "Do not change the background."
         })
         {
             Assert.Contains(blocked, prompt, StringComparison.Ordinal);

@@ -635,36 +635,35 @@ public sealed class DanceSellReferenceImageService : IDanceSellReferenceImageSer
     {
         var basePrompt = string.IsNullOrWhiteSpace(job.ImagePrompt) ? job.Prompt : job.ImagePrompt;
         var instruction = string.IsNullOrWhiteSpace(job.CustomPlacementInstruction)
-            ? "Dress the model in the exact product from the product reference image."
+            ? "Only replace the clothing region on the fixed base body."
             : job.CustomPlacementInstruction.Trim();
         return string.Join(' ', new[]
         {
-            "Create ONE single photorealistic fashion try-on image.",
-            "IDENTITY SOURCE: Use the character reference image as the identity source.",
-            "Preserve the same person from the character reference image.",
-            "Preserve the same face, hairstyle, expression, skin tone, body proportions, pose direction, hand position, and overall studio or background feel as much as possible.",
-            "Do not replace the person with a different person.",
-            "PRODUCT SOURCE: Use the product reference image as the clothing source.",
-            "The model MUST WEAR the exact clothing/product shown in the product image.",
-            "The final outfit must visually read as the same outfit from the product image, not a similar one.",
-            "Faithfully preserve the product garment type, silhouette, main colors, printed graphics, logos, embroidery, collar shape, sleeve shape, waistline, skirt, shorts, pants construction, and visible design details.",
-            "If the product image shows front and back views of the same garment, use both views only to understand the design and do NOT display both product views in the final output.",
-            "If the product image contains a coordinated set, dress the model in the full set.",
+            "VIRTUAL TRY-ON - PREVIEW ONLY.",
+            "IMAGE 1 is the FIXED BASE BODY.",
+            "Preserve the exact person identity, face, hairstyle, body shape, body pose, limb angles, shoulder alignment, head tilt, camera angle, framing, and background from IMAGE 1.",
+            "Do NOT regenerate the person.",
+            "Do NOT reinterpret or modify the pose.",
+            "Only replace the clothing region on the body.",
+            "IMAGE 2 is the CLOTHING SOURCE.",
+            "Apply the clothing from IMAGE 2 onto the person in IMAGE 1.",
+            "The person in IMAGE 1 must appear to be wearing the clothing from IMAGE 2.",
+            "Clothing must conform naturally to the existing body pose in IMAGE 1.",
+            "Reproduce the outfit from IMAGE 2 as faithfully as possible.",
+            "Match exactly: garment type, overall silhouette and shape, dominant colors, sleeve colors and trim colors, collar or neckline style, hem length, fabric appearance, graphic artwork, printed text, artwork placement, and artwork scale.",
+            "If IMAGE 2 contains front and back views of the same outfit, treat them as reference views of one single outfit, not separate garments.",
+            "Use the visible front-view clothing details as the primary design in the result.",
             instruction,
-            "The result must look like a realistic fashion advertisement photo of the SAME MODEL wearing the PROVIDED PRODUCT.",
-            "A human viewer should immediately recognize that the model is wearing the exact outfit from the product image.",
-            "The product must be physically worn on the model's body.",
-            "Do not display the product separately.",
-            "Do not place the product beside the model.",
             "Do not create a collage.",
-            "Do not create side-by-side images.",
-            "Do not create a split-screen composition.",
-            "Do not create an inset product thumbnail.",
-            "Do not create a product catalog board.",
-            "Do not preserve the model's original outfit when a replacement fashion product is provided.",
+            "Do not place IMAGE 2 beside the model.",
             "Do not invent a different outfit.",
-            "Do not change product colors arbitrarily, remove important logos or printed graphics, add text, or add a watermark.",
-            "OUTPUT: Return one clean, unified, photorealistic image suitable as the reference image for motion-video generation.",
+            "Do not simplify the outfit.",
+            "Do not replace it with generic fashion clothing.",
+            "Do not change the pose.",
+            "Do not change the camera angle.",
+            "Do not change the background.",
+            "If conflict occurs between clothing accuracy and clothing realism, prioritize preserving the exact body pose from IMAGE 1 while keeping the clothing design from IMAGE 2 as accurate as possible.",
+            "Photorealistic virtual try-on, product preview quality, realistic fabric drape, clean studio result.",
             basePrompt
         }.Where(part => !string.IsNullOrWhiteSpace(part)));
     }
