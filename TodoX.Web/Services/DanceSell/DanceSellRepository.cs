@@ -27,6 +27,7 @@ public interface IDanceSellRepository
     Task<DanceSellReferenceVersionDto> CreateReferenceVersionAsync(DanceSellReferenceVersionDto version, CancellationToken ct = default);
     Task CompleteReferenceVersionAsync(Guid versionId, Guid mediaId, string objectKey, string publicUrl, string responseJson, CancellationToken ct = default);
     Task FailReferenceVersionAsync(Guid versionId, string errorJson, CancellationToken ct = default);
+    Task UpdateReferenceVersionScoreAsync(Guid versionId, string scoreJson, CancellationToken ct = default);
     Task<bool> SelectReferenceVersionAsync(Guid danceSellJobId, Guid versionId, CancellationToken ct = default);
     Task UnapproveReferenceAsync(Guid danceSellJobId, CancellationToken ct = default);
     Task UpdateSubmittedAsync(Guid id, string requestJson, string providerTaskId, string submitResponseJson, CancellationToken ct = default);
@@ -480,6 +481,22 @@ public sealed class DanceSellRepository : IDanceSellRepository
                AND status='generating';
             """,
             new { versionId, errorJson });
+    }
+
+    public async Task UpdateReferenceVersionScoreAsync(Guid versionId, string scoreJson, CancellationToken ct = default)
+    {
+        using var conn = await _factory.OpenAsync(ct);
+        await conn.ExecuteAsync(
+            """
+            UPDATE dance_sell.dance_sell_reference_versions
+               SET response_json = jsonb_set(
+                       COALESCE(response_json, '{}'::jsonb),
+                       '{manualScore}',
+                       CAST(@scoreJson AS jsonb),
+                       true)
+             WHERE id=@versionId;
+            """,
+            new { versionId, scoreJson });
     }
 
     public async Task<bool> SelectReferenceVersionAsync(Guid danceSellJobId, Guid versionId, CancellationToken ct = default)

@@ -12,9 +12,22 @@ public static class DanceSellConstants
     public const string KieMotionModel = "kling-2.6/motion-control";
     public const string ReferenceModel = "gpt-image-2-image-to-image";
     public const string Ai79ReferenceModel = "seedream_5_0";
+    public const string ReferenceComparisonExperiment = "dance_sell_reference_ab_test";
     public const string BillingEnabledConfigKey = "dance_sell_billing_enabled";
     public const string AllowCodeProviderFallbackConfigKey = "dance_sell_allow_code_provider_fallback";
 }
+
+public static class DanceSellReferenceComparisonCandidates
+{
+    public static IReadOnlyList<DanceSellReferenceComparisonCandidate> All { get; } = new[]
+    {
+        new DanceSellReferenceComparisonCandidate("79ai", "o1", "IMAGE O1 - Kling"),
+        new DanceSellReferenceComparisonCandidate("79ai", "seedream_4_0", "Seedream 4.0"),
+        new DanceSellReferenceComparisonCandidate("79ai", "google_image_gen_banana_pro", "Nano Banana Pro")
+    };
+}
+
+public sealed record DanceSellReferenceComparisonCandidate(string ProviderCode, string ModelName, string DisplayName);
 
 public static class DanceSellReferenceModes
 {
@@ -295,6 +308,25 @@ public sealed class DanceSellReferenceVersionDto
     public Guid? CreatedBy { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime? CompletedAt { get; set; }
+}
+
+public sealed class DanceSellReferenceComparisonResultDto
+{
+    public DanceSellReferenceComparisonCandidate Candidate { get; set; } = new("79ai", string.Empty, string.Empty);
+    public DanceSellReferenceVersionDto? Version { get; set; }
+    public string Status { get; set; } = DanceSellReferenceStatuses.NotCreated;
+    public string? ErrorMessage { get; set; }
+    public TimeSpan? Elapsed { get; set; }
+}
+
+public sealed class DanceSellReferenceComparisonScoreRequest
+{
+    public int ShirtColorFidelity { get; set; }
+    public int GarmentShapeFidelity { get; set; }
+    public int GraphicTextFidelity { get; set; }
+    public int LogoArtworkFidelity { get; set; }
+    public int SelectedBottomFidelity { get; set; }
+    public int IdentityPreservation { get; set; }
 }
 
 public sealed class DanceSellCreateJobRequest

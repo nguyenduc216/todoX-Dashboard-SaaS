@@ -6,6 +6,7 @@
 @inject AuthStateService AuthState
 @inject IDanceSellPhase2Service DanceSell
 @inject IDanceSellReferenceImageService References
+@inject IDanceSellReferenceComparisonService ReferenceComparison
 @inject IDanceSellRepository DanceRepo
 @inject IDanceSellCostEstimator Costs
 @inject IDanceSellProviderCatalog ProviderCatalog
@@ -244,6 +245,54 @@
                     </MudItem>
                 </MudGrid>
                 <MudAlert Severity="Severity.Info" Class="mt-3">Chỉ ảnh tham chiếu đã duyệt mới được phép render video. Tạo lại ảnh sẽ tạo phiên bản mới.</MudAlert>
+                @if (CanRunReferenceComparison)
+                {
+                    <MudPaper Class="todox-panel pa-4 mt-3 rdance-ab-panel">
+                        <MudStack Spacing="2">
+                            <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
+                                <MudStack Spacing="0">
+                                    <MudText Typo="Typo.h6">A/B reference model test</MudText>
+                                    <MudText Typo="Typo.caption">Admin/dev only. Same character image, product image, prompt, ratio and resolution.</MudText>
+                                </MudStack>
+                                <MudButton Variant="Variant.Filled" Color="Color.Warning" Disabled="@(_busy || _job?.CharacterMediaId is null || _job?.ProductMediaId is null)" OnClick="RunReferenceComparisonAsync">Run 3-model test</MudButton>
+                            </MudStack>
+                            <MudGrid>
+                                @foreach (var candidate in DanceSellReferenceComparisonCandidates.All)
+                                {
+                                    var version = FindComparisonVersion(candidate.ModelName);
+                                    <MudItem xs="12" md="4">
+                                        <MudPaper Outlined="true" Class="pa-3 rdance-ab-card">
+                                            <MudStack Spacing="2">
+                                                <MudText Typo="Typo.subtitle2">@candidate.DisplayName</MudText>
+                                                <MudText Typo="Typo.caption">79ai / @candidate.ModelName</MudText>
+                                                <MudChip T="string" Size="Size.Small" Color="@ComparisonStatusColor(version)">@(version?.Status ?? "not_created")</MudChip>
+                                                @Preview(version?.PublicUrl, candidate.DisplayName)
+                                                @if (version?.Status == DanceSellReferenceStatuses.Generating)
+                                                {
+                                                    <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning" Disabled="@_busy" OnClick="@(() => PollReferenceComparisonAsync(version.Id))">Poll result</MudButton>
+                                                }
+                                                else if (version?.Status == DanceSellReferenceStatuses.Failed)
+                                                {
+                                                    <MudAlert Severity="Severity.Error" Dense="true">@version.ErrorJson</MudAlert>
+                                                }
+                                                @if (version?.Status == DanceSellReferenceStatuses.Ready)
+                                                {
+                                                    <MudNumericField T="int" Label="shirt color" Min="0" Max="5" Variant="Variant.Outlined" @bind-Value="_scoreShirtColor" />
+                                                    <MudNumericField T="int" Label="garment shape" Min="0" Max="5" Variant="Variant.Outlined" @bind-Value="_scoreGarmentShape" />
+                                                    <MudNumericField T="int" Label="graphic/text" Min="0" Max="5" Variant="Variant.Outlined" @bind-Value="_scoreGraphicText" />
+                                                    <MudNumericField T="int" Label="logo/artwork" Min="0" Max="5" Variant="Variant.Outlined" @bind-Value="_scoreLogoArtwork" />
+                                                    <MudNumericField T="int" Label="selected bottom" Min="0" Max="5" Variant="Variant.Outlined" @bind-Value="_scoreSelectedBottom" />
+                                                    <MudNumericField T="int" Label="identity" Min="0" Max="5" Variant="Variant.Outlined" @bind-Value="_scoreIdentity" />
+                                                    <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary" Disabled="@_busy" OnClick="@(() => ScoreReferenceComparisonAsync(version.Id))">Save score</MudButton>
+                                                }
+                                            </MudStack>
+                                        </MudPaper>
+                                    </MudItem>
+                                }
+                            </MudGrid>
+                        </MudStack>
+                    </MudPaper>
+                }
                 @if (_job?.PreparedReferenceStatus == DanceSellReferenceStatuses.Approved)
                 {
                     <MudButton Class="mt-3" Variant="Variant.Filled" Color="Color.Warning" OnClick="@(() => _tabIndex = 2)">Tiếp tục tạo video</MudButton>
@@ -331,6 +380,7 @@
     private string _tiktokUrl = string.Empty;
     private DanceSellJobDto? _job;
     private DanceSellReferenceVersionDto? _latestReference;
+    private IReadOnlyList<DanceSellReferenceVersionDto> _referenceVersions = Array.Empty<DanceSellReferenceVersionDto>();
     private IReadOnlyList<DanceSellJobDto> _history = Array.Empty<DanceSellJobDto>();
     private IReadOnlyList<DanceSellProviderRouteDto> _motionRoutes = Array.Empty<DanceSellProviderRouteDto>();
     private DanceSellCostEstimate? _estimate;
@@ -346,6 +396,12 @@
     private bool _productDragActive;
     private CancellationTokenSource? _pollCts;
     private PeriodicTimer? _pollTimer;
+    private int _scoreShirtColor = 3;
+    private int _scoreGarmentShape = 3;
+    private int _scoreGraphicText = 3;
+    private int _scoreLogoArtwork = 3;
+    private int _scoreSelectedBottom = 3;
+    private int _scoreIdentity = 3;
 
     private const string AcceptedImageTypes = "image/png,image/jpeg,image/webp";
     private bool CanRender => _job?.Status is not (DanceSellJobStatuses.Queued or DanceSellJobStatuses.Submitted or DanceSellJobStatuses.Rendering)
@@ -381,6 +437,7 @@
     };
     private Color ReferenceColor => _job?.PreparedReferenceStatus == DanceSellReferenceStatuses.Approved ? Color.Success : Color.Warning;
     private bool HasTikTokSource => _job?.MotionSourceType == DanceSellMotionSourceTypes.TikTok && !string.IsNullOrWhiteSpace(_job.MotionSourceUrl);
+    private bool CanRunReferenceComparison => AuthState.CurrentUser is not null && DanceSellSecurity.IsAdmin(AuthState.CurrentUser);
 
     protected override void OnInitialized()
     {
@@ -445,6 +502,7 @@
                 _tiktokUrl = _job.MotionSourceUrl;
             }
             var versions = await DanceRepo.ListReferenceVersionsAsync(_job.Id);
+            _referenceVersions = versions;
             _latestReference = versions.OrderByDescending(x => x.VersionNo).FirstOrDefault();
             await RefreshEstimateAsync();
         }
@@ -452,6 +510,7 @@
         {
             _job = null;
             _latestReference = null;
+            _referenceVersions = Array.Empty<DanceSellReferenceVersionDto>();
             _loadError = ex.Message == "DANCE_SELL_UNAUTHORIZED"
                 ? "Bạn không có quyền xem video này."
                 : "Không tìm thấy video quảng cáo thời trang.";
@@ -463,7 +522,7 @@
 
     private void HandleAuthChange() => _ = InvokeAsync(async () =>
     {
-        if (AuthState.CurrentUser is { IsCustomer: true })
+        if (AuthState.CurrentUser is not null)
         {
             await ReloadAsync();
             StartPolling();
@@ -643,6 +702,34 @@
         await ReloadAsync();
     });
 
+    private async Task RunReferenceComparisonAsync() => await RunAsync(async () =>
+    {
+        await ReferenceComparison.RunAsync(_job!.Id, AuthState.CurrentUser!);
+        Snackbar.Add("A/B reference comparison submitted.", Severity.Success);
+        await ReloadAsync();
+    });
+
+    private async Task PollReferenceComparisonAsync(Guid versionId) => await RunAsync(async () =>
+    {
+        await ReferenceComparison.PollAsync(_job!.Id, versionId, AuthState.CurrentUser!);
+        await ReloadAsync();
+    });
+
+    private async Task ScoreReferenceComparisonAsync(Guid versionId) => await RunAsync(async () =>
+    {
+        await ReferenceComparison.ScoreAsync(_job!.Id, versionId, new DanceSellReferenceComparisonScoreRequest
+        {
+            ShirtColorFidelity = _scoreShirtColor,
+            GarmentShapeFidelity = _scoreGarmentShape,
+            GraphicTextFidelity = _scoreGraphicText,
+            LogoArtworkFidelity = _scoreLogoArtwork,
+            SelectedBottomFidelity = _scoreSelectedBottom,
+            IdentityPreservation = _scoreIdentity
+        }, AuthState.CurrentUser!);
+        Snackbar.Add("A/B score saved.", Severity.Success);
+        await ReloadAsync();
+    });
+
     private async Task ConfirmAndQueueAsync()
     {
         if (!string.IsNullOrWhiteSpace(_motionReadinessError))
@@ -736,6 +823,25 @@
             ? $"{bytes / 1024d / 1024d:0.##} MB"
             : $"{bytes / 1024d:0.##} KB";
     }
+
+    private DanceSellReferenceVersionDto? FindComparisonVersion(string modelName)
+        => _referenceVersions
+            .Where(x => string.Equals(x.ProviderModel, modelName, StringComparison.OrdinalIgnoreCase) && IsComparisonVersion(x))
+            .OrderByDescending(x => x.VersionNo)
+            .FirstOrDefault();
+
+    private static bool IsComparisonVersion(DanceSellReferenceVersionDto version)
+        => (version.RequestJson?.Contains(DanceSellConstants.ReferenceComparisonExperiment, StringComparison.Ordinal) == true)
+           || (version.ResponseJson?.Contains(DanceSellConstants.ReferenceComparisonExperiment, StringComparison.Ordinal) == true)
+           || (version.ErrorJson?.Contains(DanceSellConstants.ReferenceComparisonExperiment, StringComparison.Ordinal) == true);
+
+    private static Color ComparisonStatusColor(DanceSellReferenceVersionDto? version) => version?.Status switch
+    {
+        DanceSellReferenceStatuses.Ready => Color.Success,
+        DanceSellReferenceStatuses.Generating => Color.Warning,
+        DanceSellReferenceStatuses.Failed => Color.Error,
+        _ => Color.Default
+    };
 
     private static RenderFragment Preview(string? url, string alt) => @<div class="rdance-media-preview">
         @if (!string.IsNullOrWhiteSpace(url))

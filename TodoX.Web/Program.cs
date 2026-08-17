@@ -157,6 +157,7 @@ builder.Services.AddScoped<IDanceSellRepository, DanceSellRepository>();
 builder.Services.AddScoped<IDanceSellCompletionService, DanceSellCompletionService>();
 builder.Services.AddScoped<IDanceSellMotionSourceService, DanceSellMotionSourceService>();
 builder.Services.AddScoped<IDanceSellReferenceImageService, DanceSellReferenceImageService>();
+builder.Services.AddScoped<IDanceSellReferenceComparisonService, DanceSellReferenceComparisonService>();
 builder.Services.AddScoped<IDanceSellPhase2Service, DanceSellPhase2Service>();
 builder.Services.AddScoped<IDanceSellProviderCatalog, DanceSellProviderCatalog>();
 builder.Services.AddScoped<IDanceSellOperationRepository, DanceSellOperationRepository>();

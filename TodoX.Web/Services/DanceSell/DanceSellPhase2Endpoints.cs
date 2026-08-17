@@ -38,6 +38,9 @@ public static class DanceSellPhase2Endpoints
         admin.MapPost("/ai-operation-logs/{id:guid}/retry-refund", RetryRefundAsync).DisableAntiforgery();
         admin.MapPost("/ai-operation-logs/{id:guid}/retry-charge", RetryChargeAsync).DisableAntiforgery();
         admin.MapGet("/ai-provider-accounts", ListProviderAccountsAsync);
+        admin.MapPost("/dance-sell/jobs/{id:guid}/reference-comparison/run", RunReferenceComparisonAsync).DisableAntiforgery();
+        admin.MapPost("/dance-sell/jobs/{id:guid}/reference-comparison/{versionId:guid}/poll", PollReferenceComparisonAsync).DisableAntiforgery();
+        admin.MapPost("/dance-sell/jobs/{id:guid}/reference-comparison/{versionId:guid}/score", ScoreReferenceComparisonAsync).DisableAntiforgery();
     }
 
     private static async Task<IResult> GetProvidersAsync(string operationType, AuthStateService auth, IDanceSellPhase2Service service, CancellationToken ct)
@@ -121,6 +124,15 @@ public static class DanceSellPhase2Endpoints
 
     private static Task<IResult> ListProviderAccountsAsync(AuthStateService auth)
         => ExecuteAdminAsync(auth, () => Task.FromResult<IReadOnlyList<ProviderAccountDto>>(Array.Empty<ProviderAccountDto>()));
+
+    private static async Task<IResult> RunReferenceComparisonAsync(Guid id, AuthStateService auth, IDanceSellReferenceComparisonService service, CancellationToken ct)
+        => await ExecuteAdminAsync(auth, () => service.RunAsync(id, auth.CurrentUser!, ct));
+
+    private static async Task<IResult> PollReferenceComparisonAsync(Guid id, Guid versionId, AuthStateService auth, IDanceSellReferenceComparisonService service, CancellationToken ct)
+        => await ExecuteAdminAsync(auth, () => service.PollAsync(id, versionId, auth.CurrentUser!, ct));
+
+    private static async Task<IResult> ScoreReferenceComparisonAsync(Guid id, Guid versionId, DanceSellReferenceComparisonScoreRequest request, AuthStateService auth, IDanceSellReferenceComparisonService service, CancellationToken ct)
+        => await ExecuteAdminAsync(auth, () => service.ScoreAsync(id, versionId, request, auth.CurrentUser!, ct));
 
     private static async Task<IResult> ExecuteFileAsync<T>(HttpRequest request, AuthStateService auth, Func<CurrentUserSession, IFormFile, byte[], Task<T>> action, CancellationToken ct)
     {

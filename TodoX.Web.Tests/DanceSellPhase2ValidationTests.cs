@@ -191,6 +191,71 @@ public sealed class DanceSellPhase2ValidationTests
     }
 
     [Fact]
+    public void ReferenceComparison_IsAdminOnlyAndDoesNotTouchProductionApproval()
+    {
+        var root = FindRepoRoot();
+        var models = File.ReadAllText(Path.Combine(root, "TodoX.Web/Services/DanceSell/DanceSellModels.cs"));
+        var service = File.ReadAllText(Path.Combine(root, "TodoX.Web/Services/DanceSell/DanceSellPhase2Services.cs"));
+        var endpoints = File.ReadAllText(Path.Combine(root, "TodoX.Web/Services/DanceSell/DanceSellPhase2Endpoints.cs"));
+        var program = File.ReadAllText(Path.Combine(root, "TodoX.Web/Program.cs"));
+        var comparison = service[service.IndexOf("public sealed class DanceSellReferenceComparisonService", StringComparison.Ordinal)..service.IndexOf("public interface IDanceSellPhase2Service", StringComparison.Ordinal)];
+
+        foreach (var expected in new[]
+        {
+            "new DanceSellReferenceComparisonCandidate(\"79ai\", \"o1\", \"IMAGE O1 - Kling\")",
+            "new DanceSellReferenceComparisonCandidate(\"79ai\", \"seedream_4_0\", \"Seedream 4.0\")",
+            "new DanceSellReferenceComparisonCandidate(\"79ai\", \"google_image_gen_banana_pro\", \"Nano Banana Pro\")"
+        })
+        {
+            Assert.Contains(expected, models, StringComparison.Ordinal);
+        }
+
+        Assert.Contains("IDanceSellReferenceComparisonService", service, StringComparison.Ordinal);
+        Assert.Contains("EnsureAdmin(user)", comparison, StringComparison.Ordinal);
+        Assert.Contains("/api/admin", endpoints, StringComparison.Ordinal);
+        Assert.Contains("/dance-sell/jobs/{id:guid}/reference-comparison/run", endpoints, StringComparison.Ordinal);
+        Assert.Contains("AddScoped<IDanceSellReferenceComparisonService, DanceSellReferenceComparisonService>", program, StringComparison.Ordinal);
+        Assert.Contains("var prompt = DanceSellReferenceImageService.BuildReferencePrompt(job)", comparison, StringComparison.Ordinal);
+        Assert.Contains("Prompt = prompt", comparison, StringComparison.Ordinal);
+        Assert.Contains("CharacterMediaId = job.CharacterMediaId", comparison, StringComparison.Ordinal);
+        Assert.Contains("ProductMediaId = job.ProductMediaId", comparison, StringComparison.Ordinal);
+        Assert.Contains("ratio = \"9:16\"", comparison, StringComparison.Ordinal);
+        Assert.Contains("resolution = \"2k\"", comparison, StringComparison.Ordinal);
+        Assert.Contains("IsSelected = false", comparison, StringComparison.Ordinal);
+        Assert.DoesNotContain("UpdateReferenceStatusAsync", comparison, StringComparison.Ordinal);
+        Assert.DoesNotContain("SelectReferenceVersionAsync", comparison, StringComparison.Ordinal);
+        Assert.DoesNotContain("ApproveAsync", comparison, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ReferenceComparison_StoresIndependentResultsAndManualScores()
+    {
+        var root = FindRepoRoot();
+        var service = File.ReadAllText(Path.Combine(root, "TodoX.Web/Services/DanceSell/DanceSellPhase2Services.cs"));
+        var repository = File.ReadAllText(Path.Combine(root, "TodoX.Web/Services/DanceSell/DanceSellRepository.cs"));
+        var page = File.ReadAllText(Path.Combine(root, "TodoX.Web/Components/Pages/RDanceJobDetail.razor"));
+        var comparison = service[service.IndexOf("public sealed class DanceSellReferenceComparisonService", StringComparison.Ordinal)..service.IndexOf("public interface IDanceSellPhase2Service", StringComparison.Ordinal)];
+
+        Assert.Contains("foreach (var candidate in DanceSellReferenceComparisonCandidates.All)", comparison, StringComparison.Ordinal);
+        Assert.Contains("results.Add(new DanceSellReferenceComparisonResultDto", comparison, StringComparison.Ordinal);
+        Assert.Contains("catch (Exception ex)", comparison, StringComparison.Ordinal);
+        Assert.Contains("TryCreateFailedVersionAsync", comparison, StringComparison.Ordinal);
+        Assert.Contains("operationId", comparison, StringComparison.Ordinal);
+        Assert.Contains("TaskId", comparison, StringComparison.Ordinal);
+        Assert.Contains("PollAsync(Guid jobId, Guid versionId", comparison, StringComparison.Ordinal);
+        Assert.Contains("ScoreAsync(Guid jobId, Guid versionId", comparison, StringComparison.Ordinal);
+        Assert.Contains("manualScore", repository, StringComparison.Ordinal);
+        Assert.Contains("jsonb_set", repository, StringComparison.Ordinal);
+        Assert.Contains("UpdateReferenceVersionScoreAsync", repository, StringComparison.Ordinal);
+        Assert.Contains("CanRunReferenceComparison", page, StringComparison.Ordinal);
+        Assert.Contains("DanceSellSecurity.IsAdmin", page, StringComparison.Ordinal);
+        Assert.Contains("A/B reference model test", page, StringComparison.Ordinal);
+        Assert.Contains("RunReferenceComparisonAsync", page, StringComparison.Ordinal);
+        Assert.Contains("PollReferenceComparisonAsync", page, StringComparison.Ordinal);
+        Assert.Contains("ScoreReferenceComparisonAsync", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void StaleGeneratingRecovery_RequiresNoActiveVersionOrOperationBeforeRetry()
     {
         var root = FindRepoRoot();
@@ -295,6 +360,11 @@ public sealed class DanceSellPhase2ValidationTests
         if (start < 0)
         {
             start = source.IndexOf($"private static string {methodName}(", StringComparison.Ordinal);
+        }
+
+        if (start < 0)
+        {
+            start = source.IndexOf($"internal static string {methodName}(", StringComparison.Ordinal);
         }
 
         Assert.True(start >= 0, $"Could not locate {methodName}.");

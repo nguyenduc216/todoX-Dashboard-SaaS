@@ -232,6 +232,7 @@ public sealed class DanceSellRenderHandlerTests
         public Task<DanceSellReferenceVersionDto> CreateReferenceVersionAsync(DanceSellReferenceVersionDto version, CancellationToken ct = default) => throw new NotImplementedException();
         public Task CompleteReferenceVersionAsync(Guid versionId, Guid mediaId, string objectKey, string publicUrl, string responseJson, CancellationToken ct = default) => throw new NotImplementedException();
         public Task FailReferenceVersionAsync(Guid versionId, string errorJson, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task UpdateReferenceVersionScoreAsync(Guid versionId, string scoreJson, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<bool> SelectReferenceVersionAsync(Guid danceSellJobId, Guid versionId, CancellationToken ct = default) => throw new NotImplementedException();
         public Task UnapproveReferenceAsync(Guid danceSellJobId, CancellationToken ct = default) => throw new NotImplementedException();
         public Task UpdateSubmittedAsync(Guid id, string requestJson, string providerTaskId, string submitResponseJson, CancellationToken ct = default) => throw new NotImplementedException();

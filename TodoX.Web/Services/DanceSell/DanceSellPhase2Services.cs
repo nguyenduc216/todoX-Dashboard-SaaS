@@ -174,6 +174,13 @@ public interface IDanceSellReferenceImageService
     Task<DanceSellJobDto> UnapproveAsync(Guid jobId, CurrentUserSession user, CancellationToken ct = default);
 }
 
+public interface IDanceSellReferenceComparisonService
+{
+    Task<IReadOnlyList<DanceSellReferenceComparisonResultDto>> RunAsync(Guid jobId, CurrentUserSession user, CancellationToken ct = default);
+    Task<DanceSellReferenceVersionDto> PollAsync(Guid jobId, Guid versionId, CurrentUserSession user, CancellationToken ct = default);
+    Task<DanceSellReferenceVersionDto> ScoreAsync(Guid jobId, Guid versionId, DanceSellReferenceComparisonScoreRequest score, CurrentUserSession user, CancellationToken ct = default);
+}
+
 public sealed class DanceSellReferenceImageService : IDanceSellReferenceImageService
 {
     private static readonly ConcurrentDictionary<Guid, SemaphoreSlim> ReferenceLocks = new();
@@ -624,7 +631,7 @@ public sealed class DanceSellReferenceImageService : IDanceSellReferenceImageSer
         }
     }
 
-    private static string BuildReferencePrompt(DanceSellJobDto job)
+    internal static string BuildReferencePrompt(DanceSellJobDto job)
     {
         var basePrompt = string.IsNullOrWhiteSpace(job.ImagePrompt) ? job.Prompt : job.ImagePrompt;
         var instruction = string.IsNullOrWhiteSpace(job.CustomPlacementInstruction)
@@ -823,6 +830,413 @@ public sealed class DanceSellReferenceImageService : IDanceSellReferenceImageSer
         await canvas.SaveAsync(ms, new PngEncoder(), ct);
         return ms.ToArray();
     }
+}
+
+public sealed class DanceSellReferenceComparisonService : IDanceSellReferenceComparisonService
+{
+    private readonly IDanceSellRepository _repo;
+    private readonly IMediaFileService _media;
+    private readonly IDanceSellMotionSourceService _urls;
+    private readonly IDanceSellReferenceProviderFactory _referenceProviders;
+    private readonly IDanceSellOperationRepository _operations;
+    private readonly IDanceSellCostEstimator _costs;
+    private readonly TenantContext _tenant;
+    private readonly ILogger<DanceSellReferenceComparisonService> _logger;
+
+    public DanceSellReferenceComparisonService(
+        IDanceSellRepository repo,
+        IMediaFileService media,
+        IDanceSellMotionSourceService urls,
+        IDanceSellReferenceProviderFactory referenceProviders,
+        IDanceSellOperationRepository operations,
+        IDanceSellCostEstimator costs,
+        TenantContext tenant,
+        ILogger<DanceSellReferenceComparisonService> logger)
+    {
+        _repo = repo;
+        _media = media;
+        _urls = urls;
+        _referenceProviders = referenceProviders;
+        _operations = operations;
+        _costs = costs;
+        _tenant = tenant;
+        _logger = logger;
+    }
+
+    public async Task<IReadOnlyList<DanceSellReferenceComparisonResultDto>> RunAsync(Guid jobId, CurrentUserSession user, CancellationToken ct = default)
+    {
+        EnsureAdmin(user);
+        var job = await RequireAccessibleJobAsync(jobId, user, ct);
+        if (job.ReferenceMode == DanceSellReferenceModes.DirectReference)
+        {
+            throw new InvalidOperationException("DANCE_SELL_REFERENCE_GENERATION_NOT_REQUIRED");
+        }
+
+        if (job.CharacterMediaId is null || string.IsNullOrWhiteSpace(job.CharacterImageUrl)) throw new InvalidOperationException("DANCE_SELL_INVALID_CHARACTER");
+        if (job.ProductMediaId is null || string.IsNullOrWhiteSpace(job.ProductImageUrl)) throw new InvalidOperationException("DANCE_SELL_INVALID_PRODUCT");
+
+        var versions = await _repo.ListReferenceVersionsAsync(job.Id, ct);
+        var nextVersionNo = versions.Count == 0 ? 1 : versions.Max(x => x.VersionNo) + 1;
+        var nextAttemptNo = await _operations.GetNextAttemptNoAsync(job.Id, DanceSellOperationTypes.ReferenceImage, ct);
+        var prompt = DanceSellReferenceImageService.BuildReferencePrompt(job);
+        var results = new List<DanceSellReferenceComparisonResultDto>();
+
+        foreach (var candidate in DanceSellReferenceComparisonCandidates.All)
+        {
+            var started = DateTime.UtcNow;
+            DanceSellProviderOperationDto? operation = null;
+            try
+            {
+                var route = BuildCandidateRoute(candidate);
+                var requestJson = BuildComparisonRequestJson(job, candidate, prompt, route, started);
+                var estimate = await _costs.EstimateAsync(route, job.Mode, null, ct);
+                operation = await _operations.UpsertOperationAsync(new DanceSellProviderOperationDto
+                {
+                    Id = Guid.NewGuid(),
+                    DanceSellJobId = job.Id,
+                    OperationType = DanceSellOperationTypes.ReferenceImage,
+                    AttemptNo = nextAttemptNo++,
+                    ReferenceMode = job.ReferenceMode,
+                    ProviderCode = route.ProviderCode,
+                    ProviderModel = route.ModelName,
+                    Status = DanceSellOperationStatuses.Generating,
+                    BillingStatus = DanceSellBillingStatuses.Estimated,
+                    RefundStatus = DanceSellRefundStatuses.NotCharged,
+                    RequestJson = requestJson,
+                    UsageUnit = estimate.UsageUnit,
+                    CreditsEstimated = estimate.EstimatedUsage,
+                    ProviderCost = estimate.EstimatedProviderCost,
+                    ProviderCurrency = estimate.Currency,
+                    ProviderCostVnd = estimate.ProviderCostVnd,
+                    TodoxPointsEstimated = estimate.EstimatedTodoxPoints,
+                    CostSource = estimate.PricingSource,
+                    PricingSnapshotJson = DanceSellRepository.ToJson(estimate),
+                    CreatedAt = started,
+                    StartedAt = started
+                }, ct);
+
+                var submitted = await _referenceProviders.Resolve(route).SubmitAsync(new DanceSellReferenceProviderRequest
+                {
+                    Route = route,
+                    CharacterMediaId = job.CharacterMediaId,
+                    ProductMediaId = job.ProductMediaId,
+                    Prompt = prompt,
+                    CharacterImageUrl = job.CharacterImageUrl,
+                    ProductImageUrl = job.ProductImageUrl!,
+                    AspectRatio = ReadConfigString(route.ConfigJson, "aspect_ratio")
+                }, ct);
+
+                if (operation is not null)
+                {
+                    await _operations.MarkSubmittedAsync(operation.Id, submitted.TaskId, submitted.ResponseJson, ct);
+                }
+
+                var version = await _repo.CreateReferenceVersionAsync(new DanceSellReferenceVersionDto
+                {
+                    Id = Guid.NewGuid(),
+                    DanceSellJobId = job.Id,
+                    VersionNo = nextVersionNo++,
+                    CharacterMediaId = job.CharacterMediaId,
+                    ProductMediaId = job.ProductMediaId,
+                    PlacementMode = job.PlacementMode ?? DanceSellPlacementModes.WearProduct,
+                    CustomInstruction = job.CustomPlacementInstruction,
+                    Prompt = prompt,
+                    ProviderCode = candidate.ProviderCode,
+                    ProviderModel = candidate.ModelName,
+                    RequestJson = submitted.RequestJson,
+                    ResponseJson = DanceSellRepository.ToJson(new
+                    {
+                        experiment = DanceSellConstants.ReferenceComparisonExperiment,
+                        candidate.DisplayName,
+                        submitted.TaskId,
+                        operationId = operation?.Id,
+                        submitted.ResponseJson,
+                        startedAt = started,
+                        elapsedMs = (DateTime.UtcNow - started).TotalMilliseconds
+                    }),
+                    Status = DanceSellReferenceStatuses.Generating,
+                    IsSelected = false,
+                    CreatedBy = user.UserId,
+                    CreatedAt = started
+                }, ct);
+
+                results.Add(new DanceSellReferenceComparisonResultDto
+                {
+                    Candidate = candidate,
+                    Version = version,
+                    Status = version.Status,
+                    Elapsed = DateTime.UtcNow - started
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "DanceSell reference comparison candidate failed jobId={JobId} model={Model}", job.Id, candidate.ModelName);
+                if (operation is not null)
+                {
+                    await _operations.MarkFailedAsync(operation.Id, "failed", DanceSellRepository.ToJson(new { experiment = DanceSellConstants.ReferenceComparisonExperiment, error = ex.Message }), "reference_comparison_failed", ex.Message, ct);
+                }
+
+                var failedVersion = await TryCreateFailedVersionAsync(job, candidate, prompt, nextVersionNo++, ex, user, started, ct);
+                results.Add(new DanceSellReferenceComparisonResultDto
+                {
+                    Candidate = candidate,
+                    Version = failedVersion,
+                    Status = DanceSellReferenceStatuses.Failed,
+                    ErrorMessage = ex.Message,
+                    Elapsed = DateTime.UtcNow - started
+                });
+            }
+        }
+
+        return results;
+    }
+
+    public async Task<DanceSellReferenceVersionDto> PollAsync(Guid jobId, Guid versionId, CurrentUserSession user, CancellationToken ct = default)
+    {
+        EnsureAdmin(user);
+        var job = await RequireAccessibleJobAsync(jobId, user, ct);
+        var version = await _repo.GetReferenceVersionAsync(versionId, ct) ?? throw new InvalidOperationException("DANCE_SELL_REFERENCE_NOT_FOUND");
+        if (version.DanceSellJobId != job.Id || !IsComparisonVersion(version))
+        {
+            throw new InvalidOperationException("DANCE_SELL_REFERENCE_NOT_FOUND");
+        }
+
+        if (version.Status != DanceSellReferenceStatuses.Generating)
+        {
+            return version;
+        }
+
+        var operationId = ReadGuid(version.ResponseJson, "operationId");
+        var taskId = ReadString(version.ResponseJson, "taskId");
+        if (operationId is null || string.IsNullOrWhiteSpace(taskId))
+        {
+            await _repo.FailReferenceVersionAsync(version.Id, DanceSellRepository.ToJson(new { error = "comparison operation metadata missing" }), ct);
+            return await _repo.GetReferenceVersionAsync(version.Id, ct) ?? version;
+        }
+
+        var route = BuildCandidateRoute(new DanceSellReferenceComparisonCandidate(version.ProviderCode ?? "79ai", version.ProviderModel ?? string.Empty, DisplayNameFor(version.ProviderModel)));
+        var detail = await _referenceProviders.Resolve(route).GetTaskAsync(route, taskId!, ct);
+        if (!detail.IsTerminal)
+        {
+            return version;
+        }
+
+        if (detail.IsFailure)
+        {
+            var error = detail.FailMsg ?? "AI reference comparison generation failed.";
+            var errorJson = DanceSellRepository.ToJson(new
+            {
+                experiment = DanceSellConstants.ReferenceComparisonExperiment,
+                providerStatus = detail.ProviderState ?? detail.Status,
+                errorCode = detail.FailCode,
+                error,
+                response = detail.RawResponse
+            });
+            await _repo.FailReferenceVersionAsync(version.Id, errorJson, ct);
+            await _operations.MarkFailedAsync(operationId.Value, detail.ProviderState ?? detail.Status, detail.RawResponse, detail.FailCode ?? "reference_comparison_failed", error, ct);
+            return await _repo.GetReferenceVersionAsync(version.Id, ct) ?? version;
+        }
+
+        var outputUrl = detail.ResultUrls.FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(outputUrl))
+        {
+            const string error = "AI reference comparison completed without an output URL.";
+            await _repo.FailReferenceVersionAsync(version.Id, DanceSellRepository.ToJson(new { experiment = DanceSellConstants.ReferenceComparisonExperiment, error, response = detail.RawResponse }), ct);
+            await _operations.MarkFailedAsync(operationId.Value, detail.ProviderState ?? detail.Status, detail.RawResponse, "missing_reference_comparison_output", error, ct);
+            return await _repo.GetReferenceVersionAsync(version.Id, ct) ?? version;
+        }
+
+        await _tenant.EnsureLoadedAsync(ct);
+        var mediaCustomerId = job.CustomerId ?? user.CustomerId;
+        var objectKey = $"dance-sell/{mediaCustomerId?.ToString("N") ?? "system"}/{DateTime.UtcNow:yyyyMM}/reference-ab-{job.Id:N}-{version.ProviderModel}-{version.VersionNo}.png";
+        var media = await _media.DownloadAndSaveImageAtObjectKeyAsync(outputUrl, objectKey, "dance_sell_reference_ab", user.UserId, mediaCustomerId, _tenant.TenantId, ct);
+        var publicUrl = _urls.ToProviderUrl(media.PublicUrl ?? media.FileUrl);
+        var responseJson = DanceSellRepository.ToJson(new
+        {
+            experiment = DanceSellConstants.ReferenceComparisonExperiment,
+            providerStatus = detail.ProviderState ?? detail.Status,
+            resultUrl = outputUrl,
+            savedMediaId = media.Id,
+            media.ObjectKey,
+            publicUrl,
+            response = detail.RawResponse,
+            completedAt = DateTime.UtcNow,
+            selected = false,
+            approved = false
+        });
+        await _repo.CompleteReferenceVersionAsync(version.Id, media.Id, media.ObjectKey ?? objectKey, publicUrl, responseJson, ct);
+        await _operations.MarkCompletedAsync(operationId.Value, detail.ProviderState ?? detail.Status, detail.RawResponse, detail.CreditsConsumed, publicUrl, ct);
+        await _operations.UpsertAssetAsync(new AiOperationAssetDto
+        {
+            OperationId = operationId.Value,
+            AssetRole = DanceSellAssetRoles.ReferenceOutput,
+            MediaId = media.Id,
+            ObjectKey = media.ObjectKey,
+            PublicUrl = publicUrl,
+            ProviderUrl = outputUrl,
+            MimeType = media.MimeType,
+            MetadataJson = DanceSellRepository.ToJson(new { versionId = version.Id, experiment = DanceSellConstants.ReferenceComparisonExperiment })
+        }, ct);
+        return await _repo.GetReferenceVersionAsync(version.Id, ct) ?? version;
+    }
+
+    public async Task<DanceSellReferenceVersionDto> ScoreAsync(Guid jobId, Guid versionId, DanceSellReferenceComparisonScoreRequest score, CurrentUserSession user, CancellationToken ct = default)
+    {
+        EnsureAdmin(user);
+        var job = await RequireAccessibleJobAsync(jobId, user, ct);
+        var version = await _repo.GetReferenceVersionAsync(versionId, ct) ?? throw new InvalidOperationException("DANCE_SELL_REFERENCE_NOT_FOUND");
+        if (version.DanceSellJobId != job.Id || !IsComparisonVersion(version))
+        {
+            throw new InvalidOperationException("DANCE_SELL_REFERENCE_NOT_FOUND");
+        }
+
+        ValidateScore(score.ShirtColorFidelity);
+        ValidateScore(score.GarmentShapeFidelity);
+        ValidateScore(score.GraphicTextFidelity);
+        ValidateScore(score.LogoArtworkFidelity);
+        ValidateScore(score.SelectedBottomFidelity);
+        ValidateScore(score.IdentityPreservation);
+        await _repo.UpdateReferenceVersionScoreAsync(version.Id, DanceSellRepository.ToJson(new
+        {
+            score.ShirtColorFidelity,
+            score.GarmentShapeFidelity,
+            score.GraphicTextFidelity,
+            score.LogoArtworkFidelity,
+            score.SelectedBottomFidelity,
+            score.IdentityPreservation,
+            scoredBy = user.UserId,
+            scoredAt = DateTime.UtcNow
+        }), ct);
+        return await _repo.GetReferenceVersionAsync(version.Id, ct) ?? version;
+    }
+
+    private async Task<DanceSellReferenceVersionDto?> TryCreateFailedVersionAsync(DanceSellJobDto job, DanceSellReferenceComparisonCandidate candidate, string prompt, int versionNo, Exception ex, CurrentUserSession user, DateTime started, CancellationToken ct)
+    {
+        try
+        {
+            return await _repo.CreateReferenceVersionAsync(new DanceSellReferenceVersionDto
+            {
+                Id = Guid.NewGuid(),
+                DanceSellJobId = job.Id,
+                VersionNo = versionNo,
+                CharacterMediaId = job.CharacterMediaId,
+                ProductMediaId = job.ProductMediaId,
+                PlacementMode = job.PlacementMode ?? DanceSellPlacementModes.WearProduct,
+                CustomInstruction = job.CustomPlacementInstruction,
+                Prompt = prompt,
+                ProviderCode = candidate.ProviderCode,
+                ProviderModel = candidate.ModelName,
+                RequestJson = BuildComparisonRequestJson(job, candidate, prompt, BuildCandidateRoute(candidate), started),
+                ErrorJson = DanceSellRepository.ToJson(new { experiment = DanceSellConstants.ReferenceComparisonExperiment, error = ex.Message }),
+                Status = DanceSellReferenceStatuses.Failed,
+                IsSelected = false,
+                CreatedBy = user.UserId,
+                CreatedAt = started,
+                CompletedAt = DateTime.UtcNow
+            }, ct);
+        }
+        catch (Exception versionEx)
+        {
+            _logger.LogError(versionEx, "DanceSell failed to persist failed comparison version jobId={JobId} model={Model}", job.Id, candidate.ModelName);
+            return null;
+        }
+    }
+
+    private async Task<DanceSellJobDto> RequireAccessibleJobAsync(Guid jobId, CurrentUserSession user, CancellationToken ct)
+    {
+        var job = await _repo.GetByIdAsync(jobId, ct) ?? throw new InvalidOperationException("DANCE_SELL_NOT_FOUND");
+        if (!DanceSellSecurity.CanAccess(user, job)) throw new InvalidOperationException("DANCE_SELL_UNAUTHORIZED");
+        return job;
+    }
+
+    private static DanceSellProviderRouteDto BuildCandidateRoute(DanceSellReferenceComparisonCandidate candidate)
+        => new()
+        {
+            Id = Guid.Empty,
+            FeatureCode = DanceSellConstants.FeatureCode,
+            OperationType = DanceSellOperationTypes.ReferenceImage,
+            ProviderCode = candidate.ProviderCode,
+            ModelName = candidate.ModelName,
+            Priority = 900,
+            Enabled = true,
+            IsDefault = false,
+            ConfigJson = DanceSellRepository.ToJson(new
+            {
+                experiment = DanceSellConstants.ReferenceComparisonExperiment,
+                displayName = candidate.DisplayName,
+                submit_path = "/generateImage",
+                poll_path = "/image",
+                ratio = "9:16",
+                resolution = "2k",
+                mode = "vip",
+                character_image_field = "base64Image",
+                product_image_field = "image_2"
+            })
+        };
+
+    private static string BuildComparisonRequestJson(DanceSellJobDto job, DanceSellReferenceComparisonCandidate candidate, string prompt, DanceSellProviderRouteDto route, DateTime started)
+        => DanceSellRepository.ToJson(new
+        {
+            experiment = DanceSellConstants.ReferenceComparisonExperiment,
+            job.Id,
+            job.CharacterMediaId,
+            job.ProductMediaId,
+            provider = candidate.ProviderCode,
+            model = candidate.ModelName,
+            candidate.DisplayName,
+            prompt,
+            ratio = ReadConfigString(route.ConfigJson, "ratio"),
+            resolution = ReadConfigString(route.ConfigJson, "resolution"),
+            mode = ReadConfigString(route.ConfigJson, "mode"),
+            action_type = "create",
+            editImage = true,
+            project_id = "default",
+            subjects = Array.Empty<string>(),
+            characterImageField = "base64Image",
+            productImageField = "image_2",
+            startedAt = started
+        });
+
+    private static bool IsComparisonVersion(DanceSellReferenceVersionDto version)
+        => string.Equals(ReadString(version.ResponseJson, "experiment"), DanceSellConstants.ReferenceComparisonExperiment, StringComparison.Ordinal)
+           || string.Equals(ReadString(version.RequestJson, "experiment"), DanceSellConstants.ReferenceComparisonExperiment, StringComparison.Ordinal)
+           || string.Equals(ReadString(version.ErrorJson, "experiment"), DanceSellConstants.ReferenceComparisonExperiment, StringComparison.Ordinal);
+
+    private static void EnsureAdmin(CurrentUserSession user)
+    {
+        if (!DanceSellSecurity.IsAdmin(user)) throw new InvalidOperationException("DANCE_SELL_ADMIN_REQUIRED");
+    }
+
+    private static void ValidateScore(int score)
+    {
+        if (score is < 0 or > 5) throw new InvalidOperationException("DANCE_SELL_INVALID_SCORE");
+    }
+
+    private static string DisplayNameFor(string? modelName)
+        => DanceSellReferenceComparisonCandidates.All.FirstOrDefault(x => x.ModelName.Equals(modelName, StringComparison.OrdinalIgnoreCase))?.DisplayName
+           ?? modelName
+           ?? string.Empty;
+
+    private static Guid? ReadGuid(string? rawJson, string propertyName)
+        => Guid.TryParse(ReadString(rawJson, propertyName), out var parsed) ? parsed : null;
+
+    private static string? ReadString(string? rawJson, string propertyName)
+    {
+        if (string.IsNullOrWhiteSpace(rawJson)) return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(rawJson);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object || !doc.RootElement.TryGetProperty(propertyName, out var value)) return null;
+            return value.ValueKind == JsonValueKind.String ? value.GetString() : value.ToString();
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static string? ReadConfigString(string? rawJson, string propertyName)
+        => ReadString(rawJson, propertyName);
 }
 
 public interface IDanceSellPhase2Service
