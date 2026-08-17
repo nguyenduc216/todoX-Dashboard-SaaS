@@ -244,14 +244,17 @@ public sealed class RDanceFashionDemoPageTests
         var sql = ReadStrictUtf8(Path.Combine(root, "database", "manual", "rdance-fashion", "01_seed_79ai_kling_motion_routes.sql"));
 
         Assert.Contains("'79ai'", sql, StringComparison.Ordinal);
-        Assert.Contains("'seedream_5_0'", sql, StringComparison.Ordinal);
+        Assert.Contains("'imagegen_2_0'", sql, StringComparison.Ordinal);
         Assert.Contains("'kling_video_motion'", sql, StringComparison.Ordinal);
         Assert.Contains("'kling-2.6/motion-control'", sql, StringComparison.Ordinal);
         Assert.Contains("provider_code = 'local_composite'", sql, StringComparison.Ordinal);
         Assert.Contains("enabled = false", sql, StringComparison.Ordinal);
         Assert.Contains("\"motion_video_field\":\"video\"", sql, StringComparison.Ordinal);
-        Assert.Contains("\"character_image_field\":\"base64Image\"", sql, StringComparison.Ordinal);
-        Assert.Contains("\"subject_schema\":\"json_stringified_array_of_image_data_uris\"", sql, StringComparison.Ordinal);
+        Assert.Contains("\"subject_schema\":\"form_subject_url_fields\"", sql, StringComparison.Ordinal);
+        Assert.Contains("\"domain\":\"79ai.net\"", sql, StringComparison.Ordinal);
+        Assert.Contains("\"sync\":\"false\"", sql, StringComparison.Ordinal);
+        Assert.Contains("\"category\":\"FASHION\"", sql, StringComparison.Ordinal);
+        Assert.Contains("\"resolution\":\"1k\"", sql, StringComparison.Ordinal);
         Assert.Contains("is_default = false", sql, StringComparison.Ordinal);
         Assert.Contains("model_mode", sql, StringComparison.Ordinal);
         Assert.Contains("route_priority", sql, StringComparison.Ordinal);
@@ -259,7 +262,7 @@ public sealed class RDanceFashionDemoPageTests
         Assert.DoesNotContain("provider_capability_id", sql, StringComparison.Ordinal);
         Assert.DoesNotContain("provider_account_id", sql, StringComparison.Ordinal);
         Assert.DoesNotContain("allow_user_select", sql, StringComparison.Ordinal);
-        Assert.Contains("Reference generation now uses the production 79AI image route for seedream_5_0.", sql, StringComparison.Ordinal);
+        Assert.Contains("Reference generation now uses the verified 79AI GPT Image 2 fashion route.", sql, StringComparison.Ordinal);
     }
 
     private static string ReadStrictUtf8(string file)

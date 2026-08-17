@@ -245,6 +245,11 @@ public sealed class DanceSellReferenceImageService : IDanceSellReferenceImageSer
                 throw new InvalidOperationException("DANCE_SELL_REFERENCE_AI_ROUTE_REQUIRED");
             }
 
+            if (route.ProviderCode.Equals(DanceSellConstants.ProviderCode, StringComparison.OrdinalIgnoreCase))
+            {
+                route.ModelName = DanceSellConstants.Ai79GptImage2Model;
+            }
+
             stage = "list_versions";
             var versions = await _repo.ListReferenceVersionsAsync(job.Id, ct);
             versionNo = versions.Count == 0 ? 1 : versions.Max(x => x.VersionNo) + 1;
@@ -252,16 +257,23 @@ public sealed class DanceSellReferenceImageService : IDanceSellReferenceImageSer
 
             requestJson = DanceSellRepository.ToJson(new
             {
-                job.Id,
-                job.CharacterMediaId,
-                job.ProductMediaId,
-                placementMode = job.PlacementMode,
-                job.CustomPlacementInstruction,
-                imagePrompt = referencePrompt,
-                job.Prompt,
-                provider = route.ProviderCode,
                 model = route.ModelName,
-                runtime = "provider_task_submit"
+                domain = "79ai.net",
+                action_type = "create",
+                prompt = referencePrompt,
+                sync = false,
+                project_id = "default",
+                ratio = "16:9",
+                category = "FASHION",
+                resolution = "1k",
+                mode = "low",
+                num_outputs = 1,
+                language = "VI",
+                subjects = new[]
+                {
+                    new { url = job.CharacterImageUrl },
+                    new { url = job.ProductImageUrl }
+                }
             });
 
             stage = "estimate_cost";
@@ -300,7 +312,7 @@ public sealed class DanceSellReferenceImageService : IDanceSellReferenceImageSer
                 CustomInstruction = job.CustomPlacementInstruction,
                 Prompt = referencePrompt,
                 ProviderCode = route.ProviderCode,
-                ProviderModel = route.ModelName,
+                ProviderModel = submitted.ModelName,
                 RequestJson = submitted.RequestJson,
                 ResponseJson = DanceSellRepository.ToJson(new { submitted.TaskId, submitted.ResponseJson }),
                 Status = DanceSellReferenceStatuses.Generating,
@@ -632,41 +644,23 @@ public sealed class DanceSellReferenceImageService : IDanceSellReferenceImageSer
     }
 
     internal static string BuildReferencePrompt(DanceSellJobDto job)
-    {
-        var basePrompt = string.IsNullOrWhiteSpace(job.ImagePrompt) ? job.Prompt : job.ImagePrompt;
-        var instruction = string.IsNullOrWhiteSpace(job.CustomPlacementInstruction)
-            ? "Only replace the clothing region on the fixed base body."
-            : job.CustomPlacementInstruction.Trim();
-        return string.Join(' ', new[]
-        {
-            "VIRTUAL TRY-ON - PREVIEW ONLY.",
-            "IMAGE 1 is the FIXED BASE BODY.",
-            "Preserve the exact person identity, face, hairstyle, body shape, body pose, limb angles, shoulder alignment, head tilt, camera angle, framing, and background from IMAGE 1.",
-            "Do NOT regenerate the person.",
-            "Do NOT reinterpret or modify the pose.",
-            "Only replace the clothing region on the body.",
-            "IMAGE 2 is the CLOTHING SOURCE.",
-            "Apply the clothing from IMAGE 2 onto the person in IMAGE 1.",
-            "The person in IMAGE 1 must appear to be wearing the clothing from IMAGE 2.",
-            "Clothing must conform naturally to the existing body pose in IMAGE 1.",
-            "Reproduce the outfit from IMAGE 2 as faithfully as possible.",
-            "Match exactly: garment type, overall silhouette and shape, dominant colors, sleeve colors and trim colors, collar or neckline style, hem length, fabric appearance, graphic artwork, printed text, artwork placement, and artwork scale.",
-            "If IMAGE 2 contains front and back views of the same outfit, treat them as reference views of one single outfit, not separate garments.",
-            "Use the visible front-view clothing details as the primary design in the result.",
-            instruction,
-            "Do not create a collage.",
-            "Do not place IMAGE 2 beside the model.",
-            "Do not invent a different outfit.",
-            "Do not simplify the outfit.",
-            "Do not replace it with generic fashion clothing.",
-            "Do not change the pose.",
-            "Do not change the camera angle.",
-            "Do not change the background.",
-            "If conflict occurs between clothing accuracy and clothing realism, prioritize preserving the exact body pose from IMAGE 1 while keeping the clothing design from IMAGE 2 as accurate as possible.",
-            "Photorealistic virtual try-on, product preview quality, realistic fabric drape, clean studio result.",
-            basePrompt
-        }.Where(part => !string.IsNullOrWhiteSpace(part)));
-    }
+        => """
+VIRTUAL TRY-ON – PREVIEW ONLY
+
+Use IMAGE 1 as FIXED BASE BODY.
+- Preserve exact body pose, limb angles, shoulder alignment, head tilt, camera angle
+- Do NOT regenerate body, do NOT reinterpret pose
+- Only replace clothing region
+
+Apply clothing from IMAGE 2 with exact design, color, texture, pattern
+- Clothing must conform to existing body pose
+- No pose correction, no body adjustment, no camera shift
+
+If conflict occurs between clothing and pose:
+→ Prioritize BODY POSE from IMAGE 1 over clothing realism
+
+Photorealistic, product preview quality.
+""";
 
     public async Task<DanceSellJobDto> ApproveAsync(Guid jobId, Guid versionId, CurrentUserSession user, CancellationToken ct = default)
     {

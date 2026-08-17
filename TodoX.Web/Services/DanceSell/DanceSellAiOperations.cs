@@ -1,12 +1,9 @@
-using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 using Dapper;
 using Npgsql;
 using TodoX.Web.Services.AiProviders;
 using TodoX.Web.Data;
 using TodoX.Web.Services.AiProviders.Kie;
-using TodoX.Web.Services.Media;
 using TodoX.Web.Services.Timelapse;
 using Microsoft.Extensions.Options;
 
@@ -139,25 +136,16 @@ public sealed class KieDanceSellReferenceProvider : IDanceSellReferenceProvider
 public sealed class Ai79DanceSellReferenceProvider : IDanceSellReferenceProvider
 {
     private readonly IAi79TaskClient _client;
-    private readonly AiProviderRepository _providerRepository;
     private readonly IProviderCredentialResolver _credentials;
-    private readonly IProviderCredentialRepository _credentialRepository;
-    private readonly IMediaFileService _media;
     private readonly ILogger<Ai79DanceSellReferenceProvider> _logger;
 
     public Ai79DanceSellReferenceProvider(
         IAi79TaskClient client,
-        AiProviderRepository providerRepository,
         IProviderCredentialResolver credentials,
-        IProviderCredentialRepository credentialRepository,
-        IMediaFileService media,
         ILogger<Ai79DanceSellReferenceProvider> logger)
     {
         _client = client;
-        _providerRepository = providerRepository;
         _credentials = credentials;
-        _credentialRepository = credentialRepository;
-        _media = media;
         _logger = logger;
     }
 
@@ -167,30 +155,37 @@ public sealed class Ai79DanceSellReferenceProvider : IDanceSellReferenceProvider
     public async Task<ProviderTaskSubmitResult> SubmitAsync(DanceSellReferenceProviderRequest request, CancellationToken ct)
     {
         var runtime = await ResolveRuntimeAsync(request.Route, ct);
-        var character = await BuildDataUriAsync(request.CharacterMediaId, "character", ct);
-        var product = await BuildDataUriAsync(request.ProductMediaId, "product", ct);
-        var resolution = TimelapseProviderWorkerOptions.NormalizeImageResolution(
-            runtime.Model,
-            FirstNonBlank(ReadConfigString(request.Route.ConfigJson, "resolution"), "2k"));
-        var mode = FirstNonBlank(ReadConfigString(request.Route.ConfigJson, "mode"), ReadConfigString(request.Route.ConfigJson, "default_mode"), "vip")!;
-        var projectId = FirstNonBlank(ReadConfigString(request.Route.ConfigJson, "project_id"), "default")!;
-        var ratio = FirstNonBlank(request.AspectRatio, ReadConfigString(request.Route.ConfigJson, "ratio"), "9:16")!;
-        var firstImageField = FirstNonBlank(ReadConfigString(request.Route.ConfigJson, "character_image_field"), ReadConfigString(request.Route.ConfigJson, "first_image_field"), "base64Image")!;
-        if (!firstImageField.Equals("base64Image", StringComparison.Ordinal))
+        runtime = runtime with
         {
-            throw new InvalidOperationException("DANCE_SELL_79AI_REFERENCE_BASE_IMAGE_FIELD_UNSUPPORTED");
-        }
-
-        var subjects = BuildSubjectsJson(product);
+            Model = DanceSellConstants.Ai79GptImage2Model,
+            BaseUrl = "https://api.gommo.net/ai",
+            Domain = "79ai.net",
+            SubmitPath = "/generateImage",
+            PollPath = "/image"
+        };
+        var characterUrl = KiePayloadBuilder.ValidatePublicHttpsUrl(request.CharacterImageUrl, "subjects[0][url]");
+        var productUrl = KiePayloadBuilder.ValidatePublicHttpsUrl(request.ProductImageUrl, "subjects[1][url]");
+        var ratio = "16:9";
+        var category = "FASHION";
+        var resolution = "1k";
+        var mode = "low";
+        var projectId = "default";
+        var sync = "false";
+        var numOutputs = "1";
+        var language = "VI";
         var options = new Dictionary<string, string?>
         {
             ["action_type"] = "create",
-            ["editImage"] = "true",
+            ["sync"] = sync,
             ["project_id"] = projectId,
-            ["subjects"] = subjects,
+            ["subjects[0][url]"] = characterUrl,
+            ["subjects[1][url]"] = productUrl,
             ["ratio"] = ratio,
             ["resolution"] = resolution,
-            ["mode"] = mode
+            ["category"] = category,
+            ["mode"] = mode,
+            ["num_outputs"] = numOutputs,
+            ["language"] = language
         };
         var submit = new Ai79TaskSubmitRequest(
             runtime.BaseUrl,
@@ -198,71 +193,54 @@ public sealed class Ai79DanceSellReferenceProvider : IDanceSellReferenceProvider
             runtime.Credential.Secret,
             runtime.Domain,
             runtime.Model,
-            request.Prompt,
-            [character.DataUri],
+            BuildReferencePrompt(),
+            [],
             options,
-            Ai79TaskOperation.Image,
-            firstImageField);
-        var formFieldNames = BuildGenerateImageFieldNames(firstImageField, options);
+            Ai79TaskOperation.Image);
+        var formFieldNames = BuildGenerateImageFieldNames(options);
         var requestJson = JsonSerializer.Serialize(new
         {
             providerCode = runtime.ProviderCode,
             model = runtime.Model,
             endpointPath = runtime.SubmitPath,
             domain = runtime.Domain,
-            promptHash = Sha256Hex(request.Prompt),
-            promptLength = request.Prompt.Length,
+            prompt = BuildReferencePrompt(),
             action_type = "create",
-            editImage = true,
+            sync = false,
             project_id = projectId,
-            subjectsCount = 1,
-            subjectSchema = "json_stringified_array_of_image_data_uris",
             ratio,
             resolution,
             mode,
-            characterImageField = firstImageField,
-            productImageTransport = "subjects",
-            characterImagePresent = true,
-            productImagePresent = true,
-            base64ImagePresent = true,
-            base64ImageBytes = character.Bytes,
-            characterMime = character.MimeType,
-            characterBytes = character.Bytes,
+            category,
+            num_outputs = 1,
+            language,
             subjects = new[]
             {
                 new
                 {
-                    role = "clothing_product_reference",
-                    mimeType = product.MimeType,
-                    bytes = product.Bytes
+                    url = characterUrl
+                },
+                new
+                {
+                    url = productUrl
                 }
             },
-            subjectMimeTypes = new[] { product.MimeType },
-            subjectBytes = new[] { product.Bytes },
-            productBytes = product.Bytes
+            subjectOrder = new[]
+            {
+                characterUrl,
+                productUrl
+            }
         }, KieJson.Options);
 
-        _logger.LogInformation(
-            "DANCE_SELL_79AI_REFERENCE_SUBMIT model={Model} promptHash={PromptHash} promptLength={PromptLength} editImage={EditImage} base64ImagePresent={Base64ImagePresent} base64ImageBytes={Base64ImageBytes} subjectsCount={SubjectsCount} subjectMimeTypes={SubjectMimeTypes} subjectBytes={SubjectBytes} ratio={Ratio} resolution={Resolution} mode={Mode} formFields={FormFields}",
-            runtime.Model,
-            Sha256Hex(request.Prompt),
-            request.Prompt.Length,
-            true,
-            true,
-            character.Bytes,
-            1,
-            string.Join(",", new[] { product.MimeType }),
-            string.Join(",", new[] { product.Bytes.ToString() }),
-            ratio,
-            resolution,
-            mode,
+        _logger.LogInformation("DANCE_SELL_79AI_REFERENCE_OUTBOUND_FORM payload={PayloadJson} formFields={FormFields}",
+            requestJson,
             string.Join(",", formFieldNames));
 
         var submitted = await _client.SubmitAsync(submit, ct);
         return new ProviderTaskSubmitResult
         {
             ProviderCode = request.Route.ProviderCode,
-            ModelName = request.Route.ModelName,
+            ModelName = runtime.Model,
             TaskId = submitted.TaskId,
             RequestJson = requestJson,
             ResponseJson = submitted.SanitizedResponseJson
@@ -300,33 +278,15 @@ public sealed class Ai79DanceSellReferenceProvider : IDanceSellReferenceProvider
 
     private async Task<Ai79ReferenceRuntime> ResolveRuntimeAsync(DanceSellProviderRouteDto route, CancellationToken ct)
     {
-        var provider = await _providerRepository.GetProviderByCodeAsync(route.ProviderCode, ct)
-            ?? throw new InvalidOperationException("DANCE_SELL_79AI_PROVIDER_NOT_CONFIGURED");
         var credential = await _credentials.ResolveAsync(route.ProviderCode, "access_token", ct);
-        var account = await _credentialRepository.GetAccountByIdAsync(credential.ProviderAccountId, ct);
         return new Ai79ReferenceRuntime(
             route.ProviderCode,
             route.ModelName,
-            FirstNonBlank(ReadConfigString(account?.ConfigJson, "base_url"), provider.BaseUrl, ReadConfigString(provider.ConfigJson, "base_url"), "https://api.gommo.net/ai")!,
-            FirstNonBlank(ReadConfigString(account?.ConfigJson, "domain"), ReadConfigString(provider.ConfigJson, "domain"), "79ai.net")!,
+            FirstNonBlank(ReadConfigString(route.ConfigJson, "base_url"), "https://api.gommo.net/ai")!,
+            FirstNonBlank(ReadConfigString(route.ConfigJson, "domain"), "79ai.net")!,
             FirstNonBlank(ReadConfigString(route.ConfigJson, "submit_path"), "/generateImage")!,
             FirstNonBlank(ReadConfigString(route.ConfigJson, "poll_path"), "/image")!,
             credential);
-    }
-
-    private async Task<ImagePayload> BuildDataUriAsync(Guid? mediaId, string role, CancellationToken ct)
-    {
-        if (mediaId is null || mediaId == Guid.Empty)
-        {
-            throw new InvalidOperationException($"DANCE_SELL_REFERENCE_{role.ToUpperInvariant()}_IMAGE_MISSING");
-        }
-
-        var media = await _media.GetAsync(mediaId.Value, ct)
-            ?? throw new InvalidOperationException($"DANCE_SELL_REFERENCE_{role.ToUpperInvariant()}_IMAGE_NOT_FOUND");
-        var bytes = await _media.ReadBytesAsync(mediaId.Value, ct)
-            ?? throw new InvalidOperationException($"DANCE_SELL_REFERENCE_{role.ToUpperInvariant()}_IMAGE_NOT_READABLE");
-        var mimeType = FirstNonBlank(media.MimeType, InferMimeType(media.FileName), "image/png")!;
-        return new ImagePayload($"data:{mimeType};base64,{Convert.ToBase64String(bytes)}", mimeType, bytes.LongLength);
     }
 
     private static string? ReadConfigString(string? rawJson, string propertyName)
@@ -351,31 +311,33 @@ public sealed class Ai79DanceSellReferenceProvider : IDanceSellReferenceProvider
         }
     }
 
-    private static string? InferMimeType(string? fileName)
-        => Path.GetExtension(fileName ?? string.Empty).ToLowerInvariant() switch
-        {
-            ".jpg" or ".jpeg" => "image/jpeg",
-            ".webp" => "image/webp",
-            ".png" => "image/png",
-            _ => null
-        };
+    private static string BuildReferencePrompt()
+        => """
+VIRTUAL TRY-ON – PREVIEW ONLY
 
-    private static string BuildSubjectsJson(ImagePayload product)
-        => JsonSerializer.Serialize(new[] { product.DataUri }, KieJson.Options);
+Use IMAGE 1 as FIXED BASE BODY.
+- Preserve exact body pose, limb angles, shoulder alignment, head tilt, camera angle
+- Do NOT regenerate body, do NOT reinterpret pose
+- Only replace clothing region
 
-    private static string[] BuildGenerateImageFieldNames(string firstImageField, IReadOnlyDictionary<string, string?> options)
-        => new[] { "access_token", "domain", "model", "prompt", firstImageField }
+Apply clothing from IMAGE 2 with exact design, color, texture, pattern
+- Clothing must conform to existing body pose
+- No pose correction, no body adjustment, no camera shift
+
+If conflict occurs between clothing and pose:
+→ Prioritize BODY POSE from IMAGE 1 over clothing realism
+
+Photorealistic, product preview quality.
+""";
+
+    private static string[] BuildGenerateImageFieldNames(IReadOnlyDictionary<string, string?> options)
+        => new[] { "access_token", "domain", "model", "prompt" }
             .Concat(options.Where(x => !string.IsNullOrWhiteSpace(x.Value)).Select(x => x.Key))
             .Distinct(StringComparer.Ordinal)
             .ToArray();
 
-    private static string Sha256Hex(string value)
-        => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
-
     private static string? FirstNonBlank(params string?[] values)
         => values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim();
-
-    private sealed record ImagePayload(string DataUri, string MimeType, long Bytes);
 
     private sealed record Ai79ReferenceRuntime(
         string ProviderCode,

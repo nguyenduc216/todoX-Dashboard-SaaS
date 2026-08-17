@@ -60,7 +60,6 @@ public sealed class Ai79TaskClientTests
     {
         var handler = new RecordingJsonHandler("""{"imageInfo":{"id_base":"try-on-001"}}""");
         var client = new Ai79TaskClient(new HttpClient(handler));
-        var subjectsJson = """["data:image/png;base64,PRODUCT_BYTES"]""";
 
         var result = await client.SubmitAsync(new Ai79TaskSubmitRequest(
             "https://api.gommo.net/ai",
@@ -68,30 +67,37 @@ public sealed class Ai79TaskClientTests
             "secret-token",
             "79ai.net",
             "imagegen_2_0",
-            "VIRTUAL TRY-ON - PREVIEW ONLY.",
-            ["data:image/jpeg;base64,CHARACTER_BYTES"],
+            "VIRTUAL TRY-ON – PREVIEW ONLY",
+            [],
             new Dictionary<string, string?>
             {
                 ["action_type"] = "create",
-                ["editImage"] = "true",
+                ["sync"] = "false",
                 ["project_id"] = "default",
-                ["subjects"] = subjectsJson,
-                ["ratio"] = "9:16",
-                ["mode"] = "medium",
-                ["resolution"] = "2k"
+                ["subjects[0][url]"] = "https://cdn.example/model.png",
+                ["subjects[1][url]"] = "https://cdn.example/product.png",
+                ["ratio"] = "16:9",
+                ["category"] = "FASHION",
+                ["mode"] = "low",
+                ["resolution"] = "1k",
+                ["num_outputs"] = "1",
+                ["language"] = "VI"
             },
-            Ai79TaskOperation.Image,
-            "base64Image"));
+            Ai79TaskOperation.Image));
 
         Assert.Equal("try-on-001", result.TaskId);
         var request = Assert.Single(handler.Requests);
-        var decoded = Uri.UnescapeDataString(request.Body);
-        Assert.Contains("base64Image=data%3Aimage%2Fjpeg", request.Body, StringComparison.Ordinal);
-        Assert.Contains("subjects=%5B%22data%3Aimage%2Fpng%3Bbase64%2CPRODUCT_BYTES%22%5D", request.Body, StringComparison.Ordinal);
-        Assert.DoesNotContain("image_2", decoded, StringComparison.Ordinal);
+        Assert.DoesNotContain("image_2", request.Body, StringComparison.Ordinal);
+        Assert.Contains("subjects%5B0%5D%5Burl%5D=https%3A%2F%2Fcdn.example%2Fmodel.png", request.Body, StringComparison.Ordinal);
+        Assert.Contains("subjects%5B1%5D%5Burl%5D=https%3A%2F%2Fcdn.example%2Fproduct.png", request.Body, StringComparison.Ordinal);
         Assert.Contains("model=imagegen_2_0", request.Body, StringComparison.Ordinal);
-        Assert.Contains("base64Image=data:image/jpeg;base64,CHARACTER_BYTES", decoded, StringComparison.Ordinal);
-        Assert.Contains("subjects=[\"data:image/png;base64,PRODUCT_BYTES\"]", decoded, StringComparison.Ordinal);
+        Assert.Contains("prompt=VIRTUAL+TRY-ON+%E2%80%93+PREVIEW+ONLY", request.Body, StringComparison.Ordinal);
+        Assert.Contains("sync=false", request.Body, StringComparison.Ordinal);
+        Assert.Contains("category=FASHION", request.Body, StringComparison.Ordinal);
+        Assert.Contains("resolution=1k", request.Body, StringComparison.Ordinal);
+        Assert.Contains("mode=low", request.Body, StringComparison.Ordinal);
+        Assert.Contains("num_outputs=1", request.Body, StringComparison.Ordinal);
+        Assert.Contains("language=VI", request.Body, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -107,12 +113,13 @@ public sealed class Ai79TaskClientTests
             "79ai.net",
             "imagegen_2_0",
             "prompt",
-            ["data:image/jpeg;base64,CHARACTER_BYTES", "data:image/png;base64,PRODUCT_BYTES"],
-            new Dictionary<string, string?> { ["subjects"] = """["product"]""" },
+            ["data:image/jpeg;base64,CHARACTER_BYTES"],
+            new Dictionary<string, string?> { ["subjects[0][url]"] = "https://cdn.example/model.png", ["subjects[1][url]"] = "https://cdn.example/product.png" },
             Ai79TaskOperation.Image,
-            "base64Image")));
+            "base64Image",
+            "image_2")));
 
-        Assert.Contains("subjects", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("second image field", ex.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Empty(handler.Requests);
     }
 

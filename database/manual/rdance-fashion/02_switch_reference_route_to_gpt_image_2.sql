@@ -1,6 +1,5 @@
 -- Generated for manual review only. Do not execute automatically.
--- Switch DanceSell reference generation only after the 79AI subjects payload
--- has been verified against the live provider contract.
+-- Switch DanceSell reference generation to the verified 79AI try-on payload.
 
 UPDATE public.todox_ai_feature_provider_route
    SET is_default = false,
@@ -22,14 +21,17 @@ UPDATE public.todox_ai_feature_provider_route
            'displayName', '79AI GPT Image 2 Reference',
            'submit_path', '/generateImage',
            'poll_path', '/image',
-           'character_image_field', 'base64Image',
-           'subject_schema', 'json_stringified_array_of_image_data_uris',
+           'subject_schema', 'form_subject_url_fields',
+           'domain', '79ai.net',
            'project_id', 'default',
            'action_type', 'create',
-           'editImage', 'true',
-           'ratio', '9:16',
-           'mode', 'medium',
-           'resolution', '2k'
+           'sync', 'false',
+           'ratio', '16:9',
+           'category', 'FASHION',
+           'mode', 'low',
+           'resolution', '1k',
+           'num_outputs', '1',
+           'language', 'VI'
        ),
        updated_at = now()
  WHERE feature_code = 'dance_sell'
@@ -54,14 +56,17 @@ SELECT 'dance_sell',
            'displayName', '79AI GPT Image 2 Reference',
            'submit_path', '/generateImage',
            'poll_path', '/image',
-           'character_image_field', 'base64Image',
-           'subject_schema', 'json_stringified_array_of_image_data_uris',
+           'subject_schema', 'form_subject_url_fields',
+           'domain', '79ai.net',
            'project_id', 'default',
            'action_type', 'create',
-           'editImage', 'true',
-           'ratio', '9:16',
-           'mode', 'medium',
-           'resolution', '2k'
+           'sync', 'false',
+           'ratio', '16:9',
+           'category', 'FASHION',
+           'mode', 'low',
+           'resolution', '1k',
+           'num_outputs', '1',
+           'language', 'VI'
        )
  WHERE NOT EXISTS (
      SELECT 1

@@ -395,7 +395,7 @@ public sealed class Ai79TaskClient : IAi79TaskClient
         }
 
         var firstImageField = request.FirstImageField ?? "image";
-        if (!firstImageField.Equals("base64Image", StringComparison.Ordinal))
+        if (request.Images.Count > 0 && !firstImageField.Equals("base64Image", StringComparison.Ordinal))
         {
             throw new InvalidOperationException("79AI /generateImage base edit image field must be base64Image.");
         }

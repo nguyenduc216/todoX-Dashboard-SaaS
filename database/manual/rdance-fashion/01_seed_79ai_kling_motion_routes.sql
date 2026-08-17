@@ -22,20 +22,20 @@ INSERT INTO public.todox_ai_feature_provider_route
 SELECT 'dance_sell',
        'reference_image',
        '79ai',
-       'seedream_5_0',
+       'imagegen_2_0',
        'image',
        10,
        true,
        true,
        ARRAY[]::text[],
-       '{"capability":"reference_image_generation","displayName":"79AI Seedream 5.0 Reference","submit_path":"/generateImage","poll_path":"/image","character_image_field":"base64Image","subject_schema":"json_stringified_array_of_image_data_uris","project_id":"default","action_type":"create","editImage":"true","ratio":"9:16","mode":"vip","resolution":"2k"}'::jsonb
+       '{"capability":"reference_image_generation","displayName":"79AI GPT Image 2 Fashion Reference","submit_path":"/generateImage","poll_path":"/image","subject_schema":"form_subject_url_fields","domain":"79ai.net","project_id":"default","action_type":"create","sync":"false","ratio":"16:9","category":"FASHION","mode":"low","resolution":"1k","num_outputs":"1","language":"VI"}'::jsonb
  WHERE NOT EXISTS (
      SELECT 1
        FROM public.todox_ai_feature_provider_route
       WHERE feature_code = 'dance_sell'
         AND operation_type = 'reference_image'
         AND provider_code = '79ai'
-        AND model_name = 'seedream_5_0'
+        AND model_name = 'imagegen_2_0'
  );
 
 UPDATE public.todox_ai_feature_provider_route
@@ -44,7 +44,16 @@ UPDATE public.todox_ai_feature_provider_route
        enabled = true,
        model_mode = 'image',
        fallback_on = ARRAY[]::text[],
-       config_json = COALESCE(config_json, '{}'::jsonb) || '{"capability":"reference_image_generation","displayName":"79AI Seedream 5.0 Reference","submit_path":"/generateImage","poll_path":"/image","character_image_field":"base64Image","subject_schema":"json_stringified_array_of_image_data_uris","project_id":"default","action_type":"create","editImage":"true","ratio":"9:16","mode":"vip","resolution":"2k"}'::jsonb,
+       config_json = COALESCE(config_json, '{}'::jsonb) || '{"capability":"reference_image_generation","displayName":"79AI GPT Image 2 Fashion Reference","submit_path":"/generateImage","poll_path":"/image","subject_schema":"form_subject_url_fields","domain":"79ai.net","project_id":"default","action_type":"create","sync":"false","ratio":"16:9","category":"FASHION","mode":"low","resolution":"1k","num_outputs":"1","language":"VI"}'::jsonb,
+       updated_at = now()
+ WHERE feature_code = 'dance_sell'
+   AND operation_type = 'reference_image'
+   AND provider_code = '79ai'
+   AND model_name = 'imagegen_2_0';
+
+UPDATE public.todox_ai_feature_provider_route
+   SET is_default = false,
+       enabled = false,
        updated_at = now()
  WHERE feature_code = 'dance_sell'
    AND operation_type = 'reference_image'
@@ -102,7 +111,7 @@ UPDATE public.todox_ai_feature_provider_route
    AND provider_code = 'kie'
    AND model_name = 'kling-2.6/motion-control';
 
--- Reference generation now uses the production 79AI image route for seedream_5_0.
+-- Reference generation now uses the verified 79AI GPT Image 2 fashion route.
 SELECT feature_code, operation_type, provider_code, model_name, model_mode, route_priority, is_default, enabled, fallback_on
   FROM public.todox_ai_feature_provider_route
  WHERE feature_code = 'dance_sell'

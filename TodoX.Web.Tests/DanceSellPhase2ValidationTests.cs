@@ -154,40 +154,20 @@ public sealed class DanceSellPhase2ValidationTests
     }
 
     [Fact]
-    public void ReferencePrompt_ForcesTryOnSemanticsAndBansCollageOutput()
+    public void ReferencePrompt_MatchesTheVerified79AiTryOnPromptExactly()
     {
         var root = FindRepoRoot();
         var service = File.ReadAllText(Path.Combine(root, "TodoX.Web/Services/DanceSell/DanceSellPhase2Services.cs"));
         var prompt = GetMethodSection(service, "BuildReferencePrompt");
         var generate = GetMethodSection(service, "GenerateAsync");
 
-        Assert.Contains("VIRTUAL TRY-ON - PREVIEW ONLY.", prompt, StringComparison.Ordinal);
-        Assert.Contains("IMAGE 1 is the FIXED BASE BODY.", prompt, StringComparison.Ordinal);
-        Assert.Contains("Preserve the exact person identity, face, hairstyle, body shape, body pose, limb angles, shoulder alignment, head tilt, camera angle, framing, and background from IMAGE 1.", prompt, StringComparison.Ordinal);
-        Assert.Contains("Do NOT regenerate the person.", prompt, StringComparison.Ordinal);
-        Assert.Contains("Do NOT reinterpret or modify the pose.", prompt, StringComparison.Ordinal);
-        Assert.Contains("Only replace the clothing region on the body.", prompt, StringComparison.Ordinal);
-        Assert.Contains("IMAGE 2 is the CLOTHING SOURCE.", prompt, StringComparison.Ordinal);
-        Assert.Contains("Apply the clothing from IMAGE 2 onto the person in IMAGE 1.", prompt, StringComparison.Ordinal);
-        Assert.Contains("The person in IMAGE 1 must appear to be wearing the clothing from IMAGE 2.", prompt, StringComparison.Ordinal);
-        Assert.Contains("Clothing must conform naturally to the existing body pose in IMAGE 1.", prompt, StringComparison.Ordinal);
-        Assert.Contains("Match exactly: garment type, overall silhouette and shape, dominant colors, sleeve colors and trim colors, collar or neckline style, hem length, fabric appearance, graphic artwork, printed text, artwork placement, and artwork scale.", prompt, StringComparison.Ordinal);
-        Assert.Contains("If conflict occurs between clothing accuracy and clothing realism, prioritize preserving the exact body pose from IMAGE 1", prompt, StringComparison.Ordinal);
-
-        foreach (var blocked in new[]
-        {
-            "Do not create a collage.",
-            "Do not place IMAGE 2 beside the model.",
-            "Do not invent a different outfit.",
-            "Do not simplify the outfit.",
-            "Do not replace it with generic fashion clothing.",
-            "Do not change the pose.",
-            "Do not change the camera angle.",
-            "Do not change the background."
-        })
-        {
-            Assert.Contains(blocked, prompt, StringComparison.Ordinal);
-        }
+        Assert.Contains("VIRTUAL TRY-ON – PREVIEW ONLY", prompt, StringComparison.Ordinal);
+        Assert.Contains("Use IMAGE 1 as FIXED BASE BODY.", prompt, StringComparison.Ordinal);
+        Assert.Contains("Apply clothing from IMAGE 2 with exact design, color, texture, pattern", prompt, StringComparison.Ordinal);
+        Assert.Contains("→ Prioritize BODY POSE from IMAGE 1 over clothing realism", prompt, StringComparison.Ordinal);
+        Assert.Contains("Photorealistic, product preview quality.", prompt, StringComparison.Ordinal);
+        Assert.DoesNotContain("basePrompt", prompt, StringComparison.Ordinal);
+        Assert.DoesNotContain("CustomPlacementInstruction", prompt, StringComparison.Ordinal);
 
         Assert.DoesNotContain("BuildCompositeAsync", generate, StringComparison.Ordinal);
         Assert.Contains("DANCE_SELL_REFERENCE_AI_ROUTE_REQUIRED", generate, StringComparison.Ordinal);
@@ -203,13 +183,17 @@ public sealed class DanceSellPhase2ValidationTests
         var models = File.ReadAllText(Path.Combine(root, "TodoX.Web/Services/DanceSell/DanceSellModels.cs"));
         var switchSql = File.ReadAllText(Path.Combine(root, "database/manual/rdance-fashion/02_switch_reference_route_to_gpt_image_2.sql"));
 
-        Assert.Contains("var subjects = BuildSubjectsJson(product)", operations, StringComparison.Ordinal);
-        Assert.Contains("[\"subjects\"] = subjects", operations, StringComparison.Ordinal);
-        Assert.Contains("[character.DataUri]", operations, StringComparison.Ordinal);
-        Assert.Contains("productImageTransport = \"subjects\"", operations, StringComparison.Ordinal);
-        Assert.Contains("subjectMimeTypes", operations, StringComparison.Ordinal);
-        Assert.Contains("subjectBytes", operations, StringComparison.Ordinal);
-        Assert.Contains("promptHash", operations, StringComparison.Ordinal);
+        Assert.Contains("[\"subjects[0][url]\"] = characterUrl", operations, StringComparison.Ordinal);
+        Assert.Contains("[\"subjects[1][url]\"] = productUrl", operations, StringComparison.Ordinal);
+        Assert.Contains("Model = DanceSellConstants.Ai79GptImage2Model", operations, StringComparison.Ordinal);
+        Assert.Contains("BaseUrl = \"https://api.gommo.net/ai\"", operations, StringComparison.Ordinal);
+        Assert.Contains("Domain = \"79ai.net\"", operations, StringComparison.Ordinal);
+        Assert.Contains("SubmitPath = \"/generateImage\"", operations, StringComparison.Ordinal);
+        Assert.Contains("sync = \"false\"", operations, StringComparison.Ordinal);
+        Assert.Contains("var category = \"FASHION\"", operations, StringComparison.Ordinal);
+        Assert.Contains("var resolution = \"1k\"", operations, StringComparison.Ordinal);
+        Assert.Contains("var mode = \"low\"", operations, StringComparison.Ordinal);
+        Assert.Contains("BuildReferencePrompt()", operations, StringComparison.Ordinal);
         Assert.Contains("formFields", operations, StringComparison.Ordinal);
         Assert.DoesNotContain("secondImageField", operations, StringComparison.Ordinal);
         Assert.DoesNotContain("image_2", operations, StringComparison.Ordinal);
@@ -217,9 +201,10 @@ public sealed class DanceSellPhase2ValidationTests
         Assert.Contains("pass additional references through subjects", client, StringComparison.Ordinal);
         Assert.Contains("Ai79GptImage2Model = \"imagegen_2_0\"", models, StringComparison.Ordinal);
         Assert.Contains("imagegen_2_0", switchSql, StringComparison.Ordinal);
-        Assert.Contains("'mode', 'medium'", switchSql, StringComparison.Ordinal);
-        Assert.Contains("'resolution', '2k'", switchSql, StringComparison.Ordinal);
-        Assert.Contains("'ratio', '9:16'", switchSql, StringComparison.Ordinal);
+        Assert.Contains("'mode', 'low'", switchSql, StringComparison.Ordinal);
+        Assert.Contains("'resolution', '1k'", switchSql, StringComparison.Ordinal);
+        Assert.Contains("'ratio', '16:9'", switchSql, StringComparison.Ordinal);
+        Assert.Contains("'category', 'FASHION'", switchSql, StringComparison.Ordinal);
         Assert.DoesNotContain("image_2", switchSql, StringComparison.Ordinal);
     }
 
