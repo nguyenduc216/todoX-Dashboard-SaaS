@@ -158,7 +158,7 @@ public sealed class RDanceFashionDemoPageTests
             "OnCharacterDragEnter",
             "OnProductDragEnter",
             "Ảnh dùng để tạo video",
-            "AI sẽ kết hợp ảnh người mẫu và ảnh sản phẩm để tạo ảnh dùng cho video.",
+            "AI sẽ tạo ảnh người mẫu mặc sản phẩm để dùng làm ảnh nguồn cho video.",
             "Ảnh người mẫu sẽ được dùng trực tiếp để tạo video.",
             "Tạo lại ảnh",
             "Duyệt ảnh",
@@ -179,6 +179,7 @@ public sealed class RDanceFashionDemoPageTests
         Assert.DoesNotContain("<InputFile OnChange=\"OnProductSelected\"", page, StringComparison.Ordinal);
         Assert.DoesNotContain("Tạo ảnh AI", page, StringComparison.Ordinal);
         Assert.DoesNotContain("Dùng ảnh người mẫu", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("AI sẽ kết hợp ảnh người mẫu và ảnh sản phẩm", page, StringComparison.Ordinal);
     }
 
     [Fact]

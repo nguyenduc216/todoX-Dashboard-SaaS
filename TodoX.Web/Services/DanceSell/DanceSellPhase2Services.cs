@@ -628,17 +628,32 @@ public sealed class DanceSellReferenceImageService : IDanceSellReferenceImageSer
     {
         var basePrompt = string.IsNullOrWhiteSpace(job.ImagePrompt) ? job.Prompt : job.ImagePrompt;
         var instruction = string.IsNullOrWhiteSpace(job.CustomPlacementInstruction)
-            ? "Dress the model naturally in the product from the second image."
+            ? "Dress the model in the exact product from the product reference image."
             : job.CustomPlacementInstruction.Trim();
         return string.Join(' ', new[]
         {
-            "Create one realistic fashion advertising reference image.",
-            "Use the first image as the human model and the second image as the fashion product.",
+            "Create ONE single photorealistic fashion try-on image.",
+            "IDENTITY SOURCE: Use the character reference image as the identity source.",
+            "Preserve the same person, face, hairstyle, skin tone, body proportions, recognizable appearance, original pose, and camera composition as much as possible.",
+            "PRODUCT SOURCE: Use the product reference image as the clothing source.",
+            "The model MUST WEAR the actual clothing/product shown in the product image.",
+            "Faithfully preserve the product garment type, silhouette, main colors, printed graphics, logos, embroidery, collar shape, sleeve shape, waistline, skirt, shorts, pants construction, and visible design details.",
+            "If the product image shows front and back views of the same garment, use both views only to understand the design and do NOT display both product views in the final output.",
+            "If the product image contains a coordinated set, dress the model in the full set.",
             instruction,
-            "The output must show the model wearing the product naturally.",
-            "Preserve the model as the main subject, including face, pose, body proportions, framing, and basic composition.",
-            "Preserve the product color, pattern, logo, material, and design as accurately as possible.",
-            "Do not create a collage, side-by-side layout, inset thumbnail, mockup board, split canvas, text, watermark, extra person, duplicated limbs, or product floating beside the model.",
+            "The result must look like a realistic fashion advertisement photo of the SAME MODEL wearing the PROVIDED PRODUCT.",
+            "The product must be physically worn on the model's body.",
+            "Do not display the product separately.",
+            "Do not place the product beside the model.",
+            "Do not create a collage.",
+            "Do not create side-by-side images.",
+            "Do not create a split-screen composition.",
+            "Do not create an inset product thumbnail.",
+            "Do not create a product catalog board.",
+            "Do not preserve the model's original outfit when a replacement fashion product is provided.",
+            "Do not invent a different outfit.",
+            "Do not change product colors arbitrarily, remove important logos or printed graphics, add text, or add a watermark.",
+            "OUTPUT: Return one clean, unified, photorealistic image suitable as the reference image for motion-video generation.",
             basePrompt
         }.Where(part => !string.IsNullOrWhiteSpace(part)));
     }

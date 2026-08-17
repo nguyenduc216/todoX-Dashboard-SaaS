@@ -154,6 +154,39 @@ public sealed class DanceSellPhase2ValidationTests
     }
 
     [Fact]
+    public void ReferencePrompt_ForcesTryOnSemanticsAndBansCollageOutput()
+    {
+        var root = FindRepoRoot();
+        var service = File.ReadAllText(Path.Combine(root, "TodoX.Web/Services/DanceSell/DanceSellPhase2Services.cs"));
+        var prompt = GetMethodSection(service, "BuildReferencePrompt");
+        var generate = GetMethodSection(service, "GenerateAsync");
+
+        Assert.Contains("Create ONE single photorealistic fashion try-on image.", prompt, StringComparison.Ordinal);
+        Assert.Contains("The model MUST WEAR the actual clothing/product shown in the product image", prompt, StringComparison.Ordinal);
+        Assert.Contains("same person", prompt, StringComparison.Ordinal);
+        Assert.Contains("face", prompt, StringComparison.Ordinal);
+        Assert.Contains("hairstyle", prompt, StringComparison.Ordinal);
+        Assert.Contains("body proportions", prompt, StringComparison.Ordinal);
+
+        foreach (var blocked in new[]
+        {
+            "Do not create a collage.",
+            "Do not create side-by-side images.",
+            "Do not create a split-screen composition.",
+            "Do not create an inset product thumbnail.",
+            "Do not display the product separately.",
+            "Do not invent a different outfit."
+        })
+        {
+            Assert.Contains(blocked, prompt, StringComparison.Ordinal);
+        }
+
+        Assert.DoesNotContain("BuildCompositeAsync", generate, StringComparison.Ordinal);
+        Assert.Contains("DANCE_SELL_REFERENCE_AI_ROUTE_REQUIRED", generate, StringComparison.Ordinal);
+        Assert.Contains("provider.SubmitAsync", generate, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void StaleGeneratingRecovery_RequiresNoActiveVersionOrOperationBeforeRetry()
     {
         var root = FindRepoRoot();
@@ -253,6 +286,11 @@ public sealed class DanceSellPhase2ValidationTests
         if (start < 0)
         {
             start = source.IndexOf($"private static void {methodName}(", StringComparison.Ordinal);
+        }
+
+        if (start < 0)
+        {
+            start = source.IndexOf($"private static string {methodName}(", StringComparison.Ordinal);
         }
 
         Assert.True(start >= 0, $"Could not locate {methodName}.");

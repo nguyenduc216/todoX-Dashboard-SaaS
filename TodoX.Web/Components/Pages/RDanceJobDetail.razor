@@ -362,7 +362,7 @@
     private string CharacterImageUploadZoneClass => $"rdance-upload-zone rdance-image-upload-zone{(_characterDragActive ? " is-dragging" : string.Empty)}{(_busy ? " is-busy" : string.Empty)}";
     private string ProductImageUploadZoneClass => $"rdance-upload-zone rdance-image-upload-zone{(_productDragActive ? " is-dragging" : string.Empty)}{(_busy ? " is-busy" : string.Empty)}";
     private string ReferenceHelpText => _job?.ProductMediaId is not null
-        ? "AI sẽ kết hợp ảnh người mẫu và ảnh sản phẩm để tạo ảnh dùng cho video."
+        ? "AI sẽ tạo ảnh người mẫu mặc sản phẩm để dùng làm ảnh nguồn cho video."
         : "Ảnh người mẫu sẽ được dùng trực tiếp để tạo video.";
     private string? MotionSourceName => !string.IsNullOrWhiteSpace(_motionFileName)
         ? _motionFileName
