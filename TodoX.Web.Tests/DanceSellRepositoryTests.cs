@@ -78,6 +78,24 @@ public sealed class DanceSellRepositoryTests
         Assert.Contains("prepared_reference_url=NULL", section, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("prepared_reference_approved_at=NULL", section, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("reference_approved_at=NULL", section, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("UPDATE dance_sell.dance_sell_reference_versions", section, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("SET is_selected = false", section, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("DELETE FROM dance_sell.dance_sell_reference_versions", section, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void UnapproveReferenceSql_PreservesHistoryAndClearsApprovalState()
+    {
+        var source = ReadRepositorySource();
+        var section = GetMethodSection(source, "UnapproveReferenceAsync");
+
+        Assert.Contains("UPDATE dance_sell.dance_sell_reference_versions", section, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("SET is_selected = false", section, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("prepared_reference_status='ready'", section, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("prepared_reference_approved_at=NULL", section, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("reference_approved_at=NULL", section, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("prepared_reference_status='approved'", section, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("DELETE FROM dance_sell.dance_sell_reference_versions", section, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

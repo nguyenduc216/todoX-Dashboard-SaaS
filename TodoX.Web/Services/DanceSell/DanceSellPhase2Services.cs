@@ -171,6 +171,7 @@ public interface IDanceSellReferenceImageService
     Task<DanceSellJobDto> AutoPrepareAsync(Guid jobId, CurrentUserSession user, CancellationToken ct = default);
     Task<DanceSellJobDto> ApproveCharacterAsync(Guid jobId, CurrentUserSession user, CancellationToken ct = default);
     Task<DanceSellJobDto> ApproveAsync(Guid jobId, Guid versionId, CurrentUserSession user, CancellationToken ct = default);
+    Task<DanceSellJobDto> UnapproveAsync(Guid jobId, CurrentUserSession user, CancellationToken ct = default);
 }
 
 public sealed class DanceSellReferenceImageService : IDanceSellReferenceImageService
@@ -657,6 +658,18 @@ public sealed class DanceSellReferenceImageService : IDanceSellReferenceImageSer
         return await _repo.GetByIdAsync(job.Id, ct) ?? job;
     }
 
+    public async Task<DanceSellJobDto> UnapproveAsync(Guid jobId, CurrentUserSession user, CancellationToken ct = default)
+    {
+        var job = await RequireOwnedJobAsync(jobId, user, ct);
+        if (job.PreparedReferenceStatus != DanceSellReferenceStatuses.Approved)
+        {
+            return job;
+        }
+
+        await _repo.UnapproveReferenceAsync(job.Id, ct);
+        return await _repo.GetByIdAsync(job.Id, ct) ?? job;
+    }
+
     public async Task<DanceSellJobDto> ApproveCharacterAsync(Guid jobId, CurrentUserSession user, CancellationToken ct = default)
     {
         var job = await RequireOwnedJobAsync(jobId, user, ct);
@@ -918,10 +931,18 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
             throw new InvalidOperationException("DANCE_SELL_INVALID_REFERENCE_MODE");
         }
 
-        await _catalog.ResolveAsync(DanceSellOperationTypes.ReferenceImage, request.ReferenceProviderCode, request.ReferenceProviderModel, ct);
-        var motionRoute = await _catalog.ResolveAsync(DanceSellOperationTypes.MotionVideo, request.MotionProviderCode, request.MotionProviderModel, ct);
-        ValidateCapability(request.Mode, request.CharacterOrientation, motionRoute);
+        var referenceChanged =
+            !string.Equals(job.ReferenceMode, request.ReferenceMode.Trim(), StringComparison.Ordinal)
+            || !string.Equals(job.Prompt?.Trim(), request.Prompt.Trim(), StringComparison.Ordinal)
+            || !string.Equals(job.PlacementMode?.Trim(), request.PlacementMode.Trim(), StringComparison.Ordinal)
+            || !string.Equals(job.CustomPlacementInstruction?.Trim(), NullIfBlank(request.CustomPlacementInstruction), StringComparison.Ordinal)
+            || !string.Equals(job.ImagePrompt?.Trim(), NullIfBlank(request.ImagePrompt), StringComparison.Ordinal);
         await _repo.UpdateBusinessAsync(job.Id, request, ct);
+        if (referenceChanged && job.ReferenceMode != DanceSellReferenceModes.DirectReference)
+        {
+            await _repo.ResetReferenceAsync(job.Id, ct: ct);
+        }
+
         return await _repo.GetByIdAsync(job.Id, ct) ?? job;
     }
 
@@ -1128,6 +1149,9 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
         if (!DanceSellPlacementModes.All.Contains(placementMode)) throw new InvalidOperationException("DANCE_SELL_INVALID_PLACEMENT");
     }
 
+    private static string? NullIfBlank(string? value)
+        => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
     private void ValidateCapability(string mode, string orientation, DanceSellProviderRouteDto route)
     {
         var capability = BuildCapability(route);
@@ -1205,6 +1229,7 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
         {
             if (job.CharacterMediaId is null || string.IsNullOrWhiteSpace(job.CharacterImageUrl)) throw new InvalidOperationException("DANCE_SELL_INVALID_CHARACTER");
             if (job.ProductMediaId is null || string.IsNullOrWhiteSpace(job.ProductImageUrl)) throw new InvalidOperationException("DANCE_SELL_INVALID_PRODUCT");
+            if (job.PreparedReferenceStatus != DanceSellReferenceStatuses.Approved || string.IsNullOrWhiteSpace(job.PreparedReferenceUrl)) throw new InvalidOperationException("DANCE_SELL_REFERENCE_NOT_APPROVED");
         }
         if (job.MotionVideoMediaId is null || string.IsNullOrWhiteSpace(job.MotionVideoUrl) || job.SourceStageStatus != DanceSellSourceStageStatuses.Ready) throw new InvalidOperationException("DANCE_SELL_INVALID_MOTION");
         if (job.PreparedReferenceStatus != DanceSellReferenceStatuses.Approved || string.IsNullOrWhiteSpace(job.PreparedReferenceUrl)) throw new InvalidOperationException("DANCE_SELL_REFERENCE_NOT_APPROVED");

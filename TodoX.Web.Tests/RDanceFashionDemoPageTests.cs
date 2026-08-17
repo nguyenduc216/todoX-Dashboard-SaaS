@@ -205,6 +205,38 @@ public sealed class RDanceFashionDemoPageTests
     }
 
     [Fact]
+    public void RDanceDetailPageAllowsEditingWhenProviderRoutesAreUnavailable()
+    {
+        var page = ReadStrictUtf8(Path.Combine(FindRepoRoot(), "TodoX.Web", "Components", "Pages", "RDanceJobDetail.razor"));
+
+        var upload = GetMethodSection(page, "UploadAsync");
+        var stageTikTok = GetMethodSection(page, "StageTikTokAsync");
+        var autoPrepare = GetMethodSection(page, "AutoPrepareReferenceAsync");
+        var queueRender = GetMethodSection(page, "ConfirmAndQueueAsync");
+
+        Assert.Contains("_referenceReadinessError", page, StringComparison.Ordinal);
+        Assert.Contains("_motionReadinessError", page, StringComparison.Ordinal);
+        Assert.Contains("await EnsureEditableAsync()", upload, StringComparison.Ordinal);
+        Assert.DoesNotContain("EnsureReferenceProviderReady", upload, StringComparison.Ordinal);
+        Assert.Contains("await EnsureEditableAsync()", stageTikTok, StringComparison.Ordinal);
+        Assert.Contains("EnsureReferenceProviderReady()", autoPrepare, StringComparison.Ordinal);
+        Assert.Contains("EnsureMotionProviderReady()", queueRender, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RDanceDetailPageSupportsUnapproveAndRegeneratesAfterImageChanges()
+    {
+        var page = ReadStrictUtf8(Path.Combine(FindRepoRoot(), "TodoX.Web", "Components", "Pages", "RDanceJobDetail.razor"));
+
+        Assert.Contains("OnClick=\"UnapproveReferenceAsync\"", page, StringComparison.Ordinal);
+        Assert.Contains("References.UnapproveAsync(_job!.Id, AuthState.CurrentUser!)", page, StringComparison.Ordinal);
+        Assert.Contains("if (await UploadAsync(args, MaxImageBytes", GetMethodSection(page, "OnCharacterSelected"), StringComparison.Ordinal);
+        Assert.Contains("await AutoPrepareReferenceAsync()", GetMethodSection(page, "OnCharacterSelected"), StringComparison.Ordinal);
+        Assert.Contains("if (await UploadAsync(args, MaxImageBytes", GetMethodSection(page, "OnProductSelected"), StringComparison.Ordinal);
+        Assert.Contains("await AutoPrepareReferenceAsync()", GetMethodSection(page, "OnProductSelected"), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void RouteSeedMakes79AiPrimaryAndKieBackup()
     {
         var root = FindRepoRoot();
@@ -232,6 +264,19 @@ public sealed class RDanceFashionDemoPageTests
     private static string ReadStrictUtf8(string file)
         => new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true)
             .GetString(File.ReadAllBytes(file));
+
+    private static string GetMethodSection(string source, string methodName)
+    {
+        var start = source.IndexOf($"private async Task {methodName}(", StringComparison.Ordinal);
+        if (start < 0)
+        {
+            start = source.IndexOf($"private async Task<bool> {methodName}(", StringComparison.Ordinal);
+        }
+
+        Assert.True(start >= 0, $"Could not locate {methodName}.");
+        var nextMethod = source.IndexOf("\n    private ", start + methodName.Length, StringComparison.Ordinal);
+        return nextMethod > start ? source[start..nextMethod] : source[start..];
+    }
 
     private static string FindRepoRoot()
     {

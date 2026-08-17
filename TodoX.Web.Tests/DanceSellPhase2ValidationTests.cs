@@ -91,6 +91,35 @@ public sealed class DanceSellPhase2ValidationTests
         Assert.Contains("prepared_reference_media_id=NULL", repository, StringComparison.Ordinal);
         Assert.Contains("prepared_reference_approved_at=NULL", repository, StringComparison.Ordinal);
         Assert.Contains("reference_approved_at=NULL", repository, StringComparison.Ordinal);
+        Assert.Contains("SET is_selected = false", GetMethodSection(repository, "ResetReferenceAsync"), StringComparison.Ordinal);
+        Assert.Contains("await _repo.ResetReferenceAsync(job.Id, ct: ct)", GetMethodSection(service, "UploadCharacterAsync"), StringComparison.Ordinal);
+        Assert.Contains("await _repo.ResetReferenceAsync(job.Id, ct: ct)", GetMethodSection(service, "UploadProductAsync"), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ReferenceApprovalCanBeRemovedWithoutDeletingReferenceHistory()
+    {
+        var root = FindRepoRoot();
+        var service = File.ReadAllText(Path.Combine(root, "TodoX.Web/Services/DanceSell/DanceSellPhase2Services.cs"));
+        var endpoints = File.ReadAllText(Path.Combine(root, "TodoX.Web/Services/DanceSell/DanceSellPhase2Endpoints.cs"));
+
+        var unapprove = GetMethodSection(service, "UnapproveAsync");
+        Assert.Contains("RequireOwnedJobAsync", unapprove, StringComparison.Ordinal);
+        Assert.Contains("DanceSellReferenceStatuses.Approved", unapprove, StringComparison.Ordinal);
+        Assert.Contains("await _repo.UnapproveReferenceAsync(job.Id, ct)", unapprove, StringComparison.Ordinal);
+        Assert.Contains("/jobs/{id:guid}/reference/unapprove", endpoints, StringComparison.Ordinal);
+        Assert.Contains("service.UnapproveAsync(id, user, ct)", endpoints, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RenderRequiresApprovedReferenceAfterSourceInvalidation()
+    {
+        var root = FindRepoRoot();
+        var service = File.ReadAllText(Path.Combine(root, "TodoX.Web/Services/DanceSell/DanceSellPhase2Services.cs"));
+        var validation = GetMethodSection(service, "ValidateReadyForRender");
+
+        Assert.Contains("job.PreparedReferenceStatus != DanceSellReferenceStatuses.Approved", validation, StringComparison.Ordinal);
+        Assert.Contains("DANCE_SELL_REFERENCE_NOT_APPROVED", validation, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -198,6 +227,11 @@ public sealed class DanceSellPhase2ValidationTests
 
         if (start < 0)
         {
+            start = source.IndexOf($"public async Task {methodName}(", StringComparison.Ordinal);
+        }
+
+        if (start < 0)
+        {
             start = source.IndexOf($"private async Task<bool> {methodName}(", StringComparison.Ordinal);
         }
 
@@ -209,6 +243,16 @@ public sealed class DanceSellPhase2ValidationTests
         if (start < 0)
         {
             start = source.IndexOf($"private async Task {methodName}(", StringComparison.Ordinal);
+        }
+
+        if (start < 0)
+        {
+            start = source.IndexOf($"private void {methodName}(", StringComparison.Ordinal);
+        }
+
+        if (start < 0)
+        {
+            start = source.IndexOf($"private static void {methodName}(", StringComparison.Ordinal);
         }
 
         Assert.True(start >= 0, $"Could not locate {methodName}.");

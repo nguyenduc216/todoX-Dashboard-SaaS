@@ -25,6 +25,7 @@ public static class DanceSellPhase2Endpoints
         group.MapPost("/jobs/{id:guid}/reference/generate", GenerateReferenceAsync).DisableAntiforgery();
         group.MapGet("/jobs/{id:guid}/reference/versions", ListReferenceVersionsAsync);
         group.MapPost("/jobs/{id:guid}/reference/{versionId:guid}/approve", ApproveReferenceAsync).DisableAntiforgery();
+        group.MapPost("/jobs/{id:guid}/reference/unapprove", UnapproveReferenceAsync).DisableAntiforgery();
         group.MapPost("/jobs/{id:guid}/render", QueueRenderAsync).DisableAntiforgery();
         group.MapPost("/jobs/{id:guid}/retry", RetryAsync).DisableAntiforgery();
         group.MapPost("/jobs/{id:guid}/retry-reference", GenerateReferenceAsync).DisableAntiforgery();
@@ -84,6 +85,9 @@ public static class DanceSellPhase2Endpoints
 
     private static async Task<IResult> ApproveReferenceAsync(Guid id, Guid versionId, AuthStateService auth, IDanceSellReferenceImageService service, CancellationToken ct)
         => await ExecuteAsync(auth, user => service.ApproveAsync(id, versionId, user, ct));
+
+    private static async Task<IResult> UnapproveReferenceAsync(Guid id, AuthStateService auth, IDanceSellReferenceImageService service, CancellationToken ct)
+        => await ExecuteAsync(auth, user => service.UnapproveAsync(id, user, ct));
 
     private static async Task<IResult> QueueRenderAsync(Guid id, AuthStateService auth, IDanceSellPhase2Service service, CancellationToken ct)
         => await ExecuteAsync(auth, user => service.QueueRenderAsync(id, user, ct));

@@ -37,9 +37,13 @@
     }
     else
     {
-        @if (!string.IsNullOrWhiteSpace(_readinessError))
+        @if (!string.IsNullOrWhiteSpace(_referenceReadinessError))
         {
-            <MudAlert Severity="Severity.Error">@_readinessError</MudAlert>
+            <MudAlert Severity="Severity.Error">@_referenceReadinessError</MudAlert>
+        }
+        @if (!string.IsNullOrWhiteSpace(_motionReadinessError))
+        {
+            <MudAlert Severity="Severity.Error">@_motionReadinessError</MudAlert>
         }
 
         <MudTabs Rounded="true" Elevation="0" @bind-ActivePanelIndex="_tabIndex">
@@ -226,6 +230,7 @@
                             @if (_job?.PreparedReferenceStatus == DanceSellReferenceStatuses.Approved)
                             {
                                 <MudChip T="string" Color="Color.Success" Size="Size.Small">Đã duyệt</MudChip>
+                                <MudButton Variant="Variant.Outlined" Color="Color.Warning" Size="Size.Small" Disabled="@_busy" OnClick="UnapproveReferenceAsync">Gỡ duyệt</MudButton>
                             }
                             else if (_latestReference?.Status == DanceSellReferenceStatuses.Ready)
                             {
@@ -330,7 +335,8 @@
     private IReadOnlyList<DanceSellProviderRouteDto> _motionRoutes = Array.Empty<DanceSellProviderRouteDto>();
     private DanceSellCostEstimate? _estimate;
     private decimal? _balance;
-    private string? _readinessError;
+    private string? _referenceReadinessError;
+    private string? _motionReadinessError;
     private string? _loadError;
     private string? _motionFileName;
     private long? _motionFileSize;
@@ -396,21 +402,30 @@
     {
         if (AuthState.CurrentUser is null) return;
         _loadError = null;
-        _readinessError = null;
+        _referenceReadinessError = null;
+        _motionReadinessError = null;
         try
         {
             var referenceRoute = await ProviderCatalog.GetDefaultRouteAsync(DanceSellOperationTypes.ReferenceImage);
             if (referenceRoute.ProviderCode.Equals("local_composite", StringComparison.OrdinalIgnoreCase)
                 || referenceRoute.ModelName.Equals("local_composite", StringComparison.OrdinalIgnoreCase))
             {
-                _readinessError = "Dịch vụ video nhảy quảng cáo thời trang chưa được cấu hình AI tạo ảnh tham chiếu.";
+                _referenceReadinessError = "Dịch vụ video nhảy quảng cáo thời trang chưa được cấu hình AI tạo ảnh tham chiếu.";
             }
 
+        }
+        catch (Exception)
+        {
+            _referenceReadinessError = "Dịch vụ video nhảy quảng cáo thời trang chưa được cấu hình AI tạo ảnh tham chiếu.";
+        }
+
+        try
+        {
             var motionRoute = await ProviderCatalog.GetDefaultRouteAsync(DanceSellOperationTypes.MotionVideo);
             if (!motionRoute.ProviderCode.Equals(DanceSellConstants.ProviderCode, StringComparison.OrdinalIgnoreCase)
                 || !motionRoute.ModelName.Equals(DanceSellConstants.Model, StringComparison.OrdinalIgnoreCase))
             {
-                _readinessError = "Dịch vụ video nhảy quảng cáo thời trang chưa được cấu hình Motion Control.";
+                _motionReadinessError = "Dịch vụ video nhảy quảng cáo thời trang chưa được cấu hình Motion Control.";
             }
 
             _motionRoutes = new[] { motionRoute };
@@ -418,7 +433,7 @@
         catch (Exception)
         {
             _motionRoutes = Array.Empty<DanceSellProviderRouteDto>();
-            _readinessError = "Dịch vụ video nhảy quảng cáo thời trang chưa được cấu hình Motion Control.";
+            _motionReadinessError ??= "Dịch vụ video nhảy quảng cáo thời trang chưa được cấu hình Motion Control.";
         }
 
         try
@@ -457,23 +472,34 @@
         StateHasChanged();
     });
 
-    private async Task EnsureDraftAsync()
+    private async Task EnsureEditableAsync()
     {
         if (AuthState.CurrentUser is null) return;
-        if (!string.IsNullOrWhiteSpace(_readinessError))
-        {
-            throw new InvalidOperationException(_readinessError);
-        }
-
         if (_job is null)
         {
             throw new InvalidOperationException("Không tìm thấy video quảng cáo thời trang.");
         }
     }
 
+    private void EnsureReferenceProviderReady()
+    {
+        if (!string.IsNullOrWhiteSpace(_referenceReadinessError))
+        {
+            throw new InvalidOperationException(_referenceReadinessError);
+        }
+    }
+
+    private void EnsureMotionProviderReady()
+    {
+        if (!string.IsNullOrWhiteSpace(_motionReadinessError))
+        {
+            throw new InvalidOperationException(_motionReadinessError);
+        }
+    }
+
     private async Task StageTikTokAsync() => await RunAsync(async () =>
     {
-        await EnsureDraftAsync();
+        await EnsureEditableAsync();
         _job = await DanceSell.StageTikTokAsync(_job!.Id, _tiktokUrl, AuthState.CurrentUser!);
         _tiktokUrl = _job.MotionSourceUrl ?? _tiktokUrl;
         _motionFileName = "TikTok MP4";
@@ -538,7 +564,7 @@
         var saved = false;
         await RunAsync(async () =>
         {
-            await EnsureDraftAsync();
+            await EnsureEditableAsync();
             var file = args.File;
             await using var input = file.OpenReadStream(maxBytes);
             using var buffer = new MemoryStream();
@@ -559,7 +585,7 @@
 
         await RunAsync(async () =>
         {
-            await EnsureDraftAsync();
+            EnsureReferenceProviderReady();
             _job = await References.AutoPrepareAsync(_job!.Id, AuthState.CurrentUser!);
             var versions = await DanceRepo.ListReferenceVersionsAsync(_job.Id);
             _latestReference = versions.OrderByDescending(x => x.VersionNo).FirstOrDefault();
@@ -611,14 +637,21 @@
         await ReloadAsync();
     });
 
+    private async Task UnapproveReferenceAsync() => await RunAsync(async () =>
+    {
+        _job = await References.UnapproveAsync(_job!.Id, AuthState.CurrentUser!);
+        await ReloadAsync();
+    });
+
     private async Task ConfirmAndQueueAsync()
     {
-        if (!string.IsNullOrWhiteSpace(_readinessError))
+        if (!string.IsNullOrWhiteSpace(_motionReadinessError))
         {
-            Snackbar.Add(_readinessError, Severity.Error);
+            Snackbar.Add(_motionReadinessError, Severity.Error);
             return;
         }
 
+        EnsureMotionProviderReady();
         await RefreshEstimateAsync();
         var points = _estimate?.EstimatedTodoxPoints?.ToString("0.##") ?? "chưa cấu hình";
         var confirmed = await DialogService.ShowMessageBoxAsync("Xác nhận tạo video",

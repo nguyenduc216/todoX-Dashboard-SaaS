@@ -28,6 +28,7 @@ public interface IDanceSellRepository
     Task CompleteReferenceVersionAsync(Guid versionId, Guid mediaId, string objectKey, string publicUrl, string responseJson, CancellationToken ct = default);
     Task FailReferenceVersionAsync(Guid versionId, string errorJson, CancellationToken ct = default);
     Task<bool> SelectReferenceVersionAsync(Guid danceSellJobId, Guid versionId, CancellationToken ct = default);
+    Task UnapproveReferenceAsync(Guid danceSellJobId, CancellationToken ct = default);
     Task UpdateSubmittedAsync(Guid id, string requestJson, string providerTaskId, string submitResponseJson, CancellationToken ct = default);
     Task UpdatePollingAsync(Guid id, string providerStatus, string pollResponseJson, int pollCount, DateTime nextPollAtUtc, CancellationToken ct = default);
     Task<bool> UpdateCompletedAsync(Guid id, string providerStatus, string pollResponseJson, string resultVideoUrl, CancellationToken ct = default);
@@ -350,6 +351,10 @@ public sealed class DanceSellRepository : IDanceSellRepository
                    END,
                    updated_at=now()
              WHERE id=@id;
+
+            UPDATE dance_sell.dance_sell_reference_versions
+               SET is_selected = false
+             WHERE dance_sell_job_id=@id;
             """,
             new { id, status });
     }
@@ -488,6 +493,28 @@ public sealed class DanceSellRepository : IDanceSellRepository
             """,
             new { danceSellJobId, versionId });
         return changed > 0;
+    }
+
+    public async Task UnapproveReferenceAsync(Guid danceSellJobId, CancellationToken ct = default)
+    {
+        using var conn = await _factory.OpenAsync(ct);
+        await conn.ExecuteAsync(
+            """
+            UPDATE dance_sell.dance_sell_reference_versions
+               SET is_selected = false
+             WHERE dance_sell_job_id=@danceSellJobId;
+
+            UPDATE dance_sell.dance_sell_jobs
+               SET prepared_reference_status='ready',
+                   source_stage_error=NULL,
+                   prepared_reference_approved_at=NULL,
+                   reference_approved_at=NULL,
+                   current_stage='reference_ready',
+                   updated_at=now()
+             WHERE id=@danceSellJobId
+               AND prepared_reference_status='approved';
+            """,
+            new { danceSellJobId });
     }
 
     public async Task UpdateSubmittedAsync(Guid id, string requestJson, string providerTaskId, string submitResponseJson, CancellationToken ct = default)
