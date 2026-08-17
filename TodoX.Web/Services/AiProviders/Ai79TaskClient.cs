@@ -8,6 +8,8 @@ public interface IAi79TaskClient
 {
     Task<Ai79TaskSubmitResult> SubmitAsync(Ai79TaskSubmitRequest request, CancellationToken ct = default);
     Task<Ai79TaskSubmitResult> SubmitMultipartAsync(Ai79MultipartTaskSubmitRequest request, CancellationToken ct = default);
+    Task<Ai79MediaUploadResult> UploadMediaAsync(Ai79MediaUploadRequest request, CancellationToken ct = default);
+    Task<Ai79TaskSubmitResult> SubmitMotionControlAsync(Ai79MotionControlSubmitRequest request, CancellationToken ct = default);
     Task<Ai79ImageUploadResult> UploadImageAsync(Ai79ImageUploadRequest request, CancellationToken ct = default);
     Task<Ai79TaskStatusResult> GetStatusAsync(Ai79TaskStatusRequest request, CancellationToken ct = default);
 }
@@ -37,7 +39,8 @@ public sealed record Ai79TaskStatusRequest(
     string AccessToken,
     string Domain,
     string TaskId,
-    Ai79TaskOperation Operation);
+    Ai79TaskOperation Operation,
+    string? TaskIdField = null);
 
 public sealed record Ai79TaskSubmitResult(string TaskId, string SanitizedResponseJson);
 
@@ -58,6 +61,38 @@ public sealed record Ai79MultipartTaskSubmitRequest(
     IReadOnlyDictionary<string, string?> Fields,
     IReadOnlyList<Ai79MultipartFilePart> Files,
     Ai79TaskOperation Operation);
+
+public sealed record Ai79MediaUploadRequest(
+    string BaseUrl,
+    string EndpointPath,
+    string AccessToken,
+    string Domain,
+    string ProjectId,
+    string FieldName,
+    Ai79MultipartFilePart File);
+
+public sealed record Ai79MediaUploadResult(
+    string Url,
+    string? IdBase,
+    string? ProjectId,
+    string? FileName,
+    string SanitizedResponseJson);
+
+public sealed record Ai79MotionControlSubmitRequest(
+    string BaseUrl,
+    string EndpointPath,
+    string AccessToken,
+    string Domain,
+    string ProjectId,
+    string Model,
+    string Prompt,
+    string ImageUrl,
+    string VideoUrl,
+    string Mode,
+    string Ratio,
+    string SubType,
+    string BackgroundSource,
+    bool IncludeImagesZeroUrl = true);
 
 public sealed record Ai79ImageUploadRequest(
     string BaseUrl,
@@ -241,6 +276,117 @@ public sealed class Ai79TaskClient : IAi79TaskClient
         return await ReadSubmitResultAsync(response, request.AccessToken, request.EndpointPath, request.Operation, ct);
     }
 
+    public async Task<Ai79MediaUploadResult> UploadMediaAsync(Ai79MediaUploadRequest request, CancellationToken ct = default)
+    {
+        using var body = new MultipartFormDataContent();
+        body.Add(new StringContent(request.AccessToken), "access_token");
+        body.Add(new StringContent(request.Domain), "domain");
+        body.Add(new StringContent(request.ProjectId), "project_id");
+
+        var file = request.File;
+        var stream = await file.OpenReadAsync(ct)
+            ?? throw new Ai79TaskSubmitException(
+                $"79AI upload file '{request.FieldName}' could not be opened.",
+                JsonSerializer.Serialize(new { error = "missing_file", field = request.FieldName }, JsonOptions),
+                errorCode: "missing_file");
+        var content = new StreamContent(stream);
+        content.Headers.ContentType = MediaTypeHeaderValue.Parse(file.MimeType);
+        body.Add(content, request.FieldName, file.FileName);
+
+        using var response = await _httpClient.PostAsync(BuildUri(request.BaseUrl, request.EndpointPath), body, ct);
+        var json = await response.Content.ReadAsStringAsync(ct);
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            throw new Ai79TaskSubmitException(
+                "79AI media upload response was empty.",
+                JsonSerializer.Serialize(string.Empty, JsonOptions),
+                response.StatusCode,
+                response.IsSuccessStatusCode ? "empty_response" : $"http_{(int)response.StatusCode}");
+        }
+
+        JsonDocument document;
+        try
+        {
+            document = JsonDocument.Parse(json);
+        }
+        catch (JsonException ex)
+        {
+            throw new Ai79TaskSubmitException(
+                "79AI media upload response was not valid JSON.",
+                JsonSerializer.Serialize(SanitizeText(json, request.AccessToken), JsonOptions),
+                response.StatusCode,
+                response.IsSuccessStatusCode ? "invalid_json" : $"http_{(int)response.StatusCode}",
+                ex);
+        }
+
+        using (document)
+        {
+            var sanitized = SanitizeSecretJson(document.RootElement, request.AccessToken);
+            var providerError = FindSubmitError(document.RootElement, taskIdMissing: false, request.AccessToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new Ai79TaskSubmitException(
+                    providerError?.ErrorMessage ?? $"79AI media upload returned HTTP {(int)response.StatusCode}.",
+                    sanitized,
+                    response.StatusCode,
+                    providerError?.ErrorCode ?? $"http_{(int)response.StatusCode}");
+            }
+
+            if (providerError is not null)
+            {
+                throw new Ai79TaskSubmitException(
+                    $"79AI media upload failed: {providerError.ErrorMessage}",
+                    sanitized,
+                    response.StatusCode,
+                    providerError.ErrorCode ?? "provider_error");
+            }
+
+            var url = FindUploadAssetUrl(document.RootElement);
+            if (string.IsNullOrWhiteSpace(url))
+            {
+                throw new Ai79TaskSubmitException(
+                    "79AI media upload response missing asset URL.",
+                    sanitized,
+                    response.StatusCode,
+                    "missing_asset_url");
+            }
+
+            return new Ai79MediaUploadResult(
+                url!,
+                FirstNonBlank(FindImageInfoString(document.RootElement, "id_base"), FindString(document.RootElement, "id_base", "idBase")),
+                FirstNonBlank(FindImageInfoString(document.RootElement, "project_id"), FindString(document.RootElement, "project_id", "projectId"), request.ProjectId),
+                FirstNonBlank(FindImageInfoString(document.RootElement, "file_name"), FindString(document.RootElement, "file_name", "fileName"), file.FileName),
+                sanitized);
+        }
+    }
+
+    public async Task<Ai79TaskSubmitResult> SubmitMotionControlAsync(Ai79MotionControlSubmitRequest request, CancellationToken ct = default)
+    {
+        var form = new Dictionary<string, string>
+        {
+            ["access_token"] = request.AccessToken,
+            ["domain"] = request.Domain,
+            ["project_id"] = request.ProjectId,
+            ["model"] = request.Model,
+            ["prompt"] = request.Prompt,
+            ["image_url"] = request.ImageUrl,
+            ["video_url"] = request.VideoUrl,
+            ["subType"] = request.SubType,
+            ["background_source"] = request.BackgroundSource,
+            ["mode"] = request.Mode,
+            ["ratio"] = request.Ratio
+        };
+
+        if (request.IncludeImagesZeroUrl)
+        {
+            form["images[0][url]"] = request.ImageUrl;
+        }
+
+        using var body = new FormUrlEncodedContent(form);
+        using var response = await _httpClient.PostAsync(BuildUri(request.BaseUrl, request.EndpointPath), body, ct);
+        return await ReadSubmitResultAsync(response, request.AccessToken, request.EndpointPath, Ai79TaskOperation.Video, ct);
+    }
+
     private static async Task<Ai79TaskSubmitResult> ReadSubmitResultAsync(
         HttpResponseMessage response,
         string accessToken,
@@ -398,7 +544,7 @@ public sealed class Ai79TaskClient : IAi79TaskClient
         {
             ["access_token"] = request.AccessToken,
             ["domain"] = request.Domain,
-            [request.Operation == Ai79TaskOperation.Image ? "id_base" : "videoId"] = request.TaskId
+            [request.TaskIdField ?? (request.Operation == Ai79TaskOperation.Image ? "id_base" : "videoId")] = request.TaskId
         };
 
         using var body = new FormUrlEncodedContent(form);
@@ -854,6 +1000,48 @@ public sealed class Ai79TaskClient : IAi79TaskClient
         }
 
         return null;
+    }
+
+    private static string? FindUploadAssetUrl(JsonElement element)
+    {
+        foreach (var path in new[]
+                 {
+                     new[] { "url" },
+                     new[] { "assetUrl" },
+                     new[] { "asset_url" },
+                     new[] { "image_url" },
+                     new[] { "video_url" },
+                     new[] { "imageInfo", "url" },
+                     new[] { "videoInfo", "url" },
+                     new[] { "fileInfo", "url" },
+                     new[] { "data", "url" },
+                     new[] { "data", "assetUrl" },
+                     new[] { "data", "asset_url" },
+                     new[] { "data", "image_url" },
+                     new[] { "data", "video_url" },
+                     new[] { "data", "imageInfo", "url" },
+                     new[] { "data", "videoInfo", "url" },
+                     new[] { "data", "fileInfo", "url" },
+                     new[] { "body", "url" },
+                     new[] { "body", "data", "url" },
+                     new[] { "body", "data", "assetUrl" },
+                     new[] { "body", "data", "asset_url" },
+                     new[] { "body", "data", "imageInfo", "url" },
+                     new[] { "body", "data", "videoInfo", "url" },
+                     new[] { "body", "data", "fileInfo", "url" }
+                 })
+        {
+            if (TryGetPath(element, path, out var value))
+            {
+                var found = FindUrl(value);
+                if (found is not null)
+                {
+                    return found;
+                }
+            }
+        }
+
+        return FindUrl(element);
     }
 
     private static string? FindVideoOutputUrl(JsonElement root)

@@ -202,6 +202,85 @@ public sealed class Ai79TaskClientTests
         Assert.DoesNotContain("data%3Aimage", request.Body, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task MediaUpload_UsesMultipartProviderAssetUploadAndParsesUrlAliases()
+    {
+        var handler = new RecordingJsonHandler(
+            """{"data":{"asset_url":"https://cdn.79ai.net/assets/reference.png","id_base":"asset-img-001","file_name":"reference.png"}}""",
+            """{"videoInfo":{"url":"https://cdn.79ai.net/assets/motion.mp4","id_base":"asset-video-001","file_name":"motion.mp4"}}""");
+        var client = new Ai79TaskClient(new HttpClient(handler));
+
+        var image = await client.UploadMediaAsync(new Ai79MediaUploadRequest(
+            "https://v2.api.gommo.net",
+            "/ai/upload/image",
+            "secret-token",
+            "79ai.net",
+            "default",
+            "file",
+            new Ai79MultipartFilePart("file", "reference.png", "image/png", 4, _ => Task.FromResult<Stream?>(new MemoryStream(new byte[] { 1, 2, 3, 4 })))));
+        var video = await client.UploadMediaAsync(new Ai79MediaUploadRequest(
+            "https://v2.api.gommo.net",
+            "/ai/upload/video",
+            "secret-token",
+            "79ai.net",
+            "default",
+            "video_file",
+            new Ai79MultipartFilePart("video_file", "motion.mp4", "video/mp4", 4, _ => Task.FromResult<Stream?>(new MemoryStream(new byte[] { 5, 6, 7, 8 })))));
+
+        Assert.Equal("https://cdn.79ai.net/assets/reference.png", image.Url);
+        Assert.Equal("asset-img-001", image.IdBase);
+        Assert.Equal("https://cdn.79ai.net/assets/motion.mp4", video.Url);
+        Assert.Equal("asset-video-001", video.IdBase);
+        Assert.DoesNotContain("secret-token", image.SanitizedResponseJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("secret-token", video.SanitizedResponseJson, StringComparison.Ordinal);
+
+        Assert.Equal("https://v2.api.gommo.net/ai/upload/image", handler.Requests[0].Uri);
+        Assert.Equal("https://v2.api.gommo.net/ai/upload/video", handler.Requests[1].Uri);
+        Assert.Contains("name=file", handler.Requests[0].Body, StringComparison.Ordinal);
+        Assert.Contains("filename=reference.png", handler.Requests[0].Body, StringComparison.Ordinal);
+        Assert.Contains("name=video_file", handler.Requests[1].Body, StringComparison.Ordinal);
+        Assert.Contains("filename=motion.mp4", handler.Requests[1].Body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task MotionControlSubmit_UsesProviderUploadedUrlsAndParsesIdBase()
+    {
+        var handler = new RecordingJsonHandler("""{"id_base":"motion-task-001","success":true}""");
+        var client = new Ai79TaskClient(new HttpClient(handler));
+
+        var result = await client.SubmitMotionControlAsync(new Ai79MotionControlSubmitRequest(
+            "https://v2.api.gommo.net",
+            "/ai/jobs/video/kling_video_motion_3",
+            "secret-token",
+            "79ai.net",
+            "default",
+            "kling_video_motion_3",
+            "",
+            "https://cdn.79ai.net/assets/reference.png",
+            "https://cdn.79ai.net/assets/motion.mp4",
+            "standard",
+            "default",
+            "motion",
+            "input_video"));
+
+        Assert.Equal("motion-task-001", result.TaskId);
+        var request = Assert.Single(handler.Requests);
+        Assert.Equal("https://v2.api.gommo.net/ai/jobs/video/kling_video_motion_3", request.Uri);
+        Assert.Contains("domain=79ai.net", request.Body, StringComparison.Ordinal);
+        Assert.Contains("project_id=default", request.Body, StringComparison.Ordinal);
+        Assert.Contains("model=kling_video_motion_3", request.Body, StringComparison.Ordinal);
+        Assert.Contains("image_url=https%3A%2F%2Fcdn.79ai.net%2Fassets%2Freference.png", request.Body, StringComparison.Ordinal);
+        Assert.Contains("images%5B0%5D%5Burl%5D=https%3A%2F%2Fcdn.79ai.net%2Fassets%2Freference.png", request.Body, StringComparison.Ordinal);
+        Assert.Contains("video_url=https%3A%2F%2Fcdn.79ai.net%2Fassets%2Fmotion.mp4", request.Body, StringComparison.Ordinal);
+        Assert.Contains("subType=motion", request.Body, StringComparison.Ordinal);
+        Assert.Contains("background_source=input_video", request.Body, StringComparison.Ordinal);
+        Assert.Contains("mode=standard", request.Body, StringComparison.Ordinal);
+        Assert.Contains("ratio=default", request.Body, StringComparison.Ordinal);
+        Assert.DoesNotContain("localhost", request.Body, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("motion_video=", request.Body, StringComparison.Ordinal);
+        Assert.DoesNotContain("character_image=", request.Body, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData("""{"success":true,"id_base":"45d9f48d8741edb7","message":"Gửi yêu cầu tạo video thành công, chờ hoàn thành trong ít phút.","videoInfo":{"mode":"fast","model":"seedance_20_pro"}}""")]
     [InlineData("""{"success":true,"videoInfo":{"id_base":"45d9f48d8741edb7","mode":"fast","model":"seedance_20_pro"},"message":"Gửi yêu cầu tạo video thành công, chờ hoàn thành trong ít phút."}""")]

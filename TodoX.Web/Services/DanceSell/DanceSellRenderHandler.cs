@@ -169,50 +169,96 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
             throw new RenderJobTerminalFailureException("DANCE_SELL_MOTION_FILE_REQUIRED");
         }
 
-        var motionPrompt = ReadConfigString(runtime.RouteConfigJson, "motion_prompt") ?? string.Empty;
-        var request = new Ai79MultipartTaskSubmitRequest(
-            runtime.BaseUrl,
-            runtime.SubmitPath,
-            runtime.Credential.Secret,
-            runtime.Domain,
-            runtime.Model,
-            motionPrompt,
-            new Dictionary<string, string?>
-            {
-                ["privacy"] = ReadConfigString(runtime.RouteConfigJson, "privacy") ?? "PRIVATE",
-                ["project_id"] = ReadConfigString(runtime.RouteConfigJson, "project_id") ?? "default",
-                ["mode"] = runtime.ProviderMode,
-                ["ratio"] = runtime.ProviderRatio
-            },
-            [referenceImage.ToMultipartPart(), motionVideo.ToMultipartPart()],
-            Ai79TaskOperation.Video);
         var submittedAt = DateTime.UtcNow;
-        var requestJson = JsonSerializer.Serialize(new
-        {
-            providerCode = runtime.ProviderCode,
-            model = runtime.Model,
-            endpointPath = runtime.SubmitPath,
-            contentType = "multipart/form-data",
-            referenceImageField = runtime.ReferenceImageField,
-            characterImageField = runtime.ReferenceImageField,
-            characterImageMime = referenceImage.MimeType,
-            characterImageBytes = referenceImage.SizeBytes >= 0 ? referenceImage.SizeBytes : (long?)null,
-            characterImageSource = referenceImage.Source,
-            motionVideoField = runtime.MotionVideoField,
-            motionVideoMime = motionVideo.MimeType,
-            motionVideoBytes = motionVideo.SizeBytes >= 0 ? motionVideo.SizeBytes : (long?)null,
-            motionVideoDuration = (decimal?)null,
-            motionVideoSource = motionVideo.Source,
-            providerMode = runtime.ProviderMode,
-            providerRatio = runtime.ProviderRatio,
-            prompt = motionPrompt,
-            auditPrompt = danceJob.Prompt,
-            submittedAt
-        }, KieJson.Options);
-
         try
         {
-            var submitted = await _ai79.SubmitMultipartAsync(request, ct);
+            var referenceUpload = await _ai79.UploadMediaAsync(new Ai79MediaUploadRequest(
+                runtime.BaseUrl,
+                runtime.UploadImagePath,
+                runtime.Credential.Secret,
+                runtime.Domain,
+                runtime.ProjectId,
+                runtime.UploadImageField,
+                referenceImage.ToMultipartPart(runtime.UploadImageField)),
+                ct);
+            await _renderJobs.AddEventAsync(renderJob.Id, "AI79_MOTION_REFERENCE_UPLOADED", "79AI motion reference image uploaded.",
+                new { danceSellJobId = danceJob.Id, providerUrl = referenceUpload.Url, runtime.UploadImagePath }, ct: ct);
+
+            var motionUpload = await _ai79.UploadMediaAsync(new Ai79MediaUploadRequest(
+                runtime.BaseUrl,
+                runtime.UploadVideoPath,
+                runtime.Credential.Secret,
+                runtime.Domain,
+                runtime.ProjectId,
+                runtime.UploadVideoField,
+                motionVideo.ToMultipartPart(runtime.UploadVideoField)),
+                ct);
+            await _renderJobs.AddEventAsync(renderJob.Id, "AI79_MOTION_SOURCE_UPLOADED", "79AI source motion video uploaded.",
+                new { danceSellJobId = danceJob.Id, providerUrl = motionUpload.Url, runtime.UploadVideoPath }, ct: ct);
+
+            var motionPrompt = ReadConfigString(runtime.RouteConfigJson, "motion_prompt") ?? string.Empty;
+            var request = new Ai79MotionControlSubmitRequest(
+                runtime.BaseUrl,
+                runtime.MotionSubmitPath,
+                runtime.Credential.Secret,
+                runtime.Domain,
+                runtime.ProjectId,
+                runtime.Model,
+                motionPrompt,
+                referenceUpload.Url,
+                motionUpload.Url,
+                runtime.ProviderMode,
+                runtime.ProviderRatio,
+                runtime.SubType,
+                runtime.BackgroundSource,
+                runtime.IncludeImagesZeroUrl);
+            var requestJson = JsonSerializer.Serialize(new
+            {
+                providerCode = runtime.ProviderCode,
+                model = runtime.Model,
+                endpointPath = runtime.MotionSubmitPath,
+                contentType = "application/x-www-form-urlencoded",
+                referenceUpload = new
+                {
+                    status = "completed",
+                    endpointPath = runtime.UploadImagePath,
+                    field = runtime.UploadImageField,
+                    source = referenceImage.Source,
+                    mime = referenceImage.MimeType,
+                    bytes = referenceImage.SizeBytes >= 0 ? referenceImage.SizeBytes : (long?)null,
+                    providerUrl = referenceUpload.Url,
+                    idBase = referenceUpload.IdBase
+                },
+                motionUpload = new
+                {
+                    status = "completed",
+                    endpointPath = runtime.UploadVideoPath,
+                    field = runtime.UploadVideoField,
+                    source = motionVideo.Source,
+                    mime = motionVideo.MimeType,
+                    bytes = motionVideo.SizeBytes >= 0 ? motionVideo.SizeBytes : (long?)null,
+                    duration = (decimal?)null,
+                    providerUrl = motionUpload.Url,
+                    idBase = motionUpload.IdBase
+                },
+                submit = new
+                {
+                    model = runtime.Model,
+                    projectId = runtime.ProjectId,
+                    mode = runtime.ProviderMode,
+                    ratio = runtime.ProviderRatio,
+                    imageUrl = referenceUpload.Url,
+                    images0Url = runtime.IncludeImagesZeroUrl ? referenceUpload.Url : null,
+                    videoUrl = motionUpload.Url,
+                    subType = runtime.SubType,
+                    backgroundSource = runtime.BackgroundSource,
+                    prompt = motionPrompt
+                },
+                auditPrompt = danceJob.Prompt,
+                submittedAt
+            }, KieJson.Options);
+
+            var submitted = await _ai79.SubmitMotionControlAsync(request, ct);
             await _repo.UpdateSubmittedAsync(danceJob.Id, requestJson, submitted.TaskId, submitted.SanitizedResponseJson, ct);
             if (operationId is Guid existingOperationId)
             {
@@ -220,7 +266,7 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
             }
 
             await _renderJobs.AddEventAsync(renderJob.Id, "AI79_MOTION_TASK_SUBMITTED", "79AI Kling Motion Control task submitted.",
-                new { danceSellJobId = danceJob.Id, taskId = submitted.TaskId, runtime.Model, runtime.ProviderMode, runtime.ProviderRatio }, ct: ct);
+                new { danceSellJobId = danceJob.Id, taskId = submitted.TaskId, runtime.Model, runtime.ProviderMode, runtime.ProviderRatio, runtime.MotionSubmitPath }, ct: ct);
             await LogUsageAsync(danceJob, renderJob, "submitted", submitted.TaskId, "submitted", null, null, ct);
             await ScheduleNextPollAsync(renderJob, "79AI motion task submitted; polling scheduled.", ct);
         }
@@ -254,7 +300,8 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
                 runtime.Credential.Secret,
                 runtime.Domain,
                 danceJob.ProviderTaskId!,
-                Ai79TaskOperation.Video), ct);
+                Ai79TaskOperation.Video,
+                runtime.PollIdField), ct);
             if (status.NormalizedStatus == Ai79TaskStatusNormalizer.Success)
             {
                 if (string.IsNullOrWhiteSpace(status.OutputUrl))
@@ -330,13 +377,22 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
         return new Ai79MotionRuntime(
             route.ProviderCode,
             route.ModelName,
-            FirstNonBlank(ReadConfigString(account?.ConfigJson, "base_url"), provider.BaseUrl, ReadConfigString(provider.ConfigJson, "base_url"), "https://api.gommo.net/ai")!,
+            FirstNonBlank(ReadConfigString(route.ConfigJson, "base_url"), ReadConfigString(account?.ConfigJson, "base_url"), provider.BaseUrl, ReadConfigString(provider.ConfigJson, "base_url"), "https://api.gommo.net/ai")!,
             FirstNonBlank(ReadConfigString(account?.ConfigJson, "domain"), ReadConfigString(provider.ConfigJson, "domain"), "79ai.net")!,
             route.ConfigJson,
-            ReadConfigString(route.ConfigJson, "submit_path") ?? "/create-video",
+            ReadConfigString(route.ConfigJson, "upload_image_path") ?? "/ai/upload/image",
+            ReadConfigString(route.ConfigJson, "upload_video_path") ?? "/ai/upload/video",
+            ReadConfigString(route.ConfigJson, "motion_submit_path") ?? $"/ai/jobs/video/{route.ModelName}",
             ReadConfigString(route.ConfigJson, "poll_path") ?? "/video",
+            ReadConfigString(route.ConfigJson, "poll_id_field") ?? "id_base",
             DanceSellMotionProviderContract.ResolveReferenceImageField(route),
             DanceSellMotionProviderContract.ResolveMotionVideoField(route),
+            ReadConfigString(route.ConfigJson, "upload_image_field") ?? "file",
+            ReadConfigString(route.ConfigJson, "upload_video_field") ?? "video_file",
+            ReadConfigString(route.ConfigJson, "project_id") ?? "default",
+            ReadConfigString(route.ConfigJson, "subType") ?? ReadConfigString(route.ConfigJson, "sub_type") ?? "motion",
+            ReadConfigString(route.ConfigJson, "background_source") ?? "input_video",
+            !string.Equals(ReadConfigString(route.ConfigJson, "include_images_zero_url"), "false", StringComparison.OrdinalIgnoreCase),
             providerMode,
             providerRatio,
             credential);
@@ -351,10 +407,19 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
         string BaseUrl,
         string Domain,
         string RouteConfigJson,
-        string SubmitPath,
+        string UploadImagePath,
+        string UploadVideoPath,
+        string MotionSubmitPath,
         string PollPath,
+        string PollIdField,
         string ReferenceImageField,
         string MotionVideoField,
+        string UploadImageField,
+        string UploadVideoField,
+        string ProjectId,
+        string SubType,
+        string BackgroundSource,
+        bool IncludeImagesZeroUrl,
         string ProviderMode,
         string ProviderRatio,
         ResolvedProviderCredential Credential);
@@ -510,6 +575,9 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
     {
         public Ai79MultipartFilePart ToMultipartPart()
             => new(FieldName, FileName, MimeType, SizeBytes, OpenReadAsync);
+
+        public Ai79MultipartFilePart ToMultipartPart(string fieldName)
+            => new(fieldName, FileName, MimeType, SizeBytes, OpenReadAsync);
     }
 
     private async Task SubmitAsync(RenderJobDto renderJob, DanceSellJobDto danceJob, Guid? operationId, CancellationToken ct)

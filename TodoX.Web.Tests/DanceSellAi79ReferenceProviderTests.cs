@@ -89,6 +89,12 @@ Photorealistic, product preview quality.
         public Task<Ai79TaskSubmitResult> SubmitMultipartAsync(Ai79MultipartTaskSubmitRequest request, CancellationToken ct = default)
             => throw new NotImplementedException();
 
+        public Task<Ai79MediaUploadResult> UploadMediaAsync(Ai79MediaUploadRequest request, CancellationToken ct = default)
+            => throw new NotImplementedException();
+
+        public Task<Ai79TaskSubmitResult> SubmitMotionControlAsync(Ai79MotionControlSubmitRequest request, CancellationToken ct = default)
+            => throw new NotImplementedException();
+
         public Task<Ai79ImageUploadResult> UploadImageAsync(Ai79ImageUploadRequest request, CancellationToken ct = default)
             => throw new NotImplementedException();
 
