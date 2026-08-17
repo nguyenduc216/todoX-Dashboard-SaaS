@@ -11,6 +11,7 @@ public static class DanceSellConstants
     public const string Model = "kling_video_motion";
     public const string KieMotionModel = "kling-2.6/motion-control";
     public const string ReferenceModel = "gpt-image-2-image-to-image";
+    public const string Ai79ReferenceModel = "seedream_5_0";
     public const string BillingEnabledConfigKey = "dance_sell_billing_enabled";
     public const string AllowCodeProviderFallbackConfigKey = "dance_sell_allow_code_provider_fallback";
 }

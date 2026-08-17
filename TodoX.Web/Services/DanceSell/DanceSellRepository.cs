@@ -25,6 +25,8 @@ public interface IDanceSellRepository
     Task<IReadOnlyList<DanceSellReferenceVersionDto>> ListReferenceVersionsAsync(Guid danceSellJobId, CancellationToken ct = default);
     Task<DanceSellReferenceVersionDto?> GetReferenceVersionAsync(Guid versionId, CancellationToken ct = default);
     Task<DanceSellReferenceVersionDto> CreateReferenceVersionAsync(DanceSellReferenceVersionDto version, CancellationToken ct = default);
+    Task CompleteReferenceVersionAsync(Guid versionId, Guid mediaId, string objectKey, string publicUrl, string responseJson, CancellationToken ct = default);
+    Task FailReferenceVersionAsync(Guid versionId, string errorJson, CancellationToken ct = default);
     Task<bool> SelectReferenceVersionAsync(Guid danceSellJobId, Guid versionId, CancellationToken ct = default);
     Task UpdateSubmittedAsync(Guid id, string requestJson, string providerTaskId, string submitResponseJson, CancellationToken ct = default);
     Task UpdatePollingAsync(Guid id, string providerStatus, string pollResponseJson, int pollCount, DateTime nextPollAtUtc, CancellationToken ct = default);
@@ -439,6 +441,40 @@ public sealed class DanceSellRepository : IDanceSellRepository
                       created_by AS CreatedBy, created_at AS CreatedAt, completed_at AS CompletedAt;
             """,
             version);
+    }
+
+    public async Task CompleteReferenceVersionAsync(Guid versionId, Guid mediaId, string objectKey, string publicUrl, string responseJson, CancellationToken ct = default)
+    {
+        using var conn = await _factory.OpenAsync(ct);
+        await conn.ExecuteAsync(
+            """
+            UPDATE dance_sell.dance_sell_reference_versions
+               SET media_id=@mediaId,
+                   object_key=@objectKey,
+                   public_url=@publicUrl,
+                   response_json=CAST(@responseJson AS jsonb),
+                   error_json=NULL,
+                   status='ready',
+                   completed_at=now()
+             WHERE id=@versionId
+               AND status='generating';
+            """,
+            new { versionId, mediaId, objectKey, publicUrl, responseJson });
+    }
+
+    public async Task FailReferenceVersionAsync(Guid versionId, string errorJson, CancellationToken ct = default)
+    {
+        using var conn = await _factory.OpenAsync(ct);
+        await conn.ExecuteAsync(
+            """
+            UPDATE dance_sell.dance_sell_reference_versions
+               SET error_json=CAST(@errorJson AS jsonb),
+                   status='failed',
+                   completed_at=now()
+             WHERE id=@versionId
+               AND status='generating';
+            """,
+            new { versionId, errorJson });
     }
 
     public async Task<bool> SelectReferenceVersionAsync(Guid danceSellJobId, Guid versionId, CancellationToken ct = default)

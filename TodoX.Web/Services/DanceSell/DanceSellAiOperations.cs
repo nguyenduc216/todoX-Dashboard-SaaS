@@ -1,8 +1,11 @@
 using System.Text.Json;
 using Dapper;
 using Npgsql;
+using TodoX.Web.Services.AiProviders;
 using TodoX.Web.Data;
 using TodoX.Web.Services.AiProviders.Kie;
+using TodoX.Web.Services.Media;
+using TodoX.Web.Services.Timelapse;
 using Microsoft.Extensions.Options;
 
 namespace TodoX.Web.Services.DanceSell;
@@ -32,6 +35,8 @@ public sealed class DanceSellSchemaException : InvalidOperationException
 public sealed class DanceSellReferenceProviderRequest
 {
     public DanceSellProviderRouteDto Route { get; set; } = new();
+    public Guid? CharacterMediaId { get; set; }
+    public Guid? ProductMediaId { get; set; }
     public string Prompt { get; set; } = string.Empty;
     public string CharacterImageUrl { get; set; } = string.Empty;
     public string ProductImageUrl { get; set; } = string.Empty;
@@ -52,7 +57,7 @@ public interface IDanceSellReferenceProvider
 {
     bool Supports(DanceSellProviderRouteDto route);
     Task<ProviderTaskSubmitResult> SubmitAsync(DanceSellReferenceProviderRequest request, CancellationToken ct);
-    Task<KieTaskDetailResult> GetTaskAsync(string taskId, CancellationToken ct);
+    Task<KieTaskDetailResult> GetTaskAsync(DanceSellProviderRouteDto route, string taskId, CancellationToken ct);
 }
 
 public interface IDanceSellReferenceProviderFactory
@@ -125,8 +130,212 @@ public sealed class KieDanceSellReferenceProvider : IDanceSellReferenceProvider
         };
     }
 
-    public async Task<KieTaskDetailResult> GetTaskAsync(string taskId, CancellationToken ct)
+    public async Task<KieTaskDetailResult> GetTaskAsync(DanceSellProviderRouteDto route, string taskId, CancellationToken ct)
         => await _client.GetTaskDetailAsync(taskId, ct);
+}
+
+public sealed class Ai79DanceSellReferenceProvider : IDanceSellReferenceProvider
+{
+    private readonly IAi79TaskClient _client;
+    private readonly AiProviderRepository _providerRepository;
+    private readonly IProviderCredentialResolver _credentials;
+    private readonly IProviderCredentialRepository _credentialRepository;
+    private readonly IMediaFileService _media;
+    private readonly ILogger<Ai79DanceSellReferenceProvider> _logger;
+
+    public Ai79DanceSellReferenceProvider(
+        IAi79TaskClient client,
+        AiProviderRepository providerRepository,
+        IProviderCredentialResolver credentials,
+        IProviderCredentialRepository credentialRepository,
+        IMediaFileService media,
+        ILogger<Ai79DanceSellReferenceProvider> logger)
+    {
+        _client = client;
+        _providerRepository = providerRepository;
+        _credentials = credentials;
+        _credentialRepository = credentialRepository;
+        _media = media;
+        _logger = logger;
+    }
+
+    public bool Supports(DanceSellProviderRouteDto route)
+        => route.ProviderCode.Equals(DanceSellConstants.ProviderCode, StringComparison.OrdinalIgnoreCase);
+
+    public async Task<ProviderTaskSubmitResult> SubmitAsync(DanceSellReferenceProviderRequest request, CancellationToken ct)
+    {
+        var runtime = await ResolveRuntimeAsync(request.Route, ct);
+        var character = await BuildDataUriAsync(request.CharacterMediaId, "character", ct);
+        var product = await BuildDataUriAsync(request.ProductMediaId, "product", ct);
+        var resolution = TimelapseProviderWorkerOptions.NormalizeImageResolution(
+            runtime.Model,
+            FirstNonBlank(ReadConfigString(request.Route.ConfigJson, "resolution"), "2k"));
+        var mode = FirstNonBlank(ReadConfigString(request.Route.ConfigJson, "mode"), ReadConfigString(request.Route.ConfigJson, "default_mode"), "vip")!;
+        var projectId = FirstNonBlank(ReadConfigString(request.Route.ConfigJson, "project_id"), "default")!;
+        var ratio = FirstNonBlank(request.AspectRatio, ReadConfigString(request.Route.ConfigJson, "ratio"), "9:16")!;
+        var firstImageField = FirstNonBlank(ReadConfigString(request.Route.ConfigJson, "character_image_field"), ReadConfigString(request.Route.ConfigJson, "first_image_field"), "base64Image")!;
+        var secondImageField = FirstNonBlank(ReadConfigString(request.Route.ConfigJson, "product_image_field"), ReadConfigString(request.Route.ConfigJson, "second_image_field"), "image_2")!;
+        var options = new Dictionary<string, string?>
+        {
+            ["action_type"] = "create",
+            ["editImage"] = "true",
+            ["project_id"] = projectId,
+            ["subjects"] = "[]",
+            ["ratio"] = ratio,
+            ["resolution"] = resolution,
+            ["mode"] = mode
+        };
+        var submit = new Ai79TaskSubmitRequest(
+            runtime.BaseUrl,
+            runtime.SubmitPath,
+            runtime.Credential.Secret,
+            runtime.Domain,
+            runtime.Model,
+            request.Prompt,
+            [character.DataUri, product.DataUri],
+            options,
+            Ai79TaskOperation.Image,
+            firstImageField,
+            secondImageField);
+        var requestJson = JsonSerializer.Serialize(new
+        {
+            providerCode = runtime.ProviderCode,
+            model = runtime.Model,
+            endpointPath = runtime.SubmitPath,
+            domain = runtime.Domain,
+            prompt = request.Prompt,
+            action_type = "create",
+            editImage = true,
+            project_id = projectId,
+            subjects = Array.Empty<string>(),
+            ratio,
+            resolution,
+            mode,
+            characterImageField = firstImageField,
+            productImageField = secondImageField,
+            characterImagePresent = true,
+            productImagePresent = true,
+            characterMime = character.MimeType,
+            productMime = product.MimeType,
+            characterBytes = character.Bytes,
+            productBytes = product.Bytes
+        }, KieJson.Options);
+
+        var submitted = await _client.SubmitAsync(submit, ct);
+        return new ProviderTaskSubmitResult
+        {
+            ProviderCode = request.Route.ProviderCode,
+            ModelName = request.Route.ModelName,
+            TaskId = submitted.TaskId,
+            RequestJson = requestJson,
+            ResponseJson = submitted.SanitizedResponseJson
+        };
+    }
+
+    public async Task<KieTaskDetailResult> GetTaskAsync(DanceSellProviderRouteDto route, string taskId, CancellationToken ct)
+    {
+        var runtime = await ResolveRuntimeAsync(route, ct);
+        var status = await _client.GetStatusAsync(new Ai79TaskStatusRequest(
+            runtime.BaseUrl,
+            runtime.PollPath,
+            runtime.Credential.Secret,
+            runtime.Domain,
+            taskId,
+            Ai79TaskOperation.Image), ct);
+
+        return new KieTaskDetailResult
+        {
+            TaskId = taskId,
+            ProviderState = status.NormalizedStatus,
+            Status = status.NormalizedStatus switch
+            {
+                Ai79TaskStatusNormalizer.Success => KieTaskStatuses.Completed,
+                Ai79TaskStatusNormalizer.Failed => KieTaskStatuses.Failed,
+                _ => KieTaskStatuses.Rendering
+            },
+            ResultUrls = string.IsNullOrWhiteSpace(status.OutputUrl) ? Array.Empty<string>() : new[] { status.OutputUrl! },
+            FailCode = status.ErrorCode,
+            FailMsg = status.ErrorMessage,
+            Model = runtime.Model,
+            RawResponse = status.SanitizedResponseJson
+        };
+    }
+
+    private async Task<Ai79ReferenceRuntime> ResolveRuntimeAsync(DanceSellProviderRouteDto route, CancellationToken ct)
+    {
+        var provider = await _providerRepository.GetProviderByCodeAsync(route.ProviderCode, ct)
+            ?? throw new InvalidOperationException("DANCE_SELL_79AI_PROVIDER_NOT_CONFIGURED");
+        var credential = await _credentials.ResolveAsync(route.ProviderCode, "access_token", ct);
+        var account = await _credentialRepository.GetAccountByIdAsync(credential.ProviderAccountId, ct);
+        return new Ai79ReferenceRuntime(
+            route.ProviderCode,
+            route.ModelName,
+            FirstNonBlank(ReadConfigString(account?.ConfigJson, "base_url"), provider.BaseUrl, ReadConfigString(provider.ConfigJson, "base_url"), "https://api.gommo.net/ai")!,
+            FirstNonBlank(ReadConfigString(account?.ConfigJson, "domain"), ReadConfigString(provider.ConfigJson, "domain"), "79ai.net")!,
+            FirstNonBlank(ReadConfigString(route.ConfigJson, "submit_path"), "/generateImage")!,
+            FirstNonBlank(ReadConfigString(route.ConfigJson, "poll_path"), "/image")!,
+            credential);
+    }
+
+    private async Task<ImagePayload> BuildDataUriAsync(Guid? mediaId, string role, CancellationToken ct)
+    {
+        if (mediaId is null || mediaId == Guid.Empty)
+        {
+            throw new InvalidOperationException($"DANCE_SELL_REFERENCE_{role.ToUpperInvariant()}_IMAGE_MISSING");
+        }
+
+        var media = await _media.GetAsync(mediaId.Value, ct)
+            ?? throw new InvalidOperationException($"DANCE_SELL_REFERENCE_{role.ToUpperInvariant()}_IMAGE_NOT_FOUND");
+        var bytes = await _media.ReadBytesAsync(mediaId.Value, ct)
+            ?? throw new InvalidOperationException($"DANCE_SELL_REFERENCE_{role.ToUpperInvariant()}_IMAGE_NOT_READABLE");
+        var mimeType = FirstNonBlank(media.MimeType, InferMimeType(media.FileName), "image/png")!;
+        return new ImagePayload($"data:{mimeType};base64,{Convert.ToBase64String(bytes)}", mimeType, bytes.LongLength);
+    }
+
+    private static string? ReadConfigString(string? rawJson, string propertyName)
+    {
+        if (string.IsNullOrWhiteSpace(rawJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(rawJson);
+            return document.RootElement.ValueKind == JsonValueKind.Object
+                   && document.RootElement.TryGetProperty(propertyName, out var value)
+                   && value.ValueKind == JsonValueKind.String
+                ? value.GetString()
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static string? InferMimeType(string? fileName)
+        => Path.GetExtension(fileName ?? string.Empty).ToLowerInvariant() switch
+        {
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".webp" => "image/webp",
+            ".png" => "image/png",
+            _ => null
+        };
+
+    private static string? FirstNonBlank(params string?[] values)
+        => values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim();
+
+    private sealed record ImagePayload(string DataUri, string MimeType, long Bytes);
+
+    private sealed record Ai79ReferenceRuntime(
+        string ProviderCode,
+        string Model,
+        string BaseUrl,
+        string Domain,
+        string SubmitPath,
+        string PollPath,
+        ResolvedProviderCredential Credential);
 }
 
 public sealed class DanceSellProviderCatalog : IDanceSellProviderCatalog
@@ -221,7 +430,7 @@ public sealed class DanceSellProviderCatalog : IDanceSellProviderCatalog
             OperationType = operationType,
             ProviderCode = DanceSellConstants.ProviderCode,
             ModelName = operationType == DanceSellOperationTypes.ReferenceImage
-                ? "local_composite"
+                ? DanceSellConstants.Ai79ReferenceModel
                 : DanceSellConstants.Model,
             Priority = 100,
             Enabled = true,
@@ -250,6 +459,7 @@ public interface IDanceSellOperationRepository
 {
     Task<DanceSellProviderOperationDto?> UpsertOperationAsync(DanceSellProviderOperationDto operation, CancellationToken ct = default);
     Task<int> GetNextAttemptNoAsync(Guid danceSellJobId, string operationType, CancellationToken ct = default);
+    Task<DanceSellProviderOperationDto?> GetLatestActiveOperationAsync(Guid danceSellJobId, string operationType, CancellationToken ct = default);
     Task<bool> HasActiveOperationAsync(Guid danceSellJobId, string operationType, CancellationToken ct = default);
     Task MarkSubmittedAsync(Guid operationId, string providerTaskId, string responseJson, CancellationToken ct = default);
     Task MarkCompletedAsync(Guid operationId, string providerStatus, string responseJson, decimal? creditsConsumed, string? resultUrl, CancellationToken ct = default);
@@ -345,6 +555,47 @@ public sealed class DanceSellOperationRepository : IDanceSellOperationRepository
                   FROM dance_sell.dance_sell_provider_operations
                  WHERE dance_sell_job_id = @danceSellJobId
                    AND operation_type = @operationType;
+                """,
+                new { danceSellJobId, operationType });
+        }
+        catch (PostgresException ex) when (IsSchemaMissing(ex))
+        {
+            throw SchemaNotReady(ex);
+        }
+    }
+
+    public async Task<DanceSellProviderOperationDto?> GetLatestActiveOperationAsync(Guid danceSellJobId, string operationType, CancellationToken ct = default)
+    {
+        try
+        {
+            using var conn = await _factory.OpenAsync(ct);
+            return await conn.QuerySingleOrDefaultAsync<DanceSellProviderOperationDto>(
+                """
+                SELECT id AS Id, dance_sell_job_id AS DanceSellJobId, render_job_id AS RenderJobId,
+                       parent_operation_id AS ParentOperationId, operation_type AS OperationType, attempt_no AS AttemptNo,
+                       reference_mode AS ReferenceMode, provider_code AS ProviderCode,
+                       provider_capability_id AS ProviderCapabilityId, provider_account_id AS ProviderAccountId,
+                       provider_model AS ProviderModel, provider_task_id AS ProviderTaskId, status AS Status,
+                       provider_status AS ProviderStatus, billing_status AS BillingStatus, refund_status AS RefundStatus,
+                       request_json::text AS RequestJson, response_json::text AS ResponseJson,
+                       callback_json::text AS CallbackJson, error_json::text AS ErrorJson,
+                       provider_usage_json::text AS ProviderUsageJson, pricing_snapshot_json::text AS PricingSnapshotJson,
+                       usage_quantity AS UsageQuantity, usage_unit AS UsageUnit, credits_estimated AS CreditsEstimated,
+                       credits_consumed AS CreditsConsumed, provider_cost AS ProviderCost,
+                       provider_currency AS ProviderCurrency, provider_cost_vnd AS ProviderCostVnd,
+                       exchange_rate AS ExchangeRate, todox_points_estimated AS TodoxPointsEstimated,
+                       todox_points_reserved AS TodoxPointsReserved, todox_points_charged AS TodoxPointsCharged,
+                       todox_points_refunded AS TodoxPointsRefunded, balance_before AS BalanceBefore,
+                       balance_after AS BalanceAfter, cost_source AS CostSource, error_code AS ErrorCode,
+                       error_message AS ErrorMessage, created_at AS CreatedAt, started_at AS StartedAt,
+                       submitted_at AS SubmittedAt, completed_at AS CompletedAt, failed_at AS FailedAt,
+                       refunded_at AS RefundedAt, updated_at AS UpdatedAt
+                  FROM dance_sell.dance_sell_provider_operations
+                 WHERE dance_sell_job_id = @danceSellJobId
+                   AND operation_type = @operationType
+                   AND status IN ('queued','submitted','generating')
+                 ORDER BY attempt_no DESC, created_at DESC
+                 LIMIT 1;
                 """,
                 new { danceSellJobId, operationType });
         }

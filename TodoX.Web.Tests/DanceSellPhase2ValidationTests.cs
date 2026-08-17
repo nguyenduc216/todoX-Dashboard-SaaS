@@ -82,6 +82,8 @@ public sealed class DanceSellPhase2ValidationTests
         Assert.Contains("RecoverStaleGenerationAsync", service, StringComparison.Ordinal);
         Assert.Contains("StaleReferenceGenerationThreshold", service, StringComparison.Ordinal);
         Assert.Contains("PrepareCharacterReferenceAsync", service, StringComparison.Ordinal);
+        Assert.Contains("PollGeneratingReferenceAsync", service, StringComparison.Ordinal);
+        Assert.Contains("BuildReferencePrompt", service, StringComparison.Ordinal);
         Assert.Contains("await GenerateAsync(job.Id, user, ct)", service, StringComparison.Ordinal);
         Assert.Contains("Status = DanceSellReferenceStatuses.Ready", service, StringComparison.Ordinal);
         Assert.DoesNotContain("Status = DanceSellReferenceStatuses.Approved", GetMethodSection(service, "PrepareCharacterReferenceAsync"), StringComparison.Ordinal);
@@ -101,13 +103,10 @@ public sealed class DanceSellPhase2ValidationTests
         foreach (var stage in new[]
         {
             "\"resolve_route\"",
+            "\"provider_submit\"",
             "\"estimate_cost\"",
             "\"next_attempt\"",
             "\"create_operation\"",
-            "\"read_character\"",
-            "\"read_product\"",
-            "\"composite\"",
-            "\"save_media\""
         })
         {
             Assert.Contains(stage, generate, StringComparison.Ordinal);
@@ -116,8 +115,13 @@ public sealed class DanceSellPhase2ValidationTests
         Assert.Contains("await _repo.UpdateReferenceStatusAsync(job.Id, DanceSellReferenceStatuses.Generating", generate, StringComparison.Ordinal);
         Assert.Contains("catch (Exception ex)", generate, StringComparison.Ordinal);
         Assert.Contains("DanceSellReferenceStatuses.Failed", generate, StringComparison.Ordinal);
-        Assert.Contains("DanceSell optional reference operation metadata failed", service, StringComparison.Ordinal);
-        Assert.Contains("TryCreateFailedReferenceVersionAsync", service, StringComparison.Ordinal);
+        Assert.Contains("DANCE_SELL_REFERENCE_AI_ROUTE_REQUIRED", generate, StringComparison.Ordinal);
+        Assert.Contains("CharacterMediaId = job.CharacterMediaId", generate, StringComparison.Ordinal);
+        Assert.Contains("ProductMediaId = job.ProductMediaId", generate, StringComparison.Ordinal);
+        Assert.Contains("RequestJson = submitted.RequestJson", generate, StringComparison.Ordinal);
+        Assert.Contains("ResponseJson = DanceSellRepository.ToJson(new { submitted.TaskId, submitted.ResponseJson })", generate, StringComparison.Ordinal);
+        Assert.Contains("CompleteReferenceVersionAsync", service, StringComparison.Ordinal);
+        Assert.Contains("FailReferenceVersionAsync", service, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -135,6 +139,7 @@ public sealed class DanceSellPhase2ValidationTests
         Assert.Contains("DanceSellReferenceStatuses.Failed", recovery, StringComparison.Ordinal);
         Assert.Contains("stale_generation", recovery, StringComparison.Ordinal);
         Assert.Contains("Task<bool> HasActiveOperationAsync", operations, StringComparison.Ordinal);
+        Assert.Contains("Task<DanceSellProviderOperationDto?> GetLatestActiveOperationAsync", operations, StringComparison.Ordinal);
         Assert.Contains("status IN ('queued','submitted','generating')", operations, StringComparison.Ordinal);
     }
 

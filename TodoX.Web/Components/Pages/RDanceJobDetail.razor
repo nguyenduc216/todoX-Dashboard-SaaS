@@ -211,7 +211,17 @@
                         <MudPaper Class="todox-panel pa-4">
                             <MudText Typo="Typo.h6">Ảnh dùng để tạo video</MudText>
                             <MudText Typo="Typo.body2" Class="rdance-reference-help">@ReferenceHelpText</MudText>
-                            @Preview(_job?.PreparedReferenceUrl, "Ảnh dùng để tạo video")
+                            <div class="rdance-reference-frame">
+                                @Preview(_job?.PreparedReferenceUrl, "Ảnh AI dùng để tạo video")
+                                @if (IsReferenceGenerating)
+                                {
+                                    <div class="rdance-processing-overlay" aria-label="Đang tạo ảnh AI tham chiếu">
+                                        <span class="rdance-processing-sweep"></span>
+                                        <span class="rdance-processing-spinner"></span>
+                                        <span class="rdance-processing-dots"><i></i><i></i><i></i></span>
+                                    </div>
+                                }
+                            </div>
                             <MudChip T="string" Color="@ReferenceColor" Size="Size.Small">@ReferenceLabel</MudChip>
                             @if (_job?.PreparedReferenceStatus == DanceSellReferenceStatuses.Approved)
                             {
@@ -336,6 +346,8 @@
         && _job?.MotionVideoMediaId is not null
         && _job?.PreparedReferenceStatus == DanceSellReferenceStatuses.Approved;
     private bool IsActive => _job?.Status is DanceSellJobStatuses.Queued or DanceSellJobStatuses.Submitted or DanceSellJobStatuses.Rendering;
+    private bool IsReferenceGenerating => _job?.PreparedReferenceStatus == DanceSellReferenceStatuses.Generating
+        || _latestReference?.Status == DanceSellReferenceStatuses.Generating;
     private long MaxImageBytes => (long)Math.Max(1, DanceOptions.CurrentValue.MaxImageMb) * 1024 * 1024;
     private long MaxMotionVideoBytes => (long)Math.Max(1, DanceOptions.CurrentValue.MaxVideoMb) * 1024 * 1024;
     private string MaxImageLabel => $"{Math.Max(1, DanceOptions.CurrentValue.MaxImageMb)}MB";
@@ -387,6 +399,13 @@
         _readinessError = null;
         try
         {
+            var referenceRoute = await ProviderCatalog.GetDefaultRouteAsync(DanceSellOperationTypes.ReferenceImage);
+            if (referenceRoute.ProviderCode.Equals("local_composite", StringComparison.OrdinalIgnoreCase)
+                || referenceRoute.ModelName.Equals("local_composite", StringComparison.OrdinalIgnoreCase))
+            {
+                _readinessError = "Dịch vụ video nhảy quảng cáo thời trang chưa được cấu hình AI tạo ảnh tham chiếu.";
+            }
+
             var motionRoute = await ProviderCatalog.GetDefaultRouteAsync(DanceSellOperationTypes.MotionVideo);
             if (!motionRoute.ProviderCode.Equals(DanceSellConstants.ProviderCode, StringComparison.OrdinalIgnoreCase)
                 || !motionRoute.ModelName.Equals(DanceSellConstants.Model, StringComparison.OrdinalIgnoreCase))
@@ -716,7 +735,16 @@
         try
         {
             while (_pollTimer is not null && await _pollTimer.WaitForNextTickAsync(ct))
-                if (IsActive) await InvokeAsync(ReloadAsync);
+            {
+                if (IsReferenceGenerating)
+                {
+                    await InvokeAsync(AutoPrepareReferenceAsync);
+                }
+                else if (IsActive)
+                {
+                    await InvokeAsync(ReloadAsync);
+                }
+            }
         }
         catch (OperationCanceledException) { }
     }
@@ -744,6 +772,24 @@
     .rdance-upload-subtitle, .rdance-upload-limit { color: rgba(255,255,255,.62); font-size: .875rem; }
     .rdance-image-upload-zone { min-height: 154px; margin-top: 12px; }
     .rdance-reference-help { margin: 8px 0 4px; color: rgba(255,255,255,.68); }
+    .rdance-reference-frame { position: relative; overflow: hidden; border-radius: 8px; }
+    .rdance-processing-overlay { position: absolute; inset: 12px 0; display: grid; place-items: center; overflow: hidden; border: 1px solid rgba(245,181,64,.72); border-radius: 8px; background: rgba(7,10,14,.56); box-shadow: inset 0 0 0 1px rgba(42,194,177,.16), 0 0 28px rgba(245,181,64,.18); animation: rdance-processing-pulse 1.8s ease-in-out infinite; pointer-events: none; }
+    .rdance-processing-sweep { position: absolute; inset: -20%; background: linear-gradient(110deg, transparent 22%, rgba(245,181,64,.08) 42%, rgba(42,194,177,.22) 50%, rgba(245,181,64,.08) 58%, transparent 78%); transform: translateX(-65%); animation: rdance-processing-sweep 1.35s ease-in-out infinite; }
+    .rdance-processing-spinner { width: 38px; height: 38px; border: 3px solid rgba(255,255,255,.2); border-top-color: #f5b540; border-right-color: #2ac2b1; border-radius: 999px; animation: rdance-processing-spin .9s linear infinite; z-index: 1; }
+    .rdance-processing-dots { position: absolute; bottom: 18px; display: inline-flex; gap: 6px; z-index: 1; }
+    .rdance-processing-dots i { width: 6px; height: 6px; border-radius: 999px; background: #f5b540; animation: rdance-processing-dot 1s ease-in-out infinite; }
+    .rdance-processing-dots i:nth-child(2) { animation-delay: .15s; background: #2ac2b1; }
+    .rdance-processing-dots i:nth-child(3) { animation-delay: .3s; }
+    @@keyframes rdance-processing-spin { to { transform: rotate(360deg); } }
+    @@keyframes rdance-processing-sweep { 0% { transform: translateX(-65%); } 100% { transform: translateX(65%); } }
+    @@keyframes rdance-processing-pulse { 0%, 100% { border-color: rgba(245,181,64,.58); } 50% { border-color: rgba(42,194,177,.82); } }
+    @@keyframes rdance-processing-dot { 0%, 100% { transform: translateY(0); opacity: .45; } 50% { transform: translateY(-5px); opacity: 1; } }
+    @@media (prefers-reduced-motion: reduce) {
+        .rdance-processing-sweep { animation: none; }
+        .rdance-processing-spinner { animation: rdance-processing-spin 1.8s linear infinite; }
+        .rdance-processing-dots i { animation: rdance-processing-dot 1.8s ease-in-out infinite; }
+        .rdance-processing-overlay { animation: rdance-processing-pulse 2.4s ease-in-out infinite; }
+    }
     .rdance-motion-file { border-color: rgba(245,181,64,.28) !important; background: rgba(255,255,255,.035); }
     .rdance-motion-file-copy { min-width: 0; }
     .rdance-source-url { overflow-wrap: anywhere; color: rgba(255,255,255,.68); }

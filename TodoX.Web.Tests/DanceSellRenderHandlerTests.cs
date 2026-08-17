@@ -230,6 +230,8 @@ public sealed class DanceSellRenderHandlerTests
         public Task<IReadOnlyList<DanceSellReferenceVersionDto>> ListReferenceVersionsAsync(Guid danceSellJobId, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<DanceSellReferenceVersionDto?> GetReferenceVersionAsync(Guid versionId, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<DanceSellReferenceVersionDto> CreateReferenceVersionAsync(DanceSellReferenceVersionDto version, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task CompleteReferenceVersionAsync(Guid versionId, Guid mediaId, string objectKey, string publicUrl, string responseJson, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task FailReferenceVersionAsync(Guid versionId, string errorJson, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<bool> SelectReferenceVersionAsync(Guid danceSellJobId, Guid versionId, CancellationToken ct = default) => throw new NotImplementedException();
         public Task UpdateSubmittedAsync(Guid id, string requestJson, string providerTaskId, string submitResponseJson, CancellationToken ct = default) => throw new NotImplementedException();
         public Task UpdatePollingAsync(Guid id, string providerStatus, string pollResponseJson, int pollCount, DateTime nextPollAtUtc, CancellationToken ct = default) => throw new NotImplementedException();
@@ -259,6 +261,9 @@ public sealed class DanceSellRenderHandlerTests
 
         public Task<int> GetNextAttemptNoAsync(Guid danceSellJobId, string operationType, CancellationToken ct = default)
             => Task.FromResult(1);
+
+        public Task<DanceSellProviderOperationDto?> GetLatestActiveOperationAsync(Guid danceSellJobId, string operationType, CancellationToken ct = default)
+            => Task.FromResult<DanceSellProviderOperationDto?>(null);
 
         public Task<bool> HasActiveOperationAsync(Guid danceSellJobId, string operationType, CancellationToken ct = default)
             => Task.FromResult(false);

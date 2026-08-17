@@ -6,6 +6,14 @@ UPDATE public.todox_ai_feature_provider_route
        enabled = false,
        updated_at = now()
  WHERE feature_code = 'dance_sell'
+   AND operation_type = 'reference_image'
+   AND provider_code = 'local_composite'
+   AND model_name = 'local_composite';
+
+UPDATE public.todox_ai_feature_provider_route
+   SET is_default = false,
+       updated_at = now()
+ WHERE feature_code = 'dance_sell'
    AND operation_type = 'reference_image';
 
 INSERT INTO public.todox_ai_feature_provider_route
@@ -13,22 +21,35 @@ INSERT INTO public.todox_ai_feature_provider_route
      route_priority, is_default, enabled, fallback_on, config_json)
 SELECT 'dance_sell',
        'reference_image',
-       'local_composite',
-       'local_composite',
-       NULL,
+       '79ai',
+       'seedream_5_0',
+       'image',
        10,
        true,
        true,
        ARRAY[]::text[],
-       '{"capability":"reference_image_generation","displayName":"Local reference composite"}'::jsonb
+       '{"capability":"reference_image_generation","displayName":"79AI Seedream 5.0 Reference","submit_path":"/generateImage","poll_path":"/image","character_image_field":"base64Image","product_image_field":"image_2","project_id":"default","action_type":"create","editImage":"true","subjects":"[]","ratio":"9:16","mode":"vip","resolution":"2k"}'::jsonb
  WHERE NOT EXISTS (
      SELECT 1
        FROM public.todox_ai_feature_provider_route
       WHERE feature_code = 'dance_sell'
         AND operation_type = 'reference_image'
-        AND provider_code = 'local_composite'
-        AND model_name = 'local_composite'
+        AND provider_code = '79ai'
+        AND model_name = 'seedream_5_0'
  );
+
+UPDATE public.todox_ai_feature_provider_route
+   SET route_priority = 10,
+       is_default = true,
+       enabled = true,
+       model_mode = 'image',
+       fallback_on = ARRAY[]::text[],
+       config_json = COALESCE(config_json, '{}'::jsonb) || '{"capability":"reference_image_generation","displayName":"79AI Seedream 5.0 Reference","submit_path":"/generateImage","poll_path":"/image","character_image_field":"base64Image","product_image_field":"image_2","project_id":"default","action_type":"create","editImage":"true","subjects":"[]","ratio":"9:16","mode":"vip","resolution":"2k"}'::jsonb,
+       updated_at = now()
+ WHERE feature_code = 'dance_sell'
+   AND operation_type = 'reference_image'
+   AND provider_code = '79ai'
+   AND model_name = 'seedream_5_0';
 
 UPDATE public.todox_ai_feature_provider_route
    SET is_default = false,
@@ -81,8 +102,7 @@ UPDATE public.todox_ai_feature_provider_route
    AND provider_code = 'kie'
    AND model_name = 'kling-2.6/motion-control';
 
--- No verified 79AI image-edit model is present in the repository catalog audit.
--- Keep reference generation on the existing local composite path until one is configured.
+-- Reference generation now uses the production 79AI image route for seedream_5_0.
 SELECT feature_code, operation_type, provider_code, model_name, model_mode, route_priority, is_default, enabled, fallback_on
   FROM public.todox_ai_feature_provider_route
  WHERE feature_code = 'dance_sell'
