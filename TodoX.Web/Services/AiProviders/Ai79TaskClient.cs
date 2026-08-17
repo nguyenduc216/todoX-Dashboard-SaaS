@@ -143,6 +143,8 @@ public sealed class Ai79TaskClient : IAi79TaskClient
 
     public async Task<Ai79TaskSubmitResult> SubmitAsync(Ai79TaskSubmitRequest request, CancellationToken ct = default)
     {
+        EnsureGenerateImageContract(request);
+
         var form = new Dictionary<string, string>
         {
             ["access_token"] = request.AccessToken,
@@ -378,6 +380,31 @@ public sealed class Ai79TaskClient : IAi79TaskClient
 
     private static Uri BuildUri(string baseUrl, string path)
         => new(new Uri(baseUrl.TrimEnd('/') + "/"), path.TrimStart('/'));
+
+    private static void EnsureGenerateImageContract(Ai79TaskSubmitRequest request)
+    {
+        if (request.Operation != Ai79TaskOperation.Image
+            || !request.EndpointPath.Contains("generateImage", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        if (request.Images.Count > 1)
+        {
+            throw new InvalidOperationException("79AI /generateImage supports one base edit image; pass additional references through subjects.");
+        }
+
+        var firstImageField = request.FirstImageField ?? "image";
+        if (!firstImageField.Equals("base64Image", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("79AI /generateImage base edit image field must be base64Image.");
+        }
+
+        if (request.SecondImageField is not null)
+        {
+            throw new InvalidOperationException("79AI /generateImage does not support a second image field; pass additional references through subjects.");
+        }
+    }
 
     private static async Task<string> ReadJsonAsync(HttpResponseMessage response, string accessToken, CancellationToken ct)
     {

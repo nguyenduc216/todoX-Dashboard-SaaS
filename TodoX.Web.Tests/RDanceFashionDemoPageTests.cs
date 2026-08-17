@@ -251,7 +251,7 @@ public sealed class RDanceFashionDemoPageTests
         Assert.Contains("enabled = false", sql, StringComparison.Ordinal);
         Assert.Contains("\"motion_video_field\":\"video\"", sql, StringComparison.Ordinal);
         Assert.Contains("\"character_image_field\":\"base64Image\"", sql, StringComparison.Ordinal);
-        Assert.Contains("\"product_image_field\":\"image_2\"", sql, StringComparison.Ordinal);
+        Assert.Contains("\"subject_schema\":\"json_stringified_array_of_image_data_uris\"", sql, StringComparison.Ordinal);
         Assert.Contains("is_default = false", sql, StringComparison.Ordinal);
         Assert.Contains("model_mode", sql, StringComparison.Ordinal);
         Assert.Contains("route_priority", sql, StringComparison.Ordinal);

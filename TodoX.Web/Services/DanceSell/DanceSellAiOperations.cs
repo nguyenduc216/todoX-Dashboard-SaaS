@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Dapper;
 using Npgsql;
@@ -174,13 +176,18 @@ public sealed class Ai79DanceSellReferenceProvider : IDanceSellReferenceProvider
         var projectId = FirstNonBlank(ReadConfigString(request.Route.ConfigJson, "project_id"), "default")!;
         var ratio = FirstNonBlank(request.AspectRatio, ReadConfigString(request.Route.ConfigJson, "ratio"), "9:16")!;
         var firstImageField = FirstNonBlank(ReadConfigString(request.Route.ConfigJson, "character_image_field"), ReadConfigString(request.Route.ConfigJson, "first_image_field"), "base64Image")!;
-        var secondImageField = FirstNonBlank(ReadConfigString(request.Route.ConfigJson, "product_image_field"), ReadConfigString(request.Route.ConfigJson, "second_image_field"), "image_2")!;
+        if (!firstImageField.Equals("base64Image", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("DANCE_SELL_79AI_REFERENCE_BASE_IMAGE_FIELD_UNSUPPORTED");
+        }
+
+        var subjects = BuildSubjectsJson(product);
         var options = new Dictionary<string, string?>
         {
             ["action_type"] = "create",
             ["editImage"] = "true",
             ["project_id"] = projectId,
-            ["subjects"] = "[]",
+            ["subjects"] = subjects,
             ["ratio"] = ratio,
             ["resolution"] = resolution,
             ["mode"] = mode
@@ -192,34 +199,64 @@ public sealed class Ai79DanceSellReferenceProvider : IDanceSellReferenceProvider
             runtime.Domain,
             runtime.Model,
             request.Prompt,
-            [character.DataUri, product.DataUri],
+            [character.DataUri],
             options,
             Ai79TaskOperation.Image,
-            firstImageField,
-            secondImageField);
+            firstImageField);
+        var formFieldNames = BuildGenerateImageFieldNames(firstImageField, options);
         var requestJson = JsonSerializer.Serialize(new
         {
             providerCode = runtime.ProviderCode,
             model = runtime.Model,
             endpointPath = runtime.SubmitPath,
             domain = runtime.Domain,
-            prompt = request.Prompt,
+            promptHash = Sha256Hex(request.Prompt),
+            promptLength = request.Prompt.Length,
             action_type = "create",
             editImage = true,
             project_id = projectId,
-            subjects = Array.Empty<string>(),
+            subjectsCount = 1,
+            subjectSchema = "json_stringified_array_of_image_data_uris",
             ratio,
             resolution,
             mode,
             characterImageField = firstImageField,
-            productImageField = secondImageField,
+            productImageTransport = "subjects",
             characterImagePresent = true,
             productImagePresent = true,
+            base64ImagePresent = true,
+            base64ImageBytes = character.Bytes,
             characterMime = character.MimeType,
-            productMime = product.MimeType,
             characterBytes = character.Bytes,
+            subjects = new[]
+            {
+                new
+                {
+                    role = "clothing_product_reference",
+                    mimeType = product.MimeType,
+                    bytes = product.Bytes
+                }
+            },
+            subjectMimeTypes = new[] { product.MimeType },
+            subjectBytes = new[] { product.Bytes },
             productBytes = product.Bytes
         }, KieJson.Options);
+
+        _logger.LogInformation(
+            "DANCE_SELL_79AI_REFERENCE_SUBMIT model={Model} promptHash={PromptHash} promptLength={PromptLength} editImage={EditImage} base64ImagePresent={Base64ImagePresent} base64ImageBytes={Base64ImageBytes} subjectsCount={SubjectsCount} subjectMimeTypes={SubjectMimeTypes} subjectBytes={SubjectBytes} ratio={Ratio} resolution={Resolution} mode={Mode} formFields={FormFields}",
+            runtime.Model,
+            Sha256Hex(request.Prompt),
+            request.Prompt.Length,
+            true,
+            true,
+            character.Bytes,
+            1,
+            string.Join(",", new[] { product.MimeType }),
+            string.Join(",", new[] { product.Bytes.ToString() }),
+            ratio,
+            resolution,
+            mode,
+            string.Join(",", formFieldNames));
 
         var submitted = await _client.SubmitAsync(submit, ct);
         return new ProviderTaskSubmitResult
@@ -322,6 +359,18 @@ public sealed class Ai79DanceSellReferenceProvider : IDanceSellReferenceProvider
             ".png" => "image/png",
             _ => null
         };
+
+    private static string BuildSubjectsJson(ImagePayload product)
+        => JsonSerializer.Serialize(new[] { product.DataUri }, KieJson.Options);
+
+    private static string[] BuildGenerateImageFieldNames(string firstImageField, IReadOnlyDictionary<string, string?> options)
+        => new[] { "access_token", "domain", "model", "prompt", firstImageField }
+            .Concat(options.Where(x => !string.IsNullOrWhiteSpace(x.Value)).Select(x => x.Key))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+
+    private static string Sha256Hex(string value)
+        => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
 
     private static string? FirstNonBlank(params string?[] values)
         => values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim();

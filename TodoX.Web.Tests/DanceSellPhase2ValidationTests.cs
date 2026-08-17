@@ -195,6 +195,35 @@ public sealed class DanceSellPhase2ValidationTests
     }
 
     [Fact]
+    public void Ai79ReferencePayload_UsesBaseImageAndSubjectsWithoutUndocumentedImage2()
+    {
+        var root = FindRepoRoot();
+        var operations = File.ReadAllText(Path.Combine(root, "TodoX.Web/Services/DanceSell/DanceSellAiOperations.cs"));
+        var client = File.ReadAllText(Path.Combine(root, "TodoX.Web/Services/AiProviders/Ai79TaskClient.cs"));
+        var models = File.ReadAllText(Path.Combine(root, "TodoX.Web/Services/DanceSell/DanceSellModels.cs"));
+        var switchSql = File.ReadAllText(Path.Combine(root, "database/manual/rdance-fashion/02_switch_reference_route_to_gpt_image_2.sql"));
+
+        Assert.Contains("var subjects = BuildSubjectsJson(product)", operations, StringComparison.Ordinal);
+        Assert.Contains("[\"subjects\"] = subjects", operations, StringComparison.Ordinal);
+        Assert.Contains("[character.DataUri]", operations, StringComparison.Ordinal);
+        Assert.Contains("productImageTransport = \"subjects\"", operations, StringComparison.Ordinal);
+        Assert.Contains("subjectMimeTypes", operations, StringComparison.Ordinal);
+        Assert.Contains("subjectBytes", operations, StringComparison.Ordinal);
+        Assert.Contains("promptHash", operations, StringComparison.Ordinal);
+        Assert.Contains("formFields", operations, StringComparison.Ordinal);
+        Assert.DoesNotContain("secondImageField", operations, StringComparison.Ordinal);
+        Assert.DoesNotContain("image_2", operations, StringComparison.Ordinal);
+        Assert.Contains("EnsureGenerateImageContract", client, StringComparison.Ordinal);
+        Assert.Contains("pass additional references through subjects", client, StringComparison.Ordinal);
+        Assert.Contains("Ai79GptImage2Model = \"imagegen_2_0\"", models, StringComparison.Ordinal);
+        Assert.Contains("imagegen_2_0", switchSql, StringComparison.Ordinal);
+        Assert.Contains("'mode', 'medium'", switchSql, StringComparison.Ordinal);
+        Assert.Contains("'resolution', '2k'", switchSql, StringComparison.Ordinal);
+        Assert.Contains("'ratio', '9:16'", switchSql, StringComparison.Ordinal);
+        Assert.DoesNotContain("image_2", switchSql, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ReferenceComparison_IsAdminOnlyAndDoesNotTouchProductionApproval()
     {
         var root = FindRepoRoot();

@@ -1169,7 +1169,7 @@ public sealed class DanceSellReferenceComparisonService : IDanceSellReferenceCom
                 resolution = "2k",
                 mode = "vip",
                 character_image_field = "base64Image",
-                product_image_field = "image_2"
+                subject_schema = "json_stringified_array_of_image_data_uris"
             })
         };
 
@@ -1190,9 +1190,10 @@ public sealed class DanceSellReferenceComparisonService : IDanceSellReferenceCom
             action_type = "create",
             editImage = true,
             project_id = "default",
-            subjects = Array.Empty<string>(),
+            subjectsCount = 1,
+            subjectSchema = "json_stringified_array_of_image_data_uris",
             characterImageField = "base64Image",
-            productImageField = "image_2",
+            productImageTransport = "subjects",
             startedAt = started
         });
 

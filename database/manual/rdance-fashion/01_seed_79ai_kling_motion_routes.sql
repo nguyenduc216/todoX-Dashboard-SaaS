@@ -28,7 +28,7 @@ SELECT 'dance_sell',
        true,
        true,
        ARRAY[]::text[],
-       '{"capability":"reference_image_generation","displayName":"79AI Seedream 5.0 Reference","submit_path":"/generateImage","poll_path":"/image","character_image_field":"base64Image","product_image_field":"image_2","project_id":"default","action_type":"create","editImage":"true","subjects":"[]","ratio":"9:16","mode":"vip","resolution":"2k"}'::jsonb
+       '{"capability":"reference_image_generation","displayName":"79AI Seedream 5.0 Reference","submit_path":"/generateImage","poll_path":"/image","character_image_field":"base64Image","subject_schema":"json_stringified_array_of_image_data_uris","project_id":"default","action_type":"create","editImage":"true","ratio":"9:16","mode":"vip","resolution":"2k"}'::jsonb
  WHERE NOT EXISTS (
      SELECT 1
        FROM public.todox_ai_feature_provider_route
@@ -44,7 +44,7 @@ UPDATE public.todox_ai_feature_provider_route
        enabled = true,
        model_mode = 'image',
        fallback_on = ARRAY[]::text[],
-       config_json = COALESCE(config_json, '{}'::jsonb) || '{"capability":"reference_image_generation","displayName":"79AI Seedream 5.0 Reference","submit_path":"/generateImage","poll_path":"/image","character_image_field":"base64Image","product_image_field":"image_2","project_id":"default","action_type":"create","editImage":"true","subjects":"[]","ratio":"9:16","mode":"vip","resolution":"2k"}'::jsonb,
+       config_json = COALESCE(config_json, '{}'::jsonb) || '{"capability":"reference_image_generation","displayName":"79AI Seedream 5.0 Reference","submit_path":"/generateImage","poll_path":"/image","character_image_field":"base64Image","subject_schema":"json_stringified_array_of_image_data_uris","project_id":"default","action_type":"create","editImage":"true","ratio":"9:16","mode":"vip","resolution":"2k"}'::jsonb,
        updated_at = now()
  WHERE feature_code = 'dance_sell'
    AND operation_type = 'reference_image'

@@ -56,6 +56,67 @@ public sealed class Ai79TaskClientTests
     }
 
     [Fact]
+    public async Task ImageSubmit_UsesSubjectsForProductReferenceWithoutImage2()
+    {
+        var handler = new RecordingJsonHandler("""{"imageInfo":{"id_base":"try-on-001"}}""");
+        var client = new Ai79TaskClient(new HttpClient(handler));
+        var subjectsJson = """["data:image/png;base64,PRODUCT_BYTES"]""";
+
+        var result = await client.SubmitAsync(new Ai79TaskSubmitRequest(
+            "https://api.gommo.net/ai",
+            "/generateImage",
+            "secret-token",
+            "79ai.net",
+            "imagegen_2_0",
+            "VIRTUAL TRY-ON - PREVIEW ONLY.",
+            ["data:image/jpeg;base64,CHARACTER_BYTES"],
+            new Dictionary<string, string?>
+            {
+                ["action_type"] = "create",
+                ["editImage"] = "true",
+                ["project_id"] = "default",
+                ["subjects"] = subjectsJson,
+                ["ratio"] = "9:16",
+                ["mode"] = "medium",
+                ["resolution"] = "2k"
+            },
+            Ai79TaskOperation.Image,
+            "base64Image"));
+
+        Assert.Equal("try-on-001", result.TaskId);
+        var request = Assert.Single(handler.Requests);
+        var decoded = Uri.UnescapeDataString(request.Body);
+        Assert.Contains("base64Image=data%3Aimage%2Fjpeg", request.Body, StringComparison.Ordinal);
+        Assert.Contains("subjects=%5B%22data%3Aimage%2Fpng%3Bbase64%2CPRODUCT_BYTES%22%5D", request.Body, StringComparison.Ordinal);
+        Assert.DoesNotContain("image_2", decoded, StringComparison.Ordinal);
+        Assert.Contains("model=imagegen_2_0", request.Body, StringComparison.Ordinal);
+        Assert.Contains("base64Image=data:image/jpeg;base64,CHARACTER_BYTES", decoded, StringComparison.Ordinal);
+        Assert.Contains("subjects=[\"data:image/png;base64,PRODUCT_BYTES\"]", decoded, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ImageSubmit_RejectsSecondImageInsteadOfInventingImage2Field()
+    {
+        var handler = new RecordingJsonHandler("""{"imageInfo":{"id_base":"unused"}}""");
+        var client = new Ai79TaskClient(new HttpClient(handler));
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => client.SubmitAsync(new Ai79TaskSubmitRequest(
+            "https://api.gommo.net/ai",
+            "/generateImage",
+            "secret-token",
+            "79ai.net",
+            "imagegen_2_0",
+            "prompt",
+            ["data:image/jpeg;base64,CHARACTER_BYTES", "data:image/png;base64,PRODUCT_BYTES"],
+            new Dictionary<string, string?> { ["subjects"] = """["product"]""" },
+            Ai79TaskOperation.Image,
+            "base64Image")));
+
+        Assert.Contains("subjects", ex.Message, StringComparison.Ordinal);
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
     public async Task VideoSubmit_UsesVerifiedCreateVideoContractWithStartAndEndImageDescriptors()
     {
         var handler = new RecordingJsonHandler("""{"data":{"request_id":"video-task-001"}}""");
@@ -327,7 +388,7 @@ public sealed class Ai79TaskClientTests
             ["https://cdn.example/source.png"],
             new Dictionary<string, string?>(),
             Ai79TaskOperation.Image,
-            "image")));
+            "base64Image")));
 
         Assert.Equal("missing_task_id", ex.ErrorCode);
         Assert.Equal(HttpStatusCode.OK, ex.HttpStatusCode);
@@ -355,7 +416,7 @@ public sealed class Ai79TaskClientTests
             ["https://cdn.example/source.png"],
             new Dictionary<string, string?> { ["ratio"] = "16:9" },
             Ai79TaskOperation.Image,
-            "image")));
+            "base64Image")));
 
         Assert.Equal("invalid_model", ex.ErrorCode);
         Assert.Equal(HttpStatusCode.OK, ex.HttpStatusCode);

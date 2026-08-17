@@ -11,6 +11,7 @@ public static class DanceSellConstants
     public const string Model = "kling_video_motion";
     public const string KieMotionModel = "kling-2.6/motion-control";
     public const string ReferenceModel = "gpt-image-2-image-to-image";
+    public const string Ai79GptImage2Model = "imagegen_2_0";
     public const string Ai79ReferenceModel = "seedream_5_0";
     public const string ReferenceComparisonExperiment = "dance_sell_reference_ab_test";
     public const string BillingEnabledConfigKey = "dance_sell_billing_enabled";
@@ -21,6 +22,7 @@ public static class DanceSellReferenceComparisonCandidates
 {
     public static IReadOnlyList<DanceSellReferenceComparisonCandidate> All { get; } = new[]
     {
+        new DanceSellReferenceComparisonCandidate("79ai", DanceSellConstants.Ai79GptImage2Model, "GPT Image 2"),
         new DanceSellReferenceComparisonCandidate("79ai", "o1", "IMAGE O1 - Kling"),
         new DanceSellReferenceComparisonCandidate("79ai", "seedream_4_0", "Seedream 4.0"),
         new DanceSellReferenceComparisonCandidate("79ai", "google_image_gen_banana_pro", "Nano Banana Pro")

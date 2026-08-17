@@ -17,23 +17,33 @@ The reference generation service also had no completion path for submitted AI re
 ## Fix
 
 - Added a 79AI reference provider for `dance_sell.reference_image` using the existing 79AI task client.
-- Reference submit now uses the production image contract shape:
+- Reference submit now uses the documented `/generateImage` image contract shape:
   - `/generateImage`
   - `base64Image`
-  - `image_2`
+  - `subjects` as a JSON-stringified array containing the product image
   - `action_type=create`
   - `editImage=true`
   - `project_id=default`
-  - `subjects=[]`
   - `ratio=9:16`
   - `mode=vip`
   - `resolution=2k`
+- Character/model image remains IMAGE 1 and the edit base. Product/clothing image is
+  sent as the single subject reference. The client rejects a second image field for
+  `/generateImage`, so it cannot silently fall back to `image_2`.
+- The repository contained no non-empty `subjects` example and no documented object
+  item schema. The adapter therefore uses the provider-documented array transport
+  with image data URI string items and records this explicitly as
+  `json_stringified_array_of_image_data_uris`; production route switching remains a
+  separate manual SQL step pending live provider verification.
 - Added a fashion-reference prompt that explicitly forbids collage, side-by-side layout, inset thumbnails, split canvas, text, watermark, extra people, and duplicated limbs.
 - `GenerateAsync` now rejects `local_composite` as the configured product-reference route.
 - `AutoPrepareAsync` now polls active reference operations, downloads completed provider output into media storage, completes the reference version, and updates the job to `reference_ready`.
 - Failed reference poll results mark both the version and job failed, allowing retry.
 - RDance detail page now polls while the reference image is generating and shows animated reference-generation feedback.
 - Production route seed now disables the old `local_composite` default and enables `79ai / seedream_5_0`.
+- Manual switch script `database/manual/rdance-fashion/02_switch_reference_route_to_gpt_image_2.sql`
+  is prepared for `79ai / imagegen_2_0` with `mode=medium`, `resolution=2k`, and
+  `ratio=9:16`; it has not been executed.
 
 ## SQL
 
@@ -67,4 +77,3 @@ The fix reuses the existing 79AI task client but keeps all changes isolated to D
 Publish output:
 
 - `D:\todoX\Dashboard-web\TodoXPortal\todoX-Dashboard-SaaS\artifacts\publish\todox-dashboard`
-

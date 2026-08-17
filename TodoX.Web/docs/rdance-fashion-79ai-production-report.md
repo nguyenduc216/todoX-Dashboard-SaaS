@@ -35,7 +35,9 @@
 - Reference route output: real AI-generated fashion reference image, not a side-by-side local composite
 - Reference backup provider/model: existing KIE route may remain available but is not the primary default
 
-The repository uses the existing 79AI `/generateImage` contract shared with the Timelapse image runtime for the fashion reference step. The manual route seed disables the old `local_composite` default for `dance_sell.reference_image` and enables `79ai / seedream_5_0` with `base64Image`, `image_2`, `editImage=true`, `project_id=default`, `subjects=[]`, `ratio=9:16`, `mode=vip`, and `resolution=2k`.
+The repository uses the existing 79AI `/generateImage` contract shared with the Timelapse image runtime for the fashion reference step. The manual route seed disables the old `local_composite` default for `dance_sell.reference_image` and enables `79ai / seedream_5_0` with `base64Image` for the character edit base and `subjects` for the product reference, plus `editImage=true`, `project_id=default`, `ratio=9:16`, `mode=vip`, and `resolution=2k`. No `image_2` field is sent for image generation.
+
+The repository has no non-empty `subjects` example or object-item schema. The DanceSell adapter uses a JSON-stringified array of product image data URI strings and records that provisional transport explicitly. The unexecuted manual switch script `database/manual/rdance-fashion/02_switch_reference_route_to_gpt_image_2.sql` prepares `79ai / imagegen_2_0` with `mode=medium`, `resolution=2k`, and `ratio=9:16` after live payload verification.
 
 ## Workflow
 
