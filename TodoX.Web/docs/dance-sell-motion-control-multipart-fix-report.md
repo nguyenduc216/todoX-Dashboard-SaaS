@@ -56,7 +56,7 @@ No local TodoX URL is submitted to Motion Control, and no binary file is submitt
 ## Polling And Retry
 
 - DanceSell uses the submit `id_base` as `provider_task_id`.
-- Route config supplies `poll_id_field=id_base`; generic Timelapse video polling retains its existing `videoId` behavior.
+- Route config supplies `poll_id_field=id_base` and bearer poll path `/ai/jobs/{task_id}?media=video`; generic Timelapse video polling retains its existing `videoId` behavior.
 - `MEDIA_GENERATION_STATUS_SUCCESSFUL` without `download_url` remains pollable.
 - The job completes only after an output URL is returned.
 - Retry clears provider task/status/response/poll state and never writes generated column `result_video_url`.

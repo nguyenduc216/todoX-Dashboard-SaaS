@@ -274,6 +274,7 @@ public sealed class RDanceFashionDemoPageTests
         Assert.Contains("\"upload_image_path\":\"/ai/upload/image\"", motionSql.Replace(" ", string.Empty), StringComparison.Ordinal);
         Assert.Contains("\"upload_video_path\":\"/ai/upload/video\"", motionSql.Replace(" ", string.Empty), StringComparison.Ordinal);
         Assert.Contains("\"motion_submit_path\":\"/ai/jobs/video/kling_video_motion_3\"", motionSql.Replace(" ", string.Empty), StringComparison.Ordinal);
+        Assert.Contains("\"poll_path\":\"/ai/jobs/{task_id}?media=video\"", motionSql.Replace(" ", string.Empty), StringComparison.Ordinal);
         Assert.Contains("\"poll_id_field\":\"id_base\"", motionSql.Replace(" ", string.Empty), StringComparison.Ordinal);
         Assert.Contains("\"upload_video_field\":\"video_file\"", motionSql.Replace(" ", string.Empty), StringComparison.Ordinal);
         Assert.Contains("\"subType\":\"motion\"", motionSql.Replace(" ", string.Empty), StringComparison.Ordinal);

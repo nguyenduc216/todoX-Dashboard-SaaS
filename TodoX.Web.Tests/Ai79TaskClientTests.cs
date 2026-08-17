@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Headers;
 using TodoX.Web.Services.AiProviders;
 using Xunit;
 
@@ -236,6 +237,12 @@ public sealed class Ai79TaskClientTests
 
         Assert.Equal("https://v2.api.gommo.net/ai/upload/image", handler.Requests[0].Uri);
         Assert.Equal("https://v2.api.gommo.net/ai/upload/video", handler.Requests[1].Uri);
+        Assert.Equal("Bearer", handler.Requests[0].Authorization?.Scheme);
+        Assert.Equal("Bearer", handler.Requests[1].Authorization?.Scheme);
+        Assert.Equal("secret-token", handler.Requests[0].Authorization?.Parameter);
+        Assert.Equal("secret-token", handler.Requests[1].Authorization?.Parameter);
+        Assert.DoesNotContain("access_token=", handler.Requests[0].Body, StringComparison.Ordinal);
+        Assert.DoesNotContain("access_token=", handler.Requests[1].Body, StringComparison.Ordinal);
         Assert.Contains("name=file", handler.Requests[0].Body, StringComparison.Ordinal);
         Assert.Contains("filename=reference.png", handler.Requests[0].Body, StringComparison.Ordinal);
         Assert.Contains("name=video_file", handler.Requests[1].Body, StringComparison.Ordinal);
@@ -266,6 +273,9 @@ public sealed class Ai79TaskClientTests
         Assert.Equal("motion-task-001", result.TaskId);
         var request = Assert.Single(handler.Requests);
         Assert.Equal("https://v2.api.gommo.net/ai/jobs/video/kling_video_motion_3", request.Uri);
+        Assert.Equal("Bearer", request.Authorization?.Scheme);
+        Assert.Equal("secret-token", request.Authorization?.Parameter);
+        Assert.DoesNotContain("access_token=", request.Body, StringComparison.Ordinal);
         Assert.Contains("domain=79ai.net", request.Body, StringComparison.Ordinal);
         Assert.Contains("project_id=default", request.Body, StringComparison.Ordinal);
         Assert.Contains("model=kling_video_motion_3", request.Body, StringComparison.Ordinal);
@@ -279,6 +289,62 @@ public sealed class Ai79TaskClientTests
         Assert.DoesNotContain("localhost", request.Body, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("motion_video=", request.Body, StringComparison.Ordinal);
         Assert.DoesNotContain("character_image=", request.Body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task MotionControlSubmit_ReportsPlainText500AsHttpErrorNotInvalidJson()
+    {
+        var handler = new RecordingJsonHandler((HttpStatusCode.InternalServerError, "Service unavailable"));
+        var client = new Ai79TaskClient(new HttpClient(handler));
+
+        var ex = await Assert.ThrowsAsync<Ai79TaskSubmitException>(() => client.SubmitMotionControlAsync(new Ai79MotionControlSubmitRequest(
+            "https://v2.api.gommo.net",
+            "/ai/jobs/video/kling_video_motion_3",
+            "secret-token",
+            "79ai.net",
+            "default",
+            "kling_video_motion_3",
+            "prompt",
+            "https://cdn.example/reference.png",
+            "https://cdn.example/motion.mp4",
+            "standard",
+            "default",
+            "motion",
+            "input_video")));
+
+        Assert.Equal("http_500", ex.ErrorCode);
+        Assert.Equal(HttpStatusCode.InternalServerError, ex.HttpStatusCode);
+        Assert.Contains("HTTP 500", ex.ErrorMessage, StringComparison.Ordinal);
+        Assert.DoesNotContain("invalid JSON", ex.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task VideoStatus_BearerAuthUsesTaskIdPathAndProjectOnlyBody()
+    {
+        var handler = new RecordingJsonHandler("""{"videoInfo":{"status":"MEDIA_GENERATION_COMPLETED","download_url":"https://cdn.example/final.mp4"}}""");
+        var client = new Ai79TaskClient(new HttpClient(handler));
+
+        var result = await client.GetStatusAsync(new Ai79TaskStatusRequest(
+            "https://v2.api.gommo.net",
+            "/ai/jobs/{task_id}?media=video",
+            "secret-token",
+            "79ai.net",
+            "motion-task-001",
+            Ai79TaskOperation.Video,
+            null,
+            true,
+            "default"));
+
+        var request = Assert.Single(handler.Requests);
+        Assert.Equal("https://v2.api.gommo.net/ai/jobs/motion-task-001?media=video", request.Uri);
+        Assert.Equal("Bearer", request.Authorization?.Scheme);
+        Assert.Equal("secret-token", request.Authorization?.Parameter);
+        Assert.Contains("domain=79ai.net", request.Body, StringComparison.Ordinal);
+        Assert.Contains("project_id=default", request.Body, StringComparison.Ordinal);
+        Assert.DoesNotContain("access_token=", request.Body, StringComparison.Ordinal);
+        Assert.DoesNotContain("videoId=motion-task-001", request.Body, StringComparison.Ordinal);
+        Assert.Equal(Ai79TaskStatusNormalizer.Success, result.NormalizedStatus);
+        Assert.Equal("https://cdn.example/final.mp4", result.OutputUrl);
     }
 
     [Theory]
@@ -526,6 +592,7 @@ public sealed class Ai79TaskClientTests
 
         var request = Assert.Single(handler.Requests);
         Assert.Equal($"https://api.gommo.net/ai{path}", request.Uri);
+        Assert.Null(request.Authorization);
         if (operation == Ai79TaskOperation.Image)
         {
             Assert.Contains("id_base=abc123", request.Body, StringComparison.Ordinal);
@@ -544,24 +611,31 @@ public sealed class Ai79TaskClientTests
 
     private sealed class RecordingJsonHandler : HttpMessageHandler
     {
-        private readonly Queue<string> _responses;
+        private readonly Queue<RecordedResponse> _responses;
         public List<RequestSnapshot> Requests { get; } = new();
 
         public RecordingJsonHandler(params string[] responses)
         {
-            _responses = new Queue<string>(responses);
+            _responses = new Queue<RecordedResponse>(responses.Select(response => new RecordedResponse(HttpStatusCode.OK, response)));
+        }
+
+        public RecordingJsonHandler(params (HttpStatusCode Status, string Body)[] responses)
+        {
+            _responses = new Queue<RecordedResponse>(responses.Select(response => new RecordedResponse(response.Status, response.Body)));
         }
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             var body = request.Content is null ? string.Empty : await request.Content.ReadAsStringAsync(cancellationToken);
-            Requests.Add(new RequestSnapshot(request.RequestUri!.ToString(), body));
-            return new HttpResponseMessage(HttpStatusCode.OK)
+            Requests.Add(new RequestSnapshot(request.RequestUri!.ToString(), body, request.Headers.Authorization));
+            var response = _responses.Count == 0 ? new RecordedResponse(HttpStatusCode.OK, "{}") : _responses.Dequeue();
+            return new HttpResponseMessage(response.Status)
             {
-                Content = new StringContent(_responses.Count == 0 ? "{}" : _responses.Dequeue())
+                Content = new StringContent(response.Body)
             };
         }
     }
 
-    private sealed record RequestSnapshot(string Uri, string Body);
+    private sealed record RequestSnapshot(string Uri, string Body, AuthenticationHeaderValue? Authorization);
+    private sealed record RecordedResponse(HttpStatusCode Status, string Body);
 }

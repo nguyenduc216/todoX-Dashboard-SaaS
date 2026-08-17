@@ -301,7 +301,9 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
                 runtime.Domain,
                 danceJob.ProviderTaskId!,
                 Ai79TaskOperation.Video,
-                runtime.PollIdField), ct);
+                runtime.PollIdField,
+                UseBearerAuth: true,
+                ProjectId: runtime.ProjectId), ct);
             if (status.NormalizedStatus == Ai79TaskStatusNormalizer.Success)
             {
                 if (string.IsNullOrWhiteSpace(status.OutputUrl))
@@ -383,7 +385,7 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
             ReadConfigString(route.ConfigJson, "upload_image_path") ?? "/ai/upload/image",
             ReadConfigString(route.ConfigJson, "upload_video_path") ?? "/ai/upload/video",
             ReadConfigString(route.ConfigJson, "motion_submit_path") ?? $"/ai/jobs/video/{route.ModelName}",
-            ReadConfigString(route.ConfigJson, "poll_path") ?? "/video",
+            ReadConfigString(route.ConfigJson, "poll_path") ?? "/ai/jobs/{task_id}?media=video",
             ReadConfigString(route.ConfigJson, "poll_id_field") ?? "id_base",
             DanceSellMotionProviderContract.ResolveReferenceImageField(route),
             DanceSellMotionProviderContract.ResolveMotionVideoField(route),

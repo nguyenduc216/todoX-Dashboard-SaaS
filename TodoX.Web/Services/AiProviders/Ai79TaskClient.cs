@@ -40,7 +40,9 @@ public sealed record Ai79TaskStatusRequest(
     string Domain,
     string TaskId,
     Ai79TaskOperation Operation,
-    string? TaskIdField = null);
+    string? TaskIdField = null,
+    bool UseBearerAuth = false,
+    string? ProjectId = null);
 
 public sealed record Ai79TaskSubmitResult(string TaskId, string SanitizedResponseJson);
 
@@ -279,7 +281,6 @@ public sealed class Ai79TaskClient : IAi79TaskClient
     public async Task<Ai79MediaUploadResult> UploadMediaAsync(Ai79MediaUploadRequest request, CancellationToken ct = default)
     {
         using var body = new MultipartFormDataContent();
-        body.Add(new StringContent(request.AccessToken), "access_token");
         body.Add(new StringContent(request.Domain), "domain");
         body.Add(new StringContent(request.ProjectId), "project_id");
 
@@ -293,8 +294,23 @@ public sealed class Ai79TaskClient : IAi79TaskClient
         content.Headers.ContentType = MediaTypeHeaderValue.Parse(file.MimeType);
         body.Add(content, request.FieldName, file.FileName);
 
-        using var response = await _httpClient.PostAsync(BuildUri(request.BaseUrl, request.EndpointPath), body, ct);
+        using var httpRequest = new HttpRequestMessage(HttpMethod.Post, BuildUri(request.BaseUrl, request.EndpointPath));
+        httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", request.AccessToken);
+        httpRequest.Content = body;
+
+        using var response = await _httpClient.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, ct);
         var json = await response.Content.ReadAsStringAsync(ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new Ai79TaskSubmitException(
+                $"79AI media upload returned HTTP {(int)response.StatusCode}.",
+                string.IsNullOrWhiteSpace(json)
+                    ? JsonSerializer.Serialize(string.Empty, JsonOptions)
+                    : JsonSerializer.Serialize(SanitizeText(json, request.AccessToken), JsonOptions),
+                response.StatusCode,
+                $"http_{(int)response.StatusCode}");
+        }
+
         if (string.IsNullOrWhiteSpace(json))
         {
             throw new Ai79TaskSubmitException(
@@ -323,15 +339,6 @@ public sealed class Ai79TaskClient : IAi79TaskClient
         {
             var sanitized = SanitizeSecretJson(document.RootElement, request.AccessToken);
             var providerError = FindSubmitError(document.RootElement, taskIdMissing: false, request.AccessToken);
-            if (!response.IsSuccessStatusCode)
-            {
-                throw new Ai79TaskSubmitException(
-                    providerError?.ErrorMessage ?? $"79AI media upload returned HTTP {(int)response.StatusCode}.",
-                    sanitized,
-                    response.StatusCode,
-                    providerError?.ErrorCode ?? $"http_{(int)response.StatusCode}");
-            }
-
             if (providerError is not null)
             {
                 throw new Ai79TaskSubmitException(
@@ -364,7 +371,6 @@ public sealed class Ai79TaskClient : IAi79TaskClient
     {
         var form = new Dictionary<string, string>
         {
-            ["access_token"] = request.AccessToken,
             ["domain"] = request.Domain,
             ["project_id"] = request.ProjectId,
             ["model"] = request.Model,
@@ -383,7 +389,11 @@ public sealed class Ai79TaskClient : IAi79TaskClient
         }
 
         using var body = new FormUrlEncodedContent(form);
-        using var response = await _httpClient.PostAsync(BuildUri(request.BaseUrl, request.EndpointPath), body, ct);
+        using var httpRequest = new HttpRequestMessage(HttpMethod.Post, BuildUri(request.BaseUrl, request.EndpointPath));
+        httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", request.AccessToken);
+        httpRequest.Content = body;
+
+        using var response = await _httpClient.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, ct);
         return await ReadSubmitResultAsync(response, request.AccessToken, request.EndpointPath, Ai79TaskOperation.Video, ct);
     }
 
@@ -411,11 +421,21 @@ public sealed class Ai79TaskClient : IAi79TaskClient
         }
         catch (JsonException ex)
         {
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new Ai79TaskSubmitException(
+                    $"79AI submit returned HTTP {(int)response.StatusCode}.",
+                    JsonSerializer.Serialize(SanitizeText(json, accessToken), JsonOptions),
+                    response.StatusCode,
+                    $"http_{(int)response.StatusCode}",
+                    ex);
+            }
+
             throw new Ai79TaskSubmitException(
                 "79AI submit response was not valid JSON.",
                 JsonSerializer.Serialize(SanitizeText(json, accessToken), JsonOptions),
                 response.StatusCode,
-                response.IsSuccessStatusCode ? "invalid_json" : $"http_{(int)response.StatusCode}",
+                "invalid_json",
                 ex);
         }
 
@@ -540,56 +560,77 @@ public sealed class Ai79TaskClient : IAi79TaskClient
     {
         var path = request.EndpointPath.Replace("{task_id}", Uri.EscapeDataString(request.TaskId), StringComparison.OrdinalIgnoreCase)
             .Replace("{taskId}", Uri.EscapeDataString(request.TaskId), StringComparison.OrdinalIgnoreCase);
-        var form = new Dictionary<string, string>
-        {
-            ["access_token"] = request.AccessToken,
-            ["domain"] = request.Domain,
-            [request.TaskIdField ?? (request.Operation == Ai79TaskOperation.Image ? "id_base" : "videoId")] = request.TaskId
-        };
-
-        using var body = new FormUrlEncodedContent(form);
-        using var response = await _httpClient.PostAsync(BuildUri(request.BaseUrl, path), body, ct);
-        var json = await ReadJsonAsync(response, request.AccessToken, ct);
-        using var document = JsonDocument.Parse(json);
-        JsonElement statusRoot = document.RootElement;
-        JsonDocument? fallbackDocument = null;
-        if (request.Operation == Ai79TaskOperation.Video
-            && TryFindVideoInfoById(statusRoot, request.TaskId, out var primaryMatchedInfo))
-        {
-            statusRoot = primaryMatchedInfo;
-        }
-        else if (request.Operation == Ai79TaskOperation.Video && !HasSingleVideoInfo(statusRoot))
-        {
-            var fallbackPath = ResolveVideosListPath(path);
-            using var fallbackBody = new FormUrlEncodedContent(new Dictionary<string, string>
+        var form = request.UseBearerAuth
+            ? new Dictionary<string, string>
+            {
+                ["domain"] = request.Domain,
+                ["project_id"] = request.ProjectId ?? "default"
+            }
+            : new Dictionary<string, string>
             {
                 ["access_token"] = request.AccessToken,
-                ["domain"] = request.Domain
-            });
-            using var fallbackResponse = await _httpClient.PostAsync(BuildUri(request.BaseUrl, fallbackPath), fallbackBody, ct);
-            var fallbackJson = await ReadJsonAsync(fallbackResponse, request.AccessToken, ct);
-            fallbackDocument = JsonDocument.Parse(fallbackJson);
-            if (TryFindVideoInfoById(fallbackDocument.RootElement, request.TaskId, out var matchedInfo))
-            {
-                statusRoot = matchedInfo;
-            }
-            else
-            {
-                statusRoot = fallbackDocument.RootElement;
-            }
+                ["domain"] = request.Domain,
+                [request.TaskIdField ?? (request.Operation == Ai79TaskOperation.Image ? "id_base" : "videoId")] = request.TaskId
+            };
+
+        using var body = new FormUrlEncodedContent(form);
+        HttpResponseMessage response;
+        if (request.UseBearerAuth)
+        {
+            using var httpRequest = new HttpRequestMessage(HttpMethod.Post, BuildUri(request.BaseUrl, path));
+            httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", request.AccessToken);
+            httpRequest.Content = body;
+            response = await _httpClient.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, ct);
+        }
+        else
+        {
+            response = await _httpClient.PostAsync(BuildUri(request.BaseUrl, path), body, ct);
         }
 
-        using (fallbackDocument)
+        using (response)
         {
-            var sanitized = SanitizeSecretJson(statusRoot, request.AccessToken);
-            var status = Ai79TaskStatusNormalizer.Normalize(FindStatus(statusRoot));
-            var outputUrl = request.Operation == Ai79TaskOperation.Video
-                ? FindVideoOutputUrl(statusRoot)
-                : FindUrl(statusRoot);
-            var errorCode = FindErrorValue(statusRoot, "error_code", "errorCode", "code");
-            var errorMessage = FindErrorValue(statusRoot, "error_message", "errorMessage", "message", "msg");
+            var json = await ReadJsonAsync(response, request.AccessToken, ct);
+            using var document = JsonDocument.Parse(json);
+            JsonElement statusRoot = document.RootElement;
+            JsonDocument? fallbackDocument = null;
+            if (request.Operation == Ai79TaskOperation.Video
+                && TryFindVideoInfoById(statusRoot, request.TaskId, out var primaryMatchedInfo))
+            {
+                statusRoot = primaryMatchedInfo;
+            }
+            else if (!request.UseBearerAuth && request.Operation == Ai79TaskOperation.Video && !HasSingleVideoInfo(statusRoot))
+            {
+                var fallbackPath = ResolveVideosListPath(path);
+                using var fallbackBody = new FormUrlEncodedContent(new Dictionary<string, string>
+                {
+                    ["access_token"] = request.AccessToken,
+                    ["domain"] = request.Domain
+                });
+                using var fallbackResponse = await _httpClient.PostAsync(BuildUri(request.BaseUrl, fallbackPath), fallbackBody, ct);
+                var fallbackJson = await ReadJsonAsync(fallbackResponse, request.AccessToken, ct);
+                fallbackDocument = JsonDocument.Parse(fallbackJson);
+                if (TryFindVideoInfoById(fallbackDocument.RootElement, request.TaskId, out var matchedInfo))
+                {
+                    statusRoot = matchedInfo;
+                }
+                else
+                {
+                    statusRoot = fallbackDocument.RootElement;
+                }
+            }
 
-            return new Ai79TaskStatusResult(status, sanitized, outputUrl, errorCode, errorMessage);
+            using (fallbackDocument)
+            {
+                var sanitized = SanitizeSecretJson(statusRoot, request.AccessToken);
+                var status = Ai79TaskStatusNormalizer.Normalize(FindStatus(statusRoot));
+                var outputUrl = request.Operation == Ai79TaskOperation.Video
+                    ? FindVideoOutputUrl(statusRoot)
+                    : FindUrl(statusRoot);
+                var errorCode = FindErrorValue(statusRoot, "error_code", "errorCode", "code");
+                var errorMessage = FindErrorValue(statusRoot, "error_message", "errorMessage", "message", "msg");
+
+                return new Ai79TaskStatusResult(status, sanitized, outputUrl, errorCode, errorMessage);
+            }
         }
     }
 
