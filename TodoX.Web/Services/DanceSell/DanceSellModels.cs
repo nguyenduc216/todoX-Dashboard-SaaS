@@ -497,3 +497,142 @@ public sealed class ProviderAccountDto
     public bool IsDefault { get; set; }
     public string ConfigJson { get; set; } = "{}";
 }
+
+public class DanceSellProviderOperationDto
+{
+    public Guid Id { get; set; }
+    public Guid DanceSellJobId { get; set; }
+    public Guid? RenderJobId { get; set; }
+    public Guid? ParentOperationId { get; set; }
+    public string OperationType { get; set; } = DanceSellOperationTypes.MotionVideo;
+    public int AttemptNo { get; set; } = 1;
+    public string? ReferenceMode { get; set; }
+    public string ProviderCode { get; set; } = DanceSellConstants.ProviderCode;
+    public Guid? ProviderCapabilityId { get; set; }
+    public Guid? ProviderAccountId { get; set; }
+    public string ProviderModel { get; set; } = DanceSellConstants.Model;
+    public string? ProviderTaskId { get; set; }
+    public string Status { get; set; } = DanceSellOperationStatuses.Draft;
+    public string? ProviderStatus { get; set; }
+    public string BillingStatus { get; set; } = DanceSellBillingStatuses.NotRequired;
+    public string RefundStatus { get; set; } = DanceSellRefundStatuses.NotRequired;
+    public string RequestJson { get; set; } = "{}";
+    public string? ResponseJson { get; set; }
+    public string? CallbackJson { get; set; }
+    public string? ErrorJson { get; set; }
+    public string? ProviderUsageJson { get; set; }
+    public string? PricingSnapshotJson { get; set; }
+    public decimal? UsageQuantity { get; set; }
+    public string? UsageUnit { get; set; }
+    public decimal? CreditsEstimated { get; set; }
+    public decimal? CreditsConsumed { get; set; }
+    public decimal? ProviderCost { get; set; }
+    public string? ProviderCurrency { get; set; }
+    public decimal? ProviderCostVnd { get; set; }
+    public decimal? ExchangeRate { get; set; }
+    public decimal? TodoxPointsEstimated { get; set; }
+    public decimal? TodoxPointsReserved { get; set; }
+    public decimal? TodoxPointsCharged { get; set; }
+    public decimal? TodoxPointsRefunded { get; set; }
+    public decimal? BalanceBefore { get; set; }
+    public decimal? BalanceAfter { get; set; }
+    public string? CostSource { get; set; }
+    public string? ErrorCode { get; set; }
+    public string? ErrorMessage { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime? StartedAt { get; set; }
+    public DateTime? SubmittedAt { get; set; }
+    public DateTime? CompletedAt { get; set; }
+    public DateTime? FailedAt { get; set; }
+    public DateTime? RefundedAt { get; set; }
+    public DateTime? UpdatedAt { get; set; }
+}
+
+public sealed class AiOperationAssetDto
+{
+    public Guid Id { get; set; }
+    public Guid OperationId { get; set; }
+    public string AssetRole { get; set; } = string.Empty;
+    public Guid? MediaId { get; set; }
+    public string? ObjectKey { get; set; }
+    public string? PublicUrl { get; set; }
+    public string? ProviderUrl { get; set; }
+    public string? MimeType { get; set; }
+    public string MetadataJson { get; set; } = "{}";
+    public DateTime CreatedAt { get; set; }
+}
+
+public sealed class DanceSellOperationLogFilter
+{
+    public string? Search { get; set; }
+    public Guid? DanceSellJobId { get; set; }
+    public Guid? RenderJobId { get; set; }
+    public string? ProviderTaskId { get; set; }
+    public Guid? CustomerId { get; set; }
+    public Guid? UserId { get; set; }
+    public string? ProviderCode { get; set; }
+    public Guid? ProviderAccountId { get; set; }
+    public string? ModelName { get; set; }
+    public string? OperationType { get; set; }
+    public string? Status { get; set; }
+    public string? BillingStatus { get; set; }
+    public string? RefundStatus { get; set; }
+    public string? ErrorCode { get; set; }
+    public DateTime? FromUtc { get; set; }
+    public DateTime? ToUtc { get; set; }
+    public int Page { get; set; } = 1;
+    public int PageSize { get; set; } = 25;
+}
+
+public sealed class DanceSellOperationLogItemDto : DanceSellProviderOperationDto
+{
+    public string? Title { get; set; }
+    public Guid? CustomerId { get; set; }
+    public Guid? UserId { get; set; }
+    public string? CurrentStage { get; set; }
+    public string? ResultUrl { get; set; }
+    public int AssetCount { get; set; }
+}
+
+public sealed class DanceSellOperationLogDetailDto
+{
+    public DanceSellOperationLogItemDto Operation { get; set; } = new();
+    public IReadOnlyList<AiOperationAssetDto> Assets { get; set; } = Array.Empty<AiOperationAssetDto>();
+}
+
+public sealed record PagedResult<T>(IReadOnlyList<T> Items, int Page, int PageSize, long Total);
+
+public sealed class DanceSellCostEstimate
+{
+    public string OperationType { get; set; } = string.Empty;
+    public string ProviderCode { get; set; } = string.Empty;
+    public string ModelName { get; set; } = string.Empty;
+    public string? ProviderMode { get; set; }
+    public string UsageUnit { get; set; } = "credits";
+    public decimal EstimatedUsage { get; set; }
+    public decimal? ProviderUnitPrice { get; set; }
+    public decimal? EstimatedProviderCost { get; set; }
+    public string Currency { get; set; } = "USD";
+    public decimal? ExchangeRate { get; set; }
+    public decimal? ProviderCostVnd { get; set; }
+    public decimal? EstimatedTodoxPoints { get; set; }
+    public string PricingSource { get; set; } = "estimated";
+    public string? Warning { get; set; }
+    public string? PricingUnit { get; set; }
+    public decimal? Markup { get; set; }
+    public string? RoundingRule { get; set; }
+    public decimal? TodoXVndPerPoint { get; set; }
+}
+
+public sealed class ProviderBalanceResult
+{
+    public bool Success { get; set; }
+    public string ProviderCode { get; set; } = string.Empty;
+    public Guid ProviderAccountId { get; set; }
+    public decimal? Balance { get; set; }
+    public string BalanceUnit { get; set; } = "credits";
+    public string Source { get; set; } = "manual";
+    public string? RawResponseJson { get; set; }
+    public string? ErrorCode { get; set; }
+    public string? ErrorMessage { get; set; }
+}
