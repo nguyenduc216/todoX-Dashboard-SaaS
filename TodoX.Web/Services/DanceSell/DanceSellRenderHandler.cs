@@ -4,12 +4,19 @@ using Microsoft.Extensions.Options;
 using TodoX.Web.Models;
 using TodoX.Web.Services.AiProviders;
 using TodoX.Web.Services.AiProviders.Kie;
+using TodoX.Web.Services.Media;
 using TodoX.Web.Services.Render;
 
 namespace TodoX.Web.Services.DanceSell;
 
 public sealed class DanceSellRenderHandler : IRenderJobHandler
 {
+    private const long MaxMotionControlVideoBytes = 50L * 1024 * 1024;
+    private static readonly HashSet<string> AllowedMotionImageMime = new(StringComparer.OrdinalIgnoreCase)
+        { "image/jpeg", "image/png", "image/webp" };
+    private static readonly HashSet<string> AllowedMotionVideoMime = new(StringComparer.OrdinalIgnoreCase)
+        { "video/mp4", "video/webm" };
+
     private readonly IDanceSellRepository _repo;
     private readonly IKiePayloadBuilder _payloadBuilder;
     private readonly IKieClient _client;
@@ -23,6 +30,8 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
     private readonly IProviderCredentialResolver _credentials;
     private readonly IProviderCredentialRepository _credentialRepository;
     private readonly IAi79TaskClient _ai79;
+    private readonly IMediaFileService _media;
+    private readonly IHttpClientFactory _httpClientFactory;
     private readonly IOptionsMonitor<KieOptions> _options;
     private readonly ILogger<DanceSellRenderHandler> _logger;
 
@@ -42,6 +51,8 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
         IProviderCredentialResolver credentials,
         IProviderCredentialRepository credentialRepository,
         IAi79TaskClient ai79,
+        IMediaFileService media,
+        IHttpClientFactory httpClientFactory,
         IOptionsMonitor<KieOptions> options,
         ILogger<DanceSellRenderHandler> logger)
     {
@@ -58,6 +69,8 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
         _credentials = credentials;
         _credentialRepository = credentialRepository;
         _ai79 = ai79;
+        _media = media;
+        _httpClientFactory = httpClientFactory;
         _options = options;
         _logger = logger;
     }
@@ -109,56 +122,97 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
             throw new RenderJobTerminalFailureException("DANCE_SELL_REFERENCE_NOT_APPROVED");
         }
 
-        var referenceImageUrl = FirstNonBlank(danceJob.PreparedReferenceUrl);
-        if (referenceImageUrl is null)
+        ResolvedMotionFile? referenceImage;
+        ResolvedMotionFile? motionVideo;
+        try
         {
-            await FailAsync(renderJob, danceJob, "DANCE_SELL_REFERENCE_URL_REQUIRED", "Approved reference image URL is required before creating the motion video.", "{}", permanent: true, ct);
-            throw new RenderJobTerminalFailureException("DANCE_SELL_REFERENCE_URL_REQUIRED");
+            referenceImage = await ResolveMotionFileAsync(
+                danceJob.PreparedReferenceMediaId,
+                danceJob.PreparedReferenceObjectKey,
+                danceJob.PreparedReferenceUrl,
+                runtime.ReferenceImageField,
+                "reference.jpg",
+                AllowedMotionImageMime,
+                maxBytes: null,
+                "DANCE_SELL_REFERENCE_FILE_REQUIRED",
+                "DANCE_SELL_REFERENCE_UNSUPPORTED_MIME",
+                "DANCE_SELL_REFERENCE_FILE_REQUIRED",
+                ct);
+            motionVideo = await ResolveMotionFileAsync(
+                danceJob.MotionVideoMediaId,
+                danceJob.MotionVideoObjectKey,
+                danceJob.MotionVideoUrl,
+                runtime.MotionVideoField,
+                "motion.mp4",
+                AllowedMotionVideoMime,
+                MaxMotionControlVideoBytes,
+                "DANCE_SELL_MOTION_FILE_REQUIRED",
+                "DANCE_SELL_MOTION_UNSUPPORTED_MIME",
+                "DANCE_SELL_MOTION_FILE_TOO_LARGE",
+                ct);
+        }
+        catch (InvalidOperationException ex) when (ex.Message.StartsWith("DANCE_SELL_", StringComparison.Ordinal))
+        {
+            await FailAsync(renderJob, danceJob, ex.Message, ex.Message, "{}", permanent: true, ct);
+            throw new RenderJobTerminalFailureException(ex.Message, ex);
         }
 
-        var motionVideoUrl = FirstNonBlank(danceJob.MotionVideoUrl);
-        if (motionVideoUrl is null)
+        if (referenceImage is null)
         {
-            await FailAsync(renderJob, danceJob, "DANCE_SELL_MOTION_VIDEO_URL_REQUIRED", "Motion video URL is required before creating the motion video.", "{}", permanent: true, ct);
-            throw new RenderJobTerminalFailureException("DANCE_SELL_MOTION_VIDEO_URL_REQUIRED");
+            await FailAsync(renderJob, danceJob, "DANCE_SELL_REFERENCE_FILE_REQUIRED", "Approved reference image file is required before creating the motion video.", "{}", permanent: true, ct);
+            throw new RenderJobTerminalFailureException("DANCE_SELL_REFERENCE_FILE_REQUIRED");
         }
 
-        var request = new Ai79TaskSubmitRequest(
+        if (motionVideo is null)
+        {
+            await FailAsync(renderJob, danceJob, "DANCE_SELL_MOTION_FILE_REQUIRED", "Motion video file is required before creating the motion video.", "{}", permanent: true, ct);
+            throw new RenderJobTerminalFailureException("DANCE_SELL_MOTION_FILE_REQUIRED");
+        }
+
+        var motionPrompt = ReadConfigString(runtime.RouteConfigJson, "motion_prompt") ?? string.Empty;
+        var request = new Ai79MultipartTaskSubmitRequest(
             runtime.BaseUrl,
             runtime.SubmitPath,
             runtime.Credential.Secret,
             runtime.Domain,
             runtime.Model,
-            danceJob.Prompt,
-            [referenceImageUrl],
+            motionPrompt,
             new Dictionary<string, string?>
             {
-                ["type"] = "video",
-                [runtime.MotionVideoField] = motionVideoUrl,
+                ["privacy"] = ReadConfigString(runtime.RouteConfigJson, "privacy") ?? "PRIVATE",
+                ["project_id"] = ReadConfigString(runtime.RouteConfigJson, "project_id") ?? "default",
                 ["mode"] = runtime.ProviderMode,
                 ["ratio"] = runtime.ProviderRatio
             },
-            Ai79TaskOperation.Video,
-            runtime.ReferenceImageField);
+            [referenceImage.ToMultipartPart(), motionVideo.ToMultipartPart()],
+            Ai79TaskOperation.Video);
         var submittedAt = DateTime.UtcNow;
         var requestJson = JsonSerializer.Serialize(new
         {
             providerCode = runtime.ProviderCode,
             model = runtime.Model,
             endpointPath = runtime.SubmitPath,
+            contentType = "multipart/form-data",
             referenceImageField = runtime.ReferenceImageField,
+            characterImageField = runtime.ReferenceImageField,
+            characterImageMime = referenceImage.MimeType,
+            characterImageBytes = referenceImage.SizeBytes >= 0 ? referenceImage.SizeBytes : (long?)null,
+            characterImageSource = referenceImage.Source,
             motionVideoField = runtime.MotionVideoField,
-            referenceImageUrl,
-            motionVideoUrl,
+            motionVideoMime = motionVideo.MimeType,
+            motionVideoBytes = motionVideo.SizeBytes >= 0 ? motionVideo.SizeBytes : (long?)null,
+            motionVideoDuration = (decimal?)null,
+            motionVideoSource = motionVideo.Source,
             providerMode = runtime.ProviderMode,
             providerRatio = runtime.ProviderRatio,
-            prompt = danceJob.Prompt,
+            prompt = motionPrompt,
+            auditPrompt = danceJob.Prompt,
             submittedAt
         }, KieJson.Options);
 
         try
         {
-            var submitted = await _ai79.SubmitAsync(request, ct);
+            var submitted = await _ai79.SubmitMultipartAsync(request, ct);
             await _repo.UpdateSubmittedAsync(danceJob.Id, requestJson, submitted.TaskId, submitted.SanitizedResponseJson, ct);
             if (operationId is Guid existingOperationId)
             {
@@ -181,6 +235,12 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
     {
         if (danceJob.PollCount >= Math.Max(1, _options.CurrentValue.MaxPollCount))
         {
+            if (string.Equals(danceJob.ProviderStatus, Ai79TaskStatusNormalizer.Success, StringComparison.OrdinalIgnoreCase))
+            {
+                await FailAsync(renderJob, danceJob, "DANCE_SELL_OUTPUT_URL_TIMEOUT", "79AI motion task succeeded but no output URL became available before the poll grace window expired.", danceJob.PollResponseJson, permanent: true, ct, DanceSellJobStatuses.Timeout);
+                throw new RenderJobTerminalFailureException("79AI motion output URL timeout.");
+            }
+
             await FailAsync(renderJob, danceJob, "ai79_poll_timeout", "79AI motion poll max count reached.", danceJob.PollResponseJson, permanent: true, ct, DanceSellJobStatuses.Timeout);
             throw new RenderJobTerminalFailureException("79AI motion poll max count reached.");
         }
@@ -199,8 +259,12 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
             {
                 if (string.IsNullOrWhiteSpace(status.OutputUrl))
                 {
-                    await FailAsync(renderJob, danceJob, "missing_output", "79AI motion task completed without an output URL.", status.SanitizedResponseJson, permanent: true, ct);
-                    throw new RenderJobTerminalFailureException("79AI motion task completed without an output URL.");
+                    var outputPendingNextPoll = DateTime.UtcNow.Add(_options.CurrentValue.PollInterval);
+                    await _repo.UpdatePollingAsync(danceJob.Id, status.NormalizedStatus, status.SanitizedResponseJson, danceJob.PollCount + 1, outputPendingNextPoll, ct);
+                    await _renderJobs.AddEventAsync(renderJob.Id, "AI79_MOTION_OUTPUT_PENDING", "79AI Kling Motion Control task succeeded; output URL is not available yet.",
+                        new { danceSellJobId = danceJob.Id, danceJob.ProviderTaskId, status = status.NormalizedStatus, pollCount = danceJob.PollCount + 1 }, ct: ct);
+                    await ScheduleNextPollAsync(renderJob, "79AI motion output URL pending; next poll scheduled.", ct);
+                    return;
                 }
 
                 await _completion.CompleteAsync(new DanceSellCompletionRequest
@@ -268,6 +332,7 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
             route.ModelName,
             FirstNonBlank(ReadConfigString(account?.ConfigJson, "base_url"), provider.BaseUrl, ReadConfigString(provider.ConfigJson, "base_url"), "https://api.gommo.net/ai")!,
             FirstNonBlank(ReadConfigString(account?.ConfigJson, "domain"), ReadConfigString(provider.ConfigJson, "domain"), "79ai.net")!,
+            route.ConfigJson,
             ReadConfigString(route.ConfigJson, "submit_path") ?? "/create-video",
             ReadConfigString(route.ConfigJson, "poll_path") ?? "/video",
             DanceSellMotionProviderContract.ResolveReferenceImageField(route),
@@ -285,6 +350,7 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
         string Model,
         string BaseUrl,
         string Domain,
+        string RouteConfigJson,
         string SubmitPath,
         string PollPath,
         string ReferenceImageField,
@@ -317,6 +383,134 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
 
     private static string? FirstNonBlank(params string?[] values)
         => values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim();
+
+    private async Task<ResolvedMotionFile?> ResolveMotionFileAsync(
+        Guid? mediaId,
+        string? objectKey,
+        string? publicUrl,
+        string fieldName,
+        string fallbackFileName,
+        IReadOnlySet<string> allowedMime,
+        long? maxBytes,
+        string requiredErrorCode,
+        string unsupportedMimeErrorCode,
+        string tooLargeErrorCode,
+        CancellationToken ct)
+    {
+        MediaFileDto? media = null;
+        if (mediaId is Guid id && id != Guid.Empty)
+        {
+            media = await _media.GetAsync(id, ct);
+        }
+
+        if (media is null && !string.IsNullOrWhiteSpace(objectKey))
+        {
+            media = await _media.GetByObjectKeyAsync(objectKey, ct);
+        }
+
+        if (media is null && !string.IsNullOrWhiteSpace(publicUrl))
+        {
+            media = await _media.GetByPublicUrlAsync(publicUrl, ct);
+        }
+
+        if (media is not null && media.IsActive)
+        {
+            var mime = NormalizeMotionMime(media.MimeType, media.FileName, allowedMime);
+            ValidateMotionFile(mime, media.FileSizeBytes, allowedMime, maxBytes, requiredErrorCode, unsupportedMimeErrorCode, tooLargeErrorCode);
+            var mediaIdValue = media.Id;
+            return new ResolvedMotionFile(
+                fieldName,
+                FirstNonBlank(media.FileName, Path.GetFileName(media.ObjectKey), fallbackFileName)!,
+                mime,
+                media.FileSizeBytes ?? -1,
+                media.ObjectKey is null ? "media" : "media_storage",
+                async token => await _media.OpenReadAsync(mediaIdValue, token));
+        }
+
+        var fallbackUrl = FirstNonBlank(publicUrl);
+        if (fallbackUrl is null)
+        {
+            return null;
+        }
+
+        if (!Uri.TryCreate(fallbackUrl, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps)
+        {
+            throw new InvalidOperationException(requiredErrorCode);
+        }
+
+        var fileName = FirstNonBlank(Path.GetFileName(uri.LocalPath), fallbackFileName)!;
+        var mimeType = NormalizeMotionMime(null, fileName, allowedMime);
+        ValidateMotionFile(mimeType, null, allowedMime, maxBytes, requiredErrorCode, unsupportedMimeErrorCode, tooLargeErrorCode);
+        return new ResolvedMotionFile(
+            fieldName,
+            fileName,
+            mimeType,
+            -1,
+            "https_url_fallback",
+            async token =>
+            {
+                var client = _httpClientFactory.CreateClient();
+                var response = await client.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, token);
+                response.EnsureSuccessStatusCode();
+                return await response.Content.ReadAsStreamAsync(token);
+            });
+    }
+
+    private static void ValidateMotionFile(
+        string mimeType,
+        long? sizeBytes,
+        IReadOnlySet<string> allowedMime,
+        long? maxBytes,
+        string requiredErrorCode,
+        string unsupportedMimeErrorCode,
+        string tooLargeErrorCode)
+    {
+        if (!allowedMime.Contains(mimeType))
+        {
+            throw new InvalidOperationException(unsupportedMimeErrorCode);
+        }
+
+        if (sizeBytes is <= 0)
+        {
+            throw new InvalidOperationException(requiredErrorCode);
+        }
+
+        if (maxBytes is long limit && sizeBytes is long size && size > limit)
+        {
+            throw new InvalidOperationException(tooLargeErrorCode);
+        }
+    }
+
+    private static string NormalizeMotionMime(string? mimeType, string? fileName, IReadOnlySet<string> allowedMime)
+    {
+        var normalized = mimeType?.Trim().ToLowerInvariant();
+        if (!string.IsNullOrWhiteSpace(normalized) && allowedMime.Contains(normalized))
+        {
+            return normalized;
+        }
+
+        return Path.GetExtension(fileName ?? string.Empty).ToLowerInvariant() switch
+        {
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".png" => "image/png",
+            ".webp" => "image/webp",
+            ".mp4" => "video/mp4",
+            ".webm" => "video/webm",
+            _ => normalized ?? string.Empty
+        };
+    }
+
+    private sealed record ResolvedMotionFile(
+        string FieldName,
+        string FileName,
+        string MimeType,
+        long SizeBytes,
+        string Source,
+        Func<CancellationToken, Task<Stream?>> OpenReadAsync)
+    {
+        public Ai79MultipartFilePart ToMultipartPart()
+            => new(FieldName, FileName, MimeType, SizeBytes, OpenReadAsync);
+    }
 
     private async Task SubmitAsync(RenderJobDto renderJob, DanceSellJobDto danceJob, Guid? operationId, CancellationToken ct)
     {

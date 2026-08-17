@@ -7,6 +7,7 @@ namespace TodoX.Web.Services.AiProviders;
 public interface IAi79TaskClient
 {
     Task<Ai79TaskSubmitResult> SubmitAsync(Ai79TaskSubmitRequest request, CancellationToken ct = default);
+    Task<Ai79TaskSubmitResult> SubmitMultipartAsync(Ai79MultipartTaskSubmitRequest request, CancellationToken ct = default);
     Task<Ai79ImageUploadResult> UploadImageAsync(Ai79ImageUploadRequest request, CancellationToken ct = default);
     Task<Ai79TaskStatusResult> GetStatusAsync(Ai79TaskStatusRequest request, CancellationToken ct = default);
 }
@@ -39,6 +40,24 @@ public sealed record Ai79TaskStatusRequest(
     Ai79TaskOperation Operation);
 
 public sealed record Ai79TaskSubmitResult(string TaskId, string SanitizedResponseJson);
+
+public sealed record Ai79MultipartFilePart(
+    string FieldName,
+    string FileName,
+    string MimeType,
+    long SizeBytes,
+    Func<CancellationToken, Task<Stream?>> OpenReadAsync);
+
+public sealed record Ai79MultipartTaskSubmitRequest(
+    string BaseUrl,
+    string EndpointPath,
+    string AccessToken,
+    string Domain,
+    string Model,
+    string Prompt,
+    IReadOnlyDictionary<string, string?> Fields,
+    IReadOnlyList<Ai79MultipartFilePart> Files,
+    Ai79TaskOperation Operation);
 
 public sealed record Ai79ImageUploadRequest(
     string BaseUrl,
@@ -179,6 +198,56 @@ public sealed class Ai79TaskClient : IAi79TaskClient
 
         using var body = new FormUrlEncodedContent(form);
         using var response = await _httpClient.PostAsync(BuildUri(request.BaseUrl, request.EndpointPath), body, ct);
+        return await ReadSubmitResultAsync(response, request.AccessToken, request.EndpointPath, request.Operation, ct);
+    }
+
+    public async Task<Ai79TaskSubmitResult> SubmitMultipartAsync(Ai79MultipartTaskSubmitRequest request, CancellationToken ct = default)
+    {
+        using var body = new MultipartFormDataContent();
+        var form = new Dictionary<string, string?>
+        {
+            ["access_token"] = request.AccessToken,
+            ["domain"] = request.Domain,
+            ["model"] = request.Model,
+            ["prompt"] = request.Prompt
+        };
+
+        foreach (var pair in request.Fields)
+        {
+            if (!string.IsNullOrWhiteSpace(pair.Value) && !form.ContainsKey(pair.Key))
+            {
+                form[pair.Key] = pair.Value;
+            }
+        }
+
+        foreach (var pair in form)
+        {
+            body.Add(new StringContent(pair.Value ?? string.Empty), pair.Key);
+        }
+
+        foreach (var file in request.Files)
+        {
+            var stream = await file.OpenReadAsync(ct)
+                ?? throw new Ai79TaskSubmitException(
+                    $"79AI multipart file '{file.FieldName}' could not be opened.",
+                    JsonSerializer.Serialize(new { error = "missing_file", field = file.FieldName }, JsonOptions),
+                    errorCode: "missing_file");
+            var content = new StreamContent(stream);
+            content.Headers.ContentType = MediaTypeHeaderValue.Parse(file.MimeType);
+            body.Add(content, file.FieldName, file.FileName);
+        }
+
+        using var response = await _httpClient.PostAsync(BuildUri(request.BaseUrl, request.EndpointPath), body, ct);
+        return await ReadSubmitResultAsync(response, request.AccessToken, request.EndpointPath, request.Operation, ct);
+    }
+
+    private static async Task<Ai79TaskSubmitResult> ReadSubmitResultAsync(
+        HttpResponseMessage response,
+        string accessToken,
+        string endpointPath,
+        Ai79TaskOperation operation,
+        CancellationToken ct)
+    {
         var json = await response.Content.ReadAsStringAsync(ct);
         if (string.IsNullOrWhiteSpace(json))
         {
@@ -198,7 +267,7 @@ public sealed class Ai79TaskClient : IAi79TaskClient
         {
             throw new Ai79TaskSubmitException(
                 "79AI submit response was not valid JSON.",
-                JsonSerializer.Serialize(SanitizeText(json, request.AccessToken), JsonOptions),
+                JsonSerializer.Serialize(SanitizeText(json, accessToken), JsonOptions),
                 response.StatusCode,
                 response.IsSuccessStatusCode ? "invalid_json" : $"http_{(int)response.StatusCode}",
                 ex);
@@ -206,9 +275,9 @@ public sealed class Ai79TaskClient : IAi79TaskClient
 
         using (document)
         {
-            var sanitized = SanitizeSecretJson(document.RootElement, request.AccessToken);
-            var taskId = FindTaskId(document.RootElement, request.Operation);
-            var providerError = FindSubmitError(document.RootElement, string.IsNullOrWhiteSpace(taskId), request.AccessToken);
+            var sanitized = SanitizeSecretJson(document.RootElement, accessToken);
+            var taskId = FindTaskId(document.RootElement, operation);
+            var providerError = FindSubmitError(document.RootElement, string.IsNullOrWhiteSpace(taskId), accessToken);
 
             if (!response.IsSuccessStatusCode)
             {
@@ -221,7 +290,7 @@ public sealed class Ai79TaskClient : IAi79TaskClient
             if (providerError is not null)
             {
                 throw new Ai79TaskSubmitException(
-                    $"79AI {ResolveOperationName(request.EndpointPath)} submit failed: {providerError.ErrorMessage}",
+                    $"79AI {ResolveOperationName(endpointPath)} submit failed: {providerError.ErrorMessage}",
                     sanitized,
                     response.StatusCode,
                     providerError.ErrorCode ?? "provider_error");

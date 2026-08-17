@@ -86,6 +86,9 @@ Photorealistic, product preview quality.
             return Task.FromResult(new Ai79TaskSubmitResult("try-on-001", """{"imageInfo":{"id_base":"try-on-001"}}"""));
         }
 
+        public Task<Ai79TaskSubmitResult> SubmitMultipartAsync(Ai79MultipartTaskSubmitRequest request, CancellationToken ct = default)
+            => throw new NotImplementedException();
+
         public Task<Ai79ImageUploadResult> UploadImageAsync(Ai79ImageUploadRequest request, CancellationToken ct = default)
             => throw new NotImplementedException();
 

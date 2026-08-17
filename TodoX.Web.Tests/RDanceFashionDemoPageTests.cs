@@ -274,14 +274,28 @@ public sealed class RDanceFashionDemoPageTests
     {
         var root = FindRepoRoot();
         var handler = ReadStrictUtf8(Path.Combine(root, "TodoX.Web", "Services", "DanceSell", "DanceSellRenderHandler.cs"));
+        var client = ReadStrictUtf8(Path.Combine(root, "TodoX.Web", "Services", "AiProviders", "Ai79TaskClient.cs"));
         var submit = GetMethodSection(handler, "Submit79AiAsync");
         var runtime = GetMethodSection(handler, "Resolve79AiRuntimeAsync");
         var models = ReadStrictUtf8(Path.Combine(root, "TodoX.Web", "Services", "DanceSell", "DanceSellModels.cs"));
 
-        Assert.Contains("FirstNonBlank(danceJob.PreparedReferenceUrl)", submit, StringComparison.Ordinal);
         Assert.DoesNotContain("?? danceJob.CharacterImageUrl", submit, StringComparison.Ordinal);
-        Assert.Contains("[referenceImageUrl]", submit, StringComparison.Ordinal);
-        Assert.Contains("[runtime.MotionVideoField] = motionVideoUrl", submit, StringComparison.Ordinal);
+        Assert.Contains("danceJob.PreparedReferenceMediaId", submit, StringComparison.Ordinal);
+        Assert.Contains("danceJob.PreparedReferenceObjectKey", submit, StringComparison.Ordinal);
+        Assert.Contains("danceJob.PreparedReferenceUrl", submit, StringComparison.Ordinal);
+        Assert.Contains("new Ai79MultipartTaskSubmitRequest", submit, StringComparison.Ordinal);
+        Assert.Contains("SubmitMultipartAsync(request, ct)", submit, StringComparison.Ordinal);
+        Assert.Contains("contentType = \"multipart/form-data\"", submit, StringComparison.Ordinal);
+        Assert.Contains("characterImageField = runtime.ReferenceImageField", submit, StringComparison.Ordinal);
+        Assert.Contains("characterImageMime = referenceImage.MimeType", submit, StringComparison.Ordinal);
+        Assert.Contains("characterImageBytes = referenceImage.SizeBytes", submit, StringComparison.Ordinal);
+        Assert.Contains("motionVideoField = runtime.MotionVideoField", submit, StringComparison.Ordinal);
+        Assert.Contains("motionVideoMime = motionVideo.MimeType", submit, StringComparison.Ordinal);
+        Assert.Contains("motionVideoBytes = motionVideo.SizeBytes", submit, StringComparison.Ordinal);
+        Assert.Contains("referenceImage.ToMultipartPart()", submit, StringComparison.Ordinal);
+        Assert.Contains("motionVideo.ToMultipartPart()", submit, StringComparison.Ordinal);
+        Assert.DoesNotContain("[referenceImageUrl]", submit, StringComparison.Ordinal);
+        Assert.DoesNotContain("[runtime.MotionVideoField] = motionVideoUrl", submit, StringComparison.Ordinal);
         Assert.Contains("[\"mode\"] = runtime.ProviderMode", submit, StringComparison.Ordinal);
         Assert.Contains("[\"ratio\"] = runtime.ProviderRatio", submit, StringComparison.Ordinal);
         Assert.DoesNotContain("[\"mode\"] = danceJob.Mode", submit, StringComparison.Ordinal);
@@ -295,12 +309,21 @@ public sealed class RDanceFashionDemoPageTests
         Assert.Contains("DanceSellMotionProviderContract.ResolveProviderRatio(route)", runtime, StringComparison.Ordinal);
         Assert.Contains("DanceSellMotionProviderContract.ResolveReferenceImageField(route)", runtime, StringComparison.Ordinal);
         Assert.Contains("DanceSellMotionProviderContract.ResolveMotionVideoField(route)", runtime, StringComparison.Ordinal);
+        Assert.Contains("route.ConfigJson", runtime, StringComparison.Ordinal);
 
         Assert.Contains("\"720p\" => \"standard\"", models, StringComparison.Ordinal);
         Assert.Contains("\"1080p\" => \"professional\"", models, StringComparison.Ordinal);
         Assert.Contains("DefaultProviderRatio = \"default\"", models, StringComparison.Ordinal);
         Assert.Contains("DefaultReferenceImageField = \"character_image\"", models, StringComparison.Ordinal);
         Assert.Contains("DefaultMotionVideoField = \"motion_video\"", models, StringComparison.Ordinal);
+
+        Assert.Contains("Task<Ai79TaskSubmitResult> SubmitMultipartAsync", client, StringComparison.Ordinal);
+        Assert.Contains("new MultipartFormDataContent()", client, StringComparison.Ordinal);
+        Assert.Contains("new StreamContent(stream)", client, StringComparison.Ordinal);
+        Assert.Contains("body.Add(content, file.FieldName, file.FileName)", client, StringComparison.Ordinal);
+        Assert.Contains("MediaTypeHeaderValue.Parse(file.MimeType)", client, StringComparison.Ordinal);
+        Assert.Contains("public async Task<Ai79TaskSubmitResult> SubmitAsync", client, StringComparison.Ordinal);
+        Assert.Contains("new FormUrlEncodedContent(form)", client, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -319,6 +342,7 @@ public sealed class RDanceFashionDemoPageTests
         Assert.Contains("poll_count=0", reset, StringComparison.Ordinal);
         Assert.Contains("error_code=NULL", reset, StringComparison.Ordinal);
         Assert.Contains("error_message=NULL", reset, StringComparison.Ordinal);
+        Assert.DoesNotContain("result_video_url", reset, StringComparison.OrdinalIgnoreCase);
 
         var retry = GetMethodSection(service, "RetryAsync");
         Assert.Contains("ResetMotionRenderStateAsync(job.Id, retry.Id, ct)", retry, StringComparison.Ordinal);
@@ -356,7 +380,40 @@ public sealed class RDanceFashionDemoPageTests
         Assert.Contains("var providerMode = DanceSellMotionProviderContract.ResolveProviderMode(motionRoute, job.Mode)", service, StringComparison.Ordinal);
         Assert.Contains("EstimateAsync(motionRoute, providerMode", service, StringComparison.Ordinal);
         Assert.Contains("ResolveProviderMode(route, \"720p\")", page, StringComparison.Ordinal);
+        Assert.Contains("IAiPricingService _pricing", estimator, StringComparison.Ordinal);
+        Assert.Contains("ProviderCode = route.ProviderCode", estimator, StringComparison.Ordinal);
+        Assert.Contains("ProviderModelCode = route.ModelName", estimator, StringComparison.Ordinal);
+        Assert.Contains("DurationSeconds = duration is null", estimator, StringComparison.Ordinal);
+        Assert.Contains("PricingSource = \"provider_catalog\"", estimator, StringComparison.Ordinal);
         Assert.Contains("DanceSell:Pricing:{route.ProviderCode}:{route.ModelName}:{mode}:UsdPerRequest", estimator, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DanceSellMotionMultipartValidatesFilesAndKeepsSuccessfulPollWithoutUrlPollable()
+    {
+        var root = FindRepoRoot();
+        var handler = ReadStrictUtf8(Path.Combine(root, "TodoX.Web", "Services", "DanceSell", "DanceSellRenderHandler.cs"));
+        var media = ReadStrictUtf8(Path.Combine(root, "TodoX.Web", "Services", "Media", "MediaFileService.cs"));
+        var poll = GetMethodSection(handler, "Poll79AiAsync");
+
+        Assert.Contains("AllowedMotionImageMime", handler, StringComparison.Ordinal);
+        Assert.Contains("\"image/jpeg\"", handler, StringComparison.Ordinal);
+        Assert.Contains("\"image/png\"", handler, StringComparison.Ordinal);
+        Assert.Contains("\"image/webp\"", handler, StringComparison.Ordinal);
+        Assert.Contains("AllowedMotionVideoMime", handler, StringComparison.Ordinal);
+        Assert.Contains("\"video/mp4\"", handler, StringComparison.Ordinal);
+        Assert.Contains("\"video/webm\"", handler, StringComparison.Ordinal);
+        Assert.Contains("MaxMotionControlVideoBytes = 50L * 1024 * 1024", handler, StringComparison.Ordinal);
+        Assert.Contains("_media.OpenReadAsync(mediaIdValue", handler, StringComparison.Ordinal);
+        Assert.Contains("Task<Stream?> OpenReadAsync", media, StringComparison.Ordinal);
+        Assert.DoesNotContain("Convert.ToBase64String", GetMethodSection(handler, "Submit79AiAsync"), StringComparison.Ordinal);
+
+        Assert.Contains("AI79_MOTION_OUTPUT_PENDING", poll, StringComparison.Ordinal);
+        Assert.Contains("DANCE_SELL_OUTPUT_URL_TIMEOUT", poll, StringComparison.Ordinal);
+        Assert.Contains("await _repo.UpdatePollingAsync(danceJob.Id, status.NormalizedStatus", poll, StringComparison.Ordinal);
+        Assert.Contains("await ScheduleNextPollAsync(renderJob, \"79AI motion output URL pending; next poll scheduled.\"", poll, StringComparison.Ordinal);
+        Assert.Contains("await _completion.CompleteAsync", poll, StringComparison.Ordinal);
+        Assert.Contains("ResultVideoUrl = status.OutputUrl", poll, StringComparison.Ordinal);
     }
 
     private static string ReadStrictUtf8(string file)
@@ -377,6 +434,10 @@ public sealed class RDanceFashionDemoPageTests
         if (start < 0)
         {
             start = source.IndexOf($"public async Task<DanceSellJobDto> {methodName}(", StringComparison.Ordinal);
+        }
+        if (start < 0)
+        {
+            start = source.IndexOf($"public async Task<Ai79TaskSubmitResult> {methodName}(", StringComparison.Ordinal);
         }
         if (start < 0)
         {

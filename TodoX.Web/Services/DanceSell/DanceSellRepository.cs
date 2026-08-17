@@ -287,7 +287,6 @@ public sealed class DanceSellRepository : IDanceSellRepository
                    error_code=NULL,
                    error_message=NULL,
                    error_json=NULL,
-                   result_video_url=NULL,
                    current_stage='motion_queued',
                    updated_at=now()
              WHERE id=@id
@@ -616,7 +615,6 @@ public sealed class DanceSellRepository : IDanceSellRepository
            SET status='completed',
                provider_status=@providerStatus,
                poll_response_json=CAST(@pollResponseJson AS jsonb),
-               result_video_url=COALESCE(result_video_url, @resultVideoUrl),
                current_stage='completed',
                last_polled_at=now(),
                completed_at=COALESCE(completed_at, now()),
@@ -666,7 +664,6 @@ public sealed class DanceSellRepository : IDanceSellRepository
             UPDATE dance_sell.dance_sell_jobs
                SET callback_json=CAST(@callbackJson AS jsonb),
                    provider_status=@providerStatus,
-                   result_video_url=COALESCE(result_video_url, @resultVideoUrl),
                    status = CASE
                        WHEN status IN ('completed','failed','timeout') THEN status
                        WHEN @resultVideoUrl IS NOT NULL THEN 'completed'

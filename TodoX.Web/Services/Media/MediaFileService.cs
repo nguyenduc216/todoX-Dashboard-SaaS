@@ -43,6 +43,9 @@ public interface IMediaFileService
     /// <summary>Read raw bytes for a media file (used to pass reference images to the render API).</summary>
     Task<byte[]?> ReadBytesAsync(Guid id, CancellationToken ct = default);
 
+    /// <summary>Open raw media content as a read stream. Caller owns the returned stream.</summary>
+    Task<Stream?> OpenReadAsync(Guid id, CancellationToken ct = default);
+
     Task<MediaFileDto> ReplaceContentAsync(Guid mediaId, byte[] content, string mimeType,
         Guid userId, CancellationToken ct = default);
 
@@ -72,7 +75,7 @@ public interface IMediaFileService
 public sealed class MediaFileService : IMediaFileService
 {
     private static readonly HashSet<string> AllowedMime = new(StringComparer.OrdinalIgnoreCase)
-        { "image/png", "image/jpeg", "image/webp", "video/mp4", "application/octet-stream" };
+        { "image/png", "image/jpeg", "image/webp", "video/mp4", "audio/mpeg", "audio/wav", "audio/x-wav", "audio/mp4", "audio/m4a", "application/octet-stream" };
 
     private readonly TodoXConnectionFactory _factory;
     private readonly IWebHostEnvironment _env;
@@ -319,9 +322,22 @@ public sealed class MediaFileService : IMediaFileService
     {
         var media = await GetAsync(id, ct);
         if (media?.ObjectKey is null) return null;
-        var uploadRoot = _config["Storage:LocalUploadRoot"] ?? "wwwroot/uploads";
-        var absPath = Path.Combine(_env.ContentRootPath, uploadRoot, media.ObjectKey.Replace('/', Path.DirectorySeparatorChar));
+        var absPath = ResolveLocalPath(media.ObjectKey);
         return File.Exists(absPath) ? await File.ReadAllBytesAsync(absPath, ct) : null;
+    }
+
+    public async Task<Stream?> OpenReadAsync(Guid id, CancellationToken ct = default)
+    {
+        var media = await GetAsync(id, ct);
+        if (media?.ObjectKey is null) return null;
+        var absPath = ResolveLocalPath(media.ObjectKey);
+        if (!File.Exists(absPath))
+        {
+            return null;
+        }
+
+        await Task.CompletedTask;
+        return new FileStream(absPath, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize: 64 * 1024, useAsync: true);
     }
 
     public async Task<MediaFileDto> ReplaceContentAsync(Guid mediaId, byte[] content, string mimeType,
@@ -702,6 +718,9 @@ public sealed class MediaFileService : IMediaFileService
             ".jpg" or ".jpeg" => "image/jpeg",
             ".webp" => "image/webp",
             ".mp4" => "video/mp4",
+            ".mp3" => "audio/mpeg",
+            ".wav" => "audio/wav",
+            ".m4a" => "audio/mp4",
             _ => normalized
         };
     }
@@ -712,6 +731,9 @@ public sealed class MediaFileService : IMediaFileService
         "image/jpeg" => ".jpg",
         "image/webp" => ".webp",
         "video/mp4" => ".mp4",
+        "audio/mpeg" => ".mp3",
+        "audio/wav" or "audio/x-wav" => ".wav",
+        "audio/mp4" or "audio/m4a" => ".m4a",
         _ => ".img"
     };
 
@@ -721,16 +743,24 @@ public sealed class MediaFileService : IMediaFileService
     private long GetMaxVideoBytes()
         => _config.GetValue("MediaStorage:MaxVideoBytes", 500L * 1024 * 1024);
 
+    private long GetMaxAudioBytes()
+        => _config.GetValue("MediaStorage:MaxAudioBytes", 50L * 1024 * 1024);
+
     private long GetMaxBytesForMime(string mimeType)
         => string.Equals(mimeType, "video/mp4", StringComparison.OrdinalIgnoreCase)
             ? GetMaxVideoBytes()
+            : IsAudioMime(mimeType)
+                ? GetMaxAudioBytes()
             : GetMaxImageBytes();
 
     private static bool IsAllowedImageMime(string mimeType)
         => mimeType is "image/png" or "image/jpeg" or "image/webp";
 
     private static bool IsPersistableMime(string mimeType)
-        => mimeType is "image/png" or "image/jpeg" or "image/webp" or "video/mp4" or "application/octet-stream";
+        => mimeType is "image/png" or "image/jpeg" or "image/webp" or "video/mp4" or "audio/mpeg" or "audio/wav" or "audio/x-wav" or "audio/mp4" or "audio/m4a" or "application/octet-stream";
+
+    private static bool IsAudioMime(string mimeType)
+        => mimeType is "audio/mpeg" or "audio/wav" or "audio/x-wav" or "audio/mp4" or "audio/m4a";
 
     private static string ResolveDownloadedBinaryMime(string expectedMimeType, string responseMime, string originalFileName)
     {
@@ -783,6 +813,19 @@ public sealed class MediaFileService : IMediaFileService
         }
 
         return normalized;
+    }
+
+    private string ResolveLocalPath(string objectKey)
+    {
+        var uploadRoot = _config["Storage:LocalUploadRoot"] ?? "wwwroot/uploads";
+        var absRoot = Path.GetFullPath(Path.Combine(_env.ContentRootPath, uploadRoot));
+        var absPath = Path.GetFullPath(Path.Combine(absRoot, NormalizeObjectKey(objectKey).Replace('/', Path.DirectorySeparatorChar)));
+        if (!absPath.StartsWith(absRoot, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Storage key không hợp lệ.");
+        }
+
+        return absPath;
     }
 
     private static void TryDeleteFile(string path)

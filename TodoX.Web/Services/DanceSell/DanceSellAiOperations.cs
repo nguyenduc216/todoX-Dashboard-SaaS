@@ -6,6 +6,7 @@ using TodoX.Web.Data;
 using TodoX.Web.Services.AiProviders.Kie;
 using TodoX.Web.Services.Timelapse;
 using Microsoft.Extensions.Options;
+using TodoX.Web.Models;
 
 namespace TodoX.Web.Services.DanceSell;
 
@@ -872,27 +873,75 @@ public interface IDanceSellCostEstimator
 public sealed class DanceSellCostEstimator : IDanceSellCostEstimator
 {
     private readonly IConfiguration _configuration;
+    private readonly IAiPricingService _pricing;
 
-    public DanceSellCostEstimator(IConfiguration configuration)
+    public DanceSellCostEstimator(IConfiguration configuration, IAiPricingService pricing)
     {
         _configuration = configuration;
+        _pricing = pricing;
     }
 
-    public Task<DanceSellCostEstimate> EstimateAsync(DanceSellProviderRouteDto route, string mode, TimeSpan? duration, CancellationToken ct = default)
+    public async Task<DanceSellCostEstimate> EstimateAsync(DanceSellProviderRouteDto route, string mode, TimeSpan? duration, CancellationToken ct = default)
     {
+        var estimatedUsage = duration is null ? 1 : Math.Max(1, (decimal)duration.Value.TotalSeconds);
+        EstimateCostResponseDto? catalogEstimate = null;
+        try
+        {
+            catalogEstimate = await _pricing.EstimateAsync(new EstimateCostRequestDto
+            {
+                ProviderCode = route.ProviderCode,
+                ProviderModelCode = route.ModelName,
+                Mode = mode,
+                DurationSeconds = duration is null ? null : (int)Math.Ceiling(duration.Value.TotalSeconds),
+                Quantity = estimatedUsage
+            }, ct);
+        }
+        catch (Exception ex)
+        {
+            catalogEstimate = new EstimateCostResponseDto
+            {
+                Success = false,
+                ErrorCode = ex.GetType().Name,
+                Message = ex.Message
+            };
+        }
+
+        if (catalogEstimate.Success)
+        {
+            var matched = catalogEstimate.MatchedPrice;
+            return new DanceSellCostEstimate
+            {
+                OperationType = route.OperationType,
+                ProviderCode = route.ProviderCode,
+                ModelName = route.ModelName,
+                ProviderMode = mode,
+                UsageUnit = matched?.UnitType ?? "request",
+                PricingUnit = matched?.RateType ?? matched?.UnitType,
+                EstimatedUsage = estimatedUsage,
+                ProviderUnitPrice = matched?.ProviderPrice,
+                EstimatedProviderCost = catalogEstimate.ProviderTotalCost,
+                Currency = "USD",
+                EstimatedTodoxPoints = catalogEstimate.EstimatedTodoXPoints,
+                PricingSource = "provider_catalog",
+                Warning = matched?.RateType?.Equals("per_second", StringComparison.OrdinalIgnoreCase) == true && duration is null
+                    ? $"Da tim thay pricing {route.ProviderCode}/{route.ModelName}/{mode} theo per_second nhung chua co duration metadata; dang uoc tinh 1 giay."
+                    : null
+            };
+        }
+
         using var configDoc = TryParseJson(route.ConfigJson);
         var pricingUnit = ReadString(configDoc, "pricingUnit")
                           ?? ReadString(configDoc, "pricing_unit")
                           ?? ReadString(configDoc, "usageUnit")
                           ?? "request";
-        var estimatedUsage = ReadDecimal(configDoc, "estimatedUsage")
-                             ?? ReadDecimal(configDoc, "estimated_usage")
-                             ?? pricingUnit switch
-                             {
-                                 "fixed" => 0,
-                                 "video_second" or "second" when duration is not null => (decimal)duration.Value.TotalSeconds,
-                                 _ => 1
-                             };
+        estimatedUsage = ReadDecimal(configDoc, "estimatedUsage")
+                         ?? ReadDecimal(configDoc, "estimated_usage")
+                         ?? pricingUnit switch
+                         {
+                             "fixed" => 0,
+                             "video_second" or "second" or "per_second" when duration is not null => (decimal)duration.Value.TotalSeconds,
+                             _ => estimatedUsage
+                         };
         var unitPrice = ReadDecimal(configDoc, "providerUnitPrice")
                         ?? ReadDecimal(configDoc, "provider_unit_price")
                         ?? ReadDecimal(configDoc, "usdPerRequest")
@@ -911,7 +960,7 @@ public sealed class DanceSellCostEstimator : IDanceSellCostEstimator
             : unitPrice is not null ? "configuration"
             : "missing_config";
 
-        return Task.FromResult(new DanceSellCostEstimate
+        return new DanceSellCostEstimate
         {
             OperationType = route.OperationType,
             ProviderCode = route.ProviderCode,
@@ -929,9 +978,9 @@ public sealed class DanceSellCostEstimator : IDanceSellCostEstimator
             TodoXVndPerPoint = vndPerPoint,
             PricingSource = source,
             Warning = unitPrice is null
-                ? $"Chua cau hinh don gia provider cho {route.ProviderCode}/{route.ModelName}/{mode}."
+                ? $"Chua tim thay pricing provider/catalog hoac config cho {route.ProviderCode}/{route.ModelName}/{mode}; catalogError={catalogEstimate?.ErrorCode ?? catalogEstimate?.Message ?? "unknown"}."
                 : null
-        });
+        };
     }
 
     private decimal? ReadDecimal(string key)
