@@ -1,4 +1,5 @@
 using System.Text;
+using TodoX.Web.Services.DanceSell;
 using Xunit;
 
 namespace TodoX.Web.Tests;
@@ -249,7 +250,10 @@ public sealed class RDanceFashionDemoPageTests
         Assert.Contains("'kling-2.6/motion-control'", sql, StringComparison.Ordinal);
         Assert.Contains("provider_code = 'local_composite'", sql, StringComparison.Ordinal);
         Assert.Contains("enabled = false", sql, StringComparison.Ordinal);
-        Assert.Contains("\"motion_video_field\":\"video\"", sql, StringComparison.Ordinal);
+        Assert.Contains("\"motion_video_field\":\"motion_video\"", sql, StringComparison.Ordinal);
+        Assert.Contains("\"reference_image_field\":\"character_image\"", sql, StringComparison.Ordinal);
+        Assert.Contains("\"mode\":\"standard\"", sql, StringComparison.Ordinal);
+        Assert.Contains("\"ratio\":\"default\"", sql, StringComparison.Ordinal);
         Assert.Contains("\"subject_schema\":\"form_subject_url_fields\"", sql, StringComparison.Ordinal);
         Assert.Contains("\"domain\":\"79ai.net\"", sql, StringComparison.Ordinal);
         Assert.Contains("\"sync\":\"false\"", sql, StringComparison.Ordinal);
@@ -265,6 +269,96 @@ public sealed class RDanceFashionDemoPageTests
         Assert.Contains("Reference generation now uses the verified 79AI GPT Image 2 fashion route.", sql, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void DanceSell79AiMotionSubmitUsesRouteFieldsAndProviderMode()
+    {
+        var root = FindRepoRoot();
+        var handler = ReadStrictUtf8(Path.Combine(root, "TodoX.Web", "Services", "DanceSell", "DanceSellRenderHandler.cs"));
+        var submit = GetMethodSection(handler, "Submit79AiAsync");
+        var runtime = GetMethodSection(handler, "Resolve79AiRuntimeAsync");
+        var models = ReadStrictUtf8(Path.Combine(root, "TodoX.Web", "Services", "DanceSell", "DanceSellModels.cs"));
+
+        Assert.Contains("FirstNonBlank(danceJob.PreparedReferenceUrl)", submit, StringComparison.Ordinal);
+        Assert.DoesNotContain("?? danceJob.CharacterImageUrl", submit, StringComparison.Ordinal);
+        Assert.Contains("[referenceImageUrl]", submit, StringComparison.Ordinal);
+        Assert.Contains("[runtime.MotionVideoField] = motionVideoUrl", submit, StringComparison.Ordinal);
+        Assert.Contains("[\"mode\"] = runtime.ProviderMode", submit, StringComparison.Ordinal);
+        Assert.Contains("[\"ratio\"] = runtime.ProviderRatio", submit, StringComparison.Ordinal);
+        Assert.DoesNotContain("[\"mode\"] = danceJob.Mode", submit, StringComparison.Ordinal);
+        Assert.DoesNotContain("[\"ratio\"] = \"9:16\"", submit, StringComparison.Ordinal);
+        Assert.Contains("referenceImageField = runtime.ReferenceImageField", submit, StringComparison.Ordinal);
+        Assert.Contains("motionVideoField = runtime.MotionVideoField", submit, StringComparison.Ordinal);
+        Assert.Contains("providerMode = runtime.ProviderMode", submit, StringComparison.Ordinal);
+        Assert.Contains("providerRatio = runtime.ProviderRatio", submit, StringComparison.Ordinal);
+
+        Assert.Contains("DanceSellMotionProviderContract.ResolveProviderMode(route, job.Mode)", runtime, StringComparison.Ordinal);
+        Assert.Contains("DanceSellMotionProviderContract.ResolveProviderRatio(route)", runtime, StringComparison.Ordinal);
+        Assert.Contains("DanceSellMotionProviderContract.ResolveReferenceImageField(route)", runtime, StringComparison.Ordinal);
+        Assert.Contains("DanceSellMotionProviderContract.ResolveMotionVideoField(route)", runtime, StringComparison.Ordinal);
+
+        Assert.Contains("\"720p\" => \"standard\"", models, StringComparison.Ordinal);
+        Assert.Contains("\"1080p\" => \"professional\"", models, StringComparison.Ordinal);
+        Assert.Contains("DefaultProviderRatio = \"default\"", models, StringComparison.Ordinal);
+        Assert.Contains("DefaultReferenceImageField = \"character_image\"", models, StringComparison.Ordinal);
+        Assert.Contains("DefaultMotionVideoField = \"motion_video\"", models, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RDanceRetryAndResultUiUseFreshMotionStateAndSharedLoadingAnimation()
+    {
+        var root = FindRepoRoot();
+        var repository = ReadStrictUtf8(Path.Combine(root, "TodoX.Web", "Services", "DanceSell", "DanceSellRepository.cs"));
+        var service = ReadStrictUtf8(Path.Combine(root, "TodoX.Web", "Services", "DanceSell", "DanceSellPhase2Services.cs"));
+        var page = ReadStrictUtf8(Path.Combine(root, "TodoX.Web", "Components", "Pages", "RDanceJobDetail.razor"));
+
+        var reset = GetMethodSection(repository, "ResetMotionRenderStateAsync");
+        Assert.Contains("provider_task_id=NULL", reset, StringComparison.Ordinal);
+        Assert.Contains("provider_status=NULL", reset, StringComparison.Ordinal);
+        Assert.Contains("submit_response_json=NULL", reset, StringComparison.Ordinal);
+        Assert.Contains("poll_response_json=NULL", reset, StringComparison.Ordinal);
+        Assert.Contains("poll_count=0", reset, StringComparison.Ordinal);
+        Assert.Contains("error_code=NULL", reset, StringComparison.Ordinal);
+        Assert.Contains("error_message=NULL", reset, StringComparison.Ordinal);
+
+        var retry = GetMethodSection(service, "RetryAsync");
+        Assert.Contains("ResetMotionRenderStateAsync(job.Id, retry.Id, ct)", retry, StringComparison.Ordinal);
+
+        Assert.Contains("IsResultActive", page, StringComparison.Ordinal);
+        Assert.Contains("rdance-result-frame", page, StringComparison.Ordinal);
+        Assert.Contains("rdance-processing-overlay", page, StringComparison.Ordinal);
+        Assert.Contains("rdance-processing-sweep", page, StringComparison.Ordinal);
+        Assert.Contains("rdance-processing-spinner", page, StringComparison.Ordinal);
+        Assert.Contains("rdance-processing-dots", page, StringComparison.Ordinal);
+        Assert.Contains("ResultErrorText", page, StringComparison.Ordinal);
+        Assert.Contains("Render lại video", page, StringComparison.Ordinal);
+        Assert.Contains("video src=\"@_job.ResultVideoUrl\"", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DanceSellMotionCostUsesProviderModeInsteadOfBusinessQuality()
+    {
+        var route = new DanceSellProviderRouteDto
+        {
+            ProviderCode = "79ai",
+            ModelName = "kling_video_motion",
+            ConfigJson = """{"mode":"standard","ratio":"default"}"""
+        };
+
+        Assert.Equal("standard", DanceSellMotionProviderContract.ResolveProviderMode(route, "720p"));
+        Assert.Equal("default", DanceSellMotionProviderContract.ResolveProviderRatio(route));
+        Assert.Equal("professional", DanceSellMotionProviderContract.MapBusinessMode("1080p"));
+
+        var root = FindRepoRoot();
+        var service = ReadStrictUtf8(Path.Combine(root, "TodoX.Web", "Services", "DanceSell", "DanceSellPhase2Services.cs"));
+        var page = ReadStrictUtf8(Path.Combine(root, "TodoX.Web", "Components", "Pages", "RDanceJobDetail.razor"));
+        var estimator = ReadStrictUtf8(Path.Combine(root, "TodoX.Web", "Services", "DanceSell", "DanceSellAiOperations.cs"));
+
+        Assert.Contains("var providerMode = DanceSellMotionProviderContract.ResolveProviderMode(motionRoute, job.Mode)", service, StringComparison.Ordinal);
+        Assert.Contains("EstimateAsync(motionRoute, providerMode", service, StringComparison.Ordinal);
+        Assert.Contains("ResolveProviderMode(route, \"720p\")", page, StringComparison.Ordinal);
+        Assert.Contains("DanceSell:Pricing:{route.ProviderCode}:{route.ModelName}:{mode}:UsdPerRequest", estimator, StringComparison.Ordinal);
+    }
+
     private static string ReadStrictUtf8(string file)
         => new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true)
             .GetString(File.ReadAllBytes(file));
@@ -275,6 +369,18 @@ public sealed class RDanceFashionDemoPageTests
         if (start < 0)
         {
             start = source.IndexOf($"private async Task<bool> {methodName}(", StringComparison.Ordinal);
+        }
+        if (start < 0)
+        {
+            start = source.IndexOf($"private async Task<Ai79MotionRuntime> {methodName}(", StringComparison.Ordinal);
+        }
+        if (start < 0)
+        {
+            start = source.IndexOf($"public async Task<DanceSellJobDto> {methodName}(", StringComparison.Ordinal);
+        }
+        if (start < 0)
+        {
+            start = source.IndexOf($"public async Task {methodName}(", StringComparison.Ordinal);
         }
 
         Assert.True(start >= 0, $"Could not locate {methodName}.");

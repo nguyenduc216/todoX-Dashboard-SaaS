@@ -1446,7 +1446,8 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
 
         var logicalRequestId = string.IsNullOrWhiteSpace(job.LogicalRequestId) ? $"dance-sell-{Guid.NewGuid():N}" : job.LogicalRequestId;
         var motionRoute = await _catalog.ResolveAsync(DanceSellOperationTypes.MotionVideo, job.MotionProviderCode, job.MotionProviderModel, ct);
-        var estimate = await _costs.EstimateAsync(motionRoute, job.Mode, null, ct);
+        var providerMode = DanceSellMotionProviderContract.ResolveProviderMode(motionRoute, job.Mode);
+        var estimate = await _costs.EstimateAsync(motionRoute, providerMode, null, ct);
         var attemptNo = await _operations.GetNextAttemptNoAsync(job.Id, DanceSellOperationTypes.MotionVideo, ct);
         var operation = await _operations.UpsertOperationAsync(new DanceSellProviderOperationDto
         {
@@ -1462,7 +1463,7 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
             Status = DanceSellOperationStatuses.Queued,
             BillingStatus = estimate.EstimatedTodoxPoints is null ? DanceSellBillingStatuses.Reconciliation : DanceSellBillingStatuses.Estimated,
             RefundStatus = DanceSellRefundStatuses.NotCharged,
-            RequestJson = DanceSellRepository.ToJson(new { job.Id, job.PreparedReferenceUrl, job.MotionVideoUrl, job.Prompt, job.Mode, job.CharacterOrientation }),
+            RequestJson = DanceSellRepository.ToJson(new { job.Id, job.PreparedReferenceUrl, job.MotionVideoUrl, job.Prompt, businessMode = job.Mode, providerMode, job.CharacterOrientation }),
             UsageUnit = estimate.UsageUnit,
             CreditsEstimated = estimate.EstimatedUsage,
             ProviderCost = estimate.EstimatedProviderCost,
@@ -1517,7 +1518,7 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
 
         var retry = await _renderJobs.RetryAsync(job.RenderJobId.Value, user.UserId, ct)
             ?? throw new InvalidOperationException("DANCE_SELL_RENDER_ENQUEUE_FAILED");
-        await _repo.SetRenderJobIdAsync(job.Id, retry.Id, ct);
+        await _repo.ResetMotionRenderStateAsync(job.Id, retry.Id, ct);
         return await _repo.GetByIdAsync(job.Id, ct) ?? job;
     }
 

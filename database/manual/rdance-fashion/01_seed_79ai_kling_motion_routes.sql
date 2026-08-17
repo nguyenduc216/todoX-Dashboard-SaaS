@@ -78,7 +78,7 @@ SELECT 'dance_sell',
        true,
        true,
        ARRAY[]::text[],
-       '{"capability":"image_to_video","displayName":"Kling Motion Control","submit_path":"/create-video","poll_path":"/video","reference_image_field":"image","motion_video_field":"video"}'::jsonb
+       '{"capability":"image_to_video","displayName":"Kling Motion Control","submit_path":"/create-video","poll_path":"/video","mode":"standard","ratio":"default","reference_image_field":"character_image","motion_video_field":"motion_video"}'::jsonb
  WHERE NOT EXISTS (
      SELECT 1
        FROM public.todox_ai_feature_provider_route
@@ -93,7 +93,7 @@ UPDATE public.todox_ai_feature_provider_route
        is_default = true,
        enabled = true,
        fallback_on = ARRAY[]::text[],
-       config_json = COALESCE(config_json, '{}'::jsonb) || '{"capability":"image_to_video","displayName":"Kling Motion Control","submit_path":"/create-video","poll_path":"/video","reference_image_field":"image","motion_video_field":"video"}'::jsonb,
+       config_json = COALESCE(config_json, '{}'::jsonb) || '{"capability":"image_to_video","displayName":"Kling Motion Control","submit_path":"/create-video","poll_path":"/video","mode":"standard","ratio":"default","reference_image_field":"character_image","motion_video_field":"motion_video"}'::jsonb,
        updated_at = now()
  WHERE feature_code = 'dance_sell'
    AND operation_type = 'motion_video'

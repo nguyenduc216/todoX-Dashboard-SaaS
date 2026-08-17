@@ -35,6 +35,7 @@ public interface IDanceSellRepository
     Task<bool> UpdateCompletedAsync(Guid id, string providerStatus, string pollResponseJson, string resultVideoUrl, CancellationToken ct = default);
     Task<bool> UpdateFailedAsync(Guid id, string status, string? providerStatus, string? responseJson, string errorCode, string errorMessage, CancellationToken ct = default);
     Task UpdateCallbackAsync(string providerTaskId, string callbackJson, string providerStatus, string? resultVideoUrl, string? errorCode, string? errorMessage, CancellationToken ct = default);
+    Task ResetMotionRenderStateAsync(Guid id, Guid renderJobId, CancellationToken ct = default);
 }
 
 public sealed class DanceSellRepository : IDanceSellRepository
@@ -236,6 +237,11 @@ public sealed class DanceSellRepository : IDanceSellRepository
                    current_stage='motion_queued',
                    provider_task_id=NULL,
                    provider_status=NULL,
+                   submit_response_json=NULL,
+                   poll_response_json=NULL,
+                   callback_json=NULL,
+                   poll_count=0,
+                   next_poll_at=NULL,
                    submitted_at=NULL,
                    last_polled_at=NULL,
                    completed_at=NULL,
@@ -258,6 +264,36 @@ public sealed class DanceSellRepository : IDanceSellRepository
                 motionProviderCapabilityId = motionRoute.ProviderCapabilityId,
                 motionProviderAccountId = motionRoute.ProviderAccountId
             });
+    }
+
+    public async Task ResetMotionRenderStateAsync(Guid id, Guid renderJobId, CancellationToken ct = default)
+    {
+        using var conn = await _factory.OpenAsync(ct);
+        await conn.ExecuteAsync(
+            """
+            UPDATE dance_sell.dance_sell_jobs
+               SET status='queued',
+                   render_job_id=@renderJobId,
+                   provider_task_id=NULL,
+                   provider_status=NULL,
+                   submit_response_json=NULL,
+                   poll_response_json=NULL,
+                   callback_json=NULL,
+                   poll_count=0,
+                   next_poll_at=NULL,
+                   submitted_at=NULL,
+                   last_polled_at=NULL,
+                   completed_at=NULL,
+                   error_code=NULL,
+                   error_message=NULL,
+                   error_json=NULL,
+                   result_video_url=NULL,
+                   current_stage='motion_queued',
+                   updated_at=now()
+             WHERE id=@id
+               AND status IN ('failed','timeout');
+            """,
+            new { id, renderJobId });
     }
 
     public async Task UpdateBusinessAsync(Guid id, DanceSellUpdateBusinessRequest request, CancellationToken ct = default)

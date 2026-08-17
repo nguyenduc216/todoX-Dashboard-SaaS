@@ -896,6 +896,7 @@ public sealed class DanceSellCostEstimator : IDanceSellCostEstimator
         var unitPrice = ReadDecimal(configDoc, "providerUnitPrice")
                         ?? ReadDecimal(configDoc, "provider_unit_price")
                         ?? ReadDecimal(configDoc, "usdPerRequest")
+                        ?? ReadDecimal($"DanceSell:Pricing:{route.ProviderCode}:{route.ModelName}:{mode}:UsdPerRequest")
                         ?? ReadDecimal($"DanceSell:Pricing:{route.ProviderCode}:{route.ModelName}:UsdPerRequest");
         var exchangeRate = ReadDecimal(configDoc, "exchangeRate")
                            ?? ReadDecimal(configDoc, "exchange_rate")
@@ -915,6 +916,7 @@ public sealed class DanceSellCostEstimator : IDanceSellCostEstimator
             OperationType = route.OperationType,
             ProviderCode = route.ProviderCode,
             ModelName = route.ModelName,
+            ProviderMode = mode,
             UsageUnit = pricingUnit,
             PricingUnit = pricingUnit,
             EstimatedUsage = estimatedUsage,
@@ -926,7 +928,9 @@ public sealed class DanceSellCostEstimator : IDanceSellCostEstimator
             EstimatedTodoxPoints = points,
             TodoXVndPerPoint = vndPerPoint,
             PricingSource = source,
-            Warning = unitPrice is null ? "Chua cau hinh don gia provider cho model nay." : null
+            Warning = unitPrice is null
+                ? $"Chua cau hinh don gia provider cho {route.ProviderCode}/{route.ModelName}/{mode}."
+                : null
         });
     }
 

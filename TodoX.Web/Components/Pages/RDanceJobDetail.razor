@@ -337,11 +337,40 @@
 
             <MudTabPanel Text="Kết quả">
                 <MudStack Spacing="3" Class="mt-4">
-                    @if (_job is null || string.IsNullOrWhiteSpace(_job.ResultVideoUrl))
+                    @if (_job is null)
                     {
                         <MudAlert Severity="Severity.Info">Kết quả sẽ xuất hiện sau khi render hoàn tất.</MudAlert>
                     }
-                    else
+                    else if (IsResultActive)
+                    {
+                        <MudPaper Class="todox-panel pa-4">
+                            <MudText Typo="Typo.h6">@_title</MudText>
+                            <div class="rdance-result-frame">
+                                <MudIcon Icon="@Icons.Material.Filled.Movie" Size="Size.Large" />
+                                <div class="rdance-processing-overlay" aria-label="Rendering video">
+                                    <span class="rdance-processing-sweep"></span>
+                                    <span class="rdance-processing-spinner"></span>
+                                    <span class="rdance-processing-dots"><i></i><i></i><i></i></span>
+                                </div>
+                            </div>
+                            <MudText Typo="Typo.body1" Class="mt-3">@ResultProgressText</MudText>
+                            <MudText Typo="Typo.caption">Kling Motion Control</MudText>
+                        </MudPaper>
+                    }
+                    else if (_job.Status is DanceSellJobStatuses.Failed or DanceSellJobStatuses.Timeout)
+                    {
+                        <MudPaper Class="todox-panel pa-4">
+                            <MudText Typo="Typo.h6">@_title</MudText>
+                            <div class="rdance-result-frame is-failed">
+                                <MudIcon Icon="@Icons.Material.Filled.ErrorOutline" Size="Size.Large" />
+                            </div>
+                            <MudAlert Severity="@(_job.Status == DanceSellJobStatuses.Timeout ? Severity.Warning : Severity.Error)" Class="mt-3">
+                                @ResultErrorText
+                            </MudAlert>
+                            <MudButton Variant="Variant.Filled" Color="Color.Warning" Disabled="@_busy" OnClick="RetryAsync">Render lại video</MudButton>
+                        </MudPaper>
+                    }
+                    else if (!string.IsNullOrWhiteSpace(_job.ResultVideoUrl))
                     {
                         <MudPaper Class="todox-panel pa-4">
                             <MudText Typo="Typo.h6">Video nhảy quảng cáo thời trang</MudText>
@@ -352,6 +381,10 @@
                                 <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="@(() => Navigation.NavigateTo("/jobs/rdance/new"))">Tạo video mới</MudButton>
                             </MudStack>
                         </MudPaper>
+                    }
+                    else
+                    {
+                        <MudAlert Severity="Severity.Info">Kết quả sẽ xuất hiện sau khi render hoàn tất.</MudAlert>
                     }
                     <MudText Typo="Typo.h6">Lịch sử video quảng cáo thời trang</MudText>
                     @foreach (var item in _history)
@@ -408,6 +441,7 @@
         && _job?.MotionVideoMediaId is not null
         && _job?.PreparedReferenceStatus == DanceSellReferenceStatuses.Approved;
     private bool IsActive => _job?.Status is DanceSellJobStatuses.Queued or DanceSellJobStatuses.Submitted or DanceSellJobStatuses.Rendering;
+    private bool IsResultActive => _job?.Status is DanceSellJobStatuses.Queued or DanceSellJobStatuses.Submitted or DanceSellJobStatuses.Rendering;
     private bool IsReferenceGenerating => _job?.PreparedReferenceStatus == DanceSellReferenceStatuses.Generating
         || _latestReference?.Status == DanceSellReferenceStatuses.Generating;
     private long MaxImageBytes => (long)Math.Max(1, DanceOptions.CurrentValue.MaxImageMb) * 1024 * 1024;
@@ -438,6 +472,12 @@
     private Color ReferenceColor => _job?.PreparedReferenceStatus == DanceSellReferenceStatuses.Approved ? Color.Success : Color.Warning;
     private bool HasTikTokSource => _job?.MotionSourceType == DanceSellMotionSourceTypes.TikTok && !string.IsNullOrWhiteSpace(_job.MotionSourceUrl);
     private bool CanRunReferenceComparison => AuthState.CurrentUser is not null && DanceSellSecurity.IsAdmin(AuthState.CurrentUser);
+    private string ResultProgressText => _job?.Status == DanceSellJobStatuses.Queued
+        ? "Đang chuẩn bị render video..."
+        : "Đang tạo video...";
+    private string ResultErrorText => _job?.Status == DanceSellJobStatuses.Timeout
+        ? $"Render video quá thời gian: {(_job.ErrorMessage ?? "Vui lòng thử render lại.")}"
+        : $"Tạo video thất bại: {(_job?.ErrorMessage ?? "Vui lòng thử render lại.")}";
 
     protected override void OnInitialized()
     {
@@ -772,6 +812,7 @@
     private async Task RetryAsync() => await RunAsync(async () =>
     {
         _job = await DanceSell.RetryAsync(_job!.Id, AuthState.CurrentUser!);
+        _tabIndex = 3;
         await ReloadAsync();
     });
 
@@ -796,7 +837,8 @@
     {
         var route = _motionRoutes.FirstOrDefault(x => x.ProviderCode.Equals(DanceSellConstants.ProviderCode, StringComparison.OrdinalIgnoreCase)) ?? _motionRoutes.FirstOrDefault();
         if (route is null) return;
-        _estimate = await Costs.EstimateAsync(route, "720p", null);
+        var providerMode = DanceSellMotionProviderContract.ResolveProviderMode(route, "720p");
+        _estimate = await Costs.EstimateAsync(route, providerMode, null);
         if (AuthState.CurrentUser?.CustomerId is Guid customerId) _balance = await Wallet.GetBalanceAsync(customerId);
     }
 
@@ -935,6 +977,9 @@
     .rdance-replace-button { position: relative; display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 0 12px; overflow: hidden; border: 1px solid rgba(245,181,64,.55); border-radius: 8px; color: #f5b540; font-size: .8125rem; font-weight: 700; text-transform: uppercase; cursor: pointer; }
     .rdance-media-preview { aspect-ratio: 9 / 12; display: grid; place-items: center; overflow: hidden; border-radius: 8px; background: rgba(255,255,255,.05); margin: 12px 0; }
     .rdance-media-preview img { width: 100%; height: 100%; object-fit: contain; }
+    .rdance-result-frame { position: relative; aspect-ratio: 16 / 9; display: grid; place-items: center; overflow: hidden; width: min(100%, 720px); border-radius: 8px; background: #090d12; color: rgba(255,255,255,.42); }
+    .rdance-result-frame .rdance-processing-overlay { inset: 0; }
+    .rdance-result-frame.is-failed { border: 1px solid rgba(244,67,54,.36); background: rgba(244,67,54,.08); color: rgba(255,255,255,.58); }
     .rdance-media-player, .rdance-result-player { width: 100%; max-height: 520px; border-radius: 8px; background: #090d12; }
     .rdance-result-player { max-width: 720px; aspect-ratio: 9 / 16; object-fit: contain; }
 </style>

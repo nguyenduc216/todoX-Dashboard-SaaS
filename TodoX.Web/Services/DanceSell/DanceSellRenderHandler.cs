@@ -103,6 +103,26 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
     private async Task Submit79AiAsync(RenderJobDto renderJob, DanceSellJobDto danceJob, Guid? operationId, CancellationToken ct)
     {
         var runtime = await Resolve79AiRuntimeAsync(danceJob, ct);
+        if (danceJob.PreparedReferenceStatus != DanceSellReferenceStatuses.Approved)
+        {
+            await FailAsync(renderJob, danceJob, "DANCE_SELL_REFERENCE_NOT_APPROVED", "Approved reference image is required before creating the motion video.", "{}", permanent: true, ct);
+            throw new RenderJobTerminalFailureException("DANCE_SELL_REFERENCE_NOT_APPROVED");
+        }
+
+        var referenceImageUrl = FirstNonBlank(danceJob.PreparedReferenceUrl);
+        if (referenceImageUrl is null)
+        {
+            await FailAsync(renderJob, danceJob, "DANCE_SELL_REFERENCE_URL_REQUIRED", "Approved reference image URL is required before creating the motion video.", "{}", permanent: true, ct);
+            throw new RenderJobTerminalFailureException("DANCE_SELL_REFERENCE_URL_REQUIRED");
+        }
+
+        var motionVideoUrl = FirstNonBlank(danceJob.MotionVideoUrl);
+        if (motionVideoUrl is null)
+        {
+            await FailAsync(renderJob, danceJob, "DANCE_SELL_MOTION_VIDEO_URL_REQUIRED", "Motion video URL is required before creating the motion video.", "{}", permanent: true, ct);
+            throw new RenderJobTerminalFailureException("DANCE_SELL_MOTION_VIDEO_URL_REQUIRED");
+        }
+
         var request = new Ai79TaskSubmitRequest(
             runtime.BaseUrl,
             runtime.SubmitPath,
@@ -110,26 +130,30 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
             runtime.Domain,
             runtime.Model,
             danceJob.Prompt,
-            [danceJob.PreparedReferenceUrl ?? danceJob.CharacterImageUrl],
+            [referenceImageUrl],
             new Dictionary<string, string?>
             {
                 ["type"] = "video",
-                [runtime.MotionVideoField] = danceJob.MotionVideoUrl,
-                ["mode"] = danceJob.Mode,
-                ["ratio"] = "9:16"
+                [runtime.MotionVideoField] = motionVideoUrl,
+                ["mode"] = runtime.ProviderMode,
+                ["ratio"] = runtime.ProviderRatio
             },
             Ai79TaskOperation.Video,
             runtime.ReferenceImageField);
+        var submittedAt = DateTime.UtcNow;
         var requestJson = JsonSerializer.Serialize(new
         {
             providerCode = runtime.ProviderCode,
             model = runtime.Model,
             endpointPath = runtime.SubmitPath,
+            referenceImageField = runtime.ReferenceImageField,
+            motionVideoField = runtime.MotionVideoField,
+            referenceImageUrl,
+            motionVideoUrl,
+            providerMode = runtime.ProviderMode,
+            providerRatio = runtime.ProviderRatio,
             prompt = danceJob.Prompt,
-            referenceImage = danceJob.PreparedReferenceUrl ?? danceJob.CharacterImageUrl,
-            motionVideo = danceJob.MotionVideoUrl,
-            mode = danceJob.Mode,
-            ratio = "9:16"
+            submittedAt
         }, KieJson.Options);
 
         try
@@ -142,7 +166,7 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
             }
 
             await _renderJobs.AddEventAsync(renderJob.Id, "AI79_MOTION_TASK_SUBMITTED", "79AI Kling Motion Control task submitted.",
-                new { danceSellJobId = danceJob.Id, taskId = submitted.TaskId, runtime.Model }, ct: ct);
+                new { danceSellJobId = danceJob.Id, taskId = submitted.TaskId, runtime.Model, runtime.ProviderMode, runtime.ProviderRatio }, ct: ct);
             await LogUsageAsync(danceJob, renderJob, "submitted", submitted.TaskId, "submitted", null, null, ct);
             await ScheduleNextPollAsync(renderJob, "79AI motion task submitted; polling scheduled.", ct);
         }
@@ -237,6 +261,8 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
             ?? throw new InvalidOperationException("DANCE_SELL_79AI_PROVIDER_NOT_CONFIGURED");
         var credential = await _credentials.ResolveAsync(route.ProviderCode, "access_token", ct);
         var account = await _credentialRepository.GetAccountByIdAsync(credential.ProviderAccountId, ct);
+        var providerMode = DanceSellMotionProviderContract.ResolveProviderMode(route, job.Mode);
+        var providerRatio = DanceSellMotionProviderContract.ResolveProviderRatio(route);
         return new Ai79MotionRuntime(
             route.ProviderCode,
             route.ModelName,
@@ -244,8 +270,10 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
             FirstNonBlank(ReadConfigString(account?.ConfigJson, "domain"), ReadConfigString(provider.ConfigJson, "domain"), "79ai.net")!,
             ReadConfigString(route.ConfigJson, "submit_path") ?? "/create-video",
             ReadConfigString(route.ConfigJson, "poll_path") ?? "/video",
-            ReadConfigString(route.ConfigJson, "reference_image_field") ?? "image",
-            ReadConfigString(route.ConfigJson, "motion_video_field") ?? "video",
+            DanceSellMotionProviderContract.ResolveReferenceImageField(route),
+            DanceSellMotionProviderContract.ResolveMotionVideoField(route),
+            providerMode,
+            providerRatio,
             credential);
     }
 
@@ -261,6 +289,8 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
         string PollPath,
         string ReferenceImageField,
         string MotionVideoField,
+        string ProviderMode,
+        string ProviderRatio,
         ResolvedProviderCredential Credential);
 
     private static string? ReadConfigString(string? rawJson, string propertyName)

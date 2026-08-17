@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace TodoX.Web.Services.DanceSell;
 
 public static class DanceSellConstants
@@ -312,6 +314,69 @@ public sealed class DanceSellReferenceVersionDto
     public DateTime? CompletedAt { get; set; }
 }
 
+public static class DanceSellMotionProviderContract
+{
+    public const string DefaultProviderMode = "standard";
+    public const string DefaultProviderRatio = "default";
+    public const string DefaultReferenceImageField = "character_image";
+    public const string DefaultMotionVideoField = "motion_video";
+
+    public static string ResolveProviderMode(DanceSellProviderRouteDto route, string? businessMode)
+        => FirstNonBlank(
+               ReadConfigString(route.ConfigJson, "mode"),
+               ReadConfigString(route.ConfigJson, "provider_mode"),
+               MapBusinessMode(businessMode),
+               DefaultProviderMode)!;
+
+    public static string ResolveProviderRatio(DanceSellProviderRouteDto route)
+        => FirstNonBlank(
+               ReadConfigString(route.ConfigJson, "ratio"),
+               ReadConfigString(route.ConfigJson, "provider_ratio"),
+               DefaultProviderRatio)!;
+
+    public static string ResolveReferenceImageField(DanceSellProviderRouteDto route)
+        => FirstNonBlank(ReadConfigString(route.ConfigJson, "reference_image_field"), DefaultReferenceImageField)!;
+
+    public static string ResolveMotionVideoField(DanceSellProviderRouteDto route)
+        => FirstNonBlank(ReadConfigString(route.ConfigJson, "motion_video_field"), DefaultMotionVideoField)!;
+
+    public static string MapBusinessMode(string? businessMode)
+    {
+        var value = businessMode?.Trim();
+        return value?.ToLowerInvariant() switch
+        {
+            "720p" => "standard",
+            "1080p" => "professional",
+            "standard" => "standard",
+            "professional" => "professional",
+            _ => DefaultProviderMode
+        };
+    }
+
+    private static string? ReadConfigString(string? rawJson, string propertyName)
+    {
+        if (string.IsNullOrWhiteSpace(rawJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(rawJson);
+            return doc.RootElement.TryGetProperty(propertyName, out var value) && value.ValueKind == JsonValueKind.String
+                ? value.GetString()
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static string? FirstNonBlank(params string?[] values)
+        => values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim();
+}
+
 public sealed class DanceSellReferenceComparisonResultDto
 {
     public DanceSellReferenceComparisonCandidate Candidate { get; set; } = new("79ai", string.Empty, string.Empty);
@@ -542,6 +607,7 @@ public sealed class DanceSellCostEstimate
     public string OperationType { get; set; } = string.Empty;
     public string ProviderCode { get; set; } = string.Empty;
     public string ModelName { get; set; } = string.Empty;
+    public string? ProviderMode { get; set; }
     public string UsageUnit { get; set; } = "credits";
     public decimal EstimatedUsage { get; set; }
     public decimal? ProviderUnitPrice { get; set; }

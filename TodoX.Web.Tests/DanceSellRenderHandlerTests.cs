@@ -218,6 +218,7 @@ public sealed class DanceSellRenderHandlerTests
         public Task<IReadOnlyList<DanceSellJobDto>> ListAsync(Guid? customerId = null, int limit = 20, int offset = 0, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<DanceSellJobDto?> GetByRenderJobIdAsync(Guid renderJobId, CancellationToken ct = default) => throw new NotImplementedException();
         public Task SetRenderJobIdAsync(Guid id, Guid renderJobId, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task ResetMotionRenderStateAsync(Guid id, Guid renderJobId, CancellationToken ct = default) => throw new NotImplementedException();
         public Task QueueForRenderAsync(Guid id, Guid renderJobId, string logicalRequestId, string preparedReferenceUrl, string motionVideoUrl, DanceSellProviderRouteDto motionRoute, CancellationToken ct = default) => throw new NotImplementedException();
         public Task UpdateBusinessAsync(Guid id, DanceSellUpdateBusinessRequest request, CancellationToken ct = default) => throw new NotImplementedException();
         public Task UpdateCharacterAsync(Guid id, Guid mediaId, string objectKey, string publicUrl, CancellationToken ct = default) => throw new NotImplementedException();
