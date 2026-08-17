@@ -162,11 +162,15 @@ public sealed class DanceSellPhase2ValidationTests
         var generate = GetMethodSection(service, "GenerateAsync");
 
         Assert.Contains("Create ONE single photorealistic fashion try-on image.", prompt, StringComparison.Ordinal);
-        Assert.Contains("The model MUST WEAR the actual clothing/product shown in the product image", prompt, StringComparison.Ordinal);
+        Assert.Contains("Preserve the same person from the character reference image.", prompt, StringComparison.Ordinal);
+        Assert.Contains("Preserve the same face, hairstyle, expression, skin tone, body proportions, pose direction, hand position, and overall studio or background feel as much as possible.", prompt, StringComparison.Ordinal);
+        Assert.Contains("The model MUST WEAR the exact clothing/product shown in the product image.", prompt, StringComparison.Ordinal);
+        Assert.Contains("The final outfit must visually read as the same outfit from the product image, not a similar one.", prompt, StringComparison.Ordinal);
         Assert.Contains("same person", prompt, StringComparison.Ordinal);
         Assert.Contains("face", prompt, StringComparison.Ordinal);
         Assert.Contains("hairstyle", prompt, StringComparison.Ordinal);
         Assert.Contains("body proportions", prompt, StringComparison.Ordinal);
+        Assert.Contains("A human viewer should immediately recognize that the model is wearing the exact outfit from the product image.", prompt, StringComparison.Ordinal);
 
         foreach (var blocked in new[]
         {
