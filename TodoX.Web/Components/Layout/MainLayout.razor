@@ -311,6 +311,9 @@
             list.Add(BuildCustomerWorkspaceGroup(existingCodes));
         }
 
+        EnsureAiStudioItem(list, existingCodes, BuildAiStudioVoicesItem());
+        EnsureAiStudioItem(list, existingCodes, BuildAiStudioMusicItem());
+
         // Ensure "AI Providers" is always reachable even if the DB menu has not been seeded with it.
         if (!existingCodes.Contains("ai_providers"))
         {
@@ -351,6 +354,63 @@
 
         return list;
     }
+
+    private static void EnsureAiStudioItem(List<NavigationMenuGroupDto> list, ISet<string> existingCodes, NavigationMenuItemDto item)
+    {
+        if (existingCodes.Contains(item.Code))
+        {
+            return;
+        }
+
+        var aiStudio = list.FirstOrDefault(g => g.Code.Equals("ai_studio", StringComparison.OrdinalIgnoreCase));
+        if (aiStudio is not null)
+        {
+            item.GroupId = aiStudio.Id;
+            aiStudio.Items.Add(item);
+            return;
+        }
+
+        var groupId = Guid.NewGuid();
+        item.GroupId = groupId;
+        list.Add(new NavigationMenuGroupDto
+        {
+            Id = groupId,
+            Code = "ai_studio",
+            Title = "AI Studio",
+            IconKey = "AutoFixHigh",
+            SortOrder = 40,
+            DefaultExpanded = true,
+            Items = new List<NavigationMenuItemDto> { item }
+        });
+    }
+
+    private static NavigationMenuItemDto BuildAiStudioVoicesItem()
+        => new()
+        {
+            Id = Guid.NewGuid(),
+            Code = "ai_studio_voices",
+            Title = "Giọng đọc",
+            Href = "/admin/ai-studio/voices",
+            IconKey = "RecordVoiceOver",
+            ModuleKeys = new[] { "settings", "services", "api_providers" },
+            VisibilityPolicy = "admin_avatar_manager",
+            MatchAll = false,
+            SortOrder = 37
+        };
+
+    private static NavigationMenuItemDto BuildAiStudioMusicItem()
+        => new()
+        {
+            Id = Guid.NewGuid(),
+            Code = "ai_studio_music",
+            Title = "Nhạc nền",
+            Href = "/admin/ai-studio/music",
+            IconKey = "LibraryMusic",
+            ModuleKeys = new[] { "settings", "services", "api_providers" },
+            VisibilityPolicy = "admin_avatar_manager",
+            MatchAll = false,
+            SortOrder = 38
+        };
 
     private static NavigationMenuItemDto BuildAiProvidersItem()
         => new()
@@ -436,6 +496,8 @@
         "Security" => Icons.Material.Filled.Security,
         "Settings" => Icons.Material.Filled.Settings,
         "AutoFixHigh" => Icons.Material.Filled.AutoFixHigh,
+        "RecordVoiceOver" => Icons.Material.Filled.RecordVoiceOver,
+        "LibraryMusic" => Icons.Material.Filled.LibraryMusic,
         "PermMedia" => Icons.Material.Filled.PermMedia,
         "Api" => Icons.Material.Filled.Api,
         "Dns" => Icons.Material.Filled.Dns,
