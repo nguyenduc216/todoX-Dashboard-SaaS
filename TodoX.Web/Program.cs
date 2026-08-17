@@ -50,6 +50,7 @@ builder.Services.AddScoped<AuditRepository>();
 builder.Services.AddScoped<BillingRepository>();
 builder.Services.AddScoped<CatalogRepository>();
 builder.Services.AddScoped<CatalogAdminRepository>();
+builder.Services.AddScoped<IAiStudioCatalogService, AiStudioCatalogService>();
 builder.Services.AddScoped<IServiceSellPriceResolver, ServiceSellPriceResolver>();
 builder.Services.AddScoped<ITimelapseProfileRepository, TimelapseProfileRepository>();
 builder.Services.AddScoped<ITimelapseWorkflowService, TimelapseWorkflowService>();
@@ -418,6 +419,7 @@ extensionApi.MapGet("/download", async (
 
 app.MapDanceSellPhase1Endpoints();
 app.MapDanceSellPhase2Endpoints();
+app.MapAiStudioCatalogEndpoints();
 
 app.MapPost("/api/ai/cost/estimate", async (
     TodoX.Web.Services.AiProviders.IAiPricingService pricing,
