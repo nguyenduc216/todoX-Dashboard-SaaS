@@ -9,7 +9,7 @@
   - `9d1884d` `feat(rvideo): add dashboard shell information and execution mode`
   - `4e000e0` `feat(rvideo): add scene editor and json import export`
   - correction commit: `fix(rvideo): complete information settings and auto render configuration`
-- Final SHA: populated after the correction commit is created.
+- Final SHA: `6047420` (correction implementation commit; this report update follows in a separate commit).
 
 ## Implemented
 
