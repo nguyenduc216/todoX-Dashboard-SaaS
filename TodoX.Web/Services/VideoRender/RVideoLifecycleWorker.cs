@@ -81,8 +81,15 @@ public sealed class RVideoLifecycleWorker : BackgroundService
         }
 
         var renderSettings = RVideoRules.ResolveRenderSettings(project.OriginalPrompt);
-        var sceneStatuses = project.Scenes.Select(x => x.Status).ToList();
-        var decision = RVideoRules.Evaluate(setting.ExecutionMode, sceneStatuses, !string.IsNullOrWhiteSpace(project.FinalVideoUrl));
+        var activeSceneIds = await LoadActiveSceneIdsAsync(factory, tenant, project.Id, ct);
+        var sceneStates = project.Scenes
+            .Select(scene => RVideoSceneLifecycleClassifier.Classify(
+                scene,
+                project.Events,
+                activeSceneIds.ImageSceneIds.Contains(scene.Id),
+                activeSceneIds.VideoSceneIds.Contains(scene.Id)))
+            .ToList();
+        var decision = RVideoRules.Evaluate(setting.ExecutionMode, sceneStates, !string.IsNullOrWhiteSpace(project.FinalVideoUrl));
         var settingsRepo = new RVideoJobSettingsRepository(factory, tenant, catalog);
         if (!string.Equals(setting.CurrentStage, decision.Stage, StringComparison.OrdinalIgnoreCase))
         {
@@ -90,7 +97,12 @@ public sealed class RVideoLifecycleWorker : BackgroundService
         }
 
         var userId = project.UserId ?? Guid.Empty;
-        if (RVideoRules.NeedsImageWork(sceneStatuses))
+        var imageSceneIds = sceneStates
+            .Where(RVideoRules.NeedsImageWork)
+            .Select(x => x.SceneId)
+            .ToArray();
+        if (!sceneStates.Any(x => x.ImageFailedTerminal && !x.ImageRetryRequested)
+            && imageSceneIds.Length > 0)
         {
             var imageInput = new SceneImageBatchInput
             {
@@ -100,7 +112,8 @@ public sealed class RVideoLifecycleWorker : BackgroundService
                 CharacterReferenceUrl = ReadSnapshotString(setting.CharacterSnapshotJson, "fileUrl", "masterImageUrl"),
                 UserId = userId,
                 CustomerId = project.CustomerId,
-                OnlyMissingOrFailed = true
+                OnlyMissingOrFailed = true,
+                SceneIds = imageSceneIds
             };
             await jobs.EnqueueForProjectIfNoneActiveAsync(new RenderJobCreateModel
             {
@@ -119,7 +132,7 @@ public sealed class RVideoLifecycleWorker : BackgroundService
         }
         else if (decision.ShouldQueueVideo)
         {
-            var sceneIds = project.Scenes.Where(x => x.Status == VideoSceneStatuses.ImageReady).Select(x => x.Id).ToArray();
+            var sceneIds = sceneStates.Where(x => x.IsImageReady).Select(x => x.SceneId).ToArray();
             if (sceneIds.Length == 0) return;
             await jobs.EnqueueForProjectIfNoneActiveAsync(new RenderJobCreateModel
             {
@@ -157,6 +170,116 @@ public sealed class RVideoLifecycleWorker : BackgroundService
                 MaxAttempts = 1
             }, project.Id, ct);
         }
+    }
+
+    private static async Task<(HashSet<long> ImageSceneIds, HashSet<long> VideoSceneIds)> LoadActiveSceneIdsAsync(
+        TodoXConnectionFactory factory,
+        TenantContext tenant,
+        long projectId,
+        CancellationToken ct)
+    {
+        using var conn = await factory.OpenAsync(ct);
+        var rows = await conn.QueryAsync<ActiveRenderJobRow>(
+            """
+            SELECT job_type AS JobType, input_json::text AS InputJson
+              FROM render.render_jobs
+             WHERE tenant_id=@tenant
+               AND job_type = ANY(@jobTypes)
+               AND status = ANY(@statuses)
+               AND input_json->>'projectId' = CAST(@projectId AS text);
+            """,
+            new
+            {
+                tenant = tenant.TenantId,
+                projectId,
+                jobTypes = new[]
+                {
+                    SceneImageBatchRenderHandler.JobTypeName,
+                    SceneVideoRenderHandler.JobTypeName
+                },
+                statuses = new[]
+                {
+                    RenderJobStatuses.Queued,
+                    RenderJobStatuses.Preparing,
+                    RenderJobStatuses.Rendering,
+                    RenderJobStatuses.PostProcessing,
+                    RenderJobStatuses.PendingReconciliation
+                }
+            });
+
+        var imageSceneIds = new HashSet<long>();
+        var videoSceneIds = new HashSet<long>();
+        foreach (var row in rows)
+        {
+            var target = row.JobType == SceneImageBatchRenderHandler.JobTypeName
+                ? imageSceneIds
+                : videoSceneIds;
+            var parsed = ReadSceneIds(row.InputJson);
+            if (parsed.Count == 0)
+            {
+                target.Add(-1);
+                continue;
+            }
+
+            target.UnionWith(parsed);
+        }
+
+        if (imageSceneIds.Remove(-1))
+        {
+            imageSceneIds.UnionWith(await ListProjectSceneIdsAsync(conn, tenant.TenantId, projectId));
+        }
+        if (videoSceneIds.Remove(-1))
+        {
+            videoSceneIds.UnionWith(await ListProjectSceneIdsAsync(conn, tenant.TenantId, projectId));
+        }
+
+        return (imageSceneIds, videoSceneIds);
+    }
+
+    private static async Task<HashSet<long>> ListProjectSceneIdsAsync(
+        System.Data.IDbConnection conn,
+        Guid tenantId,
+        long projectId)
+    {
+        var ids = await conn.QueryAsync<long>(
+            """
+            SELECT id
+              FROM video_render.video_project_scenes
+             WHERE project_id=@projectId AND tenant_id=@tenant;
+            """,
+            new { projectId, tenant = tenantId });
+        return ids.ToHashSet();
+    }
+
+    private static HashSet<long> ReadSceneIds(string json)
+    {
+        var ids = new HashSet<long>();
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            if (!document.RootElement.TryGetProperty("sceneIds", out var values)
+                || values.ValueKind != JsonValueKind.Array)
+            {
+                return ids;
+            }
+
+            foreach (var value in values.EnumerateArray())
+            {
+                if (value.ValueKind == JsonValueKind.Number && value.TryGetInt64(out var id))
+                    ids.Add(id);
+            }
+        }
+        catch (JsonException)
+        {
+        }
+
+        return ids;
+    }
+
+    private sealed class ActiveRenderJobRow
+    {
+        public string JobType { get; set; } = string.Empty;
+        public string InputJson { get; set; } = "{}";
     }
 
     private static async Task<IReadOnlyList<RVideoJobSettingsDto>> ListAutoSettingsAsync(TodoXConnectionFactory factory, TenantContext tenant, CancellationToken ct)

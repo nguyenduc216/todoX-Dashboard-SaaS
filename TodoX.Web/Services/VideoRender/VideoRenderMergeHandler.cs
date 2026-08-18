@@ -130,12 +130,21 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
                     url,
                     finalPath,
                     PosterUrl: null,
-                    DurationSeconds: project.Scenes.Sum(x => (decimal)x.DurationSeconds),
+                    DurationSeconds: RVideoRules.CalculateMergedDuration(mergeableScenes),
                     "video/mp4"), ct);
             }
 
             await _repo.UpdateProjectAsync(project.Id, VideoProjectStatuses.Completed, url, finalPath, null, ct);
-            await _repo.AddProjectEventAsync(project.Id, "PROJECT_MERGED", "info", "Final video merged.", new { finalPath, url }, ct);
+            var finalDurationSeconds = RVideoRules.CalculateMergedDuration(mergeableScenes);
+            await _repo.AddProjectEventAsync(project.Id, "PROJECT_MERGED", "info", "Final video merged.", new
+            {
+                finalPath,
+                url,
+                mergedSceneCount = mergeableScenes.Count,
+                failedSceneCount = project.Scenes.Count - mergeableScenes.Count,
+                mergedSceneIndexes = mergeableScenes.Select(x => x.SceneIndex).ToArray(),
+                finalDurationSeconds
+            }, ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

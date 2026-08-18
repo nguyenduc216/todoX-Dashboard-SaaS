@@ -58,7 +58,7 @@ public sealed class RVideoFoundationTests
     [Theory]
     [InlineData(new[] { VideoSceneStatuses.Draft, VideoSceneStatuses.Draft }, true)]
     [InlineData(new[] { VideoSceneStatuses.ImageReady, VideoSceneStatuses.Draft }, true)]
-    [InlineData(new[] { VideoSceneStatuses.ImageReady, VideoSceneStatuses.Failed }, true)]
+    [InlineData(new[] { VideoSceneStatuses.ImageReady, VideoSceneStatuses.Failed }, false)]
     [InlineData(new[] { VideoSceneStatuses.ImageReady, VideoSceneStatuses.ImageReady }, false)]
     [InlineData(new[] { VideoSceneStatuses.VideoRendering, VideoSceneStatuses.ImageReady }, false)]
     [InlineData(new[] { VideoSceneStatuses.VideoReady, VideoSceneStatuses.VideoReady }, false)]
@@ -108,6 +108,129 @@ public sealed class RVideoFoundationTests
     }
 
     [Fact]
+    public void TerminalImageFailureDoesNotAutoRetry()
+    {
+        var scene = LifecycleState(imageFailed: true);
+
+        Assert.False(RVideoRules.NeedsImageWork(scene));
+    }
+
+    [Fact]
+    public void ExplicitImageRetryBecomesRetryable()
+    {
+        var scene = LifecycleState(imageFailed: true, imageRetryRequested: true);
+
+        Assert.True(RVideoRules.NeedsImageWork(scene));
+    }
+
+    [Fact]
+    public void ImageFailuresStayAtImageStageAndDoNotFinalize()
+    {
+        var decision = RVideoRules.Evaluate(RVideoExecutionModes.Auto,
+            new[] { LifecycleState(imageFailed: true), LifecycleState(imageFailed: true, sceneId: 2) }, false);
+
+        Assert.False(decision.ShouldFinalize);
+        Assert.Equal(RVideoStages.Image, decision.Stage);
+    }
+
+    [Fact]
+    public void StageAwarePartialVideoFailureFinalizes()
+    {
+        var decision = RVideoRules.Evaluate(RVideoExecutionModes.Auto,
+            new[] { LifecycleState(hasVideo: true), LifecycleState(videoFailed: true, sceneId: 2) }, false);
+
+        Assert.True(decision.ShouldFinalize);
+    }
+
+    [Fact]
+    public void ImageFailureAndVideoReadyDoesNotFinalize()
+    {
+        var decision = RVideoRules.Evaluate(RVideoExecutionModes.Auto,
+            new[] { LifecycleState(imageFailed: true), LifecycleState(hasVideo: true, sceneId: 2) }, false);
+
+        Assert.False(decision.ShouldFinalize);
+        Assert.Equal(RVideoStages.Image, decision.Stage);
+    }
+
+    [Fact]
+    public void ClassifierUsesPersistedFailureEventToDistinguishImageAndVideoFailure()
+    {
+        var failedScene = new VideoProjectSceneDto
+        {
+            Id = 7,
+            SceneIndex = 1,
+            Status = VideoSceneStatuses.Failed
+        };
+        var imageFailure = RVideoSceneLifecycleClassifier.Classify(failedScene, new[]
+        {
+            new VideoProjectEventDto
+            {
+                Id = 1,
+                EventType = "SCENE_IMAGE_RENDER_FAILED",
+                DataJson = """{"sceneId":7}""",
+                CreatedAt = DateTime.UtcNow
+            }
+        });
+        var videoFailure = RVideoSceneLifecycleClassifier.Classify(failedScene, new[]
+        {
+            new VideoProjectEventDto
+            {
+                Id = 2,
+                EventType = "SCENE_VIDEO_RENDER_FAILED",
+                DataJson = """{"sceneId":7}""",
+                CreatedAt = DateTime.UtcNow
+            }
+        });
+
+        Assert.True(imageFailure.ImageFailedTerminal);
+        Assert.False(imageFailure.VideoFailedTerminal);
+        Assert.True(videoFailure.VideoFailedTerminal);
+        Assert.False(videoFailure.ImageFailedTerminal);
+    }
+
+    [Fact]
+    public void ImageReadyAndVideoReadyQueuesOnlyPendingVideo()
+    {
+        var states = new[]
+        {
+            LifecycleState(hasImage: true),
+            LifecycleState(hasVideo: true, sceneId: 2)
+        };
+        var decision = RVideoRules.Evaluate(RVideoExecutionModes.Auto, states, false);
+
+        Assert.True(decision.ShouldQueueVideo);
+        Assert.Equal(new[] { 1L }, states.Where(x => x.IsImageReady).Select(x => x.SceneId));
+    }
+
+    [Fact]
+    public void ActiveVideoAndImageFailureDoesNotRequestImageWork()
+    {
+        var states = new[]
+        {
+            LifecycleState(videoAttemptActive: true),
+            LifecycleState(imageFailed: true, sceneId: 2)
+        };
+        var decision = RVideoRules.Evaluate(RVideoExecutionModes.Auto, states, false);
+
+        Assert.DoesNotContain(states, RVideoRules.NeedsImageWork);
+        Assert.False(decision.ShouldQueueVideo);
+        Assert.False(decision.ShouldFinalize);
+    }
+
+    [Fact]
+    public void FinalDurationUsesMergeableScenesOnly()
+    {
+        var duration = RVideoRules.CalculateMergedDuration(new[]
+        {
+            new VideoProjectSceneDto { DurationSeconds = 8, Status = VideoSceneStatuses.VideoReady },
+            new VideoProjectSceneDto { DurationSeconds = 8, Status = VideoSceneStatuses.Failed },
+            new VideoProjectSceneDto { DurationSeconds = 6, Status = VideoSceneStatuses.VideoReady }
+        }.Where(x => x.Status == VideoSceneStatuses.VideoReady));
+
+        Assert.Equal(14m, duration);
+    }
+
+    [Fact]
     public void TenantGuardRejectsForeignOrMissingProject()
     {
         var tenant = Guid.NewGuid();
@@ -123,6 +246,16 @@ public sealed class RVideoFoundationTests
             new[] { VideoSceneStatuses.ImageReady }, false);
 
         Assert.Equal(RVideoStages.Image, decision.Stage);
+        Assert.False(decision.ShouldQueueVideo);
+        Assert.False(decision.ShouldFinalize);
+    }
+
+    [Fact]
+    public void StageAwareManualLifecycleDoesNotQueueVideoOrFinalize()
+    {
+        var decision = RVideoRules.Evaluate(RVideoExecutionModes.Manual,
+            new[] { LifecycleState(hasImage: true) }, false);
+
         Assert.False(decision.ShouldQueueVideo);
         Assert.False(decision.ShouldFinalize);
     }
@@ -209,4 +342,24 @@ public sealed class RVideoFoundationTests
         valid.IsActive = false;
         Assert.Throws<InvalidOperationException>(() => RVideoRules.ValidateActiveMusic(valid, request));
     }
+
+    private static RVideoSceneLifecycleState LifecycleState(
+        long sceneId = 1,
+        bool hasImage = false,
+        bool hasVideo = false,
+        bool imageFailed = false,
+        bool videoFailed = false,
+        bool videoAttemptActive = false,
+        bool imageRetryRequested = false)
+        => new(
+            sceneId,
+            (int)sceneId,
+            8,
+            hasImage,
+            hasVideo,
+            ImageAttemptActive: false,
+            imageFailed,
+            videoAttemptActive,
+            videoFailed,
+            imageRetryRequested);
 }

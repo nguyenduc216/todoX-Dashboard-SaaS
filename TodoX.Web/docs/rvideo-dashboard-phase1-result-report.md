@@ -1,84 +1,59 @@
-# RVIDEO Dashboard Phase 1 - Result Report
+# RVIDEO Phase 1 Final Hotfix Report
 
-## Git
+## 1. Git
 
-- Branch: `integration/rdance-on-construction-video-core`
-- Starting SHA: `6faf7b212d8c9fe2d923aa1f360bc4e3721b23eb`
-- Scope: native TodoX RVIDEO dashboard foundation; no Telegram wrapper and no n8n change.
-- Commits:
-  - `9d1884d` `feat(rvideo): add dashboard shell information and execution mode`
-  - `4e000e0` `feat(rvideo): add scene editor and json import export`
-  - `6047420` `fix(rvideo): complete information settings and auto render configuration`
-  - hotfix: `fix(rvideo): harden auto lifecycle and tenant safety`
-- Final SHA: `48cbd9b` (hotfix implementation; report metadata follows in the documentation commit).
+- Starting SHA: `c9adbf6000d4d286b3219e6908303ebffbe0cf73`
+- Final SHA: `c7cefc7f07ebc66418ef7908c7bb76bdef56e1a5`
+- Commit: `fix(rvideo): prevent terminal image retry loops`
 
-## Implemented
+## 2. Root Cause
 
-- Added RVIDEO constants and validation for execution mode, lifecycle stage, voice mode, music volume, TTS rate, and supported scene durations `4/6/8/10`.
-- Added additive RVIDEO settings repository with tenant-scoped persistence for:
-  - `MANUAL` / `AUTO`
-  - current stage `INFO/SCENE/IMAGE/VIDEO/RESULT`
-  - character mode and snapshot fields
-  - voice mode/catalog code/snapshot/rate
-  - music catalog code/snapshot/volume
-- Added native endpoints:
-  - `GET /api/rvideo/projects/{projectId}/settings`
-  - `PUT /api/rvideo/projects/{projectId}/settings`
-  - `POST /api/rvideo/scenes/import`
-  - `POST /api/rvideo/scenes/export`
-- Added JSON import/export support with all requested narration aliases:
-  `voice`, `dialogue`, `dialogue_text`, `tts_text`, `narration`, `narration_text`,
-  `voice_over`, `voiceover`, `script`.
-- Added the fifth dashboard tab (`Thông tin`, `Scene`, `Hình ảnh`, `Video`, `Kết quả`) and execution-mode control.
-- Disabled browser-driven lifecycle transitions. Browser polling only refreshes display state.
-- Added `RVideoLifecycleWorker`, which evaluates AUTO jobs server-side and uses the existing project-scoped idempotent enqueue/claim/lock worker architecture for video and final merge.
-- Added regression tests for import aliases/order, manual stop, AUTO transitions, duration validation, and library voice validation.
-- Removed the hard-coded AUTO video values `9:16` and `720P`; lifecycle resolves the persisted project prompt settings and covers both `16:9` and `9:16`.
-- Completed explicit Character `NONE/UPLOAD/LIBRARY` state, tenant-scoped library selection, local media upload/preview/remove, and immutable runtime snapshots.
-- Connected active Voice Library and Music Library catalogs, previews, rate/volume controls, local-MP3 validation, and reload restoration.
-- Added per-scene `tts_rate` persistence through scene metadata and editor state.
-- AUTO now validates persisted settings before provider work and server-side queues the initial image batch using the existing idempotent project queue path.
-- Removed the duplicate `Tự động hoàn thành` control; `MANUAL/AUTO` is the single automation choice.
+`VideoSceneStatuses.Failed` represented both terminal static-image failures and terminal scene-video failures. The AUTO lifecycle treated every failed scene as image work and could enqueue a new top-level image batch after the previous failed batch had finished. `EnqueueForProjectIfNoneActiveAsync` only prevents concurrent active jobs, so it did not prevent those sequential retry loops.
 
-## Database
+## 3. New Lifecycle Classification
 
-Standalone SQL file:
+The lifecycle now derives stage-aware scene state from persisted scene media URLs/paths, scene status, active `render.render_jobs`, and the latest scene-specific project failure event:
 
-Canonical repository path: `database/migrations/20260818_rvideo_dashboard_phase1.sql`
+- `SCENE_IMAGE_RENDER_FAILED` -> `IMAGE_FAILED`
+- `SCENE_VIDEO_RENDER_FAILED` -> `VIDEO_FAILED`
 
-The migration was relocated from `TodoX.Web/database/migrations/` to the repository canonical `database/migrations/` location. SQL content was not changed and it was **not executed**, per database safety instructions. Existing `video_render` and `render.render_jobs` tables remain unchanged.
+Legacy failed records fall back to available persisted media evidence. No schema change is required.
 
-## Lifecycle
+## 4. Image Retry Behavior
 
-- Manual mode: user starts image rendering, reviews terminal images, explicitly starts video, then explicitly finalizes.
-- Auto mode: server worker validates configuration, queues missing scene images, then evaluates image-to-video/final merge stages without browser or Telegram session dependency.
-- Duplicate protection: existing `EnqueueForProjectIfNoneActiveAsync` advisory-lock/idempotency path is reused; existing provider task/version resume behavior is preserved.
-- Browser/UI polling remains display-only; lifecycle transitions remain server-side.
+- Terminal image failures no longer auto-retry.
+- AUTO image batches target only explicitly classified pending scene IDs.
+- Existing user-triggered bulk and per-scene retry paths remain direct commands and retain persisted active-job idempotency.
+- A terminal image failure blocks AUTO video/finalization until a user retry succeeds.
 
-## Compatibility
+## 5. Video Partial Failure
 
-- RDance, Construction Timelapse, Voice Library, Music Library, provider management, and billing code were not behaviorally changed.
-- Existing Telegram RVIDEO workflows were not removed or modified.
-- No YEScale model/provider metadata was added or guessed.
+- `VIDEO_READY + VIDEO_FAILED` finalizes the successful clips.
+- All `VIDEO_FAILED` scenes are terminal without a merge.
+- `IMAGE_FAILED` is not classified as `VIDEO_FAILED` and cannot trigger a partial finalize.
 
-## Hotfix Verification
+## 6. Merge Duration
 
-- Mixed `Draft`/`ImageReady`/`Failed` image states resume only missing or failed scenes.
-- Video partial failures finalize successful clips when at least one clip is ready; all-failed states do not merge.
-- Tenant/project ownership is checked before settings upsert, and conflict updates require matching tenant IDs.
-- Persisted `OriginalPrompt` render settings preserve `16:9`, `9:16`, and selected resolution for AUTO input.
-- Idempotent project-scoped enqueue remains used for image, video, and merge jobs.
+Final-video duration now sums only `VIDEO_READY` scenes. `PROJECT_MERGED` includes `mergedSceneCount`, `failedSceneCount`, `mergedSceneIndexes`, and `finalDurationSeconds`.
 
-## Validation
+## 7. Database
 
-- `dotnet build TodoX.Web.csproj --no-restore`: passed, 0 errors; existing generated Razor nullable warnings only.
-- `dotnet test Tests\TodoX.Web.Phase1B.Tests.csproj --no-restore --logger "console;verbosity=minimal"`: passed, 30/30.
+- NO DATABASE MIGRATION CHANGE.
+- The existing project events, scene fields, and render job records provide the persisted state required for the fix.
+
+## 8. Tests
+
+- `dotnet test Tests\TodoX.Web.Phase1B.Tests.csproj --no-restore --logger "console;verbosity=minimal"`
+- Passed: 40, Failed: 0.
+- Added regression coverage for terminal image failure, explicit retry eligibility, event-based failure classification, partial video merge decisions, mixed states, manual mode, and partial merge duration.
+
+## 9. Build and Publish
+
+- `dotnet build TodoX.Web.csproj --no-restore`: succeeded, 0 warnings, 0 errors.
 - `git diff --check`: passed.
-- `dotnet publish TodoX.Web.csproj --no-restore -c Release -o D:\todoX\Dashboard-web\TodoXPortal\todoX-Dashboard-SaaS\artifacts\publish\todox-dashboard`: passed.
-- `dotnet format TodoX.Web.csproj --verify-no-changes --no-restore`: not clean because of pre-existing whitespace diagnostics in unrelated files including `AccountRepository.cs`, `AuditRepository.cs`, `WalletService.cs`, and settings/profile repositories. Those files were not changed.
+- `dotnet publish TodoX.Web.csproj --no-restore -c Release -o ..\artifacts\publish\todox-dashboard`: succeeded.
+- Publish output: `D:\todoX\Dashboard-web\TodoXPortal\todoX-Dashboard-SaaS\artifacts\publish\todox-dashboard`.
 
-## Deployment
+## 10. Compatibility
 
-1. Review and manually run `database/migrations/20260818_rvideo_dashboard_phase1.sql`.
-2. Deploy the published application from `artifacts/publish/todox-dashboard`.
-3. No n8n update is required for this phase.
+No intended behavioral change was made to RDance, Construction Timelapse, Telegram RVIDEO, n8n, Voice/Music catalog administration, provider pricing, billing, or 79AI model mapping.

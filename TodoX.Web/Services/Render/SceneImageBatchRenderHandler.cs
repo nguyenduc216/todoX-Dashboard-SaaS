@@ -21,6 +21,8 @@ public sealed class SceneImageBatchInput
 
     /// <summary>When true, only scenes without a successful image (or failed) are rendered.</summary>
     public bool OnlyMissingOrFailed { get; set; }
+    /// <summary>Optional exact scene selection used by the automatic lifecycle.</summary>
+    public long[]? SceneIds { get; set; }
 }
 
 /// <summary>
@@ -74,6 +76,7 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
 
         var scenes = project.Scenes
             .OrderBy(x => x.SceneIndex)
+            .Where(scene => input.SceneIds is null || input.SceneIds.Contains(scene.Id))
             .Where(scene => ShouldRenderScene(scene, input.OnlyMissingOrFailed))
             .ToList();
 

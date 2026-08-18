@@ -108,6 +108,100 @@ public sealed record RVideoSceneEditorItem(
 
 public sealed record RVideoLifecycleDecision(string Stage, bool ShouldQueueVideo, bool ShouldFinalize, bool TerminalFailure);
 
+public sealed record RVideoSceneLifecycleState(
+    long SceneId,
+    int SceneIndex,
+    int DurationSeconds,
+    bool HasImage,
+    bool HasVideo,
+    bool ImageAttemptActive,
+    bool ImageFailedTerminal,
+    bool VideoAttemptActive,
+    bool VideoFailedTerminal,
+    bool ImageRetryRequested = false)
+{
+    public bool IsImageReady
+        => HasImage && !HasVideo && !VideoAttemptActive && !VideoFailedTerminal;
+
+    public bool IsVideoTerminal
+        => HasVideo || VideoFailedTerminal;
+}
+
+public static class RVideoSceneLifecycleClassifier
+{
+    public static RVideoSceneLifecycleState Classify(
+        VideoProjectSceneDto scene,
+        IReadOnlyCollection<VideoProjectEventDto>? events = null,
+        bool imageAttemptActive = false,
+        bool videoAttemptActive = false,
+        bool imageRetryRequested = false)
+    {
+        var status = scene.Status?.Trim().ToLowerInvariant();
+        var latestFailure = FindLatestFailure(scene.Id, events);
+        var hasVideo = !string.IsNullOrWhiteSpace(scene.SceneVideoUrl)
+                       || !string.IsNullOrWhiteSpace(scene.SceneVideoPath)
+                       || status == VideoSceneStatuses.VideoReady;
+        var hasImage = !string.IsNullOrWhiteSpace(scene.StaticImageUrl)
+                       || !string.IsNullOrWhiteSpace(scene.StaticImagePath)
+                       || status is VideoSceneStatuses.ImageReady
+                           or VideoSceneStatuses.VideoQueued
+                           or VideoSceneStatuses.VideoRendering
+                           or VideoSceneStatuses.VideoReady;
+        var videoActive = videoAttemptActive
+                          || status is VideoSceneStatuses.VideoQueued or VideoSceneStatuses.VideoRendering;
+        var imageFailed = status == VideoSceneStatuses.Failed
+                          && (latestFailure == "SCENE_IMAGE_RENDER_FAILED"
+                              || (latestFailure is null && !hasImage && !hasVideo));
+        var videoFailed = status == VideoSceneStatuses.Failed
+                          && !imageFailed
+                          && (latestFailure == "SCENE_VIDEO_RENDER_FAILED"
+                              || (latestFailure is null && hasImage));
+
+        return new(
+            scene.Id,
+            scene.SceneIndex,
+            scene.DurationSeconds,
+            hasImage,
+            hasVideo,
+            imageAttemptActive,
+            imageFailed,
+            videoActive,
+            videoFailed,
+            imageRetryRequested);
+    }
+
+    private static string? FindLatestFailure(long sceneId, IReadOnlyCollection<VideoProjectEventDto>? events)
+    {
+        if (events is null) return null;
+        foreach (var projectEvent in events.OrderByDescending(x => x.CreatedAt).ThenByDescending(x => x.Id))
+        {
+            if (projectEvent.EventType is not ("SCENE_IMAGE_RENDER_FAILED" or "SCENE_VIDEO_RENDER_FAILED")
+                || string.IsNullOrWhiteSpace(projectEvent.DataJson))
+            {
+                continue;
+            }
+
+            try
+            {
+                using var document = JsonDocument.Parse(projectEvent.DataJson);
+                if (document.RootElement.TryGetProperty("sceneId", out var value)
+                    && value.ValueKind == JsonValueKind.Number
+                    && value.TryGetInt64(out var eventSceneId)
+                    && eventSceneId == sceneId)
+                {
+                    return projectEvent.EventType;
+                }
+            }
+            catch (JsonException)
+            {
+                // Ignore malformed historical event payloads and use the legacy fallback.
+            }
+        }
+
+        return null;
+    }
+}
+
 public static class RVideoRules
 {
     public static readonly int[] SupportedDurations = [4, 6, 8, 10];
@@ -220,7 +314,15 @@ public static class RVideoRules
     }
 
     public static bool NeedsImageWork(string sceneStatus)
-        => sceneStatus is VideoSceneStatuses.Draft or VideoSceneStatuses.Failed;
+        => string.Equals(sceneStatus, VideoSceneStatuses.Draft, StringComparison.OrdinalIgnoreCase);
+
+    public static bool NeedsImageWork(RVideoSceneLifecycleState scene)
+        => !scene.HasImage
+           && !scene.HasVideo
+           && !scene.ImageAttemptActive
+           && !scene.VideoAttemptActive
+           && !scene.VideoFailedTerminal
+           && (!scene.ImageFailedTerminal || scene.ImageRetryRequested);
 
     public static bool NeedsImageWork(IReadOnlyCollection<string> sceneStatuses)
         => sceneStatuses.Count > 0
@@ -228,6 +330,9 @@ public static class RVideoRules
                                       and not VideoSceneStatuses.VideoRendering
                                       and not VideoSceneStatuses.VideoReady)
             && sceneStatuses.Any(NeedsImageWork);
+
+    public static decimal CalculateMergedDuration(IEnumerable<VideoProjectSceneDto> scenes)
+        => scenes.Sum(x => (decimal)x.DurationSeconds);
 
     public static void EnsureProjectOwnership(Guid? projectTenantId, Guid currentTenantId)
     {
@@ -299,5 +404,44 @@ public static class RVideoRules
         if (sceneStatuses.Count > 0 && sceneStatuses.All(x => x == VideoSceneStatuses.Failed))
             return new(RVideoStages.Video, false, false, true);
         return new(imageTerminal ? RVideoStages.Image : RVideoStages.Scene, false, false, false);
+    }
+
+    public static RVideoLifecycleDecision Evaluate(
+        string executionMode,
+        IReadOnlyCollection<RVideoSceneLifecycleState> scenes,
+        bool hasFinalVideo)
+    {
+        if (hasFinalVideo) return new(RVideoStages.Result, false, false, false);
+        if (scenes.Count == 0) return new(RVideoStages.Scene, false, false, false);
+
+        var imageFailed = scenes.Any(x => x.ImageFailedTerminal && !x.ImageRetryRequested);
+        var imagePending = scenes.Any(x => !x.HasImage
+                                           && !x.HasVideo
+                                           && !x.VideoFailedTerminal
+                                           && (!x.ImageFailedTerminal || x.ImageRetryRequested));
+        var imageActive = scenes.Any(x => x.ImageAttemptActive);
+        var videoActive = scenes.Any(x => x.VideoAttemptActive);
+        var allVideoTerminal = scenes.All(x => x.IsVideoTerminal);
+        var anyVideoReady = scenes.Any(x => x.HasVideo);
+        var videoPending = scenes.Any(x => x.IsImageReady);
+
+        if (imageFailed || imagePending || imageActive)
+            return new(RVideoStages.Image, false, false, false);
+        if (videoActive)
+            return new(RVideoStages.Video, false, false, false);
+        if (allVideoTerminal)
+        {
+            return anyVideoReady
+                ? new(RVideoStages.Result, false, true, false)
+                : new(RVideoStages.Video, false, false, true);
+        }
+
+        if (string.Equals(executionMode, RVideoExecutionModes.Auto, StringComparison.OrdinalIgnoreCase)
+            && videoPending)
+        {
+            return new(RVideoStages.Video, true, false, false);
+        }
+
+        return new(RVideoStages.Video, false, false, false);
     }
 }
