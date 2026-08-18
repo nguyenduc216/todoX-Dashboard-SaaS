@@ -46,7 +46,12 @@ public sealed class RVideoJobSettingsRepository
         }
         await _tenant.EnsureLoadedAsync(ct);
         using var conn = await _factory.OpenAsync(ct);
-        return await conn.QuerySingleAsync<RVideoJobSettingsDto>(
+        var projectTenantId = await conn.QuerySingleOrDefaultAsync<Guid?>(
+            "SELECT tenant_id FROM video_render.video_projects WHERE id=@projectId LIMIT 1;",
+            new { projectId });
+        RVideoRules.EnsureProjectOwnership(projectTenantId, _tenant.TenantId);
+
+        var upsertedProjectId = await conn.QuerySingleOrDefaultAsync<long?>(
             """
             INSERT INTO video_render.rvideo_job_settings
                 (project_id, tenant_id, execution_mode, current_stage, skip_character, character_mode,
@@ -71,8 +76,10 @@ public sealed class RVideoJobSettingsRepository
                 music_catalog_code=EXCLUDED.music_catalog_code,
                 music_snapshot_json=EXCLUDED.music_snapshot_json,
                 music_volume=EXCLUDED.music_volume,
-                updated_at=now();
-            """ + SelectSql + " WHERE project_id=@projectId AND tenant_id=@tenant;",
+                updated_at=now()
+            WHERE video_render.rvideo_job_settings.tenant_id = EXCLUDED.tenant_id
+            RETURNING project_id;
+            """,
             new
             {
                 projectId,
@@ -90,6 +97,13 @@ public sealed class RVideoJobSettingsRepository
                 musicSnapshot = JsonSerializer.Serialize(request.MusicSnapshot ?? new { }, JsonOptions),
                 request.MusicVolume
             });
+
+        if (upsertedProjectId is null)
+            throw new InvalidOperationException("RVVIDEO_PROJECT_NOT_FOUND");
+
+        return await conn.QuerySingleAsync<RVideoJobSettingsDto>(
+            SelectSql + " WHERE project_id=@projectId AND tenant_id=@tenant;",
+            new { projectId = upsertedProjectId.Value, tenant = _tenant.TenantId });
     }
 
     public async Task SetStageAsync(long projectId, string stage, CancellationToken ct = default)

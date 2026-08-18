@@ -219,6 +219,22 @@ public static class RVideoRules
             throw new InvalidOperationException("RVVIDEO_LIBRARY_MUSIC_UNAVAILABLE");
     }
 
+    public static bool NeedsImageWork(string sceneStatus)
+        => sceneStatus is VideoSceneStatuses.Draft or VideoSceneStatuses.Failed;
+
+    public static bool NeedsImageWork(IReadOnlyCollection<string> sceneStatuses)
+        => sceneStatuses.Count > 0
+            && sceneStatuses.All(x => x is not VideoSceneStatuses.VideoQueued
+                                      and not VideoSceneStatuses.VideoRendering
+                                      and not VideoSceneStatuses.VideoReady)
+            && sceneStatuses.Any(NeedsImageWork);
+
+    public static void EnsureProjectOwnership(Guid? projectTenantId, Guid currentTenantId)
+    {
+        if (projectTenantId is null || projectTenantId.Value != currentTenantId)
+            throw new InvalidOperationException("RVVIDEO_PROJECT_NOT_FOUND");
+    }
+
     public static void ValidateAutoProject(VideoProjectDto project, RVideoJobSettingsDto settings)
     {
         if (project.Scenes.Count == 0) throw new InvalidOperationException("RVVIDEO_SCENES_REQUIRED");
@@ -261,22 +277,27 @@ public static class RVideoRules
     {
         var imageTerminal = sceneStatuses.Count > 0
             && sceneStatuses.All(x => x is VideoSceneStatuses.ImageReady or VideoSceneStatuses.VideoQueued or VideoSceneStatuses.VideoRendering or VideoSceneStatuses.VideoReady);
-        var imageFailed = sceneStatuses.Count > 0 && sceneStatuses.All(x => x == VideoSceneStatuses.Failed);
+        var videoActive = sceneStatuses.Any(x => x is VideoSceneStatuses.VideoQueued or VideoSceneStatuses.VideoRendering);
         var videoTerminal = sceneStatuses.Count > 0
             && sceneStatuses.All(x => x is VideoSceneStatuses.VideoReady or VideoSceneStatuses.Failed);
         var anyVideoReady = sceneStatuses.Any(x => x == VideoSceneStatuses.VideoReady);
         if (hasFinalVideo) return new(RVideoStages.Result, false, false, false);
-        if (imageFailed) return new(RVideoStages.Image, false, false, true);
+        if (videoTerminal)
+        {
+            return anyVideoReady
+                ? new(RVideoStages.Result, false, true, false)
+                : new(RVideoStages.Video, false, false, true);
+        }
         if (string.Equals(executionMode, RVideoExecutionModes.Auto, StringComparison.OrdinalIgnoreCase)
-            && imageTerminal && anyVideoReady == false)
+            && !videoActive
+            && imageTerminal
+            && sceneStatuses.Any(x => x == VideoSceneStatuses.ImageReady))
         {
             return new(RVideoStages.Video, true, false, false);
         }
-        if (string.Equals(executionMode, RVideoExecutionModes.Auto, StringComparison.OrdinalIgnoreCase)
-            && videoTerminal && sceneStatuses.All(x => x == VideoSceneStatuses.VideoReady))
-        {
-            return new(RVideoStages.Result, false, true, false);
-        }
+        if (videoActive) return new(RVideoStages.Video, false, false, false);
+        if (sceneStatuses.Count > 0 && sceneStatuses.All(x => x == VideoSceneStatuses.Failed))
+            return new(RVideoStages.Video, false, false, true);
         return new(imageTerminal ? RVideoStages.Image : RVideoStages.Scene, false, false, false);
     }
 }

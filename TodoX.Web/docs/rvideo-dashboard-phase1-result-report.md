@@ -8,8 +8,9 @@
 - Commits:
   - `9d1884d` `feat(rvideo): add dashboard shell information and execution mode`
   - `4e000e0` `feat(rvideo): add scene editor and json import export`
-  - correction commit: `fix(rvideo): complete information settings and auto render configuration`
-- Final SHA: `6047420` (correction implementation commit; this report update follows in a separate commit).
+  - `6047420` `fix(rvideo): complete information settings and auto render configuration`
+  - hotfix: `fix(rvideo): harden auto lifecycle and tenant safety`
+- Final SHA: filled after hotfix commit.
 
 ## Implemented
 
@@ -43,15 +44,16 @@
 
 Standalone SQL file:
 
-`database/migrations/20260818_rvideo_dashboard_phase1.sql`
+Canonical repository path: `database/migrations/20260818_rvideo_dashboard_phase1.sql`
 
-The migration creates only `video_render.rvideo_job_settings` and its tenant/mode index. It was **not executed**, per database safety instructions. Existing `video_render` and `render.render_jobs` tables remain unchanged.
+The migration was relocated from `TodoX.Web/database/migrations/` to the repository canonical `database/migrations/` location. SQL content was not changed and it was **not executed**, per database safety instructions. Existing `video_render` and `render.render_jobs` tables remain unchanged.
 
 ## Lifecycle
 
 - Manual mode: user starts image rendering, reviews terminal images, explicitly starts video, then explicitly finalizes.
 - Auto mode: server worker validates configuration, queues missing scene images, then evaluates image-to-video/final merge stages without browser or Telegram session dependency.
 - Duplicate protection: existing `EnqueueForProjectIfNoneActiveAsync` advisory-lock/idempotency path is reused; existing provider task/version resume behavior is preserved.
+- Browser/UI polling remains display-only; lifecycle transitions remain server-side.
 
 ## Compatibility
 
@@ -59,10 +61,18 @@ The migration creates only `video_render.rvideo_job_settings` and its tenant/mod
 - Existing Telegram RVIDEO workflows were not removed or modified.
 - No YEScale model/provider metadata was added or guessed.
 
+## Hotfix Verification
+
+- Mixed `Draft`/`ImageReady`/`Failed` image states resume only missing or failed scenes.
+- Video partial failures finalize successful clips when at least one clip is ready; all-failed states do not merge.
+- Tenant/project ownership is checked before settings upsert, and conflict updates require matching tenant IDs.
+- Persisted `OriginalPrompt` render settings preserve `16:9`, `9:16`, and selected resolution for AUTO input.
+- Idempotent project-scoped enqueue remains used for image, video, and merge jobs.
+
 ## Validation
 
-- `dotnet build TodoX.Web.csproj --no-restore`: passed, 0 errors.
-- `dotnet test Tests\TodoX.Web.Phase1B.Tests.csproj --no-restore --logger "console;verbosity=minimal"`: passed, 19/19.
+- `dotnet build TodoX.Web.csproj --no-restore`: passed, 0 errors; existing generated Razor nullable warnings only.
+- `dotnet test Tests\TodoX.Web.Phase1B.Tests.csproj --no-restore --logger "console;verbosity=minimal"`: passed, 30/30.
 - `git diff --check`: passed.
 - `dotnet publish TodoX.Web.csproj --no-restore -c Release -o D:\todoX\Dashboard-web\TodoXPortal\todoX-Dashboard-SaaS\artifacts\publish\todox-dashboard`: passed.
 - `dotnet format TodoX.Web.csproj --verify-no-changes --no-restore`: not clean because of pre-existing whitespace diagnostics in unrelated files including `AccountRepository.cs`, `AuditRepository.cs`, `WalletService.cs`, and settings/profile repositories. Those files were not changed.

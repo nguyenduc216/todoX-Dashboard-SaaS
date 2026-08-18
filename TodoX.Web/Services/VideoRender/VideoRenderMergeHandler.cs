@@ -37,6 +37,12 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
         }
 
         await _repo.UpdateProjectAsync(project.Id, VideoProjectStatuses.Merging, errorMessage: null, ct: ct);
+        var mergeableScenes = project.Scenes
+            .Where(x => x.Status == VideoSceneStatuses.VideoReady)
+            .OrderBy(x => x.SceneIndex)
+            .ToList();
+        if (mergeableScenes.Count == 0)
+            throw new InvalidOperationException("Chua co scene video ready de merge.");
         var root = ResolveRoot(_options.CurrentValue.StorageRoot);
         var projectRoot = Path.Combine(root, project.JobFolder);
         var versioningEnabled = await _versions.IsEnabledAsync(SceneMediaVersioningFlags.FinalVideos, ct);
@@ -50,27 +56,21 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
                 project.CustomerId,
                 job.Id,
                 $"final-video-job-{job.Id:N}-project-{project.Id}",
-                CompositionConfigSnapshot: new { source = "merge_video_job", sceneCount = project.Scenes.Count, scenes = project.Scenes.OrderBy(x => x.SceneIndex).Select(x => new { x.Id, x.SceneIndex, x.SceneVideoPath }) },
+                CompositionConfigSnapshot: new { source = "merge_video_job", sceneCount = mergeableScenes.Count, failedSceneCount = project.Scenes.Count - mergeableScenes.Count, scenes = mergeableScenes.Select(x => new { x.Id, x.SceneIndex, x.SceneVideoPath }) },
                 TransitionConfigSnapshot: new { mode = "copy_concat" },
                 AudioConfigSnapshot: new { },
                 SubtitleConfigSnapshot: new { }), ct);
             mergeItems = (await _versions.ListFinalVideoVersionItemsAsync(version.Id, ct))
                 .Select(item => new MergeInput(item.SceneId, item.ItemOrder, item.SceneVideoVersionId, item.SourceFilePath))
                 .ToList();
-            if (mergeItems.Count != project.Scenes.Count)
+            if (mergeItems.Count != mergeableScenes.Count)
             {
                 throw new InvalidOperationException("Project is missing selected completed scene video versions.");
             }
         }
         else
         {
-            if (project.Scenes.Any(x => x.Status != VideoSceneStatuses.VideoReady))
-            {
-                throw new InvalidOperationException("Chua du scene video ready de merge.");
-            }
-
-            mergeItems = project.Scenes
-                .OrderBy(x => x.SceneIndex)
+            mergeItems = mergeableScenes
                 .Select(scene => new MergeInput(scene.Id, scene.SceneIndex, null, scene.SceneVideoPath))
                 .ToList();
         }

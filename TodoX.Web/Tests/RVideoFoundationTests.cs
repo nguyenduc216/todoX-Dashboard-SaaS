@@ -55,6 +55,67 @@ public sealed class RVideoFoundationTests
         Assert.Equal(RVideoStages.Result, videoReady.Stage);
     }
 
+    [Theory]
+    [InlineData(new[] { VideoSceneStatuses.Draft, VideoSceneStatuses.Draft }, true)]
+    [InlineData(new[] { VideoSceneStatuses.ImageReady, VideoSceneStatuses.Draft }, true)]
+    [InlineData(new[] { VideoSceneStatuses.ImageReady, VideoSceneStatuses.Failed }, true)]
+    [InlineData(new[] { VideoSceneStatuses.ImageReady, VideoSceneStatuses.ImageReady }, false)]
+    [InlineData(new[] { VideoSceneStatuses.VideoRendering, VideoSceneStatuses.ImageReady }, false)]
+    [InlineData(new[] { VideoSceneStatuses.VideoReady, VideoSceneStatuses.VideoReady }, false)]
+    public void AutoImageResumeOnlyTargetsMissingOrFailedStates(string[] statuses, bool expected)
+        => Assert.Equal(expected, RVideoRules.NeedsImageWork(statuses));
+
+    [Fact]
+    public void PartialVideoFailureStillFinalizesSuccessfulClips()
+    {
+        var decision = RVideoRules.Evaluate(RVideoExecutionModes.Auto,
+            new[] { VideoSceneStatuses.VideoReady, VideoSceneStatuses.Failed }, false);
+
+        Assert.True(decision.ShouldFinalize);
+        Assert.False(decision.TerminalFailure);
+    }
+
+    [Fact]
+    public void AllVideoFailuresAreTerminalWithoutFinalizer()
+    {
+        var decision = RVideoRules.Evaluate(RVideoExecutionModes.Auto,
+            new[] { VideoSceneStatuses.Failed, VideoSceneStatuses.Failed }, false);
+
+        Assert.False(decision.ShouldFinalize);
+        Assert.True(decision.TerminalFailure);
+    }
+
+    [Fact]
+    public void ActiveVideoStateWaitsInsteadOfRestartingImageOrVideoStage()
+    {
+        var decision = RVideoRules.Evaluate(RVideoExecutionModes.Auto,
+            new[] { VideoSceneStatuses.VideoRendering, VideoSceneStatuses.VideoReady }, false);
+
+        Assert.False(decision.ShouldQueueVideo);
+        Assert.False(decision.ShouldFinalize);
+        Assert.Equal(RVideoStages.Video, decision.Stage);
+    }
+
+    [Fact]
+    public void ProjectWithImageReadyAndFailedSceneIsNotVideoFinalYet()
+    {
+        var decision = RVideoRules.Evaluate(RVideoExecutionModes.Auto,
+            new[] { VideoSceneStatuses.ImageReady, VideoSceneStatuses.Failed }, false);
+
+        Assert.False(decision.ShouldQueueVideo);
+        Assert.False(decision.ShouldFinalize);
+        Assert.False(decision.TerminalFailure);
+    }
+
+    [Fact]
+    public void TenantGuardRejectsForeignOrMissingProject()
+    {
+        var tenant = Guid.NewGuid();
+        Assert.Throws<InvalidOperationException>(() => RVideoRules.EnsureProjectOwnership(Guid.NewGuid(), tenant));
+        Assert.Throws<InvalidOperationException>(() => RVideoRules.EnsureProjectOwnership(null, tenant));
+        RVideoRules.EnsureProjectOwnership(tenant, tenant);
+    }
+
     [Fact]
     public void ManualLifecycleStopsAfterImageTerminal()
     {

@@ -81,7 +81,8 @@ public sealed class RVideoLifecycleWorker : BackgroundService
         }
 
         var renderSettings = RVideoRules.ResolveRenderSettings(project.OriginalPrompt);
-        var decision = RVideoRules.Evaluate(setting.ExecutionMode, project.Scenes.Select(x => x.Status).ToList(), !string.IsNullOrWhiteSpace(project.FinalVideoUrl));
+        var sceneStatuses = project.Scenes.Select(x => x.Status).ToList();
+        var decision = RVideoRules.Evaluate(setting.ExecutionMode, sceneStatuses, !string.IsNullOrWhiteSpace(project.FinalVideoUrl));
         var settingsRepo = new RVideoJobSettingsRepository(factory, tenant, catalog);
         if (!string.Equals(setting.CurrentStage, decision.Stage, StringComparison.OrdinalIgnoreCase))
         {
@@ -89,7 +90,7 @@ public sealed class RVideoLifecycleWorker : BackgroundService
         }
 
         var userId = project.UserId ?? Guid.Empty;
-        if (project.Scenes.All(x => x.Status == VideoSceneStatuses.Draft))
+        if (RVideoRules.NeedsImageWork(sceneStatuses))
         {
             var imageInput = new SceneImageBatchInput
             {
