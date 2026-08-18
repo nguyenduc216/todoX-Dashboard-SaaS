@@ -1,0 +1,130 @@
+using Dapper;
+using TodoX.Web.Data;
+using TodoX.Web.Models;
+using TodoX.Web.Services.Render;
+
+namespace TodoX.Web.Services.VideoRender;
+
+public sealed class RVideoLifecycleWorker : BackgroundService
+{
+    private readonly IServiceScopeFactory _scopeFactory;
+    private readonly IConfiguration _configuration;
+    private readonly ILogger<RVideoLifecycleWorker> _logger;
+
+    public RVideoLifecycleWorker(IServiceScopeFactory scopeFactory, IConfiguration configuration, ILogger<RVideoLifecycleWorker> logger)
+    {
+        _scopeFactory = scopeFactory;
+        _configuration = configuration;
+        _logger = logger;
+    }
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        if (!_configuration.GetValue("RenderQueue:Enabled", false))
+        {
+            _logger.LogInformation("RVIDEO lifecycle worker is disabled because RenderQueue:Enabled=false.");
+            return;
+        }
+
+        var delay = TimeSpan.FromSeconds(Math.Clamp(_configuration.GetValue("RVideo:LifecycleIntervalSeconds", 10), 3, 120));
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            try
+            {
+                using var scope = _scopeFactory.CreateScope();
+                var tenant = scope.ServiceProvider.GetRequiredService<TenantContext>();
+                await tenant.EnsureLoadedAsync(stoppingToken);
+                var factory = scope.ServiceProvider.GetRequiredService<TodoXConnectionFactory>();
+                var settings = await ListAutoSettingsAsync(factory, tenant, stoppingToken);
+                var repository = scope.ServiceProvider.GetRequiredService<VideoRenderRepository>();
+                var jobs = scope.ServiceProvider.GetRequiredService<IRenderJobService>();
+                foreach (var setting in settings)
+                {
+                    await EvaluateProjectAsync(setting, repository, jobs, factory, tenant, stoppingToken);
+                }
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "RVIDEO lifecycle evaluation failed.");
+            }
+
+            await Task.Delay(delay, stoppingToken);
+        }
+    }
+
+    private static async Task EvaluateProjectAsync(RVideoJobSettingsDto setting, VideoRenderRepository repo, IRenderJobService jobs, TodoXConnectionFactory factory, TenantContext tenant, CancellationToken ct)
+    {
+        var project = await repo.GetProjectAsync(setting.ProjectId, ct);
+        if (project is null || project.Scenes.Count == 0) return;
+        var decision = RVideoRules.Evaluate(setting.ExecutionMode, project.Scenes.Select(x => x.Status).ToList(), !string.IsNullOrWhiteSpace(project.FinalVideoUrl));
+        var settingsRepo = new RVideoJobSettingsRepository(factory, tenant);
+        if (!string.Equals(setting.CurrentStage, decision.Stage, StringComparison.OrdinalIgnoreCase))
+        {
+            await settingsRepo.SetStageAsync(setting.ProjectId, decision.Stage, ct);
+        }
+
+        var userId = project.UserId ?? Guid.Empty;
+        if (decision.ShouldQueueVideo)
+        {
+            var sceneIds = project.Scenes.Where(x => x.Status == VideoSceneStatuses.ImageReady).Select(x => x.Id).ToArray();
+            if (sceneIds.Length == 0) return;
+            await jobs.EnqueueForProjectIfNoneActiveAsync(new RenderJobCreateModel
+            {
+                JobType = SceneVideoRenderHandler.JobTypeName,
+                UserId = userId,
+                CustomerId = project.CustomerId,
+                Input = new SceneVideoRenderInput
+                {
+                    ProjectId = project.Id,
+                    SceneIds = sceneIds,
+                    AspectRatio = "9:16",
+                    Resolution = "720P",
+                    UserId = userId,
+                    CustomerId = project.CustomerId
+                },
+                Prompt = new { projectId = project.Id, source = "rvideo_auto_lifecycle" },
+                LogCode = $"video-{project.Id}",
+                ProviderCode = SceneVideoRenderHandler.RoutingProviderCode,
+                ModelCode = SceneVideoRenderHandler.RoutingModelCode,
+                MaxAttempts = 1
+            }, project.Id, ct);
+        }
+        else if (decision.ShouldFinalize)
+        {
+            await jobs.EnqueueForProjectIfNoneActiveAsync(new RenderJobCreateModel
+            {
+                JobType = VideoRenderMergeHandler.JobTypeName,
+                UserId = userId,
+                CustomerId = project.CustomerId,
+                Input = new { projectId = project.Id },
+                Prompt = new { projectId = project.Id, source = "rvideo_auto_lifecycle" },
+                LogCode = $"video-{project.Id}",
+                ProviderCode = "internal_merge",
+                ModelCode = "ffmpeg_concat",
+                MaxAttempts = 1
+            }, project.Id, ct);
+        }
+    }
+
+    private static async Task<IReadOnlyList<RVideoJobSettingsDto>> ListAutoSettingsAsync(TodoXConnectionFactory factory, TenantContext tenant, CancellationToken ct)
+    {
+        using var conn = await factory.OpenAsync(ct);
+        var rows = await conn.QueryAsync<RVideoJobSettingsDto>(
+            """
+            SELECT project_id AS ProjectId, execution_mode AS ExecutionMode, current_stage AS CurrentStage,
+                   skip_character AS SkipCharacter, character_mode AS CharacterMode, selected_character_id AS SelectedCharacterId,
+                   character_snapshot_json::text AS CharacterSnapshotJson, voice_mode AS VoiceMode,
+                   voice_catalog_code AS VoiceCatalogCode, voice_snapshot_json::text AS VoiceSnapshotJson,
+                   default_tts_rate AS DefaultTtsRate, music_catalog_code AS MusicCatalogCode,
+                   music_snapshot_json::text AS MusicSnapshotJson, music_volume AS MusicVolume,
+                   created_at AS CreatedAt, updated_at AS UpdatedAt
+              FROM video_render.rvideo_job_settings
+             WHERE tenant_id=@tenant AND execution_mode='AUTO';
+            """, new { tenant = tenant.TenantId });
+        return rows.ToList();
+    }
+}
