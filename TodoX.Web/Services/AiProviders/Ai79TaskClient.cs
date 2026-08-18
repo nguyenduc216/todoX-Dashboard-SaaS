@@ -444,7 +444,8 @@ public sealed class Ai79TaskClient : IAi79TaskClient
         }
 
         using var body = new FormUrlEncodedContent(form);
-        using var response = await _httpClient.PostAsync(BuildUri(request.BaseUrl, request.EndpointPath), body, ct);
+        var endpointPath = NormalizeProviderMediaListPath(request.BaseUrl, request.EndpointPath);
+        using var response = await _httpClient.PostAsync(BuildUri(request.BaseUrl, endpointPath), body, ct);
         var json = await response.Content.ReadAsStringAsync(ct);
         var sanitized = string.IsNullOrWhiteSpace(json)
             ? JsonSerializer.Serialize(string.Empty, JsonOptions)
@@ -765,6 +766,20 @@ public sealed class Ai79TaskClient : IAi79TaskClient
 
     private static Uri BuildUri(string baseUrl, string path)
         => new(new Uri(baseUrl.TrimEnd('/') + "/"), path.TrimStart('/'));
+
+    private static string NormalizeProviderMediaListPath(string baseUrl, string path)
+    {
+        var normalizedBasePath = new Uri(baseUrl.TrimEnd('/') + "/", UriKind.Absolute).AbsolutePath.TrimEnd('/');
+        var normalizedPath = "/" + path.Trim('/');
+        if (string.Equals(normalizedBasePath, "/ai", StringComparison.OrdinalIgnoreCase)
+            && (string.Equals(normalizedPath, "/ai", StringComparison.OrdinalIgnoreCase)
+                || normalizedPath.StartsWith("/ai/", StringComparison.OrdinalIgnoreCase)))
+        {
+            return normalizedPath["/ai".Length..];
+        }
+
+        return normalizedPath;
+    }
 
     private static StringContent CreateMultipartTextPart(string name, string value)
     {

@@ -887,7 +887,7 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
         {
             list = await _ai79.ListImagesAsync(new Ai79ProviderMediaListRequest(
                 runtime.BaseUrl,
-                ReadConfigString(runtime.RouteConfigJson, "list_images_path") ?? "/ai/images",
+                ReadConfigString(runtime.RouteConfigJson, "list_images_path") ?? "/images",
                 runtime.Credential.Secret,
                 runtime.Domain,
                 runtime.ProjectId), ct);
@@ -957,7 +957,7 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
         {
             list = await _ai79.ListVideosAsync(new Ai79ProviderMediaListRequest(
                 runtime.BaseUrl,
-                ReadConfigString(runtime.RouteConfigJson, "list_videos_path") ?? "/ai/videos",
+                ReadConfigString(runtime.RouteConfigJson, "list_videos_path") ?? "/videos",
                 runtime.Credential.Secret,
                 runtime.Domain,
                 runtime.ProjectId), ct);

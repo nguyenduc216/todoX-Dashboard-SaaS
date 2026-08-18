@@ -34,8 +34,8 @@ public sealed class Ai79TaskClientTests
         Assert.Equal("https://cdn.example/video.mp4", videos.Items[0].DownloadUrl);
         Assert.DoesNotContain("secret-token", images.SanitizedResponseJson, StringComparison.Ordinal);
         Assert.DoesNotContain("secret-token", videos.SanitizedResponseJson, StringComparison.Ordinal);
-        Assert.Equal("https://api.gommo.net/ai/ai/images", handler.Requests[0].Uri);
-        Assert.Equal("https://api.gommo.net/ai/ai/videos", handler.Requests[1].Uri);
+        Assert.Equal("https://api.gommo.net/ai/images", handler.Requests[0].Uri);
+        Assert.Equal("https://api.gommo.net/ai/videos", handler.Requests[1].Uri);
         Assert.Contains("access_token=secret-token", handler.Requests[0].Body, StringComparison.Ordinal);
         Assert.Contains("domain=79ai.net", handler.Requests[0].Body, StringComparison.Ordinal);
         Assert.Contains("project_id=default", handler.Requests[0].Body, StringComparison.Ordinal);
