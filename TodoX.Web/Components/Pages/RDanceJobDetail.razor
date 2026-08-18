@@ -370,32 +370,57 @@
                             <MudButton Variant="Variant.Filled" Color="Color.Warning" Disabled="@_busy" OnClick="RetryAsync">Render lại video</MudButton>
                         </MudPaper>
                     }
-                    else if (!string.IsNullOrWhiteSpace(_job.ResultVideoUrl))
+                    else if (_job.Status == DanceSellJobStatuses.Completed
+                             && !string.IsNullOrWhiteSpace(_job.ResultVideoUrl))
                     {
                         <MudPaper Class="todox-panel pa-4">
                             <MudText Typo="Typo.h6">Video nhảy quảng cáo thời trang</MudText>
                             <video src="@_job.ResultVideoUrl" controls playsinline class="rdance-result-player"></video>
                             <MudStack Row="true" Class="flex-wrap gap-2 mt-3">
                                 <MudButton Variant="Variant.Filled" Color="Color.Warning" OnClick="@(() => JS.InvokeVoidAsync("open", _job.ResultVideoUrl))">Xem video</MudButton>
+                                <MudButton Variant="Variant.Outlined" Color="Color.Warning" Href="@DownloadUrl">Tải video</MudButton>
                                 <MudButton Variant="Variant.Outlined" Color="Color.Warning" OnClick="RetryAsync">Render lại video</MudButton>
                                 <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="@(() => Navigation.NavigateTo("/jobs/rdance/new"))">Tạo video mới</MudButton>
                             </MudStack>
+                        </MudPaper>
+                    }
+                    else if (_job.Status == DanceSellJobStatuses.Completed)
+                    {
+                        <MudPaper Class="todox-panel pa-4">
+                            <MudText Typo="Typo.h6">@_title</MudText>
+                            <MudAlert Severity="Severity.Error">Video đã hoàn thành nhưng chưa lấy được đường dẫn kết quả.</MudAlert>
+                            <MudButton Variant="Variant.Filled" Color="Color.Warning" Disabled="@_busy" OnClick="RetryAsync">Render lại video</MudButton>
                         </MudPaper>
                     }
                     else
                     {
                         <MudAlert Severity="Severity.Info">Kết quả sẽ xuất hiện sau khi render hoàn tất.</MudAlert>
                     }
-                    <MudText Typo="Typo.h6">Lịch sử video quảng cáo thời trang</MudText>
-                    @foreach (var item in _history)
+                    @if (_job is not null)
                     {
-                        <MudPaper Class="todox-panel pa-3" Outlined="true">
-                            <MudStack Row="true" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
-                                <MudText>@(item.Title ?? "Video nhảy quảng cáo thời trang")</MudText>
-                                <MudChip T="string" Color="@StatusColor(item.Status)" Size="Size.Small">@item.Status</MudChip>
-                                <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="@(() => OpenAsync(item.Id))">Mở</MudButton>
-                            </MudStack>
-                        </MudPaper>
+                    <MudPaper Class="todox-panel pa-4 rdance-job-summary">
+                        <MudText Typo="Typo.h6">Thông tin video hiện tại</MudText>
+                        <MudList T="string" Dense="true">
+                            <MudListItem T="string">Trạng thái: @StatusLabel(_job!.Status)</MudListItem>
+                            <MudListItem T="string">Bắt đầu: @FormatVietnamTime(RenderStartUtc(_job!))</MudListItem>
+                            @if (IsActive)
+                            {
+                                <MudListItem T="string">Đã thực hiện: @FormatDuration(RenderDuration(_job!))</MudListItem>
+                            }
+                            else
+                            {
+                                <MudListItem T="string">Kết thúc: @FormatVietnamTime(_job!.CompletedAt)</MudListItem>
+                                <MudListItem T="string">Thời gian thực hiện: @FormatDuration(RenderDuration(_job!))</MudListItem>
+                            }
+                            <MudListItem T="string">Provider: 79AI</MudListItem>
+                            <MudListItem T="string">Model: Kling Motion Control</MudListItem>
+                                @if (_job!.Status is DanceSellJobStatuses.Failed or DanceSellJobStatuses.Timeout
+                                 && !string.IsNullOrWhiteSpace(_job.ErrorMessage))
+                            {
+                                <MudListItem T="string">Lỗi: @_job.ErrorMessage</MudListItem>
+                            }
+                        </MudList>
+                    </MudPaper>
                     }
                 </MudStack>
             </MudTabPanel>
@@ -414,7 +439,6 @@
     private DanceSellJobDto? _job;
     private DanceSellReferenceVersionDto? _latestReference;
     private IReadOnlyList<DanceSellReferenceVersionDto> _referenceVersions = Array.Empty<DanceSellReferenceVersionDto>();
-    private IReadOnlyList<DanceSellJobDto> _history = Array.Empty<DanceSellJobDto>();
     private IReadOnlyList<DanceSellProviderRouteDto> _motionRoutes = Array.Empty<DanceSellProviderRouteDto>();
     private DanceSellCostEstimate? _estimate;
     private decimal? _balance;
@@ -478,6 +502,69 @@
     private string ResultErrorText => _job?.Status == DanceSellJobStatuses.Timeout
         ? $"Render video quá thời gian: {(_job.ErrorMessage ?? "Vui lòng thử render lại.")}"
         : $"Tạo video thất bại: {(_job?.ErrorMessage ?? "Vui lòng thử render lại.")}";
+    private string? DownloadUrl => _job is null ? null : $"/api/dance-sell/jobs/{_job.Id}/download";
+
+    private static string StatusLabel(string status) => status switch
+    {
+        DanceSellJobStatuses.Draft => "Bản nháp",
+        DanceSellJobStatuses.Queued => "Đang chờ",
+        DanceSellJobStatuses.Submitted => "Đã gửi xử lý",
+        DanceSellJobStatuses.Rendering => "Đang tạo video",
+        DanceSellJobStatuses.Completed => "Hoàn thành",
+        DanceSellJobStatuses.Failed => "Thất bại",
+        DanceSellJobStatuses.Timeout => "Quá thời gian",
+        _ => "Không xác định"
+    };
+
+    private static DateTime RenderStartUtc(DanceSellJobDto job)
+        => DateTime.SpecifyKind(job.SubmittedAt ?? job.CreatedAt, DateTimeKind.Utc);
+
+    private static TimeSpan RenderDuration(DanceSellJobDto job)
+    {
+        var end = job.CompletedAt is DateTime completed
+            ? DateTime.SpecifyKind(completed, DateTimeKind.Utc)
+            : DateTime.UtcNow;
+        var duration = end - RenderStartUtc(job);
+        return duration < TimeSpan.Zero ? TimeSpan.Zero : duration;
+    }
+
+    private static string FormatVietnamTime(DateTime? value)
+    {
+        if (value is null) return "—";
+        var utc = DateTime.SpecifyKind(value.Value, DateTimeKind.Utc);
+        var zone = ResolveVietnamTimeZone();
+        return TimeZoneInfo.ConvertTimeFromUtc(utc, zone).ToString("dd/MM/yyyy HH:mm:ss");
+    }
+
+    private static string FormatDuration(TimeSpan duration)
+    {
+        if (duration.TotalHours >= 1)
+        {
+            return $"{(int)duration.TotalHours} giờ {duration.Minutes:00} phút {duration.Seconds:00} giây";
+        }
+
+        if (duration.TotalMinutes >= 1)
+        {
+            return $"{(int)duration.TotalMinutes} phút {duration.Seconds:00} giây";
+        }
+
+        return $"{Math.Max(0, (int)duration.TotalSeconds)} giây";
+    }
+
+    private static TimeZoneInfo ResolveVietnamTimeZone()
+    {
+        foreach (var id in new[] { "SE Asia Standard Time", "Asia/Ho_Chi_Minh" })
+        {
+            try
+            {
+                return TimeZoneInfo.FindSystemTimeZoneById(id);
+            }
+            catch (TimeZoneNotFoundException) { }
+            catch (InvalidTimeZoneException) { }
+        }
+
+        return TimeZoneInfo.Utc;
+    }
 
     protected override void OnInitialized()
     {
@@ -495,9 +582,10 @@
         StartPolling();
     }
 
-    private async Task ReloadAsync()
+    private async Task ReloadAsync(bool selectResultOnCompletion = false)
     {
         if (AuthState.CurrentUser is null) return;
+        var wasActive = IsActive;
         _loadError = null;
         _referenceReadinessError = null;
         _motionReadinessError = null;
@@ -536,6 +624,10 @@
         try
         {
             _job = await DanceSell.GetAsync(JobId, AuthState.CurrentUser);
+            if (selectResultOnCompletion && wasActive && _job.Status == DanceSellJobStatuses.Completed)
+            {
+                _tabIndex = 3;
+            }
             if (_job.MotionSourceType == DanceSellMotionSourceTypes.TikTok
                 && !string.IsNullOrWhiteSpace(_job.MotionSourceUrl))
             {
@@ -556,7 +648,6 @@
                 : "Không tìm thấy video quảng cáo thời trang.";
         }
 
-        _history = await DanceSell.ListAsync(AuthState.CurrentUser, 30);
         await InvokeAsync(StateHasChanged);
     }
 
@@ -906,9 +997,19 @@
 
     private void StartPolling()
     {
+        StopPolling();
         _pollCts = new CancellationTokenSource();
         _pollTimer = new PeriodicTimer(TimeSpan.FromSeconds(5));
         _ = PollLoopAsync(_pollCts.Token);
+    }
+
+    private void StopPolling()
+    {
+        _pollCts?.Cancel();
+        _pollTimer?.Dispose();
+        _pollCts?.Dispose();
+        _pollCts = null;
+        _pollTimer = null;
     }
 
     private async Task PollLoopAsync(CancellationToken ct)
@@ -923,7 +1024,12 @@
                 }
                 else if (IsActive)
                 {
-                    await InvokeAsync(ReloadAsync);
+                    var wasActive = IsActive;
+                    await InvokeAsync(() => ReloadAsync(wasActive));
+                    if (wasActive && !IsActive)
+                    {
+                        StopPolling();
+                    }
                 }
             }
         }

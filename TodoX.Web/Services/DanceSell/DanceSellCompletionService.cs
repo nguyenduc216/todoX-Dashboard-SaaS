@@ -114,7 +114,8 @@ public sealed class DanceSellCompletionService : IDanceSellCompletionService
             }, KieJson.Options)
         }, ct);
 
-        return DanceSellCompletionResult.Completed(danceJob);
+        var completedJob = await _repo.GetByIdAsync(danceJob.Id, ct) ?? danceJob;
+        return DanceSellCompletionResult.Completed(completedJob);
     }
 
     public async Task<DanceSellCompletionResult> FailAsync(DanceSellFailureRequest request, CancellationToken ct = default)

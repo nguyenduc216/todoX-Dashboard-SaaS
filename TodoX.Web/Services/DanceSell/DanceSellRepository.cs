@@ -615,6 +615,7 @@ public sealed class DanceSellRepository : IDanceSellRepository
            SET status='completed',
                provider_status=@providerStatus,
                poll_response_json=CAST(@pollResponseJson AS jsonb),
+               result_url=@resultVideoUrl,
                current_stage='completed',
                last_polled_at=now(),
                completed_at=COALESCE(completed_at, now()),
@@ -672,6 +673,7 @@ public sealed class DanceSellRepository : IDanceSellRepository
                    END,
                    error_code=COALESCE(error_code, @errorCode),
                    error_message=COALESCE(error_message, @errorMessage),
+                   result_url=COALESCE(NULLIF(@resultVideoUrl, ''), result_url),
                    completed_at = CASE WHEN (@resultVideoUrl IS NOT NULL OR @errorCode IS NOT NULL) THEN COALESCE(completed_at, now()) ELSE completed_at END,
                    updated_at=now()
              WHERE provider_task_id=@providerTaskId;

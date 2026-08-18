@@ -106,6 +106,8 @@ public sealed class DanceSellRenderHandlerTests
         Assert.True(result.CompletedNow);
         Assert.Equal(1, repo.UpdateCompletedCallCount);
         Assert.Equal(DanceSellJobStatuses.Completed, repo.Job.Status);
+        Assert.Equal("https://cdn.example/result.mp4", result.Job?.ResultVideoUrl);
+        Assert.NotNull(result.Job?.CompletedAt);
         Assert.Equal(1, renderJobs.MarkStatusCallCount);
         Assert.Equal(1, renderJobs.AddEventCallCount);
         Assert.Equal(1, providers.LogUsageCallCount);

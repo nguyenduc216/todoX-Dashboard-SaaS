@@ -63,6 +63,8 @@ builder.Services.AddScoped<ICoreJobExecutionAdapter, ConstructionTimelapseAdapte
 builder.Services.AddScoped<ITimelapseProviderRuntime, TimelapseProviderRuntime>();
 builder.Services.AddScoped<ITimelapseFinalizerRuntime, TimelapseFinalizerRuntime>();
 builder.Services.AddHttpClient<TodoX.Web.Services.AiProviders.IAi79TaskClient, TodoX.Web.Services.AiProviders.Ai79TaskClient>();
+builder.Services.AddHttpClient("DanceSellDownload", client => client.Timeout = TimeSpan.FromMinutes(5))
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
 builder.Services.AddScoped<MrTodoXAvatarService>();
 builder.Services.AddScoped<SystemImageStorage>();
 builder.Services.AddScoped<ServiceThumbnailRenderService>();

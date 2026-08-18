@@ -1,3 +1,5 @@
+using System.Net;
+using System.Net.Sockets;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 using TodoX.Web.Models;
@@ -16,6 +18,7 @@ public static class DanceSellPhase2Endpoints
         group.MapGet("/jobs", ListJobsAsync);
         group.MapPost("/jobs", CreateJobAsync).DisableAntiforgery();
         group.MapGet("/jobs/{id:guid}", GetJobAsync);
+        group.MapGet("/jobs/{id:guid}/download", DownloadAsync);
         group.MapPut("/jobs/{id:guid}", UpdateBusinessAsync).DisableAntiforgery();
         group.MapPost("/jobs/{id:guid}/character", UploadCharacterAsync).DisableAntiforgery();
         group.MapPost("/jobs/{id:guid}/product", UploadProductAsync).DisableAntiforgery();
@@ -57,6 +60,44 @@ public static class DanceSellPhase2Endpoints
 
     private static async Task<IResult> GetJobAsync(Guid id, AuthStateService auth, IDanceSellPhase2Service service, CancellationToken ct)
         => await ExecuteAsync(auth, user => service.GetAsync(id, user, ct));
+
+    private static async Task<IResult> DownloadAsync(
+        Guid id,
+        AuthStateService auth,
+        IDanceSellPhase2Service service,
+        IHttpClientFactory httpClients,
+        CancellationToken ct)
+        => await ExecuteAsync(auth, async user =>
+        {
+            var job = await service.GetAsync(id, user, ct);
+            if (!string.Equals(job.Status, DanceSellJobStatuses.Completed, StringComparison.OrdinalIgnoreCase)
+                || string.IsNullOrWhiteSpace(job.ResultVideoUrl))
+            {
+                throw new InvalidOperationException("DANCE_SELL_RESULT_NOT_READY");
+            }
+
+            if (!Uri.TryCreate(job.ResultVideoUrl, UriKind.Absolute, out var resultUri))
+            {
+                throw new InvalidOperationException("DANCE_SELL_RESULT_URL_INVALID");
+            }
+
+            await EnsurePublicHttpsUrlAsync(resultUri, ct);
+            var client = httpClients.CreateClient("DanceSellDownload");
+            using var request = new HttpRequestMessage(HttpMethod.Get, resultUri);
+            var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+            if (!response.IsSuccessStatusCode)
+            {
+                response.Dispose();
+                throw new InvalidOperationException("DANCE_SELL_RESULT_DOWNLOAD_FAILED");
+            }
+
+            var stream = await response.Content.ReadAsStreamAsync(ct);
+            return Results.Stream(
+                stream,
+                "video/mp4",
+                $"todox-video-thoi-trang-{id:N}.mp4",
+                enableRangeProcessing: true);
+        });
 
     private static async Task<IResult> UpdateBusinessAsync(Guid id, DanceSellUpdateBusinessRequest request, AuthStateService auth, IDanceSellPhase2Service service, CancellationToken ct)
         => await ExecuteAsync(auth, user => service.UpdateBusinessAsync(id, request, user, ct));
@@ -173,6 +214,9 @@ public static class DanceSellPhase2Endpoints
             {
                 "DANCE_SELL_UNAUTHORIZED" => StatusCodes.Status403Forbidden,
                 "DANCE_SELL_NOT_FOUND" => StatusCodes.Status404NotFound,
+                "DANCE_SELL_RESULT_NOT_READY" => StatusCodes.Status409Conflict,
+                "DANCE_SELL_RESULT_URL_INVALID" => StatusCodes.Status400BadRequest,
+                "DANCE_SELL_RESULT_DOWNLOAD_FAILED" => StatusCodes.Status502BadGateway,
                 _ => StatusCodes.Status400BadRequest
             };
             return Results.Json(new { success = false, errorCode = ex.Message, message = ex.Message }, statusCode: status);
@@ -203,6 +247,61 @@ public static class DanceSellPhase2Endpoints
             };
             return Results.Json(new { success = false, errorCode = ex.Message, message = ex.Message }, statusCode: status);
         }
+    }
+
+    private static async Task EnsurePublicHttpsUrlAsync(Uri uri, CancellationToken ct)
+    {
+        if (uri.Scheme != Uri.UriSchemeHttps
+            || string.IsNullOrWhiteSpace(uri.Host)
+            || string.Equals(uri.Host, "localhost", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("DANCE_SELL_RESULT_URL_INVALID");
+        }
+
+        IPAddress[] addresses;
+        try
+        {
+            addresses = IPAddress.TryParse(uri.DnsSafeHost, out var address)
+                ? new[] { address }
+                : await Dns.GetHostAddressesAsync(uri.DnsSafeHost, ct);
+        }
+        catch (SocketException)
+        {
+            throw new InvalidOperationException("DANCE_SELL_RESULT_URL_INVALID");
+        }
+
+        if (addresses.Length == 0 || addresses.Any(IsPrivateOrLocalAddress))
+        {
+            throw new InvalidOperationException("DANCE_SELL_RESULT_URL_INVALID");
+        }
+    }
+
+    private static bool IsPrivateOrLocalAddress(IPAddress address)
+    {
+        if (IPAddress.IsLoopback(address)
+            || address.Equals(IPAddress.Any)
+            || address.Equals(IPAddress.IPv6Any)
+            || address.Equals(IPAddress.None)
+            || address.Equals(IPAddress.IPv6None)
+            || address.IsIPv6LinkLocal
+            || address.IsIPv6SiteLocal
+            || address.IsIPv6UniqueLocal)
+        {
+            return true;
+        }
+
+        var bytes = address.GetAddressBytes();
+        if (address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+        {
+            return bytes[0] == 10
+                || bytes[0] == 127
+                || bytes[0] == 0
+                || (bytes[0] == 169 && bytes[1] == 254)
+                || (bytes[0] == 172 && bytes[1] is >= 16 and <= 31)
+                || (bytes[0] == 192 && bytes[1] == 168);
+        }
+
+        return false;
     }
 }
 

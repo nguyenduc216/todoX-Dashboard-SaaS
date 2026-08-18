@@ -110,6 +110,23 @@ public sealed class DanceSellRepositoryTests
         Assert.Contains("completed_at=COALESCE(completed_at, now())", DanceSellRepository.UpdateCompletedSql, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public void UpdateCompletedAsyncSql_PersistsWritableResultUrlWithoutGeneratedColumnWrite()
+    {
+        Assert.Contains("result_url=@resultVideoUrl", DanceSellRepository.UpdateCompletedSql, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("result_video_url=", DanceSellRepository.UpdateCompletedSql, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void UpdateCallbackSql_PersistsResultUrlWithoutWritingGeneratedColumn()
+    {
+        var source = ReadRepositorySource();
+        var section = GetMethodSection(source, "UpdateCallbackAsync");
+
+        Assert.Contains("result_url=COALESCE(NULLIF(@resultVideoUrl, ''), result_url)", section, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("result_video_url=", section, StringComparison.OrdinalIgnoreCase);
+    }
+
     private static string ReadRepositorySource()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);

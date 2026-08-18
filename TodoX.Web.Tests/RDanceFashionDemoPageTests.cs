@@ -80,7 +80,6 @@ public sealed class RDanceFashionDemoPageTests
             "Provider chính: 79AI",
             "Video nhảy quảng cáo thời trang",
             "Dịch vụ: Video nhảy quảng cáo thời trang",
-            "Lịch sử video quảng cáo thời trang",
             "Bạn không có quyền xem video này.",
             "Không tìm thấy video quảng cáo thời trang.",
             "CancelAsync",
@@ -98,6 +97,9 @@ public sealed class RDanceFashionDemoPageTests
         Assert.DoesNotContain("rDance", page, StringComparison.Ordinal);
         Assert.Contains("MotionSourceUrl", page, StringComparison.Ordinal);
         Assert.Contains("NavigateTo(\"/jobs/rdance/new\")", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("_history", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("Lịch sử video quảng cáo thời trang", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("DanceSell.ListAsync(AuthState.CurrentUser", page, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -401,6 +403,31 @@ public sealed class RDanceFashionDemoPageTests
         Assert.Contains("ResultErrorText", page, StringComparison.Ordinal);
         Assert.Contains("Render lại video", page, StringComparison.Ordinal);
         Assert.Contains("video src=\"@_job.ResultVideoUrl\"", page, StringComparison.Ordinal);
+        Assert.Contains("Tải video", page, StringComparison.Ordinal);
+        Assert.Contains("StatusLabel", page, StringComparison.Ordinal);
+        Assert.Contains("Bắt đầu:", page, StringComparison.Ordinal);
+        Assert.Contains("Kết thúc:", page, StringComparison.Ordinal);
+        Assert.Contains("Thời gian thực hiện:", page, StringComparison.Ordinal);
+        Assert.Contains("Đã thực hiện:", page, StringComparison.Ordinal);
+        Assert.Contains("ReloadAsync(wasActive)", page, StringComparison.Ordinal);
+        Assert.Contains("_tabIndex = 3", page, StringComparison.Ordinal);
+        Assert.Contains("/api/dance-sell/jobs/{_job.Id}/download", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DanceSellDownloadEndpointUsesOwnedJobUrlAndBlocksArbitraryUrl()
+    {
+        var root = FindRepoRoot();
+        var endpoints = ReadStrictUtf8(Path.Combine(root, "TodoX.Web", "Services", "DanceSell", "DanceSellPhase2Endpoints.cs"));
+
+        Assert.Contains("group.MapGet(\"/jobs/{id:guid}/download\"", endpoints, StringComparison.Ordinal);
+        Assert.Contains("service.GetAsync(id, user, ct)", endpoints, StringComparison.Ordinal);
+        Assert.Contains("job.ResultVideoUrl", endpoints, StringComparison.Ordinal);
+        Assert.Contains("EnsurePublicHttpsUrlAsync", endpoints, StringComparison.Ordinal);
+        Assert.Contains("Results.Stream", endpoints, StringComparison.Ordinal);
+        Assert.Contains("video/mp4", endpoints, StringComparison.Ordinal);
+        Assert.DoesNotContain("string url", endpoints, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Request.Query", endpoints, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
