@@ -10,7 +10,7 @@
   - `4e000e0` `feat(rvideo): add scene editor and json import export`
   - `6047420` `fix(rvideo): complete information settings and auto render configuration`
   - hotfix: `fix(rvideo): harden auto lifecycle and tenant safety`
-- Final SHA: filled after hotfix commit.
+- Final SHA: `48cbd9b` (hotfix implementation; report metadata follows in the documentation commit).
 
 ## Implemented
 
