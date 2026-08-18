@@ -281,8 +281,8 @@ public sealed class Ai79TaskClient : IAi79TaskClient
     public async Task<Ai79MediaUploadResult> UploadMediaAsync(Ai79MediaUploadRequest request, CancellationToken ct = default)
     {
         using var body = new MultipartFormDataContent();
-        body.Add(new StringContent(request.Domain), "domain");
-        body.Add(new StringContent(request.ProjectId), "project_id");
+        body.Add(CreateMultipartTextPart("domain", request.Domain));
+        body.Add(CreateMultipartTextPart("project_id", request.ProjectId));
 
         var file = request.File;
         var stream = await file.OpenReadAsync(ct)
@@ -290,9 +290,33 @@ public sealed class Ai79TaskClient : IAi79TaskClient
                 $"79AI upload file '{request.FieldName}' could not be opened.",
                 JsonSerializer.Serialize(new { error = "missing_file", field = request.FieldName }, JsonOptions),
                 errorCode: "missing_file");
+        if (stream.CanSeek)
+        {
+            stream.Position = 0;
+            if (stream.Length == 0)
+            {
+                throw new Ai79TaskSubmitException(
+                    $"79AI upload file '{request.FieldName}' was empty.",
+                    JsonSerializer.Serialize(new { error = "empty_file", field = request.FieldName }, JsonOptions),
+                    errorCode: "empty_file");
+            }
+        }
+        else if (file.SizeBytes == 0)
+        {
+            throw new Ai79TaskSubmitException(
+                $"79AI upload file '{request.FieldName}' was empty.",
+                JsonSerializer.Serialize(new { error = "empty_file", field = request.FieldName }, JsonOptions),
+                errorCode: "empty_file");
+        }
+
         var content = new StreamContent(stream);
         content.Headers.ContentType = MediaTypeHeaderValue.Parse(file.MimeType);
-        body.Add(content, request.FieldName, file.FileName);
+        content.Headers.ContentDisposition = new ContentDispositionHeaderValue("form-data")
+        {
+            Name = QuoteMultipartValue(request.FieldName),
+            FileName = QuoteMultipartValue(file.FileName)
+        };
+        body.Add(content);
 
         using var httpRequest = new HttpRequestMessage(HttpMethod.Post, BuildUri(request.BaseUrl, request.EndpointPath));
         httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", NormalizeBearerToken(request.AccessToken));
@@ -636,6 +660,20 @@ public sealed class Ai79TaskClient : IAi79TaskClient
 
     private static Uri BuildUri(string baseUrl, string path)
         => new(new Uri(baseUrl.TrimEnd('/') + "/"), path.TrimStart('/'));
+
+    private static StringContent CreateMultipartTextPart(string name, string value)
+    {
+        var content = new StringContent(value);
+        content.Headers.ContentDisposition = new ContentDispositionHeaderValue("form-data")
+        {
+            Name = QuoteMultipartValue(name)
+        };
+        content.Headers.ContentType = null;
+        return content;
+    }
+
+    private static string QuoteMultipartValue(string value)
+        => $"\"{value.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal)}\"";
 
     private static string NormalizeBearerToken(string accessToken)
     {
@@ -1064,27 +1102,41 @@ public sealed class Ai79TaskClient : IAi79TaskClient
         foreach (var path in new[]
                  {
                      new[] { "url" },
+                     new[] { "download_url" },
+                     new[] { "downloadUrl" },
                      new[] { "assetUrl" },
                      new[] { "asset_url" },
                      new[] { "image_url" },
                      new[] { "video_url" },
                      new[] { "imageInfo", "url" },
                      new[] { "videoInfo", "url" },
+                     new[] { "videoInfo", "download_url" },
+                     new[] { "videoInfo", "downloadUrl" },
                      new[] { "fileInfo", "url" },
                      new[] { "data", "url" },
+                     new[] { "data", "download_url" },
+                     new[] { "data", "downloadUrl" },
                      new[] { "data", "assetUrl" },
                      new[] { "data", "asset_url" },
                      new[] { "data", "image_url" },
                      new[] { "data", "video_url" },
                      new[] { "data", "imageInfo", "url" },
                      new[] { "data", "videoInfo", "url" },
+                     new[] { "data", "videoInfo", "download_url" },
+                     new[] { "data", "videoInfo", "downloadUrl" },
                      new[] { "data", "fileInfo", "url" },
                      new[] { "body", "url" },
+                     new[] { "body", "download_url" },
+                     new[] { "body", "downloadUrl" },
                      new[] { "body", "data", "url" },
+                     new[] { "body", "data", "download_url" },
+                     new[] { "body", "data", "downloadUrl" },
                      new[] { "body", "data", "assetUrl" },
                      new[] { "body", "data", "asset_url" },
                      new[] { "body", "data", "imageInfo", "url" },
                      new[] { "body", "data", "videoInfo", "url" },
+                     new[] { "body", "data", "videoInfo", "download_url" },
+                     new[] { "body", "data", "videoInfo", "downloadUrl" },
                      new[] { "body", "data", "fileInfo", "url" }
                  })
         {

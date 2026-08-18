@@ -355,14 +355,18 @@ public sealed class RDanceFashionDemoPageTests
         Assert.Contains("Task<Ai79TaskSubmitResult> SubmitMotionControlAsync", client, StringComparison.Ordinal);
         Assert.Contains("new MultipartFormDataContent()", client, StringComparison.Ordinal);
         Assert.Contains("new StreamContent(stream)", client, StringComparison.Ordinal);
-        Assert.Contains("body.Add(content, file.FieldName, file.FileName)", client, StringComparison.Ordinal);
-        Assert.Contains("body.Add(content, request.FieldName, file.FileName)", client, StringComparison.Ordinal);
+        Assert.Contains("ContentDispositionHeaderValue(\"form-data\")", client, StringComparison.Ordinal);
+        Assert.Contains("CreateMultipartTextPart(\"domain\", request.Domain)", client, StringComparison.Ordinal);
+        Assert.Contains("CreateMultipartTextPart(\"project_id\", request.ProjectId)", client, StringComparison.Ordinal);
+        Assert.Contains("body.Add(content);", client, StringComparison.Ordinal);
         Assert.Contains("[\"image_url\"] = request.ImageUrl", client, StringComparison.Ordinal);
         Assert.Contains("[\"images[0][url]\"] = request.ImageUrl", client, StringComparison.Ordinal);
         Assert.Contains("[\"video_url\"] = request.VideoUrl", client, StringComparison.Ordinal);
         Assert.Contains("[\"subType\"] = request.SubType", client, StringComparison.Ordinal);
         Assert.Contains("[\"background_source\"] = request.BackgroundSource", client, StringComparison.Ordinal);
         Assert.Contains("MediaTypeHeaderValue.Parse(file.MimeType)", client, StringComparison.Ordinal);
+        Assert.Contains("FindUploadAssetUrl", client, StringComparison.Ordinal);
+        Assert.Contains("\"download_url\"", client, StringComparison.Ordinal);
         Assert.Contains("public async Task<Ai79TaskSubmitResult> SubmitAsync", client, StringComparison.Ordinal);
         Assert.Contains("new FormUrlEncodedContent(form)", client, StringComparison.Ordinal);
     }

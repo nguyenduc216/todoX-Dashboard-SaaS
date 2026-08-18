@@ -241,12 +241,52 @@ public sealed class Ai79TaskClientTests
         Assert.Equal("Bearer", handler.Requests[1].Authorization?.Scheme);
         Assert.Equal("secret-token", handler.Requests[0].Authorization?.Parameter);
         Assert.Equal("secret-token", handler.Requests[1].Authorization?.Parameter);
+        Assert.StartsWith("multipart/form-data; boundary=", handler.Requests[0].ContentType, StringComparison.Ordinal);
+        Assert.StartsWith("multipart/form-data; boundary=", handler.Requests[1].ContentType, StringComparison.Ordinal);
         Assert.DoesNotContain("access_token=", handler.Requests[0].Body, StringComparison.Ordinal);
         Assert.DoesNotContain("access_token=", handler.Requests[1].Body, StringComparison.Ordinal);
-        Assert.Contains("name=file", handler.Requests[0].Body, StringComparison.Ordinal);
-        Assert.Contains("filename=reference.png", handler.Requests[0].Body, StringComparison.Ordinal);
-        Assert.Contains("name=video_file", handler.Requests[1].Body, StringComparison.Ordinal);
-        Assert.Contains("filename=motion.mp4", handler.Requests[1].Body, StringComparison.Ordinal);
+        Assert.Contains("name=\"file\"", handler.Requests[0].Body, StringComparison.Ordinal);
+        Assert.Contains("filename=\"reference.png\"", handler.Requests[0].Body, StringComparison.Ordinal);
+        Assert.Contains("Content-Type: image/png", handler.Requests[0].Body, StringComparison.Ordinal);
+        Assert.Contains("name=\"video_file\"", handler.Requests[1].Body, StringComparison.Ordinal);
+        Assert.Contains("filename=\"motion.mp4\"", handler.Requests[1].Body, StringComparison.Ordinal);
+        Assert.Contains("Content-Type: video/mp4", handler.Requests[1].Body, StringComparison.Ordinal);
+        Assert.Contains("name=\"domain\"", handler.Requests[1].Body, StringComparison.Ordinal);
+        Assert.Contains("79ai.net", handler.Requests[1].Body, StringComparison.Ordinal);
+        Assert.Contains("name=\"project_id\"", handler.Requests[1].Body, StringComparison.Ordinal);
+        Assert.Contains("default", handler.Requests[1].Body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task MediaUpload_ParsesTopLevelDownloadUrlFromCurlCompatibleVideoResponse()
+    {
+        var handler = new RecordingJsonHandler(
+            """{"message":"Upload video thành công","download_url":"https://ai-cdn.gommo.net/ai/videos/test.mp4"}""");
+        var client = new Ai79TaskClient(new HttpClient(handler));
+
+        var result = await client.UploadMediaAsync(new Ai79MediaUploadRequest(
+            "https://v2.api.gommo.net",
+            "/ai/upload/video",
+            "Bearer secret-token",
+            "79ai.net",
+            "default",
+            "video_file",
+            new Ai79MultipartFilePart("video_file", "motion.mp4", "video/mp4", 4, _ => Task.FromResult<Stream?>(new MemoryStream(new byte[] { 5, 6, 7, 8 })))));
+
+        Assert.Equal("https://ai-cdn.gommo.net/ai/videos/test.mp4", result.Url);
+        var request = Assert.Single(handler.Requests);
+        Assert.Equal("https://v2.api.gommo.net/ai/upload/video", request.Uri);
+        Assert.Equal("Bearer", request.Authorization?.Scheme);
+        Assert.Equal("secret-token", request.Authorization?.Parameter);
+        Assert.StartsWith("multipart/form-data; boundary=", request.ContentType, StringComparison.Ordinal);
+        Assert.Contains("name=\"video_file\"", request.Body, StringComparison.Ordinal);
+        Assert.Contains("filename=\"motion.mp4\"", request.Body, StringComparison.Ordinal);
+        Assert.Contains("Content-Type: video/mp4", request.Body, StringComparison.Ordinal);
+        Assert.Contains("name=\"domain\"", request.Body, StringComparison.Ordinal);
+        Assert.Contains("79ai.net", request.Body, StringComparison.Ordinal);
+        Assert.Contains("name=\"project_id\"", request.Body, StringComparison.Ordinal);
+        Assert.Contains("default", request.Body, StringComparison.Ordinal);
+        Assert.DoesNotContain("access_token", request.Body, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -651,7 +691,7 @@ public sealed class Ai79TaskClientTests
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             var body = request.Content is null ? string.Empty : await request.Content.ReadAsStringAsync(cancellationToken);
-            Requests.Add(new RequestSnapshot(request.RequestUri!.ToString(), body, request.Headers.Authorization));
+            Requests.Add(new RequestSnapshot(request.RequestUri!.ToString(), body, request.Headers.Authorization, request.Content?.Headers.ContentType?.ToString()));
             var response = _responses.Count == 0 ? new RecordedResponse(HttpStatusCode.OK, "{}") : _responses.Dequeue();
             return new HttpResponseMessage(response.Status)
             {
@@ -660,6 +700,6 @@ public sealed class Ai79TaskClientTests
         }
     }
 
-    private sealed record RequestSnapshot(string Uri, string Body, AuthenticationHeaderValue? Authorization);
+    private sealed record RequestSnapshot(string Uri, string Body, AuthenticationHeaderValue? Authorization, string? ContentType);
     private sealed record RecordedResponse(HttpStatusCode Status, string Body);
 }
