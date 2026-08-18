@@ -1544,15 +1544,29 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
     public async Task<DanceSellJobDto> CancelAsync(Guid id, string reason, CurrentUserSession user, CancellationToken ct = default)
     {
         var job = await RequireOwnedJobAsync(id, user, ct);
-        if (job.RenderJobId is null
-            || job.Status is not (DanceSellJobStatuses.Queued or DanceSellJobStatuses.Submitted or DanceSellJobStatuses.Rendering))
+        if (job.RenderJobId is null)
+        {
+            throw new InvalidOperationException("DANCE_SELL_CANCEL_NOT_ALLOWED");
+        }
+
+        var coreJob = await _renderJobs.GetAsync(job.RenderJobId.Value, ct);
+        if (coreJob?.Status == RenderJobStatuses.Cancelled)
+        {
+            return await _repo.GetByIdAsync(job.Id, ct) ?? job;
+        }
+
+        if (job.Status is not (DanceSellJobStatuses.Queued or DanceSellJobStatuses.Submitted or DanceSellJobStatuses.Rendering))
         {
             throw new InvalidOperationException("DANCE_SELL_CANCEL_NOT_ALLOWED");
         }
 
         if (!await _renderJobs.CancelAsync(job.RenderJobId.Value, reason, user.UserId, ct))
         {
-            throw new InvalidOperationException("DANCE_SELL_CANCEL_FAILED");
+            coreJob = await _renderJobs.GetAsync(job.RenderJobId.Value, ct);
+            if (coreJob?.Status != RenderJobStatuses.Cancelled)
+            {
+                throw new InvalidOperationException("DANCE_SELL_CANCEL_FAILED");
+            }
         }
 
         return await _repo.GetByIdAsync(job.Id, ct) ?? job;

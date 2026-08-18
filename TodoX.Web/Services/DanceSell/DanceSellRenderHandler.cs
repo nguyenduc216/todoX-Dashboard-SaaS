@@ -194,6 +194,8 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
         string? motionProviderFileName = motionVideo.FileName;
         string motionUploadState;
         AiOperationAssetDto? reusableMotionUpload = null;
+        var submitStartedAtUtc = DateTime.UtcNow;
+        var submitAttempt = 0;
         try
         {
             if (referenceSource == "uploaded_binary")
@@ -298,7 +300,7 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
                 runtime.SubType,
                 runtime.BackgroundSource,
                 runtime.IncludeImagesZeroUrl);
-            var requestJson = JsonSerializer.Serialize(new
+            string BuildRequestJson(int submitAttempt) => JsonSerializer.Serialize(new
             {
                 providerCode = runtime.ProviderCode,
                 providerModel = runtime.Model,
@@ -341,24 +343,51 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
                     videoUrl = motionProviderUrl,
                     subType = runtime.SubType,
                     backgroundSource = runtime.BackgroundSource,
-                    prompt = motionPrompt
+                    prompt = motionPrompt,
+                    submitAttempt
                 },
                 auditPrompt = danceJob.Prompt,
                 submittedAt
             }, KieJson.Options);
 
+            var requestJson = BuildRequestJson(0);
+            submitAttempt = await _operations.BeginMotionSubmitAttemptAsync(motionOperationId, requestJson, ct);
+            var maxAmbiguousSubmitAttempts = Math.Clamp(_options.CurrentValue.SubmitMaxRetry, 2, 3);
+            if (submitAttempt > maxAmbiguousSubmitAttempts)
+            {
+                await _renderJobs.AddEventAsync(renderJob.Id, "AI79_MOTION_SUBMIT_ATTEMPTS_EXHAUSTED", "79AI motion submit retry cap reached; manual recovery is required.",
+                    new
+                    {
+                        danceSellJobId = danceJob.Id,
+                        endpointPath = runtime.MotionSubmitPath,
+                        internalModel = runtime.Model,
+                        submitAttempt,
+                        maxAmbiguousSubmitAttempts
+                    }, level: "warning", ct: ct);
+                await FailAsync(renderJob, danceJob, "AI79_MOTION_SUBMIT_RETRY_EXHAUSTED", "79AI motion submit retry cap reached. Please retry the video manually.", "{}", permanent: true, ct, DanceSellJobStatuses.Timeout);
+                throw new RenderJobTerminalFailureException("AI79_MOTION_SUBMIT_RETRY_EXHAUSTED");
+            }
+
+            requestJson = BuildRequestJson(submitAttempt);
+
+            submitStartedAtUtc = DateTime.UtcNow;
             var submitStartedAt = Stopwatch.StartNew();
             await _renderJobs.AddEventAsync(renderJob.Id, "AI79_MOTION_SUBMIT_STARTED", "79AI Kling Motion Control submit started.",
                 new
                 {
                     danceSellJobId = danceJob.Id,
                     endpointPath = runtime.MotionSubmitPath,
-                    model = runtime.Model,
+                    internalModel = runtime.Model,
+                    projectId = runtime.ProjectId,
                     mode = runtime.ProviderMode,
                     ratio = runtime.ProviderRatio,
+                    subType = runtime.SubType,
+                    backgroundSource = runtime.BackgroundSource,
                     imageUrl = referenceUrlUsed,
                     videoUrl = motionProviderUrl,
-                    projectId = motionProviderProjectId
+                    includeImagesZeroUrl = runtime.IncludeImagesZeroUrl,
+                    submitAttempt,
+                    startedAt = submitStartedAtUtc
                 }, ct: ct);
             var submitted = await _ai79.SubmitMotionControlAsync(request, ct);
             submitStartedAt.Stop();
@@ -366,7 +395,7 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
             await _operations.MarkSubmittedAsync(motionOperationId, submitted.TaskId, submitted.SanitizedResponseJson, ct);
 
             await _renderJobs.AddEventAsync(renderJob.Id, "AI79_MOTION_TASK_SUBMITTED", "79AI Kling Motion Control task submitted.",
-                new { danceSellJobId = danceJob.Id, taskId = submitted.TaskId, runtime.Model, runtime.ProviderMode, runtime.ProviderRatio, runtime.MotionSubmitPath, durationMs = submitStartedAt.ElapsedMilliseconds }, ct: ct);
+                new { danceSellJobId = danceJob.Id, taskId = submitted.TaskId, elapsedMs = submitStartedAt.ElapsedMilliseconds, endpointPath = runtime.MotionSubmitPath, internalModel = runtime.Model }, ct: ct);
             await LogUsageAsync(danceJob, renderJob, "submitted", submitted.TaskId, "submitted", null, null, ct);
             await ScheduleNextPollAsync(renderJob, "79AI motion task submitted; polling scheduled.", ct);
         }
@@ -377,7 +406,7 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
         }
         catch (TaskCanceledException ex) when (!ct.IsCancellationRequested)
         {
-            await Record79AiSubmitTimeoutAsync(renderJob, danceJob, runtime.MotionSubmitPath, motionProviderUrl, submittedAt, ex, ct);
+            await Handle79AiSubmitRetryFailureAsync(renderJob, danceJob, runtime, motionProviderUrl, submitAttempt, submitStartedAtUtc, ex, ct);
             await _renderJobs.ScheduleRetryAsync(renderJob.Id, TimeSpan.FromSeconds(30), "AI79_MOTION_SUBMIT_TIMEOUT", "79AI motion submit timed out after source upload; retry will reuse the persisted provider video URL.", ct);
             throw new RenderJobDeferredException("79AI motion submit timeout scheduled for retry.");
         }
@@ -387,22 +416,13 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
         }
         catch (OperationCanceledException ex)
         {
-            await Record79AiSubmitTimeoutAsync(renderJob, danceJob, runtime.MotionSubmitPath, motionProviderUrl, submittedAt, ex, ct);
+            await Handle79AiSubmitRetryFailureAsync(renderJob, danceJob, runtime, motionProviderUrl, submitAttempt, submitStartedAtUtc, ex, ct);
             await _renderJobs.ScheduleRetryAsync(renderJob.Id, TimeSpan.FromSeconds(30), "AI79_MOTION_SUBMIT_TIMEOUT", "79AI motion submit was cancelled by HTTP timeout after source upload; retry will reuse the persisted provider video URL.", ct);
             throw new RenderJobDeferredException("79AI motion submit cancellation scheduled for retry.");
         }
         catch (HttpRequestException ex)
         {
-            await _renderJobs.AddEventAsync(renderJob.Id, "AI79_MOTION_SUBMIT_HTTP_ERROR", "79AI Kling Motion Control submit HTTP error.",
-                new
-                {
-                    danceSellJobId = danceJob.Id,
-                    endpoint = runtime.MotionSubmitPath,
-                    elapsedMs = (long)(DateTime.UtcNow - submittedAt).TotalMilliseconds,
-                    providerUploadUrl = motionProviderUrl,
-                    errorType = ex.GetType().Name,
-                    errorMessage = ex.Message
-                }, level: "warning", ct: ct);
+            await Handle79AiSubmitRetryFailureAsync(renderJob, danceJob, runtime, motionProviderUrl, submitAttempt, submitStartedAtUtc, ex, ct);
             await _renderJobs.ScheduleRetryAsync(renderJob.Id, TimeSpan.FromSeconds(30), "AI79_MOTION_SUBMIT_HTTP_ERROR", "79AI motion submit HTTP error after source upload; retry will reuse the persisted provider video URL.", ct);
             throw new RenderJobDeferredException("79AI motion submit HTTP error scheduled for retry.");
         }
@@ -438,18 +458,36 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
         return operation?.Id ?? throw new InvalidOperationException("DANCE_SELL_MOTION_OPERATION_REQUIRED");
     }
 
-    private async Task Record79AiSubmitTimeoutAsync(RenderJobDto renderJob, DanceSellJobDto danceJob, string endpointPath, string providerUploadUrl, DateTime startedAt, Exception ex, CancellationToken ct)
+    private async Task Handle79AiSubmitRetryFailureAsync(
+        RenderJobDto renderJob,
+        DanceSellJobDto danceJob,
+        Ai79MotionRuntime runtime,
+        string providerUploadUrl,
+        int submitAttempt,
+        DateTime startedAt,
+        Exception ex,
+        CancellationToken ct)
     {
-        await _renderJobs.AddEventAsync(renderJob.Id, "AI79_MOTION_SUBMIT_TIMEOUT", "79AI Kling Motion Control submit timed out after source upload.",
+        var maxAmbiguousSubmitAttempts = Math.Clamp(_options.CurrentValue.SubmitMaxRetry, 2, 3);
+        var isTimeout = ex is OperationCanceledException;
+        await _renderJobs.AddEventAsync(renderJob.Id, isTimeout ? "AI79_MOTION_SUBMIT_TIMEOUT" : "AI79_MOTION_SUBMIT_HTTP_ERROR",
+            isTimeout ? "79AI Kling Motion Control submit timed out after source upload." : "79AI Kling Motion Control submit HTTP error.",
             new
             {
                 danceSellJobId = danceJob.Id,
-                endpoint = endpointPath,
+                endpointPath = runtime.MotionSubmitPath,
                 elapsedMs = (long)(DateTime.UtcNow - startedAt).TotalMilliseconds,
-                providerUploadUrl,
+                providerUploadedVideoUrl = providerUploadUrl,
+                submitAttempt,
+                maxAmbiguousSubmitAttempts,
                 errorType = ex.GetType().Name,
                 errorMessage = ex.Message
             }, level: "warning", ct: ct);
+        if (submitAttempt >= maxAmbiguousSubmitAttempts)
+        {
+            await FailAsync(renderJob, danceJob, "AI79_MOTION_SUBMIT_RETRY_EXHAUSTED", "79AI motion submit retry cap reached. Please retry the video manually.", "{}", permanent: true, ct, DanceSellJobStatuses.Timeout);
+            throw new RenderJobTerminalFailureException("AI79_MOTION_SUBMIT_RETRY_EXHAUSTED", ex);
+        }
     }
 
     private async Task Poll79AiAsync(RenderJobDto renderJob, DanceSellJobDto danceJob, Guid? operationId, CancellationToken ct)

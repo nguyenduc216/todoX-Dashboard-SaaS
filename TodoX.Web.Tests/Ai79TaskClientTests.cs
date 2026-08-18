@@ -342,7 +342,6 @@ public sealed class Ai79TaskClientTests
         Assert.DoesNotContain("access_token=", request.Body, StringComparison.Ordinal);
         Assert.Contains("domain=79ai.net", request.Body, StringComparison.Ordinal);
         Assert.Contains("project_id=default", request.Body, StringComparison.Ordinal);
-        Assert.Contains("model=kling_video_motion_3", request.Body, StringComparison.Ordinal);
         Assert.Contains("image_url=https%3A%2F%2Fcdn.79ai.net%2Fassets%2Freference.png", request.Body, StringComparison.Ordinal);
         Assert.Contains("images%5B0%5D%5Burl%5D=https%3A%2F%2Fcdn.79ai.net%2Fassets%2Freference.png", request.Body, StringComparison.Ordinal);
         Assert.Contains("video_url=https%3A%2F%2Fcdn.79ai.net%2Fassets%2Fmotion.mp4", request.Body, StringComparison.Ordinal);
@@ -350,6 +349,7 @@ public sealed class Ai79TaskClientTests
         Assert.Contains("background_source=input_video", request.Body, StringComparison.Ordinal);
         Assert.Contains("mode=standard", request.Body, StringComparison.Ordinal);
         Assert.Contains("ratio=default", request.Body, StringComparison.Ordinal);
+        Assert.DoesNotContain("model=", request.Body, StringComparison.Ordinal);
         Assert.DoesNotContain("localhost", request.Body, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("motion_video=", request.Body, StringComparison.Ordinal);
         Assert.DoesNotContain("character_image=", request.Body, StringComparison.Ordinal);

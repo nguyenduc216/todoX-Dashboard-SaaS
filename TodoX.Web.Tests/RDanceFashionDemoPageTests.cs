@@ -100,6 +100,13 @@ public sealed class RDanceFashionDemoPageTests
         Assert.DoesNotContain("_history", page, StringComparison.Ordinal);
         Assert.DoesNotContain("Lịch sử video quảng cáo thời trang", page, StringComparison.Ordinal);
         Assert.DoesNotContain("DanceSell.ListAsync(AuthState.CurrentUser", page, StringComparison.Ordinal);
+        Assert.Contains("IRenderJobService RenderJobs", page, StringComparison.Ordinal);
+        Assert.Contains("RenderJobs.GetAsync(renderJobId)", page, StringComparison.Ordinal);
+        Assert.Contains("IsCoreCancelled", page, StringComparison.Ordinal);
+        Assert.Contains("MudItem xs=\"12\" md=\"8\"", page, StringComparison.Ordinal);
+        Assert.Contains("MudItem xs=\"12\" md=\"4\"", page, StringComparison.Ordinal);
+        Assert.Contains("DisplayStatusLabel(_job!)", page, StringComparison.Ordinal);
+        Assert.Contains("Đã dừng tạo video.", page, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -317,6 +324,7 @@ public sealed class RDanceFashionDemoPageTests
         var submit = GetMethodSection(handler, "Submit79AiAsync");
         var runtime = GetMethodSection(handler, "Resolve79AiRuntimeAsync");
         var models = ReadStrictUtf8(Path.Combine(root, "TodoX.Web", "Services", "DanceSell", "DanceSellModels.cs"));
+        var motionSubmit = GetMethodSection(client, "SubmitMotionControlAsync");
 
         Assert.DoesNotContain("?? danceJob.CharacterImageUrl", submit, StringComparison.Ordinal);
         Assert.Contains("danceJob.PreparedReferenceMediaId", submit, StringComparison.Ordinal);
@@ -337,6 +345,9 @@ public sealed class RDanceFashionDemoPageTests
         Assert.Contains("SubmitMotionControlAsync(request, ct)", submit, StringComparison.Ordinal);
         Assert.Contains("AI79_MOTION_SUBMIT_STARTED", submit, StringComparison.Ordinal);
         Assert.Contains("AI79_MOTION_SUBMIT_TIMEOUT", submit, StringComparison.Ordinal);
+        Assert.Contains("BeginMotionSubmitAttemptAsync", submit, StringComparison.Ordinal);
+        Assert.Contains("SubmitMaxRetry", submit, StringComparison.Ordinal);
+        Assert.Contains("AI79_MOTION_SUBMIT_RETRY_EXHAUSTED", submit, StringComparison.Ordinal);
         Assert.Contains("contentType = \"application/x-www-form-urlencoded\"", submit, StringComparison.Ordinal);
         Assert.Contains("referenceSource", submit, StringComparison.Ordinal);
         Assert.Contains("referenceUrlUsed", submit, StringComparison.Ordinal);
@@ -404,6 +415,7 @@ public sealed class RDanceFashionDemoPageTests
         Assert.Contains("[\"video_url\"] = request.VideoUrl", client, StringComparison.Ordinal);
         Assert.Contains("[\"subType\"] = request.SubType", client, StringComparison.Ordinal);
         Assert.Contains("[\"background_source\"] = request.BackgroundSource", client, StringComparison.Ordinal);
+        Assert.DoesNotContain("[\"model\"] = request.Model", motionSubmit, StringComparison.Ordinal);
         Assert.Contains("MediaTypeHeaderValue.Parse(file.MimeType)", client, StringComparison.Ordinal);
         Assert.Contains("FindUploadAssetUrl", client, StringComparison.Ordinal);
         Assert.Contains("\"download_url\"", client, StringComparison.Ordinal);
@@ -499,6 +511,26 @@ public sealed class RDanceFashionDemoPageTests
     }
 
     [Fact]
+    public void DanceSellCancelIsIdempotentWhenCoreJobAlreadyCancelled()
+    {
+        var root = FindRepoRoot();
+        var service = ReadStrictUtf8(Path.Combine(root, "TodoX.Web", "Services", "DanceSell", "DanceSellPhase2Services.cs"));
+        var page = ReadStrictUtf8(Path.Combine(root, "TodoX.Web", "Components", "Pages", "RDanceJobDetail.razor"));
+        var cancel = GetMethodSection(service, "CancelAsync");
+
+        Assert.Contains("_renderJobs.GetAsync(job.RenderJobId.Value, ct)", cancel, StringComparison.Ordinal);
+        Assert.Contains("coreJob?.Status == RenderJobStatuses.Cancelled", cancel, StringComparison.Ordinal);
+        Assert.Contains("if (!await _renderJobs.CancelAsync(job.RenderJobId.Value, reason, user.UserId, ct))", cancel, StringComparison.Ordinal);
+        Assert.Contains("coreJob = await _renderJobs.GetAsync(job.RenderJobId.Value, ct)", cancel, StringComparison.Ordinal);
+        Assert.Contains("coreJob?.Status != RenderJobStatuses.Cancelled", cancel, StringComparison.Ordinal);
+        Assert.Contains("throw new InvalidOperationException(\"DANCE_SELL_CANCEL_FAILED\")", cancel, StringComparison.Ordinal);
+
+        Assert.Contains("CustomerErrorMessage", page, StringComparison.Ordinal);
+        Assert.Contains("DANCE_SELL_CANCEL_FAILED", page, StringComparison.Ordinal);
+        Assert.Contains("Không thể dừng video lúc này. Vui lòng thử lại.", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void DanceSellMotionUploadFirstFlowValidatesFilesAndKeepsSuccessfulPollWithoutUrlPollable()
     {
         var root = FindRepoRoot();
@@ -526,6 +558,8 @@ public sealed class RDanceFashionDemoPageTests
         Assert.Contains("AI79_MOTION_SOURCE_UPLOAD_REUSED", submit, StringComparison.Ordinal);
         Assert.Contains("AI79_MOTION_SUBMIT_STARTED", submit, StringComparison.Ordinal);
         Assert.Contains("AI79_MOTION_SUBMIT_TIMEOUT", submit, StringComparison.Ordinal);
+        Assert.Contains("BeginMotionSubmitAttemptAsync", submit, StringComparison.Ordinal);
+        Assert.Contains("AI79_MOTION_SUBMIT_RETRY_EXHAUSTED", submit, StringComparison.Ordinal);
         Assert.Contains("reference = new", submit, StringComparison.Ordinal);
         Assert.Contains("motionUpload = new", submit, StringComparison.Ordinal);
         Assert.Contains("AI79_MOTION_REFERENCE_USING_APPROVED_URL", submit, StringComparison.Ordinal);
