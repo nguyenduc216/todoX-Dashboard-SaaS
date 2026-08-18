@@ -463,7 +463,8 @@
     private const string AcceptedImageTypes = "image/png,image/jpeg,image/webp";
     private bool CanRender => _job?.Status is not (DanceSellJobStatuses.Queued or DanceSellJobStatuses.Submitted or DanceSellJobStatuses.Rendering)
         && _job?.MotionVideoMediaId is not null
-        && _job?.PreparedReferenceStatus == DanceSellReferenceStatuses.Approved;
+        && _job?.PreparedReferenceStatus == DanceSellReferenceStatuses.Approved
+        && !string.IsNullOrWhiteSpace(_job.PreparedReferenceUrl);
     private bool IsActive => _job?.Status is DanceSellJobStatuses.Queued or DanceSellJobStatuses.Submitted or DanceSellJobStatuses.Rendering;
     private bool IsResultActive => _job?.Status is DanceSellJobStatuses.Queued or DanceSellJobStatuses.Submitted or DanceSellJobStatuses.Rendering;
     private bool IsReferenceGenerating => _job?.PreparedReferenceStatus == DanceSellReferenceStatuses.Generating
@@ -736,7 +737,11 @@
         _characterDragActive = false;
         if (await UploadAsync(args, MaxImageBytes, (bytes, file) => DanceSell.UploadCharacterAsync(_job!.Id, bytes, file.Name, file.ContentType, AuthState.CurrentUser!)))
         {
-            await AutoPrepareReferenceAsync();
+            await ReloadAsync();
+            if (_job?.CharacterMediaId is not null && !string.IsNullOrWhiteSpace(_job.CharacterImageUrl))
+            {
+                await AutoPrepareReferenceAsync();
+            }
         }
     }
 
@@ -745,7 +750,11 @@
         _productDragActive = false;
         if (await UploadAsync(args, MaxImageBytes, (bytes, file) => DanceSell.UploadProductAsync(_job!.Id, bytes, file.Name, file.ContentType, AuthState.CurrentUser!)))
         {
-            await AutoPrepareReferenceAsync();
+            await ReloadAsync();
+            if (_job?.ProductMediaId is not null && !string.IsNullOrWhiteSpace(_job.ProductImageUrl))
+            {
+                await AutoPrepareReferenceAsync();
+            }
         }
     }
 
@@ -775,7 +784,17 @@
 
         await RunAsync(async () =>
         {
-            EnsureReferenceProviderReady();
+            await ReloadAsync();
+            if (_job is null)
+            {
+                return;
+            }
+
+            if (_job.ProductMediaId is not null && !string.IsNullOrWhiteSpace(_job.ProductImageUrl))
+            {
+                EnsureReferenceProviderReady();
+            }
+
             _job = await References.AutoPrepareAsync(_job!.Id, AuthState.CurrentUser!);
             var versions = await DanceRepo.ListReferenceVersionsAsync(_job.Id);
             _latestReference = versions.OrderByDescending(x => x.VersionNo).FirstOrDefault();
@@ -880,6 +899,13 @@
             await RunAsync(async () =>
             {
                 await UpdateBusinessAsync();
+                _job = await DanceSell.GetAsync(_job!.Id, AuthState.CurrentUser!);
+                if (_job.PreparedReferenceStatus != DanceSellReferenceStatuses.Approved
+                    || string.IsNullOrWhiteSpace(_job.PreparedReferenceUrl))
+                {
+                    throw new InvalidOperationException("DANCE_SELL_REFERENCE_NOT_APPROVED");
+                }
+
                 _job = await DanceSell.QueueRenderAsync(_job!.Id, AuthState.CurrentUser!);
                 _tabIndex = 3;
                 await ReloadAsync();
@@ -938,8 +964,29 @@
         if (_busy) return;
         _busy = true;
         try { await action(); }
-        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+        catch (Exception ex) { Snackbar.Add(CustomerErrorMessage(ex), Severity.Error); }
         finally { _busy = false; await InvokeAsync(StateHasChanged); }
+    }
+
+    private static string CustomerErrorMessage(Exception ex)
+    {
+        var message = ex.Message;
+        if (message.Contains("DANCE_SELL_INVALID_PRODUCT", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Ảnh sản phẩm chưa sẵn sàng. Vui lòng tải lại ảnh sản phẩm.";
+        }
+
+        if (message.Contains("DANCE_SELL_INVALID_CHARACTER", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Ảnh người mẫu chưa sẵn sàng. Vui lòng tải lại ảnh người mẫu.";
+        }
+
+        if (message.Contains("DANCE_SELL_REFERENCE_NOT_APPROVED", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Ảnh dùng để tạo video đã thay đổi. Vui lòng tạo và duyệt lại ảnh trước khi render.";
+        }
+
+        return message;
     }
 
     private string BuildPrompt()

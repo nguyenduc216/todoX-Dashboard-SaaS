@@ -454,6 +454,8 @@ public sealed class DanceSellReferenceImageService : IDanceSellReferenceImageSer
                 versions = await _repo.ListReferenceVersionsAsync(job.Id, ct);
             }
 
+            job = await RequireOwnedJobAsync(jobId, user, ct);
+            versions = await _repo.ListReferenceVersionsAsync(job.Id, ct);
             var reusable = versions.FirstOrDefault(version => ReferenceVersionMatches(version, job)
                 && version.Status is DanceSellReferenceStatuses.Generating or DanceSellReferenceStatuses.Ready or DanceSellReferenceStatuses.Approved);
             if (reusable is not null)
@@ -464,9 +466,30 @@ public sealed class DanceSellReferenceImageService : IDanceSellReferenceImageSer
                     return await _repo.GetByIdAsync(job.Id, ct) ?? job;
                 }
 
-                if (reusable.Status == DanceSellReferenceStatuses.Ready && !string.IsNullOrWhiteSpace(reusable.PublicUrl))
+                if (reusable.Status is DanceSellReferenceStatuses.Ready or DanceSellReferenceStatuses.Approved
+                    && !string.IsNullOrWhiteSpace(reusable.PublicUrl))
                 {
-                    await _repo.UpdateReferenceStatusAsync(job.Id, DanceSellReferenceStatuses.Ready, null, reusable.MediaId, reusable.ObjectKey, reusable.PublicUrl, ct: ct);
+                    var status = reusable.Status == DanceSellReferenceStatuses.Approved
+                        || reusable.IsSelected
+                        || job.PreparedReferenceStatus == DanceSellReferenceStatuses.Approved
+                        ? DanceSellReferenceStatuses.Approved
+                        : DanceSellReferenceStatuses.Ready;
+                    if (status == DanceSellReferenceStatuses.Approved)
+                    {
+                        await _repo.SelectReferenceVersionAsync(job.Id, reusable.Id, ct);
+                    }
+
+                    await _repo.UpdateReferenceStatusAsync(
+                        job.Id,
+                        status,
+                        null,
+                        reusable.MediaId,
+                        reusable.ObjectKey,
+                        reusable.PublicUrl,
+                        status == DanceSellReferenceStatuses.Approved
+                            ? job.PreparedReferenceApprovedAt ?? reusable.CompletedAt ?? DateTime.UtcNow
+                            : null,
+                        ct);
                     return await _repo.GetByIdAsync(job.Id, ct) ?? job;
                 }
 
@@ -1358,14 +1381,10 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
             throw new InvalidOperationException("DANCE_SELL_INVALID_REFERENCE_MODE");
         }
 
-        var referenceChanged =
-            !string.Equals(job.ReferenceMode, request.ReferenceMode.Trim(), StringComparison.Ordinal)
-            || !string.Equals(job.Prompt?.Trim(), request.Prompt.Trim(), StringComparison.Ordinal)
-            || !string.Equals(job.PlacementMode?.Trim(), request.PlacementMode.Trim(), StringComparison.Ordinal)
-            || !string.Equals(job.CustomPlacementInstruction?.Trim(), NullIfBlank(request.CustomPlacementInstruction), StringComparison.Ordinal)
-            || !string.Equals(job.ImagePrompt?.Trim(), NullIfBlank(request.ImagePrompt), StringComparison.Ordinal);
+        var referenceModeChanged =
+            !string.Equals(job.ReferenceMode, request.ReferenceMode.Trim(), StringComparison.Ordinal);
         await _repo.UpdateBusinessAsync(job.Id, request, ct);
-        if (referenceChanged && job.ReferenceMode != DanceSellReferenceModes.DirectReference)
+        if (referenceModeChanged)
         {
             await _repo.ResetReferenceAsync(job.Id, ct: ct);
         }
@@ -1656,7 +1675,6 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
         else
         {
             if (job.CharacterMediaId is null || string.IsNullOrWhiteSpace(job.CharacterImageUrl)) throw new InvalidOperationException("DANCE_SELL_INVALID_CHARACTER");
-            if (job.ProductMediaId is null || string.IsNullOrWhiteSpace(job.ProductImageUrl)) throw new InvalidOperationException("DANCE_SELL_INVALID_PRODUCT");
             if (job.PreparedReferenceStatus != DanceSellReferenceStatuses.Approved || string.IsNullOrWhiteSpace(job.PreparedReferenceUrl)) throw new InvalidOperationException("DANCE_SELL_REFERENCE_NOT_APPROVED");
         }
         if (job.MotionVideoMediaId is null || string.IsNullOrWhiteSpace(job.MotionVideoUrl) || job.SourceStageStatus != DanceSellSourceStageStatuses.Ready) throw new InvalidOperationException("DANCE_SELL_INVALID_MOTION");

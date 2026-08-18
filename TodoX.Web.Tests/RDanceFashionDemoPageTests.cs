@@ -225,6 +225,8 @@ public sealed class RDanceFashionDemoPageTests
         Assert.Contains("await EnsureEditableAsync()", stageTikTok, StringComparison.Ordinal);
         Assert.Contains("EnsureReferenceProviderReady()", autoPrepare, StringComparison.Ordinal);
         Assert.Contains("EnsureMotionProviderReady()", queueRender, StringComparison.Ordinal);
+        Assert.Contains("await ReloadAsync()", autoPrepare, StringComparison.Ordinal);
+        Assert.Contains("_job.ProductMediaId is not null", autoPrepare, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -235,9 +237,32 @@ public sealed class RDanceFashionDemoPageTests
         Assert.Contains("OnClick=\"UnapproveReferenceAsync\"", page, StringComparison.Ordinal);
         Assert.Contains("References.UnapproveAsync(_job!.Id, AuthState.CurrentUser!)", page, StringComparison.Ordinal);
         Assert.Contains("if (await UploadAsync(args, MaxImageBytes", GetMethodSection(page, "OnCharacterSelected"), StringComparison.Ordinal);
+        Assert.Contains("await ReloadAsync()", GetMethodSection(page, "OnCharacterSelected"), StringComparison.Ordinal);
         Assert.Contains("await AutoPrepareReferenceAsync()", GetMethodSection(page, "OnCharacterSelected"), StringComparison.Ordinal);
         Assert.Contains("if (await UploadAsync(args, MaxImageBytes", GetMethodSection(page, "OnProductSelected"), StringComparison.Ordinal);
+        Assert.Contains("await ReloadAsync()", GetMethodSection(page, "OnProductSelected"), StringComparison.Ordinal);
+        Assert.Contains("_job?.ProductMediaId is not null", GetMethodSection(page, "OnProductSelected"), StringComparison.Ordinal);
+        Assert.Contains("!string.IsNullOrWhiteSpace(_job.ProductImageUrl)", GetMethodSection(page, "OnProductSelected"), StringComparison.Ordinal);
         Assert.Contains("await AutoPrepareReferenceAsync()", GetMethodSection(page, "OnProductSelected"), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RDanceDetailPageReReadsReferenceBeforeQueueAndMapsLifecycleErrors()
+    {
+        var page = ReadStrictUtf8(Path.Combine(FindRepoRoot(), "TodoX.Web", "Components", "Pages", "RDanceJobDetail.razor"));
+        var queue = GetMethodSection(page, "ConfirmAndQueueAsync");
+        var errors = page;
+
+        Assert.Contains("await UpdateBusinessAsync()", queue, StringComparison.Ordinal);
+        Assert.Contains("_job = await DanceSell.GetAsync(_job!.Id, AuthState.CurrentUser!)", queue, StringComparison.Ordinal);
+        Assert.Contains("_job.PreparedReferenceStatus != DanceSellReferenceStatuses.Approved", queue, StringComparison.Ordinal);
+        Assert.Contains("string.IsNullOrWhiteSpace(_job.PreparedReferenceUrl)", queue, StringComparison.Ordinal);
+        Assert.Contains("DANCE_SELL_REFERENCE_NOT_APPROVED", queue, StringComparison.Ordinal);
+        Assert.Contains("DANCE_SELL_INVALID_PRODUCT", errors, StringComparison.Ordinal);
+        Assert.Contains("DANCE_SELL_INVALID_CHARACTER", errors, StringComparison.Ordinal);
+        Assert.Contains("DANCE_SELL_REFERENCE_NOT_APPROVED", errors, StringComparison.Ordinal);
+        Assert.Contains("Ảnh dùng để tạo video đã thay đổi", errors, StringComparison.Ordinal);
+        Assert.Contains("!string.IsNullOrWhiteSpace(_job.PreparedReferenceUrl)", page, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -525,6 +550,10 @@ public sealed class RDanceFashionDemoPageTests
         if (start < 0)
         {
             start = source.IndexOf($"public async Task {methodName}(", StringComparison.Ordinal);
+        }
+        if (start < 0)
+        {
+            start = source.IndexOf($"private static string {methodName}(", StringComparison.Ordinal);
         }
 
         Assert.True(start >= 0, $"Could not locate {methodName}.");

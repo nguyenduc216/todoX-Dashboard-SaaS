@@ -88,12 +88,18 @@ public sealed class DanceSellPhase2ValidationTests
         Assert.Contains("Status = DanceSellReferenceStatuses.Ready", service, StringComparison.Ordinal);
         Assert.DoesNotContain("Status = DanceSellReferenceStatuses.Approved", GetMethodSection(service, "PrepareCharacterReferenceAsync"), StringComparison.Ordinal);
         Assert.Contains("await _repo.ResetReferenceAsync(job.Id", service, StringComparison.Ordinal);
+        Assert.Contains("await _repo.SelectReferenceVersionAsync(job.Id, reusable.Id, ct)", service, StringComparison.Ordinal);
+        Assert.Contains("job = await RequireOwnedJobAsync(jobId, user, ct)", GetMethodSection(service, "AutoPrepareAsync"), StringComparison.Ordinal);
         Assert.Contains("prepared_reference_media_id=NULL", repository, StringComparison.Ordinal);
         Assert.Contains("prepared_reference_approved_at=NULL", repository, StringComparison.Ordinal);
         Assert.Contains("reference_approved_at=NULL", repository, StringComparison.Ordinal);
         Assert.Contains("SET is_selected = false", GetMethodSection(repository, "ResetReferenceAsync"), StringComparison.Ordinal);
         Assert.Contains("await _repo.ResetReferenceAsync(job.Id, ct: ct)", GetMethodSection(service, "UploadCharacterAsync"), StringComparison.Ordinal);
         Assert.Contains("await _repo.ResetReferenceAsync(job.Id, ct: ct)", GetMethodSection(service, "UploadProductAsync"), StringComparison.Ordinal);
+        Assert.DoesNotContain("job.Prompt?.Trim()", GetMethodSection(service, "UpdateBusinessAsync"), StringComparison.Ordinal);
+        Assert.DoesNotContain("job.PlacementMode?.Trim()", GetMethodSection(service, "UpdateBusinessAsync"), StringComparison.Ordinal);
+        Assert.DoesNotContain("job.CustomPlacementInstruction?.Trim()", GetMethodSection(service, "UpdateBusinessAsync"), StringComparison.Ordinal);
+        Assert.DoesNotContain("job.ImagePrompt?.Trim()", GetMethodSection(service, "UpdateBusinessAsync"), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -119,7 +125,9 @@ public sealed class DanceSellPhase2ValidationTests
         var validation = GetMethodSection(service, "ValidateReadyForRender");
 
         Assert.Contains("job.PreparedReferenceStatus != DanceSellReferenceStatuses.Approved", validation, StringComparison.Ordinal);
+        Assert.Contains("job.PreparedReferenceUrl", validation, StringComparison.Ordinal);
         Assert.Contains("DANCE_SELL_REFERENCE_NOT_APPROVED", validation, StringComparison.Ordinal);
+        Assert.DoesNotContain("DANCE_SELL_INVALID_PRODUCT", validation, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -290,6 +298,22 @@ public sealed class DanceSellPhase2ValidationTests
         Assert.Contains("Task<bool> HasActiveOperationAsync", operations, StringComparison.Ordinal);
         Assert.Contains("Task<DanceSellProviderOperationDto?> GetLatestActiveOperationAsync", operations, StringComparison.Ordinal);
         Assert.Contains("status IN ('queued','submitted','generating')", operations, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AutoPrepareRestoresApprovedReferenceAndDefersToCharacterFallbackWhenProductIsMissing()
+    {
+        var root = FindRepoRoot();
+        var service = File.ReadAllText(Path.Combine(root, "TodoX.Web/Services/DanceSell/DanceSellPhase2Services.cs"));
+        var autoPrepare = GetMethodSection(service, "AutoPrepareAsync");
+
+        Assert.Contains("reusable.Status is DanceSellReferenceStatuses.Ready or DanceSellReferenceStatuses.Approved", autoPrepare, StringComparison.Ordinal);
+        Assert.Contains("await _repo.SelectReferenceVersionAsync(job.Id, reusable.Id, ct)", autoPrepare, StringComparison.Ordinal);
+        Assert.Contains("status == DanceSellReferenceStatuses.Approved", autoPrepare, StringComparison.Ordinal);
+        Assert.Contains("job.PreparedReferenceApprovedAt ?? reusable.CompletedAt ?? DateTime.UtcNow", autoPrepare, StringComparison.Ordinal);
+        Assert.Contains("job.ProductMediaId is null || string.IsNullOrWhiteSpace(job.ProductImageUrl)", autoPrepare, StringComparison.Ordinal);
+        Assert.Contains("PrepareCharacterReferenceAsync(job, user, versions, ct)", autoPrepare, StringComparison.Ordinal);
+        Assert.DoesNotContain("DANCE_SELL_INVALID_PRODUCT", autoPrepare, StringComparison.Ordinal);
     }
 
     [Fact]
