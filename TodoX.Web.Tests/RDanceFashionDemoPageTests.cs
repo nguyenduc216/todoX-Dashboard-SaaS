@@ -7,6 +7,25 @@ namespace TodoX.Web.Tests;
 public sealed class RDanceFashionDemoPageTests
 {
     [Fact]
+    public void RDanceCustomerPagesContainUtf8VietnameseWithoutMojibake()
+    {
+        var root = FindRepoRoot();
+        foreach (var fileName in new[] { "RDanceFashionDemo.razor", "RDanceJobCreate.razor", "RDanceJobDetail.razor" })
+        {
+            var page = ReadStrictUtf8(Path.Combine(root, "TodoX.Web", "Components", "Pages", fileName));
+
+            Assert.DoesNotContain("Ã", page, StringComparison.Ordinal);
+            Assert.DoesNotContain("Â", page, StringComparison.Ordinal);
+            Assert.DoesNotContain("á»", page, StringComparison.Ordinal);
+            Assert.DoesNotContain("Ä‘", page, StringComparison.Ordinal);
+            Assert.DoesNotContain("Æ", page, StringComparison.Ordinal);
+        }
+
+        var detail = ReadStrictUtf8(Path.Combine(root, "TodoX.Web", "Components", "Pages", "RDanceJobDetail.razor"));
+        Assert.Contains("Video chuyển động", detail, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void LegacyDemoPageRedirectsToProductionCreateRoute()
     {
         var page = ReadStrictUtf8(Path.Combine(FindRepoRoot(), "TodoX.Web", "Components", "Pages", "RDanceFashionDemo.razor"));
@@ -331,8 +350,9 @@ public sealed class RDanceFashionDemoPageTests
         Assert.Contains("danceJob.PreparedReferenceUrl", submit, StringComparison.Ordinal);
         Assert.Contains("DanceSellAssetRoles.MotionReferenceProviderUpload", submit, StringComparison.Ordinal);
         Assert.Contains("AI_PROVIDER_REFERENCE_UPLOAD_STARTED", submit, StringComparison.Ordinal);
+        Assert.Contains("AI_PROVIDER_REFERENCE_UPLOAD_FAILED", submit, StringComparison.Ordinal);
         Assert.Contains("AI_PROVIDER_REFERENCE_UPLOAD_COMPLETED", submit, StringComparison.Ordinal);
-        Assert.Contains("AI_PROVIDER_REFERENCE_UPLOAD_REUSED", submit, StringComparison.Ordinal);
+        Assert.Contains("freshForRenderAttempt = true", submit, StringComparison.Ordinal);
         Assert.Contains("UploadMediaAsync(new Ai79MediaUploadRequest", submit, StringComparison.Ordinal);
         Assert.Contains("runtime.UploadVideoPath", submit, StringComparison.Ordinal);
         Assert.Contains("DanceSellAssetRoles.MotionProviderUpload", submit, StringComparison.Ordinal);
@@ -358,10 +378,12 @@ public sealed class RDanceFashionDemoPageTests
         Assert.Contains("imageUrl = referenceUrlUsed", submit, StringComparison.Ordinal);
         Assert.Contains("images0Url = runtime.IncludeImagesZeroUrl ? referenceUrlUsed : null", submit, StringComparison.Ordinal);
         Assert.Contains("videoUrl = motionProviderUrl", submit, StringComparison.Ordinal);
+        Assert.DoesNotContain("reusableReferenceUpload", submit, StringComparison.Ordinal);
+        Assert.DoesNotContain("AI_PROVIDER_REFERENCE_UPLOAD_REUSED", submit, StringComparison.Ordinal);
         Assert.True(
-            submit.IndexOf("MotionReferenceProviderUpload", StringComparison.Ordinal)
+            submit.IndexOf("AI_PROVIDER_REFERENCE_UPLOAD_STARTED", StringComparison.Ordinal)
             < submit.IndexOf("UploadMediaAsync(new Ai79MediaUploadRequest", StringComparison.Ordinal),
-            "A persisted provider reference asset must be considered before any provider media upload.");
+            "The current reference must be uploaded before motion submit.");
         Assert.True(
             submit.IndexOf("UpsertAssetAsync(new AiOperationAssetDto", StringComparison.Ordinal)
             < submit.IndexOf("SubmitMotionControlAsync(request, ct)", StringComparison.Ordinal),
@@ -596,7 +618,7 @@ public sealed class RDanceFashionDemoPageTests
         Assert.Contains("AI79_MOTION_SUBMIT_RETRY_EXHAUSTED", submit, StringComparison.Ordinal);
         Assert.Contains("reference = new", submit, StringComparison.Ordinal);
         Assert.Contains("motionUpload = new", submit, StringComparison.Ordinal);
-        Assert.Contains("AI_PROVIDER_REFERENCE_UPLOAD_REUSED", submit, StringComparison.Ordinal);
+        Assert.Contains("freshForRenderAttempt = true", submit, StringComparison.Ordinal);
         Assert.Contains("AI_PROVIDER_REFERENCE_UPLOAD_COMPLETED", submit, StringComparison.Ordinal);
         Assert.Contains("referenceSource", submit, StringComparison.Ordinal);
         Assert.Contains("referenceUrlUsed", submit, StringComparison.Ordinal);

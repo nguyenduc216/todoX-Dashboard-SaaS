@@ -18,19 +18,19 @@ Before:
 
 After:
 
-`character + optional product -> prepared reference version -> explicit approval -> resolve reference binary -> reuse or upload provider reference -> reuse or upload provider motion video -> submit only provider URLs -> poll -> persist result`
+`character + optional product -> prepared reference version -> explicit approval -> resolve current reference binary -> fresh provider reference upload -> reuse or upload provider motion video -> submit only provider URLs -> poll -> persist result`
 
 No-product jobs use the character image as the prepared reference and do not invoke product try-on generation.
 
 ## Idempotency and diagnostics
 
-Provider reference uploads use the `motion_reference_provider_upload` asset role and are keyed by the current prepared-reference media/object identity. Source motion uploads continue to use the existing persisted asset identity. Retries therefore reuse both provider URLs when the source identity is unchanged.
+Provider reference uploads use the `motion_reference_provider_upload` asset role and are freshly executed for every RDance motion render attempt, including retries. Each fresh provider URL is persisted with `freshForRenderAttempt=true`. Source motion uploads continue to use the existing persisted asset identity and may be reused when unchanged.
 
 Recorded reference events include:
 
 - `AI_PROVIDER_REFERENCE_UPLOAD_STARTED`
 - `AI_PROVIDER_REFERENCE_UPLOAD_COMPLETED`
-- `AI_PROVIDER_REFERENCE_UPLOAD_REUSED`
+- `AI_PROVIDER_REFERENCE_UPLOAD_FAILED`
 
 Motion submit diagnostics retain sanitized request/response data and include provider-side reference and motion URLs without access tokens.
 
@@ -56,6 +56,8 @@ For new jobs, both `DanceSellDraftCreateRequest` and `DanceSellCreateJobRequest`
 
 This UI refinement changed only RDance and Timelapse presentation/default wiring. No RVideo files were changed for this task. The RDance Information tab is now an outer `md=8`/`md=4` layout: project information and TikTok/MP4 source are separate cards inside the left column, with output summary on the right. The Auto Finish setting is inside the project card and the right-side summary reports `Bật` or `Tắt`.
 
+The current RDance hotfix also normalizes the remaining customer-facing RDance literal to valid UTF-8 Vietnamese and removes the reference-upload reuse branch from the 79AI motion submit path. The provider reference upload now always occurs after resolving the current approved local reference and before motion submit; motion-video upload reuse is unchanged.
+
 Existing cancel, retry, billing, result persistence, provider authentication, polling parser, and Timelapse behavior remain intact.
 
 ## Changed files
@@ -80,7 +82,7 @@ Existing cancel, retry, billing, result persistence, provider authentication, po
 
 ## Validation
 
-- `dotnet test TodoX.Dashboard.sln -c Release --no-restore`: **644 passed**
+- `dotnet test TodoX.Dashboard.sln -c Release --no-restore`: **645 passed**
 - `dotnet build TodoX.Dashboard.sln -c Release --no-restore`: **passed, 0 warnings, 0 errors**
 - `dotnet format TodoX.Dashboard.sln --verify-no-changes --no-restore --include TodoX.Web/Services/DanceSell/DanceSellModels.cs TodoX.Web.Tests/RDanceFashionDemoPageTests.cs TodoX.Web.Tests/TimelapsePhase2CTests.cs`: **passed**
 - `git diff --check`: **passed**
