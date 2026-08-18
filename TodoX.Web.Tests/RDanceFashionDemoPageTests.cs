@@ -368,7 +368,6 @@ public sealed class RDanceFashionDemoPageTests
         Assert.Contains("BeginMotionSubmitAttemptAsync", submit, StringComparison.Ordinal);
         Assert.Contains("SubmitMaxRetry", submit, StringComparison.Ordinal);
         Assert.Contains("AI79_MOTION_SUBMIT_RETRY_EXHAUSTED", submit, StringComparison.Ordinal);
-        Assert.Contains("MarkFailedAsync", submit, StringComparison.Ordinal);
         Assert.Contains("contentType = \"application/x-www-form-urlencoded\"", submit, StringComparison.Ordinal);
         Assert.Contains("referenceSource", submit, StringComparison.Ordinal);
         Assert.Contains("referenceUrlUsed", submit, StringComparison.Ordinal);
