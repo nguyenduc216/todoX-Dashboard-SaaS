@@ -14,6 +14,7 @@
 @inject TodoX.Web.Services.AiProviders.IAiProviderService AiProviders
 @inject TodoX.Web.Services.Media.IMediaFileService MediaFiles
 @inject TodoX.Web.Services.VideoRender.ISceneMediaVersioningService SceneVersions
+@inject TodoX.Web.Services.VideoRender.RVideoJobSettingsRepository RVideoSettings
 @inject IOptionsMonitor<TodoX.Web.Services.VideoRender.VideoRenderOptions> VideoOptions
 @inject IDialogService DialogService
 @inject ISnackbar Snackbar
@@ -162,6 +163,17 @@ else
                                     <MudSwitch T="bool" Color="Color.Warning" @bind-Value="_autoFinish">
                                         Tự động hoàn thành
                                     </MudSwitch>
+                                    <MudPaper Class="pa-3" Outlined="true" rounded="true">
+                                        <MudText Typo="Typo.subtitle1">Chế độ xử lý</MudText>
+                                        <MudRadioGroup T="string" @bind-Value="_executionMode">
+                                            <MudRadio T="string" Value="@RVideoExecutionModes.Manual" Color="Color.Warning">Duyệt từng bước</MudRadio>
+                                            <MudRadio T="string" Value="@RVideoExecutionModes.Auto" Color="Color.Warning">Tự động thực hiện</MudRadio>
+                                        </MudRadioGroup>
+                                        @if (_executionMode == RVideoExecutionModes.Auto)
+                                        {
+                                            <MudAlert Severity="Severity.Info" Dense="true">Ở chế độ tự động, server sẽ tiếp tục ảnh → video → hoàn thiện mà không cần xác nhận giữa các giai đoạn.</MudAlert>
+                                        }
+                                    </MudPaper>
                                     <MudStack Row="true" Spacing="2" Class="flex-wrap gap-2">
                                         <MudButton Color="Color.Warning" Variant="Variant.Filled" OnClick="CreateProjectAsync" Disabled="@_busy">Tạo / phân tách scene</MudButton>
                                         <MudButton Color="Color.Primary" Variant="Variant.Outlined" OnClick="CreateEmptyProjectAsync" Disabled="@_busy">Tạo project rỗng</MudButton>
@@ -214,7 +226,7 @@ else
                 </div>
             </MudTabPanel>
 
-            <MudTabPanel Text="Scene / Hình ảnh">
+            <MudTabPanel Text="Scene">
                 <div class="scene-image-tab">
                     @if (_project is null)
                     {
@@ -305,6 +317,45 @@ else
                         }
                         </MudStack>
                         </div>
+                    }
+                </div>
+            </MudTabPanel>
+
+            <MudTabPanel Text="Hình ảnh">
+                <div class="render-tab-scroll">
+                    @if (_project is null)
+                    {
+                        <MudAlert Severity="Severity.Info">Hãy tạo project ở tab Thông tin trước.</MudAlert>
+                    }
+                    else
+                    {
+                        <MudPaper Class="todox-card pa-4" rounded="true">
+                            <MudStack Spacing="2">
+                                <MudText Typo="Typo.h6">Hình ảnh theo scene</MudText>
+                                <MudText Typo="Typo.body2" Color="Color.Secondary">Ảnh được lưu theo version và có thể tiếp tục sau khi đóng trình duyệt.</MudText>
+                                <MudStack Row="true" Spacing="2" Class="flex-wrap gap-2">
+                                    <MudChip T="string" Color="Color.Success">Sẵn sàng: @_project.Scenes.Count(x => x.Status == VideoSceneStatuses.ImageReady)</MudChip>
+                                    <MudChip T="string" Color="Color.Warning">Đang xử lý: @_project.Scenes.Count(x => x.Status is VideoSceneStatuses.Draft or VideoSceneStatuses.Failed)</MudChip>
+                                    <MudChip T="string" Color="Color.Error">Lỗi: @_project.Scenes.Count(x => x.Status == VideoSceneStatuses.Failed)</MudChip>
+                                    <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.AddPhotoAlternate" OnClick="RenderMissingSceneImagesAsync" Disabled="@_batchActive">Tạo toàn bộ ảnh</MudButton>
+                                    <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh" OnClick="ReloadAsync">Refresh</MudButton>
+                                </MudStack>
+                            </MudStack>
+                        </MudPaper>
+                        @foreach (var scene in _project.Scenes.OrderBy(x => x.SceneIndex))
+                        {
+                            <MudPaper Class="todox-card pa-3 mt-3" Outlined="true" rounded="true">
+                                <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
+                                    <MudText>Scene @scene.SceneIndex.ToString("00") · @scene.Title</MudText>
+                                    @RenderSceneStatusBadge(scene, "image")
+                                </MudStack>
+                                <MudText Typo="Typo.caption">@scene.ImagePrompt</MudText>
+                                @if (!string.IsNullOrWhiteSpace(scene.StaticImageUrl))
+                                {
+                                    <img src="@scene.StaticImageUrl" alt="Scene @scene.SceneIndex" style="max-width:240px;max-height:160px;border-radius:8px;margin-top:8px" />
+                                }
+                            </MudPaper>
+                        }
                     }
                 </div>
             </MudTabPanel>
@@ -506,7 +557,7 @@ else
     private int _sceneSeconds = 8;
     private bool _thinkScenes = false;
     private bool _autoFinish = true;
-    private bool _autoFinishing;
+    private string _executionMode = RVideoExecutionModes.Manual;
     private PeriodicTimer? _pollTimer;
     private CancellationTokenSource? _pollCts;
     private readonly List<DebugEntry> _debugEntries = new();
@@ -919,6 +970,7 @@ else
                 _thinkScenes = _project.ThinkScenes;
                 _prompt = _project.OriginalPrompt;
                 _autoFinish = ReadAutoFinish(_prompt);
+                await LoadRVideoSettingsAsync(_project.Id);
                 _promptParseResult = PromptParser.Parse(_prompt);
                 ApplyVideoSettingsFromPrompt();
                 _totalSeconds = _project.TotalSeconds;
@@ -1670,34 +1722,9 @@ else
 
     private async Task ContinueAutoFinishAsync()
     {
-        if (!_autoFinish || _autoFinishing || _project is null || AuthState.CurrentUser is null)
-        {
-            return;
-        }
-
-        if (_batchActive || HasActiveSceneRenders() || _project.Status is VideoProjectStatuses.Rendering or VideoProjectStatuses.Merging)
-        {
-            return;
-        }
-
-        _autoFinishing = true;
-        try
-        {
-            if (_project.Scenes.Any()
-                && _project.Scenes.All(scene => !string.IsNullOrWhiteSpace(scene.StaticImageUrl))
-                && _project.Scenes.Any(scene => scene.Status is VideoSceneStatuses.Draft or VideoSceneStatuses.ImageReady))
-            {
-                await EnqueueRenderAllScenesAsync();
-            }
-            else if (CanMerge && _project.Status != VideoProjectStatuses.Completed)
-            {
-                await EnqueueMergeAsync();
-            }
-        }
-        finally
-        {
-            _autoFinishing = false;
-        }
+        // Pipeline transitions are server-driven by RVideoLifecycleWorker. This method remains as
+        // a no-op compatibility hook for the existing UI polling loop.
+        await Task.CompletedTask;
     }
 
     private async Task SaveSceneAsync(VideoProjectSceneDto scene)
@@ -1796,6 +1823,16 @@ else
                 ThinkScenes = _thinkScenes,
                 Scenes = _project.Scenes.OrderBy(x => x.SceneIndex).ToList()
             }, AuthState.CurrentUser);
+            await RVideoSettings.SaveAsync(_project.Id, new RVideoJobSettingsRequest
+            {
+                ExecutionMode = _executionMode,
+                SkipCharacter = _selectedCharacterId is null,
+                CharacterMode = _selectedCharacterId is null ? "NONE" : "LIBRARY",
+                SelectedCharacterId = _selectedCharacterId,
+                VoiceMode = RVideoVoiceModes.None,
+                DefaultTtsRate = 1.0m,
+                MusicVolume = 0.8m
+            });
             await LogProjectEvent("JOB_SAVED", "info", "Lưu video project render-job.", snapshot);
             Snackbar.Add("Đã lưu job.", Severity.Success);
             await ReloadAsync();
@@ -1810,6 +1847,20 @@ else
         finally
         {
             _busy = false;
+        }
+    }
+
+    private async Task LoadRVideoSettingsAsync(long projectId)
+    {
+        try
+        {
+            var settings = await RVideoSettings.GetAsync(projectId);
+            _executionMode = RVideoRules.NormalizeExecutionMode(settings?.ExecutionMode);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "RVVIDEO_SETTINGS_LOAD_FAILED projectId={ProjectId}", projectId);
+            _executionMode = RVideoExecutionModes.Manual;
         }
     }
 

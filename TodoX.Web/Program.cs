@@ -11,6 +11,7 @@ using TodoX.Web.Services.DanceSell;
 using TodoX.Web.Services.Landing;
 using TodoX.Web.Services.SharedMedia;
 using TodoX.Web.Services.Timelapse;
+using TodoX.Web.Services.VideoRender;
 using MudBlazor.Services;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Options;
@@ -159,6 +160,8 @@ builder.Services.Configure<TodoX.Web.Services.VideoRender.VideoRenderOptions>(bu
 builder.Services.AddSingleton<TodoX.Web.Services.VideoRender.ITodoXVideoPromptParser, TodoX.Web.Services.VideoRender.TodoXVideoPromptParser>();
 builder.Services.AddSingleton<TodoX.Web.Services.VideoRender.IVideoPromptValidator, TodoX.Web.Services.VideoRender.VideoPromptValidator>();
 builder.Services.AddScoped<TodoX.Web.Services.VideoRender.VideoRenderRepository>();
+builder.Services.AddScoped<TodoX.Web.Services.VideoRender.RVideoJobSettingsRepository>();
+builder.Services.AddSingleton<TodoX.Web.Services.VideoRender.RVideoSceneJsonService>();
 builder.Services.AddScoped<TodoX.Web.Services.VideoRender.ISceneMediaVersioningService, TodoX.Web.Services.VideoRender.SceneMediaVersioningService>();
 builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IYEScaleVideoPricingResolver, TodoX.Web.Services.VideoRender.YEScaleVideoPricingResolver>();
 builder.Services.AddScoped<IDanceSellRepository, DanceSellRepository>();
@@ -192,6 +195,7 @@ builder.Services.AddScoped<IRenderJobService, RenderJobService>();
 builder.Services.AddScoped<IRenderJobDispatcher, RenderJobDispatcher>();
 builder.Services.AddHostedService<RenderJobWorker>();
 builder.Services.AddHostedService<TodoX.Web.Services.Render.SceneVideoJobWorker>();
+builder.Services.AddHostedService<TodoX.Web.Services.VideoRender.RVideoLifecycleWorker>();
 builder.Services.AddHostedService<TodoX.Web.Services.Timelapse.TimelapseImageWorker>();
 builder.Services.AddHostedService<TodoX.Web.Services.Timelapse.TimelapseVideoWorker>();
 builder.Services.AddHostedService<TodoX.Web.Services.Timelapse.TimelapseFinalizerWorker>();
@@ -427,6 +431,7 @@ extensionApi.MapGet("/download", async (
 app.MapDanceSellPhase1Endpoints();
 app.MapDanceSellPhase2Endpoints();
 app.MapAiStudioCatalogEndpoints();
+app.MapRVideoEndpoints();
 
 app.MapPost("/api/ai/cost/estimate", async (
     TodoX.Web.Services.AiProviders.IAiPricingService pricing,
