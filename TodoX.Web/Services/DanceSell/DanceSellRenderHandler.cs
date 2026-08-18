@@ -186,6 +186,14 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
         }
 
         var submittedAt = DateTime.UtcNow;
+        var motionOperationId = await EnsureMotionOperationIdAsync(renderJob, danceJob, operationId, ct);
+        var motionSource = !string.IsNullOrWhiteSpace(danceJob.MotionVideoUrl) ? "motion_video_url" : "uploaded_binary";
+        string motionProviderUrl = string.Empty;
+        string? motionProviderIdBase = null;
+        string? motionProviderProjectId = runtime.ProjectId;
+        string? motionProviderFileName = motionVideo.FileName;
+        string motionUploadState;
+        AiOperationAssetDto? reusableMotionUpload = null;
         try
         {
             if (referenceSource == "uploaded_binary")
@@ -204,20 +212,77 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
                     new { danceSellJobId = danceJob.Id, providerUrl = referenceUpload.Url, runtime.UploadImagePath, referenceSource }, ct: ct);
             }
 
-            var motionUpload = await _ai79.UploadMediaAsync(new Ai79MediaUploadRequest(
-                runtime.BaseUrl,
-                runtime.UploadVideoPath,
-                runtime.Credential.Secret,
-                runtime.Domain,
-                runtime.ProjectId,
-                runtime.UploadVideoField,
-                motionVideo.ToMultipartPart(runtime.UploadVideoField)),
+            reusableMotionUpload = await _operations.GetLatestAssetAsync(
+                danceJob.Id,
+                DanceSellOperationTypes.MotionVideo,
+                DanceSellAssetRoles.MotionProviderUpload,
+                danceJob.MotionVideoMediaId,
+                danceJob.MotionVideoObjectKey,
                 ct);
-            await _renderJobs.AddEventAsync(renderJob.Id, "AI79_MOTION_SOURCE_UPLOADED", "79AI source motion video uploaded.",
-                new { danceSellJobId = danceJob.Id, providerUrl = motionUpload.Url, runtime.UploadVideoPath }, ct: ct);
+            if (!string.IsNullOrWhiteSpace(reusableMotionUpload?.ProviderUrl))
+            {
+                motionProviderUrl = reusableMotionUpload.ProviderUrl!;
+                motionProviderIdBase = ReadConfigString(reusableMotionUpload.MetadataJson, "idBase");
+                motionProviderProjectId = ReadConfigString(reusableMotionUpload.MetadataJson, "projectId") ?? runtime.ProjectId;
+                motionProviderFileName = ReadConfigString(reusableMotionUpload.MetadataJson, "fileName") ?? motionVideo.FileName;
+                motionUploadState = "reused";
+                await _renderJobs.AddEventAsync(renderJob.Id, "AI79_MOTION_SOURCE_UPLOAD_REUSED", "79AI source motion video upload reused.",
+                    new
+                    {
+                        danceSellJobId = danceJob.Id,
+                        mediaId = danceJob.MotionVideoMediaId,
+                        objectKey = danceJob.MotionVideoObjectKey,
+                        providerUrl = motionProviderUrl,
+                        previousUploadAt = reusableMotionUpload.CreatedAt
+                    }, ct: ct);
+            }
+            else
+            {
+                var motionUpload = await _ai79.UploadMediaAsync(new Ai79MediaUploadRequest(
+                    runtime.BaseUrl,
+                    runtime.UploadVideoPath,
+                    runtime.Credential.Secret,
+                    runtime.Domain,
+                    runtime.ProjectId,
+                    runtime.UploadVideoField,
+                    motionVideo.ToMultipartPart(runtime.UploadVideoField)),
+                    ct);
+                motionProviderUrl = motionUpload.Url;
+                motionProviderIdBase = motionUpload.IdBase;
+                motionProviderProjectId = motionUpload.ProjectId;
+                motionProviderFileName = motionUpload.FileName;
+                motionUploadState = "uploaded";
+                await _operations.UpsertAssetAsync(new AiOperationAssetDto
+                {
+                    OperationId = motionOperationId,
+                    AssetRole = DanceSellAssetRoles.MotionProviderUpload,
+                    MediaId = danceJob.MotionVideoMediaId,
+                    ObjectKey = danceJob.MotionVideoObjectKey,
+                    PublicUrl = danceJob.MotionVideoUrl,
+                    ProviderUrl = motionProviderUrl,
+                    MimeType = motionVideo.MimeType,
+                    MetadataJson = DanceSellRepository.ToJson(new
+                    {
+                        danceSellJobId = danceJob.Id,
+                        mediaId = danceJob.MotionVideoMediaId,
+                        objectKey = danceJob.MotionVideoObjectKey,
+                        providerUrl = motionProviderUrl,
+                        idBase = motionProviderIdBase,
+                        projectId = motionProviderProjectId,
+                        fileName = motionProviderFileName,
+                        uploadedAt = DateTime.UtcNow,
+                        source = motionSource,
+                        mime = motionVideo.MimeType,
+                        bytes = motionVideo.SizeBytes >= 0 ? motionVideo.SizeBytes : (long?)null,
+                        endpointPath = runtime.UploadVideoPath,
+                        field = runtime.UploadVideoField
+                    })
+                }, ct);
+                await _renderJobs.AddEventAsync(renderJob.Id, "AI79_MOTION_SOURCE_UPLOADED", "79AI source motion video uploaded.",
+                    new { danceSellJobId = danceJob.Id, providerUrl = motionProviderUrl, runtime.UploadVideoPath }, ct: ct);
+            }
 
             var motionPrompt = ReadConfigString(runtime.RouteConfigJson, "motion_prompt") ?? string.Empty;
-            var motionSource = !string.IsNullOrWhiteSpace(danceJob.MotionVideoUrl) ? "motion_video_url" : "uploaded_binary";
             var request = new Ai79MotionControlSubmitRequest(
                 runtime.BaseUrl,
                 runtime.MotionSubmitPath,
@@ -227,7 +292,7 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
                 runtime.Model,
                 motionPrompt,
                 referenceUrlUsed,
-                motionUpload.Url,
+                motionProviderUrl,
                 runtime.ProviderMode,
                 runtime.ProviderRatio,
                 runtime.SubType,
@@ -250,6 +315,7 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
                 motionUpload = new
                 {
                     status = "completed",
+                    uploadState = motionUploadState,
                     endpointPath = runtime.UploadVideoPath,
                     field = runtime.UploadVideoField,
                     source = motionSource,
@@ -257,8 +323,11 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
                     mime = motionVideo.MimeType,
                     bytes = motionVideo.SizeBytes >= 0 ? motionVideo.SizeBytes : (long?)null,
                     duration = (decimal?)null,
-                    providerUrl = motionUpload.Url,
-                    idBase = motionUpload.IdBase
+                    providerUrl = motionProviderUrl,
+                    idBase = motionProviderIdBase,
+                    projectId = motionProviderProjectId,
+                    fileName = motionProviderFileName,
+                    reusedAssetId = reusableMotionUpload?.Id
                 },
                 submit = new
                 {
@@ -269,7 +338,7 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
                     ratio = runtime.ProviderRatio,
                     imageUrl = referenceUrlUsed,
                     images0Url = runtime.IncludeImagesZeroUrl ? referenceUrlUsed : null,
-                    videoUrl = motionUpload.Url,
+                    videoUrl = motionProviderUrl,
                     subType = runtime.SubType,
                     backgroundSource = runtime.BackgroundSource,
                     prompt = motionPrompt
@@ -278,15 +347,26 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
                 submittedAt
             }, KieJson.Options);
 
+            var submitStartedAt = Stopwatch.StartNew();
+            await _renderJobs.AddEventAsync(renderJob.Id, "AI79_MOTION_SUBMIT_STARTED", "79AI Kling Motion Control submit started.",
+                new
+                {
+                    danceSellJobId = danceJob.Id,
+                    endpointPath = runtime.MotionSubmitPath,
+                    model = runtime.Model,
+                    mode = runtime.ProviderMode,
+                    ratio = runtime.ProviderRatio,
+                    imageUrl = referenceUrlUsed,
+                    videoUrl = motionProviderUrl,
+                    projectId = motionProviderProjectId
+                }, ct: ct);
             var submitted = await _ai79.SubmitMotionControlAsync(request, ct);
+            submitStartedAt.Stop();
             await _repo.UpdateSubmittedAsync(danceJob.Id, requestJson, submitted.TaskId, submitted.SanitizedResponseJson, ct);
-            if (operationId is Guid existingOperationId)
-            {
-                await _operations.MarkSubmittedAsync(existingOperationId, submitted.TaskId, submitted.SanitizedResponseJson, ct);
-            }
+            await _operations.MarkSubmittedAsync(motionOperationId, submitted.TaskId, submitted.SanitizedResponseJson, ct);
 
             await _renderJobs.AddEventAsync(renderJob.Id, "AI79_MOTION_TASK_SUBMITTED", "79AI Kling Motion Control task submitted.",
-                new { danceSellJobId = danceJob.Id, taskId = submitted.TaskId, runtime.Model, runtime.ProviderMode, runtime.ProviderRatio, runtime.MotionSubmitPath }, ct: ct);
+                new { danceSellJobId = danceJob.Id, taskId = submitted.TaskId, runtime.Model, runtime.ProviderMode, runtime.ProviderRatio, runtime.MotionSubmitPath, durationMs = submitStartedAt.ElapsedMilliseconds }, ct: ct);
             await LogUsageAsync(danceJob, renderJob, "submitted", submitted.TaskId, "submitted", null, null, ct);
             await ScheduleNextPollAsync(renderJob, "79AI motion task submitted; polling scheduled.", ct);
         }
@@ -295,6 +375,81 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
             await FailAsync(renderJob, danceJob, ex.ErrorCode ?? "ai79_submit_failed", ex.ErrorMessage, ex.SanitizedResponseJson, permanent: true, ct);
             throw new RenderJobTerminalFailureException(ex.Message, ex);
         }
+        catch (TaskCanceledException ex) when (!ct.IsCancellationRequested)
+        {
+            await Record79AiSubmitTimeoutAsync(renderJob, danceJob, runtime.MotionSubmitPath, motionProviderUrl, submittedAt, ex, ct);
+            await _renderJobs.ScheduleRetryAsync(renderJob.Id, TimeSpan.FromSeconds(30), "AI79_MOTION_SUBMIT_TIMEOUT", "79AI motion submit timed out after source upload; retry will reuse the persisted provider video URL.", ct);
+            throw new RenderJobDeferredException("79AI motion submit timeout scheduled for retry.");
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException ex)
+        {
+            await Record79AiSubmitTimeoutAsync(renderJob, danceJob, runtime.MotionSubmitPath, motionProviderUrl, submittedAt, ex, ct);
+            await _renderJobs.ScheduleRetryAsync(renderJob.Id, TimeSpan.FromSeconds(30), "AI79_MOTION_SUBMIT_TIMEOUT", "79AI motion submit was cancelled by HTTP timeout after source upload; retry will reuse the persisted provider video URL.", ct);
+            throw new RenderJobDeferredException("79AI motion submit cancellation scheduled for retry.");
+        }
+        catch (HttpRequestException ex)
+        {
+            await _renderJobs.AddEventAsync(renderJob.Id, "AI79_MOTION_SUBMIT_HTTP_ERROR", "79AI Kling Motion Control submit HTTP error.",
+                new
+                {
+                    danceSellJobId = danceJob.Id,
+                    endpoint = runtime.MotionSubmitPath,
+                    elapsedMs = (long)(DateTime.UtcNow - submittedAt).TotalMilliseconds,
+                    providerUploadUrl = motionProviderUrl,
+                    errorType = ex.GetType().Name,
+                    errorMessage = ex.Message
+                }, level: "warning", ct: ct);
+            await _renderJobs.ScheduleRetryAsync(renderJob.Id, TimeSpan.FromSeconds(30), "AI79_MOTION_SUBMIT_HTTP_ERROR", "79AI motion submit HTTP error after source upload; retry will reuse the persisted provider video URL.", ct);
+            throw new RenderJobDeferredException("79AI motion submit HTTP error scheduled for retry.");
+        }
+    }
+
+    private async Task<Guid> EnsureMotionOperationIdAsync(RenderJobDto renderJob, DanceSellJobDto danceJob, Guid? operationId, CancellationToken ct)
+    {
+        if (operationId is Guid existingOperationId)
+        {
+            return existingOperationId;
+        }
+
+        var attemptNo = await _operations.GetNextAttemptNoAsync(danceJob.Id, DanceSellOperationTypes.MotionVideo, ct);
+        var operation = await _operations.UpsertOperationAsync(new DanceSellProviderOperationDto
+        {
+            Id = Guid.NewGuid(),
+            DanceSellJobId = danceJob.Id,
+            RenderJobId = renderJob.Id,
+            OperationType = DanceSellOperationTypes.MotionVideo,
+            AttemptNo = attemptNo,
+            ReferenceMode = danceJob.ReferenceMode,
+            ProviderCode = danceJob.MotionProviderCode ?? danceJob.ProviderCode,
+            ProviderCapabilityId = danceJob.MotionProviderCapabilityId,
+            ProviderAccountId = danceJob.MotionProviderAccountId,
+            ProviderModel = danceJob.MotionProviderModel ?? danceJob.ProviderModel,
+            Status = DanceSellOperationStatuses.Queued,
+            BillingStatus = danceJob.BillingStatus,
+            RefundStatus = danceJob.RefundStatus,
+            CreatedAt = DateTime.UtcNow,
+            StartedAt = DateTime.UtcNow
+        }, ct);
+
+        return operation?.Id ?? throw new InvalidOperationException("DANCE_SELL_MOTION_OPERATION_REQUIRED");
+    }
+
+    private async Task Record79AiSubmitTimeoutAsync(RenderJobDto renderJob, DanceSellJobDto danceJob, string endpointPath, string providerUploadUrl, DateTime startedAt, Exception ex, CancellationToken ct)
+    {
+        await _renderJobs.AddEventAsync(renderJob.Id, "AI79_MOTION_SUBMIT_TIMEOUT", "79AI Kling Motion Control submit timed out after source upload.",
+            new
+            {
+                danceSellJobId = danceJob.Id,
+                endpoint = endpointPath,
+                elapsedMs = (long)(DateTime.UtcNow - startedAt).TotalMilliseconds,
+                providerUploadUrl,
+                errorType = ex.GetType().Name,
+                errorMessage = ex.Message
+            }, level: "warning", ct: ct);
     }
 
     private async Task Poll79AiAsync(RenderJobDto renderJob, DanceSellJobDto danceJob, Guid? operationId, CancellationToken ct)

@@ -106,6 +106,7 @@ public static class DanceSellAssetRoles
     public const string DirectReferenceInput = "direct_reference_input";
     public const string ReferenceOutput = "reference_output";
     public const string MotionInput = "motion_input";
+    public const string MotionProviderUpload = "motion_provider_upload";
     public const string VideoOutput = "video_output";
     public const string ProviderRawOutput = "provider_raw_output";
 }

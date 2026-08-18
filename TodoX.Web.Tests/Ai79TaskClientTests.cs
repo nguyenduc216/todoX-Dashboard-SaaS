@@ -383,6 +383,30 @@ public sealed class Ai79TaskClientTests
     }
 
     [Fact]
+    public async Task MotionControlSubmit_UsesBoundedSubmitTimeoutWithoutChangingPoll()
+    {
+        var handler = new HangingHandler();
+        var client = new Ai79TaskClient(new HttpClient(handler), TimeSpan.FromMilliseconds(10));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => client.SubmitMotionControlAsync(new Ai79MotionControlSubmitRequest(
+            "https://v2.api.gommo.net",
+            "/ai/jobs/video/kling_video_motion_3",
+            "secret-token",
+            "79ai.net",
+            "default",
+            "kling_video_motion_3",
+            "prompt",
+            "https://cdn.example/reference.png",
+            "https://cdn.example/motion.mp4",
+            "standard",
+            "default",
+            "motion",
+            "input_video")));
+
+        Assert.Equal("https://v2.api.gommo.net/ai/jobs/video/kling_video_motion_3", handler.LastUri);
+    }
+
+    [Fact]
     public async Task VideoStatus_BearerAuthUsesTaskIdPathAndProjectOnlyBody()
     {
         var handler = new RecordingJsonHandler("""{"videoInfo":{"status":"MEDIA_GENERATION_COMPLETED","download_url":"https://cdn.example/final.mp4"}}""");
@@ -769,6 +793,18 @@ public sealed class Ai79TaskClientTests
             {
                 Content = new StringContent(response.Body)
             };
+        }
+    }
+
+    private sealed class HangingHandler : HttpMessageHandler
+    {
+        public string? LastUri { get; private set; }
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            LastUri = request.RequestUri!.ToString();
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            throw new InvalidOperationException("The timeout cancellation should stop this handler.");
         }
     }
 

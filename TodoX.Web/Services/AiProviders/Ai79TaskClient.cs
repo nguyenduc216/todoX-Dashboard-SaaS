@@ -189,12 +189,15 @@ public static class Ai79TaskStatusNormalizer
 public sealed class Ai79TaskClient : IAi79TaskClient
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly TimeSpan DefaultMotionControlSubmitTimeout = TimeSpan.FromSeconds(120);
 
     private readonly HttpClient _httpClient;
+    private readonly TimeSpan _motionControlSubmitTimeout;
 
-    public Ai79TaskClient(HttpClient httpClient)
+    public Ai79TaskClient(HttpClient httpClient, TimeSpan? motionControlSubmitTimeout = null)
     {
         _httpClient = httpClient;
+        _motionControlSubmitTimeout = motionControlSubmitTimeout ?? DefaultMotionControlSubmitTimeout;
     }
 
     public async Task<Ai79TaskSubmitResult> SubmitAsync(Ai79TaskSubmitRequest request, CancellationToken ct = default)
@@ -417,8 +420,10 @@ public sealed class Ai79TaskClient : IAi79TaskClient
         httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", NormalizeBearerToken(request.AccessToken));
         httpRequest.Content = body;
 
-        using var response = await _httpClient.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, ct);
-        return await ReadSubmitResultAsync(response, request.AccessToken, request.EndpointPath, Ai79TaskOperation.Video, ct);
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeoutCts.CancelAfter(_motionControlSubmitTimeout);
+        using var response = await _httpClient.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, timeoutCts.Token);
+        return await ReadSubmitResultAsync(response, request.AccessToken, request.EndpointPath, Ai79TaskOperation.Video, timeoutCts.Token);
     }
 
     private static async Task<Ai79TaskSubmitResult> ReadSubmitResultAsync(

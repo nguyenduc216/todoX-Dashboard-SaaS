@@ -476,6 +476,7 @@ public interface IDanceSellOperationRepository
     Task MarkSubmittedAsync(Guid operationId, string providerTaskId, string responseJson, CancellationToken ct = default);
     Task MarkCompletedAsync(Guid operationId, string providerStatus, string responseJson, decimal? creditsConsumed, string? resultUrl, CancellationToken ct = default);
     Task MarkFailedAsync(Guid operationId, string providerStatus, string? responseJson, string errorCode, string errorMessage, CancellationToken ct = default);
+    Task<AiOperationAssetDto?> GetLatestAssetAsync(Guid danceSellJobId, string operationType, string assetRole, Guid? mediaId, string? objectKey, CancellationToken ct = default);
     Task UpsertAssetAsync(AiOperationAssetDto asset, CancellationToken ct = default);
     Task<PagedResult<DanceSellOperationLogItemDto>> SearchLogsAsync(DanceSellOperationLogFilter filter, CancellationToken ct = default);
     Task<DanceSellOperationLogDetailDto?> GetLogDetailAsync(Guid id, CancellationToken ct = default);
@@ -685,6 +686,41 @@ public sealed class DanceSellOperationRepository : IDanceSellOperationRepository
             """,
             new { operationId, providerStatus, responseJson = KieJsonRedactor.Redact(responseJson) ?? "{}", errorCode, errorMessage },
             ct);
+    }
+
+    public async Task<AiOperationAssetDto?> GetLatestAssetAsync(Guid danceSellJobId, string operationType, string assetRole, Guid? mediaId, string? objectKey, CancellationToken ct = default)
+    {
+        if (mediaId is null && string.IsNullOrWhiteSpace(objectKey))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var conn = await _factory.OpenAsync(ct);
+            return await conn.QuerySingleOrDefaultAsync<AiOperationAssetDto>(
+                """
+                SELECT a.id AS Id, a.operation_id AS OperationId, a.asset_role AS AssetRole,
+                       a.media_id AS MediaId, a.object_key AS ObjectKey, a.public_url AS PublicUrl,
+                       a.provider_url AS ProviderUrl, a.mime_type AS MimeType,
+                       a.metadata_json::text AS MetadataJson, a.created_at AS CreatedAt
+                  FROM public.todox_ai_operation_assets a
+                  JOIN dance_sell.dance_sell_provider_operations o ON o.id = a.operation_id
+                 WHERE o.dance_sell_job_id = @danceSellJobId
+                   AND o.operation_type = @operationType
+                   AND a.asset_role = @assetRole
+                   AND COALESCE(a.provider_url, '') <> ''
+                   AND (@mediaId IS NULL OR a.media_id = @mediaId)
+                   AND (@objectKey IS NULL OR a.object_key = @objectKey)
+                 ORDER BY a.created_at DESC
+                 LIMIT 1;
+                """,
+                new { danceSellJobId, operationType, assetRole, mediaId, objectKey = string.IsNullOrWhiteSpace(objectKey) ? null : objectKey.Trim() });
+        }
+        catch (PostgresException ex) when (IsSchemaMissing(ex))
+        {
+            throw SchemaNotReady(ex);
+        }
     }
 
     public async Task UpsertAssetAsync(AiOperationAssetDto asset, CancellationToken ct = default)

@@ -328,9 +328,15 @@ public sealed class RDanceFashionDemoPageTests
         Assert.Contains("AI79_MOTION_REFERENCE_UPLOADED", submit, StringComparison.Ordinal);
         Assert.Contains("UploadMediaAsync(new Ai79MediaUploadRequest", submit, StringComparison.Ordinal);
         Assert.Contains("runtime.UploadVideoPath", submit, StringComparison.Ordinal);
-        Assert.Contains("motionUpload.Url", submit, StringComparison.Ordinal);
+        Assert.Contains("DanceSellAssetRoles.MotionProviderUpload", submit, StringComparison.Ordinal);
+        Assert.Contains("GetLatestAssetAsync", submit, StringComparison.Ordinal);
+        Assert.Contains("AI79_MOTION_SOURCE_UPLOAD_REUSED", submit, StringComparison.Ordinal);
+        Assert.Contains("AI79_MOTION_SOURCE_UPLOADED", submit, StringComparison.Ordinal);
+        Assert.Contains("motionProviderUrl", submit, StringComparison.Ordinal);
         Assert.Contains("new Ai79MotionControlSubmitRequest", submit, StringComparison.Ordinal);
         Assert.Contains("SubmitMotionControlAsync(request, ct)", submit, StringComparison.Ordinal);
+        Assert.Contains("AI79_MOTION_SUBMIT_STARTED", submit, StringComparison.Ordinal);
+        Assert.Contains("AI79_MOTION_SUBMIT_TIMEOUT", submit, StringComparison.Ordinal);
         Assert.Contains("contentType = \"application/x-www-form-urlencoded\"", submit, StringComparison.Ordinal);
         Assert.Contains("referenceSource", submit, StringComparison.Ordinal);
         Assert.Contains("referenceUrlUsed", submit, StringComparison.Ordinal);
@@ -341,11 +347,15 @@ public sealed class RDanceFashionDemoPageTests
         Assert.Contains("providerModel", submit, StringComparison.Ordinal);
         Assert.Contains("imageUrl = referenceUrlUsed", submit, StringComparison.Ordinal);
         Assert.Contains("images0Url = runtime.IncludeImagesZeroUrl ? referenceUrlUsed : null", submit, StringComparison.Ordinal);
-        Assert.Contains("videoUrl = motionUpload.Url", submit, StringComparison.Ordinal);
+        Assert.Contains("videoUrl = motionProviderUrl", submit, StringComparison.Ordinal);
         Assert.True(
             submit.IndexOf("TryUseApprovedReferenceUrl", StringComparison.Ordinal)
             < submit.IndexOf("UploadMediaAsync(new Ai79MediaUploadRequest", StringComparison.Ordinal),
             "Approved public reference URL must be considered before any 79AI media upload.");
+        Assert.True(
+            submit.IndexOf("UpsertAssetAsync(new AiOperationAssetDto", StringComparison.Ordinal)
+            < submit.IndexOf("SubmitMotionControlAsync(request, ct)", StringComparison.Ordinal),
+            "Provider-uploaded motion video URL must be persisted before provider submit can timeout.");
         Assert.DoesNotContain("imageUrl = referenceUpload.Url", submit, StringComparison.Ordinal);
         Assert.DoesNotContain("images0Url = runtime.IncludeImagesZeroUrl ? referenceUpload.Url : null", submit, StringComparison.Ordinal);
         Assert.DoesNotContain("new Ai79MultipartTaskSubmitRequest", submit, StringComparison.Ordinal);
@@ -380,6 +390,9 @@ public sealed class RDanceFashionDemoPageTests
         Assert.Contains("Task<Ai79TaskSubmitResult> SubmitMultipartAsync", client, StringComparison.Ordinal);
         Assert.Contains("Task<Ai79MediaUploadResult> UploadMediaAsync", client, StringComparison.Ordinal);
         Assert.Contains("Task<Ai79TaskSubmitResult> SubmitMotionControlAsync", client, StringComparison.Ordinal);
+        Assert.Contains("DefaultMotionControlSubmitTimeout = TimeSpan.FromSeconds(120)", client, StringComparison.Ordinal);
+        Assert.Contains("CancellationTokenSource.CreateLinkedTokenSource(ct)", client, StringComparison.Ordinal);
+        Assert.Contains("timeoutCts.CancelAfter(_motionControlSubmitTimeout)", client, StringComparison.Ordinal);
         Assert.Contains("new MultipartFormDataContent()", client, StringComparison.Ordinal);
         Assert.Contains("new StreamContent(stream)", client, StringComparison.Ordinal);
         Assert.Contains("ContentDispositionHeaderValue(\"form-data\")", client, StringComparison.Ordinal);
@@ -508,6 +521,11 @@ public sealed class RDanceFashionDemoPageTests
         Assert.DoesNotContain("SubmitMultipartAsync(request, ct)", submit, StringComparison.Ordinal);
         Assert.Contains("UploadMediaAsync(new Ai79MediaUploadRequest", submit, StringComparison.Ordinal);
         Assert.Contains("SubmitMotionControlAsync(request, ct)", submit, StringComparison.Ordinal);
+        Assert.Contains("GetLatestAssetAsync", submit, StringComparison.Ordinal);
+        Assert.Contains("DanceSellAssetRoles.MotionProviderUpload", submit, StringComparison.Ordinal);
+        Assert.Contains("AI79_MOTION_SOURCE_UPLOAD_REUSED", submit, StringComparison.Ordinal);
+        Assert.Contains("AI79_MOTION_SUBMIT_STARTED", submit, StringComparison.Ordinal);
+        Assert.Contains("AI79_MOTION_SUBMIT_TIMEOUT", submit, StringComparison.Ordinal);
         Assert.Contains("reference = new", submit, StringComparison.Ordinal);
         Assert.Contains("motionUpload = new", submit, StringComparison.Ordinal);
         Assert.Contains("AI79_MOTION_REFERENCE_USING_APPROVED_URL", submit, StringComparison.Ordinal);
