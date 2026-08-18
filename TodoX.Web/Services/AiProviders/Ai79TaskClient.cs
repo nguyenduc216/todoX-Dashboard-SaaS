@@ -295,7 +295,7 @@ public sealed class Ai79TaskClient : IAi79TaskClient
         body.Add(content, request.FieldName, file.FileName);
 
         using var httpRequest = new HttpRequestMessage(HttpMethod.Post, BuildUri(request.BaseUrl, request.EndpointPath));
-        httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", request.AccessToken);
+        httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", NormalizeBearerToken(request.AccessToken));
         httpRequest.Content = body;
 
         using var response = await _httpClient.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, ct);
@@ -390,7 +390,7 @@ public sealed class Ai79TaskClient : IAi79TaskClient
 
         using var body = new FormUrlEncodedContent(form);
         using var httpRequest = new HttpRequestMessage(HttpMethod.Post, BuildUri(request.BaseUrl, request.EndpointPath));
-        httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", request.AccessToken);
+        httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", NormalizeBearerToken(request.AccessToken));
         httpRequest.Content = body;
 
         using var response = await _httpClient.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, ct);
@@ -578,7 +578,7 @@ public sealed class Ai79TaskClient : IAi79TaskClient
         if (request.UseBearerAuth)
         {
             using var httpRequest = new HttpRequestMessage(HttpMethod.Post, BuildUri(request.BaseUrl, path));
-            httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", request.AccessToken);
+            httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", NormalizeBearerToken(request.AccessToken));
             httpRequest.Content = body;
             response = await _httpClient.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, ct);
         }
@@ -636,6 +636,22 @@ public sealed class Ai79TaskClient : IAi79TaskClient
 
     private static Uri BuildUri(string baseUrl, string path)
         => new(new Uri(baseUrl.TrimEnd('/') + "/"), path.TrimStart('/'));
+
+    private static string NormalizeBearerToken(string accessToken)
+    {
+        var value = (accessToken ?? string.Empty).Trim();
+        while (value.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+        {
+            value = value["Bearer ".Length..].Trim();
+        }
+
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            throw new InvalidOperationException("79AI bearer token is empty.");
+        }
+
+        return value;
+    }
 
     private static void EnsureGenerateImageContract(Ai79TaskSubmitRequest request)
     {
@@ -1273,17 +1289,17 @@ public sealed class Ai79TaskClient : IAi79TaskClient
            && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
 
     private static string SanitizeSecretJson(JsonElement root, string accessToken)
-        => JsonSerializer.Serialize(Sanitize(root, accessToken), JsonOptions);
+        => JsonSerializer.Serialize(Sanitize(root, GetSensitiveTokenValues(accessToken)), JsonOptions);
 
-    private static object? Sanitize(JsonElement element, string accessToken)
+    private static object? Sanitize(JsonElement element, IReadOnlySet<string> sensitiveTokens)
         => element.ValueKind switch
         {
             JsonValueKind.Object => element.EnumerateObject().ToDictionary(
                 x => x.Name,
-                x => IsSecretName(x.Name) ? "***" : Sanitize(x.Value, accessToken),
+                x => IsSecretName(x.Name) ? "***" : Sanitize(x.Value, sensitiveTokens),
                 StringComparer.OrdinalIgnoreCase),
-            JsonValueKind.Array => element.EnumerateArray().Select(x => Sanitize(x, accessToken)).ToArray(),
-            JsonValueKind.String => string.Equals(element.GetString(), accessToken, StringComparison.Ordinal) ? "***" : element.GetString(),
+            JsonValueKind.Array => element.EnumerateArray().Select(x => Sanitize(x, sensitiveTokens)).ToArray(),
+            JsonValueKind.String => sensitiveTokens.Contains(element.GetString() ?? string.Empty) ? "***" : element.GetString(),
             JsonValueKind.Number when element.TryGetDecimal(out var number) => number,
             JsonValueKind.True => true,
             JsonValueKind.False => false,
@@ -1301,9 +1317,35 @@ public sealed class Ai79TaskClient : IAi79TaskClient
             : "task";
 
     private static string SanitizeText(string value, string accessToken)
-        => string.IsNullOrEmpty(accessToken)
-            ? value
-            : value.Replace(accessToken, "***", StringComparison.Ordinal);
+    {
+        foreach (var token in GetSensitiveTokenValues(accessToken))
+        {
+            value = value.Replace(token, "***", StringComparison.Ordinal);
+        }
+
+        return value;
+    }
+
+    private static IReadOnlySet<string> GetSensitiveTokenValues(string accessToken)
+    {
+        var tokens = new HashSet<string>(StringComparer.Ordinal);
+        if (string.IsNullOrWhiteSpace(accessToken))
+        {
+            return tokens;
+        }
+
+        tokens.Add(accessToken);
+        try
+        {
+            tokens.Add(NormalizeBearerToken(accessToken));
+        }
+        catch (InvalidOperationException)
+        {
+            // The raw configured value is still redacted even when it cannot form a bearer token.
+        }
+
+        return tokens;
+    }
 
     private static string? FirstNonBlank(params string?[] values)
         => values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim();

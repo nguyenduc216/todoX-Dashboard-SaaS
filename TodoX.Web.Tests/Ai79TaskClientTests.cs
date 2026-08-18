@@ -214,7 +214,7 @@ public sealed class Ai79TaskClientTests
         var image = await client.UploadMediaAsync(new Ai79MediaUploadRequest(
             "https://v2.api.gommo.net",
             "/ai/upload/image",
-            "secret-token",
+            "Bearer secret-token",
             "79ai.net",
             "default",
             "file",
@@ -222,7 +222,7 @@ public sealed class Ai79TaskClientTests
         var video = await client.UploadMediaAsync(new Ai79MediaUploadRequest(
             "https://v2.api.gommo.net",
             "/ai/upload/video",
-            "secret-token",
+            "  Bearer   secret-token  ",
             "79ai.net",
             "default",
             "video_file",
@@ -250,15 +250,38 @@ public sealed class Ai79TaskClientTests
     }
 
     [Fact]
+    public async Task MediaUpload_NormalizesRepeatedBearerPrefix()
+    {
+        var handler = new RecordingJsonHandler(
+            """{"data":{"asset_url":"https://cdn.79ai.net/assets/reference.png","id_base":"asset-img-001"}}""");
+        var client = new Ai79TaskClient(new HttpClient(handler));
+
+        await client.UploadMediaAsync(new Ai79MediaUploadRequest(
+            "https://v2.api.gommo.net",
+            "/ai/upload/image",
+            "Bearer Bearer secret-token",
+            "79ai.net",
+            "default",
+            "file",
+            new Ai79MultipartFilePart("file", "reference.png", "image/png", 4, _ => Task.FromResult<Stream?>(new MemoryStream(new byte[] { 1, 2, 3, 4 })))));
+
+        var request = Assert.Single(handler.Requests);
+        Assert.Equal("Bearer", request.Authorization?.Scheme);
+        Assert.Equal("secret-token", request.Authorization?.Parameter);
+        Assert.DoesNotContain("access_token=", request.Body, StringComparison.Ordinal);
+        Assert.DoesNotContain("secret-token", request.Body, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task MotionControlSubmit_UsesProviderUploadedUrlsAndParsesIdBase()
     {
-        var handler = new RecordingJsonHandler("""{"id_base":"motion-task-001","success":true}""");
+        var handler = new RecordingJsonHandler("""{"id_base":"motion-task-001","success":true,"echo":"secret-token"}""");
         var client = new Ai79TaskClient(new HttpClient(handler));
 
         var result = await client.SubmitMotionControlAsync(new Ai79MotionControlSubmitRequest(
             "https://v2.api.gommo.net",
             "/ai/jobs/video/kling_video_motion_3",
-            "secret-token",
+            "Bearer Bearer secret-token",
             "79ai.net",
             "default",
             "kling_video_motion_3",
@@ -275,6 +298,7 @@ public sealed class Ai79TaskClientTests
         Assert.Equal("https://v2.api.gommo.net/ai/jobs/video/kling_video_motion_3", request.Uri);
         Assert.Equal("Bearer", request.Authorization?.Scheme);
         Assert.Equal("secret-token", request.Authorization?.Parameter);
+        Assert.DoesNotContain("secret-token", result.SanitizedResponseJson, StringComparison.Ordinal);
         Assert.DoesNotContain("access_token=", request.Body, StringComparison.Ordinal);
         Assert.Contains("domain=79ai.net", request.Body, StringComparison.Ordinal);
         Assert.Contains("project_id=default", request.Body, StringComparison.Ordinal);
@@ -327,7 +351,7 @@ public sealed class Ai79TaskClientTests
         var result = await client.GetStatusAsync(new Ai79TaskStatusRequest(
             "https://v2.api.gommo.net",
             "/ai/jobs/{task_id}?media=video",
-            "secret-token",
+            "  Bearer   secret-token  ",
             "79ai.net",
             "motion-task-001",
             Ai79TaskOperation.Video,
