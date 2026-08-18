@@ -560,6 +560,32 @@ public sealed class RDanceFashionDemoPageTests
     }
 
     [Fact]
+    public void DanceSellProviderVerificationPreservesCanonicalUploadUrlsForMotionSubmit()
+    {
+        var root = FindRepoRoot();
+        var handler = ReadStrictUtf8(Path.Combine(root, "TodoX.Web", "Services", "DanceSell", "DanceSellRenderHandler.cs"));
+        var submit = GetMethodSection(handler, "Submit79AiAsync");
+
+        Assert.Contains("referenceUrlUsed = referenceUpload.Url", submit, StringComparison.Ordinal);
+        Assert.Contains("motionProviderUrl = motionUpload.Url", submit, StringComparison.Ordinal);
+        Assert.DoesNotContain("motionProviderUrl = verifiedMotion.Url!", submit, StringComparison.Ordinal);
+        Assert.Contains("ProviderUrl = referenceUpload.Url", submit, StringComparison.Ordinal);
+        Assert.Contains("ProviderUrl = motionUpload.Url", submit, StringComparison.Ordinal);
+        Assert.Contains("uploadUrl = referenceUpload.Url", submit, StringComparison.Ordinal);
+        Assert.Contains("verificationMatchedUrl = verifiedReference.Url", submit, StringComparison.Ordinal);
+        Assert.Contains("verificationDownloadUrl = verifiedReference.DownloadUrl", submit, StringComparison.Ordinal);
+        Assert.Contains("uploadUrl = motionUpload.Url", submit, StringComparison.Ordinal);
+        Assert.Contains("verificationMatchedUrl = verifiedMotion.Url", submit, StringComparison.Ordinal);
+        Assert.Contains("verificationDownloadUrl = verifiedMotion.DownloadUrl", submit, StringComparison.Ordinal);
+        Assert.Contains("GetCanonicalProviderUploadUrl", submit, StringComparison.Ordinal);
+        Assert.Contains("uploadUrl = upload.Url", handler, StringComparison.Ordinal);
+        Assert.Contains("matchedUrl = match.Url", handler, StringComparison.Ordinal);
+        Assert.Contains("matchedUrl = verified.Url", handler, StringComparison.Ordinal);
+        Assert.Contains("AI_PROVIDER_REFERENCE_VERIFY_COMPLETED", handler, StringComparison.Ordinal);
+        Assert.Contains("AI_PROVIDER_MOTION_VERIFY_COMPLETED", handler, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void DanceSellDownloadEndpointUsesOwnedJobUrlAndBlocksArbitraryUrl()
     {
         var root = FindRepoRoot();

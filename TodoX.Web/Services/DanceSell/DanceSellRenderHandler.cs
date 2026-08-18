@@ -192,10 +192,10 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
                 ct);
             if (IsVerifiedProviderAsset(currentReferenceAsset, out var currentReferenceIdBase))
             {
-                referenceUrlUsed = currentReferenceAsset!.ProviderUrl!;
+                referenceUrlUsed = GetCanonicalProviderUploadUrl(currentReferenceAsset!);
                 await _renderJobs.AddEventAsync(renderJob.Id, "AI_PROVIDER_REFERENCE_UPLOAD_REUSED_CURRENT_ATTEMPT",
                     "Verified reference upload reused for the same render attempt.",
-                    new { danceSellJobId = danceJob.Id, renderJobId = renderJob.Id, providerUrl = referenceUrlUsed, idBase = currentReferenceIdBase }, ct: ct);
+                    new { danceSellJobId = danceJob.Id, renderJobId = renderJob.Id, canonicalUploadUrl = referenceUrlUsed, idBase = currentReferenceIdBase }, ct: ct);
             }
             else
             {
@@ -242,7 +242,7 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
                     new { danceSellJobId = danceJob.Id, renderJobId = renderJob.Id, referenceUpload.IdBase, referenceUpload.Url }, ct: ct);
                 providerStage = "reference_verify";
                 var verifiedReference = await VerifyProviderImageAsync(renderJob, danceJob, runtime, referenceUpload, ct);
-                referenceUrlUsed = verifiedReference.Url!;
+                referenceUrlUsed = referenceUpload.Url;
                 await _operations.UpsertAssetAsync(new AiOperationAssetDto
                 {
                     OperationId = motionOperationId,
@@ -250,7 +250,7 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
                     MediaId = danceJob.PreparedReferenceMediaId,
                     ObjectKey = danceJob.PreparedReferenceObjectKey,
                     PublicUrl = danceJob.PreparedReferenceUrl,
-                    ProviderUrl = referenceUrlUsed,
+                    ProviderUrl = referenceUpload.Url,
                     MimeType = referenceImage!.MimeType,
                     MetadataJson = DanceSellRepository.ToJson(new
                     {
@@ -260,7 +260,9 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
                         danceSellJobId = danceJob.Id,
                         mediaId = danceJob.PreparedReferenceMediaId,
                         objectKey = danceJob.PreparedReferenceObjectKey,
-                        providerUrl = referenceUrlUsed,
+                        uploadUrl = referenceUpload.Url,
+                        verificationMatchedUrl = verifiedReference.Url,
+                        verificationDownloadUrl = verifiedReference.DownloadUrl,
                         idBase = verifiedReference.IdBase,
                         projectId = referenceUpload.ProjectId ?? runtime.ProjectId,
                         fileName = referenceUpload.FileName,
@@ -280,7 +282,8 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
                     {
                         danceSellJobId = danceJob.Id,
                         renderJobId = renderJob.Id,
-                        providerUrl = referenceUrlUsed,
+                        canonicalUploadUrl = referenceUpload.Url,
+                        matchedUrl = verifiedReference.Url,
                         runtime.UploadImagePath,
                         verificationSource = "list_images",
                         verificationMatched = true
@@ -295,9 +298,9 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
                 ct);
             if (IsVerifiedProviderAsset(reusableMotionUpload, out var currentMotionIdBase))
             {
-                motionProviderUrl = reusableMotionUpload!.ProviderUrl!;
+                motionProviderUrl = GetCanonicalProviderUploadUrl(reusableMotionUpload!);
                 motionProviderIdBase = currentMotionIdBase;
-                motionProviderProjectId = ReadConfigString(reusableMotionUpload.MetadataJson, "projectId") ?? runtime.ProjectId;
+                motionProviderProjectId = ReadConfigString(reusableMotionUpload!.MetadataJson, "projectId") ?? runtime.ProjectId;
                 motionProviderFileName = ReadConfigString(reusableMotionUpload.MetadataJson, "fileName") ?? motionVideo.FileName;
                 motionUploadState = "reused_verified";
                 await _renderJobs.AddEventAsync(renderJob.Id, "AI79_MOTION_SOURCE_UPLOAD_REUSED", "79AI source motion video upload reused.",
@@ -306,7 +309,7 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
                         danceSellJobId = danceJob.Id,
                         mediaId = danceJob.MotionVideoMediaId,
                         objectKey = danceJob.MotionVideoObjectKey,
-                        providerUrl = motionProviderUrl,
+                        canonicalUploadUrl = motionProviderUrl,
                         previousUploadAt = reusableMotionUpload.CreatedAt
                     }, ct: ct);
             }
@@ -339,7 +342,6 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
                 providerStage = "motion_verify";
                 var verifiedMotion = await VerifyProviderVideoAsync(renderJob, danceJob, runtime, motionUpload, ct);
                 motionProviderUrl = motionUpload.Url;
-                motionProviderUrl = verifiedMotion.Url!;
                 motionProviderIdBase = verifiedMotion.IdBase;
                 motionProviderProjectId = motionUpload.ProjectId;
                 motionProviderFileName = motionUpload.FileName;
@@ -351,7 +353,7 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
                     MediaId = danceJob.MotionVideoMediaId,
                     ObjectKey = danceJob.MotionVideoObjectKey,
                     PublicUrl = danceJob.MotionVideoUrl,
-                    ProviderUrl = motionProviderUrl,
+                    ProviderUrl = motionUpload.Url,
                     MimeType = motionVideo.MimeType,
                     MetadataJson = DanceSellRepository.ToJson(new
                     {
@@ -359,7 +361,9 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
                         renderJobId = renderJob.Id,
                         mediaId = danceJob.MotionVideoMediaId,
                         objectKey = danceJob.MotionVideoObjectKey,
-                        providerUrl = motionProviderUrl,
+                        uploadUrl = motionUpload.Url,
+                        verificationMatchedUrl = verifiedMotion.Url,
+                        verificationDownloadUrl = verifiedMotion.DownloadUrl,
                         idBase = motionProviderIdBase,
                         projectId = motionProviderProjectId,
                         fileName = motionProviderFileName,
@@ -381,7 +385,8 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
                     {
                         danceSellJobId = danceJob.Id,
                         renderJobId = renderJob.Id,
-                        providerUrl = motionProviderUrl,
+                        canonicalUploadUrl = motionUpload.Url,
+                        matchedUrl = verifiedMotion.Url,
                         runtime.UploadVideoPath,
                         verificationSource = "list_videos",
                         verificationMatched = true
@@ -859,6 +864,11 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
                || string.Equals(verificationSource, "list_videos", StringComparison.OrdinalIgnoreCase);
     }
 
+    private static string GetCanonicalProviderUploadUrl(AiOperationAssetDto asset)
+        => ReadConfigString(asset.MetadataJson, "uploadUrl")
+           ?? asset.ProviderUrl
+           ?? throw new InvalidOperationException("DANCE_SELL_PROVIDER_MEDIA_URL_REQUIRED");
+
     private async Task<Ai79ProviderMediaItem> VerifyProviderImageAsync(
         RenderJobDto renderJob,
         DanceSellJobDto danceJob,
@@ -924,7 +934,16 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
 
         await _renderJobs.AddEventAsync(renderJob.Id, "AI_PROVIDER_REFERENCE_VERIFY_COMPLETED",
             "Provider reference image verification completed.",
-            new { danceSellJobId = danceJob.Id, renderJobId = renderJob.Id, idBase = match.IdBase, providerUrl = match.Url, providerStatus = match.Status },
+            new
+            {
+                danceSellJobId = danceJob.Id,
+                renderJobId = renderJob.Id,
+                idBase = match.IdBase,
+                uploadUrl = upload.Url,
+                matchedUrl = match.Url,
+                verificationDownloadUrl = match.DownloadUrl,
+                providerStatus = match.Status
+            },
             ct: ct);
         return match;
     }
@@ -1000,7 +1019,16 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
         var verified = match with { Url = verifiedUrl };
         await _renderJobs.AddEventAsync(renderJob.Id, "AI_PROVIDER_MOTION_VERIFY_COMPLETED",
             "Provider motion video verification completed.",
-            new { danceSellJobId = danceJob.Id, renderJobId = renderJob.Id, idBase = verified.IdBase, providerUrl = verified.Url, providerStatus = verified.Status },
+            new
+            {
+                danceSellJobId = danceJob.Id,
+                renderJobId = renderJob.Id,
+                idBase = verified.IdBase,
+                uploadUrl = upload.Url,
+                matchedUrl = verified.Url,
+                verificationDownloadUrl = verified.DownloadUrl,
+                providerStatus = verified.Status
+            },
             ct: ct);
         return verified;
     }
