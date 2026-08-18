@@ -475,6 +475,7 @@ public interface IDanceSellOperationRepository
     Task<bool> HasActiveOperationAsync(Guid danceSellJobId, string operationType, CancellationToken ct = default);
     Task MarkSubmittedAsync(Guid operationId, string providerTaskId, string responseJson, CancellationToken ct = default);
     Task<int> BeginMotionSubmitAttemptAsync(Guid operationId, string requestJson, CancellationToken ct = default);
+    Task ResetMotionForRetryAsync(Guid operationId, Guid renderJobId, CancellationToken ct = default);
     Task MarkCompletedAsync(Guid operationId, string providerStatus, string responseJson, decimal? creditsConsumed, string? resultUrl, CancellationToken ct = default);
     Task MarkFailedAsync(Guid operationId, string providerStatus, string? responseJson, string errorCode, string errorMessage, CancellationToken ct = default);
     Task<AiOperationAssetDto?> GetLatestAssetAsync(Guid danceSellJobId, string operationType, string assetRole, Guid? mediaId, string? objectKey, CancellationToken ct = default);
@@ -718,6 +719,33 @@ public sealed class DanceSellOperationRepository : IDanceSellOperationRepository
         {
             throw SchemaNotReady(ex);
         }
+    }
+
+    public async Task ResetMotionForRetryAsync(Guid operationId, Guid renderJobId, CancellationToken ct = default)
+    {
+        await ExecuteOptionalAsync(
+            """
+            UPDATE dance_sell.dance_sell_provider_operations
+               SET render_job_id=@renderJobId,
+                   provider_task_id=NULL,
+                   status='queued',
+                   provider_status=NULL,
+                   response_json=NULL,
+                   callback_json=NULL,
+                   error_json=NULL,
+                   provider_usage_json=NULL,
+                   error_code=NULL,
+                   error_message=NULL,
+                   started_at=now(),
+                   submitted_at=NULL,
+                   completed_at=NULL,
+                   failed_at=NULL,
+                   request_json='{}'::jsonb,
+                   updated_at=now()
+             WHERE id=@operationId;
+            """,
+            new { operationId, renderJobId },
+            ct);
     }
 
     public async Task<AiOperationAssetDto?> GetLatestAssetAsync(Guid danceSellJobId, string operationType, string assetRole, Guid? mediaId, string? objectKey, CancellationToken ct = default)

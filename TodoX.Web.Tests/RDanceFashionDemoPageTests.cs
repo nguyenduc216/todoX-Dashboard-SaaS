@@ -321,6 +321,7 @@ public sealed class RDanceFashionDemoPageTests
         var root = FindRepoRoot();
         var handler = ReadStrictUtf8(Path.Combine(root, "TodoX.Web", "Services", "DanceSell", "DanceSellRenderHandler.cs"));
         var client = ReadStrictUtf8(Path.Combine(root, "TodoX.Web", "Services", "AiProviders", "Ai79TaskClient.cs"));
+        var program = ReadStrictUtf8(Path.Combine(root, "TodoX.Web", "Program.cs"));
         var submit = GetMethodSection(handler, "Submit79AiAsync");
         var runtime = GetMethodSection(handler, "Resolve79AiRuntimeAsync");
         var models = ReadStrictUtf8(Path.Combine(root, "TodoX.Web", "Services", "DanceSell", "DanceSellModels.cs"));
@@ -404,6 +405,9 @@ public sealed class RDanceFashionDemoPageTests
         Assert.Contains("DefaultMotionControlSubmitTimeout = TimeSpan.FromSeconds(120)", client, StringComparison.Ordinal);
         Assert.Contains("CancellationTokenSource.CreateLinkedTokenSource(ct)", client, StringComparison.Ordinal);
         Assert.Contains("timeoutCts.CancelAfter(_motionControlSubmitTimeout)", client, StringComparison.Ordinal);
+        Assert.Contains("AddHttpClient<TodoX.Web.Services.AiProviders.IAi79TaskClient, TodoX.Web.Services.AiProviders.Ai79TaskClient>(client =>", program, StringComparison.Ordinal);
+        Assert.Contains("client.Timeout = TimeSpan.FromMinutes(3)", program, StringComparison.Ordinal);
+        Assert.DoesNotContain("InfiniteTimeSpan", program, StringComparison.Ordinal);
         Assert.Contains("new MultipartFormDataContent()", client, StringComparison.Ordinal);
         Assert.Contains("new StreamContent(stream)", client, StringComparison.Ordinal);
         Assert.Contains("ContentDispositionHeaderValue(\"form-data\")", client, StringComparison.Ordinal);
@@ -428,7 +432,9 @@ public sealed class RDanceFashionDemoPageTests
     {
         var root = FindRepoRoot();
         var repository = ReadStrictUtf8(Path.Combine(root, "TodoX.Web", "Services", "DanceSell", "DanceSellRepository.cs"));
+        var operations = ReadStrictUtf8(Path.Combine(root, "TodoX.Web", "Services", "DanceSell", "DanceSellAiOperations.cs"));
         var service = ReadStrictUtf8(Path.Combine(root, "TodoX.Web", "Services", "DanceSell", "DanceSellPhase2Services.cs"));
+        var renderService = ReadStrictUtf8(Path.Combine(root, "TodoX.Web", "Services", "Render", "RenderJobService.cs"));
         var page = ReadStrictUtf8(Path.Combine(root, "TodoX.Web", "Components", "Pages", "RDanceJobDetail.razor"));
 
         var reset = GetMethodSection(repository, "ResetMotionRenderStateAsync");
@@ -440,9 +446,17 @@ public sealed class RDanceFashionDemoPageTests
         Assert.Contains("error_code=NULL", reset, StringComparison.Ordinal);
         Assert.Contains("error_message=NULL", reset, StringComparison.Ordinal);
         Assert.DoesNotContain("result_video_url", reset, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("status IN ('queued','submitted','rendering','failed','timeout')", reset, StringComparison.Ordinal);
 
         var retry = GetMethodSection(service, "RetryAsync");
+        Assert.Contains("coreJob?.Status == RenderJobStatuses.Cancelled", retry, StringComparison.Ordinal);
+        Assert.Contains("ResetMotionForRetryAsync(operationId, retry.Id, ct)", retry, StringComparison.Ordinal);
         Assert.Contains("ResetMotionRenderStateAsync(job.Id, retry.Id, ct)", retry, StringComparison.Ordinal);
+        Assert.Contains("current.Status is not (RenderJobStatuses.Failed or RenderJobStatuses.Cancelled)", renderService, StringComparison.Ordinal);
+        var operationReset = GetMethodSection(operations, "ResetMotionForRetryAsync");
+        Assert.Contains("provider_task_id=NULL", operationReset, StringComparison.Ordinal);
+        Assert.Contains("status='queued'", operationReset, StringComparison.Ordinal);
+        Assert.Contains("request_json='{}'::jsonb", operationReset, StringComparison.Ordinal);
 
         Assert.Contains("IsResultActive", page, StringComparison.Ordinal);
         Assert.Contains("rdance-result-frame", page, StringComparison.Ordinal);
@@ -462,6 +476,28 @@ public sealed class RDanceFashionDemoPageTests
         Assert.Contains("ReloadAsync(wasActive)", page, StringComparison.Ordinal);
         Assert.Contains("_tabIndex = 3", page, StringComparison.Ordinal);
         Assert.Contains("/api/dance-sell/jobs/{_job.Id}/download", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DanceSellCancelledCoreJobCanQueueFreshRenderWithoutReusingProviderTask()
+    {
+        var root = FindRepoRoot();
+        var service = ReadStrictUtf8(Path.Combine(root, "TodoX.Web", "Services", "DanceSell", "DanceSellPhase2Services.cs"));
+        var renderService = ReadStrictUtf8(Path.Combine(root, "TodoX.Web", "Services", "Render", "RenderJobService.cs"));
+        var operation = ReadStrictUtf8(Path.Combine(root, "TodoX.Web", "Services", "DanceSell", "DanceSellAiOperations.cs"));
+        var repository = ReadStrictUtf8(Path.Combine(root, "TodoX.Web", "Services", "DanceSell", "DanceSellRepository.cs"));
+
+        var retry = GetMethodSection(service, "RetryAsync");
+        Assert.Contains("var coreJob = job.RenderJobId is Guid renderJobId", retry, StringComparison.Ordinal);
+        Assert.Contains("var coreCancelled = coreJob?.Status == RenderJobStatuses.Cancelled", retry, StringComparison.Ordinal);
+        Assert.DoesNotContain("DANCE_SELL_RETRY_NOT_ALLOWED", retry[..retry.IndexOf("if (job.RenderJobId is null", StringComparison.Ordinal)], StringComparison.Ordinal);
+        Assert.Contains("_renderJobs.RetryAsync(job.RenderJobId.Value, user.UserId, ct)", retry, StringComparison.Ordinal);
+        Assert.Contains("ResetMotionForRetryAsync(operationId, retry.Id, ct)", retry, StringComparison.Ordinal);
+
+        Assert.Contains("RenderJobStatuses.Failed or RenderJobStatuses.Cancelled", renderService, StringComparison.Ordinal);
+        Assert.Contains("retry_of_job_id=@source", renderService, StringComparison.Ordinal);
+        Assert.Contains("provider_task_id=NULL", operation, StringComparison.Ordinal);
+        Assert.Contains("provider_task_id=NULL", repository, StringComparison.Ordinal);
     }
 
     [Fact]

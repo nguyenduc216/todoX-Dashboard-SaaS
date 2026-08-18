@@ -328,7 +328,7 @@ public sealed class RenderJobService : IRenderJobService
     public async Task<RenderJobDto?> RetryAsync(Guid jobId, Guid? userId = null, CancellationToken ct = default)
     {
         var current = await GetAsync(jobId, ct);
-        if (current is null || current.Status != RenderJobStatuses.Failed)
+        if (current is null || current.Status is not (RenderJobStatuses.Failed or RenderJobStatuses.Cancelled))
         {
             return null;
         }

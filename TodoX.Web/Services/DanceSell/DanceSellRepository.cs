@@ -290,7 +290,7 @@ public sealed class DanceSellRepository : IDanceSellRepository
                    current_stage='motion_queued',
                    updated_at=now()
              WHERE id=@id
-               AND status IN ('failed','timeout');
+               AND status IN ('queued','submitted','rendering','failed','timeout');
             """,
             new { id, renderJobId });
     }

@@ -1530,13 +1530,30 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
     public async Task<DanceSellJobDto> RetryAsync(Guid id, CurrentUserSession user, CancellationToken ct = default)
     {
         var job = await RequireOwnedJobAsync(id, user, ct);
-        if (job.RenderJobId is null || job.Status is not (DanceSellJobStatuses.Failed or DanceSellJobStatuses.Timeout))
+        var coreJob = job.RenderJobId is Guid renderJobId
+            ? await _renderJobs.GetAsync(renderJobId, ct)
+            : null;
+        var coreCancelled = coreJob?.Status == RenderJobStatuses.Cancelled;
+        var danceJobRetryable = job.Status is DanceSellJobStatuses.Queued
+            or DanceSellJobStatuses.Submitted
+            or DanceSellJobStatuses.Rendering
+            or DanceSellJobStatuses.Failed
+            or DanceSellJobStatuses.Timeout;
+        if (job.RenderJobId is null
+            || !danceJobRetryable
+            || (!coreCancelled && job.Status is not (DanceSellJobStatuses.Failed or DanceSellJobStatuses.Timeout)))
         {
             throw new InvalidOperationException("DANCE_SELL_RETRY_NOT_ALLOWED");
         }
 
         var retry = await _renderJobs.RetryAsync(job.RenderJobId.Value, user.UserId, ct)
             ?? throw new InvalidOperationException("DANCE_SELL_RENDER_ENQUEUE_FAILED");
+        if (coreCancelled
+            && coreJob is not null
+            && JsonSerializer.Deserialize<DanceSellRenderInput>(coreJob.InputJson, KieJson.Options)?.OperationId is Guid operationId)
+        {
+            await _operations.ResetMotionForRetryAsync(operationId, retry.Id, ct);
+        }
         await _repo.ResetMotionRenderStateAsync(job.Id, retry.Id, ct);
         return await _repo.GetByIdAsync(job.Id, ct) ?? job;
     }

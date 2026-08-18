@@ -275,6 +275,7 @@ public sealed class DanceSellRenderHandlerTests
 
         public Task MarkSubmittedAsync(Guid operationId, string providerTaskId, string responseJson, CancellationToken ct = default) => Task.CompletedTask;
         public Task<int> BeginMotionSubmitAttemptAsync(Guid operationId, string requestJson, CancellationToken ct = default) => Task.FromResult(1);
+        public Task ResetMotionForRetryAsync(Guid operationId, Guid renderJobId, CancellationToken ct = default) => Task.CompletedTask;
         public Task MarkCompletedAsync(Guid operationId, string providerStatus, string responseJson, decimal? creditsConsumed, string? resultUrl, CancellationToken ct = default) => Task.CompletedTask;
         public Task MarkFailedAsync(Guid operationId, string providerStatus, string? responseJson, string errorCode, string errorMessage, CancellationToken ct = default) => Task.CompletedTask;
         public Task<AiOperationAssetDto?> GetLatestAssetAsync(Guid danceSellJobId, string operationType, string assetRole, Guid? mediaId, string? objectKey, CancellationToken ct = default)
