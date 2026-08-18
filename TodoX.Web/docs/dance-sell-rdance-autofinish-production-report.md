@@ -6,6 +6,35 @@ Branch: `integration/rdance-on-construction-video-core`
 
 This change completes the current DanceSell/RDance production hardening and adds the customer-selectable `autoFinish` mode for RDance, Timelapse, and RVideo. No deployment, merge, migration, or schema change was performed.
 
+## Provider-media verification hotfix
+
+The previous motion path treated a 79AI upload response containing `id_base` and
+`url` as sufficient. That was a false positive: the provider account could
+still be missing the asset. The current path now:
+
+1. resolves the current approved reference and local motion source;
+2. uploads both assets for a new `renderJobId`;
+3. verifies the image through `POST /ai/images`;
+4. verifies the video through `POST /ai/videos`;
+5. submits Kling only with the verified URLs for that same render job.
+
+List requests are form-urlencoded with `access_token`, `domain`, and
+`project_id`, plus configured optional fields. Verification matches `id_base`
+or provider URL and requires a normalized successful status. Sanitized response
+JSON is retained; credentials are not logged.
+
+Provider URLs are never reused across different render jobs. A transient retry
+inside the same render job may reuse only a verified asset persisted for that
+render job and the same local media identity. Current TodoX media files remain
+reusable locally, so customers do not need to upload again in the browser.
+
+Terminal reference upload/verification failures use
+`DANCE_SELL_REFERENCE_PROVIDER_VERIFY_FAILED` or a safe provider failure code;
+motion failures use `DANCE_SELL_MOTION_PROVIDER_VERIFY_FAILED` or a safe
+provider failure code. The current motion operation is marked `failed`, and
+`AI79_MOTION_SUBMIT_FAILED` is recorded for admin diagnostics. Customer-facing
+messages remain safe Vietnamese text and do not include provider details.
+
 ## Root cause
 
 The no-product RDance path could treat the dashboard-hosted prepared reference URL as sufficient for motion submission. That URL is not proof that the image exists on the motion provider. The render handler now always resolves the approved reference binary and ensures a provider-side image upload exists before motion submit.
@@ -82,14 +111,19 @@ Existing cancel, retry, billing, result persistence, provider authentication, po
 
 ## Validation
 
-- `dotnet test TodoX.Dashboard.sln -c Release --no-restore`: **645 passed**
-- `dotnet build TodoX.Dashboard.sln -c Release --no-restore`: **passed, 0 warnings, 0 errors**
-- `dotnet format TodoX.Dashboard.sln --verify-no-changes --no-restore --include TodoX.Web/Services/DanceSell/DanceSellModels.cs TodoX.Web.Tests/RDanceFashionDemoPageTests.cs TodoX.Web.Tests/TimelapsePhase2CTests.cs`: **passed**
+- `dotnet format TodoX.Dashboard.sln --verify-no-changes --no-restore --include <changed C# files>`: **passed**
 - `git diff --check`: **passed**
-- Publish command: `dotnet publish TodoX.Web/TodoX.Web.csproj -c Release --no-restore -o artifacts/publish/todox-dashboard`
-- Publish target: `artifacts/publish/todox-dashboard`
+- Relevant RDance/provider test run before the unrelated concurrent AiStudio edits: **645 passed**
+- Latest full `dotnet build TodoX.Dashboard.sln -c Release --no-restore`: **blocked by 3 unrelated AiStudio compile errors**
+- Latest full `dotnet test TodoX.Dashboard.sln -c Release --no-restore`: **blocked by the same 3 unrelated AiStudio compile errors**
+- Publish: **not run**, because the solution build is blocked
+- Publish target when unblocked: `artifacts/publish/todox-dashboard`
 - Deployment: **not performed**
 
-Final commit SHA: recorded in the repository commit metadata for this report.
+The unrelated errors are in `AiStudioCatalogModels.cs`, `AiStudioCatalogEndpoints.cs`,
+and `AiStudioCatalogService.cs`. Those files are intentionally not part of this
+commit.
+
+Final commit SHA: recorded after commit.
 
 READY TO DEPLOY: **NO** until the reviewed commit is deployed and a live customer smoke test confirms no-product and product RDance render paths.

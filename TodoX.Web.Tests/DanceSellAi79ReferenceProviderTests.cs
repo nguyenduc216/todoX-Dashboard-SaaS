@@ -98,6 +98,12 @@ Photorealistic, product preview quality.
         public Task<Ai79ImageUploadResult> UploadImageAsync(Ai79ImageUploadRequest request, CancellationToken ct = default)
             => throw new NotImplementedException();
 
+        public Task<Ai79ProviderMediaListResult> ListImagesAsync(Ai79ProviderMediaListRequest request, CancellationToken ct = default)
+            => Task.FromResult(new Ai79ProviderMediaListResult(Array.Empty<Ai79ProviderMediaItem>(), "{}"));
+
+        public Task<Ai79ProviderMediaListResult> ListVideosAsync(Ai79ProviderMediaListRequest request, CancellationToken ct = default)
+            => Task.FromResult(new Ai79ProviderMediaListResult(Array.Empty<Ai79ProviderMediaItem>(), "{}"));
+
         public Task<Ai79TaskStatusResult> GetStatusAsync(Ai79TaskStatusRequest request, CancellationToken ct = default)
             => throw new NotImplementedException();
     }

@@ -280,6 +280,8 @@ public sealed class DanceSellRenderHandlerTests
         public Task MarkFailedAsync(Guid operationId, string providerStatus, string? responseJson, string errorCode, string errorMessage, CancellationToken ct = default) => Task.CompletedTask;
         public Task<AiOperationAssetDto?> GetLatestAssetAsync(Guid danceSellJobId, string operationType, string assetRole, Guid? mediaId, string? objectKey, CancellationToken ct = default)
             => Task.FromResult<AiOperationAssetDto?>(null);
+        public Task<AiOperationAssetDto?> GetLatestAssetForRenderJobAsync(Guid renderJobId, string assetRole, Guid? mediaId, string? objectKey, CancellationToken ct = default)
+            => Task.FromResult<AiOperationAssetDto?>(null);
         public Task UpsertAssetAsync(AiOperationAssetDto asset, CancellationToken ct = default) => Task.CompletedTask;
         public Task<PagedResult<DanceSellOperationLogItemDto>> SearchLogsAsync(DanceSellOperationLogFilter filter, CancellationToken ct = default)
             => Task.FromResult(new PagedResult<DanceSellOperationLogItemDto>(Array.Empty<DanceSellOperationLogItemDto>(), filter.Page, filter.PageSize, 0));

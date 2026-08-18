@@ -7,6 +7,41 @@ namespace TodoX.Web.Tests;
 
 public sealed class Ai79TaskClientTests
 {
+    [Fact]
+    public async Task ProviderMediaLists_PostRequiredFieldsAndParseImageAndVideoItems()
+    {
+        var handler = new RecordingJsonHandler(
+            """{"data":[{"id_base":"image-001","url":"https://cdn.example/image.png","status":"SUCCESS"}]}""",
+            """{"data":[{"id_base":"video-001","download_url":"https://cdn.example/video.mp4","status":"MEDIA_GENERATION_STATUS_SUCCESSFUL","thumbnail_url":"https://cdn.example/video.jpg"}]}""");
+        var client = new Ai79TaskClient(new HttpClient(handler));
+
+        var images = await client.ListImagesAsync(new Ai79ProviderMediaListRequest(
+            "https://api.gommo.net/ai",
+            "/ai/images",
+            "secret-token",
+            "79ai.net",
+            "default"));
+        var videos = await client.ListVideosAsync(new Ai79ProviderMediaListRequest(
+            "https://api.gommo.net/ai",
+            "/ai/videos",
+            "secret-token",
+            "79ai.net",
+            "default",
+            new Dictionary<string, string?> { ["limit"] = "50" }));
+
+        Assert.Equal("image-001", Assert.Single(images.Items).IdBase);
+        Assert.Equal("video-001", Assert.Single(videos.Items).IdBase);
+        Assert.Equal("https://cdn.example/video.mp4", videos.Items[0].DownloadUrl);
+        Assert.DoesNotContain("secret-token", images.SanitizedResponseJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("secret-token", videos.SanitizedResponseJson, StringComparison.Ordinal);
+        Assert.Equal("https://api.gommo.net/ai/ai/images", handler.Requests[0].Uri);
+        Assert.Equal("https://api.gommo.net/ai/ai/videos", handler.Requests[1].Uri);
+        Assert.Contains("access_token=secret-token", handler.Requests[0].Body, StringComparison.Ordinal);
+        Assert.Contains("domain=79ai.net", handler.Requests[0].Body, StringComparison.Ordinal);
+        Assert.Contains("project_id=default", handler.Requests[0].Body, StringComparison.Ordinal);
+        Assert.Contains("limit=50", handler.Requests[1].Body, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData("""{"imageInfo":{"id_base":"abc123"}}""")]
     [InlineData("""{"data":{"imageInfo":{"id_base":"abc123"}}}""")]

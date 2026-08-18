@@ -479,6 +479,7 @@ public interface IDanceSellOperationRepository
     Task MarkCompletedAsync(Guid operationId, string providerStatus, string responseJson, decimal? creditsConsumed, string? resultUrl, CancellationToken ct = default);
     Task MarkFailedAsync(Guid operationId, string providerStatus, string? responseJson, string errorCode, string errorMessage, CancellationToken ct = default);
     Task<AiOperationAssetDto?> GetLatestAssetAsync(Guid danceSellJobId, string operationType, string assetRole, Guid? mediaId, string? objectKey, CancellationToken ct = default);
+    Task<AiOperationAssetDto?> GetLatestAssetForRenderJobAsync(Guid renderJobId, string assetRole, Guid? mediaId, string? objectKey, CancellationToken ct = default);
     Task UpsertAssetAsync(AiOperationAssetDto asset, CancellationToken ct = default);
     Task<PagedResult<DanceSellOperationLogItemDto>> SearchLogsAsync(DanceSellOperationLogFilter filter, CancellationToken ct = default);
     Task<DanceSellOperationLogDetailDto?> GetLogDetailAsync(Guid id, CancellationToken ct = default);
@@ -776,6 +777,52 @@ public sealed class DanceSellOperationRepository : IDanceSellOperationRepository
                  LIMIT 1;
                 """,
                 new { danceSellJobId, operationType, assetRole, mediaId, objectKey = string.IsNullOrWhiteSpace(objectKey) ? null : objectKey.Trim() });
+        }
+        catch (PostgresException ex) when (IsSchemaMissing(ex))
+        {
+            throw SchemaNotReady(ex);
+        }
+    }
+
+    public async Task<AiOperationAssetDto?> GetLatestAssetForRenderJobAsync(
+        Guid renderJobId,
+        string assetRole,
+        Guid? mediaId,
+        string? objectKey,
+        CancellationToken ct = default)
+    {
+        if (mediaId is null && string.IsNullOrWhiteSpace(objectKey))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var conn = await _factory.OpenAsync(ct);
+            return await conn.QuerySingleOrDefaultAsync<AiOperationAssetDto>(
+                """
+                SELECT a.id AS Id, a.operation_id AS OperationId, a.asset_role AS AssetRole,
+                       a.media_id AS MediaId, a.object_key AS ObjectKey, a.public_url AS PublicUrl,
+                       a.provider_url AS ProviderUrl, a.mime_type AS MimeType,
+                       a.metadata_json::text AS MetadataJson, a.created_at AS CreatedAt
+                  FROM public.todox_ai_operation_assets a
+                  JOIN dance_sell.dance_sell_provider_operations o ON o.id = a.operation_id
+                 WHERE o.render_job_id = @renderJobId
+                   AND a.asset_role = @assetRole
+                   AND COALESCE(a.provider_url, '') <> ''
+                   AND COALESCE(a.metadata_json->>'verificationMatched', 'false') = 'true'
+                   AND (@mediaId IS NULL OR a.media_id = @mediaId)
+                   AND (@objectKey IS NULL OR a.object_key = @objectKey)
+                 ORDER BY a.created_at DESC
+                 LIMIT 1;
+                """,
+                new
+                {
+                    renderJobId,
+                    assetRole,
+                    mediaId,
+                    objectKey = string.IsNullOrWhiteSpace(objectKey) ? null : objectKey.Trim()
+                });
         }
         catch (PostgresException ex) when (IsSchemaMissing(ex))
         {

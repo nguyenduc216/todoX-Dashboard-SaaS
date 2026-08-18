@@ -9,6 +9,8 @@ public interface IAi79TaskClient
     Task<Ai79TaskSubmitResult> SubmitAsync(Ai79TaskSubmitRequest request, CancellationToken ct = default);
     Task<Ai79TaskSubmitResult> SubmitMultipartAsync(Ai79MultipartTaskSubmitRequest request, CancellationToken ct = default);
     Task<Ai79MediaUploadResult> UploadMediaAsync(Ai79MediaUploadRequest request, CancellationToken ct = default);
+    Task<Ai79ProviderMediaListResult> ListImagesAsync(Ai79ProviderMediaListRequest request, CancellationToken ct = default);
+    Task<Ai79ProviderMediaListResult> ListVideosAsync(Ai79ProviderMediaListRequest request, CancellationToken ct = default);
     Task<Ai79TaskSubmitResult> SubmitMotionControlAsync(Ai79MotionControlSubmitRequest request, CancellationToken ct = default);
     Task<Ai79ImageUploadResult> UploadImageAsync(Ai79ImageUploadRequest request, CancellationToken ct = default);
     Task<Ai79TaskStatusResult> GetStatusAsync(Ai79TaskStatusRequest request, CancellationToken ct = default);
@@ -78,6 +80,25 @@ public sealed record Ai79MediaUploadResult(
     string? IdBase,
     string? ProjectId,
     string? FileName,
+    string SanitizedResponseJson);
+
+public sealed record Ai79ProviderMediaListRequest(
+    string BaseUrl,
+    string EndpointPath,
+    string AccessToken,
+    string Domain,
+    string ProjectId,
+    IReadOnlyDictionary<string, string?>? OptionalFields = null);
+
+public sealed record Ai79ProviderMediaItem(
+    string? IdBase,
+    string? Url,
+    string? Status,
+    string? DownloadUrl,
+    string? ThumbnailUrl);
+
+public sealed record Ai79ProviderMediaListResult(
+    IReadOnlyList<Ai79ProviderMediaItem> Items,
     string SanitizedResponseJson);
 
 public sealed record Ai79MotionControlSubmitRequest(
@@ -394,6 +415,86 @@ public sealed class Ai79TaskClient : IAi79TaskClient
         }
     }
 
+    public Task<Ai79ProviderMediaListResult> ListImagesAsync(Ai79ProviderMediaListRequest request, CancellationToken ct = default)
+        => ListProviderMediaAsync(request, Ai79TaskOperation.Image, ct);
+
+    public Task<Ai79ProviderMediaListResult> ListVideosAsync(Ai79ProviderMediaListRequest request, CancellationToken ct = default)
+        => ListProviderMediaAsync(request, Ai79TaskOperation.Video, ct);
+
+    private async Task<Ai79ProviderMediaListResult> ListProviderMediaAsync(
+        Ai79ProviderMediaListRequest request,
+        Ai79TaskOperation operation,
+        CancellationToken ct)
+    {
+        var form = new Dictionary<string, string>
+        {
+            ["access_token"] = request.AccessToken,
+            ["domain"] = request.Domain,
+            ["project_id"] = request.ProjectId
+        };
+        if (request.OptionalFields is not null)
+        {
+            foreach (var pair in request.OptionalFields)
+            {
+                if (!string.IsNullOrWhiteSpace(pair.Key) && !string.IsNullOrWhiteSpace(pair.Value))
+                {
+                    form[pair.Key] = pair.Value!;
+                }
+            }
+        }
+
+        using var body = new FormUrlEncodedContent(form);
+        using var response = await _httpClient.PostAsync(BuildUri(request.BaseUrl, request.EndpointPath), body, ct);
+        var json = await response.Content.ReadAsStringAsync(ct);
+        var sanitized = string.IsNullOrWhiteSpace(json)
+            ? JsonSerializer.Serialize(string.Empty, JsonOptions)
+            : JsonSerializer.Serialize(SanitizeText(json, request.AccessToken), JsonOptions);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new Ai79TaskSubmitException(
+                $"79AI {(operation == Ai79TaskOperation.Image ? "images" : "videos")} list returned HTTP {(int)response.StatusCode}.",
+                sanitized,
+                response.StatusCode,
+                $"http_{(int)response.StatusCode}");
+        }
+
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            throw new Ai79TaskSubmitException(
+                $"79AI {(operation == Ai79TaskOperation.Image ? "images" : "videos")} list response was empty.",
+                sanitized,
+                response.StatusCode,
+                "empty_response");
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            var providerError = FindSubmitError(document.RootElement, taskIdMissing: false, request.AccessToken);
+            if (providerError is not null)
+            {
+                throw new Ai79TaskSubmitException(
+                    $"79AI {(operation == Ai79TaskOperation.Image ? "images" : "videos")} list failed: {providerError.ErrorMessage}",
+                    sanitized,
+                    response.StatusCode,
+                    providerError.ErrorCode ?? "provider_error");
+            }
+
+            var items = FindProviderMediaItems(document.RootElement, operation);
+            return new Ai79ProviderMediaListResult(items, sanitized);
+        }
+        catch (JsonException ex)
+        {
+            throw new Ai79TaskSubmitException(
+                $"79AI {(operation == Ai79TaskOperation.Image ? "images" : "videos")} list response was not valid JSON.",
+                sanitized,
+                response.StatusCode,
+                "invalid_json",
+                ex);
+        }
+    }
+
     public async Task<Ai79TaskSubmitResult> SubmitMotionControlAsync(Ai79MotionControlSubmitRequest request, CancellationToken ct = default)
     {
         var form = new Dictionary<string, string>
@@ -678,6 +779,72 @@ public sealed class Ai79TaskClient : IAi79TaskClient
 
     private static string QuoteMultipartValue(string value)
         => $"\"{value.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal)}\"";
+
+    private static IReadOnlyList<Ai79ProviderMediaItem> FindProviderMediaItems(JsonElement root, Ai79TaskOperation operation)
+    {
+        var items = new List<Ai79ProviderMediaItem>();
+        foreach (var element in EnumerateProviderMediaElements(root, operation))
+        {
+            if (element.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            items.Add(new Ai79ProviderMediaItem(
+                FindString(element, "id_base", "idBase"),
+                FindString(element, "url"),
+                FindString(element, "status", "state", "provider_status"),
+                FindString(element, "download_url", "downloadUrl"),
+                FindString(element, "thumbnail_url", "thumbnailUrl")));
+        }
+
+        return items;
+    }
+
+    private static IEnumerable<JsonElement> EnumerateProviderMediaElements(JsonElement root, Ai79TaskOperation operation)
+    {
+        if (root.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in root.EnumerateArray())
+            {
+                yield return item;
+            }
+
+            yield break;
+        }
+
+        if (root.ValueKind != JsonValueKind.Object)
+        {
+            yield break;
+        }
+
+        foreach (var propertyName in operation == Ai79TaskOperation.Image
+                     ? new[] { "data", "images", "items" }
+                     : new[] { "data", "videos", "items" })
+        {
+            if (!root.TryGetProperty(propertyName, out var child))
+            {
+                continue;
+            }
+
+            if (child.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in child.EnumerateArray())
+                {
+                    yield return item;
+                }
+
+                yield break;
+            }
+
+            foreach (var item in EnumerateProviderMediaElements(child, operation))
+            {
+                yield return item;
+            }
+
+            yield break;
+        }
+    }
 
     private static string NormalizeBearerToken(string accessToken)
     {

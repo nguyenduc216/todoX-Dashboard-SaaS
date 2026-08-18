@@ -179,95 +179,127 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
         string? motionProviderFileName = motionVideo.FileName;
         string motionUploadState;
         AiOperationAssetDto? reusableMotionUpload = null;
+        var providerStage = "prepare";
         var submitStartedAtUtc = DateTime.UtcNow;
         var submitAttempt = 0;
         try
         {
-            await _renderJobs.AddEventAsync(renderJob.Id, "AI_PROVIDER_REFERENCE_UPLOAD_STARTED", "Uploading the current prepared reference image to the motion provider.",
-                new
-                {
-                    danceSellJobId = danceJob.Id,
-                    danceJob.PreparedReferenceMediaId,
-                    danceJob.PreparedReferenceObjectKey,
-                    runtime.UploadImagePath,
-                    freshForRenderAttempt = true
-                }, ct: ct);
-            Ai79MediaUploadResult referenceUpload;
-            try
+            var currentReferenceAsset = await _operations.GetLatestAssetForRenderJobAsync(
+                renderJob.Id,
+                DanceSellAssetRoles.MotionReferenceProviderUpload,
+                danceJob.PreparedReferenceMediaId,
+                danceJob.PreparedReferenceObjectKey,
+                ct);
+            if (IsVerifiedProviderAsset(currentReferenceAsset, out var currentReferenceIdBase))
             {
-                referenceUpload = await _ai79.UploadMediaAsync(new Ai79MediaUploadRequest(
-                    runtime.BaseUrl,
-                    runtime.UploadImagePath,
-                    runtime.Credential.Secret,
-                    runtime.Domain,
-                    runtime.ProjectId,
-                    runtime.UploadImageField,
-                    referenceImage!.ToMultipartPart(runtime.UploadImageField)),
-                    ct);
+                referenceUrlUsed = currentReferenceAsset!.ProviderUrl!;
+                await _renderJobs.AddEventAsync(renderJob.Id, "AI_PROVIDER_REFERENCE_UPLOAD_REUSED_CURRENT_ATTEMPT",
+                    "Verified reference upload reused for the same render attempt.",
+                    new { danceSellJobId = danceJob.Id, renderJobId = renderJob.Id, providerUrl = referenceUrlUsed, idBase = currentReferenceIdBase }, ct: ct);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            else
             {
-                await _renderJobs.AddEventAsync(renderJob.Id, "AI_PROVIDER_REFERENCE_UPLOAD_FAILED", "Current prepared reference image upload failed.",
+                providerStage = "reference_upload";
+                await _renderJobs.AddEventAsync(renderJob.Id, "AI_PROVIDER_REFERENCE_UPLOAD_STARTED", "Uploading the current prepared reference image to the motion provider.",
                     new
                     {
                         danceSellJobId = danceJob.Id,
+                        renderJobId = renderJob.Id,
+                        danceJob.PreparedReferenceMediaId,
+                        danceJob.PreparedReferenceObjectKey,
                         runtime.UploadImagePath,
-                        errorType = ex.GetType().Name,
-                        errorMessage = ex.Message
-                    }, level: "warning", ct: ct);
-                throw;
-            }
-            referenceUrlUsed = referenceUpload.Url;
-            await _operations.UpsertAssetAsync(new AiOperationAssetDto
-            {
-                OperationId = motionOperationId,
-                AssetRole = DanceSellAssetRoles.MotionReferenceProviderUpload,
-                MediaId = danceJob.PreparedReferenceMediaId,
-                ObjectKey = danceJob.PreparedReferenceObjectKey,
-                PublicUrl = danceJob.PreparedReferenceUrl,
-                ProviderUrl = referenceUrlUsed,
-                MimeType = referenceImage!.MimeType,
-                MetadataJson = DanceSellRepository.ToJson(new
+                        freshForRenderAttempt = true
+                    }, ct: ct);
+                Ai79MediaUploadResult referenceUpload;
+                try
                 {
-                    uploadedToProvider = true,
-                    freshForRenderAttempt = true,
-                    danceSellJobId = danceJob.Id,
-                    sourceMediaId = danceJob.PreparedReferenceMediaId,
-                    sourceObjectKey = danceJob.PreparedReferenceObjectKey,
-                    providerUrl = referenceUrlUsed,
-                    idBase = referenceUpload.IdBase,
-                    projectId = referenceUpload.ProjectId,
-                    fileName = referenceUpload.FileName,
-                    uploadedAt = DateTime.UtcNow,
-                    endpointPath = runtime.UploadImagePath,
-                    field = runtime.UploadImageField,
-                    mime = referenceImage.MimeType,
-                    bytes = referenceImage.SizeBytes >= 0 ? referenceImage.SizeBytes : (long?)null
-                })
-            }, ct);
-            await _renderJobs.AddEventAsync(renderJob.Id, "AI_PROVIDER_REFERENCE_UPLOAD_COMPLETED", "Current prepared reference image uploaded to the motion provider.",
-                new
+                    referenceUpload = await _ai79.UploadMediaAsync(new Ai79MediaUploadRequest(
+                        runtime.BaseUrl,
+                        runtime.UploadImagePath,
+                        runtime.Credential.Secret,
+                        runtime.Domain,
+                        runtime.ProjectId,
+                        runtime.UploadImageField,
+                        referenceImage!.ToMultipartPart(runtime.UploadImageField)),
+                        ct);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
                 {
-                    danceSellJobId = danceJob.Id,
-                    providerUrl = referenceUrlUsed,
-                    runtime.UploadImagePath,
-                    freshForRenderAttempt = true
-                }, ct: ct);
+                    await _renderJobs.AddEventAsync(renderJob.Id, "AI_PROVIDER_REFERENCE_UPLOAD_FAILED", "Current prepared reference image upload failed.",
+                        new
+                        {
+                            danceSellJobId = danceJob.Id,
+                            renderJobId = renderJob.Id,
+                            runtime.UploadImagePath,
+                            errorType = ex.GetType().Name,
+                            errorMessage = ex.Message
+                        }, level: "warning", ct: ct);
+                    throw;
+                }
 
-            reusableMotionUpload = await _operations.GetLatestAssetAsync(
-                danceJob.Id,
-                DanceSellOperationTypes.MotionVideo,
+                await _renderJobs.AddEventAsync(renderJob.Id, "AI_PROVIDER_REFERENCE_UPLOAD_RESPONSE_RECEIVED",
+                    "Provider reference image upload response received.",
+                    new { danceSellJobId = danceJob.Id, renderJobId = renderJob.Id, referenceUpload.IdBase, referenceUpload.Url }, ct: ct);
+                providerStage = "reference_verify";
+                var verifiedReference = await VerifyProviderImageAsync(renderJob, danceJob, runtime, referenceUpload, ct);
+                referenceUrlUsed = verifiedReference.Url!;
+                await _operations.UpsertAssetAsync(new AiOperationAssetDto
+                {
+                    OperationId = motionOperationId,
+                    AssetRole = DanceSellAssetRoles.MotionReferenceProviderUpload,
+                    MediaId = danceJob.PreparedReferenceMediaId,
+                    ObjectKey = danceJob.PreparedReferenceObjectKey,
+                    PublicUrl = danceJob.PreparedReferenceUrl,
+                    ProviderUrl = referenceUrlUsed,
+                    MimeType = referenceImage!.MimeType,
+                    MetadataJson = DanceSellRepository.ToJson(new
+                    {
+                        uploadedToProvider = true,
+                        freshForRenderAttempt = true,
+                        renderJobId = renderJob.Id,
+                        danceSellJobId = danceJob.Id,
+                        mediaId = danceJob.PreparedReferenceMediaId,
+                        objectKey = danceJob.PreparedReferenceObjectKey,
+                        providerUrl = referenceUrlUsed,
+                        idBase = verifiedReference.IdBase,
+                        projectId = referenceUpload.ProjectId ?? runtime.ProjectId,
+                        fileName = referenceUpload.FileName,
+                        uploadedAt = DateTime.UtcNow,
+                        providerStatus = verifiedReference.Status,
+                        verificationSource = "list_images",
+                        verificationMatched = true,
+                        endpointPath = runtime.UploadImagePath,
+                        field = runtime.UploadImageField,
+                        mime = referenceImage.MimeType,
+                        bytes = referenceImage.SizeBytes >= 0 ? referenceImage.SizeBytes : (long?)null
+                    })
+                }, ct);
+                await _renderJobs.AddEventAsync(renderJob.Id, "AI_PROVIDER_REFERENCE_UPLOAD_COMPLETED",
+                    "Current prepared reference image uploaded and verified by the provider.",
+                    new
+                    {
+                        danceSellJobId = danceJob.Id,
+                        renderJobId = renderJob.Id,
+                        providerUrl = referenceUrlUsed,
+                        runtime.UploadImagePath,
+                        verificationSource = "list_images",
+                        verificationMatched = true
+                    }, ct: ct);
+            }
+
+            reusableMotionUpload = await _operations.GetLatestAssetForRenderJobAsync(
+                renderJob.Id,
                 DanceSellAssetRoles.MotionProviderUpload,
                 danceJob.MotionVideoMediaId,
                 danceJob.MotionVideoObjectKey,
                 ct);
-            if (!string.IsNullOrWhiteSpace(reusableMotionUpload?.ProviderUrl))
+            if (IsVerifiedProviderAsset(reusableMotionUpload, out var currentMotionIdBase))
             {
-                motionProviderUrl = reusableMotionUpload.ProviderUrl!;
-                motionProviderIdBase = ReadConfigString(reusableMotionUpload.MetadataJson, "idBase");
+                motionProviderUrl = reusableMotionUpload!.ProviderUrl!;
+                motionProviderIdBase = currentMotionIdBase;
                 motionProviderProjectId = ReadConfigString(reusableMotionUpload.MetadataJson, "projectId") ?? runtime.ProjectId;
                 motionProviderFileName = ReadConfigString(reusableMotionUpload.MetadataJson, "fileName") ?? motionVideo.FileName;
-                motionUploadState = "reused";
+                motionUploadState = "reused_verified";
                 await _renderJobs.AddEventAsync(renderJob.Id, "AI79_MOTION_SOURCE_UPLOAD_REUSED", "79AI source motion video upload reused.",
                     new
                     {
@@ -280,6 +312,18 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
             }
             else
             {
+                providerStage = "motion_upload";
+                await _renderJobs.AddEventAsync(renderJob.Id, "AI_PROVIDER_MOTION_UPLOAD_STARTED",
+                    "Uploading the current motion source video to the motion provider.",
+                    new
+                    {
+                        danceSellJobId = danceJob.Id,
+                        renderJobId = renderJob.Id,
+                        danceJob.MotionVideoMediaId,
+                        danceJob.MotionVideoObjectKey,
+                        runtime.UploadVideoPath,
+                        freshForRenderAttempt = true
+                    }, ct: ct);
                 var motionUpload = await _ai79.UploadMediaAsync(new Ai79MediaUploadRequest(
                     runtime.BaseUrl,
                     runtime.UploadVideoPath,
@@ -289,8 +333,14 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
                     runtime.UploadVideoField,
                     motionVideo.ToMultipartPart(runtime.UploadVideoField)),
                     ct);
+                await _renderJobs.AddEventAsync(renderJob.Id, "AI_PROVIDER_MOTION_UPLOAD_RESPONSE_RECEIVED",
+                    "Provider motion video upload response received.",
+                    new { danceSellJobId = danceJob.Id, renderJobId = renderJob.Id, motionUpload.IdBase, motionUpload.Url }, ct: ct);
+                providerStage = "motion_verify";
+                var verifiedMotion = await VerifyProviderVideoAsync(renderJob, danceJob, runtime, motionUpload, ct);
                 motionProviderUrl = motionUpload.Url;
-                motionProviderIdBase = motionUpload.IdBase;
+                motionProviderUrl = verifiedMotion.Url!;
+                motionProviderIdBase = verifiedMotion.IdBase;
                 motionProviderProjectId = motionUpload.ProjectId;
                 motionProviderFileName = motionUpload.FileName;
                 motionUploadState = "uploaded";
@@ -306,6 +356,7 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
                     MetadataJson = DanceSellRepository.ToJson(new
                     {
                         danceSellJobId = danceJob.Id,
+                        renderJobId = renderJob.Id,
                         mediaId = danceJob.MotionVideoMediaId,
                         objectKey = danceJob.MotionVideoObjectKey,
                         providerUrl = motionProviderUrl,
@@ -313,6 +364,10 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
                         projectId = motionProviderProjectId,
                         fileName = motionProviderFileName,
                         uploadedAt = DateTime.UtcNow,
+                        providerStatus = verifiedMotion.Status,
+                        verificationSource = "list_videos",
+                        verificationMatched = true,
+                        freshForRenderAttempt = true,
                         source = motionSource,
                         mime = motionVideo.MimeType,
                         bytes = motionVideo.SizeBytes >= 0 ? motionVideo.SizeBytes : (long?)null,
@@ -320,14 +375,23 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
                         field = runtime.UploadVideoField
                     })
                 }, ct);
-                await _renderJobs.AddEventAsync(renderJob.Id, "AI79_MOTION_SOURCE_UPLOADED", "79AI source motion video uploaded.",
-                    new { danceSellJobId = danceJob.Id, providerUrl = motionProviderUrl, runtime.UploadVideoPath }, ct: ct);
+                await _renderJobs.AddEventAsync(renderJob.Id, "AI_PROVIDER_MOTION_UPLOAD_COMPLETED",
+                    "Current motion source video uploaded and verified by the provider.",
+                    new
+                    {
+                        danceSellJobId = danceJob.Id,
+                        renderJobId = renderJob.Id,
+                        providerUrl = motionProviderUrl,
+                        runtime.UploadVideoPath,
+                        verificationSource = "list_videos",
+                        verificationMatched = true
+                    }, ct: ct);
             }
 
             var motionPrompt = ReadConfigString(runtime.RouteConfigJson, "motion_prompt") ?? string.Empty;
             if (string.IsNullOrWhiteSpace(referenceUrlUsed) || string.IsNullOrWhiteSpace(motionProviderUrl))
             {
-                await FailAsync(renderJob, danceJob, "DANCE_SELL_PROVIDER_MEDIA_REQUIRED", "Provider-side reference image and motion video are required before submit.", "{}", permanent: true, ct);
+                await FailAsync(renderJob, danceJob, "DANCE_SELL_PROVIDER_MEDIA_REQUIRED", "Provider-side reference image and motion video are required before submit.", "{}", permanent: true, ct, operationId: motionOperationId);
                 throw new RenderJobTerminalFailureException("DANCE_SELL_PROVIDER_MEDIA_REQUIRED");
             }
             var request = new Ai79MotionControlSubmitRequest(
@@ -410,12 +474,13 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
                         submitAttempt,
                         maxAmbiguousSubmitAttempts
                     }, level: "warning", ct: ct);
-                await FailAsync(renderJob, danceJob, "AI79_MOTION_SUBMIT_RETRY_EXHAUSTED", "79AI motion submit retry cap reached. Please retry the video manually.", "{}", permanent: true, ct, DanceSellJobStatuses.Timeout);
+                await FailAsync(renderJob, danceJob, "AI79_MOTION_SUBMIT_RETRY_EXHAUSTED", "79AI motion submit retry cap reached. Please retry the video manually.", "{}", permanent: true, ct, DanceSellJobStatuses.Timeout, motionOperationId);
                 throw new RenderJobTerminalFailureException("AI79_MOTION_SUBMIT_RETRY_EXHAUSTED");
             }
 
             requestJson = BuildRequestJson(submitAttempt);
 
+            providerStage = "submit";
             submitStartedAtUtc = DateTime.UtcNow;
             var submitStartedAt = Stopwatch.StartNew();
             await _renderJobs.AddEventAsync(renderJob.Id, "AI79_MOTION_SUBMIT_STARTED", "79AI Kling Motion Control submit started.",
@@ -447,12 +512,45 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
         }
         catch (Ai79TaskSubmitException ex)
         {
-            await FailAsync(renderJob, danceJob, ex.ErrorCode ?? "ai79_submit_failed", ex.ErrorMessage, ex.SanitizedResponseJson, permanent: true, ct);
+            var errorCode = ex.ErrorCode ?? (providerStage switch
+            {
+                "reference_upload" or "reference_verify" => "DANCE_SELL_REFERENCE_PROVIDER_FAILED",
+                "motion_upload" or "motion_verify" => "DANCE_SELL_MOTION_PROVIDER_FAILED",
+                _ => "ai79_submit_failed"
+            });
+            await _renderJobs.AddEventAsync(renderJob.Id, "AI79_MOTION_SUBMIT_FAILED",
+                "79AI Kling Motion Control submit failed.",
+                new
+                {
+                    danceSellJobId = danceJob.Id,
+                    renderJobId = renderJob.Id,
+                    stage = providerStage,
+                    errorCode
+                },
+                level: "error",
+                ct: ct);
+            await FailAsync(renderJob, danceJob, errorCode, GetCustomerSafeProviderMessage(providerStage), ex.SanitizedResponseJson, permanent: true, ct, operationId: motionOperationId);
+            throw new RenderJobTerminalFailureException(ex.Message, ex);
+        }
+        catch (HttpRequestException ex) when (providerStage is "reference_upload" or "reference_verify" or "motion_upload" or "motion_verify")
+        {
+            var errorCode = providerStage is "reference_upload" or "reference_verify"
+                ? "DANCE_SELL_REFERENCE_PROVIDER_FAILED"
+                : "DANCE_SELL_MOTION_PROVIDER_FAILED";
+            await FailAsync(renderJob, danceJob, errorCode, GetCustomerSafeProviderMessage(providerStage), "{}", permanent: true, ct, operationId: motionOperationId);
+            throw new RenderJobTerminalFailureException(ex.Message, ex);
+        }
+        catch (Exception ex) when (providerStage is "reference_upload" or "reference_verify" or "motion_upload" or "motion_verify")
+        {
+            var errorCode = providerStage is "reference_upload" or "reference_verify"
+                ? "DANCE_SELL_REFERENCE_PROVIDER_FAILED"
+                : "DANCE_SELL_MOTION_PROVIDER_FAILED";
+            await FailAsync(renderJob, danceJob, errorCode, GetCustomerSafeProviderMessage(providerStage), "{}", permanent: true, ct, operationId: motionOperationId);
             throw new RenderJobTerminalFailureException(ex.Message, ex);
         }
         catch (TaskCanceledException ex) when (!ct.IsCancellationRequested)
         {
-            await Handle79AiSubmitRetryFailureAsync(renderJob, danceJob, runtime, motionProviderUrl, submitAttempt, submitStartedAtUtc, ex, ct);
+            await Handle79AiSubmitRetryFailureAsync(renderJob, danceJob, runtime, motionProviderUrl, submitAttempt, submitStartedAtUtc, ex, motionOperationId, ct);
             await _renderJobs.ScheduleRetryAsync(renderJob.Id, TimeSpan.FromSeconds(30), "AI79_MOTION_SUBMIT_TIMEOUT", "79AI motion submit timed out after source upload; retry will reuse the persisted provider video URL.", ct);
             throw new RenderJobDeferredException("79AI motion submit timeout scheduled for retry.");
         }
@@ -462,13 +560,13 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
         }
         catch (OperationCanceledException ex)
         {
-            await Handle79AiSubmitRetryFailureAsync(renderJob, danceJob, runtime, motionProviderUrl, submitAttempt, submitStartedAtUtc, ex, ct);
+            await Handle79AiSubmitRetryFailureAsync(renderJob, danceJob, runtime, motionProviderUrl, submitAttempt, submitStartedAtUtc, ex, motionOperationId, ct);
             await _renderJobs.ScheduleRetryAsync(renderJob.Id, TimeSpan.FromSeconds(30), "AI79_MOTION_SUBMIT_TIMEOUT", "79AI motion submit was cancelled by HTTP timeout after source upload; retry will reuse the persisted provider video URL.", ct);
             throw new RenderJobDeferredException("79AI motion submit cancellation scheduled for retry.");
         }
         catch (HttpRequestException ex)
         {
-            await Handle79AiSubmitRetryFailureAsync(renderJob, danceJob, runtime, motionProviderUrl, submitAttempt, submitStartedAtUtc, ex, ct);
+            await Handle79AiSubmitRetryFailureAsync(renderJob, danceJob, runtime, motionProviderUrl, submitAttempt, submitStartedAtUtc, ex, motionOperationId, ct);
             await _renderJobs.ScheduleRetryAsync(renderJob.Id, TimeSpan.FromSeconds(30), "AI79_MOTION_SUBMIT_HTTP_ERROR", "79AI motion submit HTTP error after source upload; retry will reuse the persisted provider video URL.", ct);
             throw new RenderJobDeferredException("79AI motion submit HTTP error scheduled for retry.");
         }
@@ -512,6 +610,7 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
         int submitAttempt,
         DateTime startedAt,
         Exception ex,
+        Guid operationId,
         CancellationToken ct)
     {
         var maxAmbiguousSubmitAttempts = Math.Clamp(_options.CurrentValue.SubmitMaxRetry, 2, 3);
@@ -531,7 +630,20 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
             }, level: "warning", ct: ct);
         if (submitAttempt >= maxAmbiguousSubmitAttempts)
         {
-            await FailAsync(renderJob, danceJob, "AI79_MOTION_SUBMIT_RETRY_EXHAUSTED", "79AI motion submit retry cap reached. Please retry the video manually.", "{}", permanent: true, ct, DanceSellJobStatuses.Timeout);
+            await _renderJobs.AddEventAsync(renderJob.Id, "AI79_MOTION_SUBMIT_FAILED",
+                "79AI Kling Motion Control submit failed after retry cap.",
+                new
+                {
+                    danceSellJobId = danceJob.Id,
+                    renderJobId = renderJob.Id,
+                    stage = "submit",
+                    errorCode = "AI79_MOTION_SUBMIT_RETRY_EXHAUSTED",
+                    submitAttempt,
+                    maxAmbiguousSubmitAttempts
+                },
+                level: "error",
+                ct: ct);
+            await FailAsync(renderJob, danceJob, "AI79_MOTION_SUBMIT_RETRY_EXHAUSTED", "79AI motion submit retry cap reached. Please retry the video manually.", "{}", permanent: true, ct, DanceSellJobStatuses.Timeout, operationId);
             throw new RenderJobTerminalFailureException("AI79_MOTION_SUBMIT_RETRY_EXHAUSTED", ex);
         }
     }
@@ -706,6 +818,194 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
             return null;
         }
     }
+
+    private static bool ReadConfigBool(string? rawJson, string propertyName)
+    {
+        if (string.IsNullOrWhiteSpace(rawJson))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(rawJson);
+            return document.RootElement.ValueKind == JsonValueKind.Object
+                   && document.RootElement.TryGetProperty(propertyName, out var value)
+                   && value.ValueKind is JsonValueKind.True or JsonValueKind.False
+                   && value.GetBoolean();
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    private static bool IsVerifiedProviderAsset(AiOperationAssetDto? asset, out string? idBase)
+    {
+        idBase = ReadConfigString(asset?.MetadataJson, "idBase");
+        if (asset is null
+            || string.IsNullOrWhiteSpace(asset.ProviderUrl)
+            || !IsHttpsUrl(asset.ProviderUrl)
+            || string.IsNullOrWhiteSpace(idBase)
+            || !ReadConfigBool(asset.MetadataJson, "verificationMatched"))
+        {
+            return false;
+        }
+
+        var verificationSource = ReadConfigString(asset.MetadataJson, "verificationSource");
+        return string.Equals(verificationSource, "list_images", StringComparison.OrdinalIgnoreCase)
+               || string.Equals(verificationSource, "list_videos", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task<Ai79ProviderMediaItem> VerifyProviderImageAsync(
+        RenderJobDto renderJob,
+        DanceSellJobDto danceJob,
+        Ai79MotionRuntime runtime,
+        Ai79MediaUploadResult upload,
+        CancellationToken ct)
+    {
+        const string errorCode = "DANCE_SELL_REFERENCE_PROVIDER_VERIFY_FAILED";
+        if (string.IsNullOrWhiteSpace(upload.IdBase) || !IsHttpsUrl(upload.Url))
+        {
+            await _renderJobs.AddEventAsync(renderJob.Id, "AI_PROVIDER_REFERENCE_VERIFY_FAILED",
+                "Provider reference image upload response could not be verified.",
+                new { danceSellJobId = danceJob.Id, renderJobId = renderJob.Id, errorCode, reason = "missing_id_or_https_url" },
+                level: "error", ct: ct);
+            throw new Ai79TaskSubmitException(
+                "Current reference image could not be verified with the provider.",
+                upload.SanitizedResponseJson,
+                errorCode: errorCode);
+        }
+
+        await _renderJobs.AddEventAsync(renderJob.Id, "AI_PROVIDER_REFERENCE_VERIFY_STARTED",
+            "Verifying the provider reference image through the images list.",
+            new { danceSellJobId = danceJob.Id, renderJobId = renderJob.Id, idBase = upload.IdBase, providerUrl = upload.Url },
+            ct: ct);
+
+        Ai79ProviderMediaListResult list;
+        try
+        {
+            list = await _ai79.ListImagesAsync(new Ai79ProviderMediaListRequest(
+                runtime.BaseUrl,
+                ReadConfigString(runtime.RouteConfigJson, "list_images_path") ?? "/ai/images",
+                runtime.Credential.Secret,
+                runtime.Domain,
+                runtime.ProjectId), ct);
+        }
+        catch (Ai79TaskSubmitException ex)
+        {
+            await _renderJobs.AddEventAsync(renderJob.Id, "AI_PROVIDER_REFERENCE_VERIFY_FAILED",
+                "Provider reference image verification failed.",
+                new { danceSellJobId = danceJob.Id, renderJobId = renderJob.Id, errorCode, errorType = ex.GetType().Name },
+                level: "error", ct: ct);
+            throw new Ai79TaskSubmitException(
+                "Current reference image could not be verified with the provider.",
+                ex.SanitizedResponseJson,
+                errorCode: errorCode,
+                innerException: ex);
+        }
+
+        var match = list.Items.FirstOrDefault(item =>
+            string.Equals(item.IdBase, upload.IdBase, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(item.Url, upload.Url, StringComparison.OrdinalIgnoreCase));
+        if (match is null || !Ai79TaskStatusNormalizer.Normalize(match.Status).Equals(Ai79TaskStatusNormalizer.Success, StringComparison.Ordinal))
+        {
+            await _renderJobs.AddEventAsync(renderJob.Id, "AI_PROVIDER_REFERENCE_VERIFY_FAILED",
+                "Provider reference image was not found in the verified images list.",
+                new { danceSellJobId = danceJob.Id, renderJobId = renderJob.Id, errorCode, idBase = upload.IdBase, providerUrl = upload.Url },
+                level: "error", ct: ct);
+            throw new Ai79TaskSubmitException(
+                "Current reference image could not be verified with the provider.",
+                list.SanitizedResponseJson,
+                errorCode: errorCode);
+        }
+
+        await _renderJobs.AddEventAsync(renderJob.Id, "AI_PROVIDER_REFERENCE_VERIFY_COMPLETED",
+            "Provider reference image verification completed.",
+            new { danceSellJobId = danceJob.Id, renderJobId = renderJob.Id, idBase = match.IdBase, providerUrl = match.Url, providerStatus = match.Status },
+            ct: ct);
+        return match;
+    }
+
+    private async Task<Ai79ProviderMediaItem> VerifyProviderVideoAsync(
+        RenderJobDto renderJob,
+        DanceSellJobDto danceJob,
+        Ai79MotionRuntime runtime,
+        Ai79MediaUploadResult upload,
+        CancellationToken ct)
+    {
+        const string errorCode = "DANCE_SELL_MOTION_PROVIDER_VERIFY_FAILED";
+        if (string.IsNullOrWhiteSpace(upload.IdBase) || !IsHttpsUrl(upload.Url))
+        {
+            await _renderJobs.AddEventAsync(renderJob.Id, "AI_PROVIDER_MOTION_VERIFY_FAILED",
+                "Provider motion video upload response could not be verified.",
+                new { danceSellJobId = danceJob.Id, renderJobId = renderJob.Id, errorCode, reason = "missing_id_or_https_url" },
+                level: "error", ct: ct);
+            throw new Ai79TaskSubmitException(
+                "Current motion source video could not be verified with the provider.",
+                upload.SanitizedResponseJson,
+                errorCode: errorCode);
+        }
+
+        await _renderJobs.AddEventAsync(renderJob.Id, "AI_PROVIDER_MOTION_VERIFY_STARTED",
+            "Verifying the provider motion video through the videos list.",
+            new { danceSellJobId = danceJob.Id, renderJobId = renderJob.Id, idBase = upload.IdBase, providerUrl = upload.Url },
+            ct: ct);
+
+        Ai79ProviderMediaListResult list;
+        try
+        {
+            list = await _ai79.ListVideosAsync(new Ai79ProviderMediaListRequest(
+                runtime.BaseUrl,
+                ReadConfigString(runtime.RouteConfigJson, "list_videos_path") ?? "/ai/videos",
+                runtime.Credential.Secret,
+                runtime.Domain,
+                runtime.ProjectId), ct);
+        }
+        catch (Ai79TaskSubmitException ex)
+        {
+            await _renderJobs.AddEventAsync(renderJob.Id, "AI_PROVIDER_MOTION_VERIFY_FAILED",
+                "Provider motion video verification failed.",
+                new { danceSellJobId = danceJob.Id, renderJobId = renderJob.Id, errorCode, errorType = ex.GetType().Name },
+                level: "error", ct: ct);
+            throw new Ai79TaskSubmitException(
+                "Current motion source video could not be verified with the provider.",
+                ex.SanitizedResponseJson,
+                errorCode: errorCode,
+                innerException: ex);
+        }
+
+        var match = list.Items.FirstOrDefault(item =>
+            string.Equals(item.IdBase, upload.IdBase, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(item.Url, upload.Url, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(item.DownloadUrl, upload.Url, StringComparison.OrdinalIgnoreCase));
+        var verifiedUrl = FirstNonBlank(match?.Url, match?.DownloadUrl);
+        if (match is null
+            || string.IsNullOrWhiteSpace(verifiedUrl)
+            || !IsHttpsUrl(verifiedUrl)
+            || !Ai79TaskStatusNormalizer.Normalize(match.Status).Equals(Ai79TaskStatusNormalizer.Success, StringComparison.Ordinal))
+        {
+            await _renderJobs.AddEventAsync(renderJob.Id, "AI_PROVIDER_MOTION_VERIFY_FAILED",
+                "Provider motion video was not found in the verified videos list.",
+                new { danceSellJobId = danceJob.Id, renderJobId = renderJob.Id, errorCode, idBase = upload.IdBase, providerUrl = upload.Url },
+                level: "error", ct: ct);
+            throw new Ai79TaskSubmitException(
+                "Current motion source video could not be verified with the provider.",
+                list.SanitizedResponseJson,
+                errorCode: errorCode);
+        }
+
+        var verified = match with { Url = verifiedUrl };
+        await _renderJobs.AddEventAsync(renderJob.Id, "AI_PROVIDER_MOTION_VERIFY_COMPLETED",
+            "Provider motion video verification completed.",
+            new { danceSellJobId = danceJob.Id, renderJobId = renderJob.Id, idBase = verified.IdBase, providerUrl = verified.Url, providerStatus = verified.Status },
+            ct: ct);
+        return verified;
+    }
+
+    private static bool IsHttpsUrl(string? value)
+        => Uri.TryCreate(value, UriKind.Absolute, out var uri)
+           && uri.Scheme == Uri.UriSchemeHttps;
 
     private static string? FirstNonBlank(params string?[] values)
         => values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim();
@@ -1059,8 +1359,28 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
         throw new RenderJobDeferredException(message);
     }
 
-    private async Task FailAsync(RenderJobDto renderJob, DanceSellJobDto danceJob, string errorCode, string errorMessage, string? rawResponse, bool permanent, CancellationToken ct, string status = DanceSellJobStatuses.Failed)
+    private async Task FailAsync(
+        RenderJobDto renderJob,
+        DanceSellJobDto danceJob,
+        string errorCode,
+        string errorMessage,
+        string? rawResponse,
+        bool permanent,
+        CancellationToken ct,
+        string status = DanceSellJobStatuses.Failed,
+        Guid? operationId = null)
     {
+        if (operationId is Guid currentOperationId)
+        {
+            await _operations.MarkFailedAsync(
+                currentOperationId,
+                "failed",
+                rawResponse,
+                errorCode,
+                errorMessage,
+                ct);
+        }
+
         await _completion.FailAsync(new DanceSellFailureRequest
         {
             DanceJob = danceJob,
@@ -1074,6 +1394,11 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
             Source = "poll"
         }, ct);
     }
+
+    private static string GetCustomerSafeProviderMessage(string stage)
+        => stage is "reference_upload" or "reference_verify"
+            ? "Không thể chuẩn bị ảnh tham chiếu để tạo video. Vui lòng thử lại."
+            : "Không thể chuẩn bị video nguồn để tạo video. Vui lòng thử lại.";
 
     private async Task LogUsageAsync(DanceSellJobDto danceJob, RenderJobDto renderJob, string status, string? taskId, string? providerStatus, int? resultUrlCount, string? errorMessage, CancellationToken ct)
     {
