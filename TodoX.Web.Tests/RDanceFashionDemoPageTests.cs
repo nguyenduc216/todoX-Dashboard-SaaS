@@ -522,6 +522,44 @@ public sealed class RDanceFashionDemoPageTests
     }
 
     [Fact]
+    public void DanceSellProviderVerificationUsesDedicatedOfficialMediaListBase()
+    {
+        var root = FindRepoRoot();
+        var handler = ReadStrictUtf8(Path.Combine(root, "TodoX.Web", "Services", "DanceSell", "DanceSellRenderHandler.cs"));
+        var operations = ReadStrictUtf8(Path.Combine(root, "TodoX.Web", "Services", "DanceSell", "DanceSellAiOperations.cs"));
+        var page = ReadStrictUtf8(Path.Combine(root, "TodoX.Web", "Components", "Pages", "RDanceJobDetail.razor"));
+
+        var runtime = GetMethodSection(handler, "Resolve79AiRuntimeAsync");
+        var assetLookupStart = operations.IndexOf(
+            "public async Task<AiOperationAssetDto?> GetLatestAssetForRenderJobAsync",
+            StringComparison.Ordinal);
+        Assert.True(assetLookupStart >= 0, "Expected render-job-scoped provider asset lookup.");
+        var assetLookupEnd = operations.IndexOf(
+            "\n    public async Task UpsertAssetAsync",
+            assetLookupStart,
+            StringComparison.Ordinal);
+        Assert.True(assetLookupEnd > assetLookupStart, "Expected end of render-job-scoped provider asset lookup.");
+        var assetLookup = operations[assetLookupStart..assetLookupEnd];
+        Assert.Contains("MediaListBaseUrl", handler, StringComparison.Ordinal);
+        Assert.Contains("ReadConfigString(route.ConfigJson, \"list_base_url\")", runtime, StringComparison.Ordinal);
+        Assert.Contains("ReadConfigString(account?.ConfigJson, \"list_base_url\")", runtime, StringComparison.Ordinal);
+        Assert.Contains("ReadConfigString(provider.ConfigJson, \"list_base_url\")", runtime, StringComparison.Ordinal);
+        Assert.Contains("\"https://api.gommo.net/ai\"", runtime, StringComparison.Ordinal);
+        Assert.Contains("runtime.MediaListBaseUrl", handler, StringComparison.Ordinal);
+        Assert.DoesNotContain("ListImagesAsync(new Ai79ProviderMediaListRequest(\n                runtime.BaseUrl", handler, StringComparison.Ordinal);
+        Assert.DoesNotContain("ListVideosAsync(new Ai79ProviderMediaListRequest(\n                runtime.BaseUrl", handler, StringComparison.Ordinal);
+        Assert.Contains("list_images_path", handler, StringComparison.Ordinal);
+        Assert.Contains("list_videos_path", handler, StringComparison.Ordinal);
+        Assert.Contains("DO UPDATE SET\n                    render_job_id = COALESCE(", operations, StringComparison.Ordinal);
+        Assert.Contains("EXCLUDED.render_job_id", operations, StringComparison.Ordinal);
+        Assert.Contains("dance_sell.dance_sell_provider_operations.render_job_id", operations, StringComparison.Ordinal);
+        Assert.Contains("o.render_job_id = @renderJobId", assetLookup, StringComparison.Ordinal);
+        Assert.DoesNotContain("o.dance_sell_job_id = @danceSellJobId", assetLookup, StringComparison.Ordinal);
+        Assert.Contains("_job.Status is DanceSellJobStatuses.Failed or DanceSellJobStatuses.Timeout", page, StringComparison.Ordinal);
+        Assert.Contains("_renderJob?.Status is RenderJobStatuses.Failed or RenderJobStatuses.Cancelled", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void DanceSellDownloadEndpointUsesOwnedJobUrlAndBlocksArbitraryUrl()
     {
         var root = FindRepoRoot();

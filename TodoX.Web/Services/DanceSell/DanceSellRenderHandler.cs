@@ -751,6 +751,7 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
             route.ProviderCode,
             route.ModelName,
             FirstNonBlank(ReadConfigString(route.ConfigJson, "base_url"), ReadConfigString(account?.ConfigJson, "base_url"), provider.BaseUrl, ReadConfigString(provider.ConfigJson, "base_url"), "https://api.gommo.net/ai")!,
+            FirstNonBlank(ReadConfigString(route.ConfigJson, "list_base_url"), ReadConfigString(account?.ConfigJson, "list_base_url"), ReadConfigString(provider.ConfigJson, "list_base_url"), "https://api.gommo.net/ai")!,
             FirstNonBlank(ReadConfigString(account?.ConfigJson, "domain"), ReadConfigString(provider.ConfigJson, "domain"), "79ai.net")!,
             route.ConfigJson,
             ReadConfigString(route.ConfigJson, "upload_image_path") ?? "/ai/upload/image",
@@ -778,6 +779,7 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
         string ProviderCode,
         string Model,
         string BaseUrl,
+        string MediaListBaseUrl,
         string Domain,
         string RouteConfigJson,
         string UploadImagePath,
@@ -886,7 +888,7 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
         try
         {
             list = await _ai79.ListImagesAsync(new Ai79ProviderMediaListRequest(
-                runtime.BaseUrl,
+                runtime.MediaListBaseUrl,
                 ReadConfigString(runtime.RouteConfigJson, "list_images_path") ?? "/images",
                 runtime.Credential.Secret,
                 runtime.Domain,
@@ -956,7 +958,7 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
         try
         {
             list = await _ai79.ListVideosAsync(new Ai79ProviderMediaListRequest(
-                runtime.BaseUrl,
+                runtime.MediaListBaseUrl,
                 ReadConfigString(runtime.RouteConfigJson, "list_videos_path") ?? "/videos",
                 runtime.Credential.Secret,
                 runtime.Domain,

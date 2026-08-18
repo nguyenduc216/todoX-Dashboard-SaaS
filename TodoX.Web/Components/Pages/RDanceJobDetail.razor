@@ -1040,7 +1040,8 @@
         }
 
         if (_job.Status is DanceSellJobStatuses.Queued or DanceSellJobStatuses.Submitted or DanceSellJobStatuses.Rendering
-            || IsCoreCancelled)
+            || _job.Status is DanceSellJobStatuses.Failed or DanceSellJobStatuses.Timeout
+            || _renderJob?.Status is RenderJobStatuses.Failed or RenderJobStatuses.Cancelled)
         {
             return;
         }

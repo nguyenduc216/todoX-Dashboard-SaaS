@@ -531,7 +531,11 @@ public sealed class DanceSellOperationRepository : IDanceSellOperationRepository
                      @CostSource, @ErrorCode, @ErrorMessage, COALESCE(@CreatedAt, now()), @StartedAt,
                      @SubmittedAt, @CompletedAt, @FailedAt, @RefundedAt, now())
                 ON CONFLICT (dance_sell_job_id, operation_type, attempt_no)
-                DO UPDATE SET updated_at = now()
+                DO UPDATE SET
+                    render_job_id = COALESCE(
+                        EXCLUDED.render_job_id,
+                        dance_sell.dance_sell_provider_operations.render_job_id),
+                    updated_at = now()
                 RETURNING id AS Id, dance_sell_job_id AS DanceSellJobId, render_job_id AS RenderJobId,
                           parent_operation_id AS ParentOperationId, operation_type AS OperationType, attempt_no AS AttemptNo,
                           reference_mode AS ReferenceMode, provider_code AS ProviderCode,
