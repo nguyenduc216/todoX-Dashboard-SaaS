@@ -124,6 +124,8 @@ The unrelated errors are in `AiStudioCatalogModels.cs`, `AiStudioCatalogEndpoint
 and `AiStudioCatalogService.cs`. Those files are intentionally not part of this
 commit.
 
-Final commit SHA: recorded after commit.
+Implementation commit SHA: `5ea73e7`
+
+Report metadata update commit: recorded after this report update.
 
 READY TO DEPLOY: **NO** until the reviewed commit is deployed and a live customer smoke test confirms no-product and product RDance render paths.
