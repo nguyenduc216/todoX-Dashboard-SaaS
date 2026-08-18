@@ -474,6 +474,7 @@ public interface IDanceSellOperationRepository
     Task<DanceSellProviderOperationDto?> GetLatestActiveOperationAsync(Guid danceSellJobId, string operationType, CancellationToken ct = default);
     Task<bool> HasActiveOperationAsync(Guid danceSellJobId, string operationType, CancellationToken ct = default);
     Task MarkSubmittedAsync(Guid operationId, string providerTaskId, string responseJson, CancellationToken ct = default);
+    Task<int> BeginMotionSubmitAttemptAsync(Guid operationId, string requestJson, CancellationToken ct = default);
     Task MarkCompletedAsync(Guid operationId, string providerStatus, string responseJson, decimal? creditsConsumed, string? resultUrl, CancellationToken ct = default);
     Task MarkFailedAsync(Guid operationId, string providerStatus, string? responseJson, string errorCode, string errorMessage, CancellationToken ct = default);
     Task<AiOperationAssetDto?> GetLatestAssetAsync(Guid danceSellJobId, string operationType, string assetRole, Guid? mediaId, string? objectKey, CancellationToken ct = default);
@@ -686,6 +687,37 @@ public sealed class DanceSellOperationRepository : IDanceSellOperationRepository
             """,
             new { operationId, providerStatus, responseJson = KieJsonRedactor.Redact(responseJson) ?? "{}", errorCode, errorMessage },
             ct);
+    }
+
+    public async Task<int> BeginMotionSubmitAttemptAsync(Guid operationId, string requestJson, CancellationToken ct = default)
+    {
+        try
+        {
+            using var conn = await _factory.OpenAsync(ct);
+            return await conn.ExecuteScalarAsync<int>(
+                """
+                WITH next_attempt AS (
+                    SELECT COALESCE(NULLIF(request_json->>'submitAttempt', '')::int, 0) + 1 AS attempt_no
+                      FROM dance_sell.dance_sell_provider_operations
+                     WHERE id=@operationId
+                )
+                UPDATE dance_sell.dance_sell_provider_operations o
+                   SET request_json=jsonb_set(
+                           CAST(@requestJson AS jsonb),
+                           '{submitAttempt}',
+                           to_jsonb(next_attempt.attempt_no),
+                           true),
+                       updated_at=now()
+                  FROM next_attempt
+                 WHERE o.id=@operationId
+                RETURNING (o.request_json->>'submitAttempt')::int;
+                """,
+                new { operationId, requestJson = KieJsonRedactor.Redact(requestJson) ?? "{}" });
+        }
+        catch (PostgresException ex) when (IsSchemaMissing(ex))
+        {
+            throw SchemaNotReady(ex);
+        }
     }
 
     public async Task<AiOperationAssetDto?> GetLatestAssetAsync(Guid danceSellJobId, string operationType, string assetRole, Guid? mediaId, string? objectKey, CancellationToken ct = default)

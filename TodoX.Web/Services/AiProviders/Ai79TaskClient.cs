@@ -400,7 +400,6 @@ public sealed class Ai79TaskClient : IAi79TaskClient
         {
             ["domain"] = request.Domain,
             ["project_id"] = request.ProjectId,
-            ["model"] = request.Model,
             ["prompt"] = request.Prompt,
             ["image_url"] = request.ImageUrl,
             ["video_url"] = request.VideoUrl,
