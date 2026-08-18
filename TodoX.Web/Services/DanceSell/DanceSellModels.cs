@@ -106,6 +106,7 @@ public static class DanceSellAssetRoles
     public const string DirectReferenceInput = "direct_reference_input";
     public const string ReferenceOutput = "reference_output";
     public const string MotionInput = "motion_input";
+    public const string MotionReferenceProviderUpload = "motion_reference_provider_upload";
     public const string MotionProviderUpload = "motion_provider_upload";
     public const string VideoOutput = "video_output";
     public const string ProviderRawOutput = "provider_raw_output";
@@ -192,6 +193,7 @@ public sealed class DanceSellDraftCreateRequest
     public string? ReferenceProviderModel { get; set; }
     public string? MotionProviderCode { get; set; }
     public string? MotionProviderModel { get; set; }
+    public bool AutoFinish { get; set; }
 }
 
 public sealed class DanceSellJobDto
@@ -270,6 +272,7 @@ public sealed class DanceSellJobDto
     public DateTime? PreparedReferenceApprovedAt { get; set; }
     public string SourceStageStatus { get; set; } = DanceSellSourceStageStatuses.Pending;
     public string? SourceStageError { get; set; }
+    public bool AutoFinish { get; set; }
     public Guid? CreatedBy { get; set; }
     public Guid? UpdatedBy { get; set; }
 }
@@ -411,6 +414,7 @@ public sealed class DanceSellCreateJobRequest
     public string? ReferenceProviderModel { get; set; }
     public string? MotionProviderCode { get; set; }
     public string? MotionProviderModel { get; set; }
+    public bool AutoFinish { get; set; }
 }
 
 public sealed class DanceSellUpdateBusinessRequest
@@ -427,6 +431,7 @@ public sealed class DanceSellUpdateBusinessRequest
     public string? ReferenceProviderModel { get; set; }
     public string? MotionProviderCode { get; set; }
     public string? MotionProviderModel { get; set; }
+    public bool AutoFinish { get; set; }
 }
 
 public sealed class DanceSellTikTokStageRequest
@@ -636,4 +641,18 @@ public sealed class ProviderBalanceResult
     public string? RawResponseJson { get; set; }
     public string? ErrorCode { get; set; }
     public string? ErrorMessage { get; set; }
+}
+
+public static class DanceSellCustomerErrorPolicy
+{
+    public static string Message(string? errorCode)
+        => errorCode?.Trim().ToUpperInvariant() switch
+        {
+            "DANCE_SELL_INVALID_CHARACTER" => "Ảnh người mẫu chưa hợp lệ. Vui lòng tải lại ảnh.",
+            "DANCE_SELL_INVALID_PRODUCT" => "Ảnh sản phẩm chưa hợp lệ. Vui lòng tải lại ảnh.",
+            "DANCE_SELL_INVALID_MOTION" or "DANCE_SELL_MOTION_FILE_REQUIRED" => "Video chuyển động chưa hợp lệ. Vui lòng tải lại video.",
+            "DANCE_SELL_CANCEL_FAILED" => "Không thể dừng video lúc này. Vui lòng thử lại.",
+            "DANCE_SELL_REFERENCE_NOT_APPROVED" or "DANCE_SELL_REFERENCE_FILE_REQUIRED" => "Không thể chuẩn bị ảnh để tạo video. Vui lòng thử lại.",
+            _ => "Không thể tạo video ở lần xử lý này. Vui lòng thử lại hoặc liên hệ hỗ trợ."
+        };
 }

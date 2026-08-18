@@ -124,41 +124,27 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
 
         ResolvedMotionFile? referenceImage = null;
         ResolvedMotionFile? motionVideo;
-        string referenceUrlUsed;
-        string referenceSource;
-        Ai79MediaUploadResult? referenceUpload = null;
+        string referenceUrlUsed = string.Empty;
+        const string referenceSource = "uploaded_binary";
+        AiOperationAssetDto? reusableReferenceUpload = null;
         try
         {
-            if (TryUseApprovedReferenceUrl(danceJob.PreparedReferenceStatus, danceJob.PreparedReferenceUrl, out var approvedReferenceUrl))
+            referenceImage = await ResolveMotionFileAsync(
+                danceJob.PreparedReferenceMediaId,
+                danceJob.PreparedReferenceObjectKey,
+                danceJob.PreparedReferenceUrl,
+                runtime.ReferenceImageField,
+                "reference.jpg",
+                AllowedMotionImageMime,
+                maxBytes: null,
+                "DANCE_SELL_REFERENCE_FILE_REQUIRED",
+                "DANCE_SELL_REFERENCE_UNSUPPORTED_MIME",
+                "DANCE_SELL_REFERENCE_FILE_REQUIRED",
+                ct);
+            if (referenceImage is null)
             {
-                referenceUrlUsed = approvedReferenceUrl;
-                referenceSource = "approved_url";
-                await _renderJobs.AddEventAsync(renderJob.Id, "AI79_MOTION_REFERENCE_USING_APPROVED_URL", "79AI motion reference uses approved public URL directly.",
-                    new { danceSellJobId = danceJob.Id, referenceUrl = referenceUrlUsed, source = referenceSource }, ct: ct);
-                await _renderJobs.AddEventAsync(renderJob.Id, "AI79_MOTION_REFERENCE_UPLOAD_SKIPPED", "79AI motion reference image upload skipped because an approved public URL is available.",
-                    new { danceSellJobId = danceJob.Id, referenceUrlUsed, reason = "approved_reference_url_present" }, ct: ct);
-            }
-            else
-            {
-                referenceSource = "uploaded_binary";
-                referenceUrlUsed = string.Empty;
-                referenceImage = await ResolveMotionFileAsync(
-                    danceJob.PreparedReferenceMediaId,
-                    danceJob.PreparedReferenceObjectKey,
-                    danceJob.PreparedReferenceUrl,
-                    runtime.ReferenceImageField,
-                    "reference.jpg",
-                    AllowedMotionImageMime,
-                    maxBytes: null,
-                    "DANCE_SELL_REFERENCE_FILE_REQUIRED",
-                    "DANCE_SELL_REFERENCE_UNSUPPORTED_MIME",
-                    "DANCE_SELL_REFERENCE_FILE_REQUIRED",
-                    ct);
-                if (referenceImage is null)
-                {
-                    await FailAsync(renderJob, danceJob, "DANCE_SELL_REFERENCE_FILE_REQUIRED", "Approved reference image file is required before creating the motion video.", "{}", permanent: true, ct);
-                    throw new RenderJobTerminalFailureException("DANCE_SELL_REFERENCE_FILE_REQUIRED");
-                }
+                await FailAsync(renderJob, danceJob, "DANCE_SELL_REFERENCE_FILE_REQUIRED", "Approved reference image file is required before creating the motion video.", "{}", permanent: true, ct);
+                throw new RenderJobTerminalFailureException("DANCE_SELL_REFERENCE_FILE_REQUIRED");
             }
             motionVideo = await ResolveMotionFileAsync(
                 danceJob.MotionVideoMediaId,
@@ -198,9 +184,24 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
         var submitAttempt = 0;
         try
         {
-            if (referenceSource == "uploaded_binary")
+            reusableReferenceUpload = await _operations.GetLatestAssetAsync(
+                danceJob.Id,
+                DanceSellOperationTypes.MotionVideo,
+                DanceSellAssetRoles.MotionReferenceProviderUpload,
+                danceJob.PreparedReferenceMediaId,
+                danceJob.PreparedReferenceObjectKey,
+                ct);
+            if (!string.IsNullOrWhiteSpace(reusableReferenceUpload?.ProviderUrl))
             {
-                referenceUpload = await _ai79.UploadMediaAsync(new Ai79MediaUploadRequest(
+                referenceUrlUsed = reusableReferenceUpload.ProviderUrl!;
+                await _renderJobs.AddEventAsync(renderJob.Id, "AI_PROVIDER_REFERENCE_UPLOAD_REUSED", "Motion provider reference image upload reused.",
+                    new { danceSellJobId = danceJob.Id, providerUrl = referenceUrlUsed, reusableReferenceUpload.Id }, ct: ct);
+            }
+            else
+            {
+                await _renderJobs.AddEventAsync(renderJob.Id, "AI_PROVIDER_REFERENCE_UPLOAD_STARTED", "Uploading the prepared reference image to the motion provider.",
+                    new { danceSellJobId = danceJob.Id, danceJob.PreparedReferenceMediaId, danceJob.PreparedReferenceObjectKey, runtime.UploadImagePath }, ct: ct);
+                var referenceUpload = await _ai79.UploadMediaAsync(new Ai79MediaUploadRequest(
                     runtime.BaseUrl,
                     runtime.UploadImagePath,
                     runtime.Credential.Secret,
@@ -210,8 +211,34 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
                     referenceImage!.ToMultipartPart(runtime.UploadImageField)),
                     ct);
                 referenceUrlUsed = referenceUpload.Url;
-                await _renderJobs.AddEventAsync(renderJob.Id, "AI79_MOTION_REFERENCE_UPLOADED", "79AI motion reference image uploaded.",
-                    new { danceSellJobId = danceJob.Id, providerUrl = referenceUpload.Url, runtime.UploadImagePath, referenceSource }, ct: ct);
+                await _operations.UpsertAssetAsync(new AiOperationAssetDto
+                {
+                    OperationId = motionOperationId,
+                    AssetRole = DanceSellAssetRoles.MotionReferenceProviderUpload,
+                    MediaId = danceJob.PreparedReferenceMediaId,
+                    ObjectKey = danceJob.PreparedReferenceObjectKey,
+                    PublicUrl = danceJob.PreparedReferenceUrl,
+                    ProviderUrl = referenceUrlUsed,
+                    MimeType = referenceImage!.MimeType,
+                    MetadataJson = DanceSellRepository.ToJson(new
+                    {
+                        uploadedToProvider = true,
+                        danceSellJobId = danceJob.Id,
+                        sourceMediaId = danceJob.PreparedReferenceMediaId,
+                        sourceObjectKey = danceJob.PreparedReferenceObjectKey,
+                        providerUrl = referenceUrlUsed,
+                        idBase = referenceUpload.IdBase,
+                        projectId = referenceUpload.ProjectId,
+                        fileName = referenceUpload.FileName,
+                        uploadedAt = DateTime.UtcNow,
+                        endpointPath = runtime.UploadImagePath,
+                        field = runtime.UploadImageField,
+                        mime = referenceImage.MimeType,
+                        bytes = referenceImage.SizeBytes >= 0 ? referenceImage.SizeBytes : (long?)null
+                    })
+                }, ct);
+                await _renderJobs.AddEventAsync(renderJob.Id, "AI_PROVIDER_REFERENCE_UPLOAD_COMPLETED", "Motion provider reference image upload completed.",
+                    new { danceSellJobId = danceJob.Id, providerUrl = referenceUrlUsed, runtime.UploadImagePath }, ct: ct);
             }
 
             reusableMotionUpload = await _operations.GetLatestAssetAsync(
@@ -285,6 +312,11 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
             }
 
             var motionPrompt = ReadConfigString(runtime.RouteConfigJson, "motion_prompt") ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(referenceUrlUsed) || string.IsNullOrWhiteSpace(motionProviderUrl))
+            {
+                await FailAsync(renderJob, danceJob, "DANCE_SELL_PROVIDER_MEDIA_REQUIRED", "Provider-side reference image and motion video are required before submit.", "{}", permanent: true, ct);
+                throw new RenderJobTerminalFailureException("DANCE_SELL_PROVIDER_MEDIA_REQUIRED");
+            }
             var request = new Ai79MotionControlSubmitRequest(
                 runtime.BaseUrl,
                 runtime.MotionSubmitPath,
@@ -312,7 +344,8 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
                 reference = new
                 {
                     source = referenceSource,
-                    url = referenceUrlUsed
+                    url = referenceUrlUsed,
+                    reusedAssetId = reusableReferenceUpload?.Id
                 },
                 motionUpload = new
                 {
@@ -663,28 +696,6 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
 
     private static string? FirstNonBlank(params string?[] values)
         => values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim();
-
-    private static bool TryUseApprovedReferenceUrl(string status, string? preparedReferenceUrl, out string approvedReferenceUrl)
-    {
-        approvedReferenceUrl = string.Empty;
-        if (!string.Equals(status, DanceSellReferenceStatuses.Approved, StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        if (string.IsNullOrWhiteSpace(preparedReferenceUrl))
-        {
-            return false;
-        }
-
-        if (!Uri.TryCreate(preparedReferenceUrl.Trim(), UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps)
-        {
-            return false;
-        }
-
-        approvedReferenceUrl = preparedReferenceUrl.Trim();
-        return true;
-    }
 
     private async Task<ResolvedMotionFile?> ResolveMotionFileAsync(
         Guid? mediaId,

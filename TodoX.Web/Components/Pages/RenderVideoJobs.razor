@@ -159,6 +159,9 @@ else
                                         <MudItem xs="12" md="4"><MudNumericField T="int" Label="Giây mỗi scene" @bind-Value="_sceneSeconds" Min="1" Variant="Variant.Outlined" /></MudItem>
                                         <MudItem xs="12" md="4"><MudCheckBox @bind-Value="_thinkScenes" Label="Suy nghĩ kịch bản" /></MudItem>
                                     </MudGrid>
+                                    <MudSwitch T="bool" Color="Color.Warning" @bind-Value="_autoFinish">
+                                        Tự động hoàn thành
+                                    </MudSwitch>
                                     <MudStack Row="true" Spacing="2" Class="flex-wrap gap-2">
                                         <MudButton Color="Color.Warning" Variant="Variant.Filled" OnClick="CreateProjectAsync" Disabled="@_busy">Tạo / phân tách scene</MudButton>
                                         <MudButton Color="Color.Primary" Variant="Variant.Outlined" OnClick="CreateEmptyProjectAsync" Disabled="@_busy">Tạo project rỗng</MudButton>
@@ -502,6 +505,8 @@ else
     private int _totalSeconds = 16;
     private int _sceneSeconds = 8;
     private bool _thinkScenes = false;
+    private bool _autoFinish = true;
+    private bool _autoFinishing;
     private PeriodicTimer? _pollTimer;
     private CancellationTokenSource? _pollCts;
     private readonly List<DebugEntry> _debugEntries = new();
@@ -665,7 +670,7 @@ else
             await AddDebugAsync("ui_auth", "Kiểm tra đăng nhập", "INFO", $"User={MaskGuid(AuthState.CurrentUser.UserId)}, Customer={MaskGuid(AuthState.CurrentUser.CustomerId)}");
             var inputDebug = BuildInputDebugMessage();
             await AddDebugAsync("ui_input", "Kiểm tra prompt", "INFO", inputDebug);
-            _prompt = PersistPromptVideoSettings(_prompt, _aspectRatio, _resolution);
+            _prompt = PersistPromptVideoSettings(_prompt, _aspectRatio, _resolution, _autoFinish);
 
             var storageRoot = VideoOptions.CurrentValue.StorageRoot;
             var publicBase = VideoOptions.CurrentValue.PublicBase;
@@ -717,7 +722,7 @@ else
             var jobFolder = DateTime.UtcNow.ToString("yyyyMMdd-HHmmss");
             var result = await VideoRepo.CreateProjectAsync(new VideoProjectCreateRequest
             {
-                Prompt = PersistPromptVideoSettings(_prompt, _aspectRatio, _resolution),
+                Prompt = PersistPromptVideoSettings(_prompt, _aspectRatio, _resolution, _autoFinish),
                 AspectRatio = _aspectRatio,
                 CharacterId = _selectedCharacter?.Id,
                 TotalSeconds = _totalSeconds,
@@ -913,6 +918,7 @@ else
             {
                 _thinkScenes = _project.ThinkScenes;
                 _prompt = _project.OriginalPrompt;
+                _autoFinish = ReadAutoFinish(_prompt);
                 _promptParseResult = PromptParser.Parse(_prompt);
                 ApplyVideoSettingsFromPrompt();
                 _totalSeconds = _project.TotalSeconds;
@@ -1515,7 +1521,7 @@ else
         };
     }
 
-    private static string PersistPromptVideoSettings(string? prompt, string aspectRatio, string resolution)
+    private static string PersistPromptVideoSettings(string? prompt, string aspectRatio, string resolution, bool autoFinish = false)
     {
         var ratio = NormalizeAspectRatio(aspectRatio) ?? AspectRatioPortrait;
         var normalizedResolution = NormalizeResolution(resolution);
@@ -1532,6 +1538,7 @@ else
                     {
                         obj["resolution"] = normalizedResolution;
                     }
+                    obj["auto_finish"] = autoFinish;
                     return source[..start] + obj.ToJsonString() + source[(end + 1)..];
                 }
             }
@@ -1544,9 +1551,28 @@ else
         var metadata = new JsonObject
         {
             ["aspect_ratio"] = ratio,
-            ["resolution"] = normalizedResolution
+            ["resolution"] = normalizedResolution,
+            ["auto_finish"] = autoFinish
         }.ToJsonString();
         return string.IsNullOrWhiteSpace(source) ? metadata : $"{source.TrimEnd()}{Environment.NewLine}{metadata}";
+    }
+
+    private static bool ReadAutoFinish(string? prompt)
+    {
+        if (!TryExtractJsonRange(prompt ?? string.Empty, out var start, out var end))
+        {
+            return false;
+        }
+
+        try
+        {
+            var obj = JsonNode.Parse((prompt ?? string.Empty)[start..(end + 1)]) as JsonObject;
+            return obj?["auto_finish"]?.GetValue<bool>() == true;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
     }
 
     private static bool TryExtractJsonRange(string input, out int start, out int end)
@@ -1630,11 +1656,47 @@ else
                     }
                     await InvokeAsync(StateHasChanged);
                 }
+                else
+                {
+                    await ContinueAutoFinishAsync();
+                }
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
                 break;
             }
+        }
+    }
+
+    private async Task ContinueAutoFinishAsync()
+    {
+        if (!_autoFinish || _autoFinishing || _project is null || AuthState.CurrentUser is null)
+        {
+            return;
+        }
+
+        if (_batchActive || HasActiveSceneRenders() || _project.Status is VideoProjectStatuses.Rendering or VideoProjectStatuses.Merging)
+        {
+            return;
+        }
+
+        _autoFinishing = true;
+        try
+        {
+            if (_project.Scenes.Any()
+                && _project.Scenes.All(scene => !string.IsNullOrWhiteSpace(scene.StaticImageUrl))
+                && _project.Scenes.Any(scene => scene.Status is VideoSceneStatuses.Draft or VideoSceneStatuses.ImageReady))
+            {
+                await EnqueueRenderAllScenesAsync();
+            }
+            else if (CanMerge && _project.Status != VideoProjectStatuses.Completed)
+            {
+                await EnqueueMergeAsync();
+            }
+        }
+        finally
+        {
+            _autoFinishing = false;
         }
     }
 

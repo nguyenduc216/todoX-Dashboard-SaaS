@@ -41,6 +41,7 @@
                 <MudPaper Class="todox-card pa-4" rounded="true">
                     <MudStack Spacing="3">
                         <MudTextField T="string" Label="Tên video" Variant="Variant.Outlined" @bind-Value="_title" Disabled="@_busy" />
+                        <MudSwitch T="bool" Color="Color.Warning" @bind-Value="_autoFinish" Disabled="@_busy">Tự động hoàn thành</MudSwitch>
                         <MudSelect T="string" Label="Danh mục thời trang" Variant="Variant.Outlined" @bind-Value="_category" Disabled="@_busy">
                             <MudSelectItem Value="@("shirt")">Áo</MudSelectItem>
                             <MudSelectItem Value="@("pants")">Quần</MudSelectItem>
@@ -93,8 +94,6 @@
                         <MudText Typo="Typo.h6">Video nhảy quảng cáo thời trang</MudText>
                         <MudList T="string" Dense="true">
                             <MudListItem T="string">Dịch vụ: Video nhảy quảng cáo thời trang</MudListItem>
-                            <MudListItem T="string">Provider: 79AI</MudListItem>
-                            <MudListItem T="string">Model: Kling Motion Control</MudListItem>
                             <MudListItem T="string">Tỷ lệ: 9:16</MudListItem>
                         </MudList>
                         <MudButton Variant="Variant.Filled"
@@ -122,6 +121,7 @@
     private string? _motionUploadError;
     private bool _motionDragActive;
     private bool _busy;
+    private bool _autoFinish = true;
 
     private bool CanSubmitSource => string.IsNullOrWhiteSpace(_readinessError);
     private long MaxMotionVideoBytes => (long)Math.Max(1, DanceOptions.CurrentValue.MaxVideoMb) * 1024 * 1024;
@@ -205,7 +205,8 @@
             PlacementMode = DanceSellPlacementModes.WearProduct,
             ReferenceMode = DanceSellReferenceModes.GenerateReference,
             Mode = "720p",
-            CharacterOrientation = "image"
+            CharacterOrientation = "image",
+            AutoFinish = _autoFinish
         }, AuthState.CurrentUser!);
     }
 

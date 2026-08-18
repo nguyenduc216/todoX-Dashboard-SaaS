@@ -77,6 +77,7 @@ public sealed class TimelapseCreateRequest
     public string VideoMode { get; set; } = TimelapseRequestRules.FastMode;
     public string Ratio { get; set; } = TimelapseRequestRules.LandscapeRatio;
     public bool RequireVideoConfirmation { get; set; }
+    public bool AutoFinish { get; set; } = true;
 }
 
 public sealed class TimelapseOriginalImageSnapshot
@@ -102,6 +103,7 @@ public sealed class TimelapseJobSnapshot
     public string Ratio { get; set; } = TimelapseRequestRules.LandscapeRatio;
     public string Title { get; set; } = "Video Timelapse";
     public bool RequireVideoConfirmation { get; set; }
+    public bool AutoFinish { get; set; }
     public bool VideoRenderConfirmed { get; set; }
     public TimelapseSellPriceSnapshot? SellPrice { get; set; }
     public TimelapseOriginalImageSnapshot OriginalImage { get; set; } = new();

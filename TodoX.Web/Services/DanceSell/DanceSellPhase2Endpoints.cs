@@ -19,6 +19,7 @@ public static class DanceSellPhase2Endpoints
         group.MapPost("/jobs", CreateJobAsync).DisableAntiforgery();
         group.MapGet("/jobs/{id:guid}", GetJobAsync);
         group.MapGet("/jobs/{id:guid}/download", DownloadAsync);
+        group.MapGet("/jobs/{id:guid}/reference/download", DownloadReferenceAsync);
         group.MapPut("/jobs/{id:guid}", UpdateBusinessAsync).DisableAntiforgery();
         group.MapPost("/jobs/{id:guid}/character", UploadCharacterAsync).DisableAntiforgery();
         group.MapPost("/jobs/{id:guid}/product", UploadProductAsync).DisableAntiforgery();
@@ -97,6 +98,40 @@ public static class DanceSellPhase2Endpoints
                 "video/mp4",
                 $"todox-video-thoi-trang-{id:N}.mp4",
                 enableRangeProcessing: true);
+        });
+
+    private static async Task<IResult> DownloadReferenceAsync(
+        Guid id,
+        AuthStateService auth,
+        IDanceSellPhase2Service service,
+        IHttpClientFactory httpClients,
+        CancellationToken ct)
+        => await ExecuteAsync(auth, async user =>
+        {
+            var job = await service.GetAsync(id, user, ct);
+            if (!string.Equals(job.PreparedReferenceStatus, DanceSellReferenceStatuses.Approved, StringComparison.OrdinalIgnoreCase)
+                || string.IsNullOrWhiteSpace(job.PreparedReferenceUrl))
+            {
+                throw new InvalidOperationException("DANCE_SELL_REFERENCE_NOT_READY");
+            }
+
+            if (!Uri.TryCreate(job.PreparedReferenceUrl, UriKind.Absolute, out var referenceUri))
+            {
+                throw new InvalidOperationException("DANCE_SELL_REFERENCE_URL_INVALID");
+            }
+
+            await EnsurePublicHttpsUrlAsync(referenceUri, ct);
+            var client = httpClients.CreateClient("DanceSellDownload");
+            using var request = new HttpRequestMessage(HttpMethod.Get, referenceUri);
+            var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+            if (!response.IsSuccessStatusCode)
+            {
+                response.Dispose();
+                throw new InvalidOperationException("DANCE_SELL_REFERENCE_DOWNLOAD_FAILED");
+            }
+
+            var stream = await response.Content.ReadAsStreamAsync(ct);
+            return Results.Stream(stream, "image/jpeg", $"todox-anh-tham-chieu-{id:N}.jpg");
         });
 
     private static async Task<IResult> UpdateBusinessAsync(Guid id, DanceSellUpdateBusinessRequest request, AuthStateService auth, IDanceSellPhase2Service service, CancellationToken ct)
@@ -217,6 +252,9 @@ public static class DanceSellPhase2Endpoints
                 "DANCE_SELL_RESULT_NOT_READY" => StatusCodes.Status409Conflict,
                 "DANCE_SELL_RESULT_URL_INVALID" => StatusCodes.Status400BadRequest,
                 "DANCE_SELL_RESULT_DOWNLOAD_FAILED" => StatusCodes.Status502BadGateway,
+                "DANCE_SELL_REFERENCE_NOT_READY" => StatusCodes.Status409Conflict,
+                "DANCE_SELL_REFERENCE_URL_INVALID" => StatusCodes.Status400BadRequest,
+                "DANCE_SELL_REFERENCE_DOWNLOAD_FAILED" => StatusCodes.Status502BadGateway,
                 _ => StatusCodes.Status400BadRequest
             };
             return Results.Json(new { success = false, errorCode = ex.Message, message = ex.Message }, statusCode: status);

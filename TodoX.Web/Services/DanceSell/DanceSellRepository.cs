@@ -68,7 +68,7 @@ public sealed class DanceSellRepository : IDanceSellRepository
                  '', '', @mode, @orientation,
                  @placementMode, @customInstruction, @referenceMode, @imagePrompt,
                  @referenceProviderCode, @referenceProviderModel, @motionProviderCode, @motionProviderModel,
-                 'draft', 'not_required', 'not_required', 'draft', '{}'::jsonb, @user, @user,
+                 'draft', 'not_required', 'not_required', 'draft', jsonb_build_object('autoFinish', @autoFinish), @user, @user,
                  now(), now())
             RETURNING id AS Id, tenant_id AS TenantId, customer_id AS CustomerId, user_id AS UserId,
                       render_job_id AS RenderJobId, logical_request_id AS LogicalRequestId,
@@ -106,7 +106,9 @@ public sealed class DanceSellRepository : IDanceSellRepository
                       prepared_reference_media_id AS PreparedReferenceMediaId, prepared_reference_object_key AS PreparedReferenceObjectKey,
                       prepared_reference_url AS PreparedReferenceUrl, prepared_reference_status AS PreparedReferenceStatus,
                       prepared_reference_approved_at AS PreparedReferenceApprovedAt, source_stage_status AS SourceStageStatus,
-                      source_stage_error AS SourceStageError, created_by AS CreatedBy, updated_by AS UpdatedBy;
+                      source_stage_error AS SourceStageError,
+                      COALESCE((request_json->>'autoFinish')::boolean, false) AS AutoFinish,
+                      created_by AS CreatedBy, updated_by AS UpdatedBy;
             """,
             new
             {
@@ -125,7 +127,8 @@ public sealed class DanceSellRepository : IDanceSellRepository
                 referenceProviderCode = NullIfBlank(request.ReferenceProviderCode),
                 referenceProviderModel = NullIfBlank(request.ReferenceProviderModel),
                 motionProviderCode = NullIfBlank(request.MotionProviderCode),
-                motionProviderModel = NullIfBlank(request.MotionProviderModel)
+                motionProviderModel = NullIfBlank(request.MotionProviderModel),
+                autoFinish = request.AutoFinish
             });
     }
 
@@ -313,6 +316,7 @@ public sealed class DanceSellRepository : IDanceSellRepository
                    motion_provider_model=@motionProviderModel,
                    mode=@mode,
                    orientation=@orientation,
+                   request_json=jsonb_set(COALESCE(request_json, '{}'::jsonb), '{autoFinish}', to_jsonb(CAST(@autoFinish AS boolean)), true),
                    updated_at=now()
              WHERE id=@id;
             """,
@@ -330,7 +334,8 @@ public sealed class DanceSellRepository : IDanceSellRepository
                 motionProviderCode = NullIfBlank(request.MotionProviderCode),
                 motionProviderModel = NullIfBlank(request.MotionProviderModel),
                 mode = request.Mode.Trim(),
-                orientation = request.CharacterOrientation.Trim()
+                orientation = request.CharacterOrientation.Trim(),
+                autoFinish = request.AutoFinish
             });
     }
 
@@ -758,7 +763,9 @@ public sealed class DanceSellRepository : IDanceSellRepository
                prepared_reference_media_id AS PreparedReferenceMediaId, prepared_reference_object_key AS PreparedReferenceObjectKey,
                prepared_reference_url AS PreparedReferenceUrl, prepared_reference_status AS PreparedReferenceStatus,
                prepared_reference_approved_at AS PreparedReferenceApprovedAt, source_stage_status AS SourceStageStatus,
-               source_stage_error AS SourceStageError, created_by AS CreatedBy, updated_by AS UpdatedBy
+               source_stage_error AS SourceStageError,
+               COALESCE((request_json->>'autoFinish')::boolean, false) AS AutoFinish,
+               created_by AS CreatedBy, updated_by AS UpdatedBy
           FROM dance_sell.dance_sell_jobs
         """;
 

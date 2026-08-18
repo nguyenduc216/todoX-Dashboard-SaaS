@@ -1044,7 +1044,7 @@ public class TimelapsePhase2CTests
         Assert.Contains("_sellPrices.ResolveVideoScenePriceAsync", updateDraft, StringComparison.Ordinal);
         Assert.Contains("TimelapseSellPricing.EstimateVideoSubtotal", updateDraft, StringComparison.Ordinal);
         Assert.Contains("ProgressMapping = TimelapseRequestRules.GetProgressMapping(request.SceneCount)", updateDraft, StringComparison.Ordinal);
-        Assert.Contains("VideoRenderConfirmed = false", updateDraft, StringComparison.Ordinal);
+        Assert.Contains("VideoRenderConfirmed = request.AutoFinish", updateDraft, StringComparison.Ordinal);
         Assert.Contains("_media.SaveAsync", updateDraft, StringComparison.Ordinal);
         Assert.Contains("UPDATE render.render_jobs", updateDraft, StringComparison.Ordinal);
         Assert.Contains("input_json=CAST(@inputJson AS jsonb)", updateDraft, StringComparison.Ordinal);

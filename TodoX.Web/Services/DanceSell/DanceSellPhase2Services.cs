@@ -1368,7 +1368,8 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
             ReferenceProviderCode = referenceRoute.ProviderCode,
             ReferenceProviderModel = referenceRoute.ModelName,
             MotionProviderCode = motionRoute.ProviderCode,
-            MotionProviderModel = motionRoute.ModelName
+            MotionProviderModel = motionRoute.ModelName,
+            AutoFinish = request.AutoFinish
         }, ct);
     }
 

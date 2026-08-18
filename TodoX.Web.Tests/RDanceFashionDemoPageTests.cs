@@ -76,8 +76,6 @@ public sealed class RDanceFashionDemoPageTests
             "ApproveCharacterAsync",
             "OpenTikTokAsync",
             "ShowMessageBoxAsync",
-            "Kling Motion Control",
-            "Provider chính: 79AI",
             "Video nhảy quảng cáo thời trang",
             "Dịch vụ: Video nhảy quảng cáo thời trang",
             "Bạn không có quyền xem video này.",
@@ -103,7 +101,7 @@ public sealed class RDanceFashionDemoPageTests
         Assert.Contains("IRenderJobService RenderJobs", page, StringComparison.Ordinal);
         Assert.Contains("RenderJobs.GetAsync(renderJobId)", page, StringComparison.Ordinal);
         Assert.Contains("IsCoreCancelled", page, StringComparison.Ordinal);
-        Assert.Contains("MudItem xs=\"12\" md=\"8\"", page, StringComparison.Ordinal);
+        Assert.Contains("MudItem xs=\"12\" md=\"4\"", page, StringComparison.Ordinal);
         Assert.Contains("MudItem xs=\"12\" md=\"4\"", page, StringComparison.Ordinal);
         Assert.Contains("DisplayStatusLabel(_job!)", page, StringComparison.Ordinal);
         Assert.Contains("Đã dừng tạo video.", page, StringComparison.Ordinal);
@@ -331,10 +329,10 @@ public sealed class RDanceFashionDemoPageTests
         Assert.Contains("danceJob.PreparedReferenceMediaId", submit, StringComparison.Ordinal);
         Assert.Contains("danceJob.PreparedReferenceObjectKey", submit, StringComparison.Ordinal);
         Assert.Contains("danceJob.PreparedReferenceUrl", submit, StringComparison.Ordinal);
-        Assert.Contains("TryUseApprovedReferenceUrl", submit, StringComparison.Ordinal);
-        Assert.Contains("AI79_MOTION_REFERENCE_USING_APPROVED_URL", submit, StringComparison.Ordinal);
-        Assert.Contains("AI79_MOTION_REFERENCE_UPLOAD_SKIPPED", submit, StringComparison.Ordinal);
-        Assert.Contains("AI79_MOTION_REFERENCE_UPLOADED", submit, StringComparison.Ordinal);
+        Assert.Contains("DanceSellAssetRoles.MotionReferenceProviderUpload", submit, StringComparison.Ordinal);
+        Assert.Contains("AI_PROVIDER_REFERENCE_UPLOAD_STARTED", submit, StringComparison.Ordinal);
+        Assert.Contains("AI_PROVIDER_REFERENCE_UPLOAD_COMPLETED", submit, StringComparison.Ordinal);
+        Assert.Contains("AI_PROVIDER_REFERENCE_UPLOAD_REUSED", submit, StringComparison.Ordinal);
         Assert.Contains("UploadMediaAsync(new Ai79MediaUploadRequest", submit, StringComparison.Ordinal);
         Assert.Contains("runtime.UploadVideoPath", submit, StringComparison.Ordinal);
         Assert.Contains("DanceSellAssetRoles.MotionProviderUpload", submit, StringComparison.Ordinal);
@@ -361,9 +359,9 @@ public sealed class RDanceFashionDemoPageTests
         Assert.Contains("images0Url = runtime.IncludeImagesZeroUrl ? referenceUrlUsed : null", submit, StringComparison.Ordinal);
         Assert.Contains("videoUrl = motionProviderUrl", submit, StringComparison.Ordinal);
         Assert.True(
-            submit.IndexOf("TryUseApprovedReferenceUrl", StringComparison.Ordinal)
+            submit.IndexOf("MotionReferenceProviderUpload", StringComparison.Ordinal)
             < submit.IndexOf("UploadMediaAsync(new Ai79MediaUploadRequest", StringComparison.Ordinal),
-            "Approved public reference URL must be considered before any 79AI media upload.");
+            "A persisted provider reference asset must be considered before any provider media upload.");
         Assert.True(
             submit.IndexOf("UpsertAssetAsync(new AiOperationAssetDto", StringComparison.Ordinal)
             < submit.IndexOf("SubmitMotionControlAsync(request, ct)", StringComparison.Ordinal),
@@ -598,8 +596,8 @@ public sealed class RDanceFashionDemoPageTests
         Assert.Contains("AI79_MOTION_SUBMIT_RETRY_EXHAUSTED", submit, StringComparison.Ordinal);
         Assert.Contains("reference = new", submit, StringComparison.Ordinal);
         Assert.Contains("motionUpload = new", submit, StringComparison.Ordinal);
-        Assert.Contains("AI79_MOTION_REFERENCE_USING_APPROVED_URL", submit, StringComparison.Ordinal);
-        Assert.Contains("AI79_MOTION_REFERENCE_UPLOAD_SKIPPED", submit, StringComparison.Ordinal);
+        Assert.Contains("AI_PROVIDER_REFERENCE_UPLOAD_REUSED", submit, StringComparison.Ordinal);
+        Assert.Contains("AI_PROVIDER_REFERENCE_UPLOAD_COMPLETED", submit, StringComparison.Ordinal);
         Assert.Contains("referenceSource", submit, StringComparison.Ordinal);
         Assert.Contains("referenceUrlUsed", submit, StringComparison.Ordinal);
 
@@ -610,6 +608,55 @@ public sealed class RDanceFashionDemoPageTests
         Assert.Contains("await ScheduleNextPollAsync(renderJob, \"79AI motion output URL pending; next poll scheduled.\"", poll, StringComparison.Ordinal);
         Assert.Contains("await _completion.CompleteAsync", poll, StringComparison.Ordinal);
         Assert.Contains("ResultVideoUrl = status.OutputUrl", poll, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RDanceVideoTabHasThreeResponsiveBusinessCardsAndApprovedReferenceDownload()
+    {
+        var page = ReadStrictUtf8(Path.Combine(FindRepoRoot(), "TodoX.Web", "Components", "Pages", "RDanceJobDetail.razor"));
+        var start = page.IndexOf("<MudTabPanel Text=\"Video\"", StringComparison.Ordinal);
+        var end = page.IndexOf("<MudTabPanel Text=\"K", start, StringComparison.Ordinal);
+        Assert.True(start >= 0 && end > start);
+        var videoTab = page[start..end];
+
+        Assert.Equal(3, videoTab.Split("<MudItem ", StringSplitOptions.None).Length - 1);
+        Assert.Contains("rdance-video-preview-column", videoTab, StringComparison.Ordinal);
+        Assert.Contains("rdance-reference-preview-column", videoTab, StringComparison.Ordinal);
+        Assert.Contains("ReferenceDownloadUrl", videoTab, StringComparison.Ordinal);
+        Assert.Contains("PreparedReferenceStatus == DanceSellReferenceStatuses.Approved", videoTab, StringComparison.Ordinal);
+        Assert.DoesNotContain("Provider chính", videoTab, StringComparison.Ordinal);
+        Assert.DoesNotContain("Kling Motion Control", videoTab, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RDanceAutoFinishPersistsAndContinuesWithoutManualReferenceApprovalStep()
+    {
+        var root = FindRepoRoot();
+        var create = ReadStrictUtf8(Path.Combine(root, "TodoX.Web", "Components", "Pages", "RDanceJobCreate.razor"));
+        var detail = ReadStrictUtf8(Path.Combine(root, "TodoX.Web", "Components", "Pages", "RDanceJobDetail.razor"));
+        var repository = ReadStrictUtf8(Path.Combine(root, "TodoX.Web", "Services", "DanceSell", "DanceSellRepository.cs"));
+
+        Assert.Contains("@bind-Value=\"_autoFinish\"", create, StringComparison.Ordinal);
+        Assert.Contains("AutoFinish = _autoFinish", create, StringComparison.Ordinal);
+        Assert.Contains("COALESCE((request_json->>'autoFinish')::boolean, false) AS AutoFinish", repository, StringComparison.Ordinal);
+        Assert.Contains("_autoFinish = _job.AutoFinish", detail, StringComparison.Ordinal);
+        Assert.Contains("ContinueAutoFinishAsync", detail, StringComparison.Ordinal);
+        Assert.Contains("References.ApproveAsync", detail, StringComparison.Ordinal);
+        Assert.Contains("DanceSell.QueueRenderAsync", detail, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DanceSellReferenceDownloadEndpointIsOwnedAndAttachmentOnly()
+    {
+        var endpoints = ReadStrictUtf8(Path.Combine(FindRepoRoot(), "TodoX.Web", "Services", "DanceSell", "DanceSellPhase2Endpoints.cs"));
+
+        Assert.Contains("group.MapGet(\"/jobs/{id:guid}/reference/download\"", endpoints, StringComparison.Ordinal);
+        Assert.Contains("service.GetAsync(id, user, ct)", endpoints, StringComparison.Ordinal);
+        Assert.Contains("job.PreparedReferenceStatus", endpoints, StringComparison.Ordinal);
+        Assert.Contains("job.PreparedReferenceUrl", endpoints, StringComparison.Ordinal);
+        Assert.Contains("todox-anh-tham-chieu-{id:N}.jpg", endpoints, StringComparison.Ordinal);
+        Assert.Contains("DANCE_SELL_REFERENCE_DOWNLOAD_FAILED", endpoints, StringComparison.Ordinal);
+        Assert.DoesNotContain("Request.Query", endpoints, StringComparison.OrdinalIgnoreCase);
     }
 
     private static string ReadStrictUtf8(string file)

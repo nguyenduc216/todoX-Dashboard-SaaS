@@ -163,7 +163,8 @@ public sealed class TimelapseJobService : ITimelapseJobService
             VideoMode = request.VideoMode.Trim().ToLowerInvariant(),
             Ratio = request.Ratio.Trim().ToLowerInvariant(),
             Title = NormalizeTitle(request.Title),
-            RequireVideoConfirmation = request.RequireVideoConfirmation,
+            RequireVideoConfirmation = request.RequireVideoConfirmation && !request.AutoFinish,
+            AutoFinish = request.AutoFinish,
             SellPrice = new TimelapseSellPriceSnapshot
             {
                 QualityTier = qualityTier,
@@ -388,8 +389,9 @@ public sealed class TimelapseJobService : ITimelapseJobService
             VideoMode = request.VideoMode.Trim().ToLowerInvariant(),
             Ratio = request.Ratio.Trim().ToLowerInvariant(),
             Title = NormalizeTitle(request.Title),
-            RequireVideoConfirmation = request.RequireVideoConfirmation,
-            VideoRenderConfirmed = false,
+            RequireVideoConfirmation = request.RequireVideoConfirmation && !request.AutoFinish,
+            AutoFinish = request.AutoFinish,
+            VideoRenderConfirmed = request.AutoFinish,
             SellPrice = new TimelapseSellPriceSnapshot
             {
                 QualityTier = qualityTier,

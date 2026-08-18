@@ -52,7 +52,7 @@
         <MudTabs Rounded="true" Elevation="0" @bind-ActivePanelIndex="_tabIndex">
             <MudTabPanel Text="Thông tin">
                 <MudGrid Class="mt-4">
-                    <MudItem xs="12" md="7">
+                    <MudItem xs="12" md="4">
                         <MudPaper Class="todox-panel pa-4">
                             <MudStack Spacing="3">
                                 <MudText Typo="Typo.h6">Thông tin dự án</MudText>
@@ -139,14 +139,13 @@
                             </MudStack>
                         </MudPaper>
                     </MudItem>
-                    <MudItem xs="12" md="5">
+                    <MudItem xs="12" md="4">
                         <MudPaper Class="todox-panel pa-4">
                             <MudText Typo="Typo.h6">Đầu ra</MudText>
                             <MudList T="string" Dense="true">
                                 <MudListItem T="string">Dịch vụ: Video nhảy quảng cáo thời trang</MudListItem>
                                 <MudListItem T="string">Tỷ lệ: 9:16</MudListItem>
                                 <MudListItem T="string">Định dạng: MP4</MudListItem>
-                                <MudListItem T="string">Model: Kling Motion Control</MudListItem>
                             </MudList>
                             <MudButton FullWidth="true" Variant="Variant.Filled" Color="Color.Warning" Disabled="@(_job?.MotionVideoMediaId is null || _busy)" OnClick="@(() => _tabIndex = 1)">
                                 Tiếp tục
@@ -301,25 +300,39 @@
                 }
             </MudTabPanel>
 
-            <MudTabPanel Text="Video">
+            <MudTabPanel Text="Video" Class="rdance-video-tab">
                 <MudGrid Class="mt-4">
-                    <MudItem xs="12" md="7">
+                    <MudItem xs="12" md="4" Class="rdance-video-preview-column">
                         <MudPaper Class="todox-panel pa-4">
-                            <MudText Typo="Typo.h6">Xem trước</MudText>
+                            <MudText Typo="Typo.h6">Video chuyển động</MudText>
                             @if (!string.IsNullOrWhiteSpace(_job?.MotionVideoUrl))
                             {
                                 <video src="@_job.MotionVideoUrl" controls muted playsinline class="rdance-media-player"></video>
                             }
-                            @Preview(_job?.PreparedReferenceUrl, "Ảnh tham chiếu đã duyệt")
+                            else
+                            {
+                                <MudAlert Severity="Severity.Info">Video chuyển động sẽ xuất hiện sau khi tải nguồn hoàn tất.</MudAlert>
+                            }
                         </MudPaper>
                     </MudItem>
-                    <MudItem xs="12" md="5">
+                    <MudItem xs="12" md="4" Class="rdance-reference-preview-column">
+                        <MudPaper Class="todox-panel pa-4">
+                            <MudText Typo="Typo.h6">Ảnh dùng để tạo video</MudText>
+                            @Preview(_job?.PreparedReferenceUrl, "Ảnh dùng để tạo video")
+                            @if (_job?.PreparedReferenceStatus == DanceSellReferenceStatuses.Approved)
+                            {
+                                <MudButton FullWidth="true" Variant="Variant.Outlined" Color="Color.Warning" Href="@ReferenceDownloadUrl" StartIcon="@Icons.Material.Filled.Download">
+                                    Tải xuống
+                                </MudButton>
+                            }
+                        </MudPaper>
+                    </MudItem>
+                    <MudItem xs="12" md="4">
                         <MudPaper Class="todox-panel pa-4">
                             <MudText Typo="Typo.h6">Tóm tắt render</MudText>
                             <MudList T="string" Dense="true">
                                 <MudListItem T="string">Dịch vụ: Video nhảy quảng cáo thời trang</MudListItem>
-                                <MudListItem T="string">Provider chính: 79AI</MudListItem>
-                                <MudListItem T="string">Model: Kling Motion Control</MudListItem>
+                                <MudListItem T="string">Trạng thái: @DisplayStatusLabel(_job!)</MudListItem>
                                 <MudListItem T="string">Tỷ lệ: 9:16</MudListItem>
                                 <MudListItem T="string">Ước tính: @(_estimate?.EstimatedTodoxPoints?.ToString("0.##") ?? "chưa cấu hình") điểm</MudListItem>
                                 @if (_balance is not null)
@@ -369,7 +382,6 @@
                                 </div>
                             </div>
                             <MudText Typo="Typo.body1" Class="mt-3">@ResultProgressText</MudText>
-                            <MudText Typo="Typo.caption">Kling Motion Control</MudText>
                         </MudPaper>
                     }
                     else if (_job.Status is DanceSellJobStatuses.Failed or DanceSellJobStatuses.Timeout)
@@ -430,9 +442,13 @@
                                 <MudListItem T="string">Kết thúc: @FormatVietnamTime(RenderEndUtc(_job!))</MudListItem>
                                 <MudListItem T="string">Thời gian thực hiện: @FormatDuration(RenderDuration(_job!))</MudListItem>
                             }
-                            <MudListItem T="string">Provider: 79AI</MudListItem>
-                            <MudListItem T="string">Model: Kling Motion Control</MudListItem>
-                                @if (_job!.Status is DanceSellJobStatuses.Failed or DanceSellJobStatuses.Timeout
+                            @if (IsAdmin)
+                            {
+                                <MudListItem T="string">Provider: @_job!.ProviderCode</MudListItem>
+                                <MudListItem T="string">Model: @_job.ProviderModel</MudListItem>
+                                <MudListItem T="string">Provider task: @_job.ProviderTaskId</MudListItem>
+                            }
+                                @if (IsAdmin && (_job!.Status is DanceSellJobStatuses.Failed or DanceSellJobStatuses.Timeout)
                                  && !string.IsNullOrWhiteSpace(_job.ErrorMessage))
                             {
                                 <MudListItem T="string">Lỗi: @_job.ErrorMessage</MudListItem>
@@ -452,6 +468,8 @@
 
     private int _tabIndex;
     private bool _busy;
+    private bool _autoFinishing;
+    private bool _autoFinish = true;
     private string _title = "Video nhảy quảng cáo thời trang";
     private string _category = "shirt";
     private string _tiktokUrl = string.Empty;
@@ -523,9 +541,11 @@
         ? "Đang chuẩn bị render video..."
         : "Đang tạo video...";
     private string ResultErrorText => _job?.Status == DanceSellJobStatuses.Timeout
-        ? $"Render video quá thời gian: {(_job.ErrorMessage ?? "Vui lòng thử render lại.")}"
-        : $"Tạo video thất bại: {(_job?.ErrorMessage ?? "Vui lòng thử render lại.")}";
+        ? "Video mất nhiều thời gian hơn dự kiến. Vui lòng thử lại."
+        : DanceSellCustomerErrorPolicy.Message(_job?.ErrorCode);
     private string? DownloadUrl => _job is null ? null : $"/api/dance-sell/jobs/{_job.Id}/download";
+    private string? ReferenceDownloadUrl => _job is null ? null : $"/api/dance-sell/jobs/{_job.Id}/reference/download";
+    private bool IsAdmin => AuthState.CurrentUser is not null && DanceSellSecurity.IsAdmin(AuthState.CurrentUser);
 
     private string DisplayStatusLabel(DanceSellJobDto job)
         => IsCoreCancelled ? "Đã dừng" : StatusLabel(job.Status);
@@ -653,6 +673,7 @@
         try
         {
             _job = await DanceSell.GetAsync(JobId, AuthState.CurrentUser);
+            _autoFinish = _job.AutoFinish;
             _renderJob = _job.RenderJobId is Guid renderJobId
                 ? await RenderJobs.GetAsync(renderJobId)
                 : null;
@@ -669,6 +690,7 @@
             _referenceVersions = versions;
             _latestReference = versions.OrderByDescending(x => x.VersionNo).FirstOrDefault();
             await RefreshEstimateAsync();
+            await ContinueAutoFinishAsync();
         }
         catch (Exception ex)
         {
@@ -924,7 +946,7 @@
         await RefreshEstimateAsync();
         var points = _estimate?.EstimatedTodoxPoints?.ToString("0.##") ?? "chưa cấu hình";
         var confirmed = await DialogService.ShowMessageBoxAsync("Xác nhận tạo video",
-            (MarkupString)$"Tạo video <b>{_title}</b> bằng <b>Kling Motion Control</b>, tỷ lệ <b>9:16</b>, ước tính <b>{points} điểm</b>?",
+            (MarkupString)$"Tạo video <b>{_title}</b>, tỷ lệ <b>9:16</b>, ước tính <b>{points} điểm</b>?",
             yesText: "Xác nhận tạo video", cancelText: "Quay lại chỉnh sửa");
         if (confirmed == true)
         {
@@ -959,6 +981,54 @@
         }
     }
 
+    private async Task ContinueAutoFinishAsync()
+    {
+        if (!_autoFinish || _autoFinishing || _job is null || AuthState.CurrentUser is null || _busy)
+        {
+            return;
+        }
+
+        if (_job.Status is DanceSellJobStatuses.Queued or DanceSellJobStatuses.Submitted or DanceSellJobStatuses.Rendering
+            || IsCoreCancelled)
+        {
+            return;
+        }
+
+        if (_job.PreparedReferenceStatus == DanceSellReferenceStatuses.Ready
+            && _latestReference?.Status == DanceSellReferenceStatuses.Ready)
+        {
+            _autoFinishing = true;
+            try
+            {
+                _job = await References.ApproveAsync(_job.Id, _latestReference.Id, AuthState.CurrentUser);
+                await ReloadAsync();
+                return;
+            }
+            finally
+            {
+                _autoFinishing = false;
+            }
+        }
+
+        if (_job.PreparedReferenceStatus == DanceSellReferenceStatuses.Approved
+            && _job.MotionVideoMediaId is not null
+            && !_busy)
+        {
+            _autoFinishing = true;
+            try
+            {
+                await UpdateBusinessAsync();
+                _job = await DanceSell.QueueRenderAsync(_job.Id, AuthState.CurrentUser);
+                _tabIndex = 3;
+                await ReloadAsync();
+            }
+            finally
+            {
+                _autoFinishing = false;
+            }
+        }
+    }
+
     private async Task RetryAsync() => await RunAsync(async () =>
     {
         _job = await DanceSell.RetryAsync(_job!.Id, AuthState.CurrentUser!);
@@ -980,7 +1050,8 @@
             PlacementMode = DanceSellPlacementModes.WearProduct,
             ReferenceMode = DanceSellReferenceModes.GenerateReference,
             Mode = "720p",
-            CharacterOrientation = "image"
+            CharacterOrientation = "image",
+            AutoFinish = _autoFinish
         }, AuthState.CurrentUser!);
 
     private async Task RefreshEstimateAsync()
@@ -1024,7 +1095,7 @@
             return "Không thể dừng video lúc này. Vui lòng thử lại.";
         }
 
-        return message;
+        return DanceSellCustomerErrorPolicy.Message(message);
     }
 
     private string BuildPrompt()
@@ -1174,4 +1245,8 @@
     .rdance-result-frame.is-failed { border: 1px solid rgba(244,67,54,.36); background: rgba(244,67,54,.08); color: rgba(255,255,255,.58); }
     .rdance-media-player, .rdance-result-player { width: 100%; max-height: 520px; border-radius: 8px; background: #090d12; }
     .rdance-result-player { max-width: 640px; aspect-ratio: 9 / 16; object-fit: contain; }
+    @@media (min-width: 960px) {
+        .rdance-video-preview-column, .rdance-reference-preview-column { flex: 0 0 36.36% !important; max-width: 36.36% !important; }
+        .rdance-video-tab .mud-grid-item:nth-child(3) { flex: 0 0 27.28% !important; max-width: 27.28% !important; }
+    }
 </style>

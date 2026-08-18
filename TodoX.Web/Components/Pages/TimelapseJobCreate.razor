@@ -130,6 +130,9 @@
                                     </button>
                                 </div>
                             </MudStack>
+                            <MudSwitch T="bool" Color="Color.Warning" @bind-Value="_request.AutoFinish">
+                                Tự động hoàn thành
+                            </MudSwitch>
 
                             @if (_profiles.Count == 0)
                             {
@@ -478,6 +481,10 @@
                 _selectedFile.ContentType,
                 AuthState.CurrentUser);
 
+            if (_request.AutoFinish)
+            {
+                job = await Jobs.StartOrResumeAsync(job.Id, AuthState.CurrentUser);
+            }
             Navigation.NavigateTo($"/jobs/timelapse/{job.Id}");
         }
         catch (Exception ex)
