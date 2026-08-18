@@ -12,6 +12,8 @@ public sealed class SceneImageBatchInput
     public long ProjectId { get; set; }
     public string AspectRatio { get; set; } = "9:16";
     public long? CharacterId { get; set; }
+    public string? CharacterReferenceObjectKey { get; set; }
+    public string? CharacterReferenceUrl { get; set; }
     public Guid UserId { get; set; }
     public Guid? CustomerId { get; set; }
     public string? CreatedBy { get; set; }
@@ -124,6 +126,14 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
 
     private async Task<(Guid? MediaId, string? Url, string? ObjectKey, string? CharacterPrompt)> ResolveCharacterReferenceAsync(SceneImageBatchInput input, CancellationToken ct)
     {
+        if (input.CharacterId is null
+            && (!string.IsNullOrWhiteSpace(input.CharacterReferenceUrl) || !string.IsNullOrWhiteSpace(input.CharacterReferenceObjectKey)))
+        {
+            var mediaId = await _sceneImages.ResolveCharacterReferenceMediaIdAsync(
+                input.ProjectId, input.CharacterReferenceUrl, input.CharacterReferenceObjectKey, input.UserId, input.CustomerId, ct);
+            return (mediaId, input.CharacterReferenceUrl, input.CharacterReferenceObjectKey, null);
+        }
+
         if (input.CharacterId is not long characterId)
         {
             return (null, null, null, null);

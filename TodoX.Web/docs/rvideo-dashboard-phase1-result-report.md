@@ -3,13 +3,13 @@
 ## Git
 
 - Branch: `integration/rdance-on-construction-video-core`
-- Base SHA: `a827d51d1af1596e931c2075dccc2619052126a2`
+- Starting SHA: `6faf7b212d8c9fe2d923aa1f360bc4e3721b23eb`
 - Scope: native TodoX RVIDEO dashboard foundation; no Telegram wrapper and no n8n change.
 - Commits:
   - `9d1884d` `feat(rvideo): add dashboard shell information and execution mode`
   - `4e000e0` `feat(rvideo): add scene editor and json import export`
-  - final commit: `feat(rvideo): add automatic lifecycle execution foundation`
-- Final SHA: filled after the report commit is amended.
+  - correction commit: `fix(rvideo): complete information settings and auto render configuration`
+- Final SHA: populated after the correction commit is created.
 
 ## Implemented
 
@@ -32,6 +32,12 @@
 - Disabled browser-driven lifecycle transitions. Browser polling only refreshes display state.
 - Added `RVideoLifecycleWorker`, which evaluates AUTO jobs server-side and uses the existing project-scoped idempotent enqueue/claim/lock worker architecture for video and final merge.
 - Added regression tests for import aliases/order, manual stop, AUTO transitions, duration validation, and library voice validation.
+- Removed the hard-coded AUTO video values `9:16` and `720P`; lifecycle resolves the persisted project prompt settings and covers both `16:9` and `9:16`.
+- Completed explicit Character `NONE/UPLOAD/LIBRARY` state, tenant-scoped library selection, local media upload/preview/remove, and immutable runtime snapshots.
+- Connected active Voice Library and Music Library catalogs, previews, rate/volume controls, local-MP3 validation, and reload restoration.
+- Added per-scene `tts_rate` persistence through scene metadata and editor state.
+- AUTO now validates persisted settings before provider work and server-side queues the initial image batch using the existing idempotent project queue path.
+- Removed the duplicate `Tự động hoàn thành` control; `MANUAL/AUTO` is the single automation choice.
 
 ## Database
 
@@ -44,7 +50,7 @@ The migration creates only `video_render.rvideo_job_settings` and its tenant/mod
 ## Lifecycle
 
 - Manual mode: user starts image rendering, reviews terminal images, explicitly starts video, then explicitly finalizes.
-- Auto mode: server worker evaluates persisted state and queues image-to-video/final merge stages without browser or Telegram session dependency.
+- Auto mode: server worker validates configuration, queues missing scene images, then evaluates image-to-video/final merge stages without browser or Telegram session dependency.
 - Duplicate protection: existing `EnqueueForProjectIfNoneActiveAsync` advisory-lock/idempotency path is reused; existing provider task/version resume behavior is preserved.
 
 ## Compatibility
@@ -56,7 +62,7 @@ The migration creates only `video_render.rvideo_job_settings` and its tenant/mod
 ## Validation
 
 - `dotnet build TodoX.Web.csproj --no-restore`: passed, 0 errors.
-- `dotnet test Tests\TodoX.Web.Phase1B.Tests.csproj --no-restore --logger "console;verbosity=minimal"`: passed, 14/14.
+- `dotnet test Tests\TodoX.Web.Phase1B.Tests.csproj --no-restore --logger "console;verbosity=minimal"`: passed, 19/19.
 - `git diff --check`: passed.
 - `dotnet publish TodoX.Web.csproj --no-restore -c Release -o D:\todoX\Dashboard-web\TodoXPortal\todoX-Dashboard-SaaS\artifacts\publish\todox-dashboard`: passed.
 - `dotnet format TodoX.Web.csproj --verify-no-changes --no-restore`: not clean because of pre-existing whitespace diagnostics in unrelated files including `AccountRepository.cs`, `AuditRepository.cs`, `WalletService.cs`, and settings/profile repositories. Those files were not changed.

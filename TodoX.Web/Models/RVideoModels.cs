@@ -1,4 +1,6 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
+using TodoX.Web.Services.VideoRender;
 
 namespace TodoX.Web.Models;
 
@@ -21,6 +23,19 @@ public static class RVideoVoiceModes
 {
     public const string None = "NONE";
     public const string Native = "NATIVE";
+    public const string Library = "LIBRARY";
+}
+
+public static class RVideoCharacterModes
+{
+    public const string None = "NONE";
+    public const string Upload = "UPLOAD";
+    public const string Library = "LIBRARY";
+}
+
+public static class RVideoMusicModes
+{
+    public const string None = "NONE";
     public const string Library = "LIBRARY";
 }
 
@@ -96,6 +111,8 @@ public sealed record RVideoLifecycleDecision(string Stage, bool ShouldQueueVideo
 public static class RVideoRules
 {
     public static readonly int[] SupportedDurations = [4, 6, 8, 10];
+    public static readonly string[] SupportedAspectRatios = ["16:9", "9:16"];
+    public static readonly string[] SupportedResolutions = ["720p", "1080p", "4K"];
 
     public static string NormalizeExecutionMode(string? value)
         => string.Equals(value, RVideoExecutionModes.Auto, StringComparison.OrdinalIgnoreCase)
@@ -110,24 +127,126 @@ public static class RVideoRules
             _ => RVideoVoiceModes.None
         };
 
+    public static string NormalizeCharacterMode(string? value)
+        => value?.Trim().ToUpperInvariant() switch
+        {
+            RVideoCharacterModes.Upload => RVideoCharacterModes.Upload,
+            RVideoCharacterModes.Library => RVideoCharacterModes.Library,
+            _ => RVideoCharacterModes.None
+        };
+
+    public static string NormalizeMusicMode(string? value, string? catalogCode)
+        => string.IsNullOrWhiteSpace(catalogCode) ? RVideoMusicModes.None : RVideoMusicModes.Library;
+
+    public static string? NormalizeAspectRatio(string? value)
+        => SupportedAspectRatios.FirstOrDefault(x => string.Equals(x, value?.Trim(), StringComparison.OrdinalIgnoreCase));
+
+    public static string? NormalizeResolution(string? value)
+        => SupportedResolutions.FirstOrDefault(x => string.Equals(x, value?.Trim(), StringComparison.OrdinalIgnoreCase));
+
+    public static (string AspectRatio, string Resolution) ResolveRenderSettings(string? prompt, string? fallbackAspectRatio = null, string? fallbackResolution = null)
+    {
+        var parsed = new TodoXVideoPromptParser().Parse(prompt);
+        var aspect = NormalizeAspectRatio(parsed.Model.AspectRatio)
+            ?? NormalizeAspectRatio(fallbackAspectRatio)
+            ?? "16:9";
+        var resolution = NormalizeResolution(parsed.Model.Resolution)
+            ?? NormalizeResolution(fallbackResolution)
+            ?? "720p";
+        return (aspect, resolution);
+    }
+
     public static void ValidateSettings(RVideoJobSettingsRequest request)
     {
         request.ExecutionMode = NormalizeExecutionMode(request.ExecutionMode);
         request.VoiceMode = NormalizeVoiceMode(request.VoiceMode);
-        request.CharacterMode = string.IsNullOrWhiteSpace(request.CharacterMode) ? "NONE" : request.CharacterMode.Trim().ToUpperInvariant();
+        request.CharacterMode = NormalizeCharacterMode(request.CharacterMode);
         if (request.MusicVolume is < 0 or > 1) throw new InvalidOperationException("RVVIDEO_MUSIC_VOLUME_INVALID");
         if (request.DefaultTtsRate <= 0) throw new InvalidOperationException("RVVIDEO_TTS_RATE_INVALID");
-        if (request.VoiceMode == RVideoVoiceModes.Library && string.IsNullOrWhiteSpace(request.VoiceCatalogCode))
-        {
-            throw new InvalidOperationException("RVVIDEO_LIBRARY_VOICE_REQUIRED");
-        }
         if (request.SkipCharacter)
         {
-            request.CharacterMode = "NONE";
+            request.CharacterMode = RVideoCharacterModes.None;
             request.SelectedCharacterId = null;
             request.CharacterSnapshot = null;
         }
+        else if (request.CharacterMode == RVideoCharacterModes.Upload
+                 && request.CharacterSnapshot is null)
+        {
+            throw new InvalidOperationException("RVVIDEO_UPLOADED_CHARACTER_REQUIRED");
+        }
+        else if (request.CharacterMode == RVideoCharacterModes.Library
+                 && (request.SelectedCharacterId is null || request.CharacterSnapshot is null))
+        {
+            throw new InvalidOperationException("RVVIDEO_LIBRARY_CHARACTER_REQUIRED");
+        }
+        else if (request.CharacterMode == RVideoCharacterModes.None)
+        {
+            throw new InvalidOperationException("RVVIDEO_CHARACTER_MODE_REQUIRED");
+        }
+
+        if (request.VoiceMode == RVideoVoiceModes.Library
+            && (string.IsNullOrWhiteSpace(request.VoiceCatalogCode) || request.VoiceSnapshot is null))
+        {
+            throw new InvalidOperationException("RVVIDEO_LIBRARY_VOICE_REQUIRED");
+        }
+        if (request.VoiceMode != RVideoVoiceModes.Library)
+        {
+            request.VoiceCatalogCode = null;
+            request.VoiceSnapshot = null;
+        }
+        if (string.IsNullOrWhiteSpace(request.MusicCatalogCode))
+        {
+            request.MusicCatalogCode = null;
+            request.MusicSnapshot = null;
+        }
+        else if (request.MusicSnapshot is null)
+        {
+            throw new InvalidOperationException("RVVIDEO_LIBRARY_MUSIC_REQUIRED");
+        }
     }
+
+    public static void ValidateActiveVoice(AiStudioVoiceDto? voice, RVideoJobSettingsRequest request)
+    {
+        if (request.VoiceMode != RVideoVoiceModes.Library) return;
+        if (voice is null || !voice.IsActive || string.IsNullOrWhiteSpace(voice.ProviderCode))
+            throw new InvalidOperationException("RVVIDEO_LIBRARY_VOICE_UNAVAILABLE");
+    }
+
+    public static void ValidateActiveMusic(AiStudioMusicDto? music, RVideoJobSettingsRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.MusicCatalogCode)) return;
+        if (music is null || !music.IsActive || !AiStudioCatalogRules.HasLocalMusicFile(music))
+            throw new InvalidOperationException("RVVIDEO_LIBRARY_MUSIC_UNAVAILABLE");
+    }
+
+    public static void ValidateAutoProject(VideoProjectDto project, RVideoJobSettingsDto settings)
+    {
+        if (project.Scenes.Count == 0) throw new InvalidOperationException("RVVIDEO_SCENES_REQUIRED");
+        var render = ResolveRenderSettings(project.OriginalPrompt);
+        if (NormalizeAspectRatio(render.AspectRatio) is null || NormalizeResolution(render.Resolution) is null)
+            throw new InvalidOperationException("RVVIDEO_RENDER_SETTINGS_INVALID");
+        ValidateSettings(ToRequest(settings));
+    }
+
+    public static RVideoJobSettingsRequest ToRequest(RVideoJobSettingsDto settings)
+        => new()
+        {
+            ExecutionMode = settings.ExecutionMode,
+            SkipCharacter = settings.SkipCharacter,
+            CharacterMode = settings.CharacterMode,
+            SelectedCharacterId = settings.SelectedCharacterId,
+            CharacterSnapshot = ParseSnapshot(settings.CharacterSnapshotJson),
+            VoiceMode = settings.VoiceMode,
+            VoiceCatalogCode = settings.VoiceCatalogCode,
+            VoiceSnapshot = ParseSnapshot(settings.VoiceSnapshotJson),
+            DefaultTtsRate = settings.DefaultTtsRate,
+            MusicCatalogCode = settings.MusicCatalogCode,
+            MusicSnapshot = ParseSnapshot(settings.MusicSnapshotJson),
+            MusicVolume = settings.MusicVolume
+        };
+
+    private static object? ParseSnapshot(string? json)
+        => string.IsNullOrWhiteSpace(json) ? null : JsonNode.Parse(json) ?? new JsonObject();
 
     public static void ValidateScene(RVideoSceneEditorItem scene)
     {

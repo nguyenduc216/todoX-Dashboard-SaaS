@@ -11,7 +11,8 @@ public sealed class ScenePromptMetadata
         "image_prompt",
         "motion_prompt",
         "voice",
-        "voice_instruction"
+        "voice_instruction",
+        "tts_rate"
     };
 
     public string? ScenePurpose { get; set; }
@@ -19,6 +20,7 @@ public sealed class ScenePromptMetadata
     public string? MotionPrompt { get; set; }
     public string? Voice { get; set; }
     public string? VoiceInstruction { get; set; }
+    public decimal? TtsRate { get; set; }
     public Dictionary<string, string> Extra { get; } = new(StringComparer.OrdinalIgnoreCase);
 
     public static ScenePromptMetadata FromScene(VideoProjectSceneDto scene)
@@ -73,6 +75,10 @@ public sealed class ScenePromptMetadata
         Add(parts, "motion_prompt", MotionPrompt);
         Add(parts, "voice", Voice);
         Add(parts, "voice_instruction", VoiceInstruction);
+        if (TtsRate is decimal rate && rate > 0)
+        {
+            Add(parts, "tts_rate", rate.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        }
 
         foreach (var item in Extra.OrderBy(x => x.Key, StringComparer.OrdinalIgnoreCase))
         {
@@ -119,6 +125,12 @@ public sealed class ScenePromptMetadata
                 break;
             case "voice_instruction":
                 VoiceInstruction = value;
+                break;
+            case "tts_rate":
+                if (decimal.TryParse(value, System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var rate) && rate > 0)
+                {
+                    TtsRate = rate;
+                }
                 break;
             default:
                 Extra[key.Trim()] = value;

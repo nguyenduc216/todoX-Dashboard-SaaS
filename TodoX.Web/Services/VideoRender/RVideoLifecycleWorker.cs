@@ -1,7 +1,9 @@
 using Dapper;
+using System.Text.Json;
 using TodoX.Web.Data;
 using TodoX.Web.Models;
 using TodoX.Web.Services.Render;
+using TodoX.Web.Services.AiProviders;
 
 namespace TodoX.Web.Services.VideoRender;
 
@@ -38,9 +40,10 @@ public sealed class RVideoLifecycleWorker : BackgroundService
                 var settings = await ListAutoSettingsAsync(factory, tenant, stoppingToken);
                 var repository = scope.ServiceProvider.GetRequiredService<VideoRenderRepository>();
                 var jobs = scope.ServiceProvider.GetRequiredService<IRenderJobService>();
+                var catalog = scope.ServiceProvider.GetRequiredService<IAiStudioCatalogService>();
                 foreach (var setting in settings)
                 {
-                    await EvaluateProjectAsync(setting, repository, jobs, factory, tenant, stoppingToken);
+                    await EvaluateProjectAsync(setting, repository, jobs, factory, tenant, catalog, stoppingToken);
                 }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -56,19 +59,64 @@ public sealed class RVideoLifecycleWorker : BackgroundService
         }
     }
 
-    private static async Task EvaluateProjectAsync(RVideoJobSettingsDto setting, VideoRenderRepository repo, IRenderJobService jobs, TodoXConnectionFactory factory, TenantContext tenant, CancellationToken ct)
+    private async Task EvaluateProjectAsync(RVideoJobSettingsDto setting, VideoRenderRepository repo, IRenderJobService jobs, TodoXConnectionFactory factory, TenantContext tenant, IAiStudioCatalogService catalog, CancellationToken ct)
     {
         var project = await repo.GetProjectAsync(setting.ProjectId, ct);
         if (project is null || project.Scenes.Count == 0) return;
+        try
+        {
+            RVideoRules.ValidateAutoProject(project, setting);
+            var settingsRequest = RVideoRules.ToRequest(setting);
+            RVideoRules.ValidateActiveVoice(
+                await catalog.GetVoiceByCodeAsync(setting.VoiceCatalogCode ?? string.Empty, activeOnly: true, ct),
+                settingsRequest);
+            RVideoRules.ValidateActiveMusic(
+                await catalog.GetMusicByCodeAsync(setting.MusicCatalogCode ?? string.Empty, activeOnly: true, ct),
+                settingsRequest);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "RVVIDEO_AUTO_VALIDATION_FAILED projectId={ProjectId}", setting.ProjectId);
+            return;
+        }
+
+        var renderSettings = RVideoRules.ResolveRenderSettings(project.OriginalPrompt);
         var decision = RVideoRules.Evaluate(setting.ExecutionMode, project.Scenes.Select(x => x.Status).ToList(), !string.IsNullOrWhiteSpace(project.FinalVideoUrl));
-        var settingsRepo = new RVideoJobSettingsRepository(factory, tenant);
+        var settingsRepo = new RVideoJobSettingsRepository(factory, tenant, catalog);
         if (!string.Equals(setting.CurrentStage, decision.Stage, StringComparison.OrdinalIgnoreCase))
         {
             await settingsRepo.SetStageAsync(setting.ProjectId, decision.Stage, ct);
         }
 
         var userId = project.UserId ?? Guid.Empty;
-        if (decision.ShouldQueueVideo)
+        if (project.Scenes.All(x => x.Status == VideoSceneStatuses.Draft))
+        {
+            var imageInput = new SceneImageBatchInput
+            {
+                ProjectId = project.Id,
+                AspectRatio = renderSettings.AspectRatio,
+                CharacterReferenceObjectKey = ReadSnapshotString(setting.CharacterSnapshotJson, "storageKey"),
+                CharacterReferenceUrl = ReadSnapshotString(setting.CharacterSnapshotJson, "fileUrl", "masterImageUrl"),
+                UserId = userId,
+                CustomerId = project.CustomerId,
+                OnlyMissingOrFailed = true
+            };
+            await jobs.EnqueueForProjectIfNoneActiveAsync(new RenderJobCreateModel
+            {
+                JobType = SceneImageBatchRenderHandler.JobTypeName,
+                UserId = userId,
+                CustomerId = project.CustomerId,
+                Input = imageInput,
+                Prompt = new { projectId = project.Id, source = "rvideo_auto_lifecycle", stage = "image" },
+                LogCode = $"video-image-{project.Id}",
+                ProviderCode = SceneImageBatchRenderHandler.RoutingProviderCode,
+                ModelCode = SceneImageBatchRenderHandler.RoutingModelCode,
+                MaxAttempts = 1,
+                PointCostEstimate = 0,
+                PointStatus = RenderPointStatuses.NotRequired
+            }, project.Id, ct);
+        }
+        else if (decision.ShouldQueueVideo)
         {
             var sceneIds = project.Scenes.Where(x => x.Status == VideoSceneStatuses.ImageReady).Select(x => x.Id).ToArray();
             if (sceneIds.Length == 0) return;
@@ -81,8 +129,8 @@ public sealed class RVideoLifecycleWorker : BackgroundService
                 {
                     ProjectId = project.Id,
                     SceneIds = sceneIds,
-                    AspectRatio = "9:16",
-                    Resolution = "720P",
+                    AspectRatio = renderSettings.AspectRatio,
+                    Resolution = renderSettings.Resolution,
                     UserId = userId,
                     CustomerId = project.CustomerId
                 },
@@ -126,5 +174,23 @@ public sealed class RVideoLifecycleWorker : BackgroundService
              WHERE tenant_id=@tenant AND execution_mode='AUTO';
             """, new { tenant = tenant.TenantId });
         return rows.ToList();
+    }
+
+    private static string? ReadSnapshotString(string? json, params string[] names)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return null;
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            foreach (var name in names)
+            {
+                if (document.RootElement.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String)
+                    return value.GetString();
+            }
+        }
+        catch (JsonException)
+        {
+        }
+        return null;
     }
 }

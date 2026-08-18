@@ -15,6 +15,7 @@
             <MudTextField T="string" Label="Prompt chuyển động/video" @bind-Value="_motionPrompt" Variant="Variant.Outlined" Lines="5" Required="true" />
             <MudTextField T="string" Label="Lời thoại/voice" @bind-Value="_voice" Variant="Variant.Outlined" Lines="4" />
             <MudTextField T="string" Label="Hướng dẫn giọng đọc/voice_instruction" @bind-Value="_voiceInstruction" Variant="Variant.Outlined" Lines="4" />
+            <MudNumericField T="decimal?" Label="Tốc độ nói" @bind-Value="_ttsRate" Min="0.1m" Max="4m" Step="0.05m" Variant="Variant.Outlined" />
         </MudStack>
     </DialogContent>
     <DialogActions>
@@ -34,6 +35,7 @@
     private string? _motionPrompt;
     private string? _voice;
     private string? _voiceInstruction;
+    private decimal? _ttsRate;
 
     private bool CanSubmit
         => !string.IsNullOrWhiteSpace(_imagePrompt)
@@ -46,6 +48,7 @@
         _motionPrompt = Metadata.MotionPrompt;
         _voice = Metadata.Voice;
         _voiceInstruction = Metadata.VoiceInstruction;
+        _ttsRate = Metadata.TtsRate;
     }
 
     private void Submit()
@@ -56,7 +59,8 @@
             ImagePrompt = TrimOrNull(_imagePrompt),
             MotionPrompt = TrimOrNull(_motionPrompt),
             Voice = TrimOrNull(_voice),
-            VoiceInstruction = TrimOrNull(_voiceInstruction)
+            VoiceInstruction = TrimOrNull(_voiceInstruction),
+            TtsRate = _ttsRate
         };
         foreach (var item in Metadata.Extra)
         {

@@ -2,6 +2,7 @@ using System.Text.Json;
 using Dapper;
 using TodoX.Web.Data;
 using TodoX.Web.Models;
+using TodoX.Web.Services;
 
 namespace TodoX.Web.Services.VideoRender;
 
@@ -10,11 +11,13 @@ public sealed class RVideoJobSettingsRepository
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly TodoXConnectionFactory _factory;
     private readonly TenantContext _tenant;
+    private readonly IAiStudioCatalogService _catalog;
 
-    public RVideoJobSettingsRepository(TodoXConnectionFactory factory, TenantContext tenant)
+    public RVideoJobSettingsRepository(TodoXConnectionFactory factory, TenantContext tenant, IAiStudioCatalogService catalog)
     {
         _factory = factory;
         _tenant = tenant;
+        _catalog = catalog;
     }
 
     public async Task<RVideoJobSettingsDto?> GetAsync(long projectId, CancellationToken ct = default)
@@ -29,6 +32,18 @@ public sealed class RVideoJobSettingsRepository
     public async Task<RVideoJobSettingsDto> SaveAsync(long projectId, RVideoJobSettingsRequest request, CancellationToken ct = default)
     {
         RVideoRules.ValidateSettings(request);
+        if (request.VoiceMode == RVideoVoiceModes.Library)
+        {
+            RVideoRules.ValidateActiveVoice(
+                await _catalog.GetVoiceByCodeAsync(request.VoiceCatalogCode!, activeOnly: true, ct),
+                request);
+        }
+        if (!string.IsNullOrWhiteSpace(request.MusicCatalogCode))
+        {
+            RVideoRules.ValidateActiveMusic(
+                await _catalog.GetMusicByCodeAsync(request.MusicCatalogCode!, activeOnly: true, ct),
+                request);
+        }
         await _tenant.EnsureLoadedAsync(ct);
         using var conn = await _factory.OpenAsync(ct);
         return await conn.QuerySingleAsync<RVideoJobSettingsDto>(

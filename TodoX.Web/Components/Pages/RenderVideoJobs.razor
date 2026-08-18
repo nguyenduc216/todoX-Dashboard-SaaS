@@ -1,6 +1,7 @@
 ﻿@page "/render-job"
 @using System.Text.Json
 @using System.Text.Json.Nodes
+@using Microsoft.AspNetCore.Components.Forms
 @using TodoX.Web.Components.Dialogs
 @using TodoX.Web.Services.AiProviders
 @inject AuthStateService AuthState
@@ -9,10 +10,12 @@
 @inject TodoX.Web.Services.Render.IRenderJobService RenderJobs
 @inject TodoX.Web.Services.Render.ISceneImageRenderService SceneImages
 @inject TodoX.Web.Services.AiCharacters.IAiCharacterService Characters
+@inject TodoX.Web.Services.IAiStudioCatalogService Catalog
 @inject TodoX.Web.Services.VideoRender.ITodoXVideoPromptParser PromptParser
 @inject TodoX.Web.Services.AiProviders.IAiImageRenderRouter ImageRenderRouter
 @inject TodoX.Web.Services.AiProviders.IAiProviderService AiProviders
 @inject TodoX.Web.Services.Media.IMediaFileService MediaFiles
+@inject TenantContext Tenant
 @inject TodoX.Web.Services.VideoRender.ISceneMediaVersioningService SceneVersions
 @inject TodoX.Web.Services.VideoRender.RVideoJobSettingsRepository RVideoSettings
 @inject IOptionsMonitor<TodoX.Web.Services.VideoRender.VideoRenderOptions> VideoOptions
@@ -65,51 +68,56 @@ else
                             <MudPaper Class="pa-4 d-flex flex-column h-100" Outlined="true" rounded="true">
                                 <MudStack Spacing="2" Class="h-100">
                                     <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
-                                        <MudText Typo="Typo.h6">Nhân vật</MudText>
-                                        <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="ClearSelectedCharacterAsync" Disabled="@(_busy || _selectedCharacter is null)">Không sử dụng Character</MudButton>
+                                        <MudText Typo="Typo.h6">Nhân vật tham chiếu</MudText>
                                     </MudStack>
-                                    <MudAlert Severity="Severity.Info" Dense="true">Chọn một Character hoạt động hoặc để trống để tạo project không dùng Character.</MudAlert>
-                                    <MudSelect T="long?" Label="Chọn nhân vật" Value="@(_selectedCharacterId)" ValueChanged="OnCharacterChangedAsync" Variant="Variant.Outlined" Dense="true" ToStringFunc="ResolveCharacterName">
-                                        <MudSelectItem T="long?" Value="@((long?)null)">Không sử dụng nhân vật</MudSelectItem>
-                                        @foreach (var character in _characters)
-                                        {
-                                            <MudSelectItem T="long?" Value="@character.Id">@character.CharacterName</MudSelectItem>
-                                        }
-                                    </MudSelect>
-                                    <MudDivider />
-                                    @{
-                                        var previewCharacter = ResolveCurrentCharacter();
-                                    }
-                                    @if (previewCharacter is null)
+                                    <MudCheckBox T="bool" Value="@_skipCharacter" ValueChanged="OnSkipCharacterChanged" Label="Không sử dụng nhân vật" />
+                                    @if (_skipCharacter)
                                     {
-                                        <MudPaper Class="pa-4 text-center" Outlined="true" rounded="true">
-                                            <MudText Typo="Typo.body2" Color="Color.Secondary">Chưa chọn nhân vật. Project sẽ được tạo không dùng nhân vật.</MudText>
-                                        </MudPaper>
+                                        <MudAlert Severity="Severity.Info" Dense="true">Đã tắt nhân vật tham chiếu. Video sẽ được tạo không dùng nhân vật cố định.</MudAlert>
                                     }
                                     else
                                     {
-                                        <MudPaper Class="pa-3 selected-character-preview" Outlined="true" rounded="true">
-                                            <MudStack Row="true" Spacing="3" AlignItems="AlignItems.Start">
-                                                <div class="character-thumb-wrap">
-                                                    @if (!string.IsNullOrWhiteSpace(previewCharacter.MasterImageUrl))
-                                                    {
-                                                        <img src="@previewCharacter.MasterImageUrl" style="width:100%;height:100%;object-fit:cover;border-radius:10px;cursor:pointer" @onclick="@(() => OpenCharacterPreview(previewCharacter))" />
-                                                    }
-                                                    else
-                                                    {
-                                                        <MudPaper Class="pa-2 text-center" rounded="true" Outlined="true">No img</MudPaper>
-                                                    }
-                                                </div>
-                                                <MudStack Spacing="1">
-                                                    <MudText Typo="Typo.subtitle1">@previewCharacter.CharacterName</MudText>
-                                                    @if (!string.IsNullOrWhiteSpace(previewCharacter.Description))
-                                                    {
-                                                        <MudText Typo="Typo.body2" Color="Color.Secondary">@previewCharacter.Description</MudText>
-                                                    }
-                                                    <MudText Typo="Typo.caption" Color="Color.Secondary">Nhấn ảnh để xem lớn.</MudText>
-                                                </MudStack>
-                                            </MudStack>
-                                        </MudPaper>
+                                        <MudRadioGroup T="string" @bind-Value="_characterMode">
+                                            <MudRadio T="string" Value="@RVideoCharacterModes.Upload">Upload hình ảnh</MudRadio>
+                                            <MudRadio T="string" Value="@RVideoCharacterModes.Library">Chọn từ Character Library</MudRadio>
+                                        </MudRadioGroup>
+                                        @if (_characterMode == RVideoCharacterModes.Upload)
+                                        {
+                                            <InputFile OnChange="UploadReferenceCharacterAsync" accept="image/png,image/jpeg,image/webp" />
+                                            @if (_uploadedCharacter is not null)
+                                            {
+                                                <MudPaper Class="pa-3" Outlined="true" rounded="true">
+                                                    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+                                                        <MudText>@_uploadedCharacter.FileName</MudText>
+                                                        <MudIconButton Icon="@Icons.Material.Filled.Delete" OnClick="RemoveUploadedCharacterAsync" />
+                                                    </MudStack>
+                                                    <img src="@_uploadedCharacter.FileUrl" style="max-width:100%;max-height:160px;object-fit:contain" />
+                                                </MudPaper>
+                                            }
+                                        }
+                                        else
+                                        {
+                                            <MudSelect T="long?" Label="Chọn nhân vật" Value="@_selectedCharacterId" ValueChanged="OnCharacterChangedAsync" Variant="Variant.Outlined" Dense="true">
+                                                @foreach (var character in _characters)
+                                                {
+                                                    <MudSelectItem T="long?" Value="@character.Id">@character.CharacterName</MudSelectItem>
+                                                }
+                                            </MudSelect>
+                                            @if (ResolveCurrentCharacter() is { } previewCharacter)
+                                            {
+                                                <MudPaper Class="pa-3 selected-character-preview" Outlined="true" rounded="true">
+                                                    <MudStack Row="true" Spacing="3" AlignItems="AlignItems.Start">
+                                                        <div class="character-thumb-wrap">
+                                                            @if (!string.IsNullOrWhiteSpace(previewCharacter.MasterImageUrl))
+                                                            {
+                                                                <img src="@previewCharacter.MasterImageUrl" style="width:100%;height:100%;object-fit:cover;border-radius:10px;cursor:pointer" @onclick="@(() => OpenCharacterPreview(previewCharacter))" />
+                                                            }
+                                                        </div>
+                                                        <MudText Typo="Typo.subtitle1">@previewCharacter.CharacterName</MudText>
+                                                    </MudStack>
+                                                </MudPaper>
+                                            }
+                                        }
                                     }
                                 </MudStack>
                             </MudPaper>
@@ -160,9 +168,6 @@ else
                                         <MudItem xs="12" md="4"><MudNumericField T="int" Label="Giây mỗi scene" @bind-Value="_sceneSeconds" Min="1" Variant="Variant.Outlined" /></MudItem>
                                         <MudItem xs="12" md="4"><MudCheckBox @bind-Value="_thinkScenes" Label="Suy nghĩ kịch bản" /></MudItem>
                                     </MudGrid>
-                                    <MudSwitch T="bool" Color="Color.Warning" @bind-Value="_autoFinish">
-                                        Tự động hoàn thành
-                                    </MudSwitch>
                                     <MudPaper Class="pa-3" Outlined="true" rounded="true">
                                         <MudText Typo="Typo.subtitle1">Chế độ xử lý</MudText>
                                         <MudRadioGroup T="string" @bind-Value="_executionMode">
@@ -172,6 +177,49 @@ else
                                         @if (_executionMode == RVideoExecutionModes.Auto)
                                         {
                                             <MudAlert Severity="Severity.Info" Dense="true">Ở chế độ tự động, server sẽ tiếp tục ảnh → video → hoàn thiện mà không cần xác nhận giữa các giai đoạn.</MudAlert>
+                                        }
+                                    </MudPaper>
+                                    <MudPaper Class="pa-3" Outlined="true" rounded="true">
+                                        <MudText Typo="Typo.subtitle1">Giọng nói</MudText>
+                                        <MudRadioGroup T="string" @bind-Value="_voiceMode">
+                                            <MudRadio T="string" Value="@RVideoVoiceModes.None">Không sử dụng giọng</MudRadio>
+                                            <MudRadio T="string" Value="@RVideoVoiceModes.Native">AI Native Voice + Lip-sync</MudRadio>
+                                            <MudRadio T="string" Value="@RVideoVoiceModes.Library">Giọng đọc từ Voice Library</MudRadio>
+                                        </MudRadioGroup>
+                                        @if (_voiceMode == RVideoVoiceModes.Library)
+                                        {
+                                            <MudSelect T="string" Label="Voice" @bind-Value="_voiceCatalogCode" Dense="true" Variant="Variant.Outlined">
+                                                @foreach (var voice in _voices)
+                                                {
+                                                    <MudSelectItem Value="@voice.Code">@voice.Name</MudSelectItem>
+                                                }
+                                            </MudSelect>
+                                            @if (_voices.FirstOrDefault(x => x.Code == _voiceCatalogCode) is { PreviewFileUrl: not null } voicePreview)
+                                            {
+                                                <audio controls src="@voicePreview.PreviewFileUrl" style="width:100%"></audio>
+                                            }
+                                        }
+                                        <MudNumericField T="decimal" Label="Tốc độ nói mặc định" @bind-Value="_defaultTtsRate" Min="0.1m" Max="4m" Step="0.05m" Variant="Variant.Outlined" />
+                                    </MudPaper>
+                                    <MudPaper Class="pa-3" Outlined="true" rounded="true">
+                                        <MudText Typo="Typo.subtitle1">Nhạc nền</MudText>
+                                        <MudRadioGroup T="string" Value="@_musicMode" ValueChanged="OnMusicModeChanged">
+                                            <MudRadio T="string" Value="@RVideoMusicModes.None">Không dùng</MudRadio>
+                                            <MudRadio T="string" Value="@RVideoMusicModes.Library">Chọn từ Music Library</MudRadio>
+                                        </MudRadioGroup>
+                                        @if (_musicMode == RVideoMusicModes.Library)
+                                        {
+                                            <MudSelect T="string" Label="Music" @bind-Value="_musicCatalogCode" Dense="true" Variant="Variant.Outlined">
+                                                @foreach (var music in _music)
+                                                {
+                                                    <MudSelectItem Value="@music.Code">@music.Name</MudSelectItem>
+                                                }
+                                            </MudSelect>
+                                            @if (_music.FirstOrDefault(x => x.Code == _musicCatalogCode) is { FileUrl: not null } musicPreview)
+                                            {
+                                                <audio controls src="@musicPreview.FileUrl" style="width:100%"></audio>
+                                            }
+                                            <MudNumericField T="decimal" Label="Âm lượng" @bind-Value="_musicVolume" Min="0m" Max="1m" Step="0.05m" Variant="Variant.Outlined" />
                                         }
                                     </MudPaper>
                                     <MudStack Row="true" Spacing="2" Class="flex-wrap gap-2">
@@ -304,6 +352,7 @@ else
                                                 <MudTextField T="string" Label="Purpose" Value="@draft.Purpose" ValueChanged="@((string? value) => UpdateDraft(scene.Id, d => d.Purpose = value))" Variant="Variant.Outlined" Lines="1" Immediate="true" />
                                                 <MudTextField T="string" Label="Voice" Value="@draft.Voice" ValueChanged="@((string? value) => UpdateDraft(scene.Id, d => d.Voice = value))" Variant="Variant.Outlined" Lines="1" Immediate="true" />
                                                 <MudTextField T="string" Label="Voice instruction" Value="@draft.VoiceInstruction" ValueChanged="@((string? value) => UpdateDraft(scene.Id, d => d.VoiceInstruction = value))" Variant="Variant.Outlined" Lines="1" Immediate="true" />
+                                                <MudNumericField T="decimal?" Label="Tốc độ nói" Value="@draft.TtsRate" ValueChanged="@((decimal? value) => UpdateDraft(scene.Id, d => d.TtsRate = value))" Min="0.1m" Max="4m" Step="0.05m" Variant="Variant.Outlined" />
                                             </div>
                                         </div>
                                     </div>
@@ -546,8 +595,19 @@ else
     private VideoProjectDto? _project;
     private List<RenderJobDto> _jobs = new();
     private readonly List<ActiveCharacterDto> _characters = new();
+    private readonly List<AiStudioVoiceDto> _voices = new();
+    private readonly List<AiStudioMusicDto> _music = new();
     private ActiveCharacterDto? _selectedCharacter;
     private long? _selectedCharacterId;
+    private bool _skipCharacter = true;
+    private string _characterMode = RVideoCharacterModes.None;
+    private UploadedCharacterSnapshot? _uploadedCharacter;
+    private string _voiceMode = RVideoVoiceModes.None;
+    private string? _voiceCatalogCode;
+    private decimal _defaultTtsRate = 1.0m;
+    private string _musicMode = RVideoMusicModes.None;
+    private string? _musicCatalogCode;
+    private decimal _musicVolume = 0.8m;
     private string _prompt = string.Empty;
     private string _characterPrompt = string.Empty;
     private TodoXVideoPromptParseResult _promptParseResult = new();
@@ -591,6 +651,7 @@ else
         public string? MotionPrompt { get; set; }
         public string? Voice { get; set; }
         public string? VoiceInstruction { get; set; }
+        public decimal? TtsRate { get; set; }
         public Guid? SelectedImageVersionId { get; set; }
         public Guid? SelectedVideoVersionId { get; set; }
         public string AspectRatio { get; set; } = AspectRatioPortrait;
@@ -643,6 +704,7 @@ else
         if (AuthState.CurrentUser is not null)
         {
             await LoadCharactersAsync();
+            await LoadAudioCatalogsAsync();
         }
         if (AuthState.CurrentUser is not null)
         {
@@ -739,10 +801,15 @@ else
                 CreateEmptyProject = false,
                 Scenes = BuildSceneRequests()
             }, AuthState.CurrentUser.UserId, AuthState.CurrentUser.CustomerId, storageRoot, publicBase, jobFolder);
-        _projectId = result.Id;
+            _projectId = result.Id;
+            await RVideoSettings.SaveAsync(result.Id, BuildRVideoSettingsRequest());
             await ProjectCreated.InvokeAsync(result.Id);
             Logger.LogInformation("VIDEO_RENDER_CREATE_PROJECT_OK projectId={ProjectId} sceneCount={SceneCount} status={Status}", result.Id, result.SceneCount, result.Status);
             await ReloadAsync();
+            if (_executionMode == RVideoExecutionModes.Auto)
+            {
+                await EnqueueBulkSceneImageRenderAsync(onlyMissingOrFailed: true);
+            }
             Snackbar.Add("Đã tạo project và chuyển sang tab Scene / Hình ảnh.", Severity.Success);
             _tabIndex = 1;
             await LogProjectEvent("PROJECT_CREATED", "info", "Đã tạo project và sinh scene plan mock.", new { result.Id, result.SceneCount, result.Status });
@@ -783,6 +850,7 @@ else
                 CreateEmptyProject = true
             }, AuthState.CurrentUser.UserId, AuthState.CurrentUser.CustomerId, storageRoot, publicBase, jobFolder);
             _projectId = result.Id;
+            await RVideoSettings.SaveAsync(result.Id, BuildRVideoSettingsRequest());
             await ProjectCreated.InvokeAsync(result.Id);
             await ReloadAsync();
             _tabIndex = 1;
@@ -975,12 +1043,11 @@ else
                 ApplyVideoSettingsFromPrompt();
                 _totalSeconds = _project.TotalSeconds;
                 _sceneSeconds = _project.SceneSeconds;
-                _selectedCharacterId = _project.CharacterId;
-                if (_project.CharacterId is not null)
+                if (!_skipCharacter && _characterMode == RVideoCharacterModes.Library && _selectedCharacterId is not null)
                 {
-                    await OnCharacterChangedAsync(_project.CharacterId);
+                    await OnCharacterChangedAsync(_selectedCharacterId);
                 }
-                else
+                else if (_skipCharacter)
                 {
                     await ClearSelectedCharacterAsync();
                 }
@@ -1024,6 +1091,9 @@ else
     private async Task OnCharacterChangedAsync(long? characterId)
     {
         _selectedCharacterId = characterId;
+        _skipCharacter = false;
+        _characterMode = RVideoCharacterModes.Library;
+        _uploadedCharacter = null;
         _selectedCharacter = characterId is null ? null : _characters.FirstOrDefault(x => x.Id == characterId.Value);
         if (_selectedCharacter is null && characterId is long id && AuthState.CurrentUser is not null)
         {
@@ -1061,6 +1131,8 @@ else
         _selectedCharacterId = null;
         _selectedCharacter = null;
         _characterPrompt = string.Empty;
+        _skipCharacter = true;
+        _characterMode = RVideoCharacterModes.None;
         return InvokeAsync(StateHasChanged);
     }
 
@@ -1125,6 +1197,7 @@ else
             MotionPrompt = metadata.MotionPrompt,
             Voice = metadata.Voice,
             VoiceInstruction = metadata.VoiceInstruction,
+            TtsRate = metadata.TtsRate,
             AspectRatio = HasProjectAspectRatio ? _aspectRatio : AspectRatioPortrait
         };
     }
@@ -1162,7 +1235,8 @@ else
             ImagePrompt = TrimOrNull(draft.ImagePrompt),
             MotionPrompt = TrimOrNull(draft.MotionPrompt),
             Voice = TrimOrNull(draft.Voice),
-            VoiceInstruction = TrimOrNull(draft.VoiceInstruction)
+            VoiceInstruction = TrimOrNull(draft.VoiceInstruction),
+            TtsRate = draft.TtsRate
         };
 
     private static string? TrimOrNull(string? value)
@@ -1609,6 +1683,87 @@ else
         return string.IsNullOrWhiteSpace(source) ? metadata : $"{source.TrimEnd()}{Environment.NewLine}{metadata}";
     }
 
+    private async Task LoadAudioCatalogsAsync()
+    {
+        try
+        {
+            _voices.Clear();
+            _voices.AddRange(await Catalog.ListVoicesAsync(activeOnly: true));
+            _music.Clear();
+            _music.AddRange(await Catalog.ListMusicAsync(activeOnly: true));
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "RVVIDEO_LOAD_AUDIO_CATALOG_FAILED");
+        }
+    }
+
+    private Task OnMusicModeChanged(string mode)
+    {
+        _musicMode = mode == RVideoMusicModes.Library ? RVideoMusicModes.Library : RVideoMusicModes.None;
+        if (_musicMode == RVideoMusicModes.None)
+        {
+            _musicCatalogCode = null;
+        }
+        return InvokeAsync(StateHasChanged);
+    }
+
+    private Task OnSkipCharacterChanged(bool value)
+    {
+        _skipCharacter = value;
+        if (value)
+        {
+            _characterMode = RVideoCharacterModes.None;
+            _selectedCharacter = null;
+            _selectedCharacterId = null;
+            _uploadedCharacter = null;
+        }
+        else if (_characterMode == RVideoCharacterModes.None)
+        {
+            _characterMode = RVideoCharacterModes.Library;
+        }
+        return InvokeAsync(StateHasChanged);
+    }
+
+    private async Task UploadReferenceCharacterAsync(InputFileChangeEventArgs args)
+    {
+        if (AuthState.CurrentUser is null) return;
+        try
+        {
+            var file = args.File;
+            await using var stream = file.OpenReadStream(12 * 1024 * 1024);
+            using var memory = new MemoryStream();
+            await stream.CopyToAsync(memory);
+            await Tenant.EnsureLoadedAsync();
+            var media = await MediaFiles.SaveAsync(memory.ToArray(), file.Name, file.ContentType, "rvideo_character",
+                AuthState.CurrentUser.UserId, AuthState.CurrentUser.CustomerId, Tenant.TenantId);
+            _uploadedCharacter = new UploadedCharacterSnapshot("UPLOAD", file.Name, media.ObjectKey ?? string.Empty, media.PublicUrl ?? media.FileUrl ?? string.Empty);
+            _skipCharacter = false;
+            _characterMode = RVideoCharacterModes.Upload;
+            _selectedCharacter = null;
+            _selectedCharacterId = null;
+            Snackbar.Add("Đã tải ảnh nhân vật tham chiếu.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "RVVIDEO_UPLOAD_CHARACTER_FAILED");
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+    }
+
+    private Task RemoveUploadedCharacterAsync()
+    {
+        _uploadedCharacter = null;
+        if (_characterMode == RVideoCharacterModes.Upload)
+        {
+            _skipCharacter = true;
+            _characterMode = RVideoCharacterModes.None;
+        }
+        return InvokeAsync(StateHasChanged);
+    }
+
+    private sealed record UploadedCharacterSnapshot(string Source, string FileName, string StorageKey, string FileUrl);
+
     private static bool ReadAutoFinish(string? prompt)
     {
         if (!TryExtractJsonRange(prompt ?? string.Empty, out var start, out var end))
@@ -1783,6 +1938,7 @@ else
         draft.MotionPrompt = metadata.MotionPrompt;
         draft.Voice = metadata.Voice;
         draft.VoiceInstruction = metadata.VoiceInstruction;
+        draft.TtsRate = metadata.TtsRate;
         draft.IsDirty = true;
         await SaveSceneAsync(scene);
     }
@@ -1823,16 +1979,7 @@ else
                 ThinkScenes = _thinkScenes,
                 Scenes = _project.Scenes.OrderBy(x => x.SceneIndex).ToList()
             }, AuthState.CurrentUser);
-            await RVideoSettings.SaveAsync(_project.Id, new RVideoJobSettingsRequest
-            {
-                ExecutionMode = _executionMode,
-                SkipCharacter = _selectedCharacterId is null,
-                CharacterMode = _selectedCharacterId is null ? "NONE" : "LIBRARY",
-                SelectedCharacterId = _selectedCharacterId,
-                VoiceMode = RVideoVoiceModes.None,
-                DefaultTtsRate = 1.0m,
-                MusicVolume = 0.8m
-            });
+            await RVideoSettings.SaveAsync(_project.Id, BuildRVideoSettingsRequest());
             await LogProjectEvent("JOB_SAVED", "info", "Lưu video project render-job.", snapshot);
             Snackbar.Add("Đã lưu job.", Severity.Success);
             await ReloadAsync();
@@ -1850,12 +1997,58 @@ else
         }
     }
 
+    private RVideoJobSettingsRequest BuildRVideoSettingsRequest()
+        => new()
+        {
+            ExecutionMode = _executionMode,
+            SkipCharacter = _skipCharacter,
+            CharacterMode = _skipCharacter ? RVideoCharacterModes.None : _characterMode,
+            SelectedCharacterId = _skipCharacter ? null : _selectedCharacterId,
+            CharacterSnapshot = _skipCharacter
+                ? null
+                : _characterMode == RVideoCharacterModes.Upload
+                    ? _uploadedCharacter
+                    : _selectedCharacter is null ? null : new
+                    {
+                        source = "LIBRARY",
+                        id = _selectedCharacter.Id,
+                        name = _selectedCharacter.CharacterName,
+                        masterImageUrl = _selectedCharacter.MasterImageUrl,
+                        storageKey = _selectedCharacter.MasterImageObjectKey
+                    },
+            VoiceMode = _voiceMode,
+            VoiceCatalogCode = _voiceMode == RVideoVoiceModes.Library ? _voiceCatalogCode : null,
+            VoiceSnapshot = _voiceMode == RVideoVoiceModes.Library
+                ? _voices.FirstOrDefault(x => string.Equals(x.Code, _voiceCatalogCode, StringComparison.OrdinalIgnoreCase))
+                : null,
+            DefaultTtsRate = _defaultTtsRate,
+            MusicCatalogCode = _musicMode == RVideoMusicModes.Library ? _musicCatalogCode : null,
+            MusicSnapshot = _musicMode == RVideoMusicModes.Library
+                ? _music.FirstOrDefault(x => string.Equals(x.Code, _musicCatalogCode, StringComparison.OrdinalIgnoreCase))
+                : null,
+            MusicVolume = _musicVolume
+        };
+
     private async Task LoadRVideoSettingsAsync(long projectId)
     {
         try
         {
             var settings = await RVideoSettings.GetAsync(projectId);
             _executionMode = RVideoRules.NormalizeExecutionMode(settings?.ExecutionMode);
+            _skipCharacter = settings?.SkipCharacter ?? true;
+            _characterMode = _skipCharacter ? RVideoCharacterModes.None : RVideoRules.NormalizeCharacterMode(settings?.CharacterMode);
+            _selectedCharacterId = _skipCharacter ? null : settings?.SelectedCharacterId;
+            _uploadedCharacter = null;
+            if (!string.IsNullOrWhiteSpace(settings?.CharacterSnapshotJson) && _characterMode == RVideoCharacterModes.Upload)
+            {
+                _uploadedCharacter = JsonSerializer.Deserialize<UploadedCharacterSnapshot>(settings.CharacterSnapshotJson);
+            }
+            _voiceMode = RVideoRules.NormalizeVoiceMode(settings?.VoiceMode);
+            _voiceCatalogCode = _voiceMode == RVideoVoiceModes.Library ? settings?.VoiceCatalogCode : null;
+            _defaultTtsRate = settings?.DefaultTtsRate > 0 ? settings.DefaultTtsRate : 1.0m;
+            _musicCatalogCode = settings?.MusicCatalogCode;
+            _musicMode = string.IsNullOrWhiteSpace(_musicCatalogCode) ? RVideoMusicModes.None : RVideoMusicModes.Library;
+            _musicVolume = settings?.MusicVolume is >= 0 and <= 1 ? settings.MusicVolume : 0.8m;
         }
         catch (Exception ex)
         {
@@ -1923,6 +2116,8 @@ else
             ProjectId = _project.Id,
             AspectRatio = _aspectRatio,
             CharacterId = character?.Id ?? _project.CharacterId,
+            CharacterReferenceObjectKey = _characterMode == RVideoCharacterModes.Upload ? _uploadedCharacter?.StorageKey : null,
+            CharacterReferenceUrl = _characterMode == RVideoCharacterModes.Upload ? _uploadedCharacter?.FileUrl : null,
             UserId = AuthState.CurrentUser.UserId,
             CustomerId = AuthState.CurrentUser.CustomerId,
             CreatedBy = AuthState.CurrentUser.Email ?? AuthState.CurrentUser.UserId.ToString(),

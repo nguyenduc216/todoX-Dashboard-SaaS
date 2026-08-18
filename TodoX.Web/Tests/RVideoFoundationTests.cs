@@ -73,7 +73,79 @@ public sealed class RVideoFoundationTests
             new RVideoSceneEditorItem(1, "Hook", 5, "prompt", null, null, null, null, null)));
         Assert.Throws<InvalidOperationException>(() => RVideoRules.ValidateSettings(new RVideoJobSettingsRequest
         {
+            SkipCharacter = true,
             VoiceMode = RVideoVoiceModes.Library
         }));
+    }
+
+    [Theory]
+    [InlineData("16:9", "1080p")]
+    [InlineData("9:16", "720p")]
+    public void AutoRenderSettingsPreservePersistedAspectRatioAndResolution(string ratio, string resolution)
+    {
+        var resolved = RVideoRules.ResolveRenderSettings($$"""
+        {"aspect_ratio":"{{ratio}}","resolution":"{{resolution}}"}
+        """);
+
+        Assert.Equal(ratio, resolved.AspectRatio);
+        Assert.Equal(resolution, resolved.Resolution);
+    }
+
+    [Fact]
+    public void SkipCharacterClearsSelectionAndSnapshot()
+    {
+        var request = new RVideoJobSettingsRequest
+        {
+            SkipCharacter = true,
+            CharacterMode = RVideoCharacterModes.Library,
+            SelectedCharacterId = 42,
+            CharacterSnapshot = new { id = 42 }
+        };
+
+        RVideoRules.ValidateSettings(request);
+
+        Assert.Equal(RVideoCharacterModes.None, request.CharacterMode);
+        Assert.Null(request.SelectedCharacterId);
+        Assert.Null(request.CharacterSnapshot);
+    }
+
+    [Fact]
+    public void UploadAndLibraryCharacterModesRequireRuntimeState()
+    {
+        Assert.Throws<InvalidOperationException>(() => RVideoRules.ValidateSettings(new RVideoJobSettingsRequest
+        {
+            CharacterMode = RVideoCharacterModes.Upload
+        }));
+        Assert.Throws<InvalidOperationException>(() => RVideoRules.ValidateSettings(new RVideoJobSettingsRequest
+        {
+            CharacterMode = RVideoCharacterModes.Library,
+            SelectedCharacterId = 1
+        }));
+    }
+
+    [Fact]
+    public void MusicValidationRequiresLocalActiveMp3()
+    {
+        var valid = new AiStudioMusicDto
+        {
+            Code = "demo",
+            Name = "Demo",
+            IsActive = true,
+            FileName = "demo.mp3",
+            StorageKey = "music/demo.mp3",
+            FileUrl = "/uploads/music/demo.mp3",
+            MimeType = "audio/mpeg"
+        };
+        var request = new RVideoJobSettingsRequest
+        {
+            SkipCharacter = true,
+            MusicCatalogCode = "demo",
+            MusicSnapshot = new { code = "demo" }
+        };
+
+        RVideoRules.ValidateSettings(request);
+        RVideoRules.ValidateActiveMusic(valid, request);
+        valid.IsActive = false;
+        Assert.Throws<InvalidOperationException>(() => RVideoRules.ValidateActiveMusic(valid, request));
     }
 }
