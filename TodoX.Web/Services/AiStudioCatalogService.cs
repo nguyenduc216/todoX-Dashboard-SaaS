@@ -1,4 +1,7 @@
 using Dapper;
+using System.Net;
+using System.Net.Http.Headers;
+using System.Net.Sockets;
 using TodoX.Web.Data;
 using TodoX.Web.Models;
 using TodoX.Web.Services.Media;
@@ -20,6 +23,7 @@ public interface IAiStudioCatalogService
     Task<AiStudioMusicDto> SaveMusicAsync(AiStudioMusicDto music, CurrentUserSession user, CancellationToken ct = default);
     Task DisableMusicAsync(Guid id, CurrentUserSession user, CancellationToken ct = default);
     Task<AiStudioMusicDto> UploadMusicFileAsync(Guid id, byte[] content, string fileName, string contentType, CurrentUserSession user, CancellationToken ct = default);
+    Task<AiStudioMusicDto> ImportMusicFromUrlAsync(Guid id, string url, CurrentUserSession user, CancellationToken ct = default);
 }
 
 public sealed class AiStudioCatalogService : IAiStudioCatalogService
@@ -27,13 +31,20 @@ public sealed class AiStudioCatalogService : IAiStudioCatalogService
     private readonly TodoXConnectionFactory _factory;
     private readonly TenantContext _tenant;
     private readonly IMediaFileService _media;
+    private readonly IHttpClientFactory _httpClients;
     private readonly ILogger<AiStudioCatalogService> _logger;
 
-    public AiStudioCatalogService(TodoXConnectionFactory factory, TenantContext tenant, IMediaFileService media, ILogger<AiStudioCatalogService> logger)
+    public AiStudioCatalogService(
+        TodoXConnectionFactory factory,
+        TenantContext tenant,
+        IMediaFileService media,
+        IHttpClientFactory httpClients,
+        ILogger<AiStudioCatalogService> logger)
     {
         _factory = factory;
         _tenant = tenant;
         _media = media;
+        _httpClients = httpClients;
         _logger = logger;
     }
 
@@ -182,7 +193,12 @@ public sealed class AiStudioCatalogService : IAiStudioCatalogService
     {
         using var conn = await _factory.OpenAsync(ct);
         var sql = MusicSelect + """
-             WHERE (@activeOnly = false OR m.is_active = true)
+             WHERE (@activeOnly = false OR (
+                    m.is_active = true
+                AND m.file_name IS NOT NULL
+                AND m.storage_key IS NOT NULL
+                AND m.file_url LIKE '/%'
+                AND lower(COALESCE(m.mime_type, '')) = 'audio/mpeg'))
                AND (@isActive IS NULL OR m.is_active = @isActive)
                AND (@category IS NULL OR lower(COALESCE(m.category, '')) = lower(@category))
                AND (@search IS NULL OR m.name ILIKE '%' || @search || '%' OR m.code ILIKE '%' || @search || '%' OR COALESCE(m.description, '') ILIKE '%' || @search || '%')
@@ -201,7 +217,16 @@ public sealed class AiStudioCatalogService : IAiStudioCatalogService
     {
         using var conn = await _factory.OpenAsync(ct);
         return await conn.QuerySingleOrDefaultAsync<AiStudioMusicDto>(
-            MusicSelect + " WHERE lower(m.code) = lower(@code) AND (@activeOnly = false OR m.is_active = true) LIMIT 1;",
+            MusicSelect + """
+             WHERE lower(m.code) = lower(@code)
+               AND (@activeOnly = false OR (
+                    m.is_active = true
+                AND m.file_name IS NOT NULL
+                AND m.storage_key IS NOT NULL
+                AND m.file_url LIKE '/%'
+                AND lower(COALESCE(m.mime_type, '')) = 'audio/mpeg'))
+             LIMIT 1;
+            """,
             new { code, activeOnly });
     }
 
@@ -212,6 +237,7 @@ public sealed class AiStudioCatalogService : IAiStudioCatalogService
         if (string.IsNullOrWhiteSpace(music.Category)) music.Category = "other";
         if (music.DefaultVolume == 0) music.DefaultVolume = 0.8m;
         AiStudioCatalogRules.ValidateMusic(music);
+        AiStudioCatalogRules.EnsureMusicCanBeActive(music);
 
         using var conn = await _factory.OpenAsync(ct);
         using var tx = conn.BeginTransaction();
@@ -285,28 +311,29 @@ public sealed class AiStudioCatalogService : IAiStudioCatalogService
     {
         EnsureAdmin(user);
         var music = await GetMusicAsync(id, ct) ?? throw new InvalidOperationException("MUSIC_NOT_FOUND");
-        AiStudioCatalogRules.ValidateAudioUpload(fileName, contentType, content.Length);
-        var mime = AiStudioCatalogRules.NormalizeAudioMime(contentType, fileName);
-        var ext = Path.GetExtension(fileName).ToLowerInvariant();
-        var objectKey = $"ai-studio/music/{music.Code}/{DateTimeOffset.UtcNow:yyyyMMddHHmmss}-{Guid.NewGuid():N}{ext}";
+        AiStudioCatalogRules.ValidateMusicMp3Upload(fileName, contentType, content.Length);
+        const string mime = "audio/mpeg";
+        var objectKey = BuildMusicObjectKey(music.Code);
         var media = await _media.SaveBinaryAtObjectKeyAsync(content, objectKey, fileName, mime, "ai_studio_music", user.UserId, null, _tenant.TenantId, ct);
+        return await UpdateMusicFileAsync(id, media, mime, user, ct) ?? music;
+    }
 
-        using var conn = await _factory.OpenAsync(ct);
-        await conn.ExecuteAsync(
-            """
-            UPDATE public.ai_studio_music
-               SET file_name=@fileName,
-                   storage_key=@storageKey,
-                   file_url=@fileUrl,
-                   mime_type=@mime,
-                   file_size=@size,
-                   updated_at=now(),
-                   updated_by=@userId
-             WHERE id=@id;
-            """,
-            new { id, fileName = Path.GetFileName(fileName), storageKey = media.ObjectKey, fileUrl = media.PublicUrl ?? media.FileUrl, mime, size = media.FileSizeBytes, userId = user.UserId.ToString() });
-        _logger.LogInformation("AI_STUDIO_MUSIC_UPLOADED id={Id} objectKey={ObjectKey} user={UserId}", id, media.ObjectKey, user.UserId);
-        return await GetMusicAsync(id, ct) ?? music;
+    public async Task<AiStudioMusicDto> ImportMusicFromUrlAsync(Guid id, string url, CurrentUserSession user, CancellationToken ct = default)
+    {
+        EnsureAdmin(user);
+        var music = await GetMusicAsync(id, ct) ?? throw new InvalidOperationException("MUSIC_NOT_FOUND");
+        var downloaded = await DownloadRemoteMp3Async(url, ct);
+        var media = await _media.SaveBinaryAtObjectKeyAsync(
+            downloaded.Content,
+            BuildMusicObjectKey(music.Code),
+            downloaded.FileName,
+            "audio/mpeg",
+            "ai_studio_music",
+            user.UserId,
+            null,
+            _tenant.TenantId,
+            ct);
+        return await UpdateMusicFileAsync(id, media, "audio/mpeg", user, ct) ?? music;
     }
 
     private static void EnsureAdmin(CurrentUserSession user)
@@ -330,6 +357,185 @@ public sealed class AiStudioCatalogService : IAiStudioCatalogService
         };
 
     private static string? NullIfBlank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private async Task<AiStudioMusicDto?> UpdateMusicFileAsync(Guid id, MediaFileDto media, string mime, CurrentUserSession user, CancellationToken ct)
+    {
+        var fileUrl = media.PublicUrl ?? media.FileUrl;
+        if (string.IsNullOrWhiteSpace(media.ObjectKey)
+            || string.IsNullOrWhiteSpace(fileUrl)
+            || !fileUrl.StartsWith("/", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("MUSIC_LOCAL_STORAGE_REQUIRED");
+        }
+
+        using var conn = await _factory.OpenAsync(ct);
+        await conn.ExecuteAsync(
+            """
+            UPDATE public.ai_studio_music
+               SET file_name=@fileName,
+                   storage_key=@storageKey,
+                   file_url=@fileUrl,
+                   mime_type=@mime,
+                   file_size=@size,
+                   updated_at=now(),
+                   updated_by=@userId
+             WHERE id=@id;
+            """,
+            new
+            {
+                id,
+                fileName = Path.GetFileName(media.FileName),
+                storageKey = media.ObjectKey,
+                fileUrl,
+                mime,
+                size = media.FileSizeBytes,
+                userId = user.UserId.ToString()
+            });
+        _logger.LogInformation("AI_STUDIO_MUSIC_FILE_STORED id={Id} objectKey={ObjectKey} user={UserId}", id, media.ObjectKey, user.UserId);
+        return await GetMusicAsync(id, ct);
+    }
+
+    private async Task<RemoteMp3> DownloadRemoteMp3Async(string rawUrl, CancellationToken ct)
+    {
+        var current = await ValidatePublicMusicUriAsync(rawUrl, ct);
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(TimeSpan.FromSeconds(30));
+        var client = _httpClients.CreateClient("AiStudioMusicImport");
+
+        for (var redirectCount = 0; redirectCount <= 3; redirectCount++)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, current);
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("audio/mpeg"));
+
+            using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
+            if (IsRedirect(response.StatusCode))
+            {
+                if (redirectCount == 3 || response.Headers.Location is null)
+                {
+                    throw new InvalidOperationException("MUSIC_URL_REDIRECT_INVALID");
+                }
+
+                current = await ValidatePublicMusicUriAsync(new Uri(current, response.Headers.Location).ToString(), timeout.Token);
+                continue;
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new InvalidOperationException("MUSIC_URL_DOWNLOAD_FAILED");
+            }
+
+            var contentType = AiStudioCatalogRules.NormalizeAudioMime(response.Content.Headers.ContentType?.MediaType, current.AbsolutePath);
+            var fileName = Path.GetFileName(current.AbsolutePath);
+            if (string.IsNullOrWhiteSpace(fileName))
+            {
+                fileName = "remote-music";
+            }
+
+            if (response.Content.Headers.ContentLength is long length && length > AiStudioCatalogRules.MaxAudioBytes)
+            {
+                throw new InvalidOperationException("AUDIO_FILE_TOO_LARGE");
+            }
+
+            await using var source = await response.Content.ReadAsStreamAsync(timeout.Token);
+            using var content = new MemoryStream();
+            var buffer = new byte[81920];
+            int read;
+            while ((read = await source.ReadAsync(buffer.AsMemory(0, buffer.Length), timeout.Token)) > 0)
+            {
+                content.Write(buffer, 0, read);
+                if (content.Length > AiStudioCatalogRules.MaxAudioBytes)
+                {
+                    throw new InvalidOperationException("AUDIO_FILE_TOO_LARGE");
+                }
+            }
+
+            AiStudioCatalogRules.ValidateMusicMp3Upload(fileName, contentType, content.Length);
+            if (!LooksLikeMp3(content.GetBuffer().AsSpan(0, (int)content.Length)))
+            {
+                throw new InvalidOperationException("MUSIC_MP3_REQUIRED");
+            }
+
+            return new RemoteMp3(content.ToArray(), fileName);
+        }
+
+        throw new InvalidOperationException("MUSIC_URL_REDIRECT_INVALID");
+    }
+
+    private static async Task<Uri> ValidatePublicMusicUriAsync(string rawUrl, CancellationToken ct)
+    {
+        if (!Uri.TryCreate(rawUrl?.Trim(), UriKind.Absolute, out var uri)
+            || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)
+            || string.IsNullOrWhiteSpace(uri.Host)
+            || string.Equals(uri.Host, "localhost", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("MUSIC_URL_INVALID");
+        }
+
+        IPAddress[] addresses;
+        try
+        {
+            addresses = IPAddress.TryParse(uri.DnsSafeHost, out var address)
+                ? new[] { address }
+                : await Dns.GetHostAddressesAsync(uri.DnsSafeHost, ct);
+        }
+        catch (SocketException)
+        {
+            throw new InvalidOperationException("MUSIC_URL_INVALID");
+        }
+
+        if (addresses.Length == 0 || addresses.Any(IsPrivateOrLocalAddress))
+        {
+            throw new InvalidOperationException("MUSIC_URL_PRIVATE_ADDRESS");
+        }
+
+        return uri;
+    }
+
+    private static bool IsPrivateOrLocalAddress(IPAddress address)
+    {
+        if (IPAddress.IsLoopback(address)
+            || address.Equals(IPAddress.Any)
+            || address.Equals(IPAddress.IPv6Any)
+            || address.Equals(IPAddress.None)
+            || address.Equals(IPAddress.IPv6None)
+            || address.IsIPv6LinkLocal
+            || address.IsIPv6SiteLocal
+            || address.IsIPv6UniqueLocal)
+        {
+            return true;
+        }
+
+        if (address.IsIPv4MappedToIPv6)
+        {
+            return IsPrivateOrLocalAddress(address.MapToIPv4());
+        }
+
+        var bytes = address.GetAddressBytes();
+        return address.AddressFamily == AddressFamily.InterNetwork
+               && (bytes[0] == 10
+                   || bytes[0] == 127
+                   || bytes[0] == 0
+                   || (bytes[0] == 169 && bytes[1] == 254)
+                   || (bytes[0] == 172 && bytes[1] is >= 16 and <= 31)
+                   || (bytes[0] == 192 && bytes[1] == 168));
+    }
+
+    private static bool IsRedirect(HttpStatusCode statusCode)
+        => statusCode is HttpStatusCode.MovedPermanently
+            or HttpStatusCode.Found
+            or HttpStatusCode.SeeOther
+            or HttpStatusCode.TemporaryRedirect
+            or HttpStatusCode.PermanentRedirect;
+
+    private static bool LooksLikeMp3(ReadOnlySpan<byte> bytes)
+        => bytes.Length >= 3
+           && (bytes[..3].SequenceEqual("ID3"u8)
+               || (bytes.Length >= 2 && bytes[0] == 0xFF && (bytes[1] & 0xE0) == 0xE0));
+
+    private static string BuildMusicObjectKey(string code)
+        => $"ai-studio/music/{code}/{DateTimeOffset.UtcNow:yyyyMMddHHmmss}-{Guid.NewGuid():N}.mp3";
+
+    private sealed record RemoteMp3(byte[] Content, string FileName);
 
     private const string VoiceSelect = """
         SELECT v.id AS Id,

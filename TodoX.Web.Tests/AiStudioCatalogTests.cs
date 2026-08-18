@@ -31,7 +31,7 @@ public sealed class AiStudioCatalogTests
     }
 
     [Fact]
-    public void MusicRules_ValidateVolumeAndAudioUploadTypes()
+    public void MusicRules_ValidateVolumeAndRequireLocalMp3ForActivation()
     {
         AiStudioCatalogRules.ValidateMusic(new AiStudioMusicDto
         {
@@ -41,12 +41,33 @@ public sealed class AiStudioCatalogTests
             DefaultVolume = 0.8m
         });
 
-        AiStudioCatalogRules.ValidateAudioUpload("preview.mp3", "audio/mpeg", 128);
-        AiStudioCatalogRules.ValidateAudioUpload("track.wav", "audio/wav", 128);
-        AiStudioCatalogRules.ValidateAudioUpload("track.m4a", "audio/mp4", 128);
+        AiStudioCatalogRules.ValidateMusicMp3Upload("preview.mp3", "audio/mpeg", 128);
+        AiStudioCatalogRules.ValidateAudioUpload("voice.wav", "audio/wav", 128);
+        AiStudioCatalogRules.ValidateAudioUpload("voice.m4a", "audio/mp4", 128);
         Assert.Throws<InvalidOperationException>(() => AiStudioCatalogRules.ValidateMusic(new AiStudioMusicDto { Name = "Bad", Code = "bad", DefaultVolume = 1.1m }));
-        Assert.Throws<InvalidOperationException>(() => AiStudioCatalogRules.ValidateAudioUpload("track.txt", "text/plain", 128));
-        Assert.Throws<InvalidOperationException>(() => AiStudioCatalogRules.ValidateAudioUpload("empty.mp3", "audio/mpeg", 0));
+        Assert.Throws<InvalidOperationException>(() => AiStudioCatalogRules.ValidateMusicMp3Upload("track.wav", "audio/wav", 128));
+        Assert.Throws<InvalidOperationException>(() => AiStudioCatalogRules.ValidateMusicMp3Upload("track.m4a", "audio/mp4", 128));
+        Assert.Throws<InvalidOperationException>(() => AiStudioCatalogRules.ValidateMusicMp3Upload("track.mp3", "text/plain", 128));
+        Assert.Throws<InvalidOperationException>(() => AiStudioCatalogRules.ValidateMusicMp3Upload("empty.mp3", "audio/mpeg", 0));
+        Assert.Throws<InvalidOperationException>(() => AiStudioCatalogRules.EnsureMusicCanBeActive(new AiStudioMusicDto
+        {
+            Name = "Missing file",
+            Code = "missing_file",
+            IsActive = true
+        }));
+
+        var localMusic = new AiStudioMusicDto
+        {
+            Name = "Local MP3",
+            Code = "local_mp3",
+            FileName = "local.mp3",
+            StorageKey = "ai-studio/music/local/local.mp3",
+            FileUrl = "/uploads/ai-studio/music/local/local.mp3",
+            MimeType = "audio/mpeg",
+            IsActive = true
+        };
+        AiStudioCatalogRules.EnsureMusicCanBeActive(localMusic);
+        Assert.True(AiStudioCatalogRules.HasLocalMusicFile(localMusic));
     }
 
     [Fact]
@@ -59,6 +80,8 @@ public sealed class AiStudioCatalogTests
         var menu = ReadSource("TodoX.Web", "Components", "Layout", "MainLayout.razor");
         var voicePage = ReadSource("TodoX.Web", "Components", "Pages", "AiStudioVoices.razor");
         var musicPage = ReadSource("TodoX.Web", "Components", "Pages", "AiStudioMusic.razor");
+        var voiceDialog = ReadSource("TodoX.Web", "Components", "Dialogs", "AiStudioVoiceDialog.razor");
+        var musicDialog = ReadSource("TodoX.Web", "Components", "Dialogs", "AiStudioMusicDialog.razor");
         var migration = ReadSource("database", "migrations", "20260817_ai_studio_voice_music_catalog.sql");
 
         Assert.Contains("AddScoped<IAiStudioCatalogService, AiStudioCatalogService>", program, StringComparison.Ordinal);
@@ -66,13 +89,18 @@ public sealed class AiStudioCatalogTests
         Assert.Contains("MapGroup(\"/api/admin/ai-studio\")", endpoints, StringComparison.Ordinal);
         Assert.Contains("MapGet(\"/voices\"", endpoints, StringComparison.Ordinal);
         Assert.Contains("MapGet(\"/music\"", endpoints, StringComparison.Ordinal);
+        Assert.Contains("MapPost(\"/music/{id:guid}/import-url\"", endpoints, StringComparison.Ordinal);
         Assert.Contains("MapGroup(\"/api/ai-studio\")", endpoints, StringComparison.Ordinal);
         Assert.Contains("activeOnly: true", endpoints, StringComparison.Ordinal);
         Assert.Contains("ProviderVoiceId", service, StringComparison.Ordinal);
         Assert.Contains("UPDATE public.ai_studio_voices SET is_default=false", service, StringComparison.Ordinal);
         Assert.Contains("UPDATE public.ai_studio_music SET is_default=false", service, StringComparison.Ordinal);
         Assert.Contains("ai-studio/voices/{voice.Code}/preview-", service, StringComparison.Ordinal);
-        Assert.Contains("ai-studio/music/{music.Code}/", service, StringComparison.Ordinal);
+        Assert.Contains("ai-studio/music/{code}/", service, StringComparison.Ordinal);
+        Assert.Contains("ImportMusicFromUrlAsync", service, StringComparison.Ordinal);
+        Assert.Contains("ValidatePublicMusicUriAsync", service, StringComparison.Ordinal);
+        Assert.Contains("MUSIC_URL_PRIVATE_ADDRESS", service, StringComparison.Ordinal);
+        Assert.Contains("AllowAutoRedirect = false", program, StringComparison.Ordinal);
         Assert.Contains("\"audio/mpeg\"", media, StringComparison.Ordinal);
         Assert.Contains("GetMaxAudioBytes", media, StringComparison.Ordinal);
         Assert.Contains("BuildAiStudioVoicesItem", menu, StringComparison.Ordinal);
@@ -81,6 +109,14 @@ public sealed class AiStudioCatalogTests
         Assert.Contains("@page \"/admin/ai-studio/music\"", musicPage, StringComparison.Ordinal);
         Assert.Contains("<audio controls", voicePage, StringComparison.Ordinal);
         Assert.Contains("<audio controls", musicPage, StringComparison.Ordinal);
+        Assert.Contains("ShowAsync<Components.Dialogs.AiStudioVoiceDialog>", voicePage, StringComparison.Ordinal);
+        Assert.Contains("ShowAsync<Components.Dialogs.AiStudioMusicDialog>", musicPage, StringComparison.Ordinal);
+        Assert.DoesNotContain("lg=\"4\"", voicePage, StringComparison.Ordinal);
+        Assert.DoesNotContain("lg=\"4\"", musicPage, StringComparison.Ordinal);
+        Assert.Contains("<MudDialog Class=\"ai-studio-asset-dialog\">", voiceDialog, StringComparison.Ordinal);
+        Assert.Contains("<MudDialog Class=\"ai-studio-asset-dialog ai-studio-music-dialog\">", musicDialog, StringComparison.Ordinal);
+        Assert.Contains("accept=\"audio/mpeg,.mp3\"", musicDialog, StringComparison.Ordinal);
+        Assert.Contains("ImportMusicFromUrlAsync", musicDialog, StringComparison.Ordinal);
         Assert.Contains("CREATE TABLE IF NOT EXISTS public.ai_studio_voices", migration, StringComparison.Ordinal);
         Assert.Contains("CREATE TABLE IF NOT EXISTS public.ai_studio_music", migration, StringComparison.Ordinal);
         Assert.Contains("ux_ai_studio_voices_code", migration, StringComparison.Ordinal);

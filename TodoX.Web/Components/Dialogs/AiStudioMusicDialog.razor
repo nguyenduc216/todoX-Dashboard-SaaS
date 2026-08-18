@@ -1,0 +1,233 @@
+@using Microsoft.AspNetCore.Components.Forms
+@using TodoX.Web.Models
+@inject AuthStateService AuthState
+@inject IAiStudioCatalogService Catalog
+@inject ISnackbar Snackbar
+
+<MudDialog Class="ai-studio-asset-dialog ai-studio-music-dialog">
+    <TitleContent>
+        <MudText Typo="Typo.h6">@(IsEditing ? "Sửa nhạc" : "Thêm nhạc")</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudStack Spacing="3">
+            @if (!string.IsNullOrWhiteSpace(_error))
+            {
+                <MudAlert Severity="Severity.Error">@_error</MudAlert>
+            }
+
+            <MudGrid>
+                <MudItem xs="12" sm="6"><MudTextField @bind-Value="_model.Name" Label="Tên" Variant="Variant.Outlined" Required="true" /></MudItem>
+                <MudItem xs="12" sm="6"><MudTextField @bind-Value="_model.Code" Label="Mã" Variant="Variant.Outlined" Required="true" Disabled="@_saved" /></MudItem>
+                <MudItem xs="12"><MudTextField @bind-Value="_model.Description" Label="Description" Variant="Variant.Outlined" Lines="3" /></MudItem>
+                <MudItem xs="12" sm="6">
+                    <MudSelect T="string" @bind-Value="_model.Category" Label="Category" Variant="Variant.Outlined">
+                        @foreach (var category in AiStudioCatalogRules.MusicCategories)
+                        {
+                            <MudSelectItem T="string" Value="@category">@category</MudSelectItem>
+                        }
+                    </MudSelect>
+                </MudItem>
+                <MudItem xs="12" sm="3"><MudNumericField @bind-Value="_model.DefaultVolume" Label="Default Volume (0-1)" Variant="Variant.Outlined" /></MudItem>
+                <MudItem xs="12" sm="3"><MudNumericField @bind-Value="_model.SortOrder" Label="Sort order" Variant="Variant.Outlined" /></MudItem>
+                <MudItem xs="12" sm="4" Class="d-flex align-center"><MudCheckBox @bind-Value="_model.LoopAllowed" Label="Loop allowed" /></MudItem>
+                <MudItem xs="12" sm="4" Class="d-flex align-center"><MudCheckBox @bind-Value="_model.IsActive" Label="Active" /></MudItem>
+                <MudItem xs="12" sm="4" Class="d-flex align-center"><MudCheckBox @bind-Value="_model.IsDefault" Label="Default" /></MudItem>
+            </MudGrid>
+
+            @if (_saved)
+            {
+                <MudDivider />
+                <MudPaper Class="ai-studio-upload-zone pa-4">
+                    <MudStack Spacing="1" AlignItems="AlignItems.Center">
+                        <MudIcon Icon="@Icons.Material.Filled.AudioFile" Size="Size.Large" Color="Color.Warning" />
+                        <MudText Typo="Typo.subtitle2">Kéo file MP3 vào đây</MudText>
+                        <MudText Typo="Typo.caption" Class="todox-page-subtitle">hoặc</MudText>
+                        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Upload" Disabled="@_uploading">Chọn file từ máy</MudButton>
+                        <MudText Typo="Typo.caption" Class="todox-page-subtitle">Chỉ hỗ trợ .mp3</MudText>
+                        @if (!string.IsNullOrWhiteSpace(_selectedFileText))
+                        {
+                            <MudText Typo="Typo.caption">@_selectedFileText</MudText>
+                        }
+                    </MudStack>
+                    <InputFile Class="ai-studio-file-input" OnChange="UploadFile" accept="audio/mpeg,.mp3" disabled="@_uploading" />
+                </MudPaper>
+                @if (_uploading)
+                {
+                    <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+                }
+
+                <MudStack Row="true" AlignItems="AlignItems.End" Class="flex-wrap gap-3">
+                    <MudTextField @bind-Value="_importUrl" Label="Hoặc nhập URL MP3 trực tiếp" Variant="Variant.Outlined" Class="flex-grow-1" />
+                    <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.CloudDownload" Disabled="@(_importing || _uploading)" OnClick="ImportUrl">Tải về hệ thống</MudButton>
+                </MudStack>
+                @if (_importing)
+                {
+                    <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+                }
+
+                @if (!string.IsNullOrWhiteSpace(_model.FileUrl))
+                {
+                    <MudStack Spacing="1">
+                        <audio controls src="@_model.FileUrl" class="ai-studio-audio-player"></audio>
+                        <MudText Typo="Typo.caption">@_model.FileName @FormatOptionalSize(_model.FileSize)</MudText>
+                    </MudStack>
+                }
+            }
+            else
+            {
+                <MudAlert Severity="Severity.Info">Lưu metadata ở trạng thái inactive trước, sau đó upload hoặc import MP3 để bật Active.</MudAlert>
+            }
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton Disabled="@Busy" OnClick="Cancel">Hủy</MudButton>
+        <MudButton Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.Save" Disabled="@Busy" OnClick="Save">Lưu</MudButton>
+    </DialogActions>
+</MudDialog>
+
+<style>
+    .ai-studio-asset-dialog .mud-dialog-content {
+        max-height: min(76vh, 820px);
+        overflow-y: auto;
+    }
+
+    .ai-studio-upload-zone {
+        position: relative;
+        border: 1px dashed rgba(255, 183, 0, 0.55);
+        text-align: center;
+    }
+
+    .ai-studio-file-input {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        opacity: 0;
+        cursor: pointer;
+    }
+
+    .ai-studio-audio-player {
+        width: min(100%, 560px);
+        height: 36px;
+    }
+</style>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter, EditorRequired] public AiStudioMusicDto Model { get; set; } = default!;
+    [Parameter] public bool IsEditing { get; set; }
+
+    private AiStudioMusicDto _model = new();
+    private bool _saved;
+    private bool _saving;
+    private bool _uploading;
+    private bool _importing;
+    private bool _changed;
+    private string? _error;
+    private string? _selectedFileText;
+    private string? _importUrl;
+
+    private bool Busy => _saving || _uploading || _importing;
+
+    protected override void OnInitialized()
+    {
+        _model = Model;
+        _saved = IsEditing;
+    }
+
+    private async Task Save()
+    {
+        _error = null;
+        _saving = true;
+        try
+        {
+            _model = await Catalog.SaveMusicAsync(_model, AuthState.CurrentUser!);
+            _saved = true;
+            _changed = true;
+            Snackbar.Add("Đã lưu nhạc nền.", Severity.Success);
+            if (!AiStudioCatalogRules.HasLocalMusicFile(_model))
+            {
+                return;
+            }
+
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task UploadFile(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        if (file is null) return;
+
+        _error = null;
+        _uploading = true;
+        _selectedFileText = $"{file.Name} ({FormatBytes(file.Size)})";
+        try
+        {
+            AiStudioCatalogRules.ValidateMusicMp3Upload(file.Name, file.ContentType, file.Size);
+            await using var stream = file.OpenReadStream(AiStudioCatalogRules.MaxAudioBytes);
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms);
+            _model = await Catalog.UploadMusicFileAsync(_model.Id, ms.ToArray(), file.Name, file.ContentType, AuthState.CurrentUser!);
+            _changed = true;
+            Snackbar.Add("Đã upload file nhạc.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            _uploading = false;
+        }
+    }
+
+    private async Task ImportUrl()
+    {
+        _error = null;
+        _importing = true;
+        try
+        {
+            _model = await Catalog.ImportMusicFromUrlAsync(_model.Id, _importUrl ?? string.Empty, AuthState.CurrentUser!);
+            _changed = true;
+            _importUrl = null;
+            Snackbar.Add("Đã tải MP3 về hệ thống.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            _importing = false;
+        }
+    }
+
+    private void Cancel()
+    {
+        if (_changed)
+        {
+            MudDialog.Close(DialogResult.Ok(true));
+            return;
+        }
+
+        MudDialog.Cancel();
+    }
+
+    private static string FormatBytes(long size)
+        => size >= 1024 * 1024 ? $"{size / 1024m / 1024m:0.##} MB" : $"{size / 1024m:0.##} KB";
+
+    private static string FormatOptionalSize(long? size)
+        => size is long value ? $"({FormatBytes(value)})" : string.Empty;
+}

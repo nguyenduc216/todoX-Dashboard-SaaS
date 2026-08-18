@@ -1,0 +1,178 @@
+@using Microsoft.AspNetCore.Components.Forms
+@using TodoX.Web.Models
+@inject AuthStateService AuthState
+@inject IAiStudioCatalogService Catalog
+@inject ISnackbar Snackbar
+
+<MudDialog Class="ai-studio-asset-dialog">
+    <TitleContent>
+        <MudText Typo="Typo.h6">@(IsEditing ? "Sửa giọng" : "Thêm giọng")</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudStack Spacing="3">
+            @if (!string.IsNullOrWhiteSpace(_error))
+            {
+                <MudAlert Severity="Severity.Error">@_error</MudAlert>
+            }
+
+            <MudGrid>
+                <MudItem xs="12" sm="6"><MudTextField @bind-Value="_model.Name" Label="Tên" Variant="Variant.Outlined" Required="true" /></MudItem>
+                <MudItem xs="12" sm="6"><MudTextField @bind-Value="_model.Code" Label="Mã" Variant="Variant.Outlined" Required="true" Disabled="@IsEditing" /></MudItem>
+                <MudItem xs="12" sm="6"><MudTextField @bind-Value="_model.ProviderCode" Label="Provider" Variant="Variant.Outlined" Required="true" /></MudItem>
+                <MudItem xs="12" sm="6"><MudTextField @bind-Value="_model.ProviderVoiceId" Label="Provider Voice ID" Variant="Variant.Outlined" /></MudItem>
+                <MudItem xs="12" sm="6"><MudTextField @bind-Value="_model.CompatibilityAlias" Label="Alias cũ" Variant="Variant.Outlined" /></MudItem>
+                <MudItem xs="12" sm="6"><MudTextField @bind-Value="_model.Gender" Label="Giới tính" Variant="Variant.Outlined" /></MudItem>
+                <MudItem xs="12" sm="6"><MudTextField @bind-Value="_model.LanguageCode" Label="Ngôn ngữ" Variant="Variant.Outlined" /></MudItem>
+                <MudItem xs="12" sm="6"><MudTextField @bind-Value="_model.Region" Label="Vùng miền" Variant="Variant.Outlined" /></MudItem>
+                <MudItem xs="12"><MudTextField @bind-Value="_model.Description" Label="Mô tả" Variant="Variant.Outlined" Lines="3" /></MudItem>
+                <MudItem xs="12" sm="4"><MudNumericField @bind-Value="_model.DefaultRate" Label="Default rate" Variant="Variant.Outlined" /></MudItem>
+                <MudItem xs="12" sm="4"><MudNumericField @bind-Value="_model.MinRate" Label="Min rate" Variant="Variant.Outlined" /></MudItem>
+                <MudItem xs="12" sm="4"><MudNumericField @bind-Value="_model.MaxRate" Label="Max rate" Variant="Variant.Outlined" /></MudItem>
+                <MudItem xs="12" sm="4"><MudNumericField @bind-Value="_model.SortOrder" Label="Sort order" Variant="Variant.Outlined" /></MudItem>
+                <MudItem xs="12" sm="4" Class="d-flex align-center"><MudCheckBox @bind-Value="_model.IsActive" Label="Active" /></MudItem>
+                <MudItem xs="12" sm="4" Class="d-flex align-center"><MudCheckBox @bind-Value="_model.IsDefault" Label="Default" /></MudItem>
+            </MudGrid>
+
+            @if (_saved)
+            {
+                <MudDivider />
+                <MudPaper Class="ai-studio-upload-zone pa-4">
+                    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-3">
+                        <MudStack Spacing="1">
+                            <MudText Typo="Typo.subtitle2">Upload preview MP3</MudText>
+                            <MudText Typo="Typo.caption" Class="todox-page-subtitle">Chỉ hỗ trợ .mp3</MudText>
+                            @if (!string.IsNullOrWhiteSpace(_selectedFileText))
+                            {
+                                <MudText Typo="Typo.caption">@_selectedFileText</MudText>
+                            }
+                        </MudStack>
+                        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Upload" Disabled="@_uploading">Chọn file từ máy</MudButton>
+                    </MudStack>
+                    <InputFile Class="ai-studio-file-input" OnChange="UploadPreview" accept="audio/mpeg,.mp3" disabled="@_uploading" />
+                </MudPaper>
+                @if (_uploading)
+                {
+                    <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+                }
+                @if (!string.IsNullOrWhiteSpace(_model.PreviewFileUrl))
+                {
+                    <audio controls src="@_model.PreviewFileUrl" class="ai-studio-audio-player"></audio>
+                }
+            }
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton Disabled="@(_saving || _uploading)" OnClick="Cancel">Hủy</MudButton>
+        <MudButton Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.Save" Disabled="@(_saving || _uploading)" OnClick="Save">Lưu</MudButton>
+    </DialogActions>
+</MudDialog>
+
+<style>
+    .ai-studio-asset-dialog .mud-dialog-content {
+        max-height: min(76vh, 780px);
+        overflow-y: auto;
+    }
+
+    .ai-studio-upload-zone {
+        position: relative;
+        border: 1px dashed rgba(255, 183, 0, 0.55);
+    }
+
+    .ai-studio-file-input {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        opacity: 0;
+        cursor: pointer;
+    }
+
+    .ai-studio-audio-player {
+        width: min(100%, 520px);
+        height: 36px;
+    }
+</style>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter, EditorRequired] public AiStudioVoiceDto Model { get; set; } = default!;
+    [Parameter] public bool IsEditing { get; set; }
+
+    private AiStudioVoiceDto _model = new();
+    private bool _saved;
+    private bool _saving;
+    private bool _uploading;
+    private bool _changed;
+    private string? _error;
+    private string? _selectedFileText;
+
+    protected override void OnInitialized()
+    {
+        _model = Model;
+        _saved = IsEditing;
+    }
+
+    private async Task Save()
+    {
+        _error = null;
+        _saving = true;
+        try
+        {
+            _model = await Catalog.SaveVoiceAsync(_model, AuthState.CurrentUser!);
+            Snackbar.Add("Đã lưu giọng đọc.", Severity.Success);
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task UploadPreview(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        if (file is null) return;
+
+        _error = null;
+        _uploading = true;
+        _selectedFileText = $"{file.Name} ({FormatBytes(file.Size)})";
+        try
+        {
+            AiStudioCatalogRules.ValidateMusicMp3Upload(file.Name, file.ContentType, file.Size);
+            await using var stream = file.OpenReadStream(AiStudioCatalogRules.MaxAudioBytes);
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms);
+            _model = await Catalog.UploadVoicePreviewAsync(_model.Id, ms.ToArray(), file.Name, file.ContentType, AuthState.CurrentUser!);
+            _changed = true;
+            Snackbar.Add("Đã upload preview.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            _uploading = false;
+        }
+    }
+
+    private void Cancel()
+    {
+        if (_changed)
+        {
+            MudDialog.Close(DialogResult.Ok(true));
+            return;
+        }
+
+        MudDialog.Cancel();
+    }
+
+    private static string FormatBytes(long size)
+        => size >= 1024 * 1024 ? $"{size / 1024m / 1024m:0.##} MB" : $"{size / 1024m:0.##} KB";
+}

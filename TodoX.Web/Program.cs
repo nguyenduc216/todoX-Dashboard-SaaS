@@ -142,6 +142,8 @@ builder.Services.AddScoped<TodoX.Web.Services.AiProviders.IProviderCredentialRep
 builder.Services.AddScoped<TodoX.Web.Services.AiProviders.IProviderCredentialResolver, TodoX.Web.Services.AiProviders.ProviderCredentialResolver>();
 builder.Services.AddScoped<TodoX.Web.Services.AiProviders.IAi79CredentialMigrationService, TodoX.Web.Services.AiProviders.Ai79CredentialMigrationService>();
 builder.Services.AddHttpClient<TodoX.Web.Services.AiProviders.IAi79CatalogClient, TodoX.Web.Services.AiProviders.Ai79CatalogClient>();
+builder.Services.AddHttpClient("AiStudioMusicImport", client => client.Timeout = Timeout.InfiniteTimeSpan)
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
 builder.Services.Configure<TodoX.Web.Services.AiProviders.AiProviderCatalogSyncOptions>(builder.Configuration.GetSection(TodoX.Web.Services.AiProviders.AiProviderCatalogSyncOptions.SectionName));
 builder.Services.AddHostedService<TodoX.Web.Services.AiProviders.AiProviderCatalogSyncWorker>();
 builder.Services.AddScoped<TodoX.Web.Services.AiProviders.IAiBillingPayerResolver, TodoX.Web.Services.AiProviders.AiBillingPayerResolver>();

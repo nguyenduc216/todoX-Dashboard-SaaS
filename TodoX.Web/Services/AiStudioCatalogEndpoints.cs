@@ -20,6 +20,7 @@ public static class AiStudioCatalogEndpoints
         admin.MapPut("/music/{id:guid}", UpdateMusicAsync).DisableAntiforgery();
         admin.MapDelete("/music/{id:guid}", DisableMusicAsync).DisableAntiforgery();
         admin.MapPost("/music/{id:guid}/file", UploadMusicFileAsync).DisableAntiforgery();
+        admin.MapPost("/music/{id:guid}/import-url", ImportMusicFromUrlAsync).DisableAntiforgery();
 
         var runtime = app.MapGroup("/api/ai-studio");
         runtime.MapGet("/voices", (IAiStudioCatalogService service, CancellationToken ct) => service.ListVoicesAsync(activeOnly: true, ct: ct));
@@ -130,6 +131,9 @@ public static class AiStudioCatalogEndpoints
     private static Task<AiStudioMusicDto> UploadMusicFileAsync(Guid id, HttpRequest request, AuthStateService auth, IAiStudioCatalogService service, CancellationToken ct)
         => ExecuteAdminFileAsync(request, auth, (file, bytes) => service.UploadMusicFileAsync(id, bytes, file.FileName, file.ContentType, auth.CurrentUser!, ct), ct);
 
+    private static Task<AiStudioMusicDto> ImportMusicFromUrlAsync(Guid id, AiStudioMusicImportUrlRequest request, AuthStateService auth, IAiStudioCatalogService service, CancellationToken ct)
+        => ExecuteAdminAsync(auth, () => service.ImportMusicFromUrlAsync(id, request.Url, auth.CurrentUser!, ct));
+
     private static async Task<T> ExecuteAdminAsync<T>(AuthStateService auth, Func<Task<T>> action)
     {
         EnsureAdmin(auth);
@@ -155,6 +159,7 @@ public static class AiStudioCatalogEndpoints
         var form = await request.ReadFormAsync(ct);
         var file = form.Files.FirstOrDefault();
         if (file is null || file.Length == 0) throw new InvalidOperationException("AI_STUDIO_INVALID_UPLOAD");
+        if (file.Length > AiStudioCatalogRules.MaxAudioBytes) throw new InvalidOperationException("AUDIO_FILE_TOO_LARGE");
         await using var stream = file.OpenReadStream();
         using var ms = new MemoryStream();
         await stream.CopyToAsync(ms, ct);

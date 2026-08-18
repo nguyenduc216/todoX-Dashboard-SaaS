@@ -67,6 +67,11 @@ public sealed class AiStudioCatalogFilter
     public bool? IsActive { get; set; }
 }
 
+public sealed class AiStudioMusicImportUrlRequest
+{
+    public string Url { get; set; } = string.Empty;
+}
+
 public sealed record AiStudioUploadResult(string FileName, string StorageKey, string FileUrl, string MimeType, long FileSize);
 
 public static class AiStudioCatalogRules
@@ -115,6 +120,33 @@ public static class AiStudioCatalogRules
         if (string.IsNullOrWhiteSpace(music.Code)) throw new InvalidOperationException("MUSIC_CODE_REQUIRED");
         if (music.DefaultVolume is < 0 or > 1) throw new InvalidOperationException("MUSIC_VOLUME_INVALID");
         if (string.IsNullOrWhiteSpace(music.Category)) music.Category = "other";
+    }
+
+    public static bool HasLocalMusicFile(AiStudioMusicDto music)
+        => !string.IsNullOrWhiteSpace(music.FileName)
+           && !string.IsNullOrWhiteSpace(music.StorageKey)
+           && !string.IsNullOrWhiteSpace(music.FileUrl)
+           && music.FileUrl.StartsWith("/", StringComparison.Ordinal)
+           && string.Equals(music.MimeType, "audio/mpeg", StringComparison.OrdinalIgnoreCase);
+
+    public static void EnsureMusicCanBeActive(AiStudioMusicDto music)
+    {
+        if (music.IsActive && !HasLocalMusicFile(music))
+        {
+            throw new InvalidOperationException("MUSIC_FILE_REQUIRED");
+        }
+    }
+
+    public static void ValidateMusicMp3Upload(string fileName, string? contentType, long length)
+    {
+        if (length <= 0) throw new InvalidOperationException("AUDIO_FILE_EMPTY");
+        if (length > MaxAudioBytes) throw new InvalidOperationException("AUDIO_FILE_TOO_LARGE");
+
+        if (!string.Equals(Path.GetExtension(fileName), ".mp3", StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(NormalizeAudioMime(contentType, fileName), "audio/mpeg", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("MUSIC_MP3_REQUIRED");
+        }
     }
 
     public static void ValidateAudioUpload(string fileName, string? contentType, long length, bool allowWaveAndM4a = true)
