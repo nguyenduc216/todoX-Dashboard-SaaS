@@ -519,6 +519,51 @@ public sealed class Ai79TaskClientTests
     }
 
     [Fact]
+    public async Task VideoPoll_BearerSuccessDataDownloadUrlExtractsOutput()
+    {
+        var result = await PollBearerAsync("""{"data":{"status":"MEDIA_GENERATION_STATUS_SUCCESSFUL","download_url":"https://ai-cdn.gommo.net/result.mp4"}}""");
+
+        Assert.Equal(Ai79TaskStatusNormalizer.Success, result.NormalizedStatus);
+        Assert.Equal("https://ai-cdn.gommo.net/result.mp4", result.OutputUrl);
+    }
+
+    [Fact]
+    public async Task VideoPoll_BearerSuccessDataResultUrlExtractsOutput()
+    {
+        var result = await PollBearerAsync("""{"data":{"status":"SUCCESS","result_url":"https://ai-cdn.gommo.net/result2.mp4"}}""");
+
+        Assert.Equal(Ai79TaskStatusNormalizer.Success, result.NormalizedStatus);
+        Assert.Equal("https://ai-cdn.gommo.net/result2.mp4", result.OutputUrl);
+    }
+
+    [Fact]
+    public async Task VideoPoll_BearerSuccessRawVideoInfoDownloadUrlExtractsOutput()
+    {
+        var result = await PollBearerAsync("""{"raw":{"videoInfo":{"status":"COMPLETED","download_url":"https://ai-cdn.gommo.net/result3.mp4"}}}""");
+
+        Assert.Equal(Ai79TaskStatusNormalizer.Success, result.NormalizedStatus);
+        Assert.Equal("https://ai-cdn.gommo.net/result3.mp4", result.OutputUrl);
+    }
+
+    [Fact]
+    public async Task VideoPoll_BearerSuccessRootResultUrlExtractsOutput()
+    {
+        var result = await PollBearerAsync("""{"status":"SUCCEEDED","result_url":"https://ai-cdn.gommo.net/result5.mp4"}""");
+
+        Assert.Equal(Ai79TaskStatusNormalizer.Success, result.NormalizedStatus);
+        Assert.Equal("https://ai-cdn.gommo.net/result5.mp4", result.OutputUrl);
+    }
+
+    [Fact]
+    public async Task VideoPoll_BearerSuccessWithoutOutputUrlRemainsOutputPending()
+    {
+        var result = await PollBearerAsync("""{"data":{"status":"SUCCESS"}}""");
+
+        Assert.Equal(Ai79TaskStatusNormalizer.Success, result.NormalizedStatus);
+        Assert.Null(result.OutputUrl);
+    }
+
+    [Fact]
     public async Task VideoPoll_FallsBackToVideosListAndMatchesProviderTaskId()
     {
         var handler = new RecordingJsonHandler(
@@ -669,6 +714,33 @@ public sealed class Ai79TaskClientTests
             Assert.DoesNotContain("id_base=abc123", request.Body, StringComparison.Ordinal);
         }
 
+        Assert.DoesNotContain("secret-token", result.SanitizedResponseJson, StringComparison.Ordinal);
+        return result;
+    }
+
+    private static async Task<Ai79TaskStatusResult> PollBearerAsync(string json)
+    {
+        var handler = new RecordingJsonHandler(json);
+        var client = new Ai79TaskClient(new HttpClient(handler));
+
+        var result = await client.GetStatusAsync(new Ai79TaskStatusRequest(
+            "https://v2.api.gommo.net",
+            "/ai/jobs/{task_id}?media=video",
+            "Bearer secret-token",
+            "79ai.net",
+            "motion-task-001",
+            Ai79TaskOperation.Video,
+            null,
+            true,
+            "default"));
+
+        var request = Assert.Single(handler.Requests);
+        Assert.Equal("https://v2.api.gommo.net/ai/jobs/motion-task-001?media=video", request.Uri);
+        Assert.Equal("Bearer", request.Authorization?.Scheme);
+        Assert.Equal("secret-token", request.Authorization?.Parameter);
+        Assert.Contains("domain=79ai.net", request.Body, StringComparison.Ordinal);
+        Assert.Contains("project_id=default", request.Body, StringComparison.Ordinal);
+        Assert.DoesNotContain("access_token=", request.Body, StringComparison.Ordinal);
         Assert.DoesNotContain("secret-token", result.SanitizedResponseJson, StringComparison.Ordinal);
         return result;
     }

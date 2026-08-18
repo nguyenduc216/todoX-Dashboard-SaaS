@@ -923,7 +923,7 @@ public sealed class Ai79TaskClient : IAi79TaskClient
                 }
             }
 
-            foreach (var containerName in new[] { "imageInfo", "videoInfo", "task", "data", "result", "response", "body" })
+            foreach (var containerName in new[] { "imageInfo", "videoInfo", "task", "data", "raw", "result", "response", "body" })
             {
                 if (element.TryGetProperty(containerName, out var child))
                 {
@@ -1061,7 +1061,7 @@ public sealed class Ai79TaskClient : IAi79TaskClient
 
         if (element.ValueKind == JsonValueKind.Object)
         {
-            foreach (var name in new[] { "url", "video_url", "videoUrl", "image_url", "imageUrl", "output_url", "outputUrl" })
+            foreach (var name in new[] { "url", "download_url", "downloadUrl", "result_url", "resultUrl", "video_url", "videoUrl", "image_url", "imageUrl", "output_url", "outputUrl" })
             {
                 if (element.TryGetProperty(name, out var value))
                 {
@@ -1155,12 +1155,25 @@ public sealed class Ai79TaskClient : IAi79TaskClient
 
     private static string? FindVideoOutputUrl(JsonElement root)
     {
-        foreach (var container in VideoStatusContainers(root))
+        foreach (var path in new[]
+                 {
+                     new[] { "data" },
+                     new[] { "data", "videoInfo" },
+                     new[] { "raw", "videoInfo" },
+                     new[] { "videoInfo" },
+                     Array.Empty<string>()
+                 })
         {
-            var found = FindFirstDirectUrl(container, "download_url", "downloadUrl", "video_url", "videoUrl", "source_url", "sourceUrl", "file_url", "fileUrl", "output_url", "outputUrl", "url");
-            if (found is not null)
+            if (TryGetPath(root, path, out var container))
             {
-                return found;
+                var aliases = path.Length == 0
+                    ? new[] { "result_url", "resultUrl", "download_url", "downloadUrl", "video_url", "videoUrl", "source_url", "sourceUrl", "file_url", "fileUrl", "output_url", "outputUrl", "url" }
+                    : new[] { "result_url", "resultUrl", "download_url", "downloadUrl", "video_url", "videoUrl", "url" };
+                var found = FindFirstDirectUrl(container, aliases);
+                if (found is not null)
+                {
+                    return found;
+                }
             }
         }
 
