@@ -295,17 +295,32 @@ public sealed class RDanceFashionDemoPageTests
         Assert.Contains("danceJob.PreparedReferenceMediaId", submit, StringComparison.Ordinal);
         Assert.Contains("danceJob.PreparedReferenceObjectKey", submit, StringComparison.Ordinal);
         Assert.Contains("danceJob.PreparedReferenceUrl", submit, StringComparison.Ordinal);
+        Assert.Contains("TryUseApprovedReferenceUrl", submit, StringComparison.Ordinal);
+        Assert.Contains("AI79_MOTION_REFERENCE_USING_APPROVED_URL", submit, StringComparison.Ordinal);
+        Assert.Contains("AI79_MOTION_REFERENCE_UPLOAD_SKIPPED", submit, StringComparison.Ordinal);
+        Assert.Contains("AI79_MOTION_REFERENCE_UPLOADED", submit, StringComparison.Ordinal);
         Assert.Contains("UploadMediaAsync(new Ai79MediaUploadRequest", submit, StringComparison.Ordinal);
-        Assert.Contains("runtime.UploadImagePath", submit, StringComparison.Ordinal);
         Assert.Contains("runtime.UploadVideoPath", submit, StringComparison.Ordinal);
-        Assert.Contains("referenceUpload.Url", submit, StringComparison.Ordinal);
         Assert.Contains("motionUpload.Url", submit, StringComparison.Ordinal);
         Assert.Contains("new Ai79MotionControlSubmitRequest", submit, StringComparison.Ordinal);
         Assert.Contains("SubmitMotionControlAsync(request, ct)", submit, StringComparison.Ordinal);
         Assert.Contains("contentType = \"application/x-www-form-urlencoded\"", submit, StringComparison.Ordinal);
-        Assert.Contains("imageUrl = referenceUpload.Url", submit, StringComparison.Ordinal);
-        Assert.Contains("images0Url = runtime.IncludeImagesZeroUrl ? referenceUpload.Url : null", submit, StringComparison.Ordinal);
+        Assert.Contains("referenceSource", submit, StringComparison.Ordinal);
+        Assert.Contains("referenceUrlUsed", submit, StringComparison.Ordinal);
+        Assert.Contains("motionSource", submit, StringComparison.Ordinal);
+        Assert.Contains("reference = new", submit, StringComparison.Ordinal);
+        Assert.Contains("url = referenceUrlUsed", submit, StringComparison.Ordinal);
+        Assert.Contains("submitEndpointPath", submit, StringComparison.Ordinal);
+        Assert.Contains("providerModel", submit, StringComparison.Ordinal);
+        Assert.Contains("imageUrl = referenceUrlUsed", submit, StringComparison.Ordinal);
+        Assert.Contains("images0Url = runtime.IncludeImagesZeroUrl ? referenceUrlUsed : null", submit, StringComparison.Ordinal);
         Assert.Contains("videoUrl = motionUpload.Url", submit, StringComparison.Ordinal);
+        Assert.True(
+            submit.IndexOf("TryUseApprovedReferenceUrl", StringComparison.Ordinal)
+            < submit.IndexOf("UploadMediaAsync(new Ai79MediaUploadRequest", StringComparison.Ordinal),
+            "Approved public reference URL must be considered before any 79AI media upload.");
+        Assert.DoesNotContain("imageUrl = referenceUpload.Url", submit, StringComparison.Ordinal);
+        Assert.DoesNotContain("images0Url = runtime.IncludeImagesZeroUrl ? referenceUpload.Url : null", submit, StringComparison.Ordinal);
         Assert.DoesNotContain("new Ai79MultipartTaskSubmitRequest", submit, StringComparison.Ordinal);
         Assert.DoesNotContain("SubmitMultipartAsync(request, ct)", submit, StringComparison.Ordinal);
         Assert.DoesNotContain("[referenceImageUrl]", submit, StringComparison.Ordinal);
@@ -437,8 +452,12 @@ public sealed class RDanceFashionDemoPageTests
         Assert.DoesNotContain("SubmitMultipartAsync(request, ct)", submit, StringComparison.Ordinal);
         Assert.Contains("UploadMediaAsync(new Ai79MediaUploadRequest", submit, StringComparison.Ordinal);
         Assert.Contains("SubmitMotionControlAsync(request, ct)", submit, StringComparison.Ordinal);
-        Assert.Contains("referenceUpload = new", submit, StringComparison.Ordinal);
+        Assert.Contains("reference = new", submit, StringComparison.Ordinal);
         Assert.Contains("motionUpload = new", submit, StringComparison.Ordinal);
+        Assert.Contains("AI79_MOTION_REFERENCE_USING_APPROVED_URL", submit, StringComparison.Ordinal);
+        Assert.Contains("AI79_MOTION_REFERENCE_UPLOAD_SKIPPED", submit, StringComparison.Ordinal);
+        Assert.Contains("referenceSource", submit, StringComparison.Ordinal);
+        Assert.Contains("referenceUrlUsed", submit, StringComparison.Ordinal);
 
         Assert.Contains("AI79_MOTION_OUTPUT_PENDING", poll, StringComparison.Ordinal);
         Assert.Contains("runtime.PollIdField", poll, StringComparison.Ordinal);
