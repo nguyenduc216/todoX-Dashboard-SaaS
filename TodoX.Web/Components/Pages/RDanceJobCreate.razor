@@ -51,6 +51,11 @@
                             <MudSelectItem Value="@("other")">Khác</MudSelectItem>
                         </MudSelect>
 
+                        <MudText Typo="Typo.caption" Class="rdance-auto-finish-help">
+                            @(_autoFinish
+                                ? "Hệ thống sẽ tự động chuẩn bị ảnh, duyệt ảnh và tạo video khi dữ liệu đã đầy đủ."
+                                : "Bạn sẽ xác nhận từng bước trước khi tạo video.")
+                        </MudText>
                         <MudTextField T="string" Label="Link TikTok" Variant="Variant.Outlined" @bind-Value="_tiktokUrl" Disabled="@_busy" />
                         <MudButton Variant="Variant.Outlined"
                                    Color="Color.Warning"
@@ -275,4 +280,5 @@
     .rdance-upload-icon { display: grid; place-items: center; width: 48px; height: 48px; color: #f5b540; border-radius: 999px; background: rgba(245,181,64,.14); }
     .rdance-upload-title { font-weight: 700; }
     .rdance-upload-subtitle, .rdance-upload-limit { color: rgba(255,255,255,.62); font-size: .875rem; }
+    .rdance-auto-finish-help { color: rgba(255,255,255,.68); }
 </style>

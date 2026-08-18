@@ -67,6 +67,10 @@
     font-size: 0.82rem;
 }
 
+.timelapse-auto-finish-help {
+    color: rgba(255, 255, 255, 0.68);
+}
+
 .timelapse-option-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));

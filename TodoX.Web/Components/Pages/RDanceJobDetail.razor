@@ -52,7 +52,9 @@
         <MudTabs Rounded="true" Elevation="0" @bind-ActivePanelIndex="_tabIndex">
             <MudTabPanel Text="Thông tin">
                 <MudGrid Class="mt-4">
-                    <MudItem xs="12" md="4">
+                    <MudItem xs="12" md="8">
+                        <MudGrid Class="rdance-info-left-grid">
+                            <MudItem xs="12" lg="6">
                         <MudPaper Class="todox-panel pa-4">
                             <MudStack Spacing="3">
                                 <MudText Typo="Typo.h6">Thông tin dự án</MudText>
@@ -65,6 +67,21 @@
                                     <MudSelectItem Value="@("outerwear")">Áo khoác</MudSelectItem>
                                     <MudSelectItem Value="@("other")">Khác</MudSelectItem>
                                 </MudSelect>
+                                <MudSwitch T="bool"
+                                           Color="Color.Warning"
+                                           Value="@_autoFinish"
+                                           ValueChanged="SetAutoFinishAsync"
+                                           Disabled="@(_busy || !CanEditAutoFinish)">
+                                    Tự động hoàn thành
+                                </MudSwitch>
+                                <MudText Typo="Typo.caption" Class="rdance-auto-finish-help">@AutoFinishHelpText</MudText>
+                            </MudStack>
+                        </MudPaper>
+                    </MudItem>
+                    <MudItem xs="12" lg="6">
+                        <MudPaper Class="todox-panel pa-4">
+                            <MudStack Spacing="3">
+                                <MudText Typo="Typo.h6">Video chuyá»ƒn Ä‘á»™ng</MudText>
                                 <MudTextField T="string" Label="Link TikTok" Variant="Variant.Outlined" @bind-Value="_tiktokUrl" Disabled="@_busy" />
                                 <MudButton Variant="Variant.Outlined" Color="Color.Warning" Disabled="@(_busy || string.IsNullOrWhiteSpace(_tiktokUrl))" OnClick="StageTikTokAsync">
                                     Tải và kiểm tra video
@@ -138,6 +155,8 @@
                                 }
                             </MudStack>
                         </MudPaper>
+                    </MudItem>
+                        </MudGrid>
                     </MudItem>
                     <MudItem xs="12" md="4">
                         <MudPaper Class="todox-panel pa-4">
@@ -302,7 +321,7 @@
 
             <MudTabPanel Text="Video" Class="rdance-video-tab">
                 <MudGrid Class="mt-4">
-                    <MudItem xs="12" md="4" Class="rdance-video-preview-column">
+                    <MudItem xs="12" lg="4" Class="rdance-video-preview-column">
                         <MudPaper Class="todox-panel pa-4">
                             <MudText Typo="Typo.h6">Video chuyển động</MudText>
                             @if (!string.IsNullOrWhiteSpace(_job?.MotionVideoUrl))
@@ -315,7 +334,7 @@
                             }
                         </MudPaper>
                     </MudItem>
-                    <MudItem xs="12" md="4" Class="rdance-reference-preview-column">
+                    <MudItem xs="12" lg="4" Class="rdance-reference-preview-column">
                         <MudPaper Class="todox-panel pa-4">
                             <MudText Typo="Typo.h6">Ảnh dùng để tạo video</MudText>
                             @Preview(_job?.PreparedReferenceUrl, "Ảnh dùng để tạo video")
@@ -327,7 +346,7 @@
                             }
                         </MudPaper>
                     </MudItem>
-                    <MudItem xs="12" md="4">
+                    <MudItem xs="12" lg="4">
                         <MudPaper Class="todox-panel pa-4">
                             <MudText Typo="Typo.h6">Tóm tắt render</MudText>
                             <MudList T="string" Dense="true">
@@ -335,6 +354,7 @@
                                 <MudListItem T="string">Trạng thái: @DisplayStatusLabel(_job!)</MudListItem>
                                 <MudListItem T="string">Tỷ lệ: 9:16</MudListItem>
                                 <MudListItem T="string">Ước tính: @(_estimate?.EstimatedTodoxPoints?.ToString("0.##") ?? "chưa cấu hình") điểm</MudListItem>
+                                <MudListItem T="string">Tự động hoàn thành: @(_autoFinish ? "Bật" : "Tắt")</MudListItem>
                                 @if (_balance is not null)
                                 {
                                     <MudListItem T="string">Số dư: @_balance.Value.ToString("0.##") điểm</MudListItem>
@@ -546,6 +566,10 @@
     private string? DownloadUrl => _job is null ? null : $"/api/dance-sell/jobs/{_job.Id}/download";
     private string? ReferenceDownloadUrl => _job is null ? null : $"/api/dance-sell/jobs/{_job.Id}/reference/download";
     private bool IsAdmin => AuthState.CurrentUser is not null && DanceSellSecurity.IsAdmin(AuthState.CurrentUser);
+    private bool CanEditAutoFinish => _job?.Status == DanceSellJobStatuses.Draft && _renderJob?.Status is null or RenderJobStatuses.Draft;
+    private string AutoFinishHelpText => _autoFinish
+        ? "Hệ thống sẽ tự động chuẩn bị ảnh, duyệt ảnh và tạo video khi dữ liệu đã đầy đủ."
+        : "Bạn sẽ xác nhận từng bước trước khi tạo video.";
 
     private string DisplayStatusLabel(DanceSellJobDto job)
         => IsCoreCancelled ? "Đã dừng" : StatusLabel(job.Status);
@@ -936,6 +960,12 @@
 
     private async Task ConfirmAndQueueAsync()
     {
+        if (_autoFinish)
+        {
+            await ContinueAutoFinishAsync();
+            return;
+        }
+
         if (!string.IsNullOrWhiteSpace(_motionReadinessError))
         {
             Snackbar.Add(_motionReadinessError, Severity.Error);
@@ -978,6 +1008,27 @@
                 await ReloadAsync();
                 Snackbar.Add("Đã dừng tạo video.", Severity.Success);
             });
+        }
+    }
+
+    private async Task SetAutoFinishAsync(bool value)
+    {
+        if (!CanEditAutoFinish || _job is null)
+        {
+            return;
+        }
+
+        var previous = _autoFinish;
+        _autoFinish = value;
+        await RunAsync(async () =>
+        {
+            await UpdateBusinessAsync();
+            _job = await DanceSell.GetAsync(_job.Id, AuthState.CurrentUser!);
+        });
+
+        if (_job is null)
+        {
+            _autoFinish = previous;
         }
     }
 
@@ -1203,6 +1254,10 @@
 
 <style>
     .rdance-fashion-page { min-width: 0; }
+    .rdance-info-left-grid { width: 100%; margin: 0; }
+    .rdance-info-left-grid > .mud-grid-item, .rdance-video-tab .mud-grid-item { min-width: 0; box-sizing: border-box; }
+    .rdance-info-left-grid .todox-panel, .rdance-video-tab .todox-panel { width: 100%; height: 100%; box-sizing: border-box; }
+    .rdance-auto-finish-help { color: rgba(255,255,255,.68); }
     .rdance-source-divider { display: flex; align-items: center; gap: 12px; color: rgba(255,255,255,.55); font-size: .75rem; font-weight: 700; letter-spacing: 0; }
     .rdance-source-divider::before, .rdance-source-divider::after { content: ""; flex: 1; height: 1px; background: rgba(255,255,255,.12); }
     .rdance-upload-zone { position: relative; display: grid; place-items: center; gap: 6px; min-height: 188px; padding: 24px 18px; overflow: hidden; border: 1px dashed rgba(245, 181, 64, .72); border-radius: 8px; background: linear-gradient(180deg, rgba(245,181,64,.12), rgba(255,255,255,.035)); color: rgba(255,255,255,.88); text-align: center; cursor: pointer; transition: border-color .18s ease, background .18s ease, box-shadow .18s ease, transform .18s ease; }
@@ -1245,8 +1300,8 @@
     .rdance-result-frame.is-failed { border: 1px solid rgba(244,67,54,.36); background: rgba(244,67,54,.08); color: rgba(255,255,255,.58); }
     .rdance-media-player, .rdance-result-player { width: 100%; max-height: 520px; border-radius: 8px; background: #090d12; }
     .rdance-result-player { max-width: 640px; aspect-ratio: 9 / 16; object-fit: contain; }
-    @@media (min-width: 960px) {
-        .rdance-video-preview-column, .rdance-reference-preview-column { flex: 0 0 36.36% !important; max-width: 36.36% !important; }
-        .rdance-video-tab .mud-grid-item:nth-child(3) { flex: 0 0 27.28% !important; max-width: 27.28% !important; }
+    @@media (min-width: 1280px) {
+        .rdance-video-tab .mud-grid-item { flex: 0 0 33.333333% !important; max-width: 33.333333% !important; min-width: 0 !important; }
+        .rdance-video-tab .rdance-media-player, .rdance-video-tab img { max-width: 100%; box-sizing: border-box; }
     }
 </style>

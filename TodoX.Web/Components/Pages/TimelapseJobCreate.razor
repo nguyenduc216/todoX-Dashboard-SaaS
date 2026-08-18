@@ -133,6 +133,9 @@
                             <MudSwitch T="bool" Color="Color.Warning" @bind-Value="_request.AutoFinish">
                                 Tự động hoàn thành
                             </MudSwitch>
+                            <MudText Typo="Typo.caption" Class="timelapse-auto-finish-help">
+                                Hệ thống sẽ tự động tạo ảnh trung gian, tạo các video scene và ghép video hoàn chỉnh khi dữ liệu sẵn sàng.
+                            </MudText>
 
                             @if (_profiles.Count == 0)
                             {

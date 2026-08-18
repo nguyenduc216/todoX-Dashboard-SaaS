@@ -38,7 +38,7 @@ Motion submit diagnostics retain sanitized request/response data and include pro
 
 Customer-facing RDance pages no longer show provider/model/raw error details. Customer errors use the centralized safe policy. Technical provider, model, task, and raw error details remain available inside an admin-only section.
 
-The Video tab now contains three responsive business cards: motion preview, approved reference preview with owned download endpoint, and render summary. The desktop layout uses approximately 4:4:3 proportions and stacks on mobile.
+The Video tab now contains three responsive business cards: motion preview, approved reference preview with owned download endpoint, and render summary. At desktop widths each card is an equal `lg=4` column with `min-width: 0`, `box-sizing: border-box`, and media constrained to `max-width: 100%`; the cards stack responsively on smaller screens. The previous custom 36.36%/27.28% flex sizing that could wrap the third card was removed.
 
 The approved image endpoint verifies job ownership, approval state, public HTTPS safety, and returns an attachment filename such as `todox-anh-tham-chieu-{jobId}.jpg`.
 
@@ -50,6 +50,12 @@ The approved image endpoint verifies job ownership, approval state, public HTTPS
 - Timelapse: confirmation is bypassed only when `autoFinish=true`; the existing workflow/worker engine remains unchanged.
 - RVideo: the existing scene/video/merge engine is advanced by an idempotent polling continuation guard; manual mode remains available.
 
+For new jobs, both `DanceSellDraftCreateRequest` and `DanceSellCreateJobRequest` default `AutoFinish=true`, while historical `DanceSellJobDto` values remain backward-compatible. The RDance create page exposes the switch as ON with explicit ON/OFF helper text. The detail page persists changes only while the job is editable, shows the current state in the output summary, and bypasses the manual confirmation dialog when Auto Finish is enabled. Timelapse create also defaults ON, displays the full workflow helper text, and its detail edit switch is disabled after the draft is no longer editable. Existing manual mode remains available.
+
+## Current UI task scope
+
+This UI refinement changed only RDance and Timelapse presentation/default wiring. No RVideo files were changed for this task. The RDance Information tab is now an outer `md=8`/`md=4` layout: project information and TikTok/MP4 source are separate cards inside the left column, with output summary on the right. The Auto Finish setting is inside the project card and the right-side summary reports `Bật` or `Tắt`.
+
 Existing cancel, retry, billing, result persistence, provider authentication, polling parser, and Timelapse behavior remain intact.
 
 ## Changed files
@@ -60,6 +66,7 @@ Existing cancel, retry, billing, result persistence, provider authentication, po
 - `TodoX.Web/Components/Pages/RDanceJobDetail.razor`
 - `TodoX.Web/Components/Pages/RenderVideoJobs.razor`
 - `TodoX.Web/Components/Pages/TimelapseJobCreate.razor`
+- `TodoX.Web/Components/Pages/TimelapseJobCreate.razor.css`
 - `TodoX.Web/Components/Pages/TimelapseJobDetail.razor`
 - `TodoX.Web/Models/Timelapse/TimelapseModels.cs`
 - `TodoX.Web/Services/DanceSell/DanceSellModels.cs`
@@ -73,10 +80,11 @@ Existing cancel, retry, billing, result persistence, provider authentication, po
 
 ## Validation
 
-- `dotnet test TodoX.Web.Tests/TodoX.Web.Tests.csproj -c Release --no-restore`: **643 passed**
-- `dotnet build TodoX.Dashboard.sln -c Release --no-restore`: **passed, 0 errors**
-- `dotnet format TodoX.Dashboard.sln --verify-no-changes --no-restore --include <changed C# files>`: **passed**
+- `dotnet test TodoX.Dashboard.sln -c Release --no-restore`: **644 passed**
+- `dotnet build TodoX.Dashboard.sln -c Release --no-restore`: **passed, 0 warnings, 0 errors**
+- `dotnet format TodoX.Dashboard.sln --verify-no-changes --no-restore --include TodoX.Web/Services/DanceSell/DanceSellModels.cs TodoX.Web.Tests/RDanceFashionDemoPageTests.cs TodoX.Web.Tests/TimelapsePhase2CTests.cs`: **passed**
 - `git diff --check`: **passed**
+- Publish command: `dotnet publish TodoX.Web/TodoX.Web.csproj -c Release --no-restore -o artifacts/publish/todox-dashboard`
 - Publish target: `artifacts/publish/todox-dashboard`
 - Deployment: **not performed**
 

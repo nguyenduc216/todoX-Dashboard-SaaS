@@ -620,12 +620,16 @@ public sealed class RDanceFashionDemoPageTests
         var videoTab = page[start..end];
 
         Assert.Equal(3, videoTab.Split("<MudItem ", StringSplitOptions.None).Length - 1);
+        Assert.Equal(3, videoTab.Split("lg=\"4\"", StringSplitOptions.None).Length - 1);
         Assert.Contains("rdance-video-preview-column", videoTab, StringComparison.Ordinal);
         Assert.Contains("rdance-reference-preview-column", videoTab, StringComparison.Ordinal);
         Assert.Contains("ReferenceDownloadUrl", videoTab, StringComparison.Ordinal);
         Assert.Contains("PreparedReferenceStatus == DanceSellReferenceStatuses.Approved", videoTab, StringComparison.Ordinal);
         Assert.DoesNotContain("Provider chính", videoTab, StringComparison.Ordinal);
         Assert.DoesNotContain("Kling Motion Control", videoTab, StringComparison.Ordinal);
+        Assert.Contains("flex: 0 0 33.333333%", page, StringComparison.Ordinal);
+        Assert.Contains("max-width: 100%", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("36.36%", page, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -640,9 +644,16 @@ public sealed class RDanceFashionDemoPageTests
         Assert.Contains("AutoFinish = _autoFinish", create, StringComparison.Ordinal);
         Assert.Contains("COALESCE((request_json->>'autoFinish')::boolean, false) AS AutoFinish", repository, StringComparison.Ordinal);
         Assert.Contains("_autoFinish = _job.AutoFinish", detail, StringComparison.Ordinal);
+        Assert.Contains("ValueChanged=\"SetAutoFinishAsync\"", detail, StringComparison.Ordinal);
+        Assert.Contains("Disabled=\"@(_busy || !CanEditAutoFinish)\"", detail, StringComparison.Ordinal);
         Assert.Contains("ContinueAutoFinishAsync", detail, StringComparison.Ordinal);
         Assert.Contains("References.ApproveAsync", detail, StringComparison.Ordinal);
         Assert.Contains("DanceSell.QueueRenderAsync", detail, StringComparison.Ordinal);
+        Assert.True(new DanceSellDraftCreateRequest().AutoFinish);
+        Assert.True(new DanceSellCreateJobRequest().AutoFinish);
+        Assert.Contains("Hệ thống sẽ tự động chuẩn bị ảnh", create, StringComparison.Ordinal);
+        Assert.Contains("Bạn sẽ xác nhận từng bước", create, StringComparison.Ordinal);
+        Assert.Contains("if (_autoFinish)", detail, StringComparison.Ordinal);
     }
 
     [Fact]

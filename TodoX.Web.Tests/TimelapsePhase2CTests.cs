@@ -1082,6 +1082,30 @@ public class TimelapsePhase2CTests
     }
 
     [Fact]
+    public void TimelapseAutoFinishDefaultsOnAndKeepsManualModeAvailable()
+    {
+        var create = ReadSource("TodoX.Web", "Components", "Pages", "TimelapseJobCreate.razor");
+        var detail = ReadSource("TodoX.Web", "Components", "Pages", "TimelapseJobDetail.razor");
+        var model = ReadSource("TodoX.Web", "Models", "Timelapse", "TimelapseModels.cs");
+        var service = ReadSource("TodoX.Web", "Services", "Timelapse", "TimelapseJobService.cs");
+        var workflow = ReadSource("TodoX.Web", "Services", "Timelapse", "TimelapseWorkflowService.cs");
+        var workerRepository = ReadSource("TodoX.Web", "Services", "Timelapse", "TimelapseWorkerRepository.cs");
+
+        Assert.True(new TodoX.Web.Models.Timelapse.TimelapseCreateRequest().AutoFinish);
+        Assert.Contains("MudSwitch T=\"bool\" Color=\"Color.Warning\" @bind-Value=\"_request.AutoFinish\"", create, StringComparison.Ordinal);
+        Assert.Contains("timelapse-auto-finish-help", create, StringComparison.Ordinal);
+        Assert.Contains("AutoFinish = request.AutoFinish", service, StringComparison.Ordinal);
+        Assert.Contains("RequireVideoConfirmation = request.RequireVideoConfirmation && !request.AutoFinish", service, StringComparison.Ordinal);
+        Assert.Contains("VideoRenderConfirmed = request.AutoFinish", service, StringComparison.Ordinal);
+        Assert.Contains("Disabled=\"@(!_editingRequest || !CanEditFullRequest)\"", detail, StringComparison.Ordinal);
+        Assert.Contains("_job.Snapshot.AutoFinish ? ", detail, StringComparison.Ordinal);
+        Assert.Contains("\"Bật\" : \"Tắt\"", detail, StringComparison.Ordinal);
+        Assert.Contains("StartReadyVideosAsync(conn, tx, jobId)", workflow, StringComparison.Ordinal);
+        Assert.Contains("TryStartFinalizerIfReadyAsync", workerRepository, StringComparison.Ordinal);
+        Assert.Contains("public bool AutoFinish { get; set; } = true;", model, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ProviderStatusNormalizer_MapsKnownStatuses()
     {
         Assert.Equal(Ai79TaskStatusNormalizer.Success, Ai79TaskStatusNormalizer.Normalize("SUCCESS"));

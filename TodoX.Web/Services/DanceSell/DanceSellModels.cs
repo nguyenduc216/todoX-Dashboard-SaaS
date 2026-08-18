@@ -193,7 +193,7 @@ public sealed class DanceSellDraftCreateRequest
     public string? ReferenceProviderModel { get; set; }
     public string? MotionProviderCode { get; set; }
     public string? MotionProviderModel { get; set; }
-    public bool AutoFinish { get; set; }
+    public bool AutoFinish { get; set; } = true;
 }
 
 public sealed class DanceSellJobDto
@@ -414,7 +414,7 @@ public sealed class DanceSellCreateJobRequest
     public string? ReferenceProviderModel { get; set; }
     public string? MotionProviderCode { get; set; }
     public string? MotionProviderModel { get; set; }
-    public bool AutoFinish { get; set; }
+    public bool AutoFinish { get; set; } = true;
 }
 
 public sealed class DanceSellUpdateBusinessRequest

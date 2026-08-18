@@ -168,6 +168,13 @@
                                         </div>
                                     </MudStack>
 
+                                    <MudSwitch T="bool" Color="Color.Warning" @bind-Value="_editRequest.AutoFinish" Disabled="@(!_editingRequest || !CanEditFullRequest)">
+                                        Tự động hoàn thành
+                                    </MudSwitch>
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                        Hệ thống sẽ tự động tạo ảnh trung gian, tạo các video scene và ghép video hoàn chỉnh khi dữ liệu sẵn sàng.
+                                    </MudText>
+
                                     <MudStack Row="true" Spacing="2" Class="timelapse-action-row">
                                         <MudButton Variant="Variant.Outlined"
                                                    StartIcon="@Icons.Material.Filled.Close"
@@ -241,6 +248,7 @@
                                 <div class="price-row"><span>Chất lượng</span><strong>@TimelapseSellPricing.CustomerQualityLabel(_job.Snapshot.VideoMode)</strong></div>
                                 <div class="price-row"><span>Số scene</span><strong>@_job.Snapshot.SceneCount</strong></div>
                                 <div class="price-row"><span>Ảnh khách tải lên</span><strong>Miễn phí</strong></div>
+                                <div class="price-row"><span>Tự động hoàn thành</span><strong>@(_job.Snapshot.AutoFinish ? "Bật" : "Tắt")</strong></div>
                                 @if (_job.Snapshot.SellPrice is not null)
                                 {
                                     <div class="price-row"><span>Đơn giá video</span><strong>@FormatPoints(_job.Snapshot.SellPrice.VideoSceneSellPoints) / scene</strong></div>
