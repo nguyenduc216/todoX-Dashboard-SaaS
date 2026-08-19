@@ -5,9 +5,9 @@ Branch: `integration/rdance-on-construction-video-core`
 
 ## Git
 
-- Starting SHA: `b2ad776c33ebd02f20081548bba7db227a90993d`
-- Final implementation SHA: `cdca09839f3a7ccd0f151aaeef3b5ee5a9700628`
-- Report commit SHA: `d6181677d408c3cb6e585d6b632476a12344d8ab`
+- Starting SHA: `ed65c747afcfcbf99dfc6dcf1777f7f094643ce9`
+- Final implementation SHA: `3d0a4f319028d9dff27f443a951d8173f41efc34`
+- Report commit SHA: recorded by the final Git verification after this report is committed.
 - No migration or SQL was executed.
 
 ## IMAGE PROVIDER
@@ -37,6 +37,7 @@ Terminal provider failure now closes the current version and queues a new versio
 - Process restart safe by persisted task ID: YES
 - Pending does not fail, clear task, or charge again: YES
 - Transient poll retains task and requeues: YES
+- `RequestedModel` is now the model submitted to 79AI, reserved in billing, and retained in usage metadata: YES
 
 ## REFERENCE
 
@@ -44,11 +45,13 @@ Terminal provider failure now closes the current version and queues a new versio
 - `editImage=true` only with valid reference bytes: YES
 - Missing reference fails before provider submit with `RVIDEO_REFERENCE_IMAGE_UNAVAILABLE`: YES
 - Base64 is not logged.
+- The shared resolver now has an explicit strict RVIDEO mode; legacy callers retain their nullable behavior.
 
 ## VERSION HISTORY
 
 - Stale completion protection: YES
 - Separate fallback image version: YES
+- Active image version guard prevents the bulk queue action from creating another top-level image attempt while a version is queued, submitted, pending, processing, or pending reconciliation: YES
 - Mandatory end-to-end worker/router/provider integration tests: NOT COMPLETED
 
 ## BILLING, MEDIA, UI
@@ -61,9 +64,9 @@ Terminal provider failure now closes the current version and queues a new versio
 
 ## TESTS
 
-- Focused 79AI/batch policy tests: `14 passed, 0 failed`
+- Focused 79AI provider tests: `5 passed, 0 failed`
 - Phase1B: `45 passed, 0 failed`
-- Full `TodoX.Web.Tests`: `666 passed, 0 failed`
+- Full `TodoX.Web.Tests`: `667 passed, 0 failed`
 - Build and `git diff --check`: passed.
 - Publish: passed.
 
@@ -86,6 +89,7 @@ Terminal provider failure now closes the current version and queues a new versio
 
 Exact blockers:
 
-1. Mandatory end-to-end fallback, all-models-failed, and full worker/router/provider integration tests are not yet present.
+1. The mandatory full integration harness that executes `SceneImageRenderWorkItemHandler -> SceneImageRenderService -> AiImageRenderRouter -> fake 79AI provider/client` is still not present.
+2. Therefore the required cross-layer fallback/restart/duplicate-submit/stale-success/reference/media/billing scenarios are not proven end to end, despite the focused provider and policy regressions passing.
 
 No video implementation was started.
