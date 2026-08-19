@@ -6,8 +6,8 @@ Branch: `integration/rdance-on-construction-video-core`
 ## Git
 
 - Starting SHA: `b2ad776c33ebd02f20081548bba7db227a90993d`
-- Final implementation SHA: `cdca098`
-- Report SHA: recorded after report commit.
+- Final implementation SHA: `cdca09839f3a7ccd0f151aaeef3b5ee5a9700628`
+- Report commit SHA: `d6181677d408c3cb6e585d6b632476a12344d8ab`
 - No migration or SQL was executed.
 
 ## IMAGE PROVIDER
