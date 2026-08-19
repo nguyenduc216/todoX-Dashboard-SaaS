@@ -1,97 +1,92 @@
-# RVIDEO 79AI Image Provider Report
+# RVIDEO 79AI Scene Image Pipeline Report
 
 Date: 2026-08-19
 Branch: `integration/rdance-on-construction-video-core`
 
 ## Git
 
-- Starting SHA: `58f6e6b114e766652240b8b32b1cae7c9c9820c4`
-- Implementation commit: `6252545` (`fix(rvideo): persist provider polling across workers`)
-- Report commit/final SHA: recorded after the report commit.
-- No force push and no destructive Git operation was used.
+- Starting SHA: `b2ad776c33ebd02f20081548bba7db227a90993d`
+- Final implementation SHA: `cdca098`
+- Report SHA: recorded after report commit.
+- No migration or SQL was executed.
 
-## 79AI Provider
+## IMAGE PROVIDER
 
-- Provider code: `79ai`
-- Factory key: `79ai_task_image`
-- Adapter: `Gommo79AiImageService`
-- Auth: `IProviderCredentialResolver.ResolveAsync("79ai", "access_token")`
-- Base URL: provider/config value, compatibility fallback `https://api.gommo.net/ai`
-- Endpoints:
-  - `POST /generateImage`
-  - `POST /image`
-  - `POST /images` only for SUCCESS-without-URL recovery
-- Image polling is persisted: submit once, save `id_base`, then poll `/image` once per worker pass.
-- Pending and transient poll states requeue the same render job and retain the same task ID.
-- RVIDEO video polling was also changed from an in-memory `Task.Delay` loop to one persisted submit/poll pass in `SceneVideoWorkerHandler`.
-- Poll cadence remains configurable; no pending age timeout causes fallback.
-- Secrets are never logged or persisted in diagnostics.
+- Capability: `rvideo_scene_image_generation`
+- Factory: `79ai_task_image` only.
+- Non-79AI resolution fails with `RVIDEO_IMAGE_PROVIDER_MUST_BE_79AI`.
+- Endpoints: `POST /generateImage`, `POST /image`, exact `id_base` recovery through `POST /images`.
+- Ratio normalization: `9:16 -> 9_16`, `16:9 -> 16_9`.
 
-## RVIDEO Routing
+## MODEL POLICY
 
-- RVIDEO capability: `rvideo_scene_image_generation`
-- Existing shared `scene_image_generation` routing was not changed.
-- The background worker continues polling server-side; Razor does not call 79AI.
-- The Core Job UUID remains the public job identity. `project_id` remains internal.
+The adapter now executes one requested model/task per invocation and no longer loops through models internally.
 
-Default model policy:
+- Primary: `google_image_gen_banana_2` / `vip` / `1k`
+- Fallback 1: `imagegen_2_0` / `low_basic` / `1k`
+- Fallback 2: `seedream_4_5` / `vip` / `2k`
 
-1. `google_image_gen_banana_2`, mode `vip`, resolution `1k`
-2. `imagegen_2_0`, mode `low_basic`, resolution `1k`
-3. `seedream_4_5`, mode `vip`, resolution `2k`
+Fallback orchestration creating separate image versions is not completed in this implementation.
 
-Ratio conversion is provider-specific: `9:16 -> 9_16`, `16:9 -> 16_9`.
-Pending statuses never trigger fallback. Terminal attempts advance the configured policy only after the task ID is cleared, so the next model submits a new provider task. `/images` recovery requires an exact `id_base` match.
+## PERSISTED POLLING
 
-## Title and Status
+- Submit once: YES
+- Provider task persisted through router/outcome: YES
+- Same task reused on later worker pass: YES
+- Typed provider state (`Pending`, `Success`, `Failed`): YES
+- Process restart safe by persisted task ID: YES
+- Pending does not fail, clear task, or charge again: YES
+- Transient poll retains task and requeues: YES
 
-- My Jobs now reads the title from the Core Job input snapshot instead of displaying literal `RVIDEO`.
-- Service display uses the Core service catalog when available.
-- Save Changes updates the Core Job `input_json` snapshot and the linked project title/prompt/settings.
-- Persisted provider events are mapped to:
-  - `Đang chờ lượt`
-  - `Đã gửi 79AI`
-  - `79AI đang tạo ảnh`
-  - `Đang tải kết quả`
-  - `Hoàn thành`
-  - `Lỗi`
-- Header includes the job UUID, service, aspect ratio, and persisted stage.
+## REFERENCE
 
-## Reference Image and Billing
+- JPEG/PNG/WebP data URL handling: YES
+- `editImage=true` only with valid reference bytes: YES
+- Missing reference fails before provider submit with `RVIDEO_REFERENCE_IMAGE_UNAVAILABLE`: YES
+- Base64 is not logged.
 
-- RVIDEO references are resolved through `IMediaFileService` and converted to JPEG/PNG/WebP data URLs.
-- `editImage=true` is sent only with a valid `base64Image`; unavailable requested references fail before provider submission with `RVIDEO_REFERENCE_IMAGE_UNAVAILABLE`.
-- Polling and `/images` recovery do not charge. Existing Phase 1 customer image billing remains deferred/zero; provider response metadata is retained for reconciliation without inventing a price.
-- Completion uses guarded version updates to prevent stale attempts replacing a newer selected version.
+## VERSION HISTORY
 
-## Database
+- Stale completion protection: YES
+- Separate fallback image version: NO, blocker
+- Mandatory fallback/all-models-failed integration tests: NOT COMPLETED
 
-- SQL file: `database/migrations/20260819_rvideo_79ai_image_provider.sql`
-- Migration/database update required: only when the deployment database lacks the provider/capability seed.
-- SQL is additive and idempotent.
-- SQL was not executed.
-- Support diagnostic was extended to include scene image versions and provider usage records while accepting only `:job_uuid`.
+## BILLING, MEDIA, UI
 
-## Validation
+- Poll does not recharge: YES
+- Pending usage status: `pending`
+- Customer image charge: deferred/zero by existing Phase 1 policy
+- Provider URL copied into TodoX media on success: YES
+- AUTO video transition: **DISABLED / NOT IMPLEMENTED IN THIS TASK**
 
-Passed:
+## TESTS
 
-- `dotnet build TodoX.Web/TodoX.Web.csproj --no-restore`
-- `dotnet format Dashboard-web/TodoX.Dashboard.csproj --verify-no-changes --no-restore --include ...`
-- `dotnet test TodoX.Web/Tests/TodoX.Web.Phase1B.Tests.csproj --no-restore`: 45 passed, 0 failed
-- Focused hotfix/regression tests: 66 passed, 0 failed
-- Full `TodoX.Web.Tests`: 665 passed, 0 failed
-- `git diff --check`
-- `dotnet publish TodoX.Web/TodoX.Web.csproj --no-restore -c Release -o artifacts/publish/todox-dashboard`
+- Focused 79AI service tests: `4 passed, 0 failed`
+- Phase1B: `45 passed, 0 failed`
+- Full `TodoX.Web.Tests`: `665 passed, 0 failed`
+- Build and `git diff --check`: passed.
+- Publish: passed.
 
-The previous three failures were resolved: the RDance assertion now scopes the correct client registration; the approved RVIDEO UI has five tabs; and the approved RVIDEO route is `/jobs/rvideo/new`.
+## DATABASE
 
-## Compatibility
+- Migration required: only if deployment lacks the existing additive seed.
+- Migration path: `database/migrations/20260819_rvideo_79ai_image_provider.sql`
+- SQL executed: NO
+- Support SQL: `docs/support/rvideo-job-diagnostic.sql`
 
-Timelapse, RDance, YEScale, OpenRouter, Telegram/n8n contracts, and existing billing/router architecture were preserved. TTS, Music, and Finalizer Phase 2 were not started. No live 79AI request was made because production credentials and provider seed are environment/database concerns.
+## PUBLISH
 
-## Sanitized Trace
+- Command: `dotnet publish TodoX.Web\TodoX.Web.csproj --no-restore -c Release -o artifacts\publish\todox-dashboard`
+- Output: `artifacts/publish\todox-dashboard`
+- Result: successful.
 
-`RVIDEO scene -> POST /generateImage -> persist id_base -> worker returns -> later POST /image once -> PENDING requeue or SUCCESS -> result URL persisted through TodoX media/versioning`
+## FINAL IMAGE READINESS
 
-No access token is included in this report.
+`RVIDEO_79AI_IMAGE_NOT_READY`
+
+Exact blockers:
+
+1. Terminal 79AI failure does not yet create the next persisted image version with the next configured model.
+2. Mandatory end-to-end fallback, all-models-failed, and full worker/router/provider integration tests are not yet present.
+
+No video implementation was started.
