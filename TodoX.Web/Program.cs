@@ -126,6 +126,7 @@ builder.Services.AddHttpClient<IKieClient, KieClient>();
 builder.Services.AddScoped<IKiePayloadBuilder, KiePayloadBuilder>();
 builder.Services.AddSingleton<IKieRateLimiter, InMemoryKieRateLimiter>();
 builder.Services.AddScoped<TodoX.Web.Services.AiProviders.IYEScaleImageService, TodoX.Web.Services.AiProviders.YEScaleImageService>();
+builder.Services.AddScoped<TodoX.Web.Services.AiProviders.Gommo79AiImageService>();
 builder.Services.AddScoped<IAiImageProviderFactory, AiImageProviderFactory>();
 builder.Services.AddScoped<CharacterPromptBuilder>();
 builder.Services.AddScoped<AiCharacterRepository>();

@@ -109,6 +109,7 @@ public sealed class RVideoLifecycleWorker : BackgroundService
             var imageInput = new SceneImageBatchInput
             {
                 ProjectId = project.Id,
+                CapabilityCode = SceneImageRenderContext.RVideoCapabilityCode,
                 AspectRatio = renderSettings.AspectRatio,
                 CharacterReferenceObjectKey = ReadSnapshotString(setting.CharacterSnapshotJson, "storageKey"),
                 CharacterReferenceUrl = ReadSnapshotString(setting.CharacterSnapshotJson, "fileUrl", "masterImageUrl"),

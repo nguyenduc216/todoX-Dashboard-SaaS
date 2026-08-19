@@ -22,9 +22,17 @@ UNION ALL
 SELECT 'scene', s.id::text, to_jsonb(s)
   FROM video_render.video_project_scenes s JOIN project p ON p.id=s.project_id AND p.tenant_id=s.tenant_id
 UNION ALL
+SELECT 'scene_image_version', v.id::text, to_jsonb(v)
+  FROM video_render.scene_image_versions v
+  JOIN project p ON p.id=v.project_id AND p.tenant_id=v.tenant_id
+UNION ALL
 SELECT 'render_job', r.id::text, to_jsonb(r)
   FROM render.render_jobs r JOIN project p ON r.tenant_id=p.tenant_id
  WHERE r.input_json->>'projectId'=p.id::text
+UNION ALL
+SELECT 'provider_usage', u.id::text, to_jsonb(u)
+  FROM public.todox_ai_provider_usage_log u
+  JOIN core_job c ON (u.job_id = c.id::text OR u.request_id = c.id::text)
 UNION ALL
 SELECT 'project_event', e.id::text, to_jsonb(e)
   FROM video_render.video_project_events e JOIN project p ON p.id=e.project_id AND p.tenant_id=e.tenant_id

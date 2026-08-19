@@ -12,8 +12,21 @@ public interface IRVideoJobService
 {
     Task<RVideoJobCreatedResult> CreateDraftAsync(RVideoJobCreateRequest request, CurrentUserSession user, string storageRoot, string publicBase, string jobFolder, CancellationToken ct = default);
     Task<RVideoJobView?> GetByJobIdAsync(Guid jobId, CurrentUserSession user, CancellationToken ct = default);
+    Task UpdateAsync(Guid jobId, RVideoJobUpdateRequest request, CurrentUserSession user, CancellationToken ct = default);
     Task<long?> ResolveProjectIdAsync(Guid jobId, CurrentUserSession user, CancellationToken ct = default);
     Task SyncLifecycleAsync(long projectId, string stage, string projectStatus, CancellationToken ct = default);
+}
+
+public sealed class RVideoJobUpdateRequest
+{
+    public string Title { get; init; } = "RVIDEO";
+    public string Prompt { get; init; } = string.Empty;
+    public string AspectRatio { get; init; } = "9:16";
+    public string Resolution { get; init; } = "720p";
+    public int TotalSeconds { get; init; } = 16;
+    public int SceneSeconds { get; init; } = 8;
+    public bool ThinkScenes { get; init; }
+    public RVideoJobSettingsRequest Settings { get; init; } = new();
 }
 
 public sealed class RVideoJobCreateRequest
@@ -149,6 +162,74 @@ public sealed class RVideoJobService : IRVideoJobService
         return view?.Project.Id;
     }
 
+    public async Task UpdateAsync(Guid jobId, RVideoJobUpdateRequest request, CurrentUserSession user, CancellationToken ct = default)
+    {
+        EnsureCustomer(user);
+        RVideoRules.ValidateSettings(request.Settings);
+        var view = await GetByJobIdAsync(jobId, user, ct)
+            ?? throw new InvalidOperationException("RVIDEO_JOB_NOT_FOUND");
+
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        var snapshotJson = JsonSerializer.Serialize(new
+        {
+            engine = "RVIDEO",
+            serviceId = view.CoreJob.ServiceId,
+            serviceCode = view.CoreJob.ServiceCode,
+            title = request.Title,
+            description = request.Prompt,
+            prompt = request.Prompt,
+            aspectRatio = request.AspectRatio,
+            resolution = request.Resolution,
+            executionMode = request.Settings.ExecutionMode,
+            character = request.Settings.CharacterSnapshot,
+            voice = new { request.Settings.VoiceMode, request.Settings.VoiceCatalogCode, request.Settings.DefaultTtsRate },
+            music = new { request.Settings.MusicCatalogCode, request.Settings.MusicVolume },
+            request.TotalSeconds,
+            request.SceneSeconds,
+            request.ThinkScenes,
+            projectId = view.Project.Id
+        }, JsonOptions);
+        await conn.ExecuteAsync(
+            """
+            UPDATE render.render_jobs
+               SET input_json=CAST(@snapshot AS jsonb),
+                   prompt_json=jsonb_build_object('text', @prompt),
+                   updated_at=now()
+             WHERE id=@jobId AND tenant_id=@tenant AND customer_id=@customer AND job_type=@jobType;
+            """,
+            new
+            {
+                snapshot = snapshotJson,
+                prompt = request.Prompt,
+                jobId,
+                tenant = _tenant.TenantId,
+                customer = user.CustomerId,
+                jobType = RenderJobTypes.CoreService
+            });
+        await conn.ExecuteAsync(
+            """
+            UPDATE video_render.video_projects
+               SET title=@title,
+                   original_prompt=@prompt,
+                   total_seconds=@totalSeconds,
+                   scene_seconds=@sceneSeconds,
+                   think_scenes=@thinkScenes,
+                   updated_at=now()
+             WHERE core_job_id=@jobId AND tenant_id=@tenant;
+            """,
+            new
+            {
+                jobId,
+                tenant = _tenant.TenantId,
+                request.Title,
+                request.Prompt,
+                totalSeconds = Math.Max(1, request.TotalSeconds),
+                sceneSeconds = Math.Max(1, request.SceneSeconds),
+                thinkScenes = request.ThinkScenes
+            });
+    }
+
     public async Task SyncLifecycleAsync(long projectId, string stage, string projectStatus, CancellationToken ct = default)
     {
         await _tenant.EnsureLoadedAsync(ct);
@@ -179,6 +260,16 @@ public sealed class RVideoJobService : IRVideoJobService
     private static class CoreRowMapper
     {
         internal abstract class Row { public Guid Id { get; set; } public string Status { get; set; } = "draft"; public string SourceType { get; set; } = "dashboard"; public string? OperationType { get; set; } public string? LogicalRequestId { get; set; } public string? CurrentStep { get; set; } public int ProgressPercent { get; set; } public decimal PointCostEstimate { get; set; } public decimal PointCostCharged { get; set; } public string PointStatus { get; set; } = "not_required"; public string InputJson { get; set; } = "{}"; public string OutputJson { get; set; } = "[]"; public string? ErrorCode { get; set; } public string? ErrorMessage { get; set; } public DateTime CreatedAt { get; set; } public DateTime? UpdatedAt { get; set; } public DateTime? CompletedAt { get; set; } }
-        internal static CoreJobView Map(CoreJobRow r) { using var d = JsonDocument.Parse(string.IsNullOrWhiteSpace(r.OutputJson) ? "[]" : r.OutputJson); return new(r.Id,r.ServiceId,r.ServiceCode,r.CustomerId,r.UserId,r.Status,r.SourceType,r.OperationType,r.LogicalRequestId,r.CurrentStep,r.ProgressPercent,r.PointCostEstimate,r.PointCostCharged,r.PointStatus,null,d.RootElement.Clone(),r.ErrorCode,r.ErrorMessage,r.CreatedAt,r.UpdatedAt,r.CompletedAt); }
+        internal static CoreJobView Map(CoreJobRow r)
+        {
+            using var input = JsonDocument.Parse(string.IsNullOrWhiteSpace(r.InputJson) ? "{}" : r.InputJson);
+            using var output = JsonDocument.Parse(string.IsNullOrWhiteSpace(r.OutputJson) ? "[]" : r.OutputJson);
+            return new(
+                r.Id, r.ServiceId, r.ServiceCode, r.CustomerId, r.UserId, r.Status, r.SourceType,
+                r.OperationType, r.LogicalRequestId, r.CurrentStep, r.ProgressPercent,
+                r.PointCostEstimate, r.PointCostCharged, r.PointStatus, null,
+                input.RootElement.Clone(), output.RootElement.Clone(), r.ErrorCode, r.ErrorMessage,
+                r.CreatedAt, r.UpdatedAt, r.CompletedAt);
+        }
     }
 }

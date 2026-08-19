@@ -9,6 +9,7 @@
 @inject IDanceSellPhase2Service DanceJobs
 @inject IRVideoJobService RVideoJobs
 @inject TodoX.Web.Services.Platform.ICoreJobApplicationService CoreJobs
+@inject TodoX.Web.Services.Platform.ICoreServiceCatalogService ServiceCatalog
 @inject NavigationManager Navigation
 
 <PageTitle>Jobs của tôi</PageTitle>
@@ -100,7 +101,9 @@
             var danceTask = DanceJobs.ListAsync(currentUser, 100);
             var coreTask = CoreJobs.ListAsync(new TodoX.Web.Services.Platform.CoreRequestContext(
                 currentUser.CustomerId, currentUser.UserId, TodoX.Web.Services.Platform.CoreChannelCodes.Dashboard), new(1, 100));
-            await Task.WhenAll(timelapseTask, danceTask, coreTask);
+            var catalogTask = ServiceCatalog.ListAsync();
+            await Task.WhenAll(timelapseTask, danceTask, coreTask, catalogTask);
+            var catalog = catalogTask.Result.ToDictionary(x => x.ServiceCode, StringComparer.OrdinalIgnoreCase);
 
             var rows = timelapseTask.Result.Select(x => new CustomerJobRow(
                     x.Id,
@@ -124,8 +127,8 @@
                     .Where(x => string.Equals(x.OperationType, TodoX.Web.Models.Catalog.TodoXServiceEngineTypes.RVideo, StringComparison.OrdinalIgnoreCase))
                     .Select(x => new CustomerJobRow(
                         x.JobId,
-                        "RVIDEO",
-                        "RVIDEO",
+                        ReadSnapshotString(x.Input, "title") ?? catalog.GetValueOrDefault(x.ServiceCode)?.Name ?? x.ServiceCode,
+                        catalog.GetValueOrDefault(x.ServiceCode)?.Name ?? x.ServiceCode,
                         x.Status,
                         x.CurrentStep ?? "info",
                         x.CreatedAt,
@@ -140,6 +143,13 @@
         _loading = false;
         await InvokeAsync(StateHasChanged);
     }
+
+    private static string? ReadSnapshotString(System.Text.Json.JsonElement snapshot, string propertyName)
+        => snapshot.ValueKind == System.Text.Json.JsonValueKind.Object
+           && snapshot.TryGetProperty(propertyName, out var value)
+           && value.ValueKind == System.Text.Json.JsonValueKind.String
+            ? value.GetString()
+            : null;
 
     private sealed record CustomerJobRow(
         Guid Id,

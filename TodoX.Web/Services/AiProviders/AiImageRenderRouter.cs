@@ -30,6 +30,7 @@ public sealed class AiImageRenderRequest
     public AiBillingTrustedPayerContext? TrustedPayerContext { get; set; }
     public object? Metadata { get; set; }
     public string? CreatedBy { get; set; }
+    public Func<string, object, Task>? ProgressCallback { get; set; }
 }
 
 public sealed class AiImageRenderResult
@@ -204,7 +205,8 @@ public sealed class AiImageRenderRouter : IAiImageRenderRouter
                 EndpointPath = capability?.EndpointPath,
                 ApiKeyConfigName = detail?.ApiKeyConfigName,
                 ProviderConfigJson = detail?.ConfigJson,
-                CapabilityConfigJson = capability?.ConfigJson
+                CapabilityConfigJson = capability?.ConfigJson,
+                ProgressCallback = request.ProgressCallback
             }, cancellationToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)

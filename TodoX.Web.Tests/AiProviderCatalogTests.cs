@@ -53,6 +53,10 @@ public class AiProviderCatalogTests
     [InlineData("todox_image", "todox_image")]
     [InlineData("openrouter_image", "openrouter_image")]
     [InlineData("yescale_task_image", "yescale_task_image")]
+    [InlineData("79ai", "79ai_task_image")]
+    [InlineData("79ai_image", "79ai_task_image")]
+    [InlineData("79ai_task_image", "79ai_task_image")]
+    [InlineData("gommo_image", "79ai_task_image")]
     public void ProviderCodeMap_SupportsSceneImageQuickDefaultProviders(string providerCode, string factoryKey)
     {
         Assert.Equal(factoryKey, ProviderCodeMap.ToFactoryKey(providerCode));

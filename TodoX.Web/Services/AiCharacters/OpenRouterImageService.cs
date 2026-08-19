@@ -35,6 +35,7 @@ public sealed class OpenRouterImageRequest
 
     /// <summary>Raw capability config JSON from todox_ai_provider_capability.config_json.</summary>
     public string? CapabilityConfigJson { get; set; }
+    public Func<string, object, Task>? ProgressCallback { get; set; }
 }
 
 public sealed class OpenRouterImageResponse

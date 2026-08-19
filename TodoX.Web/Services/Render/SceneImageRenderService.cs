@@ -134,6 +134,9 @@ public sealed record ProviderImageOutputClassification(
 /// <summary>Everything needed to render one scene image, independent of the chosen provider.</summary>
 public sealed class SceneImageRenderContext
 {
+    public const string DefaultCapabilityCode = "scene_image_generation";
+    public const string RVideoCapabilityCode = "rvideo_scene_image_generation";
+
     public long ProjectId { get; init; }
     public long SceneId { get; init; }
     public int SceneIndex { get; init; }
@@ -156,6 +159,8 @@ public sealed class SceneImageRenderContext
 
     /// <summary>Character reference image URL (OpenRouter path passes references by URL).</summary>
     public string? CharacterReferenceUrl { get; init; }
+    public string CapabilityCode { get; init; } = DefaultCapabilityCode;
+    public Func<string, object, Task>? ProgressCallback { get; init; }
 }
 
 public interface ISceneImageRenderService
@@ -324,7 +329,7 @@ public sealed class SceneImageRenderService : ISceneImageRenderService
         ProviderOptionDto option;
         try
         {
-            option = await _providers.ResolveProviderForCapabilityAsync(CapabilityCode, providerCapabilityId: null, fromUser: false, ct);
+            option = await _providers.ResolveProviderForCapabilityAsync(context.CapabilityCode, providerCapabilityId: null, fromUser: false, ct);
         }
         catch (Exception ex)
         {
@@ -373,7 +378,7 @@ public sealed class SceneImageRenderService : ISceneImageRenderService
             UserId = context.UserId,
             TrustedPayerContext = context.TrustedPayerContext,
             FeatureCode = featureCode,
-            CapabilityCode = CapabilityCode,
+            CapabilityCode = context.CapabilityCode,
             ProviderCapabilityId = option.ProviderCapabilityId,
             FromUser = false,
             Prompt = context.Prompt,
@@ -396,7 +401,8 @@ public sealed class SceneImageRenderService : ISceneImageRenderService
                 characterId = context.CharacterId,
                 renderJobId = context.RenderJobId
             },
-            CreatedBy = context.CreatedBy ?? context.UserId.ToString()
+            CreatedBy = context.CreatedBy ?? context.UserId.ToString(),
+            ProgressCallback = context.ProgressCallback
         }, ct);
 
         if (!render.Success)

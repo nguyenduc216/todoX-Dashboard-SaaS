@@ -482,6 +482,17 @@ public sealed class CoreJobApplicationService : ICoreJobApplicationService
 
     private static CoreJobView Map(CoreJobRow row)
     {
+        JsonElement input;
+        try
+        {
+            using var document = JsonDocument.Parse(string.IsNullOrWhiteSpace(row.InputJson) ? "{}" : row.InputJson);
+            input = document.RootElement.Clone();
+        }
+        catch (JsonException)
+        {
+            input = JsonSerializer.SerializeToElement(new { }, JsonOptions);
+        }
+
         JsonElement output;
         try
         {
@@ -509,6 +520,7 @@ public sealed class CoreJobApplicationService : ICoreJobApplicationService
             row.PointCostCharged,
             row.PointStatus,
             row.RetryOfJobId,
+            input,
             output,
             row.ErrorCode,
             row.ErrorMessage,

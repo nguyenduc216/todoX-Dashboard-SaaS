@@ -83,6 +83,7 @@ public sealed record CoreJobView(
     decimal PointCostCharged,
     string PointStatus,
     Guid? RetryOfJobId,
+    JsonElement Input,
     JsonElement Output,
     string? ErrorCode,
     string? ErrorMessage,

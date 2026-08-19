@@ -9,6 +9,7 @@ namespace TodoX.Web.Services.Render;
 /// <summary>Input payload for the <see cref="SceneImageBatchRenderHandler"/> (serialised into the job's input_json).</summary>
 public sealed class SceneImageBatchInput
 {
+    public string CapabilityCode { get; set; } = SceneImageRenderContext.DefaultCapabilityCode;
     public long ProjectId { get; set; }
     public string AspectRatio { get; set; } = "9:16";
     public long? CharacterId { get; set; }
@@ -82,7 +83,7 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
 
         await _repo.AddProjectEventAsync(input.ProjectId, "SCENE_IMAGE_BATCH_STARTED", "info",
             $"Bắt đầu render {scenes.Count} ảnh tĩnh scene qua AI provider.",
-            new { jobId = job.Id, sceneCount = scenes.Count, input.OnlyMissingOrFailed, input.CharacterId, capability = SceneImageRenderService.CapabilityCode }, ct);
+            new { jobId = job.Id, sceneCount = scenes.Count, input.OnlyMissingOrFailed, capability = input.CapabilityCode }, ct);
 
         if (scenes.Count == 0)
         {
@@ -219,7 +220,7 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
                 },
                 RenderConfigSnapshot: new
                 {
-                    capability = SceneImageRenderService.CapabilityCode,
+                    capability = input.CapabilityCode,
                     aspectRatio = SceneImageRenderService.NormalizeAspectRatio(input.AspectRatio),
                     outputFormat = "png",
                     source = "scene_image_batch"
@@ -243,7 +244,15 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
             OutputObjectKey = imageVersion?.StorageKey,
             CharacterReferenceMediaId = referenceMediaId,
             CharacterReferenceObjectKey = referenceObjectKey,
-            CharacterReferenceUrl = referenceUrl
+            CharacterReferenceUrl = referenceUrl,
+            CapabilityCode = input.CapabilityCode,
+            ProgressCallback = (eventType, data) => _repo.AddProjectEventAsync(
+                input.ProjectId,
+                eventType,
+                "info",
+                $"Scene {scene.SceneIndex} provider image state: {eventType}.",
+                MergeProviderEvent(data, input, project, scene, jobId),
+                ct)
         };
 
         try
@@ -252,7 +261,7 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
             // so the UI shows "Đang tạo ảnh..." for exactly this scene.
             await _repo.AddProjectEventAsync(input.ProjectId, "SCENE_IMAGE_RENDER_START", "info",
                 $"Scene {scene.SceneIndex} bắt đầu render qua AI provider.",
-                new { jobId, projectId = input.ProjectId, sceneId = scene.Id, sceneIndex = scene.SceneIndex, capability = SceneImageRenderService.CapabilityCode, startedAt = DateTime.UtcNow }, ct);
+                new { jobId, projectId = input.ProjectId, sceneId = scene.Id, sceneIndex = scene.SceneIndex, capability = input.CapabilityCode, startedAt = DateTime.UtcNow }, ct);
 
             var startedAt = DateTime.UtcNow;
             var outcome = await _sceneImages.RenderSceneImageAsync(context, ct);
@@ -356,4 +365,15 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
             return false;
         }
     }
+
+    private static object MergeProviderEvent(object data, SceneImageBatchInput input, VideoProjectDto project, VideoProjectSceneDto scene, Guid jobId)
+        => new
+        {
+            coreJobId = project.CoreJobId,
+            projectId = input.ProjectId,
+            renderJobId = jobId,
+            sceneId = scene.Id,
+            sceneIndex = scene.SceneIndex,
+            data
+        };
 }

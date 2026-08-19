@@ -19,6 +19,7 @@
 @inject TodoX.Web.Services.VideoRender.ISceneMediaVersioningService SceneVersions
 @inject TodoX.Web.Services.VideoRender.RVideoJobSettingsRepository RVideoSettings
 @inject TodoX.Web.Services.VideoRender.IRVideoJobService RVideoJobs
+@inject TodoX.Web.Services.Platform.ICoreServiceCatalogService CoreCatalog
 @inject IOptionsMonitor<TodoX.Web.Services.VideoRender.VideoRenderOptions> VideoOptions
 @inject IDialogService DialogService
 @inject ISnackbar Snackbar
@@ -646,6 +647,7 @@ else
     private readonly SemaphoreSlim _reloadLock = new(1, 1);
     // True while a background scene image batch job for this project is queued/rendering.
     private bool _batchActive;
+    private IReadOnlyList<TodoX.Web.Services.Platform.CoreServiceView> _coreServices = Array.Empty<TodoX.Web.Services.Platform.CoreServiceView>();
 
     private sealed class SceneEditorState
     {
@@ -690,8 +692,36 @@ else
 
     private string ProjectHeaderMeta
         => _jobId is Guid jobId
-            ? $"Job ID: {jobId} · Aspect ratio: {ProjectAspectRatio}"
-            : $"Job mới · Aspect ratio: {ProjectAspectRatio}";
+            ? $"Job ID: {jobId} · Service: {ResolveServiceLabel()} · Stage: {ResolveProjectStage()} · Aspect ratio: {ProjectAspectRatio}"
+            : $"Job mới · Service: {ResolveServiceLabel()} · Stage: {ResolveProjectStage()} · Aspect ratio: {ProjectAspectRatio}";
+
+    private string ResolveServiceLabel()
+    {
+        var serviceCode = ServiceCode;
+        var catalogService = _coreServices.FirstOrDefault(x =>
+            string.Equals(x.ServiceCode, serviceCode, StringComparison.OrdinalIgnoreCase));
+        return !string.IsNullOrWhiteSpace(catalogService?.Name)
+            ? catalogService.Name
+            : string.IsNullOrWhiteSpace(serviceCode) ? "RVIDEO" : serviceCode;
+    }
+
+    private string ResolveProjectStage()
+    {
+        if (_project is null) return "Thông tin";
+        var states = _project.Scenes.Select(ResolveSceneImageState).ToList();
+        if (states.Any(x => x == RenderSceneImageVisualState.Failed)) return "Có lỗi";
+        if (_project.Scenes.Count > 0 && _project.Scenes.All(x => !string.IsNullOrWhiteSpace(x.StaticImageUrl)))
+        {
+            if (_project.Scenes.All(x => !string.IsNullOrWhiteSpace(ResolveDraftVideoUrl(x, GetSceneDraft(x)))))
+                return "Hoàn thành";
+            return "Ảnh đã sẵn sàng";
+        }
+        if (states.Any(x => x == RenderSceneImageVisualState.Downloading)) return "Đang tải kết quả";
+        if (states.Any(x => x == RenderSceneImageVisualState.ProviderProcessing)) return "79AI đang tạo ảnh";
+        if (states.Any(x => x == RenderSceneImageVisualState.ProviderSubmitted)) return "Đã gửi 79AI";
+        if (states.Any(RenderSceneImageUiState.IsActive)) return "Đang tạo ảnh";
+        return _project.Scenes.Count > 0 ? "Chuẩn bị scene" : "Thông tin";
+    }
 
     private sealed record DebugEntry(DateTimeOffset Timestamp, int StepNumber, string StepCode, string StepName, string Status, long DurationMs, string Message, string? Details = null);
 
@@ -708,6 +738,7 @@ else
         _projectId = ProjectId ?? QueryProjectId;
         if (AuthState.CurrentUser is not null)
         {
+            _coreServices = await CoreCatalog.ListAsync();
             await LoadCharactersAsync();
             await LoadAudioCatalogsAsync();
         }
@@ -2072,7 +2103,22 @@ else
                 ThinkScenes = _thinkScenes,
                 Scenes = _project.Scenes.OrderBy(x => x.SceneIndex).ToList()
             }, AuthState.CurrentUser);
-            await RVideoSettings.SaveAsync(_project.Id, BuildRVideoSettingsRequest());
+            var settingsRequest = BuildRVideoSettingsRequest();
+            await RVideoSettings.SaveAsync(_project.Id, settingsRequest);
+            if (_jobId is Guid jobId)
+            {
+                await RVideoJobs.UpdateAsync(jobId, new RVideoJobUpdateRequest
+                {
+                    Title = _project.Title,
+                    Prompt = _prompt,
+                    AspectRatio = _aspectRatio,
+                    Resolution = _resolution,
+                    TotalSeconds = _totalSeconds,
+                    SceneSeconds = Math.Max(1, _sceneSeconds),
+                    ThinkScenes = _thinkScenes,
+                    Settings = settingsRequest
+                }, AuthState.CurrentUser);
+            }
             await LogProjectEvent("JOB_SAVED", "info", "Lưu video project render-job.", snapshot);
             Snackbar.Add("Đã lưu job.", Severity.Success);
             await ReloadAsync();
@@ -2718,6 +2764,9 @@ else
             var state = ev.EventType switch
             {
                 "SCENE_IMAGE_QUEUED" => RenderSceneImageVisualState.Queued,
+                "SCENE_IMAGE_PROVIDER_SUBMITTED" => RenderSceneImageVisualState.ProviderSubmitted,
+                "SCENE_IMAGE_PROVIDER_PROCESSING" => RenderSceneImageVisualState.ProviderProcessing,
+                "SCENE_IMAGE_RESULT_DOWNLOADING" => RenderSceneImageVisualState.Downloading,
                 "SCENE_IMAGE_RENDER_START" => RenderSceneImageVisualState.Rendering,
                 "SCENE_IMAGE_RETRY_START" => RenderSceneImageVisualState.Rendering,
                 "SCENE_IMAGE_QUOTA_WAIT" => RenderSceneImageVisualState.Retrying,
@@ -2754,6 +2803,9 @@ else
 
     private static string SceneStateCss(RenderSceneImageVisualState state) => state switch
     {
+        RenderSceneImageVisualState.ProviderSubmitted => "scene-image-submitted",
+        RenderSceneImageVisualState.ProviderProcessing => "scene-image-processing",
+        RenderSceneImageVisualState.Downloading => "scene-image-downloading",
         RenderSceneImageVisualState.Rendering => "scene-image-rendering",
         RenderSceneImageVisualState.Queued => "scene-image-queued",
         RenderSceneImageVisualState.Retrying => "scene-image-retrying",
@@ -2763,8 +2815,11 @@ else
 
     private static string SceneStateLabel(RenderSceneImageVisualState state) => state switch
     {
+        RenderSceneImageVisualState.ProviderSubmitted => "Đã gửi 79AI",
+        RenderSceneImageVisualState.ProviderProcessing => "79AI đang tạo ảnh",
+        RenderSceneImageVisualState.Downloading => "Đang tải kết quả",
         RenderSceneImageVisualState.Rendering => "Đang tạo ảnh...",
-        RenderSceneImageVisualState.Queued => "Đang chờ",
+        RenderSceneImageVisualState.Queued => "Đang chờ lượt",
         RenderSceneImageVisualState.Retrying => "Đang chờ quota...",
         RenderSceneImageVisualState.Failed => "Lỗi render",
         _ => string.Empty

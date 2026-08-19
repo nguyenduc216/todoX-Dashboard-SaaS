@@ -6,6 +6,9 @@ public enum RenderSceneImageVisualState
 {
     None,
     Queued,
+    ProviderSubmitted,
+    ProviderProcessing,
+    Downloading,
     Rendering,
     Retrying,
     Ready,
@@ -16,6 +19,9 @@ public static class RenderSceneImageUiState
 {
     public static bool IsActive(RenderSceneImageVisualState state)
         => state is RenderSceneImageVisualState.Queued
+            or RenderSceneImageVisualState.ProviderSubmitted
+            or RenderSceneImageVisualState.ProviderProcessing
+            or RenderSceneImageVisualState.Downloading
             or RenderSceneImageVisualState.Rendering
             or RenderSceneImageVisualState.Retrying;
 
