@@ -172,7 +172,9 @@ public class RenderVideoJobsLayoutTests
         Assert.Contains("SceneImageRenderWorkItemHandler.JobTypeName", method);
         Assert.Contains("SceneImageRenderContext.RVideoCapabilityCode", method);
         Assert.Contains("ResolveCharacterReferenceMediaIdAsync", method);
-        Assert.Contains("requireReference: true", method);
+        Assert.Contains("requireReference: reference.ReferenceRequested", method);
+        Assert.Contains("reference.Source", method);
+        Assert.Contains("RVideoSceneImageReferenceSelection.Resolve", method);
         Assert.Contains("RequestedModel = model.Model", method);
         Assert.Contains("ModelAttemptIndex = model.AttemptIndex", method);
     }

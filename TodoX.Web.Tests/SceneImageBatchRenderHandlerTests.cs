@@ -81,7 +81,69 @@ public class SceneImageBatchRenderHandlerTests
     public void SceneImageBatchInput_DefaultsToRVideoCapability()
     {
         Assert.Equal(SceneImageRenderContext.RVideoCapabilityCode, new SceneImageBatchInput().CapabilityCode);
+        Assert.Equal("NONE", new SceneImageBatchInput().ReferenceSource);
         Assert.Equal("rvideo_scene_image_generation", SceneImageRenderContext.RVideoCapabilityCode);
+    }
+
+    [Fact]
+    public void RVideoSceneReference_NoneDoesNotRequestOrCarryCharacterMedia()
+    {
+        var reference = RVideoSceneImageReferenceSelection.Resolve(
+            skipCharacter: true,
+            characterMode: RVideoCharacterModes.None,
+            uploadObjectKey: "upload/key",
+            uploadUrl: "https://cdn/upload.png",
+            libraryCharacterId: 42,
+            libraryObjectKey: "library/key",
+            libraryUrl: "https://cdn/library.png",
+            libraryCharacterPrompt: "library prompt");
+
+        Assert.False(reference.ReferenceRequested);
+        Assert.Null(reference.CharacterId);
+        Assert.Null(reference.ObjectKey);
+        Assert.Null(reference.Url);
+        Assert.Equal("NONE", reference.Source);
+    }
+
+    [Fact]
+    public void RVideoSceneReference_UploadUsesOnlyUploadedSnapshot()
+    {
+        var reference = RVideoSceneImageReferenceSelection.Resolve(
+            skipCharacter: false,
+            characterMode: RVideoCharacterModes.Upload,
+            uploadObjectKey: "upload/key",
+            uploadUrl: "https://cdn/upload.png",
+            libraryCharacterId: 42,
+            libraryObjectKey: "library/key",
+            libraryUrl: "https://cdn/library.png",
+            libraryCharacterPrompt: "library prompt");
+
+        Assert.True(reference.ReferenceRequested);
+        Assert.Null(reference.CharacterId);
+        Assert.Equal("upload/key", reference.ObjectKey);
+        Assert.Equal("https://cdn/upload.png", reference.Url);
+        Assert.Equal("UPLOAD", reference.Source);
+    }
+
+    [Fact]
+    public void RVideoSceneReference_LibraryUsesSelectedCharacterMedia()
+    {
+        var reference = RVideoSceneImageReferenceSelection.Resolve(
+            skipCharacter: false,
+            characterMode: RVideoCharacterModes.Library,
+            uploadObjectKey: "upload/key",
+            uploadUrl: "https://cdn/upload.png",
+            libraryCharacterId: 42,
+            libraryObjectKey: "library/key",
+            libraryUrl: "https://cdn/library.png",
+            libraryCharacterPrompt: "library prompt");
+
+        Assert.True(reference.ReferenceRequested);
+        Assert.Equal(42, reference.CharacterId);
+        Assert.Equal("library/key", reference.ObjectKey);
+        Assert.Equal("https://cdn/library.png", reference.Url);
+        Assert.Equal("library prompt", reference.CharacterPrompt);
+        Assert.Equal("LIBRARY", reference.Source);
     }
 
     [Fact]

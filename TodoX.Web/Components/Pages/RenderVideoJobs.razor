@@ -628,7 +628,7 @@ else
     private readonly List<DebugEntry> _debugEntries = new();
     private int _debugStep;
 
-    // Scenes currently being re-rendered individually (OpenRouter). Keyed by scene id.
+    // Scenes currently being re-rendered individually through persisted provider work. Keyed by scene id.
     private readonly HashSet<long> _sceneRerendering = new();
     // Per-scene re-render error messages (kept so a failed rerender does not wipe the old image).
     private readonly Dictionary<long, string> _sceneRerenderErrors = new();
@@ -2249,15 +2249,24 @@ else
     private async Task EnqueueBulkSceneImageRenderAsync(bool onlyMissingOrFailed)
     {
         if (_project is null || AuthState.CurrentUser is null) return;
-        var character = ResolveCurrentCharacter();
+        var reference = TodoX.Web.Services.Render.RVideoSceneImageReferenceSelection.Resolve(
+            _skipCharacter,
+            _characterMode,
+            _uploadedCharacter?.StorageKey,
+            _uploadedCharacter?.FileUrl,
+            ResolveCurrentCharacter()?.Id,
+            ResolveCurrentCharacter()?.MasterImageObjectKey,
+            ResolveCurrentCharacter()?.MasterImageUrl,
+            ResolveCurrentCharacter()?.NormalizedPrompt);
         var input = new TodoX.Web.Services.Render.SceneImageBatchInput
         {
             CapabilityCode = TodoX.Web.Services.Render.SceneImageRenderContext.RVideoCapabilityCode,
+            ReferenceSource = reference.Source,
             ProjectId = _project.Id,
             AspectRatio = _aspectRatio,
-            CharacterId = character?.Id ?? _project.CharacterId,
-            CharacterReferenceObjectKey = _characterMode == RVideoCharacterModes.Upload ? _uploadedCharacter?.StorageKey : null,
-            CharacterReferenceUrl = _characterMode == RVideoCharacterModes.Upload ? _uploadedCharacter?.FileUrl : null,
+            CharacterId = reference.CharacterId,
+            CharacterReferenceObjectKey = reference.ObjectKey,
+            CharacterReferenceUrl = reference.Url,
             UserId = AuthState.CurrentUser.UserId,
             CustomerId = AuthState.CurrentUser.CustomerId,
             CreatedBy = AuthState.CurrentUser.Email ?? AuthState.CurrentUser.UserId.ToString(),
@@ -2340,7 +2349,15 @@ else
             return;
         }
 
-        var character = ResolveCurrentCharacter();
+        var reference = TodoX.Web.Services.Render.RVideoSceneImageReferenceSelection.Resolve(
+            _skipCharacter,
+            _characterMode,
+            _uploadedCharacter?.StorageKey,
+            _uploadedCharacter?.FileUrl,
+            ResolveCurrentCharacter()?.Id,
+            ResolveCurrentCharacter()?.MasterImageObjectKey,
+            ResolveCurrentCharacter()?.MasterImageUrl,
+            ResolveCurrentCharacter()?.NormalizedPrompt);
         await InvokeAsync(StateHasChanged);
 
         try
@@ -2357,12 +2374,12 @@ else
                 ImagePrompt = draft.ImagePrompt,
                 VideoPrompt = draft.MotionPrompt
             };
-            var prompt = TodoX.Web.Services.Render.SceneImagePromptBuilder.Build(promptScene, character?.NormalizedPrompt);
+            var prompt = TodoX.Web.Services.Render.SceneImagePromptBuilder.Build(promptScene, reference.CharacterPrompt);
             var referenceMediaId = await SceneImages.ResolveCharacterReferenceMediaIdAsync(
-                _project.Id, character?.MasterImageUrl, character?.MasterImageObjectKey,
+                _project.Id, reference.Url, reference.ObjectKey,
                 AuthState.CurrentUser.UserId, AuthState.CurrentUser.CustomerId,
-                requireReference: true);
-            if (referenceMediaId is null)
+                requireReference: reference.ReferenceRequested);
+            if (reference.ReferenceRequested && referenceMediaId is null)
             {
                 throw new InvalidOperationException("RVIDEO_REFERENCE_IMAGE_UNAVAILABLE");
             }
@@ -2375,8 +2392,9 @@ else
                 operationId, logicalRequestId, draft.ImagePrompt, prompt, draft.MotionPrompt, null,
                 new { scene.Id, scene.ProjectId, scene.SceneIndex, scene.Title, scene.DurationSeconds,
                     scene.ScenePrompt, imagePrompt = draft.ImagePrompt, videoPrompt = draft.MotionPrompt },
-                new { characterId = character?.Id, referenceMediaId, referenceUrl = character?.MasterImageUrl,
-                    referenceObjectKey = character?.MasterImageObjectKey, characterPrompt = character?.NormalizedPrompt },
+                new { characterId = reference.CharacterId, referenceMediaId, referenceUrl = reference.Url,
+                    referenceObjectKey = reference.ObjectKey, referenceSource = reference.Source,
+                    characterPrompt = reference.CharacterPrompt },
                 new { capability = TodoX.Web.Services.Render.SceneImageRenderContext.RVideoCapabilityCode,
                     aspectRatio = TodoX.Web.Services.Render.SceneImageRenderService.NormalizeAspectRatio(_aspectRatio),
                     outputFormat = "png", source = "scene_image_user_rerender", model = model.Model,
@@ -2404,10 +2422,10 @@ else
                     TrustedPayerContext = TodoX.Web.Services.AiProviders.AiBillingPayerResolver.CreateTrustedBackgroundContext(AuthState.CurrentUser),
                     Prompt = version.CompiledImagePromptSnapshot ?? prompt,
                     AspectRatio = TodoX.Web.Services.Render.SceneImageRenderService.NormalizeAspectRatio(_aspectRatio),
-                    CharacterId = character?.Id,
+                    CharacterId = reference.CharacterId,
                     ReferenceMediaId = referenceMediaId,
-                    ReferenceObjectKey = character?.MasterImageObjectKey,
-                    ReferenceUrl = character?.MasterImageUrl,
+                    ReferenceObjectKey = reference.ObjectKey,
+                    ReferenceUrl = reference.Url,
                     CapabilityCode = TodoX.Web.Services.Render.SceneImageRenderContext.RVideoCapabilityCode,
                     LogicalRequestId = logicalRequestId,
                     RequestedModel = model.Model,
@@ -2426,7 +2444,8 @@ else
             _sceneEventState[scene.Id] = RenderSceneImageVisualState.Queued;
             await LogProjectEvent("SCENE_IMAGE_RERENDER_ENQUEUED", "info", $"Đã enqueue render lại ảnh scene {scene.SceneIndex}.",
                 new { job.Id, projectId = _project.Id, sceneId = scene.Id, sceneIndex = scene.SceneIndex,
-                    imageVersionId = version.Id, characterId = character?.Id, model = model.Model,
+                    imageVersionId = version.Id, characterId = reference.CharacterId, referenceSource = reference.Source,
+                    model = model.Model,
                     modelAttemptIndex = model.AttemptIndex });
             Snackbar.Add($"Đã enqueue render lại ảnh scene {scene.SceneIndex}.", Severity.Success);
             await StartPolling();
@@ -2745,7 +2764,7 @@ else
 
     private RenderSceneImageVisualState ResolveSceneImageState(VideoProjectSceneDto scene)
     {
-        // A locally-running OpenRouter re-render always wins for its own scene.
+        // A locally-running per-scene re-render always wins for its own scene.
         if (_sceneRerendering.Contains(scene.Id))
         {
             return RenderSceneImageVisualState.Rendering;

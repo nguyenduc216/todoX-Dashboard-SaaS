@@ -9,6 +9,7 @@ namespace TodoX.Web.Services.Render;
 public sealed class SceneImageBatchInput
 {
     public string CapabilityCode { get; set; } = SceneImageRenderContext.RVideoCapabilityCode;
+    public string ReferenceSource { get; set; } = "NONE";
     public long ProjectId { get; set; }
     public string AspectRatio { get; set; } = "9:16";
     public long? CharacterId { get; set; }
@@ -165,7 +166,7 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
             scene.ImagePrompt, compiledPrompt, scene.VideoPrompt, null,
             new { scene.Id, scene.ProjectId, scene.SceneIndex, scene.Title, scene.DurationSeconds,
                 scene.ScenePrompt, scene.ImagePrompt, scene.VideoPrompt },
-            new { input.CharacterId, referenceMediaId, referenceUrl, characterPrompt },
+            new { input.CharacterId, referenceMediaId, referenceUrl, referenceObjectKey, referenceSource = input.ReferenceSource, characterPrompt },
             new { capability = input.CapabilityCode, aspectRatio = SceneImageRenderService.NormalizeAspectRatio(input.AspectRatio),
                 outputFormat = "png", source = "scene_image_batch", model = model.Model, model.Mode,
                 model.Resolution, modelAttemptIndex = model.AttemptIndex }), ct);
@@ -203,14 +204,25 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
     private async Task<(Guid? MediaId, string? Url, string? ObjectKey, string? CharacterPrompt)>
         ResolveCharacterReferenceAsync(SceneImageBatchInput input, CancellationToken ct)
     {
+        if (string.Equals(input.ReferenceSource, "NONE", StringComparison.OrdinalIgnoreCase))
+        {
+            return (null, null, null, null);
+        }
+
         if (input.CharacterId is not long characterId)
         {
             if (string.IsNullOrWhiteSpace(input.CharacterReferenceUrl)
                 && string.IsNullOrWhiteSpace(input.CharacterReferenceObjectKey))
-                return (null, null, null, null);
+            {
+                throw new InvalidOperationException("RVIDEO_REFERENCE_IMAGE_UNAVAILABLE");
+            }
             var mediaId = await _sceneImages.ResolveCharacterReferenceMediaIdAsync(
                 input.ProjectId, input.CharacterReferenceUrl, input.CharacterReferenceObjectKey,
                 input.UserId, input.CustomerId, requireReference: true, ct: ct);
+            if (mediaId is null)
+            {
+                throw new InvalidOperationException("RVIDEO_REFERENCE_IMAGE_UNAVAILABLE");
+            }
             return (mediaId, input.CharacterReferenceUrl, input.CharacterReferenceObjectKey, null);
         }
 
