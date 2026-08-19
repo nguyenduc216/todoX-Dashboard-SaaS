@@ -74,7 +74,9 @@ Terminal provider failure now closes the current version and queues a new versio
 
 Starting SHA for this follow-up: `51a0fbc027311a131e0f81dba412dd1907c86fba`
 
-Final remote SHA for this follow-up: `PENDING_COMMIT`
+Follow-up implementation SHA: `ccbf010af3a83f722d2ff1dc706b52addd116c39`
+
+Final remote SHA for this follow-up: updated by the report-only commit immediately after this implementation commit.
 
 Implemented:
 
