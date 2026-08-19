@@ -116,6 +116,7 @@ public sealed class AiImageRenderRouter : IAiImageRenderRouter
         var provider = _imageProviders.GetProvider(factoryKey);
 
         var (cfgResolution, cfgQuality, cfgFormat) = ParseImageConfig(capability?.ConfigJson);
+        var selectedModel = FirstNonBlank(request.RequestedModel, option.ModelName);
         var resolution = factoryKey.Equals("yescale_task_image", StringComparison.OrdinalIgnoreCase)
             ? FirstNonBlank(cfgResolution, request.Resolution) ?? "1K"
             : HighestResolution(cfgResolution, request.Resolution);
@@ -128,11 +129,11 @@ public sealed class AiImageRenderRouter : IAiImageRenderRouter
         request.JobId ??= request.RenderJobId;
         var billingCost = _billing.BuildConfiguredCost(unitCost, quantity);
         var tariffSnapshotJson = BuildTariffSnapshotJson(detail?.Capabilities, option.CapabilityCode, billingCost.ExchangeRateVndPerUsd, billingCost.TodoXVndPerPoint);
-        ValidateYEScaleTariffCoverage(factoryKey, option.ModelName, detail?.ConfigJson, capability?.ConfigJson, tariffSnapshotJson);
+        ValidateYEScaleTariffCoverage(factoryKey, selectedModel, detail?.ConfigJson, capability?.ConfigJson, tariffSnapshotJson);
 
         _logger.LogInformation(
             "AI_IMAGE_ROUTER_RESOLVED capability={CapabilityCode} feature={FeatureCode} provider={ProviderCode} model={ModelName} resolution={Resolution} logicalRequestId={LogicalRequestId}",
-            request.CapabilityCode, request.FeatureCode, option.ProviderCode, option.ModelName, resolution, logicalRequestId);
+            request.CapabilityCode, request.FeatureCode, option.ProviderCode, selectedModel, resolution, logicalRequestId);
 
         var reservation = await _billing.ReserveAsync(new AiImageBillingReserveRequest
         {
@@ -145,7 +146,7 @@ public sealed class AiImageRenderRouter : IAiImageRenderRouter
             ProviderCode = option.ProviderCode,
             CapabilityCode = option.CapabilityCode,
             FeatureCode = request.FeatureCode,
-            RequestedModel = option.ModelName,
+            RequestedModel = selectedModel,
             Cost = billingCost,
             TrustedPayerContext = request.TrustedPayerContext,
             TariffSnapshotJson = tariffSnapshotJson,
@@ -164,7 +165,7 @@ public sealed class AiImageRenderRouter : IAiImageRenderRouter
                 ProviderCode = option.ProviderCode,
                 ProviderId = option.ProviderId,
                 ProviderCapabilityId = option.ProviderCapabilityId,
-                ModelName = option.ModelName,
+                ModelName = selectedModel,
                 UnitType = option.UnitType,
                 UnitCostPoints = unitCost,
                 Quantity = quantity,
@@ -189,7 +190,7 @@ public sealed class AiImageRenderRouter : IAiImageRenderRouter
                 {
                     LogicalRequestId = logicalRequestId,
                     Success = false,
-                    ActualModel = option.ModelName,
+                    ActualModel = selectedModel,
                     ErrorMessage = "Image render was canceled before provider submit."
                 }, CancellationToken.None);
                 cancellationToken.ThrowIfCancellationRequested();
@@ -200,8 +201,8 @@ public sealed class AiImageRenderRouter : IAiImageRenderRouter
             {
                 UserId = request.UserId,
                 CustomerId = null,
-                Model = option.ModelName ?? string.Empty,
-                RequestedModel = request.RequestedModel,
+                Model = selectedModel ?? string.Empty,
+                RequestedModel = selectedModel,
                 Prompt = request.Prompt,
                 AspectRatio = request.AspectRatio,
                 OutputFormat = outputFormat,
@@ -228,7 +229,7 @@ public sealed class AiImageRenderRouter : IAiImageRenderRouter
             {
                 LogicalRequestId = logicalRequestId,
                 Success = false,
-                ActualModel = option.ModelName,
+                ActualModel = selectedModel,
                 ErrorMessage = ex.Message
             }, cancellationToken);
             throw;
@@ -240,7 +241,7 @@ public sealed class AiImageRenderRouter : IAiImageRenderRouter
                 await _billing.MarkPendingReconciliationAsync(new AiImageBillingPendingReconciliationRequest
                 {
                     LogicalRequestId = logicalRequestId,
-                    ActualModel = option.ModelName,
+                    ActualModel = selectedModel,
                     ErrorMessage = ex.Message
                 }, CancellationToken.None);
             }
@@ -250,7 +251,7 @@ public sealed class AiImageRenderRouter : IAiImageRenderRouter
                 {
                     LogicalRequestId = logicalRequestId,
                     Success = false,
-                    ActualModel = option.ModelName,
+                    ActualModel = selectedModel,
                     ErrorMessage = ex.Message
                 }, CancellationToken.None);
             }
@@ -258,7 +259,7 @@ public sealed class AiImageRenderRouter : IAiImageRenderRouter
             throw;
         }
 
-        var finalModel = string.IsNullOrWhiteSpace(response.ModelName) ? option.ModelName : response.ModelName;
+        var finalModel = string.IsNullOrWhiteSpace(response.ModelName) ? selectedModel : response.ModelName;
         var providerTaskId = TryReadTaskId(response.UsageJson) ?? request.ProviderTaskId;
         AiImageBillingCompletion billingCompletion;
         try

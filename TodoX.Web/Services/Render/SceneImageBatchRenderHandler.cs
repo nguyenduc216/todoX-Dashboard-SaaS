@@ -113,6 +113,15 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
             .Where(x => input.SceneIds is null || input.SceneIds.Contains(x.Id))
             .Where(x => ShouldRenderScene(x, input.OnlyMissingOrFailed))
             .ToList();
+        var activeSceneIds = new HashSet<long>();
+        foreach (var scene in scenes)
+        {
+            if (await _versions.HasActiveImageVersionAsync(scene.Id, ct))
+            {
+                activeSceneIds.Add(scene.Id);
+            }
+        }
+        scenes = scenes.Where(scene => !activeSceneIds.Contains(scene.Id)).ToList();
         if (scenes.Count == 0) return;
 
         var (referenceMediaId, referenceUrl, referenceObjectKey, characterPrompt) =
@@ -201,7 +210,7 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
                 return (null, null, null, null);
             var mediaId = await _sceneImages.ResolveCharacterReferenceMediaIdAsync(
                 input.ProjectId, input.CharacterReferenceUrl, input.CharacterReferenceObjectKey,
-                input.UserId, input.CustomerId, ct);
+                input.UserId, input.CustomerId, requireReference: true, ct: ct);
             return (mediaId, input.CharacterReferenceUrl, input.CharacterReferenceObjectKey, null);
         }
 
@@ -216,7 +225,12 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
                 throw new InvalidOperationException("RVIDEO_REFERENCE_IMAGE_UNAVAILABLE");
             }
             var mediaId = await _sceneImages.ResolveCharacterReferenceMediaIdAsync(input.ProjectId,
-                character?.MasterImageUrl, character?.MasterImageObjectKey, input.UserId, input.CustomerId, ct);
+                character?.MasterImageUrl, character?.MasterImageObjectKey, input.UserId, input.CustomerId,
+                requireReference: true, ct: ct);
+            if (mediaId is null)
+            {
+                throw new InvalidOperationException("RVIDEO_REFERENCE_IMAGE_UNAVAILABLE");
+            }
             return (mediaId, character?.MasterImageUrl, character?.MasterImageObjectKey, character?.NormalizedPrompt);
         }
         catch (Exception ex)

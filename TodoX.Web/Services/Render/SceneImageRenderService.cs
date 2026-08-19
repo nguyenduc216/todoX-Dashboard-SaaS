@@ -169,10 +169,11 @@ public sealed class SceneImageRenderContext
 public interface ISceneImageRenderService
 {
     /// <summary>
-    /// Resolves a character's master image into a media id usable as a Vertex reference. Downloads the
-    /// image into media storage when needed. Returns null when the character has no usable master image.
+    /// Resolves a character's master image into a media id. Legacy callers may continue without a
+    /// reference; native RVIDEO callers set <paramref name="requireReference"/> and fail closed.
     /// </summary>
-    Task<Guid?> ResolveCharacterReferenceMediaIdAsync(long projectId, string? masterImageUrl, string? masterImageObjectKey, Guid userId, Guid? customerId, CancellationToken ct = default);
+    Task<Guid?> ResolveCharacterReferenceMediaIdAsync(long projectId, string? masterImageUrl, string? masterImageObjectKey,
+        Guid userId, Guid? customerId, bool requireReference = false, CancellationToken ct = default);
 
     /// <summary>Legacy direct ImageAICreativeRender path; normal scene rendering resolves the configured provider.</summary>
     Task<SceneImageRenderOutcome> RenderSceneImageWithVertexAsync(SceneImageRenderContext context, int attempt, CancellationToken ct = default);
@@ -220,11 +221,16 @@ public sealed class SceneImageRenderService : ISceneImageRenderService
         _logger = logger;
     }
 
-    public async Task<Guid?> ResolveCharacterReferenceMediaIdAsync(long projectId, string? masterImageUrl, string? masterImageObjectKey, Guid userId, Guid? customerId, CancellationToken ct = default)
+    public async Task<Guid?> ResolveCharacterReferenceMediaIdAsync(long projectId, string? masterImageUrl, string? masterImageObjectKey,
+        Guid userId, Guid? customerId, bool requireReference = false, CancellationToken ct = default)
     {
         var classification = ProviderImageOutputClassification.Classify(null, null, masterImageObjectKey, masterImageUrl);
         if (classification.SourceType == ProviderImageSourceType.Invalid)
         {
+            if (requireReference)
+            {
+                throw new InvalidOperationException("RVIDEO_REFERENCE_IMAGE_UNAVAILABLE");
+            }
             return null;
         }
 
@@ -252,6 +258,10 @@ public sealed class SceneImageRenderService : ISceneImageRenderService
                 _logger.LogWarning(
                     "SCENE_IMAGE_CHARACTER_REFERENCE_UNAVAILABLE projectId={ProjectId} sourceType={SourceType} objectKey={ObjectKey} hasUrl={HasUrl}",
                     projectId, classification.SourceType, classification.ObjectKey, !string.IsNullOrWhiteSpace(masterImageUrl));
+                if (requireReference)
+                {
+                    throw new InvalidOperationException("RVIDEO_REFERENCE_IMAGE_UNAVAILABLE");
+                }
                 return null;
             }
 
@@ -262,10 +272,15 @@ public sealed class SceneImageRenderService : ISceneImageRenderService
         }
         catch (Exception ex)
         {
-            // A missing/broken reference must not abort the whole batch; render without it and log.
             _logger.LogWarning(ex,
                 "SCENE_IMAGE_CHARACTER_REFERENCE_FAILED projectId={ProjectId} sourceType={SourceType} objectKey={ObjectKey} hasUrl={HasUrl}",
                 projectId, classification.SourceType, classification.ObjectKey, !string.IsNullOrWhiteSpace(masterImageUrl));
+            if (requireReference)
+            {
+                throw ex is InvalidOperationException { Message: "RVIDEO_REFERENCE_IMAGE_UNAVAILABLE" }
+                    ? ex
+                    : new InvalidOperationException("RVIDEO_REFERENCE_IMAGE_UNAVAILABLE", ex);
+            }
             return null;
         }
     }

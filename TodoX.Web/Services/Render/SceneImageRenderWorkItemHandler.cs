@@ -44,6 +44,10 @@ public sealed class SceneImageRenderWorkItemHandler : IRenderJobHandler
             .FirstOrDefault(x => x.Id == input.ImageVersionId)
             ?? throw new InvalidOperationException("Scene image version not found.");
         var taskId = await _versions.GetSceneImageProviderTaskIdAsync(version.Id, ct);
+        if (!string.IsNullOrWhiteSpace(input.RequestedModel))
+        {
+            await _versions.MarkSceneImageVersionRequestedAsync(version.Id, input.RequestedModel, ct);
+        }
 
         try
         {

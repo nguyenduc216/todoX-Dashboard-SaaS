@@ -227,11 +227,13 @@ public interface ISceneMediaVersioningService
     Task CompleteImageVersionAsync(Guid versionId, SceneImageVersionCompleteRequest request, CancellationToken ct = default);
     Task<bool> TryCompleteImageVersionAsync(Guid versionId, SceneImageVersionCompleteRequest request, CancellationToken ct = default);
     Task FailImageVersionAsync(Guid versionId, string? errorCode, string? errorMessage, CancellationToken ct = default);
+    Task MarkSceneImageVersionRequestedAsync(Guid versionId, string requestedModel, CancellationToken ct = default);
     Task MarkSceneImageVersionSubmittedAsync(Guid versionId, string? providerCode, string? modelName, long? providerCapabilityId, string providerTaskId, CancellationToken ct = default);
     Task<string?> GetSceneImageProviderTaskIdAsync(Guid versionId, CancellationToken ct = default);
     Task MarkSceneImagePendingReconciliationAsync(Guid versionId, string? errorCode, string? errorMessage, CancellationToken ct = default);
     Task<SceneImageVersionDto?> GetSelectedImageVersionAsync(long sceneId, CancellationToken ct = default);
     Task<IReadOnlyList<SceneImageVersionDto>> ListImageVersionsAsync(long sceneId, int skip = 0, int take = 20, CancellationToken ct = default);
+    Task<bool> HasActiveImageVersionAsync(long sceneId, CancellationToken ct = default);
     Task<IReadOnlyList<SceneImageVersionDto>> ListImageVersionsAsync(long sceneId, CurrentUserSession user, int skip = 0, int take = 20, CancellationToken ct = default);
     Task SelectImageVersionAsync(long sceneId, Guid versionId, Guid? selectedBy, CancellationToken ct = default);
     Task SelectImageVersionAsync(long sceneId, Guid versionId, CurrentUserSession user, CancellationToken ct = default);
@@ -517,6 +519,21 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
         await UpdateVersionFailureAsync("video_render.scene_image_versions", versionId, errorCode, errorMessage, ct);
     }
 
+    public async Task MarkSceneImageVersionRequestedAsync(Guid versionId, string requestedModel, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(requestedModel)) return;
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        await conn.ExecuteAsync(
+            """
+            UPDATE video_render.scene_image_versions
+               SET requested_model=COALESCE(requested_model, @requestedModel),
+                   updated_at=now()
+             WHERE id=@versionId AND tenant_id=@tenant;
+            """,
+            new { versionId, tenant = _tenant.TenantId, requestedModel });
+    }
+
     public async Task MarkSceneImageVersionSubmittedAsync(Guid versionId, string? providerCode, string? modelName, long? providerCapabilityId, string providerTaskId, CancellationToken ct = default)
     {
         await _tenant.EnsureLoadedAsync(ct);
@@ -580,6 +597,22 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
             """,
             new { sceneId, tenant = _tenant.TenantId, skip = Math.Max(0, skip), take = Math.Clamp(take, 1, 100) });
         return rows.ToList();
+    }
+
+    public async Task<bool> HasActiveImageVersionAsync(long sceneId, CancellationToken ct = default)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        var count = await conn.ExecuteScalarAsync<int>(
+            """
+            SELECT COUNT(*)
+              FROM video_render.scene_image_versions
+             WHERE scene_id=@sceneId
+               AND tenant_id=@tenant
+               AND lower(status) IN ('queued','submitted','pending','processing','pending_reconciliation');
+            """,
+            new { sceneId, tenant = _tenant.TenantId });
+        return count > 0;
     }
 
     public async Task<IReadOnlyList<SceneImageVersionDto>> ListImageVersionsAsync(long sceneId, CurrentUserSession user, int skip = 0, int take = 20, CancellationToken ct = default)

@@ -68,6 +68,25 @@ public sealed class Gommo79AiImageServiceTests
     }
 
     [Fact]
+    public async Task RequestedFallbackModelControlsProviderPayload()
+    {
+        var client = new FakeClient(["task-fallback"], []);
+        var service = Create(client);
+
+        await service.GenerateImageAsync(new OpenRouterImageRequest
+        {
+            Prompt = "fallback scene",
+            Model = "google_image_gen_banana_2",
+            RequestedModel = "seedream_4_5"
+        });
+
+        var submit = Assert.Single(client.Submits);
+        Assert.Equal("seedream_4_5", submit.Model);
+        Assert.Equal("vip", submit.Options["mode"]);
+        Assert.Equal("2k", submit.Options["resolution"]);
+    }
+
+    [Fact]
     public async Task ImageRecoveryRequiresExactTaskId()
     {
         var client = new FakeClient(["unused"],
