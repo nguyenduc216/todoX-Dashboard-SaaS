@@ -20,6 +20,8 @@ public sealed class OpenRouterImageRequest
     public string FileCategory { get; set; } = "ai_character";
     public string[] ReferenceImageUrls { get; set; } = Array.Empty<string>();
     public Guid[] ReferenceMediaIds { get; set; } = Array.Empty<Guid>();
+    public string? ProviderTaskId { get; set; }
+    public string? ReferenceImageBase64 { get; set; }
 
     /// <summary>Overrides OpenRouter:BaseUrl when the provider row supplies its own base_url.</summary>
     public string? BaseUrlOverride { get; set; }

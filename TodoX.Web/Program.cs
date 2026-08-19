@@ -185,6 +185,7 @@ builder.Services.AddScoped<IRenderJobHandler, TodoX.Web.Services.VideoRender.Sce
 builder.Services.AddScoped<IRenderJobHandler, TodoX.Web.Services.VideoRender.SceneVideoWorkerHandler>();
 builder.Services.AddScoped<IRenderJobHandler, TodoX.Web.Services.VideoRender.VideoRenderMergeHandler>();
 builder.Services.AddScoped<IRenderJobHandler, TodoX.Web.Services.Render.SceneImageBatchRenderHandler>();
+builder.Services.AddScoped<IRenderJobHandler, TodoX.Web.Services.Render.SceneImageRenderWorkItemHandler>();
 builder.Services.AddScoped<IRenderJobHandler, DanceSellRenderHandler>();
 builder.Services.AddScoped<TodoX.Web.Services.Render.ISceneImageRenderService, TodoX.Web.Services.Render.SceneImageRenderService>();
 builder.Services.AddSingleton<TodoX.Web.Services.Render.GoogleVertexRateLimiter>();

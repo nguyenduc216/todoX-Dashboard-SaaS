@@ -17,6 +17,8 @@ public sealed class AiImageRenderRequest
     public string Prompt { get; set; } = string.Empty;
     public string[] ReferenceImageUrls { get; set; } = Array.Empty<string>();
     public Guid[] ReferenceMediaIds { get; set; } = Array.Empty<Guid>();
+    public string? ProviderTaskId { get; set; }
+    public string? ReferenceImageBase64 { get; set; }
     public string AspectRatio { get; set; } = "1:1";
     public string OutputFormat { get; set; } = "png";
     public string Quality { get; set; } = "high";
@@ -143,7 +145,7 @@ public sealed class AiImageRenderRouter : IAiImageRenderRouter
             CreatedBy = request.CreatedBy
         }, cancellationToken);
 
-        if (!reservation.Ok || !reservation.ShouldSubmitProvider)
+        if (!reservation.Ok || (!reservation.ShouldSubmitProvider && string.IsNullOrWhiteSpace(request.ProviderTaskId)))
         {
             _logger.LogWarning(
                 "AI_IMAGE_BILLING_BLOCKED capability={CapabilityCode} feature={FeatureCode} logicalRequestId={LogicalRequestId} status={Status} error={Error}",
@@ -201,6 +203,8 @@ public sealed class AiImageRenderRouter : IAiImageRenderRouter
                 FileCategory = request.FileCategory,
                 ReferenceImageUrls = request.ReferenceImageUrls,
                 ReferenceMediaIds = request.ReferenceMediaIds,
+                ProviderTaskId = request.ProviderTaskId,
+                ReferenceImageBase64 = request.ReferenceImageBase64,
                 BaseUrlOverride = detail?.BaseUrl,
                 EndpointPath = capability?.EndpointPath,
                 ApiKeyConfigName = detail?.ApiKeyConfigName,
@@ -250,7 +254,17 @@ public sealed class AiImageRenderRouter : IAiImageRenderRouter
         AiImageBillingCompletion billingCompletion;
         try
         {
-            billingCompletion = await _billing.CompleteAsync(new AiImageBillingCompleteRequest
+            billingCompletion = IsPendingProviderResponse(response)
+                ? await _billing.MarkPendingReconciliationAsync(new AiImageBillingPendingReconciliationRequest
+                {
+                    LogicalRequestId = logicalRequestId,
+                    ActualModel = finalModel,
+                    ProviderTaskId = providerTaskId,
+                    ProviderUsageJson = response.UsageJson,
+                    TariffSnapshotJson = tariffSnapshotJson,
+                    ErrorMessage = response.ErrorMessage
+                }, cancellationToken)
+                : await _billing.CompleteAsync(new AiImageBillingCompleteRequest
             {
                 LogicalRequestId = logicalRequestId,
                 Success = response.Success,
@@ -550,6 +564,25 @@ public sealed class AiImageRenderRouter : IAiImageRenderRouter
         catch
         {
             return null;
+        }
+    }
+
+    private static bool IsPendingProviderResponse(OpenRouterImageResponse response)
+    {
+        if (response.Success || string.IsNullOrWhiteSpace(response.UsageJson))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(response.UsageJson);
+            return document.RootElement.TryGetProperty("pending", out var pending)
+                && pending.ValueKind == JsonValueKind.True;
+        }
+        catch (JsonException)
+        {
+            return false;
         }
     }
 }

@@ -225,7 +225,11 @@ public interface ISceneMediaVersioningService
     Task<bool> IsEnabledAsync(string settingKey, CancellationToken ct = default);
     Task<SceneImageVersionDto> CreateQueuedImageVersionAsync(SceneImageVersionCreateRequest request, CancellationToken ct = default);
     Task CompleteImageVersionAsync(Guid versionId, SceneImageVersionCompleteRequest request, CancellationToken ct = default);
+    Task<bool> TryCompleteImageVersionAsync(Guid versionId, SceneImageVersionCompleteRequest request, CancellationToken ct = default);
     Task FailImageVersionAsync(Guid versionId, string? errorCode, string? errorMessage, CancellationToken ct = default);
+    Task MarkSceneImageVersionSubmittedAsync(Guid versionId, string? providerCode, string? modelName, long? providerCapabilityId, string providerTaskId, CancellationToken ct = default);
+    Task<string?> GetSceneImageProviderTaskIdAsync(Guid versionId, CancellationToken ct = default);
+    Task MarkSceneImagePendingReconciliationAsync(Guid versionId, string? errorCode, string? errorMessage, CancellationToken ct = default);
     Task<SceneImageVersionDto?> GetSelectedImageVersionAsync(long sceneId, CancellationToken ct = default);
     Task<IReadOnlyList<SceneImageVersionDto>> ListImageVersionsAsync(long sceneId, int skip = 0, int take = 20, CancellationToken ct = default);
     Task<IReadOnlyList<SceneImageVersionDto>> ListImageVersionsAsync(long sceneId, CurrentUserSession user, int skip = 0, int take = 20, CancellationToken ct = default);
@@ -443,9 +447,115 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
         tx.Commit();
     }
 
+    public async Task<bool> TryCompleteImageVersionAsync(Guid versionId, SceneImageVersionCompleteRequest request, CancellationToken ct = default)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        using var tx = conn.BeginTransaction();
+        var version = await conn.QuerySingleOrDefaultAsync<SceneImageVersionDto>(
+            SelectImageVersionSql + " WHERE id=@versionId AND tenant_id=@tenant FOR UPDATE;",
+            new { versionId, tenant = _tenant.TenantId }, tx);
+        if (version is null || string.Equals(version.Status, "completed", StringComparison.OrdinalIgnoreCase))
+        {
+            tx.Commit();
+            return false;
+        }
+
+        var newer = await conn.ExecuteScalarAsync<int>(
+            """
+            SELECT COUNT(*)
+              FROM video_render.scene_image_versions
+             WHERE scene_id=@sceneId AND project_id=@projectId AND tenant_id=@tenant
+               AND version_number > @versionNumber;
+            """,
+            new { version.SceneId, version.ProjectId, tenant = _tenant.TenantId, version.VersionNumber }, tx);
+        if (newer > 0 || (!string.IsNullOrWhiteSpace(version.ProviderTaskId)
+            && !string.Equals(version.ProviderTaskId, request.ProviderTaskId, StringComparison.OrdinalIgnoreCase)))
+        {
+            tx.Commit();
+            return false;
+        }
+
+        await conn.ExecuteAsync(
+            "UPDATE video_render.scene_image_versions SET is_selected=false WHERE scene_id=@sceneId AND project_id=@projectId AND tenant_id=@tenant;",
+            new { version.SceneId, version.ProjectId, tenant = _tenant.TenantId }, tx);
+        await conn.ExecuteAsync(
+            """
+            UPDATE video_render.scene_image_versions
+               SET status='completed', provider_code=@providerCode,
+                   requested_model=COALESCE(requested_model, @modelName), actual_model=@modelName,
+                   provider_capability_id=@providerCapabilityId, provider_task_id=@providerTaskId,
+                   result_media_id=@resultMediaId, storage_key=COALESCE(@objectKey, storage_key),
+                   source_file_path=@objectKey, public_url=@imageUrl, mime_type=@mimeType,
+                   billing_logical_request_id=@billingLogicalRequestId, estimated_usd=@estimatedUsd,
+                   actual_usd=@actualUsd, charged_points=@chargedPoints, refunded_points=@refundedPoints,
+                   provider_usage_json=CAST(@providerUsageJson AS jsonb), cost_source=@costSource,
+                   is_selected=true, selected_at=now(), selected_by=created_by,
+                   completed_at=now(), updated_at=now()
+             WHERE id=@versionId AND tenant_id=@tenant;
+            UPDATE video_render.video_project_scenes
+               SET selected_image_version_id=@versionId,
+                   static_image_url=COALESCE(@imageUrl, static_image_url),
+                   static_image_path=COALESCE(@objectKey, static_image_path),
+                   status='image_ready', error_message=NULL, updated_at=now()
+             WHERE id=@sceneId AND tenant_id=@tenant;
+            """,
+            new
+            {
+                versionId, tenant = _tenant.TenantId, sceneId = version.SceneId,
+                request.ProviderCode, modelName = request.ModelName, request.ProviderCapabilityId,
+                request.ProviderTaskId, request.ResultMediaId, request.ObjectKey, request.ImageUrl,
+                request.MimeType, request.BillingLogicalRequestId, request.EstimatedUsd, request.ActualUsd,
+                request.ChargedPoints, request.RefundedPoints, request.ProviderUsageJson, request.CostSource
+            }, tx);
+        tx.Commit();
+        return true;
+    }
+
     public async Task FailImageVersionAsync(Guid versionId, string? errorCode, string? errorMessage, CancellationToken ct = default)
     {
         await UpdateVersionFailureAsync("video_render.scene_image_versions", versionId, errorCode, errorMessage, ct);
+    }
+
+    public async Task MarkSceneImageVersionSubmittedAsync(Guid versionId, string? providerCode, string? modelName, long? providerCapabilityId, string providerTaskId, CancellationToken ct = default)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        await conn.ExecuteAsync(
+            """
+            UPDATE video_render.scene_image_versions
+               SET status='submitted', provider_code=COALESCE(@providerCode, provider_code),
+                   provider_capability_id=COALESCE(@providerCapabilityId, provider_capability_id),
+                   requested_model=COALESCE(requested_model, @modelName),
+                   actual_model=COALESCE(@modelName, actual_model),
+                   provider_task_id=COALESCE(provider_task_id, @providerTaskId),
+                   submitted_at=COALESCE(submitted_at, now()), updated_at=now()
+             WHERE id=@versionId AND tenant_id=@tenant AND provider_task_id IS NULL;
+            """,
+            new { versionId, tenant = _tenant.TenantId, providerCode, modelName, providerCapabilityId, providerTaskId });
+    }
+
+    public async Task<string?> GetSceneImageProviderTaskIdAsync(Guid versionId, CancellationToken ct = default)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        return await conn.ExecuteScalarAsync<string?>(
+            "SELECT provider_task_id FROM video_render.scene_image_versions WHERE id=@versionId AND tenant_id=@tenant LIMIT 1;",
+            new { versionId, tenant = _tenant.TenantId });
+    }
+
+    public async Task MarkSceneImagePendingReconciliationAsync(Guid versionId, string? errorCode, string? errorMessage, CancellationToken ct = default)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        await conn.ExecuteAsync(
+            """
+            UPDATE video_render.scene_image_versions
+               SET status='pending_reconciliation', error_code=@errorCode,
+                   error_message=@errorMessage, updated_at=now()
+             WHERE id=@versionId AND tenant_id=@tenant AND status <> 'completed';
+            """,
+            new { versionId, tenant = _tenant.TenantId, errorCode, errorMessage });
     }
 
     public async Task<SceneImageVersionDto?> GetSelectedImageVersionAsync(long sceneId, CancellationToken ct = default)

@@ -5,9 +5,9 @@ Branch: `integration/rdance-on-construction-video-core`
 
 ## Git
 
-- Starting SHA: `67f24b4aaecbabf99e60c1cd2ac1e60d0c6409c`
-- Implementation commit: `faddd89` (`feat(rvideo): add 79ai image provider and synced render status`)
-- Final SHA: updated after this report commit
+- Starting SHA: `58f6e6b114e766652240b8b32b1cae7c9c9820c4`
+- Implementation commit: recorded after the hotfix implementation commit.
+- Report commit/final SHA: recorded after the report commit.
 - No force push and no destructive Git operation was used.
 
 ## 79AI Provider
@@ -21,7 +21,10 @@ Branch: `integration/rdance-on-construction-video-core`
   - `POST /generateImage`
   - `POST /image`
   - `POST /images` only for SUCCESS-without-URL recovery
-- Polling defaults: 10 seconds, 18 attempts; both are configurable.
+- Image polling is persisted: submit once, save `id_base`, then poll `/image` once per worker pass.
+- Pending and transient poll states requeue the same render job and retain the same task ID.
+- RVIDEO video polling was also changed from an in-memory `Task.Delay` loop to one persisted submit/poll pass in `SceneVideoWorkerHandler`.
+- Poll cadence remains configurable; no pending age timeout causes fallback.
 - Secrets are never logged or persisted in diagnostics.
 
 ## RVIDEO Routing
@@ -38,7 +41,7 @@ Default model policy:
 3. `seedream_4_5`, mode `vip`, resolution `2k`
 
 Ratio conversion is provider-specific: `9:16 -> 9_16`, `16:9 -> 16_9`.
-Fallback occurs only after terminal failure, invalid final output, or polling timeout. A single task ID is reused for all polls.
+Pending statuses never trigger fallback. Terminal attempts advance the configured policy only after the task ID is cleared, so the next model submits a new provider task. `/images` recovery requires an exact `id_base` match.
 
 ## Title and Status
 
@@ -54,6 +57,13 @@ Fallback occurs only after terminal failure, invalid final output, or polling ti
   - `Lỗi`
 - Header includes the job UUID, service, aspect ratio, and persisted stage.
 
+## Reference Image and Billing
+
+- RVIDEO references are resolved through `IMediaFileService` and converted to JPEG/PNG/WebP data URLs.
+- `editImage=true` is sent only with a valid `base64Image`; unavailable requested references fail before provider submission with `RVIDEO_REFERENCE_IMAGE_UNAVAILABLE`.
+- Polling and `/images` recovery do not charge. Existing Phase 1 customer image billing remains deferred/zero; provider response metadata is retained for reconciliation without inventing a price.
+- Completion uses guarded version updates to prevent stale attempts replacing a newer selected version.
+
 ## Database
 
 - SQL file: `database/migrations/20260819_rvideo_79ai_image_provider.sql`
@@ -68,18 +78,13 @@ Passed:
 
 - `dotnet build TodoX.Web/TodoX.Web.csproj --no-restore`
 - `dotnet format Dashboard-web/TodoX.Dashboard.csproj --verify-no-changes --no-restore --include ...`
-- `dotnet test TodoX.Web/Tests/TodoX.Web.Phase1B.Tests.csproj --no-restore`: 45 passed
-- Focused provider/catalog tests: 15 passed
+- `dotnet test TodoX.Web/Tests/TodoX.Web.Phase1B.Tests.csproj --no-restore`: 45 passed, 0 failed
+- Focused hotfix/regression tests: 66 passed, 0 failed
+- Full `TodoX.Web.Tests`: 665 passed, 0 failed
 - `git diff --check`
 - `dotnet publish TodoX.Web/TodoX.Web.csproj --no-restore -c Release -o artifacts/publish/todox-dashboard`
 
-The full `TodoX.Web.Tests` suite ran with 661 passed and 3 legacy expectation failures unrelated to the new adapter tests:
-
-- `RDanceFashionDemoPageTests.DanceSell79AiMotionSubmitUsesRouteFieldsAndProviderMode`
-- `RenderVideoJobsLayoutTests.ProjectDialog_KeepsFourTabs`
-- `TimelapsePhase2ATests.CustomerServiceRouting_UsesEngineType` for `rvideo`
-
-Focused new coverage passed for aliases, ratio normalization, exact fallback order, same-task polling, URL recovery, and progress events.
+The previous three failures were resolved: the RDance assertion now scopes the correct client registration; the approved RVIDEO UI has five tabs; and the approved RVIDEO route is `/jobs/rvideo/new`.
 
 ## Compatibility
 
@@ -87,6 +92,6 @@ Timelapse, RDance, YEScale, OpenRouter, Telegram/n8n contracts, and existing bil
 
 ## Sanitized Trace
 
-`RVIDEO scene -> POST /generateImage (model=google_image_gen_banana_2, ratio=9_16) -> id_base=<provider-task-id> -> POST /image using the same id_base -> SUCCESS -> result URL persisted through TodoX media/versioning`
+`RVIDEO scene -> POST /generateImage -> persist id_base -> worker returns -> later POST /image once -> PENDING requeue or SUCCESS -> result URL persisted through TodoX media/versioning`
 
 No access token is included in this report.

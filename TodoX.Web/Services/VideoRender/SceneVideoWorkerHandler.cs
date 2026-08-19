@@ -56,6 +56,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
     private readonly IYEScaleTaskClient _tasks;
     private readonly IMediaFileService _media;
     private readonly IVideoPromptValidator _promptValidator;
+    private readonly IRenderJobService _jobs;
     private readonly TenantContext _tenant;
     private readonly IConfiguration _config;
     private readonly ILogger<SceneVideoWorkerHandler> _logger;
@@ -71,6 +72,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         IYEScaleTaskClient tasks,
         IMediaFileService media,
         IVideoPromptValidator promptValidator,
+        IRenderJobService jobs,
         TenantContext tenant,
         IConfiguration config,
         IOptionsMonitor<VideoRenderOptions> options,
@@ -83,6 +85,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         _tasks = tasks;
         _media = media;
         _promptValidator = promptValidator;
+        _jobs = jobs;
         _tenant = tenant;
         _config = config;
         _logger = logger;
@@ -237,6 +240,8 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                 await _repo.AddProjectEventAsync(project.Id, "SCENE_VIDEO_PROVIDER_SUBMITTED", "info",
                     $"Scene {input.SceneIndex} submitted to YEScale.",
                     new { jobId = job.Id, input.SceneId, input.SceneIndex, taskId, input.ModelName }, ct);
+                await DeferPollAsync(job, taskId, TimeSpan.FromSeconds(Math.Max(1, _options.PollIntervalSeconds)),
+                    "SCENE_VIDEO_POLL_SCHEDULED", "Video task submitted; polling will continue in a later worker pass.", ct);
             }
             else
             {
@@ -248,8 +253,22 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                 }
             }
 
-            var terminal = await PollTerminalStatusAsync(taskId!, input.ModelName, ct);
+            var terminal = await _tasks.GetStatusAsync(taskId!, ct);
             var responseJson = JsonSerializer.Serialize(terminal, JsonOptions);
+
+            var normalized = terminal.Status?.Trim().ToUpperInvariant();
+            if (normalized is not ("SUCCESS" or "FAILURE" or "CANCELLED" or "EXPIRED"))
+            {
+                if (normalized is not ("QUEUED" or "PENDING" or "SUBMITTED" or "PROCESSING" or "RUNNING"))
+                {
+                    throw new YEScaleTaskException($"YEScale returned unsupported status: {terminal.Status}", errorCode: "unknown_status", taskId: taskId);
+                }
+
+                await MarkPendingReconciliationAsync(input, version.Id, tariffSnapshot, "provider_pending",
+                    $"YEScale video task remains {terminal.Status}.", ct, taskId);
+                await DeferPollAsync(job, taskId, TimeSpan.FromSeconds(Math.Max(1, _options.PollIntervalSeconds)),
+                    "SCENE_VIDEO_POLL_SCHEDULED", "Video task remains pending; the same provider task will be polled later.", ct);
+            }
 
             if (!terminal.IsSuccess)
             {
@@ -324,49 +343,23 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         catch (YEScaleTaskException ex) when (ex.IsTransient && !string.IsNullOrWhiteSpace(taskId))
         {
             await MarkPendingReconciliationAsync(input, version.Id, tariffSnapshot, ex.ErrorCode ?? ex.GetType().Name, ex.Message, CancellationToken.None, taskId);
-            throw new RenderJobPendingReconciliationException(ex.Message);
+            await DeferPollAsync(job, taskId, TimeSpan.FromSeconds(Math.Max(1, _options.PollIntervalSeconds)),
+                "SCENE_VIDEO_POLL_TRANSIENT", "Temporary YEScale poll failure; the same task ID will be retried.", CancellationToken.None);
         }
     }
 
-    private async Task<YEScaleTaskStatusResponse> PollTerminalStatusAsync(string taskId, string? modelName, CancellationToken ct)
+    private async Task DeferPollAsync(
+        RenderJobDto job,
+        string taskId,
+        TimeSpan delay,
+        string eventCode,
+        string message,
+        CancellationToken ct)
     {
-        var deadline = DateTimeOffset.UtcNow.AddMinutes(Math.Max(1, _options.MaxPollDurationMinutes));
-        var consecutiveErrors = 0;
-
-        while (DateTimeOffset.UtcNow < deadline)
-        {
-            ct.ThrowIfCancellationRequested();
-            try
-            {
-                var status = await _tasks.GetStatusAsync(taskId, ct);
-                consecutiveErrors = 0;
-                var normalized = status.Status?.Trim().ToUpperInvariant();
-                if (normalized is "SUCCESS" or "FAILURE" or "CANCELLED" or "EXPIRED")
-                {
-                    return status;
-                }
-
-                if (normalized is not "QUEUED" and not "PENDING" and not "SUBMITTED" and not "PROCESSING" and not "RUNNING")
-                {
-                    throw new YEScaleTaskException($"YEScale returned unsupported status: {status.Status}", errorCode: "unknown_status", taskId: taskId);
-                }
-
-                await Task.Delay(TimeSpan.FromSeconds(Math.Max(1, _options.PollIntervalSeconds)), ct);
-            }
-            catch (YEScaleTaskException ex) when (ex.StatusCode is 429 or >= 500)
-            {
-                consecutiveErrors++;
-                if (consecutiveErrors >= Math.Max(1, _options.MaxConsecutivePollErrors))
-                {
-                    throw;
-                }
-
-                _logger.LogWarning(ex, "YEScale transient poll error model={ModelName} taskId={TaskId} consecutiveErrors={Errors}", modelName, taskId, consecutiveErrors);
-                await Task.Delay(TimeSpan.FromSeconds(Math.Max(1, _options.PollIntervalSeconds)), ct);
-            }
-        }
-
-        throw new YEScaleTaskException("YEScale poll timed out.", transient: true, taskId: taskId);
+        await _jobs.ScheduleRetryAsync(job.Id, delay, eventCode, message, ct);
+        _logger.LogInformation("RVIDEO_VIDEO_POLL_DEFERRED jobId={JobId} providerTaskId={ProviderTaskId} delaySeconds={DelaySeconds}",
+            job.Id, taskId, Math.Max(1, (int)delay.TotalSeconds));
+        throw new RenderJobDeferredException(message);
     }
 
     private async Task MarkPendingReconciliationAsync(

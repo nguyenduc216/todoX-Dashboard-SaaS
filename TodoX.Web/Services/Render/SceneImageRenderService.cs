@@ -159,6 +159,7 @@ public sealed class SceneImageRenderContext
 
     /// <summary>Character reference image URL (OpenRouter path passes references by URL).</summary>
     public string? CharacterReferenceUrl { get; init; }
+    public string? ProviderTaskId { get; init; }
     public string CapabilityCode { get; init; } = DefaultCapabilityCode;
     public Func<string, object, Task>? ProgressCallback { get; init; }
 }
@@ -358,6 +359,25 @@ public sealed class SceneImageRenderService : ISceneImageRenderService
         }
 
         var hasReference = references.Length > 0 || referenceMediaIds.Length > 0;
+        string? referenceImageBase64 = null;
+        if (hasReference && ProviderCodeMap.ToFactoryKey(option.ProviderCode).Equals("79ai_task_image", StringComparison.OrdinalIgnoreCase))
+        {
+            var media = context.CharacterReferenceMediaId is Guid mediaId
+                ? await _media.GetAsync(mediaId, ct)
+                : !string.IsNullOrWhiteSpace(context.CharacterReferenceObjectKey)
+                    ? await _media.GetByObjectKeyAsync(context.CharacterReferenceObjectKey!, ct)
+                    : !string.IsNullOrWhiteSpace(context.CharacterReferenceUrl)
+                        ? await _media.GetByPublicUrlAsync(context.CharacterReferenceUrl!, ct)
+                        : null;
+            var mime = NormalizeReferenceMime(media?.MimeType);
+            var bytes = media is null ? null : await _media.ReadBytesAsync(media.Id, ct);
+            if (media is null || bytes is null || bytes.Length == 0 || bytes.Length > 10 * 1024 * 1024 || mime is null)
+            {
+                throw new InvalidOperationException("RVIDEO_REFERENCE_IMAGE_UNAVAILABLE");
+            }
+
+            referenceImageBase64 = $"data:{mime};base64,{Convert.ToBase64String(bytes)}";
+        }
 
         _logger.LogInformation(
             "SCENE_IMAGE_PROVIDER_RERENDER_START projectId={ProjectId} sceneId={SceneId} sceneIndex={SceneIndex} characterId={CharacterId} providerCapabilityId={ProviderCapabilityId} providerCode={ProviderCode} modelName={ModelName} hasReference={HasReference}",
@@ -384,6 +404,8 @@ public sealed class SceneImageRenderService : ISceneImageRenderService
             Prompt = context.Prompt,
             ReferenceImageUrls = references,
             ReferenceMediaIds = referenceMediaIds,
+            ReferenceImageBase64 = referenceImageBase64,
+            ProviderTaskId = context.ProviderTaskId,
             AspectRatio = NormalizeAspectRatio(context.AspectRatio),
             OutputFormat = "png",
             Quality = "high",
@@ -532,6 +554,15 @@ public sealed class SceneImageRenderService : ISceneImageRenderService
 
     public static string NormalizeAspectRatio(string? aspectRatio)
         => string.Equals(aspectRatio, "16:9", StringComparison.Ordinal) ? "16:9" : "9:16";
+
+    private static string? NormalizeReferenceMime(string? mime)
+        => mime?.Trim().ToLowerInvariant() switch
+        {
+            "image/jpeg" or "image/jpg" => "image/jpeg",
+            "image/png" => "image/png",
+            "image/webp" => "image/webp",
+            _ => null
+        };
 
     public static string BuildLogicalRequestId(string featureCode, long sceneId, Guid? renderJobId)
         => string.Equals(featureCode, "render_job_scene_image_rerender", StringComparison.OrdinalIgnoreCase)

@@ -64,6 +64,11 @@ public sealed class SceneVideoJobWorker : BackgroundService
                         new { job.AttemptCount, job.MaxAttempts }, "warning", stoppingToken);
                     await jobs.MarkStatusAsync(job.Id, RenderJobStatuses.PendingReconciliation, errorCode: ex.GetType().Name, errorMessage: ex.Message, ct: stoppingToken);
                 }
+                catch (RenderJobDeferredException ex)
+                {
+                    await jobs.AddEventAsync(job.Id, "JOB_DEFERRED", ex.Message,
+                        new { job.AttemptCount, job.MaxAttempts }, "info", stoppingToken);
+                }
                 catch (RenderJobTerminalFailureException ex)
                 {
                     await jobs.AddEventAsync(job.Id, "JOB_FAILED", ex.Message,

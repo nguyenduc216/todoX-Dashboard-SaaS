@@ -13,11 +13,11 @@ public class RenderVideoJobsLayoutTests
     private static readonly string VersioningServicePath = Path.Combine(WebRoot, "Services", "VideoRender", "SceneMediaVersioningService.cs");
 
     [Fact]
-    public void ProjectDialog_KeepsFourTabs()
+    public void ProjectDialog_KeepsFiveTabs()
     {
         var razor = File.ReadAllText(RazorPath);
 
-        Assert.Equal(4, Regex.Matches(razor, "<MudTabPanel\\s+Text=").Count);
+        Assert.Equal(5, Regex.Matches(razor, "<MudTabPanel\\s+Text=").Count);
         Assert.Contains("<MudTabPanel Text=\"Video\">", razor);
         Assert.Contains("class=\"scene-image-tab\"", razor);
         Assert.Contains("class=\"scene-video-tab\"", razor);

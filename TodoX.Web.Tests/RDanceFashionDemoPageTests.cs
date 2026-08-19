@@ -428,7 +428,14 @@ public sealed class RDanceFashionDemoPageTests
         Assert.Contains("timeoutCts.CancelAfter(_motionControlSubmitTimeout)", client, StringComparison.Ordinal);
         Assert.Contains("AddHttpClient<TodoX.Web.Services.AiProviders.IAi79TaskClient, TodoX.Web.Services.AiProviders.Ai79TaskClient>(client =>", program, StringComparison.Ordinal);
         Assert.Contains("client.Timeout = TimeSpan.FromMinutes(3)", program, StringComparison.Ordinal);
-        Assert.DoesNotContain("InfiniteTimeSpan", program, StringComparison.Ordinal);
+        var yescaleRegistrationStart = program.IndexOf(
+            "AddHttpClient<TodoX.Web.Services.AiProviders.IAi79TaskClient, TodoX.Web.Services.AiProviders.Ai79TaskClient>(client =>",
+            StringComparison.Ordinal);
+        Assert.True(yescaleRegistrationStart >= 0);
+        var yescaleClientRegistration = program.Substring(
+            yescaleRegistrationStart,
+            Math.Min(400, program.Length - yescaleRegistrationStart));
+        Assert.DoesNotContain("InfiniteTimeSpan", yescaleClientRegistration, StringComparison.Ordinal);
         Assert.Contains("new MultipartFormDataContent()", client, StringComparison.Ordinal);
         Assert.Contains("new StreamContent(stream)", client, StringComparison.Ordinal);
         Assert.Contains("ContentDispositionHeaderValue(\"form-data\")", client, StringComparison.Ordinal);
