@@ -161,6 +161,7 @@ public sealed class SceneImageRenderContext
     /// <summary>Character reference image URL (OpenRouter path passes references by URL).</summary>
     public string? CharacterReferenceUrl { get; init; }
     public string? ProviderTaskId { get; init; }
+    public string? RequestedModel { get; init; }
     public string CapabilityCode { get; init; } = DefaultCapabilityCode;
     public Func<string, object, Task>? ProgressCallback { get; init; }
 }
@@ -366,9 +367,13 @@ public sealed class SceneImageRenderService : ISceneImageRenderService
                 context.ProjectId, context.SceneId, option.ProviderCode, option.ModelName, context.CharacterReferenceMediaId);
         }
 
+        var referenceRequested = context.CharacterId is not null
+            || context.CharacterReferenceMediaId is not null
+            || !string.IsNullOrWhiteSpace(context.CharacterReferenceObjectKey)
+            || !string.IsNullOrWhiteSpace(context.CharacterReferenceUrl);
         var hasReference = references.Length > 0 || referenceMediaIds.Length > 0;
         string? referenceImageBase64 = null;
-        if (hasReference && factoryKey.Equals("79ai_task_image", StringComparison.OrdinalIgnoreCase))
+        if (referenceRequested && factoryKey.Equals("79ai_task_image", StringComparison.OrdinalIgnoreCase))
         {
             var media = context.CharacterReferenceMediaId is Guid mediaId
                 ? await _media.GetAsync(mediaId, ct)
@@ -414,6 +419,7 @@ public sealed class SceneImageRenderService : ISceneImageRenderService
             ReferenceMediaIds = referenceMediaIds,
             ReferenceImageBase64 = referenceImageBase64,
             ProviderTaskId = context.ProviderTaskId,
+            RequestedModel = context.RequestedModel,
             AspectRatio = NormalizeAspectRatio(context.AspectRatio),
             OutputFormat = "png",
             Quality = "high",

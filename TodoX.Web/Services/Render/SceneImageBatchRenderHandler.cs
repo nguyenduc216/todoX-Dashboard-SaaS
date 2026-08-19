@@ -41,6 +41,33 @@ public sealed class SceneImageRenderWorkItemInput
     public string? ReferenceUrl { get; set; }
     public string CapabilityCode { get; set; } = SceneImageRenderContext.RVideoCapabilityCode;
     public string LogicalRequestId { get; set; } = string.Empty;
+    public string? RequestedModel { get; set; }
+    public int ModelAttemptIndex { get; set; }
+}
+
+public sealed record RVideoImageModelPolicyEntry(
+    int AttemptIndex,
+    string Model,
+    string DisplayName,
+    string Mode,
+    string Resolution);
+
+public static class RVideoImageModelPolicy
+{
+    public static readonly IReadOnlyList<RVideoImageModelPolicyEntry> Models =
+    [
+        new(0, "google_image_gen_banana_2", "Nano Banana 2", "vip", "1k"),
+        new(1, "imagegen_2_0", "GPT Image 2", "low_basic", "1k"),
+        new(2, "seedream_4_5", "Seedream 4.5", "vip", "2k")
+    ];
+
+    public static RVideoImageModelPolicyEntry GetInitial() => Models[0];
+
+    public static RVideoImageModelPolicyEntry? GetByAttemptIndex(int attemptIndex)
+        => Models.FirstOrDefault(x => x.AttemptIndex == attemptIndex);
+
+    public static RVideoImageModelPolicyEntry? GetNext(int currentAttemptIndex)
+        => Models.FirstOrDefault(x => x.AttemptIndex == currentAttemptIndex + 1);
 }
 
 public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
@@ -121,6 +148,7 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
         CancellationToken ct)
     {
         _ = _sceneImages;
+        var model = RVideoImageModelPolicy.GetInitial();
         var logicalRequestId = SceneImageRenderService.BuildLogicalRequestId("render_job_scene_image", scene.Id, parentJobId);
         var compiledPrompt = SceneImagePromptBuilder.Build(scene, characterPrompt);
         var version = await _versions.CreateQueuedImageVersionAsync(new SceneImageVersionCreateRequest(
@@ -130,7 +158,8 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
                 scene.ScenePrompt, scene.ImagePrompt, scene.VideoPrompt },
             new { input.CharacterId, referenceMediaId, referenceUrl, characterPrompt },
             new { capability = input.CapabilityCode, aspectRatio = SceneImageRenderService.NormalizeAspectRatio(input.AspectRatio),
-                outputFormat = "png", source = "scene_image_batch" }), ct);
+                outputFormat = "png", source = "scene_image_batch", model = model.Model, model.Mode,
+                model.Resolution, modelAttemptIndex = model.AttemptIndex }), ct);
 
         await _repo.UpdateSceneAsync(scene.Id, VideoSceneStatuses.Draft, errorMessage: null,
             title: scene.Title, scenePrompt: scene.ScenePrompt, imagePrompt: scene.ImagePrompt,
@@ -150,7 +179,8 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
                 AspectRatio = SceneImageRenderService.NormalizeAspectRatio(input.AspectRatio),
                 CharacterId = input.CharacterId, ReferenceMediaId = referenceMediaId,
                 ReferenceObjectKey = referenceObjectKey, ReferenceUrl = referenceUrl,
-                CapabilityCode = input.CapabilityCode, LogicalRequestId = logicalRequestId
+                CapabilityCode = input.CapabilityCode, LogicalRequestId = logicalRequestId,
+                RequestedModel = model.Model, ModelAttemptIndex = model.AttemptIndex
             },
             Prompt = new { projectId = input.ProjectId, sceneId = scene.Id, parentJobId },
             References = Array.Empty<object>(), LogCode = parentJobId.ToString("N"),

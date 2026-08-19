@@ -66,6 +66,7 @@ public sealed class SceneImageRenderWorkItemHandler : IRenderJobHandler
                 CharacterReferenceObjectKey = input.ReferenceObjectKey,
                 CharacterReferenceUrl = input.ReferenceUrl,
                 ProviderTaskId = taskId,
+                RequestedModel = input.RequestedModel,
                 CapabilityCode = input.CapabilityCode,
                 ProgressCallback = (eventType, data) => _repo.AddProjectEventAsync(
                     input.ProjectId, eventType, "info", eventType,
@@ -87,6 +88,13 @@ public sealed class SceneImageRenderWorkItemHandler : IRenderJobHandler
             if (!outcome.Success)
             {
                 await _versions.FailImageVersionAsync(version.Id, "provider_error", outcome.Error, ct);
+                var nextModel = RVideoImageModelPolicy.GetNext(input.ModelAttemptIndex);
+                if (nextModel is not null)
+                {
+                    await EnqueueFallbackAsync(job, input, scene, nextModel, ct);
+                    return;
+                }
+
                 await _repo.UpdateSceneAsync(scene.Id, VideoSceneStatuses.Failed, errorMessage: outcome.Error,
                     title: scene.Title, scenePrompt: scene.ScenePrompt, imagePrompt: scene.ImagePrompt,
                     videoPrompt: scene.VideoPrompt, ct: ct);
@@ -119,5 +127,73 @@ public sealed class SceneImageRenderWorkItemHandler : IRenderJobHandler
                 "Temporary 79AI poll failure; the same task ID will be retried.", CancellationToken.None);
             throw new RenderJobDeferredException("Temporary 79AI poll failure; retry scheduled.");
         }
+    }
+
+    private async Task EnqueueFallbackAsync(
+        RenderJobDto job,
+        SceneImageRenderWorkItemInput input,
+        VideoProjectSceneDto scene,
+        RVideoImageModelPolicyEntry nextModel,
+        CancellationToken ct)
+    {
+        var logicalRequestId = $"{input.LogicalRequestId}-fallback-{nextModel.AttemptIndex}";
+        var version = await _versions.CreateQueuedImageVersionAsync(new SceneImageVersionCreateRequest(
+            input.ProjectId, input.SceneId, input.UserId, input.CustomerId, input.ParentJobId, logicalRequestId,
+            scene.ImagePrompt, input.Prompt, scene.VideoPrompt, null,
+            new { scene.Id, scene.ProjectId, scene.SceneIndex, scene.Title, scene.DurationSeconds,
+                scene.ScenePrompt, scene.ImagePrompt, scene.VideoPrompt },
+            new { input.CharacterId, referenceMediaId = input.ReferenceMediaId,
+                referenceUrl = input.ReferenceUrl, referenceObjectKey = input.ReferenceObjectKey },
+            new { capability = input.CapabilityCode, aspectRatio = input.AspectRatio,
+                outputFormat = "png", source = "scene_image_model_fallback",
+                model = nextModel.Model, nextModel.Mode, nextModel.Resolution,
+                modelAttemptIndex = nextModel.AttemptIndex }), ct);
+
+        await _repo.UpdateSceneAsync(scene.Id, VideoSceneStatuses.Draft, errorMessage: null,
+            title: scene.Title, scenePrompt: scene.ScenePrompt, imagePrompt: scene.ImagePrompt,
+            videoPrompt: scene.VideoPrompt, ct: ct);
+
+        var child = await _jobs.EnqueueAsync(new RenderJobCreateModel
+        {
+            JobType = JobTypeName,
+            UserId = input.UserId,
+            CustomerId = input.CustomerId,
+            Input = new SceneImageRenderWorkItemInput
+            {
+                ParentJobId = input.ParentJobId,
+                ImageVersionId = version.Id,
+                ProjectId = input.ProjectId,
+                SceneId = input.SceneId,
+                SceneIndex = input.SceneIndex,
+                UserId = input.UserId,
+                CustomerId = input.CustomerId,
+                CreatedBy = input.CreatedBy,
+                TrustedPayerContext = input.TrustedPayerContext,
+                Prompt = input.Prompt,
+                AspectRatio = input.AspectRatio,
+                CharacterId = input.CharacterId,
+                ReferenceMediaId = input.ReferenceMediaId,
+                ReferenceObjectKey = input.ReferenceObjectKey,
+                ReferenceUrl = input.ReferenceUrl,
+                CapabilityCode = input.CapabilityCode,
+                LogicalRequestId = logicalRequestId,
+                RequestedModel = nextModel.Model,
+                ModelAttemptIndex = nextModel.AttemptIndex
+            },
+            Prompt = new { projectId = input.ProjectId, sceneId = input.SceneId, fallbackFromJobId = job.Id },
+            References = Array.Empty<object>(),
+            LogCode = input.ParentJobId.ToString("N"),
+            ProviderCode = SceneImageBatchRenderHandler.RoutingProviderCode,
+            ModelCode = SceneImageBatchRenderHandler.RoutingModelCode,
+            MaxAttempts = 100,
+            PointCostEstimate = 0,
+            PointStatus = RenderPointStatuses.NotRequired
+        }, ct);
+
+        await _repo.AddProjectEventAsync(input.ProjectId, "SCENE_IMAGE_MODEL_FALLBACK_QUEUED", "warning",
+            $"Scene {input.SceneIndex} image fallback queued.",
+            new { jobId = job.Id, childJobId = child.Id, sceneId = input.SceneId,
+                failedImageVersionId = input.ImageVersionId, imageVersionId = version.Id,
+                model = nextModel.Model, modelAttemptIndex = nextModel.AttemptIndex }, ct);
     }
 }

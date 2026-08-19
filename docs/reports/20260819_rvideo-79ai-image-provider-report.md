@@ -26,7 +26,7 @@ The adapter now executes one requested model/task per invocation and no longer l
 - Fallback 1: `imagegen_2_0` / `low_basic` / `1k`
 - Fallback 2: `seedream_4_5` / `vip` / `2k`
 
-Fallback orchestration creating separate image versions is not completed in this implementation.
+Terminal provider failure now closes the current version and queues a new version with the next 79AI model.
 
 ## PERSISTED POLLING
 
@@ -48,8 +48,8 @@ Fallback orchestration creating separate image versions is not completed in this
 ## VERSION HISTORY
 
 - Stale completion protection: YES
-- Separate fallback image version: NO, blocker
-- Mandatory fallback/all-models-failed integration tests: NOT COMPLETED
+- Separate fallback image version: YES
+- Mandatory end-to-end worker/router/provider integration tests: NOT COMPLETED
 
 ## BILLING, MEDIA, UI
 
@@ -61,9 +61,9 @@ Fallback orchestration creating separate image versions is not completed in this
 
 ## TESTS
 
-- Focused 79AI service tests: `4 passed, 0 failed`
+- Focused 79AI/batch policy tests: `14 passed, 0 failed`
 - Phase1B: `45 passed, 0 failed`
-- Full `TodoX.Web.Tests`: `665 passed, 0 failed`
+- Full `TodoX.Web.Tests`: `666 passed, 0 failed`
 - Build and `git diff --check`: passed.
 - Publish: passed.
 
@@ -86,7 +86,6 @@ Fallback orchestration creating separate image versions is not completed in this
 
 Exact blockers:
 
-1. Terminal 79AI failure does not yet create the next persisted image version with the next configured model.
-2. Mandatory end-to-end fallback, all-models-failed, and full worker/router/provider integration tests are not yet present.
+1. Mandatory end-to-end fallback, all-models-failed, and full worker/router/provider integration tests are not yet present.
 
 No video implementation was started.

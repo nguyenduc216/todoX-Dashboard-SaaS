@@ -78,6 +78,25 @@ public class SceneImageBatchRenderHandlerTests
     }
 
     [Fact]
+    public void RVideoImageModelPolicy_UsesOrdered79AiOnlyFallbacks()
+    {
+        var initial = RVideoImageModelPolicy.GetInitial();
+        var fallback1 = RVideoImageModelPolicy.GetNext(initial.AttemptIndex);
+        var fallback2 = RVideoImageModelPolicy.GetNext(fallback1!.AttemptIndex);
+
+        Assert.Equal("google_image_gen_banana_2", initial.Model);
+        Assert.Equal("vip", initial.Mode);
+        Assert.Equal("1k", initial.Resolution);
+        Assert.Equal("imagegen_2_0", fallback1.Model);
+        Assert.Equal("low_basic", fallback1.Mode);
+        Assert.Equal("1k", fallback1.Resolution);
+        Assert.Equal("seedream_4_5", fallback2!.Model);
+        Assert.Equal("vip", fallback2.Mode);
+        Assert.Equal("2k", fallback2.Resolution);
+        Assert.Null(RVideoImageModelPolicy.GetNext(fallback2.AttemptIndex));
+    }
+
+    [Fact]
     public void ProjectJobLockName_IsStableForSameProjectAndJobType()
     {
         var first = RenderJobService.BuildProjectJobLockName("render_scene_images", 123);
