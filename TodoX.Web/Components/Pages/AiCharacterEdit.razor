@@ -108,14 +108,13 @@ else
             </div>
             <div class="ai-character-upload-box">
                 <MudText Typo="Typo.subtitle2">Ảnh đại diện chính thức của nhân vật.</MudText>
-                <label class="ai-character-upload-button">
-                    <MudIcon Icon="@Icons.Material.Filled.Upload" Size="Size.Small" />
-                    <span>Upload ảnh master</span>
-                    <InputFile class="ai-character-upload-input" OnChange="UploadMasterImage" accept="@AcceptedImageTypes" disabled="@(_busy || _isNew)" />
+                <label class="ai-character-upload-button" title="Tải ảnh master">
+                    <MudIcon Icon="@Icons.Material.Filled.CloudUpload" Size="Size.Medium" />
+                    <InputFile class="ai-character-upload-input" OnChange="UploadMasterImage" accept="@AcceptedImageTypes" disabled="@_busy" />
                 </label>
                 @if (_isNew)
                 {
-                    <small>Lưu nhân vật trước để tải ảnh lên.</small>
+                    <small>Chọn ảnh để tự lưu nhân vật nháp trước khi tải lên.</small>
                 }
             </div>
             @if (_lastGenerate is not null)
@@ -158,14 +157,13 @@ else
             </div>
             <div class="ai-character-upload-box">
                 <MudText Typo="Typo.subtitle2">Tải ảnh JPEG, PNG hoặc WEBP</MudText>
-                <label class="ai-character-upload-button">
-                    <MudIcon Icon="@Icons.Material.Filled.Upload" Size="Size.Small" />
-                    <span>@(string.IsNullOrWhiteSpace(ReferenceImageUrl) ? "Tải ảnh tham chiếu" : "Thay ảnh tham chiếu")</span>
-                    <InputFile class="ai-character-upload-input" OnChange="UploadReferenceImage" accept="@AcceptedImageTypes" disabled="@(_busy || _isNew)" />
+                <label class="ai-character-upload-button" title="@(string.IsNullOrWhiteSpace(ReferenceImageUrl) ? "Tải ảnh tham chiếu" : "Thay ảnh tham chiếu")">
+                    <MudIcon Icon="@Icons.Material.Filled.CloudUpload" Size="Size.Medium" />
+                    <InputFile class="ai-character-upload-input" OnChange="UploadReferenceImage" accept="@AcceptedImageTypes" disabled="@_busy" />
                 </label>
                 @if (_isNew)
                 {
-                    <small>Lưu nhân vật trước để tải ảnh tham chiếu lên.</small>
+                    <small>Chọn ảnh để tự lưu nhân vật nháp trước khi tải lên.</small>
                 }
             </div>
         </div>
@@ -613,15 +611,17 @@ else
 
     private async Task UploadMasterImage(InputFileChangeEventArgs args)
     {
-        if (AuthState.CurrentUser is null || Id is null) return;
+        if (AuthState.CurrentUser is null) return;
         var file = args.File;
         _busy = true;
         try
         {
+            await EnsureCharacterExistsForUploadAsync();
+            var characterId = Id ?? throw new InvalidOperationException("Không xác định được nhân vật để lưu ảnh.");
             await using var stream = file.OpenReadStream(MaxImageBytes);
             using var ms = new MemoryStream();
             await stream.CopyToAsync(ms);
-            _lastGenerate = await Characters.UploadMasterImageAsync(Id.Value, ms.ToArray(), file.Name, file.ContentType, AuthState.CurrentUser);
+            _lastGenerate = await Characters.UploadMasterImageAsync(characterId, ms.ToArray(), file.Name, file.ContentType, AuthState.CurrentUser);
             Snackbar.Add("Đã upload ảnh master.", Severity.Success);
             await LoadPageAsync();
         }
@@ -637,15 +637,17 @@ else
 
     private async Task UploadReferenceImage(InputFileChangeEventArgs args)
     {
-        if (AuthState.CurrentUser is null || Id is null) return;
+        if (AuthState.CurrentUser is null) return;
         var file = args.File;
         _busy = true;
         try
         {
+            await EnsureCharacterExistsForUploadAsync();
+            var characterId = Id ?? throw new InvalidOperationException("Không xác định được nhân vật để lưu ảnh.");
             await using var stream = file.OpenReadStream(MaxImageBytes);
             using var ms = new MemoryStream();
             await stream.CopyToAsync(ms);
-            _detail = await Characters.UploadReferenceImageAsync(Id.Value, ms.ToArray(), file.Name, file.ContentType, AuthState.CurrentUser);
+            _detail = await Characters.UploadReferenceImageAsync(characterId, ms.ToArray(), file.Name, file.ContentType, AuthState.CurrentUser);
             Snackbar.Add("Đã tải ảnh tham chiếu.", Severity.Success);
         }
         catch (Exception ex)
@@ -657,6 +659,31 @@ else
             _busy = false;
             await InvokeAsync(StateHasChanged);
         }
+    }
+
+    private async Task EnsureCharacterExistsForUploadAsync()
+    {
+        if (Id is not null || AuthState.CurrentUser is null)
+        {
+            return;
+        }
+
+        var created = await Characters.CreateCharacterAsync(new CreateCharacterRequest
+        {
+            CharacterName = _model.CharacterName,
+            Description = _model.Description,
+            RenderPrompt = _renderPrompt,
+            StylePreset = _model.StylePreset,
+            Gender = _model.Gender,
+            AspectRatio = _model.AspectRatio,
+            AutoGenerateImage = false
+        }, AuthState.CurrentUser);
+
+        Id = created.Id;
+        _detail = created;
+        _loadedCharacterId = created.Id;
+        ApplyDetailToForm(created);
+        Snackbar.Add("Đã lưu nhân vật nháp. Đang tải ảnh lên...", Severity.Info);
     }
 
     private async Task RemoveReferenceImage()

@@ -21,6 +21,22 @@ public sealed class AiCharacterCustomerUiTests
     }
 
     [Fact]
+    public void CustomerUploadControlsUseIconOnlyHiddenFilePickers()
+    {
+        var edit = ReadSource("TodoX.Web", "Components", "Pages", "AiCharacterEdit.razor");
+        var css = ReadSource("TodoX.Web", "Components", "Pages", "AiCharacterEdit.razor.css");
+
+        Assert.Contains("Icons.Material.Filled.CloudUpload", edit, StringComparison.Ordinal);
+        Assert.Contains("class=\"ai-character-upload-input\"", edit, StringComparison.Ordinal);
+        Assert.DoesNotContain("Chọn tệp", edit, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Không có tệp nào được chọn", edit, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("clip-path: inset(50%)", css, StringComparison.Ordinal);
+        Assert.Contains("title=\"Tải ảnh master\"", edit, StringComparison.Ordinal);
+        Assert.Contains("EnsureCharacterExistsForUploadAsync", edit, StringComparison.Ordinal);
+        Assert.DoesNotContain("disabled=\"@(_busy || _isNew)\"", edit, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ReferenceUploadUsesDedicatedStorageAndReferencePersistence()
     {
         var edit = ReadSource("TodoX.Web", "Components", "Pages", "AiCharacterEdit.razor");
@@ -29,6 +45,7 @@ public sealed class AiCharacterCustomerUiTests
 
         Assert.Contains("UploadReferenceImageAsync", edit, StringComparison.Ordinal);
         Assert.Contains("Characters.UploadReferenceImageAsync", edit, StringComparison.Ordinal);
+        Assert.Contains("ReferenceImageUrls = _detail?.References.Select", edit, StringComparison.Ordinal);
         Assert.Contains("_media.SaveAsync", service, StringComparison.Ordinal);
         Assert.Contains("_repo.ReplaceReferencesAsync", service, StringComparison.Ordinal);
         Assert.Contains("image_url", repository, StringComparison.Ordinal);

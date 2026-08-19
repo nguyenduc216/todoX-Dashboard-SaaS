@@ -12,17 +12,23 @@ database schema were not changed.
   labels, model details, and technical render metadata.
 - Removed the reference-image URL input.
 - Added a separate reference-image upload section with preview, replacement, and
-  removal actions.
+  removal actions. The browser file control is visually hidden; customers click
+  the cloud-upload icon to open the picker.
+- Uploading from the new Character page first creates a draft Character
+  automatically, then persists the selected image against that Character.
 - Kept reference/source image storage separate from the master image fields.
 - Reused the existing media storage service and configured
   `MediaStorage:MaxImageBytes` limit.
 - Added JPEG, PNG, and WEBP MIME plus file-signature validation for both reference
   and master uploads.
+- The saved reference collection remains the render input through
+  `ReferenceImageUrls`; uploading the reference does not overwrite the master
+  image.
 - Added ownership-scoped reference upload/removal operations and immediate
   Character reload for preview updates.
 - Added regression tests for customer UI visibility, upload persistence,
-  supported formats, invalid MIME/signature, size limits, and master/reference
-  separation.
+  supported formats, invalid MIME/signature, size limits, icon-only picker
+  behavior, and master/reference separation.
 
 ## Database
 
