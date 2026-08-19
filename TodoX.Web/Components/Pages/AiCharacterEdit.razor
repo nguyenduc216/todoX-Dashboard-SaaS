@@ -1,11 +1,9 @@
 @page "/ai-assets/characters/new"
 @page "/ai-assets/characters/{Id:long}"
 @using TodoX.Web.Models
-@using TodoX.Web.Services.AiProviders
 @using System.Text.Json
 @using Npgsql
 @inject IAiCharacterService Characters
-@inject IAiProviderService AiProviders
 @inject AuthStateService AuthState
 @inject NavigationManager Nav
 @inject IJSRuntime Js
@@ -42,7 +40,7 @@ else
             <MudText Typo="Typo.h5" Class="mb-4">Thông tin nhân vật</MudText>
             <MudTextField T="string" Label="Tên nhân vật" Variant="Variant.Outlined" @bind-Value="_model.CharacterName" Class="mb-3" />
             <MudTextField T="string" Label="Mô tả nhân vật" Variant="Variant.Outlined" Lines="5" @bind-Value="_model.Description" Class="mb-3" />
-            <MudTextField T="string" Label="Prompt render hình ảnh" HelperText="Có thể để trống để TodoX tự tạo prompt từ mô tả. Prompt này sẽ được gửi trực tiếp đến provider render."
+            <MudTextField T="string" Label="Prompt render hình ảnh" HelperText="Có thể để trống để TodoX tự tạo prompt từ mô tả."
                           Variant="Variant.Outlined" Lines="5" @bind-Value="_renderPrompt" Class="mb-3" />
             <MudGrid>
                 <MudItem xs="12" sm="6">
@@ -76,29 +74,9 @@ else
                     </MudSelect>
                 </MudItem>
                 <MudItem xs="12" sm="6">
-                    <MudNumericField T="int?" Label="Mã seed" Variant="Variant.Outlined" @bind-Value="_seed" />
-                </MudItem>
-                <MudItem xs="12" sm="6">
-                    @if (_providerOptions.Count == 0)
-                    {
-                        <MudAlert Severity="Severity.Warning" Dense="true">Chưa cấu hình provider cho <b>character_generation</b>.</MudAlert>
-                    }
-                    else
-                    {
-                        <MudSelect T="long?" @bind-Value="_providerCapabilityId" Label="AI Provider" Variant="Variant.Outlined">
-                            @foreach (var opt in _providerOptions)
-                            {
-                                <MudSelectItem T="long?" Value="@opt.ProviderCapabilityId">@opt.OptionLabel</MudSelectItem>
-                            }
-                        </MudSelect>
-                    }
-                </MudItem>
-                <MudItem xs="12" sm="6">
                     <MudCheckBox T="bool" Label="Render ảnh sau khi lưu" Color="Color.Warning" @bind-Value="_autoGenerate" Disabled="@(!_isNew)" />
                 </MudItem>
             </MudGrid>
-            <MudTextField T="string" Label="URL ảnh tham chiếu" HelperText="Mỗi dòng là một URL http/https."
-                          Variant="Variant.Outlined" Lines="3" @bind-Value="_referenceUrlsText" Class="mt-3" />
             <div class="ai-character-form-actions">
                 <MudButton Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.Save" Disabled="_busy" OnClick="Save">
                     Lưu
@@ -113,7 +91,6 @@ else
         <MudPaper Class="todox-panel ai-character-master pa-5" rounded="true">
             <div class="ai-character-section-title mb-3">
                 <MudText Typo="Typo.h5">Ảnh master</MudText>
-                <span class="ai-character-provider-chip">@ProviderDisplay</span>
             </div>
             <div class='@($"ai-character-master-image {(_busy ? "is-rendering" : string.Empty)}")'>
                 @if (!string.IsNullOrWhiteSpace(_detail?.MasterImageUrl))
@@ -130,15 +107,15 @@ else
                 }
             </div>
             <div class="ai-character-upload-box">
-                <MudText Typo="Typo.subtitle2">Không render? Upload ảnh master tại đây</MudText>
+                <MudText Typo="Typo.subtitle2">Ảnh đại diện chính thức của nhân vật.</MudText>
                 <label class="ai-character-upload-button">
                     <MudIcon Icon="@Icons.Material.Filled.Upload" Size="Size.Small" />
-                    <span>Chọn ảnh upload</span>
-                    <InputFile class="ai-character-upload-input" OnChange="UploadMasterImage" accept="image/*" disabled="@(_busy || _isNew)" />
+                    <span>Upload ảnh master</span>
+                    <InputFile class="ai-character-upload-input" OnChange="UploadMasterImage" accept="@AcceptedImageTypes" disabled="@(_busy || _isNew)" />
                 </label>
                 @if (_isNew)
                 {
-                    <small>Lưu nhân vật trước khi upload ảnh master.</small>
+                    <small>Lưu nhân vật trước để tải ảnh lên.</small>
                 }
             </div>
             @if (_lastGenerate is not null)
@@ -153,6 +130,46 @@ else
             }
         </MudPaper>
     </div>
+
+    <MudPaper Class="todox-panel pa-5 mt-4" rounded="true">
+        <div class="ai-character-section-title">
+            <div>
+                <MudText Typo="Typo.h5">Ảnh tham chiếu</MudText>
+                <MudText Typo="Typo.body2" Class="todox-page-subtitle">Ảnh gốc dùng để tham chiếu khi tạo nhân vật.</MudText>
+            </div>
+            @if (_detail?.References.Count > 0)
+            {
+                <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Error"
+                           StartIcon="@Icons.Material.Filled.Delete" Disabled="@(_busy || _isNew)" OnClick="RemoveReferenceImage">
+                    Xóa ảnh
+                </MudButton>
+            }
+        </div>
+        <div class="ai-character-reference-layout">
+            <div class="ai-character-reference-preview">
+                @if (!string.IsNullOrWhiteSpace(ReferenceImageUrl))
+                {
+                    <img src="@ReferenceImageUrl" alt="Ảnh tham chiếu" />
+                }
+                else
+                {
+                    <MudIcon Icon="@Icons.Material.Filled.Image" Size="Size.Large" />
+                }
+            </div>
+            <div class="ai-character-upload-box">
+                <MudText Typo="Typo.subtitle2">Tải ảnh JPEG, PNG hoặc WEBP</MudText>
+                <label class="ai-character-upload-button">
+                    <MudIcon Icon="@Icons.Material.Filled.Upload" Size="Size.Small" />
+                    <span>@(string.IsNullOrWhiteSpace(ReferenceImageUrl) ? "Tải ảnh tham chiếu" : "Thay ảnh tham chiếu")</span>
+                    <InputFile class="ai-character-upload-input" OnChange="UploadReferenceImage" accept="@AcceptedImageTypes" disabled="@(_busy || _isNew)" />
+                </label>
+                @if (_isNew)
+                {
+                    <small>Lưu nhân vật trước để tải ảnh tham chiếu lên.</small>
+                }
+            </div>
+        </div>
+    </MudPaper>
 
     @if (!_isNew && _detail is not null)
     {
@@ -189,9 +206,7 @@ else
                                 <span class="ai-character-status @render.Status">@StatusLabel(render.Status)</span>
                             </div>
                             <div class="ai-character-render-body">
-                                <b>@render.RenderCode</b>
-                                <span>Nhà cung cấp: @ProviderLabel(render.ProviderCode) / @render.ModelName</span>
-                                <span>@render.AspectRatio - @render.Quality - @render.Resolution</span>
+                                <b>@StatusLabel(render.Status)</b>
                                 <span>@(render.UsageCost?.ToString("0.####") ?? "0") điểm - @render.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</span>
                                 @if (!string.IsNullOrWhiteSpace(render.ErrorMessage))
                                 {
@@ -302,27 +317,16 @@ else
     private bool _isLoadingPage;
     private bool _busy;
     private bool _autoGenerate = true;
-    private int? _seed;
-    private string _referenceUrlsText = string.Empty;
     private string _renderPrompt = string.Empty;
     private string? _error;
     private bool _isNew => Id is null;
-    private long? _providerCapabilityId;
-    private List<ProviderOptionDto> _providerOptions = new();
     private readonly List<AiCharacterRenderLogItem> _renderLogs = new();
     private string? _lastRenderError;
     private long? _loadedCharacterId;
     private bool _autoRenderHandled;
 
-    private string ProviderDisplay
-    {
-        get
-        {
-            var provider = _detail?.ProviderCode ?? Config["AiCharacters:DefaultImageProviderCode"] ?? Config["OpenRouter:DefaultImageProviderCode"] ?? "todox_image";
-            var model = _detail?.ModelName ?? Config["AiCharacters:DefaultImageModel"] ?? Config["OpenRouter:DefaultImageModel"] ?? "ImageAICreativeRender";
-            return $"Nhà cung cấp: {ProviderLabel(provider)} / {model}";
-        }
-    }
+    private const string AcceptedImageTypes = "image/jpeg,image/png,image/webp";
+    private string? ReferenceImageUrl => _detail?.References.FirstOrDefault()?.ImageUrl;
 
     protected override async Task OnInitializedAsync()
     {
@@ -415,19 +419,6 @@ else
                 return;
             }
 
-            try
-            {
-                _providerOptions = (await AiProviders.GetSelectableProvidersAsync("character_generation")).ToList();
-                if (_providerOptions.Count > 0 && _providerCapabilityId is null)
-                {
-                    _providerCapabilityId = (_providerOptions.FirstOrDefault(o => o.IsDefault) ?? _providerOptions[0]).ProviderCapabilityId;
-                }
-            }
-            catch
-            {
-                _providerOptions = new();
-            }
-
             if (!_isNew && Id is long id)
             {
                 _detail = await Characters.GetCharacterAsync(user, id);
@@ -484,7 +475,6 @@ else
         _model.Status = NormalizeUiStatus(detail.Status);
         _model.SortOrder = detail.SortOrder;
         _renderPrompt = detail.MasterPrompt;
-        _seed = detail.Seed;
     }
 
     private static string NormalizeUiStatus(string? status)
@@ -514,7 +504,6 @@ else
                     StylePreset = _model.StylePreset,
                     Gender = _model.Gender,
                     AspectRatio = _model.AspectRatio,
-                    Seed = _seed,
                     AutoGenerateImage = false
                 }, AuthState.CurrentUser);
                 Snackbar.Add("Đã tạo nhân vật AI.", Severity.Success);
@@ -564,8 +553,6 @@ else
             _model.AspectRatio,
             _model.StylePreset,
             _model.Gender,
-            Seed = _seed,
-            ProviderCapabilityId = _providerCapabilityId
         });
 
         if (AuthState.CurrentUser is null || Id is null)
@@ -578,24 +565,19 @@ else
         _lastGenerate = null;
         try
         {
-            var referenceUrls = ParseReferenceUrls();
             await AddRenderLogAsync("service_call", "Gọi backend render character.", "info", new
             {
                 CharacterId = Id,
-                Seed = _seed,
                 SaveAsMaster = true,
-                ProviderCapabilityId = _providerCapabilityId,
-                ReferenceCount = referenceUrls.Length
+                ReferenceCount = _detail?.References.Count ?? 0
             });
 
             _lastGenerate = await Characters.GenerateImageAsync(new GenerateCharacterImageRequest
             {
                 CharacterId = Id,
-                Seed = _seed,
                 RenderPrompt = _renderPrompt,
-                ReferenceImageUrls = referenceUrls,
-                SaveAsMaster = true,
-                ProviderCapabilityId = _providerCapabilityId
+                ReferenceImageUrls = _detail?.References.Select(x => x.ImageUrl).ToArray() ?? Array.Empty<string>(),
+                SaveAsMaster = true
             }, AuthState.CurrentUser);
 
             await AddRenderLogAsync(
@@ -636,7 +618,7 @@ else
         _busy = true;
         try
         {
-            await using var stream = file.OpenReadStream(12 * 1024 * 1024);
+            await using var stream = file.OpenReadStream(MaxImageBytes);
             using var ms = new MemoryStream();
             await stream.CopyToAsync(ms);
             _lastGenerate = await Characters.UploadMasterImageAsync(Id.Value, ms.ToArray(), file.Name, file.ContentType, AuthState.CurrentUser);
@@ -653,6 +635,50 @@ else
         }
     }
 
+    private async Task UploadReferenceImage(InputFileChangeEventArgs args)
+    {
+        if (AuthState.CurrentUser is null || Id is null) return;
+        var file = args.File;
+        _busy = true;
+        try
+        {
+            await using var stream = file.OpenReadStream(MaxImageBytes);
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms);
+            _detail = await Characters.UploadReferenceImageAsync(Id.Value, ms.ToArray(), file.Name, file.ContentType, AuthState.CurrentUser);
+            Snackbar.Add("Đã tải ảnh tham chiếu.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task RemoveReferenceImage()
+    {
+        if (AuthState.CurrentUser is null || Id is null) return;
+        _busy = true;
+        try
+        {
+            _detail = await Characters.RemoveReferenceImageAsync(Id.Value, AuthState.CurrentUser);
+            Snackbar.Add("Đã xóa ảnh tham chiếu.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
     private async Task SetMaster(long renderId)
     {
         if (AuthState.CurrentUser is null || Id is null) return;
@@ -660,9 +686,6 @@ else
         Snackbar.Add("Đã chọn ảnh master.", Severity.Success);
         await LoadPageAsync();
     }
-
-    private string[] ParseReferenceUrls()
-        => _referenceUrlsText.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
     private Task AddRenderLogAsync(string step, string message, string level = "info", object? data = null, string? rawError = null)
     {
@@ -789,13 +812,7 @@ else
         _ => value
     };
 
-    private static string ProviderLabel(string value) => value switch
-    {
-        "todox_image" => "TodoX ImageAICreativeRender",
-        "openrouter_image" => "OpenRouter",
-        "manual_upload" => "Upload thủ công",
-        _ => value
-    };
+    private long MaxImageBytes => Math.Max(1, Config.GetValue("MediaStorage:MaxImageBytes", 20 * 1024 * 1024));
 }
 
 

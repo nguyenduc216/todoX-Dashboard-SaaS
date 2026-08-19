@@ -70,7 +70,7 @@ else
                             @StatusLabel(item.Status)
                         </MudChip>
                     </div>
-                    <div class="ai-character-meta">Nhà cung cấp: @item.ModelName - @item.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</div>
+                    <div class="ai-character-meta">Tạo ngày @item.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</div>
                     <div class="ai-character-actions">
                         <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning"
                                    StartIcon="@Icons.Material.Filled.Edit"

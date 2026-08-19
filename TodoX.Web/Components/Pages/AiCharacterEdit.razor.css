@@ -28,6 +28,30 @@
     margin-top: 14px;
 }
 
+.ai-character-reference-layout {
+    display: grid;
+    grid-template-columns: minmax(180px, 280px) 1fr;
+    gap: 18px;
+    align-items: center;
+    margin-top: 16px;
+}
+
+.ai-character-reference-preview {
+    aspect-ratio: 1 / 1;
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+    border: 1px solid rgba(255, 183, 0, .28);
+    border-radius: 8px;
+    background: #05080d;
+}
+
+.ai-character-reference-preview img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+
 .ai-character-upload-box small {
     color: #98a4b5;
 }
@@ -176,7 +200,8 @@
 }
 
 @media (max-width: 760px) {
-    .ai-character-detail-grid {
+    .ai-character-detail-grid,
+    .ai-character-reference-layout {
         grid-template-columns: 1fr;
     }
 }
