@@ -78,6 +78,13 @@ public class SceneImageBatchRenderHandlerTests
     }
 
     [Fact]
+    public void SceneImageBatchInput_DefaultsToRVideoCapability()
+    {
+        Assert.Equal(SceneImageRenderContext.RVideoCapabilityCode, new SceneImageBatchInput().CapabilityCode);
+        Assert.Equal("rvideo_scene_image_generation", SceneImageRenderContext.RVideoCapabilityCode);
+    }
+
+    [Fact]
     public void RVideoImageModelPolicy_UsesOrdered79AiOnlyFallbacks()
     {
         var initial = RVideoImageModelPolicy.GetInitial();

@@ -2252,6 +2252,7 @@ else
         var character = ResolveCurrentCharacter();
         var input = new TodoX.Web.Services.Render.SceneImageBatchInput
         {
+            CapabilityCode = TodoX.Web.Services.Render.SceneImageRenderContext.RVideoCapabilityCode,
             ProjectId = _project.Id,
             AspectRatio = _aspectRatio,
             CharacterId = character?.Id ?? _project.CharacterId,
@@ -2307,7 +2308,7 @@ else
     }
 
     // ------------------------------------------------------------------
-    // Per-scene re-render — configured routed image provider only.
+    // Per-scene re-render - persisted 79AI scene image work item.
     // ------------------------------------------------------------------
     private async Task RerenderSceneImageAsync(VideoProjectSceneDto scene)
     {
@@ -2325,14 +2326,26 @@ else
         if (!_sceneRerendering.Add(scene.Id)) return; // already running for this scene
 
         _sceneRerenderErrors.Remove(scene.Id);
+        if (draft.IsDirty)
+        {
+            await SaveSceneAsync(scene);
+            if (_project is null) return;
+            scene = _project.Scenes.FirstOrDefault(x => x.Id == scene.Id) ?? scene;
+            draft = GetSceneDraft(scene);
+        }
+
+        if (await SceneVersions.HasActiveImageVersionAsync(scene.Id))
+        {
+            Snackbar.Add($"Scene {scene.SceneIndex} đang có phiên bản ảnh được xử lý.", Severity.Info);
+            return;
+        }
+
         var character = ResolveCurrentCharacter();
-        var previousImageUrl = scene.StaticImageUrl;
-        var previousImagePath = scene.StaticImagePath;
-        var previousStatus = scene.Status;
         await InvokeAsync(StateHasChanged);
 
         try
         {
+            var model = TodoX.Web.Services.Render.RVideoImageModelPolicy.GetInitial();
             var promptScene = new VideoProjectSceneDto
             {
                 Id = scene.Id,
@@ -2345,60 +2358,84 @@ else
                 VideoPrompt = draft.MotionPrompt
             };
             var prompt = TodoX.Web.Services.Render.SceneImagePromptBuilder.Build(promptScene, character?.NormalizedPrompt);
-            await LogProjectEvent("SCENE_IMAGE_RERENDER_START", "info", $"Render lại ảnh scene {scene.SceneIndex} qua OpenRouter.",
-                new { projectId = _project.Id, sceneId = scene.Id, sceneIndex = scene.SceneIndex, characterId = character?.Id });
-
-            var outcome = await SceneImages.RerenderSceneImageWithOpenRouterAsync(new TodoX.Web.Services.Render.SceneImageRenderContext
+            var referenceMediaId = await SceneImages.ResolveCharacterReferenceMediaIdAsync(
+                _project.Id, character?.MasterImageUrl, character?.MasterImageObjectKey,
+                AuthState.CurrentUser.UserId, AuthState.CurrentUser.CustomerId,
+                requireReference: true);
+            if (referenceMediaId is null)
             {
-                ProjectId = _project.Id,
-                SceneId = scene.Id,
-                SceneIndex = scene.SceneIndex,
-                Prompt = prompt,
-                AspectRatio = _aspectRatio,
-                CharacterId = character?.Id,
+                throw new InvalidOperationException("RVIDEO_REFERENCE_IMAGE_UNAVAILABLE");
+            }
+
+            var logicalRequestId = TodoX.Web.Services.Render.SceneImageRenderService.BuildLogicalRequestId(
+                "render_job_scene_image_rerender", scene.Id, null);
+            var operationId = Guid.NewGuid();
+            var version = await SceneVersions.CreateQueuedImageVersionAsync(new TodoX.Web.Services.VideoRender.SceneImageVersionCreateRequest(
+                _project.Id, scene.Id, AuthState.CurrentUser.UserId, AuthState.CurrentUser.CustomerId,
+                operationId, logicalRequestId, draft.ImagePrompt, prompt, draft.MotionPrompt, null,
+                new { scene.Id, scene.ProjectId, scene.SceneIndex, scene.Title, scene.DurationSeconds,
+                    scene.ScenePrompt, imagePrompt = draft.ImagePrompt, videoPrompt = draft.MotionPrompt },
+                new { characterId = character?.Id, referenceMediaId, referenceUrl = character?.MasterImageUrl,
+                    referenceObjectKey = character?.MasterImageObjectKey, characterPrompt = character?.NormalizedPrompt },
+                new { capability = TodoX.Web.Services.Render.SceneImageRenderContext.RVideoCapabilityCode,
+                    aspectRatio = TodoX.Web.Services.Render.SceneImageRenderService.NormalizeAspectRatio(_aspectRatio),
+                    outputFormat = "png", source = "scene_image_user_rerender", model = model.Model,
+                    model.Mode, model.Resolution, modelAttemptIndex = model.AttemptIndex }));
+
+            await VideoRepo.UpdateSceneAsync(scene.Id, VideoSceneStatuses.Draft, errorMessage: null,
+                title: scene.Title, scenePrompt: scene.ScenePrompt, imagePrompt: scene.ImagePrompt,
+                videoPrompt: scene.VideoPrompt);
+
+            var job = await RenderJobs.EnqueueAsync(new RenderJobCreateModel
+            {
+                JobType = TodoX.Web.Services.Render.SceneImageRenderWorkItemHandler.JobTypeName,
                 UserId = AuthState.CurrentUser.UserId,
                 CustomerId = AuthState.CurrentUser.CustomerId,
-                CreatedBy = AuthState.CurrentUser.Email ?? AuthState.CurrentUser.UserId.ToString(),
-                CharacterReferenceMediaId = await SceneImages.ResolveCharacterReferenceMediaIdAsync(_project.Id, character?.MasterImageUrl, character?.MasterImageObjectKey, AuthState.CurrentUser.UserId, AuthState.CurrentUser.CustomerId),
-                CharacterReferenceObjectKey = character?.MasterImageObjectKey,
-                CharacterReferenceUrl = character?.MasterImageUrl
+                Input = new TodoX.Web.Services.Render.SceneImageRenderWorkItemInput
+                {
+                    ParentJobId = operationId,
+                    ImageVersionId = version.Id,
+                    ProjectId = _project.Id,
+                    SceneId = scene.Id,
+                    SceneIndex = scene.SceneIndex,
+                    UserId = AuthState.CurrentUser.UserId,
+                    CustomerId = AuthState.CurrentUser.CustomerId,
+                    CreatedBy = AuthState.CurrentUser.Email ?? AuthState.CurrentUser.UserId.ToString(),
+                    TrustedPayerContext = TodoX.Web.Services.AiProviders.AiBillingPayerResolver.CreateTrustedBackgroundContext(AuthState.CurrentUser),
+                    Prompt = version.CompiledImagePromptSnapshot ?? prompt,
+                    AspectRatio = TodoX.Web.Services.Render.SceneImageRenderService.NormalizeAspectRatio(_aspectRatio),
+                    CharacterId = character?.Id,
+                    ReferenceMediaId = referenceMediaId,
+                    ReferenceObjectKey = character?.MasterImageObjectKey,
+                    ReferenceUrl = character?.MasterImageUrl,
+                    CapabilityCode = TodoX.Web.Services.Render.SceneImageRenderContext.RVideoCapabilityCode,
+                    LogicalRequestId = logicalRequestId,
+                    RequestedModel = model.Model,
+                    ModelAttemptIndex = model.AttemptIndex
+                },
+                Prompt = new { projectId = _project.Id, sceneId = scene.Id, imageVersionId = version.Id },
+                References = Array.Empty<object>(),
+                LogCode = BuildLogCode(),
+                ProviderCode = TodoX.Web.Services.Render.SceneImageBatchRenderHandler.RoutingProviderCode,
+                ModelCode = TodoX.Web.Services.Render.SceneImageBatchRenderHandler.RoutingModelCode,
+                MaxAttempts = 100,
+                PointCostEstimate = 0,
+                PointStatus = RenderPointStatuses.NotRequired
             });
 
-            if (!outcome.Success || string.IsNullOrWhiteSpace(outcome.ImageUrl))
-            {
-                // Giữ lại ảnh cũ nếu có; chỉ hiển thị lỗi riêng cho scene.
-                _sceneRerenderErrors[scene.Id] = outcome.Error ?? "Render lại ảnh scene thất bại.";
-                await LogProjectEvent("SCENE_IMAGE_RERENDER_FAILED", "error", $"Render lại ảnh scene {scene.SceneIndex} thất bại.",
-                    new { projectId = _project.Id, sceneId = scene.Id, sceneIndex = scene.SceneIndex, error = outcome.Error, providerCode = outcome.ProviderCode, providerCapabilityId = outcome.ProviderCapabilityId, modelName = outcome.ModelName });
-                Snackbar.Add(_sceneRerenderErrors[scene.Id], Severity.Error);
-                return;
-            }
-
-            await VideoRepo.UpdateSceneAsync(scene.Id, VideoSceneStatuses.ImageReady,
-                imageUrl: outcome.ImageUrl, imagePath: outcome.ObjectKey, errorMessage: null,
-                title: scene.Title, scenePrompt: scene.ScenePrompt, imagePrompt: scene.ImagePrompt, videoPrompt: scene.VideoPrompt);
-            if (_project.Scenes.FirstOrDefault(x => x.Id == scene.Id) is { } current)
-            {
-                current.StaticImageUrl = outcome.ImageUrl;
-                current.StaticImagePath = outcome.ObjectKey;
-                current.Status = VideoSceneStatuses.ImageReady;
-                current.ErrorMessage = null;
-                current.UpdatedAt = DateTime.UtcNow;
-            }
-
-            await LogProjectEvent("SCENE_IMAGE_RERENDER_DONE", "info", $"Scene {scene.SceneIndex} đã render lại ảnh.",
-                new { projectId = _project.Id, sceneId = scene.Id, sceneIndex = scene.SceneIndex, characterId = character?.Id, providerCode = outcome.ProviderCode, providerCapabilityId = outcome.ProviderCapabilityId, modelName = outcome.ModelName, imageUrl = outcome.ImageUrl });
-            Snackbar.Add($"Đã render lại ảnh scene {scene.SceneIndex}.", Severity.Success);
+            _sceneEventState[scene.Id] = RenderSceneImageVisualState.Queued;
+            await LogProjectEvent("SCENE_IMAGE_RERENDER_ENQUEUED", "info", $"Đã enqueue render lại ảnh scene {scene.SceneIndex}.",
+                new { job.Id, projectId = _project.Id, sceneId = scene.Id, sceneIndex = scene.SceneIndex,
+                    imageVersionId = version.Id, characterId = character?.Id, model = model.Model,
+                    modelAttemptIndex = model.AttemptIndex });
+            Snackbar.Add($"Đã enqueue render lại ảnh scene {scene.SceneIndex}.", Severity.Success);
+            await StartPolling();
         }
         catch (Exception ex)
         {
-            // Không đổi ảnh cũ khi lỗi; chỉ ghi nhận lỗi riêng của scene.
             _sceneRerenderErrors[scene.Id] = ex.Message;
-            scene.StaticImageUrl = previousImageUrl;
-            scene.StaticImagePath = previousImagePath;
-            scene.Status = previousStatus;
             Logger.LogError(ex, "VIDEO_RENDER_SCENE_RERENDER_FAILED projectId={ProjectId} sceneId={SceneId}", _project.Id, scene.Id);
-            await LogProjectEvent("SCENE_IMAGE_RERENDER_FAILED", "error", $"Render lại ảnh scene {scene.SceneIndex} lỗi.",
+            await LogProjectEvent("SCENE_IMAGE_RERENDER_ENQUEUE_FAILED", "error", $"Enqueue render lại ảnh scene {scene.SceneIndex} lỗi.",
                 new { projectId = _project.Id, sceneId = scene.Id, sceneIndex = scene.SceneIndex, error = ex.Message });
             Snackbar.Add(ex.Message, Severity.Error);
         }

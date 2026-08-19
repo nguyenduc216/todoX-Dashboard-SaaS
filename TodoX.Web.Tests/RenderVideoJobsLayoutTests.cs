@@ -162,6 +162,37 @@ public class RenderVideoJobsLayoutTests
     }
 
     [Fact]
+    public void PerSceneImageRerender_EnqueuesPersisted79AiWorkItem()
+    {
+        var razor = File.ReadAllText(RazorPath);
+        var method = Between(razor, "private async Task RerenderSceneImageAsync", "private bool IsSceneRendering");
+
+        Assert.DoesNotContain("RerenderSceneImageWithOpenRouterAsync", method);
+        Assert.Contains("CreateQueuedImageVersionAsync", method);
+        Assert.Contains("SceneImageRenderWorkItemHandler.JobTypeName", method);
+        Assert.Contains("SceneImageRenderContext.RVideoCapabilityCode", method);
+        Assert.Contains("ResolveCharacterReferenceMediaIdAsync", method);
+        Assert.Contains("requireReference: true", method);
+        Assert.Contains("RequestedModel = model.Model", method);
+        Assert.Contains("ModelAttemptIndex = model.AttemptIndex", method);
+    }
+
+    [Fact]
+    public void SceneImageRenderStates_DefineLocalFlashAndShimmerKeyframes()
+    {
+        var css = File.ReadAllText(CssPath);
+
+        Assert.Contains("animation: scene-image-frame-flash", css);
+        Assert.Contains("animation: scene-image-shimmer-flash", css);
+        Assert.Contains("@keyframes scene-image-frame-flash", css);
+        Assert.Contains("@keyframes scene-image-shimmer-flash", css);
+        Assert.Contains(".scene-image-submitted", css);
+        Assert.Contains(".scene-image-processing", css);
+        Assert.DoesNotContain("avatar-card-flash", css);
+        Assert.DoesNotContain("avatar-render-flash", css);
+    }
+
+    [Fact]
     public void SceneAuxiliaryFields_StayUnderImagePromptInsideDetailsColumn()
     {
         var razor = File.ReadAllText(RazorPath);

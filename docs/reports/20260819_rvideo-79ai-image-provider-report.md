@@ -66,9 +66,51 @@ Terminal provider failure now closes the current version and queues a new versio
 
 - Focused 79AI provider tests: `5 passed, 0 failed`
 - Phase1B: `45 passed, 0 failed`
-- Full `TodoX.Web.Tests`: `667 passed, 0 failed`
+- Full `TodoX.Web.Tests`: `670 passed, 0 failed`
 - Build and `git diff --check`: passed.
 - Publish: passed.
+
+## 2026-08-19 FOLLOW-UP: RVIDEO BULK/PER-SCENE/UI
+
+Starting SHA for this follow-up: `51a0fbc027311a131e0f81dba412dd1907c86fba`
+
+Final remote SHA for this follow-up: `PENDING_COMMIT`
+
+Implemented:
+
+- `SceneImageBatchInput.CapabilityCode` now defaults to `rvideo_scene_image_generation`.
+- `/render-job` bulk image enqueue explicitly sends `SceneImageRenderContext.RVideoCapabilityCode`.
+- Per-scene image rerender no longer calls `RerenderSceneImageWithOpenRouterAsync` directly.
+- Per-scene image rerender now saves dirty scene draft, blocks duplicate active image versions, requires a reference media id, creates a queued image version, and enqueues a `render_scene_image` work item with `RequestedModel` and `ModelAttemptIndex`.
+- Per-scene image rerender now routes through the same persisted 79AI polling worker path as batch scene image rendering.
+- `RenderVideoJobs.razor.css` now defines local flash/shimmer keyframes directly and uses them for queued/submitted/processing scene image states.
+
+Regression tests added:
+
+- `SceneImageBatchInput_DefaultsToRVideoCapability`
+- `PerSceneImageRerender_EnqueuesPersisted79AiWorkItem`
+- `SceneImageRenderStates_DefineLocalFlashAndShimmerKeyframes`
+
+Follow-up validation:
+
+- `dotnet test ..\TodoX.Web.Tests\TodoX.Web.Tests.csproj --no-restore --filter "FullyQualifiedName~RenderVideoJobsLayoutTests|FullyQualifiedName~SceneImageBatchRenderHandlerTests" --logger "console;verbosity=minimal"`: `26 passed, 0 failed`
+- `dotnet format ..\TodoX.Dashboard.sln --verify-no-changes --no-restore --include TodoX.Web\Components\Pages\RenderVideoJobs.razor TodoX.Web\Components\Pages\RenderVideoJobs.razor.css TodoX.Web\Services\Render\SceneImageBatchRenderHandler.cs TodoX.Web.Tests\RenderVideoJobsLayoutTests.cs TodoX.Web.Tests\SceneImageBatchRenderHandlerTests.cs`: passed
+- `dotnet build TodoX.Web.csproj --no-restore -p:UseSharedCompilation=false`: passed, `0 warning, 0 error`
+- `git diff --check`: passed
+- `dotnet test ..\TodoX.Web.Tests\TodoX.Web.Tests.csproj --no-restore --logger "console;verbosity=minimal"`: `670 passed, 0 failed`
+- `dotnet test Tests\TodoX.Web.Phase1B.Tests.csproj --no-restore --logger "console;verbosity=minimal"`: `45 passed, 0 failed`
+- `dotnet publish TodoX.Web.csproj --no-restore -c Release -o ..\artifacts\publish\todox-dashboard -p:UseSharedCompilation=false`: passed; output `artifacts\publish\todox-dashboard`
+
+Publish warnings:
+
+- Existing/generated Razor nullable warnings remain in `obj\Release\net10.0\...\Components\Pages\AiProviders_razor.g.cs`.
+- Existing nullable warnings remain at `TodoX.Web\Components\Pages\RenderVideoJobs.razor` lines 2112 and 2129 during Release publish.
+
+Database:
+
+- No migration created.
+- No migration executed.
+- No SQL executed.
 
 ## DATABASE
 

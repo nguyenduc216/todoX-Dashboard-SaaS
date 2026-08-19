@@ -8,7 +8,7 @@ namespace TodoX.Web.Services.Render;
 
 public sealed class SceneImageBatchInput
 {
-    public string CapabilityCode { get; set; } = SceneImageRenderContext.DefaultCapabilityCode;
+    public string CapabilityCode { get; set; } = SceneImageRenderContext.RVideoCapabilityCode;
     public long ProjectId { get; set; }
     public string AspectRatio { get; set; } = "9:16";
     public long? CharacterId { get; set; }
