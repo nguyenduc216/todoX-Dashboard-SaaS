@@ -1,0 +1,23 @@
+@page "/jobs/rvideo/new"
+@using TodoX.Web.Components.Pages
+@using TodoX.Web.Models.Catalog
+@inject AuthStateService AuthState
+
+<PageTitle>RVIDEO</PageTitle>
+
+@if (!AuthState.IsInitialized)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+}
+else
+{
+    <RenderVideoJobs Embedded="true" ServiceCode="@ServiceCode" />
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "serviceId")]
+    public Guid? ServiceId { get; set; }
+
+    [SupplyParameterFromQuery(Name = "serviceCode")]
+    public string? ServiceCode { get; set; }
+}

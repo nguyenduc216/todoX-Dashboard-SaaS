@@ -1,4 +1,6 @@
 using TodoX.Web.Models;
+using TodoX.Web.Models.Catalog;
+using TodoX.Web.Models.Timelapse;
 using TodoX.Web.Services.VideoRender;
 using Xunit;
 
@@ -258,6 +260,34 @@ public sealed class RVideoFoundationTests
 
         Assert.False(decision.ShouldQueueVideo);
         Assert.False(decision.ShouldFinalize);
+    }
+
+    [Fact]
+    public void RVideoServiceResolvesToNativeCreateRoute()
+    {
+        var serviceId = Guid.NewGuid();
+        var route = CustomerServiceRouting.Resolve(TodoXServiceEngineTypes.RVideo, serviceId, "BUDDHISM_CONTENT_VIDEO");
+
+        Assert.Equal(CustomerServiceDestination.RVideoCreator, route.Destination);
+        Assert.Equal("/jobs/rvideo/new?serviceId=" + serviceId + "&serviceCode=BUDDHISM_CONTENT_VIDEO", route.Route);
+        Assert.Null(route.Message);
+    }
+
+    [Fact]
+    public void TimelapseAndRDanceRoutesRemainUnchanged()
+    {
+        Assert.StartsWith("/jobs/timelapse/new?", CustomerServiceRouting.Resolve(TodoXServiceEngineTypes.Timelapse, Guid.NewGuid(), "CONSTRUCTION_VIDEO").Route);
+        Assert.StartsWith("/jobs/rdance/new?", CustomerServiceRouting.Resolve(TodoXServiceEngineTypes.RDance, Guid.NewGuid(), "FASHION_VIDEO").Route);
+    }
+
+    [Fact]
+    public void UnknownServiceEngineStillUsesComingSoonFallback()
+    {
+        var route = CustomerServiceRouting.Resolve("future-engine");
+
+        Assert.Equal(CustomerServiceDestination.Unavailable, route.Destination);
+        Assert.Null(route.Route);
+        Assert.False(string.IsNullOrWhiteSpace(route.Message));
     }
 
     [Fact]

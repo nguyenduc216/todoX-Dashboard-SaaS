@@ -24,7 +24,7 @@ public static class CustomerServiceRouting
 
         if (string.Equals(engineType, TodoXServiceEngineTypes.RVideo, StringComparison.OrdinalIgnoreCase))
         {
-            return new(CustomerServiceDestination.RVideoCreator, null, "Dịch vụ RVideo đang hoàn thiện.");
+            return new(CustomerServiceDestination.RVideoCreator, BuildRoute("/jobs/rvideo/new", serviceId, serviceCode), null);
         }
 
         if (string.Equals(engineType, TodoXServiceEngineTypes.RDance, StringComparison.OrdinalIgnoreCase))

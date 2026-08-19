@@ -584,6 +584,7 @@ else
 
     [Parameter] public bool Embedded { get; set; }
     [Parameter] public long? ProjectId { get; set; }
+    [Parameter] public string? ServiceCode { get; set; }
     [Parameter] public EventCallback<long> ProjectCreated { get; set; }
     [Parameter] public EventCallback ProjectSaved { get; set; }
     [Parameter] public EventCallback Closed { get; set; }
