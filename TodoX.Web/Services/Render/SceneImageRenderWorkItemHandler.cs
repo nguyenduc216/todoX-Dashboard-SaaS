@@ -1,4 +1,5 @@
 using System.Text.Json;
+using TodoX.Web.Services.AiCharacters;
 using TodoX.Web.Services.AiProviders;
 using TodoX.Web.Models;
 using TodoX.Web.Services.VideoRender;
@@ -71,9 +72,8 @@ public sealed class SceneImageRenderWorkItemHandler : IRenderJobHandler
                     new { data, jobId = job.Id, sceneId = input.SceneId, imageVersionId = input.ImageVersionId }, ct)
             }, ct);
 
-            var pending = !outcome.Success && outcome.ProviderTaskId is not null
-                && (string.Equals(outcome.Error, "79AI image task is still pending.", StringComparison.OrdinalIgnoreCase)
-                    || outcome.BillingLogicalRequestId is not null);
+            var pending = outcome.ExecutionState == AiProviderExecutionState.Pending
+                && outcome.ProviderTaskId is not null;
             if (pending)
             {
                 await _versions.MarkSceneImageVersionSubmittedAsync(version.Id, outcome.ProviderCode,

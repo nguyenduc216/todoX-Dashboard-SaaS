@@ -18,6 +18,7 @@ public sealed class AiImageRenderRequest
     public string[] ReferenceImageUrls { get; set; } = Array.Empty<string>();
     public Guid[] ReferenceMediaIds { get; set; } = Array.Empty<Guid>();
     public string? ProviderTaskId { get; set; }
+    public string? RequestedModel { get; set; }
     public string? ReferenceImageBase64 { get; set; }
     public string AspectRatio { get; set; } = "1:1";
     public string OutputFormat { get; set; } = "png";
@@ -38,6 +39,7 @@ public sealed class AiImageRenderRequest
 public sealed class AiImageRenderResult
 {
     public bool Success { get; set; }
+    public AiProviderExecutionState ExecutionState { get; set; } = AiProviderExecutionState.Failed;
     public byte[]? ImageBytes { get; set; }
     public string? ImageUrl { get; set; }
     public string? ObjectKey { get; set; }
@@ -105,6 +107,12 @@ public sealed class AiImageRenderRouter : IAiImageRenderRouter
         var detail = await _repo.GetProviderAsync(option.ProviderId, cancellationToken);
         var capability = detail?.Capabilities.FirstOrDefault(c => c.Id == option.ProviderCapabilityId);
         var factoryKey = ProviderCodeMap.ToFactoryKey(option.ProviderCode);
+        if (string.Equals(request.CapabilityCode, TodoX.Web.Services.Render.SceneImageRenderContext.RVideoCapabilityCode, StringComparison.OrdinalIgnoreCase)
+            && !factoryKey.Equals("79ai_task_image", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("RVIDEO_IMAGE_PROVIDER_MUST_BE_79AI");
+        }
+
         var provider = _imageProviders.GetProvider(factoryKey);
 
         var (cfgResolution, cfgQuality, cfgFormat) = ParseImageConfig(capability?.ConfigJson);
@@ -193,6 +201,7 @@ public sealed class AiImageRenderRouter : IAiImageRenderRouter
                 UserId = request.UserId,
                 CustomerId = null,
                 Model = option.ModelName ?? string.Empty,
+                RequestedModel = request.RequestedModel,
                 Prompt = request.Prompt,
                 AspectRatio = request.AspectRatio,
                 OutputFormat = outputFormat,
@@ -250,7 +259,7 @@ public sealed class AiImageRenderRouter : IAiImageRenderRouter
         }
 
         var finalModel = string.IsNullOrWhiteSpace(response.ModelName) ? option.ModelName : response.ModelName;
-        var providerTaskId = TryReadTaskId(response.UsageJson);
+        var providerTaskId = TryReadTaskId(response.UsageJson) ?? request.ProviderTaskId;
         AiImageBillingCompletion billingCompletion;
         try
         {
@@ -299,6 +308,7 @@ public sealed class AiImageRenderRouter : IAiImageRenderRouter
             return new AiImageRenderResult
             {
                 Success = false,
+                ExecutionState = response.ExecutionState,
                 ProviderCode = option.ProviderCode,
                 ProviderId = option.ProviderId,
                 ProviderCapabilityId = option.ProviderCapabilityId,
@@ -325,6 +335,7 @@ public sealed class AiImageRenderRouter : IAiImageRenderRouter
         var result = new AiImageRenderResult
         {
             Success = response.Success,
+            ExecutionState = response.ExecutionState,
             ImageBytes = response.ImageBytes,
             ImageUrl = response.ImageUrl,
             ObjectKey = response.ObjectKey,
@@ -368,8 +379,13 @@ public sealed class AiImageRenderRouter : IAiImageRenderRouter
             UnitCostPoints = unitCost,
             TotalPoints = reservation.ChargedPoints,
             ProviderRawCost = response.UsageCost,
-            Status = response.Success ? "success" : "failed",
-            ErrorMessage = response.Success ? null : response.ErrorMessage,
+            Status = response.ExecutionState switch
+            {
+                AiProviderExecutionState.Pending => "pending",
+                AiProviderExecutionState.Success => "success",
+                _ => "failed"
+            },
+            ErrorMessage = response.ExecutionState == AiProviderExecutionState.Failed ? response.ErrorMessage : null,
             MetadataJson = SerializeMetadata(new
             {
                 request = request.Metadata,
@@ -559,7 +575,10 @@ public sealed class AiImageRenderRouter : IAiImageRenderRouter
         {
             using var doc = JsonDocument.Parse(usageJson);
             var root = doc.RootElement;
-            return ReadString(root, "taskId") ?? ReadString(root, "task_id");
+            return ReadString(root, "taskId")
+                ?? ReadString(root, "task_id")
+                ?? ReadString(root, "providerTaskId")
+                ?? ReadString(root, "provider_task_id");
         }
         catch
         {
@@ -569,20 +588,6 @@ public sealed class AiImageRenderRouter : IAiImageRenderRouter
 
     private static bool IsPendingProviderResponse(OpenRouterImageResponse response)
     {
-        if (response.Success || string.IsNullOrWhiteSpace(response.UsageJson))
-        {
-            return false;
-        }
-
-        try
-        {
-            using var document = JsonDocument.Parse(response.UsageJson);
-            return document.RootElement.TryGetProperty("pending", out var pending)
-                && pending.ValueKind == JsonValueKind.True;
-        }
-        catch (JsonException)
-        {
-            return false;
-        }
+        return response.ExecutionState == AiProviderExecutionState.Pending;
     }
 }

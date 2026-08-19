@@ -54,172 +54,127 @@ public sealed class Gommo79AiImageService : IAiImageProviderService
         var submitPath = FirstNonBlank(request.EndpointPath, ReadString(capabilityConfig, "submit_path"), "/generateImage")!;
         var pollPath = FirstNonBlank(ReadString(capabilityConfig, "poll_path"), "/image")!;
         var listPath = FirstNonBlank(ReadString(capabilityConfig, "list_path"), "/images")!;
-        var policy = ReadPolicy(capabilityConfig, providerConfig, request.Model);
-        var fallbackTrail = new List<object>();
-
-        for (var index = 0; index < policy.Count; index++)
+        var policy = ReadPolicy(capabilityConfig, providerConfig);
+        var modelName = FirstNonBlank(request.RequestedModel, request.Model, policy.FirstOrDefault()?.Model)
+            ?? "google_image_gen_banana_2";
+        var model = policy.FirstOrDefault(x => string.Equals(x.Model, modelName, StringComparison.OrdinalIgnoreCase))
+            ?? new PolicyEntry(modelName, "vip", "1k");
+        var requestJson = JsonSerializer.Serialize(new
         {
-            var model = policy[index];
-            var requestJson = JsonSerializer.Serialize(new
+            provider = "79ai",
+            endpoint = submitPath,
+            model = model.Model,
+            mode = model.Mode,
+            resolution = model.Resolution,
+            ratio = NormalizeRatio(request.AspectRatio)
+        }, JsonOptions);
+
+        try
+        {
+            var options = new Dictionary<string, string?>
             {
-                provider = "79ai",
-                endpoint = submitPath,
-                model = model.Model,
-                mode = model.Mode,
-                resolution = model.Resolution,
-                ratio = NormalizeRatio(request.AspectRatio)
-            }, JsonOptions);
-
-            try
+                ["action_type"] = ReadString(capabilityConfig, "action_type") ?? "create",
+                ["ratio"] = NormalizeRatio(request.AspectRatio),
+                ["mode"] = model.Mode,
+                ["resolution"] = model.Resolution,
+                ["editImage"] = request.ReferenceImageBase64 is null ? "false" : "true",
+                ["project_id"] = projectId
+            };
+            if (request.ReferenceImageBase64 is not null)
             {
-                var options = new Dictionary<string, string?>
-                {
-                    ["action_type"] = ReadString(capabilityConfig, "action_type") ?? "create",
-                    ["ratio"] = NormalizeRatio(request.AspectRatio),
-                    ["mode"] = model.Mode,
-                    ["resolution"] = model.Resolution,
-                    ["editImage"] = request.ReferenceImageBase64 is null ? "false" : "true",
-                    ["project_id"] = projectId
-                };
-                if (request.ReferenceImageBase64 is not null)
-                {
-                    options["base64Image"] = request.ReferenceImageBase64;
-                    options["subjects"] = JsonSerializer.Serialize(request.ReferenceImageUrls, JsonOptions);
-                }
+                options["base64Image"] = request.ReferenceImageBase64;
+                options["subjects"] = JsonSerializer.Serialize(request.ReferenceImageUrls, JsonOptions);
+            }
 
-                var taskId = request.ProviderTaskId;
-                if (string.IsNullOrWhiteSpace(taskId))
+            var taskId = request.ProviderTaskId;
+            if (string.IsNullOrWhiteSpace(taskId))
+            {
+                var submitted = await _client.SubmitAsync(new Ai79TaskSubmitRequest(
+                    baseUrl, submitPath, credential.Secret, domain, model.Model, request.Prompt,
+                    Array.Empty<string>(), options, Ai79TaskOperation.Image), cancellationToken);
+                taskId = submitted.TaskId;
+                await ReportAsync(request, "SCENE_IMAGE_PROVIDER_SUBMITTED", new
                 {
-                    var submitted = await _client.SubmitAsync(new Ai79TaskSubmitRequest(
-                        baseUrl,
-                        submitPath,
-                        credential.Secret,
-                        domain,
-                        model.Model,
-                        request.Prompt,
-                        Array.Empty<string>(),
-                        options,
-                        Ai79TaskOperation.Image), cancellationToken);
-
-                    taskId = submitted.TaskId;
-                    await ReportAsync(request, "SCENE_IMAGE_PROVIDER_SUBMITTED", new
-                    {
-                        provider = "79ai",
-                        model = model.Model,
-                        providerTaskId = taskId,
-                        providerStatus = "PENDING_ACTIVE"
-                    });
-                    return Pending(request,
-                        new Ai79TaskStatusResult(
-                            Ai79TaskStatusNormalizer.Running,
-                            submitted.SanitizedResponseJson,
-                            null,
-                            null,
-                            null),
-                        model.Model,
-                        taskId);
-                }
-
-                var terminal = await _client.GetStatusAsync(new Ai79TaskStatusRequest(
-                    baseUrl, pollPath, credential.Secret, domain, taskId, Ai79TaskOperation.Image,
-                    TaskIdField: "id_base"), cancellationToken);
-
-                if (!string.Equals(terminal.NormalizedStatus, Ai79TaskStatusNormalizer.Success, StringComparison.OrdinalIgnoreCase))
-                {
-                    if (string.Equals(terminal.NormalizedStatus, Ai79TaskStatusNormalizer.Running, StringComparison.OrdinalIgnoreCase))
-                    {
-                        await ReportAsync(request, "SCENE_IMAGE_PROVIDER_PROCESSING", new
-                        {
-                            provider = "79ai",
-                            model = model.Model,
-                            providerTaskId = taskId,
-                            providerStatus = "PENDING_PROCESSING"
-                        });
-                        return Pending(request, terminal, model.Model, taskId);
-                    }
-                    fallbackTrail.Add(new { model = model.Model, providerTaskId = taskId, reason = terminal.ErrorCode ?? "provider_error" });
-                    if (index < policy.Count - 1)
-                    {
-                        taskId = null;
-                        continue;
-                    }
-                    return Failure(terminal.ErrorMessage ?? "79AI image task failed.", request, terminal.SanitizedResponseJson, model.Model, taskId);
-                }
-
-                var imageUrl = terminal.OutputUrl;
-                if (string.IsNullOrWhiteSpace(imageUrl))
-                {
-                    await ReportAsync(request, "SCENE_IMAGE_RESULT_DOWNLOADING", new
-                    {
-                        provider = "79ai",
-                        model = model.Model,
-                        providerTaskId = taskId,
-                        providerStatus = "SUCCESS",
-                        recovery = "images"
-                    });
-                    var recovered = await _client.ListImagesAsync(new Ai79ProviderMediaListRequest(
-                        baseUrl, listPath, credential.Secret, domain, projectId,
-                        new Dictionary<string, string?> { ["id_base"] = taskId }), cancellationToken);
-                    imageUrl = recovered.Items.FirstOrDefault(x => string.Equals(x.IdBase, taskId, StringComparison.OrdinalIgnoreCase))?.Url
-                        ;
-                }
-
-                if (string.IsNullOrWhiteSpace(imageUrl))
-                {
-                    fallbackTrail.Add(new { model = model.Model, providerTaskId = taskId, reason = "missing_result_url" });
-                    if (index < policy.Count - 1)
-                    {
-                        taskId = null;
-                        continue;
-                    }
-                    return Failure("79AI trả về SUCCESS nhưng thiếu URL ảnh.", request, terminal.SanitizedResponseJson, model.Model, taskId);
-                }
-
-                await ReportAsync(request, "SCENE_IMAGE_READY", new
-                {
-                    provider = "79ai",
-                    model = model.Model,
-                    providerTaskId = taskId,
-                    providerStatus = "SUCCESS"
+                    provider = "79ai", model = model.Model, providerTaskId = taskId, providerStatus = "PENDING_ACTIVE"
                 });
-                return new OpenRouterImageResponse
-                {
-                    Success = true,
-                    ImageUrl = imageUrl,
-                    MimeType = "image/jpeg",
-                    ProviderCode = "79ai_task_image",
-                    ModelName = model.Model,
-                    RawRequestJson = requestJson,
-                    RawResponseJson = terminal.SanitizedResponseJson,
-                    UsageJson = JsonSerializer.Serialize(new
-                    {
-                        provider = "79ai",
-                        providerTaskId = taskId,
-                        providerStatus = "SUCCESS",
-                        fallbackTrail
-                    }, JsonOptions)
-                };
+                return Pending(request, new Ai79TaskStatusResult(
+                    Ai79TaskStatusNormalizer.Running, submitted.SanitizedResponseJson, null, null, null),
+                    model.Model, taskId);
             }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch (Ai79TaskPollException)
-            {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                fallbackTrail.Add(new { model = model.Model, reason = ex.GetType().Name });
-                _logger.LogWarning(ex, "RVIDEO_IMAGE_79AI_ATTEMPT_FAILED model={Model} providerTaskId={ProviderTaskId}", model.Model, (string?)null);
-                if (index >= policy.Count - 1)
-                {
-                    return Failure(ex.Message, request, JsonSerializer.Serialize(fallbackTrail, JsonOptions), model.Model);
-                }
-            }
-        }
 
-        return Failure("79AI image fallback chain exhausted.", request, JsonSerializer.Serialize(fallbackTrail, JsonOptions));
+            var terminal = await _client.GetStatusAsync(new Ai79TaskStatusRequest(
+                baseUrl, pollPath, credential.Secret, domain, taskId, Ai79TaskOperation.Image,
+                TaskIdField: "id_base"), cancellationToken);
+            if (string.Equals(terminal.NormalizedStatus, Ai79TaskStatusNormalizer.Running, StringComparison.OrdinalIgnoreCase))
+            {
+                await ReportAsync(request, "SCENE_IMAGE_PROVIDER_PROCESSING", new
+                {
+                    provider = "79ai", model = model.Model, providerTaskId = taskId, providerStatus = "PENDING_PROCESSING"
+                });
+                return Pending(request, terminal, model.Model, taskId);
+            }
+
+            if (!string.Equals(terminal.NormalizedStatus, Ai79TaskStatusNormalizer.Success, StringComparison.OrdinalIgnoreCase))
+            {
+                return Failure(terminal.ErrorMessage ?? "79AI image task failed.", request,
+                    terminal.SanitizedResponseJson, model.Model, taskId);
+            }
+
+            var imageUrl = terminal.OutputUrl;
+            if (string.IsNullOrWhiteSpace(imageUrl))
+            {
+                await ReportAsync(request, "SCENE_IMAGE_RESULT_DOWNLOADING", new
+                {
+                    provider = "79ai", model = model.Model, providerTaskId = taskId,
+                    providerStatus = "SUCCESS", recovery = "images"
+                });
+                var recovered = await _client.ListImagesAsync(new Ai79ProviderMediaListRequest(
+                    baseUrl, listPath, credential.Secret, domain, projectId,
+                    new Dictionary<string, string?> { ["id_base"] = taskId }), cancellationToken);
+                imageUrl = recovered.Items.FirstOrDefault(x =>
+                    string.Equals(x.IdBase, taskId, StringComparison.OrdinalIgnoreCase))?.Url;
+            }
+
+            if (string.IsNullOrWhiteSpace(imageUrl))
+            {
+                return Failure("79AI trả về SUCCESS nhưng thiếu URL ảnh.", request,
+                    terminal.SanitizedResponseJson, model.Model, taskId);
+            }
+
+            await ReportAsync(request, "SCENE_IMAGE_READY", new
+            {
+                provider = "79ai", model = model.Model, providerTaskId = taskId, providerStatus = "SUCCESS"
+            });
+            return new OpenRouterImageResponse
+            {
+                Success = true,
+                ExecutionState = AiProviderExecutionState.Success,
+                ImageUrl = imageUrl,
+                MimeType = "image/jpeg",
+                ProviderCode = "79ai_task_image",
+                ModelName = model.Model,
+                RawRequestJson = requestJson,
+                RawResponseJson = terminal.SanitizedResponseJson,
+                UsageJson = JsonSerializer.Serialize(new
+                {
+                    provider = "79ai", providerTaskId = taskId, providerStatus = "SUCCESS"
+                }, JsonOptions)
+            };
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Ai79TaskPollException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "RVIDEO_IMAGE_79AI_ATTEMPT_FAILED model={Model} providerTaskId={ProviderTaskId}",
+                model.Model, request.ProviderTaskId);
+            return Failure(ex.Message, request, ex.Message, model.Model, request.ProviderTaskId);
+        }
     }
 
     private static async Task ReportAsync(OpenRouterImageRequest request, string eventType, object data)
@@ -234,6 +189,7 @@ public sealed class Gommo79AiImageService : IAiImageProviderService
         => new()
         {
             Success = false,
+            ExecutionState = AiProviderExecutionState.Failed,
             ProviderCode = "79ai_task_image",
             ModelName = model ?? request.Model,
             RawResponseJson = rawResponse,
@@ -247,6 +203,7 @@ public sealed class Gommo79AiImageService : IAiImageProviderService
         => new()
         {
             Success = false,
+            ExecutionState = AiProviderExecutionState.Pending,
             ProviderCode = "79ai_task_image",
             ModelName = model,
             RawResponseJson = status.SanitizedResponseJson,
@@ -261,7 +218,7 @@ public sealed class Gommo79AiImageService : IAiImageProviderService
             }, JsonOptions)
         };
 
-    private static IReadOnlyList<PolicyEntry> ReadPolicy(JsonElement capabilityConfig, JsonElement providerConfig, string requestedModel)
+    private static IReadOnlyList<PolicyEntry> ReadPolicy(JsonElement capabilityConfig, JsonElement providerConfig)
     {
         var policy = ReadPolicyArray(capabilityConfig, "models") ?? ReadPolicyArray(providerConfig, "models");
         if (policy is { Count: > 0 }) return policy;

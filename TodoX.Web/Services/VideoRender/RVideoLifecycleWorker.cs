@@ -133,45 +133,11 @@ public sealed class RVideoLifecycleWorker : BackgroundService
                 PointStatus = RenderPointStatuses.NotRequired
             }, project.Id, ct);
         }
-        else if (decision.ShouldQueueVideo)
+        else
         {
-            var sceneIds = sceneStates.Where(x => x.IsImageReady).Select(x => x.SceneId).ToArray();
-            if (sceneIds.Length == 0) return;
-            await jobs.EnqueueForProjectIfNoneActiveAsync(new RenderJobCreateModel
-            {
-                JobType = SceneVideoRenderHandler.JobTypeName,
-                UserId = userId,
-                CustomerId = project.CustomerId,
-                Input = new SceneVideoRenderInput
-                {
-                    ProjectId = project.Id,
-                    SceneIds = sceneIds,
-                    AspectRatio = renderSettings.AspectRatio,
-                    Resolution = renderSettings.Resolution,
-                    UserId = userId,
-                    CustomerId = project.CustomerId
-                },
-                Prompt = new { projectId = project.Id, source = "rvideo_auto_lifecycle" },
-                LogCode = $"video-{project.Id}",
-                ProviderCode = SceneVideoRenderHandler.RoutingProviderCode,
-                ModelCode = SceneVideoRenderHandler.RoutingModelCode,
-                MaxAttempts = 1
-            }, project.Id, ct);
-        }
-        else if (decision.ShouldFinalize)
-        {
-            await jobs.EnqueueForProjectIfNoneActiveAsync(new RenderJobCreateModel
-            {
-                JobType = VideoRenderMergeHandler.JobTypeName,
-                UserId = userId,
-                CustomerId = project.CustomerId,
-                Input = new { projectId = project.Id },
-                Prompt = new { projectId = project.Id, source = "rvideo_auto_lifecycle" },
-                LogCode = $"video-{project.Id}",
-                ProviderCode = "internal_merge",
-                ModelCode = "ffmpeg_concat",
-                MaxAttempts = 1
-            }, project.Id, ct);
+            _logger.LogInformation(
+                "RVIDEO_IMAGE_REVIEW_HOLD projectId={ProjectId} imagesReady={ImagesReady} autoVideoDisabled=true",
+                project.Id, sceneStates.Count(x => x.IsImageReady));
         }
     }
 

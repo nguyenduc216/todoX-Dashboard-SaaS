@@ -27,6 +27,7 @@ public sealed record SceneImageRenderOutcome(
     public decimal RefundedPoints { get; init; }
     public string? CostSource { get; init; }
     public string? ProviderUsageJson { get; init; }
+    public AiProviderExecutionState ExecutionState { get; init; } = AiProviderExecutionState.Failed;
 }
 
 public enum ProviderImageSourceType
@@ -338,6 +339,13 @@ public sealed class SceneImageRenderService : ISceneImageRenderService
             throw new InvalidOperationException("Chưa cấu hình provider ảnh mặc định để render lại ảnh scene.");
         }
 
+        var factoryKey = ProviderCodeMap.ToFactoryKey(option.ProviderCode);
+        if (string.Equals(context.CapabilityCode, SceneImageRenderContext.RVideoCapabilityCode, StringComparison.OrdinalIgnoreCase)
+            && !factoryKey.Equals("79ai_task_image", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("RVIDEO_IMAGE_PROVIDER_MUST_BE_79AI");
+        }
+
         if (!ProviderCodeMap.IsRoutedImageProvider(option.ProviderCode))
         {
             throw new InvalidOperationException("Chưa cấu hình provider ảnh mặc định để render lại ảnh scene.");
@@ -360,7 +368,7 @@ public sealed class SceneImageRenderService : ISceneImageRenderService
 
         var hasReference = references.Length > 0 || referenceMediaIds.Length > 0;
         string? referenceImageBase64 = null;
-        if (hasReference && ProviderCodeMap.ToFactoryKey(option.ProviderCode).Equals("79ai_task_image", StringComparison.OrdinalIgnoreCase))
+        if (hasReference && factoryKey.Equals("79ai_task_image", StringComparison.OrdinalIgnoreCase))
         {
             var media = context.CharacterReferenceMediaId is Guid mediaId
                 ? await _media.GetAsync(mediaId, ct)
@@ -434,7 +442,19 @@ public sealed class SceneImageRenderService : ISceneImageRenderService
                 context.ProjectId, context.SceneId, context.SceneIndex, render.ProviderCapabilityId, render.ProviderCode, render.ModelName, render.ErrorMessage);
             return new SceneImageRenderOutcome(false, null, null, render.ProviderCode,
                 render.ModelName, render.ProviderCapabilityId, null,
-                render.ErrorMessage ?? "Render lại ảnh scene thất bại.", QuotaError: false);
+                render.ErrorMessage ?? "Render lại ảnh scene thất bại.", QuotaError: false)
+            {
+                ProviderTaskId = render.ProviderTaskId,
+                ResultMediaId = render.ResultMediaId,
+                BillingLogicalRequestId = render.BillingLogicalRequestId,
+                EstimatedUsd = render.EstimatedUsd,
+                ActualUsd = render.ActualUsd,
+                ChargedPoints = render.ChargedPoints,
+                RefundedPoints = render.RefundedPoints,
+                CostSource = render.CostSource,
+                ProviderUsageJson = render.UsageJson,
+                ExecutionState = render.ExecutionState
+            };
         }
 
         var source = ProviderImageOutputClassification.Classify(render.ImageBytes, render.ResultMediaId, render.ObjectKey, render.ImageUrl);
@@ -475,6 +495,7 @@ public sealed class SceneImageRenderService : ISceneImageRenderService
         return new SceneImageRenderOutcome(true, persisted.ImageUrl, persisted.ObjectKey, render.ProviderCode,
             render.ModelName, render.ProviderCapabilityId, null, null, QuotaError: false)
         {
+            ExecutionState = AiProviderExecutionState.Success,
             ProviderTaskId = render.ProviderTaskId,
             ResultMediaId = persisted.MediaId,
             BillingLogicalRequestId = render.BillingLogicalRequestId,
