@@ -31,6 +31,7 @@ public enum ScenePromptKind
 public sealed class VideoProjectDto
 {
     public long Id { get; set; }
+    public Guid? CoreJobId { get; set; }
     public Guid TenantId { get; set; }
     public Guid? UserId { get; set; }
     public Guid? CustomerId { get; set; }

@@ -18,6 +18,7 @@
 @inject TenantContext Tenant
 @inject TodoX.Web.Services.VideoRender.ISceneMediaVersioningService SceneVersions
 @inject TodoX.Web.Services.VideoRender.RVideoJobSettingsRepository RVideoSettings
+@inject TodoX.Web.Services.VideoRender.IRVideoJobService RVideoJobs
 @inject IOptionsMonitor<TodoX.Web.Services.VideoRender.VideoRenderOptions> VideoOptions
 @inject IDialogService DialogService
 @inject ISnackbar Snackbar
@@ -223,8 +224,7 @@ else
                                         }
                                     </MudPaper>
                                     <MudStack Row="true" Spacing="2" Class="flex-wrap gap-2">
-                                        <MudButton Color="Color.Warning" Variant="Variant.Filled" OnClick="CreateProjectAsync" Disabled="@_busy">Tạo / phân tách scene</MudButton>
-                                        <MudButton Color="Color.Primary" Variant="Variant.Outlined" OnClick="CreateEmptyProjectAsync" Disabled="@_busy">Tạo project rỗng</MudButton>
+                                        <MudButton Color="Color.Warning" Variant="Variant.Filled" OnClick="CreateProjectAsync" Disabled="@(_busy || _projectId is null)">Tạo / phân tách scene</MudButton>
                                         <MudButton Color="Color.Primary" Variant="Variant.Outlined" OnClick="ReloadAsync" Disabled="@(_projectId is null || _busy)">Refresh</MudButton>
                                     </MudStack>
                                 </MudStack>
@@ -568,7 +568,7 @@ else
                     </MudTabs>
                     </main>
                     <div class="render-project-dialog-footer">
-                        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveJobAsync" Disabled="@(_projectId is null || _busy)">Lưu project</MudButton>
+                        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveJobAsync" Disabled="@_busy">@(_jobId is null ? "LƯU JOB" : "LƯU THAY ĐỔI")</MudButton>
                         <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Close" OnClick="CloseProjectDialogAsync">Đóng</MudButton>
                     </div>
                 </div>
@@ -584,6 +584,8 @@ else
 
     [Parameter] public bool Embedded { get; set; }
     [Parameter] public long? ProjectId { get; set; }
+    [Parameter] public Guid? JobId { get; set; }
+    [Parameter] public Guid? ServiceId { get; set; }
     [Parameter] public string? ServiceCode { get; set; }
     [Parameter] public EventCallback<long> ProjectCreated { get; set; }
     [Parameter] public EventCallback ProjectSaved { get; set; }
@@ -593,6 +595,7 @@ else
     private bool _busy;
     private bool _projectDialogOpen;
     private long? _projectId;
+    private Guid? _jobId;
     private VideoProjectDto? _project;
     private List<RenderJobDto> _jobs = new();
     private readonly List<ActiveCharacterDto> _characters = new();
@@ -686,9 +689,9 @@ else
             .ToList();
 
     private string ProjectHeaderMeta
-        => _projectId is long id
-            ? $"Project #{id} · Aspect ratio: {ProjectAspectRatio}"
-            : $"Project mới · Aspect ratio: {ProjectAspectRatio}";
+        => _jobId is Guid jobId
+            ? $"Job ID: {jobId} · Aspect ratio: {ProjectAspectRatio}"
+            : $"Job mới · Aspect ratio: {ProjectAspectRatio}";
 
     private sealed record DebugEntry(DateTimeOffset Timestamp, int StepNumber, string StepCode, string StepName, string Status, long DurationMs, string Message, string? Details = null);
 
@@ -701,6 +704,7 @@ else
             return;
         }
 
+        _jobId = JobId;
         _projectId = ProjectId ?? QueryProjectId;
         if (AuthState.CurrentUser is not null)
         {
@@ -710,6 +714,11 @@ else
         if (AuthState.CurrentUser is not null)
         {
             _projectDialogOpen = true;
+            if (_jobId is not null && AuthState.CurrentUser is { IsCustomer: true } user)
+            {
+                var view = await RVideoJobs.GetByJobIdAsync(_jobId.Value, user);
+                _projectId = view?.Project.Id;
+            }
             if (_projectId is not null)
             {
                 await ReloadAsync();
@@ -731,8 +740,9 @@ else
         }
 
         var incomingProjectId = ProjectId ?? QueryProjectId;
-        if (incomingProjectId != _projectId)
+        if (incomingProjectId != _projectId || JobId != _jobId)
         {
+            _jobId = JobId;
             _projectId = incomingProjectId;
             _sceneDrafts.Clear();
             _imageVersions.Clear();
@@ -740,6 +750,11 @@ else
             if (AuthState.CurrentUser is not null)
             {
                 _projectDialogOpen = true;
+                if (_jobId is not null && AuthState.CurrentUser is { IsCustomer: true } user)
+                {
+                    var view = await RVideoJobs.GetByJobIdAsync(_jobId.Value, user);
+                    _projectId = view?.Project.Id;
+                }
                 if (_projectId is null)
                 {
                     _project = null;
@@ -769,6 +784,50 @@ else
     private async Task CreateProjectAsync()
     {
         if (AuthState.CurrentUser is null) return;
+        if (_projectId is not null)
+        {
+            if (!EnsureAspectRatioSelected())
+            {
+                return;
+            }
+
+            _busy = true;
+            try
+            {
+                if (!_promptParseResult.IsJsonValid)
+                {
+                    _promptParseResult = PromptParser.Parse(_prompt);
+                }
+
+                _prompt = PersistPromptVideoSettings(_prompt, _aspectRatio, _resolution, _autoFinish);
+                var scenes = BuildSceneRequests().Select(x => new VideoProjectSceneDto
+                {
+                    SceneIndex = x.SceneIndex,
+                    Title = x.Title,
+                    DurationSeconds = x.DurationSeconds,
+                    ScenePrompt = x.ScenePrompt,
+                    ImagePrompt = x.ImagePrompt,
+                    VideoPrompt = x.VideoPrompt,
+                    Status = VideoSceneStatuses.Draft
+                }).ToList();
+                await VideoRepo.ReplaceScenesAsync(_projectId.Value, scenes);
+                await VideoRepo.AddProjectEventAsync(_projectId.Value, "SCENES_CREATED", "info", "RVIDEO scenes created from the saved Core Job.", new { jobId = _jobId, projectId = _projectId });
+                await ReloadAsync();
+                _tabIndex = 1;
+                Snackbar.Add("Đã tạo và phân tách scene.", Severity.Success);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "VIDEO_RENDER_CREATE_SCENES_FAILED jobId={JobId} projectId={ProjectId}", _jobId, _projectId);
+                Snackbar.Add(ex.Message, Severity.Error);
+            }
+            finally
+            {
+                _busy = false;
+            }
+            return;
+        }
+
         if (!EnsureAspectRatioSelected())
         {
             return;
@@ -1954,7 +2013,7 @@ else
 
     private async Task SaveJobAsync()
     {
-        if (_project is null || AuthState.CurrentUser is null) return;
+        if (AuthState.CurrentUser is null) return;
         if (!EnsureAspectRatioSelected())
         {
             return;
@@ -1963,6 +2022,39 @@ else
         _busy = true;
         try
         {
+            if (_project is null && _jobId is null)
+            {
+                if (ServiceId is not Guid serviceId || string.IsNullOrWhiteSpace(ServiceCode))
+                {
+                    throw new InvalidOperationException("Thiếu thông tin dịch vụ RVIDEO.");
+                }
+
+                if (!_promptParseResult.IsJsonValid)
+                {
+                    _promptParseResult = PromptParser.Parse(_prompt);
+                }
+                _prompt = PersistPromptVideoSettings(_prompt, _aspectRatio, _resolution, _autoFinish);
+                var created = await RVideoJobs.CreateDraftAsync(new RVideoJobCreateRequest
+                {
+                    ServiceId = serviceId,
+                    ServiceCode = ServiceCode,
+                    Title = _promptParseResult.Model.VideoTitle ?? "RVIDEO",
+                    Prompt = _prompt,
+                    AspectRatio = _aspectRatio,
+                    Resolution = _resolution,
+                    TotalSeconds = _totalSeconds,
+                    SceneSeconds = Math.Max(1, _sceneSeconds),
+                    ThinkScenes = _thinkScenes,
+                    Settings = BuildRVideoSettingsRequest()
+                }, AuthState.CurrentUser, VideoOptions.CurrentValue.StorageRoot, VideoOptions.CurrentValue.PublicBase, DateTime.UtcNow.ToString("yyyyMMdd-HHmmss"));
+                _jobId = created.JobId;
+                _projectId = created.ProjectId;
+                Snackbar.Add("Đã lưu RVIDEO job.", Severity.Success);
+                Navigation.NavigateTo(created.Route, replace: true);
+                return;
+            }
+            if (_project is null) return;
+
             foreach (var scene in _project.Scenes)
             {
                 NormalizeScenePrompts(scene);

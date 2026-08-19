@@ -161,6 +161,7 @@ builder.Services.AddSingleton<TodoX.Web.Services.VideoRender.ITodoXVideoPromptPa
 builder.Services.AddSingleton<TodoX.Web.Services.VideoRender.IVideoPromptValidator, TodoX.Web.Services.VideoRender.VideoPromptValidator>();
 builder.Services.AddScoped<TodoX.Web.Services.VideoRender.VideoRenderRepository>();
 builder.Services.AddScoped<TodoX.Web.Services.VideoRender.RVideoJobSettingsRepository>();
+builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IRVideoJobService, TodoX.Web.Services.VideoRender.RVideoJobService>();
 builder.Services.AddSingleton<TodoX.Web.Services.VideoRender.RVideoSceneJsonService>();
 builder.Services.AddScoped<TodoX.Web.Services.VideoRender.ISceneMediaVersioningService, TodoX.Web.Services.VideoRender.SceneMediaVersioningService>();
 builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IYEScaleVideoPricingResolver, TodoX.Web.Services.VideoRender.YEScaleVideoPricingResolver>();

@@ -3,9 +3,12 @@
 @using TodoX.Web.Models.Timelapse
 @using TodoX.Web.Services.DanceSell
 @using TodoX.Web.Services.Timelapse
+@using TodoX.Web.Services.VideoRender
 @inject AuthStateService AuthState
 @inject ITimelapseJobService TimelapseJobs
 @inject IDanceSellPhase2Service DanceJobs
+@inject IRVideoJobService RVideoJobs
+@inject TodoX.Web.Services.Platform.ICoreJobApplicationService CoreJobs
 @inject NavigationManager Navigation
 
 <PageTitle>Jobs của tôi</PageTitle>
@@ -95,7 +98,9 @@
         {
             var timelapseTask = TimelapseJobs.ListOwnedAsync(currentUser);
             var danceTask = DanceJobs.ListAsync(currentUser, 100);
-            await Task.WhenAll(timelapseTask, danceTask);
+            var coreTask = CoreJobs.ListAsync(new TodoX.Web.Services.Platform.CoreRequestContext(
+                currentUser.CustomerId, currentUser.UserId, TodoX.Web.Services.Platform.CoreChannelCodes.Dashboard), new(1, 100));
+            await Task.WhenAll(timelapseTask, danceTask, coreTask);
 
             var rows = timelapseTask.Result.Select(x => new CustomerJobRow(
                     x.Id,
@@ -115,6 +120,17 @@
                     x.CreatedAt,
                     x.TotalTodoxPointsEstimated is decimal points ? $"{points:0.##}" : "—",
                     $"/jobs/rdance/{x.Id}")))
+                .Concat(coreTask.Result.Items
+                    .Where(x => string.Equals(x.OperationType, TodoX.Web.Models.Catalog.TodoXServiceEngineTypes.RVideo, StringComparison.OrdinalIgnoreCase))
+                    .Select(x => new CustomerJobRow(
+                        x.JobId,
+                        "RVIDEO",
+                        "RVIDEO",
+                        x.Status,
+                        x.CurrentStep ?? "info",
+                        x.CreatedAt,
+                        x.PointCostEstimate > 0 ? $"{x.PointCostEstimate:0.##}" : "—",
+                        $"/jobs/rvideo/{x.JobId}")))
                 .OrderByDescending(x => x.CreatedAt)
                 .ToList();
 

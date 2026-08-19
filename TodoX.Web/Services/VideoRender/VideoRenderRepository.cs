@@ -135,7 +135,7 @@ public sealed class VideoRenderRepository
             using var conn = await _factory.OpenAsync(ct);
             var project = await conn.QuerySingleOrDefaultAsync<VideoProjectDto>(
                 """
-                SELECT id AS Id, tenant_id AS TenantId, user_id AS UserId, customer_id AS CustomerId, title AS Title,
+                SELECT id AS Id, core_job_id AS CoreJobId, tenant_id AS TenantId, user_id AS UserId, customer_id AS CustomerId, title AS Title,
                        original_prompt AS OriginalPrompt, total_seconds AS TotalSeconds, scene_seconds AS SceneSeconds,
                        scene_count AS SceneCount, think_scenes AS ThinkScenes, character_id AS CharacterId,
                        uploaded_character_url AS UploadedCharacterUrl, storage_root AS StorageRoot, public_base AS PublicBase,
@@ -262,7 +262,7 @@ public sealed class VideoRenderRepository
 
             var project = await conn.QuerySingleOrDefaultAsync<VideoProjectDto>(
                 """
-                SELECT id AS Id, tenant_id AS TenantId, user_id AS UserId, customer_id AS CustomerId, title AS Title,
+                SELECT id AS Id, core_job_id AS CoreJobId, tenant_id AS TenantId, user_id AS UserId, customer_id AS CustomerId, title AS Title,
                        original_prompt AS OriginalPrompt, total_seconds AS TotalSeconds, scene_seconds AS SceneSeconds,
                        scene_count AS SceneCount, think_scenes AS ThinkScenes, character_id AS CharacterId,
                        status AS Status, created_at AS CreatedAt, updated_at AS UpdatedAt

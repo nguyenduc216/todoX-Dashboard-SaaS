@@ -39,11 +39,12 @@ public sealed class RVideoLifecycleWorker : BackgroundService
                 var factory = scope.ServiceProvider.GetRequiredService<TodoXConnectionFactory>();
                 var settings = await ListAutoSettingsAsync(factory, tenant, stoppingToken);
                 var repository = scope.ServiceProvider.GetRequiredService<VideoRenderRepository>();
+                var rvideoJobs = scope.ServiceProvider.GetRequiredService<IRVideoJobService>();
                 var jobs = scope.ServiceProvider.GetRequiredService<IRenderJobService>();
                 var catalog = scope.ServiceProvider.GetRequiredService<IAiStudioCatalogService>();
                 foreach (var setting in settings)
                 {
-                    await EvaluateProjectAsync(setting, repository, jobs, factory, tenant, catalog, stoppingToken);
+                    await EvaluateProjectAsync(setting, repository, rvideoJobs, jobs, factory, tenant, catalog, stoppingToken);
                 }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -59,7 +60,7 @@ public sealed class RVideoLifecycleWorker : BackgroundService
         }
     }
 
-    private async Task EvaluateProjectAsync(RVideoJobSettingsDto setting, VideoRenderRepository repo, IRenderJobService jobs, TodoXConnectionFactory factory, TenantContext tenant, IAiStudioCatalogService catalog, CancellationToken ct)
+    private async Task EvaluateProjectAsync(RVideoJobSettingsDto setting, VideoRenderRepository repo, IRVideoJobService rvideoJobs, IRenderJobService jobs, TodoXConnectionFactory factory, TenantContext tenant, IAiStudioCatalogService catalog, CancellationToken ct)
     {
         var project = await repo.GetProjectAsync(setting.ProjectId, ct);
         if (project is null || project.Scenes.Count == 0) return;
@@ -95,6 +96,7 @@ public sealed class RVideoLifecycleWorker : BackgroundService
         {
             await settingsRepo.SetStageAsync(setting.ProjectId, decision.Stage, ct);
         }
+        await rvideoJobs.SyncLifecycleAsync(project.Id, decision.Stage, project.Status, ct);
 
         var userId = project.UserId ?? Guid.Empty;
         var imageSceneIds = sceneStates

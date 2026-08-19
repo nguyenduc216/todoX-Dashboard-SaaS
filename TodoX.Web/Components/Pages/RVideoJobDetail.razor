@@ -1,0 +1,32 @@
+@page "/jobs/rvideo/{JobId:guid}"
+@inject AuthStateService AuthState
+@inject TodoX.Web.Services.VideoRender.IRVideoJobService RVideoJobs
+
+<PageTitle>RVIDEO Job</PageTitle>
+@if (!AuthState.IsInitialized || _loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+}
+else if (_view is null)
+{
+    <MudAlert Severity="Severity.Error">Không tìm thấy RVIDEO job.</MudAlert>
+}
+else
+{
+    <RenderVideoJobs Embedded="true" JobId="@JobId" ProjectId="@_view.Project.Id" />
+}
+
+@code {
+    [Parameter] public Guid JobId { get; set; }
+    private TodoX.Web.Services.VideoRender.RVideoJobView? _view;
+    private bool _loading = true;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _loading = true;
+        _view = AuthState.CurrentUser is { IsCustomer: true } user
+            ? await RVideoJobs.GetByJobIdAsync(JobId, user)
+            : null;
+        _loading = false;
+    }
+}

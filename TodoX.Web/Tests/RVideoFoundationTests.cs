@@ -274,6 +274,27 @@ public sealed class RVideoFoundationTests
     }
 
     [Fact]
+    public void RVideoCreatedResultUsesCoreJobUuidRoute()
+    {
+        var jobId = Guid.NewGuid();
+        var result = new RVideoJobCreatedResult(jobId, 42, "draft", $"/jobs/rvideo/{jobId}");
+
+        Assert.Equal(jobId, result.JobId);
+        Assert.Equal($"/jobs/rvideo/{jobId}", result.Route);
+        Assert.DoesNotContain("projectId=", result.Route, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void NewRVideoSettingsDefaultToManualInfoWithoutBillingFields()
+    {
+        var settings = new RVideoJobSettingsRequest();
+
+        Assert.Equal(RVideoExecutionModes.Manual, settings.ExecutionMode);
+        Assert.Equal(RVideoVoiceModes.None, settings.VoiceMode);
+        Assert.Equal(1.0m, settings.DefaultTtsRate);
+    }
+
+    [Fact]
     public void TimelapseAndRDanceRoutesRemainUnchanged()
     {
         Assert.StartsWith("/jobs/timelapse/new?", CustomerServiceRouting.Resolve(TodoXServiceEngineTypes.Timelapse, Guid.NewGuid(), "CONSTRUCTION_VIDEO").Route);
