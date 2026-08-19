@@ -6,7 +6,7 @@ Branch: `integration/rdance-on-construction-video-core`
 ## Git
 
 - Starting SHA: `58f6e6b114e766652240b8b32b1cae7c9c9820c4`
-- Implementation commit: recorded after the hotfix implementation commit.
+- Implementation commit: `6252545` (`fix(rvideo): persist provider polling across workers`)
 - Report commit/final SHA: recorded after the report commit.
 - No force push and no destructive Git operation was used.
 
