@@ -5,8 +5,26 @@ Date: 2026-08-19
 ## Git
 
 - Starting SHA: `0dd48eb76383f781210b6dea24c13e91fdf26822`
-- Final SHA: recorded by `git rev-parse HEAD` after the commit that includes this report. It is intentionally not embedded here because changing this file changes the commit SHA.
-- Commit: `feat(rvideo): standardize customer flow on core job uuid`
+- RVIDEO implementation SHA: `8ab53a66082742a67ac900169006fc07a5a403bc`
+- Implementation commit: `feat(rvideo): standardize customer flow on core job uuid`
+- The implementation commit was pushed to `origin/integration/rdance-on-construction-video-core`.
+
+## Changed Files
+
+- `TodoX.Web/Components/Pages/MyJobs.razor`
+- `TodoX.Web/Components/Pages/RVideoJobCreate.razor`
+- `TodoX.Web/Components/Pages/RVideoJobDetail.razor`
+- `TodoX.Web/Components/Pages/RenderVideoJobs.razor`
+- `TodoX.Web/Models/VideoRenderModels.cs`
+- `TodoX.Web/Program.cs`
+- `TodoX.Web/Services/VideoRender/RVideoEndpoints.cs`
+- `TodoX.Web/Services/VideoRender/RVideoJobService.cs`
+- `TodoX.Web/Services/VideoRender/RVideoLifecycleWorker.cs`
+- `TodoX.Web/Services/VideoRender/VideoRenderRepository.cs`
+- `TodoX.Web/Tests/RVideoFoundationTests.cs`
+- `database/migrations/20260819_rvideo_core_job_link.sql`
+- `docs/support/rvideo-job-diagnostic.sql`
+- `docs/reports/20260819_rvideo-core-job-uuid-report.md`
 
 ## Architecture
 
