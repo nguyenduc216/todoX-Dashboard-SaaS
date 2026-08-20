@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Text.Json;
 using TodoX.Web.Services.VideoRender;
 using Xunit;
 
@@ -53,5 +54,33 @@ public sealed class RVideoVideoHotfixTests
         Assert.Equal(0, method!.Invoke(null, new object[] { "scene-base", active }));
         Assert.Equal(1, method.Invoke(null, new object[] { "scene-base", failed }));
         Assert.Equal(2, method.Invoke(null, new object[] { "scene-base", fallback }));
+    }
+
+    [Fact]
+    public void BuildUsageMetadataCarriesAttemptLogicalRequestId()
+    {
+        var method = typeof(SceneVideoWorkerHandler).GetMethod("BuildUsageMetadata", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var input = new SceneVideoRenderWorkItemInput
+        {
+            ParentJobId = Guid.Parse("11111111-1111-1111-1111-111111111111"),
+            ProjectId = 42,
+            SceneId = 7,
+            SceneIndex = 3,
+            CustomerId = Guid.Parse("22222222-2222-2222-2222-222222222222"),
+            DurationSeconds = 12,
+            AspectRatio = "9:16",
+            Resolution = "720P",
+            EstimatedUsd = 1.25m,
+            CostSource = "configured_tariff",
+            PricingMode = "fixed",
+            PricingRuleKey = "rule-1"
+        };
+
+        var json = (string)method!.Invoke(null, new object[] { input, "scene-base-fallback-1", "task-123", "{\"ok\":true}", 9.5m })!;
+        using var doc = JsonDocument.Parse(json);
+        Assert.Equal("scene-base-fallback-1", doc.RootElement.GetProperty("logicalRequestId").GetString());
+        Assert.Equal("task-123", doc.RootElement.GetProperty("providerTaskId").GetString());
     }
 }

@@ -293,7 +293,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                 }
                 catch (Ai79TaskSubmitException ex) when (IsTransientSubmit(ex))
                 {
-                    await MarkPendingReconciliationAsync(input, version.Id, tariffSnapshot, ex.ErrorCode ?? "submit_transient", ex.Message, CancellationToken.None, null);
+                    await MarkPendingReconciliationAsync(input, version.Id, attemptLogicalRequestId, tariffSnapshot, ex.ErrorCode ?? "submit_transient", ex.Message, CancellationToken.None, null);
                     await DeferPollAsync(job, attemptLogicalRequestId, TimeSpan.FromSeconds(Math.Max(1, _options.PollIntervalSeconds)),
                         "SCENE_VIDEO_POLL_SCHEDULED", "79AI submit transient; retry will reuse the same task flow.", CancellationToken.None);
                     return;
@@ -307,7 +307,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
 
             if (string.IsNullOrWhiteSpace(taskId))
             {
-                await MarkPendingReconciliationAsync(input, version.Id, tariffSnapshot, "missing_task_id", "Missing provider_task_id for scene video reconciliation.", ct);
+                await MarkPendingReconciliationAsync(input, version.Id, attemptLogicalRequestId, tariffSnapshot, "missing_task_id", "Missing provider_task_id for scene video reconciliation.", ct);
                 throw new RenderJobPendingReconciliationException("Missing provider_task_id for scene video reconciliation.");
             }
 
@@ -316,7 +316,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                 var status = await _rvideo79Ai.PollAsync(await _rvideo79Ai.ResolveRuntimeAsync(ct), taskId!, ct);
                 if (string.Equals(status.NormalizedStatus, Ai79TaskStatusNormalizer.Running, StringComparison.OrdinalIgnoreCase))
                 {
-                    await MarkPendingReconciliationAsync(input, version.Id, tariffSnapshot, "provider_pending", "79AI video task remains pending.", ct, taskId);
+                    await MarkPendingReconciliationAsync(input, version.Id, attemptLogicalRequestId, tariffSnapshot, "provider_pending", "79AI video task remains pending.", ct, taskId);
                     await DeferPollAsync(job, taskId!, TimeSpan.FromSeconds(Math.Max(1, _options.PollIntervalSeconds)),
                         "SCENE_VIDEO_POLL_SCHEDULED", "Video task remains pending; the same provider task will be polled later.", ct);
                     return;
@@ -358,7 +358,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                     ProviderUsageJson = status.SanitizedResponseJson,
                     TariffSnapshotJson = tariffSnapshot
                 }, ct);
-                await LogUsageAsync(input, job, reservation.ChargedPoints, status.SanitizedResponseJson, true, null, taskId, ct);
+                await LogUsageAsync(input, job, attemptLogicalRequestId, reservation.ChargedPoints, status.SanitizedResponseJson, true, null, taskId, ct);
 
                 await _versions.CompleteSceneVideoVersionAsync(version.Id, new SceneVideoVersionCompleteRequest(
                     saved.PublicUrl ?? saved.FileUrl,
@@ -385,7 +385,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
             }
             catch (Ai79TaskPollException ex)
             {
-                await MarkPendingReconciliationAsync(input, version.Id, tariffSnapshot, "SCENE_VIDEO_POLL_TRANSIENT", ex.Message, CancellationToken.None, taskId);
+                await MarkPendingReconciliationAsync(input, version.Id, attemptLogicalRequestId, tariffSnapshot, "SCENE_VIDEO_POLL_TRANSIENT", ex.Message, CancellationToken.None, taskId);
                 await DeferPollAsync(job, taskId!, TimeSpan.FromSeconds(Math.Max(1, _options.PollIntervalSeconds)),
                     "SCENE_VIDEO_POLL_TRANSIENT", "Temporary 79AI poll failure; the same task ID will be retried.", CancellationToken.None);
                 return;
@@ -545,7 +545,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                 taskId = await _versions.GetSceneVideoProviderTaskIdAsync(version.Id, ct);
                 if (string.IsNullOrWhiteSpace(taskId))
                 {
-                    await MarkPendingReconciliationAsync(input, version.Id, tariffSnapshot, "missing_task_id", "Missing provider_task_id for scene video reconciliation.", ct);
+                    await MarkPendingReconciliationAsync(input, version.Id, input.LogicalRequestId, tariffSnapshot, "missing_task_id", "Missing provider_task_id for scene video reconciliation.", ct);
                     throw new RenderJobPendingReconciliationException("Missing provider_task_id for scene video reconciliation.");
                 }
             }
@@ -559,7 +559,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                     throw new YEScaleTaskException($"YEScale returned unsupported status: {terminal.Status}", errorCode: "unknown_status", taskId: taskId);
                 }
 
-                await MarkPendingReconciliationAsync(input, version.Id, tariffSnapshot, "provider_pending",
+                await MarkPendingReconciliationAsync(input, version.Id, input.LogicalRequestId, tariffSnapshot, "provider_pending",
                     $"YEScale video task remains {terminal.Status}.", ct, taskId);
                 await DeferPollAsync(job, taskId, TimeSpan.FromSeconds(Math.Max(1, _options.PollIntervalSeconds)),
                     "SCENE_VIDEO_POLL_SCHEDULED", "Video task remains pending; the same provider task will be polled later.", ct);
@@ -578,7 +578,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                     TariffSnapshotJson = tariffSnapshot,
                     ErrorMessage = failure
                 }, ct);
-                await LogUsageAsync(input, job, reservation.ChargedPoints, JsonSerializer.Serialize(terminal, JsonOptions), false, failure, taskId, ct);
+                await LogUsageAsync(input, job, input.LogicalRequestId, reservation.ChargedPoints, JsonSerializer.Serialize(terminal, JsonOptions), false, failure, taskId, ct);
                 await FailAsync(project.Id, scene, version.Id, "provider_failure", failure, ct);
                 throw new RenderJobTerminalFailureException(failure);
             }
@@ -607,7 +607,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                 ProviderUsageJson = JsonSerializer.Serialize(terminal, JsonOptions),
                 TariffSnapshotJson = tariffSnapshot
             }, ct);
-            await LogUsageAsync(input, job, reservation.ChargedPoints, JsonSerializer.Serialize(terminal, JsonOptions), true, null, taskId, ct);
+            await LogUsageAsync(input, job, input.LogicalRequestId, reservation.ChargedPoints, JsonSerializer.Serialize(terminal, JsonOptions), true, null, taskId, ct);
 
             await _versions.CompleteSceneVideoVersionAsync(version.Id, new SceneVideoVersionCompleteRequest(
                 saved.PublicUrl ?? saved.FileUrl,
@@ -637,7 +637,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         }
         catch (YEScaleTaskException ex) when (ex.IsTransient && !string.IsNullOrWhiteSpace(taskId))
         {
-            await MarkPendingReconciliationAsync(input, version.Id, tariffSnapshot, ex.ErrorCode ?? ex.GetType().Name, ex.Message, CancellationToken.None, taskId);
+            await MarkPendingReconciliationAsync(input, version.Id, input.LogicalRequestId, tariffSnapshot, ex.ErrorCode ?? ex.GetType().Name, ex.Message, CancellationToken.None, taskId);
             await DeferPollAsync(job, taskId, TimeSpan.FromSeconds(Math.Max(1, _options.PollIntervalSeconds)),
                 "SCENE_VIDEO_POLL_TRANSIENT", "Temporary YEScale poll failure; the same task ID will be retried.", CancellationToken.None);
         }
@@ -769,6 +769,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
     private async Task MarkPendingReconciliationAsync(
         SceneVideoRenderWorkItemInput input,
         Guid versionId,
+        string logicalRequestId,
         string? tariffSnapshot,
         string? errorCode,
         string errorMessage,
@@ -777,7 +778,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
     {
         await _billing.MarkPendingReconciliationAsync(new AiImageBillingPendingReconciliationRequest
         {
-            LogicalRequestId = input.LogicalRequestId,
+            LogicalRequestId = logicalRequestId,
             ActualModel = input.ModelName,
             ProviderTaskId = providerTaskId,
             TariffSnapshotJson = tariffSnapshot,
@@ -792,6 +793,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
     private async Task LogUsageAsync(
         SceneVideoRenderWorkItemInput input,
         RenderJobDto job,
+        string logicalRequestId,
         decimal chargedPoints,
         string? providerUsageJson,
         bool success,
@@ -808,7 +810,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
             CapabilityCode = input.CapabilityCode,
             FeatureCode = "render_job_scene_video",
             ModelName = input.ModelName,
-            RequestId = input.LogicalRequestId,
+            RequestId = logicalRequestId,
             JobId = job.Id.ToString("N"),
             Quantity = 1,
             UnitType = "request",
@@ -817,13 +819,14 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
             ProviderRawCost = input.EstimatedUsd,
             Status = success ? "success" : "failed",
             ErrorMessage = errorMessage,
-            MetadataJson = BuildUsageMetadata(input, providerTaskId, providerUsageJson, chargedPoints),
+            MetadataJson = BuildUsageMetadata(input, logicalRequestId, providerTaskId, providerUsageJson, chargedPoints),
             CreatedBy = input.CreatedBy
         }, ct);
     }
 
     private static string BuildUsageMetadata(
         SceneVideoRenderWorkItemInput input,
+        string logicalRequestId,
         string? providerTaskId,
         string? providerUsageJson,
         decimal chargedPoints)
@@ -838,6 +841,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                 sceneId = input.SceneId,
                 input.SceneIndex,
                 input.ParentJobId,
+                logicalRequestId,
                 providerTaskId,
                 input.DurationSeconds,
                 input.AspectRatio,
@@ -859,6 +863,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                 sceneId = input.SceneId,
                 input.SceneIndex,
                 input.ParentJobId,
+                logicalRequestId,
                 providerTaskId,
                 input.DurationSeconds,
                 input.AspectRatio,
