@@ -7,15 +7,17 @@
             {
                 <MudAlert Severity="Severity.Warning" Dense="true">Scene đang render. Thay đổi prompt chỉ áp dụng cho lần render tiếp theo và không sửa snapshot version cũ.</MudAlert>
             }
-            @if (!string.IsNullOrWhiteSpace(_scenePurpose))
-            {
-                <MudTextField T="string" Label="Mục đích scene" @bind-Value="_scenePurpose" Variant="Variant.Outlined" Lines="2" />
-            }
-            <MudTextField T="string" Label="Prompt hình ảnh" @bind-Value="_imagePrompt" Variant="Variant.Outlined" Lines="5" Required="true" />
-            <MudTextField T="string" Label="Prompt chuyển động/video" @bind-Value="_motionPrompt" Variant="Variant.Outlined" Lines="5" Required="true" />
-            <MudTextField T="string" Label="Lời thoại/voice" @bind-Value="_voice" Variant="Variant.Outlined" Lines="4" />
-            <MudTextField T="string" Label="Hướng dẫn giọng đọc/voice_instruction" @bind-Value="_voiceInstruction" Variant="Variant.Outlined" Lines="4" />
-            <MudNumericField T="decimal?" Label="Tốc độ nói" @bind-Value="_ttsRate" Min="0.1m" Max="4m" Step="0.05m" Variant="Variant.Outlined" />
+            <MudExpansionPanels Elevation="0" Dense="true">
+                <MudExpansionPanel Text="Prompt ảnh">
+                    <MudTextField T="string" @bind-Value="_imagePrompt" Variant="Variant.Outlined" Lines="5" Required="true" />
+                </MudExpansionPanel>
+                <MudExpansionPanel Text="Prompt video">
+                    <MudTextField T="string" @bind-Value="_motionPrompt" Variant="Variant.Outlined" Lines="5" Required="true" />
+                </MudExpansionPanel>
+                <MudExpansionPanel Text="Voice / dialogue">
+                    <MudTextField T="string" @bind-Value="_voice" Variant="Variant.Outlined" Lines="4" />
+                </MudExpansionPanel>
+            </MudExpansionPanels>
         </MudStack>
     </DialogContent>
     <DialogActions>
@@ -30,12 +32,9 @@
     [Parameter] public ScenePromptMetadata Metadata { get; set; } = new();
     [Parameter] public bool IsRendering { get; set; }
 
-    private string? _scenePurpose;
     private string? _imagePrompt;
     private string? _motionPrompt;
     private string? _voice;
-    private string? _voiceInstruction;
-    private decimal? _ttsRate;
 
     private bool CanSubmit
         => !string.IsNullOrWhiteSpace(_imagePrompt)
@@ -43,24 +42,20 @@
 
     protected override void OnInitialized()
     {
-        _scenePurpose = Metadata.ScenePurpose;
         _imagePrompt = Metadata.ImagePrompt;
         _motionPrompt = Metadata.MotionPrompt;
         _voice = Metadata.Voice;
-        _voiceInstruction = Metadata.VoiceInstruction;
-        _ttsRate = Metadata.TtsRate;
     }
 
     private void Submit()
     {
         var result = new ScenePromptMetadata
         {
-            ScenePurpose = TrimOrNull(_scenePurpose),
             ImagePrompt = TrimOrNull(_imagePrompt),
             MotionPrompt = TrimOrNull(_motionPrompt),
             Voice = TrimOrNull(_voice),
-            VoiceInstruction = TrimOrNull(_voiceInstruction),
-            TtsRate = _ttsRate
+            RawSceneJson = Metadata.RawSceneJson,
+            EffectiveImagePrompt = Metadata.EffectiveImagePrompt
         };
         foreach (var item in Metadata.Extra)
         {

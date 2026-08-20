@@ -181,22 +181,6 @@ else
                                     {
                                         <MudAlert Severity="Severity.Warning" Dense="true">@warning</MudAlert>
                                     }
-                                    <MudGrid>
-                                        <MudItem xs="12" md="4"><MudNumericField T="int" Label="Tổng số giây" @bind-Value="_totalSeconds" Min="1" Variant="Variant.Outlined" /></MudItem>
-                                        <MudItem xs="12" md="4"><MudNumericField T="int" Label="Giây mỗi scene" @bind-Value="_sceneSeconds" Min="1" Variant="Variant.Outlined" /></MudItem>
-                                        <MudItem xs="12" md="4"><MudCheckBox @bind-Value="_thinkScenes" Label="Suy nghĩ kịch bản" /></MudItem>
-                                    </MudGrid>
-                                    <MudPaper Class="pa-3" Outlined="true" rounded="true">
-                                        <MudText Typo="Typo.subtitle1">Chế độ xử lý</MudText>
-                                        <MudRadioGroup T="string" @bind-Value="_executionMode">
-                                            <MudRadio T="string" Value="@RVideoExecutionModes.Manual" Color="Color.Warning">Duyệt từng bước</MudRadio>
-                                            <MudRadio T="string" Value="@RVideoExecutionModes.Auto" Color="Color.Warning">Tự động thực hiện</MudRadio>
-                                        </MudRadioGroup>
-                                        @if (_executionMode == RVideoExecutionModes.Auto)
-                                        {
-                                            <MudAlert Severity="Severity.Info" Dense="true">Ở chế độ tự động, server sẽ tiếp tục ảnh → video → hoàn thiện mà không cần xác nhận giữa các giai đoạn.</MudAlert>
-                                        }
-                                    </MudPaper>
                                     <MudPaper Class="pa-3" Outlined="true" rounded="true">
                                         <MudText Typo="Typo.subtitle1">Giọng nói</MudText>
                                         <MudRadioGroup T="string" @bind-Value="_voiceMode">
@@ -217,7 +201,6 @@ else
                                                 <audio controls src="@voicePreview.PreviewFileUrl" style="width:100%"></audio>
                                             }
                                         }
-                                        <MudNumericField T="decimal" Label="Tốc độ nói mặc định" @bind-Value="_defaultTtsRate" Min="0.1m" Max="4m" Step="0.05m" Variant="Variant.Outlined" />
                                     </MudPaper>
                                     <MudPaper Class="pa-3" Outlined="true" rounded="true">
                                         <MudText Typo="Typo.subtitle1">Nhạc nền</MudText>
@@ -237,9 +220,53 @@ else
                                             {
                                                 <audio controls src="@musicPreview.FileUrl" style="width:100%"></audio>
                                             }
-                                            <MudNumericField T="decimal" Label="Âm lượng" @bind-Value="_musicVolume" Min="0m" Max="1m" Step="0.05m" Variant="Variant.Outlined" />
                                         }
                                     </MudPaper>
+                                    <MudExpansionPanels Elevation="0" Dense="true">
+                                        <MudExpansionPanel Text="Cài đặt nâng cao">
+                                            <MudGrid Class="pt-2">
+                                                <MudItem xs="12" sm="4"><MudNumericField T="int" Label="Tổng số giây" @bind-Value="_totalSeconds" Min="1" Variant="Variant.Outlined" /></MudItem>
+                                                <MudItem xs="12" sm="4"><MudNumericField T="int" Label="Giây mỗi scene" @bind-Value="_sceneSeconds" Min="1" Variant="Variant.Outlined" /></MudItem>
+                                                <MudItem xs="12" sm="4"><MudNumericField T="decimal" Label="Tốc độ nói mặc định" @bind-Value="_defaultTtsRate" Min="0.1m" Max="4m" Step="0.05m" Variant="Variant.Outlined" /></MudItem>
+                                                <MudItem xs="12" sm="6"><MudNumericField T="decimal" Label="Âm lượng nhạc" @bind-Value="_musicVolume" Min="0m" Max="1m" Step="0.05m" Variant="Variant.Outlined" /></MudItem>
+                                                <MudItem xs="12" sm="6"><MudCheckBox @bind-Value="_thinkScenes" Label="Suy nghĩ kịch bản" /></MudItem>
+                                            </MudGrid>
+                                            <MudDivider Class="my-3" />
+                                            <MudText Typo="Typo.subtitle2">Chế độ xử lý</MudText>
+                                            <MudRadioGroup T="string" @bind-Value="_executionMode">
+                                                <MudRadio T="string" Value="@RVideoExecutionModes.Manual" Color="Color.Warning">Duyệt từng bước</MudRadio>
+                                                <MudRadio T="string" Value="@RVideoExecutionModes.Auto" Color="Color.Warning">Tự động thực hiện</MudRadio>
+                                            </MudRadioGroup>
+                                            @if (_executionMode == RVideoExecutionModes.Auto)
+                                            {
+                                                <MudAlert Severity="Severity.Info" Dense="true">Server sẽ tiếp tục ảnh → video → hoàn thiện mà không cần xác nhận giữa các giai đoạn.</MudAlert>
+                                            }
+                                            <MudDivider Class="my-3" />
+                                            <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
+                                                <MudText Typo="Typo.subtitle2">Log kỹ thuật phân tách scene</MudText>
+                                                <MudStack Row="true" Spacing="1">
+                                                    <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.DeleteSweep" OnClick="ClearDebugLogAsync" aria-label="Xóa log kỹ thuật" />
+                                                    <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.ContentCopy" OnClick="CopyDebugLogAsync" aria-label="Sao chép log kỹ thuật" />
+                                                    <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Download" OnClick="DownloadDebugLogAsync" aria-label="Tải log kỹ thuật" />
+                                                </MudStack>
+                                            </MudStack>
+                                            <div id="render-job-debug-log" style="max-height:260px;overflow:auto;display:flex;flex-direction:column-reverse;gap:8px;">
+                                                @if (_debugEntries.Count == 0)
+                                                {
+                                                    <MudText Typo="Typo.body2" Color="Color.Secondary">Chưa có log.</MudText>
+                                                }
+                                                else
+                                                {
+                                                    @foreach (var entry in _debugEntries.OrderByDescending(x => x.StepNumber).ThenByDescending(x => x.Timestamp))
+                                                    {
+                                                        <MudPaper Class="pa-2" Outlined="true">
+                                                            <MudText Typo="Typo.caption">@entry.Status · @entry.StepCode · @entry.Message</MudText>
+                                                        </MudPaper>
+                                                    }
+                                                }
+                                            </div>
+                                        </MudExpansionPanel>
+                                    </MudExpansionPanels>
                                     <MudStack Row="true" Spacing="2" Class="flex-wrap gap-2">
                                         <MudButton Color="Color.Warning" Variant="Variant.Filled" OnClick="CreateProjectAsync" Disabled="@(_busy || _projectId is null)">Tạo / phân tách scene</MudButton>
                                         <MudButton Color="Color.Primary" Variant="Variant.Outlined" OnClick="ReloadAsync" Disabled="@(_projectId is null || _busy)">Refresh</MudButton>
@@ -248,43 +275,6 @@ else
                             </MudPaper>
                         </MudItem>
                         <MudItem xs="12">
-                            <MudPaper Class="todox-card pa-4 mt-3" rounded="true">
-                                <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
-                                    <MudText Typo="Typo.h6">Nhật ký phân tách scene</MudText>
-                                    <MudStack Row="true" Spacing="1" Class="flex-wrap gap-2">
-                                        <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="ClearDebugLogAsync">Xóa log</MudButton>
-                                        <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="CopyDebugLogAsync">Sao chép log</MudButton>
-                                        <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="DownloadDebugLogAsync">Tải log .txt</MudButton>
-                                    </MudStack>
-                                </MudStack>
-                                <MudDivider Class="my-2" />
-                                <div id="render-job-debug-log" style="max-height:260px;overflow:auto;display:flex;flex-direction:column-reverse;gap:8px;">
-                                    @if (_debugEntries.Count == 0)
-                                    {
-                                        <MudText Typo="Typo.body2" Color="Color.Secondary">Chưa có log.</MudText>
-                                    }
-                                    else
-                                    {
-                                        @foreach (var entry in _debugEntries.OrderByDescending(x => x.StepNumber).ThenByDescending(x => x.Timestamp))
-                                        {
-                                            <MudPaper Class="pa-3" Outlined="true">
-                                                <MudStack Spacing="1">
-                                                    <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center" Class="flex-wrap gap-2">
-                                                        <MudText Typo="Typo.subtitle2">Bước @entry.StepNumber - @entry.StepName</MudText>
-                                                        <MudChip T="string" Color="@LogColor(entry.Status)">@entry.Status</MudChip>
-                                                    </MudStack>
-                                                    <MudText Typo="Typo.caption">@entry.Timestamp.ToLocalTime().ToString("dd/MM/yyyy HH:mm:ss.fff") • @entry.StepCode • @entry.DurationMs ms</MudText>
-                                                    <MudText Typo="Typo.body2">@entry.Message</MudText>
-                                                    @if (!string.IsNullOrWhiteSpace(entry.Details))
-                                                    {
-                                                        <pre style="white-space:pre-wrap;margin:0">@entry.Details</pre>
-                                                    }
-                                                </MudStack>
-                                            </MudPaper>
-                                        }
-                                    }
-                                </div>
-                            </MudPaper>
                         </MudItem>
                     </MudGrid>
                 </MudPaper>
@@ -352,46 +342,67 @@ else
                                         </MudStack>
                                     </MudStack>
 
-                                    <div class="scene-workflow">
-                                        <div class="scene-workflow-cell scene-image-column">
-                                            <MudText Typo="Typo.subtitle2">Khung ảnh</MudText>
-                                            @RenderSceneImageFrame(scene, sceneState, draft)
-                                        </div>
-                                        <div class="scene-workflow-cell scene-details-column">
-                                            <MudText Typo="Typo.subtitle2">Khung video</MudText>
-                                            @RenderSceneVideoFrame(scene, draft)
-                                            <MudStack Row="true" Spacing="1" Class="flex-wrap gap-1">
-                                                @RenderSceneStatusBadge(scene, "video")
-                                                <MudTooltip Text="@SceneVideoDisabledReason(scene, draft)">
-                                                    <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Movie" Color="Color.Primary"
-                                                                   Disabled="@(!CanCreateSceneVideo(scene, draft))"
-                                                                   OnClick="@(() => RenderSceneVideoAsync(scene))"
-                                                                   aria-label="Tạo video scene" />
-                                                </MudTooltip>
-                                                <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.History" Color="Color.Default"
-                                                               OnClick="@(() => ToggleVideoHistoryAsync(scene))"
-                                                               aria-label="Lịch sử video scene" />
+                                    <MudGrid Class="scene-surface-grid">
+                                        <MudItem xs="12" md="5">
+                                            <MudStack Spacing="1">
+                                                <MudText Typo="Typo.subtitle2">IMAGE PREVIEW</MudText>
+                                                @RenderSceneImageFrame(scene, sceneState, draft)
+                                                <MudStack Row="true" Spacing="1" Class="flex-wrap gap-1">
+                                                    <MudChip T="string" Size="Size.Small" Color="Color.Info">@ProjectAspectRatio</MudChip>
+                                                    <MudChip T="string" Size="Size.Small" Color="Color.Default">@ProjectResolution</MudChip>
+                                                </MudStack>
+                                                <MudStack Row="true" Spacing="1" Class="flex-wrap gap-1">
+                                                    <MudTooltip Text="Xem prompt ảnh"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Image" OnClick="@(() => OpenScenePrompt(scene, ScenePromptKind.Image))" aria-label="Xem prompt ảnh" /></MudTooltip>
+                                                    <MudTooltip Text="Xem lời thoại"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.RecordVoiceOver" OnClick="@(() => OpenScenePrompt(scene, ScenePromptKind.Voice))" aria-label="Xem lời thoại" /></MudTooltip>
+                                                    <MudTooltip Text="Lịch sử ảnh"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.History" OnClick="@(() => ToggleImageHistoryAsync(scene))" aria-label="Lịch sử ảnh" /></MudTooltip>
+                                                </MudStack>
                                             </MudStack>
-                                            <div class="scene-prompt-panel">
-                                                <MudTextField T="string" Label="Prompt ảnh" Value="@draft.ImagePrompt" ValueChanged="@((string? value) => UpdateDraft(scene.Id, d => d.ImagePrompt = value))" Variant="Variant.Outlined" Lines="3" Immediate="true" />
-                                                <MudTextField T="string" Label="Prompt video" Value="@draft.MotionPrompt" ValueChanged="@((string? value) => UpdateDraft(scene.Id, d => d.MotionPrompt = value))" Variant="Variant.Outlined" Lines="3" Immediate="true" />
+                                        </MudItem>
+                                        <MudItem xs="12" md="7">
+                                            <MudStack Spacing="1">
+                                                <MudText Typo="Typo.subtitle2">SCENE INFO</MudText>
+                                                <MudStack Row="true" Spacing="1" Class="flex-wrap gap-1 align-center">
+                                                    @RenderSceneStatusBadge(scene, "image")
+                                                    @RenderSceneStatusBadge(scene, "video")
+                                                    @if (draft.IsDirty)
+                                                    {
+                                                        <MudChip T="string" Size="Size.Small" Color="Color.Warning">Chưa lưu</MudChip>
+                                                    }
+                                                </MudStack>
+                                                <MudText Typo="Typo.body2">Scene @scene.SceneIndex: @scene.Title</MudText>
+                                                <MudText Typo="Typo.caption">@scene.DurationSeconds giây</MudText>
+                                                <MudText Typo="Typo.caption">@ShortText(draft.Voice)</MudText>
+                                                <MudStack Row="true" Spacing="1" Class="flex-wrap gap-1">
+                                                    <MudTooltip Text="Tạo video scene">
+                                                        <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Movie" Color="Color.Primary"
+                                                                       Disabled="@(!CanCreateSceneVideo(scene, draft))"
+                                                                       OnClick="@(() => RenderSceneVideoAsync(scene))"
+                                                                       aria-label="Tạo video scene" />
+                                                    </MudTooltip>
+                                                    <MudTooltip Text="Lịch sử video">
+                                                        <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.History" Color="Color.Default"
+                                                                       OnClick="@(() => ToggleVideoHistoryAsync(scene))"
+                                                                       aria-label="Lịch sử video scene" />
+                                                    </MudTooltip>
+                                                    <MudTooltip Text="Chỉnh prompt scene">
+                                                        <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Edit" Color="Color.Default"
+                                                                       OnClick="@(() => EditScenePromptsAsync(scene))"
+                                                                       aria-label="Chỉnh prompt scene" />
+                                                    </MudTooltip>
+                                                </MudStack>
+                                                @RenderSceneVideoFrame(scene, draft)
                                                 @if (_sceneRerenderErrors.TryGetValue(scene.Id, out var sceneErr) && !string.IsNullOrWhiteSpace(sceneErr))
                                                 {
                                                     <MudText Typo="Typo.caption" Color="Color.Error">@sceneErr</MudText>
                                                 }
-                                            </div>
-                                            <div class="scene-voice-row">
-                                                <MudTextField T="string" Label="Purpose" Value="@draft.Purpose" ValueChanged="@((string? value) => UpdateDraft(scene.Id, d => d.Purpose = value))" Variant="Variant.Outlined" Lines="1" Immediate="true" />
-                                                <MudTextField T="string" Label="Voice" Value="@draft.Voice" ValueChanged="@((string? value) => UpdateDraft(scene.Id, d => d.Voice = value))" Variant="Variant.Outlined" Lines="1" Immediate="true" />
-                                                <MudTextField T="string" Label="Voice instruction" Value="@draft.VoiceInstruction" ValueChanged="@((string? value) => UpdateDraft(scene.Id, d => d.VoiceInstruction = value))" Variant="Variant.Outlined" Lines="1" Immediate="true" />
-                                                <MudNumericField T="decimal?" Label="Tốc độ nói" Value="@draft.TtsRate" ValueChanged="@((decimal? value) => UpdateDraft(scene.Id, d => d.TtsRate = value))" Min="0.1m" Max="4m" Step="0.05m" Variant="Variant.Outlined" />
-                                            </div>
-                                            @if (_videoHistorySceneId == scene.Id)
-                                            {
-                                                @RenderVideoHistoryPanel(scene)
-                                            }
-                                        </div>
-                                    </div>
+                                            </MudStack>
+                                        </MudItem>
+                                    </MudGrid>
+
+                                    @if (_videoHistorySceneId == scene.Id)
+                                    {
+                                        @RenderVideoHistoryPanel(scene)
+                                    }
 
                                     @if (_imageHistorySceneId == scene.Id)
                                     {
@@ -412,88 +423,109 @@ else
                     {
                         <MudAlert Severity="Severity.Info">Chưa có project.</MudAlert>
                     }
-                    else
-                    {
+            else
+            {
                     <MudPaper Class="todox-card pa-4" rounded="true">
-                        <MudStack Spacing="2">
-                            <MudText Typo="Typo.h6">@(_project.Title ?? "Video project")</MudText>
-                            <MudText>Trạng thái: @_project.Status</MudText>
-                            <MudText>Final video: @_project.FinalVideoUrl</MudText>
-                            <MudStack Row="true" Spacing="2" Class="flex-wrap gap-2">
-                                <MudTooltip Text="Ghép các scene video đang được chọn thành final video"><MudButton Color="Color.Warning" Variant="Variant.Filled" OnClick="EnqueueMergeAsync" Disabled="@(!CanMerge)">Tạo video kết quả</MudButton></MudTooltip>
-                                <MudButton Color="Color.Primary" Variant="Variant.Outlined" OnClick="ReloadAsync">Refresh</MudButton>
-                                <MudButton Color="Color.Info" Variant="Variant.Outlined" OnClick="ToggleFinalHistoryAsync">Lịch sử video hoàn chỉnh</MudButton>
-                            </MudStack>
-                            @if (!string.IsNullOrWhiteSpace(_project.FinalVideoUrl))
-                            {
-                                <video src="@_project.FinalVideoUrl" controls style="width:100%;border-radius:12px"></video>
-                            }
-                            @if (_showFinalHistory)
-                            {
-                                @RenderFinalHistoryPanel()
-                            }
-                        </MudStack>
-                    </MudPaper>
-
-                    <MudPaper Class="todox-card pa-4 mt-4" rounded="true">
-                        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
-                            <MudText Typo="Typo.h6">Log thao tác</MudText>
-                            <MudStack Row="true" Spacing="1" Class="flex-wrap gap-1">
-                                <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="ReloadAsync">Refresh log</MudButton>
-                            </MudStack>
-                        </MudStack>
-                        <MudDivider Class="my-2" />
-                        <div class="video-render-log-panel">
-                            @foreach (var log in _project.Events.Take(50))
-                            {
-                                <MudPaper Class="pa-3 mb-2" rounded="true" Outlined="true">
-                                    <MudStack Spacing="1">
-                                        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1" Class="flex-wrap gap-1">
-                                            <MudChip T="string" Size="Size.Small" Color="@LogColor(log.Level)">@log.Level</MudChip>
-                                            <MudText Typo="Typo.subtitle2">@log.EventType</MudText>
-                                            <MudText Typo="Typo.caption">@log.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm:ss")</MudText>
-                                        </MudStack>
-                                        <MudText>@log.Message</MudText>
-                                        @if (!string.IsNullOrWhiteSpace(log.DataJson))
-                                        {
-                                            <pre style="white-space:pre-wrap;margin:0">@log.DataJson</pre>
-                                        }
+                        <MudGrid>
+                            <MudItem xs="12" md="8">
+                                <MudStack Spacing="2">
+                                    <MudText Typo="Typo.h5">@(_project.Title ?? "Video project")</MudText>
+                                    @if (!string.IsNullOrWhiteSpace(_project.FinalVideoUrl))
+                                    {
+                                        <video src="@_project.FinalVideoUrl" controls style="width:100%;border-radius:12px;min-height:320px"></video>
+                                    }
+                                    else
+                                    {
+                                        <div class="scene-thumb-placeholder" style="min-height:320px">Chưa có final video</div>
+                                    }
+                                </MudStack>
+                            </MudItem>
+                            <MudItem xs="12" md="4">
+                                <MudStack Spacing="1">
+                                    <MudText Typo="Typo.subtitle1">Tóm tắt kết quả</MudText>
+                                    <MudText Typo="Typo.body2">Dịch vụ: @ResolveServiceLabel()</MudText>
+                                    <MudText Typo="Typo.body2">Core Job UUID: @(_jobId?.ToString() ?? "n/a")</MudText>
+                                    <MudText Typo="Typo.body2">Trạng thái: @_project.Status</MudText>
+                                    <MudText Typo="Typo.body2">Scene: @_project.Scenes.Count</MudText>
+                                    <MudText Typo="Typo.body2">Duration: @_project.TotalSeconds giây</MudText>
+                                    <MudText Typo="Typo.body2">Aspect ratio: @ProjectAspectRatio</MudText>
+                                    <MudText Typo="Typo.body2">Resolution: @ProjectResolution</MudText>
+                                    <MudText Typo="Typo.body2">Voice: @(_voiceMode == RVideoVoiceModes.None ? "Không dùng" : _voiceMode)</MudText>
+                                    <MudText Typo="Typo.body2">Music: @(_musicMode == RVideoMusicModes.None ? "Không dùng" : _musicMode)</MudText>
+                                    <MudStack Row="true" Spacing="1" Class="flex-wrap gap-1 pt-2">
+                                        <MudButton Size="Size.Small" Color="Color.Primary" Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.Download" Disabled="@string.IsNullOrWhiteSpace(_project.FinalVideoUrl)" OnClick="@(() => OpenUrl(_project.FinalVideoUrl!))">Tải video</MudButton>
+                                        <MudButton Size="Size.Small" Color="Color.Info" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.ViewCarousel" OnClick="@(() => _tabIndex = 1)">Xem lại scene</MudButton>
+                                        <MudButton Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add" OnClick="NewProjectAsync">Tạo project mới</MudButton>
+                                        <MudButton Size="Size.Small" Color="Color.Default" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.ContentCopy" OnClick="@(() => CopyJobIdAsync())">Sao chép Job ID</MudButton>
                                     </MudStack>
-                                </MudPaper>
-                            }
-                        </div>
+                                </MudStack>
+                            </MudItem>
+                        </MudGrid>
                     </MudPaper>
 
-                    <MudPaper Class="todox-card pa-4 mt-4" rounded="true">
-                        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
-                            <MudText Typo="Typo.h6">Lịch sử tác vụ xử lý</MudText>
-                            <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="ReloadJobsAsync">Refresh jobs</MudButton>
-                        </MudStack>
-                        <MudDivider Class="my-2" />
-                        @if (_jobs.Count == 0)
-                        {
-                            <MudAlert Severity="Severity.Info">Chưa có job nào cho project này.</MudAlert>
-                        }
-                        else
-                        {
-                            <MudTable Items="_jobs" Dense="true" Hover="true">
-                                <HeaderContent>
-                                    <MudTh>Job</MudTh>
-                                    <MudTh>Type</MudTh>
-                                    <MudTh>Status</MudTh>
-                                    <MudTh>Provider / Model</MudTh>
-                                    <MudTh>Thời gian</MudTh>
-                                </HeaderContent>
-                                <RowTemplate>
-                                    <MudTd DataLabel="Job">@context.Id</MudTd>
-                                    <MudTd DataLabel="Type">@context.JobType</MudTd>
-                                    <MudTd DataLabel="Status"><MudChip T="string" Color="@JobColor(context.Status)">@context.Status</MudChip></MudTd>
-                                    <MudTd DataLabel="Provider / Model">@context.ProviderCode / @context.ModelCode</MudTd>
-                                    <MudTd DataLabel="Thời gian">@context.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</MudTd>
-                                </RowTemplate>
-                            </MudTable>
-                        }
-                    </MudPaper>
+                    <MudGrid Class="mt-4">
+                        <MudItem xs="12" md="3">
+                            <MudPaper Class="pa-3" Outlined="true" rounded="true">
+                                <MudText Typo="Typo.subtitle2">Final video</MudText>
+                                <MudText Typo="Typo.caption">@(_project.FinalVideoUrl ?? "Chưa có")</MudText>
+                            </MudPaper>
+                        </MudItem>
+                        <MudItem xs="12" md="3">
+                            <MudPaper Class="pa-3" Outlined="true" rounded="true">
+                                <MudText Typo="Typo.subtitle2">Scene videos</MudText>
+                                <MudText Typo="Typo.caption">@_project.Scenes.Count scene</MudText>
+                            </MudPaper>
+                        </MudItem>
+                        <MudItem xs="12" md="3">
+                            <MudPaper Class="pa-3" Outlined="true" rounded="true">
+                                <MudText Typo="Typo.subtitle2">Prompt JSON</MudText>
+                                <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="OpenRawPromptAsync">Xem JSON</MudButton>
+                            </MudPaper>
+                        </MudItem>
+                        <MudItem xs="12" md="3">
+                            <MudPaper Class="pa-3" Outlined="true" rounded="true">
+                                <MudText Typo="Typo.subtitle2">Reference character</MudText>
+                                <MudText Typo="Typo.caption">@ResolveCharacterName(_project.CharacterId)</MudText>
+                            </MudPaper>
+                        </MudItem>
+                    </MudGrid>
+
+                    <MudExpansionPanels Class="mt-4" Elevation="0">
+                        <MudExpansionPanel Text="Chi tiết kỹ thuật">
+                            <MudStack Spacing="2">
+                                <MudStack Row="true" Spacing="1" Class="flex-wrap gap-1">
+                                    <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="ReloadAsync">Refresh</MudButton>
+                                    <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="ToggleFinalHistoryAsync">Lịch sử video hoàn chỉnh</MudButton>
+                                    <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="ReloadJobsAsync">Refresh jobs</MudButton>
+                                </MudStack>
+                                @if (_showFinalHistory)
+                                {
+                                    @RenderFinalHistoryPanel()
+                                }
+                                <MudPaper Class="pa-3" Outlined="true">
+                                    <MudText Typo="Typo.subtitle2">Project events</MudText>
+                                    @foreach (var log in _project.Events.Take(20))
+                                    {
+                                        <MudText Typo="Typo.caption">@log.EventType · @log.Message</MudText>
+                                    }
+                                </MudPaper>
+                                <MudPaper Class="pa-3" Outlined="true">
+                                    <MudText Typo="Typo.subtitle2">Render jobs</MudText>
+                                    @if (_jobs.Count == 0)
+                                    {
+                                        <MudText Typo="Typo.caption">Chưa có job nào cho project này.</MudText>
+                                    }
+                                    else
+                                    {
+                                        @foreach (var job in _jobs)
+                                        {
+                                            <MudText Typo="Typo.caption">@job.JobType · @job.Status · @job.ProviderCode / @job.ModelCode</MudText>
+                                        }
+                                    }
+                                </MudPaper>
+                            </MudStack>
+                        </MudExpansionPanel>
+                    </MudExpansionPanels>
                     }
                 </div>
             </MudTabPanel>
@@ -1262,17 +1294,22 @@ else
 
     private static ScenePromptMetadata BuildMetadata(SceneEditorState draft)
     {
+        var parsed = ScenePromptMetadata.Parse(draft.RawSceneJson);
         var metadata = new ScenePromptMetadata
         {
-            ScenePurpose = TrimOrNull(draft.Purpose),
-            ImagePrompt = TrimOrNull(draft.ImagePrompt),
-            EffectiveImagePrompt = TrimOrNull(draft.EffectiveImagePrompt),
-            MotionPrompt = TrimOrNull(draft.MotionPrompt),
-            Voice = TrimOrNull(draft.Voice),
-            VoiceInstruction = TrimOrNull(draft.VoiceInstruction),
-            TtsRate = draft.TtsRate,
-            RawSceneJson = draft.RawSceneJson
+            ScenePurpose = TrimOrNull(draft.Purpose) ?? parsed.ScenePurpose,
+            ImagePrompt = TrimOrNull(draft.ImagePrompt) ?? parsed.ImagePrompt,
+            EffectiveImagePrompt = TrimOrNull(draft.EffectiveImagePrompt) ?? parsed.EffectiveImagePrompt,
+            MotionPrompt = TrimOrNull(draft.MotionPrompt) ?? parsed.MotionPrompt,
+            Voice = TrimOrNull(draft.Voice) ?? parsed.Voice,
+            VoiceInstruction = TrimOrNull(draft.VoiceInstruction) ?? parsed.VoiceInstruction,
+            TtsRate = draft.TtsRate ?? parsed.TtsRate,
+            RawSceneJson = draft.RawSceneJson ?? parsed.RawSceneJson
         };
+        foreach (var item in parsed.Extra)
+        {
+            metadata.Extra[item.Key] = item.Value;
+        }
         foreach (var item in draft.Extra)
         {
             metadata.Extra[item.Key] = item.Value;
@@ -2640,6 +2677,11 @@ else
         => string.IsNullOrWhiteSpace(text)
             ? ValueTask.CompletedTask
             : JS.InvokeVoidAsync("navigator.clipboard.writeText", text);
+
+    private ValueTask CopyJobIdAsync()
+        => _jobId is Guid jobId
+            ? JS.InvokeVoidAsync("navigator.clipboard.writeText", jobId.ToString())
+            : ValueTask.CompletedTask;
 
     private static Color VersionStatusColor(string status) => status switch
     {

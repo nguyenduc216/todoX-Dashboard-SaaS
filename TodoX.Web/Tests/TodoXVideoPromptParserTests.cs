@@ -225,4 +225,58 @@ public sealed class TodoXVideoPromptParserTests
         Assert.Contains("knowledge_beat", metadata.RawSceneJson, StringComparison.Ordinal);
         Assert.Equal(0.85m, metadata.TtsRate);
     }
+
+    [Fact]
+    public void PreservesRawMetadataWhenEditingVoiceAndSavingScene()
+    {
+        var result = new TodoXVideoPromptParser().Parse("""
+        {
+          "scenes": [
+            {
+              "scene": 1,
+              "duration_seconds": 8,
+              "image_prompt": "A real scene",
+              "image_prompt_fallback": "Fallback image",
+              "motion_prompt": "Slow camera move",
+              "voice": "Original voice",
+              "voice_instruction": "Soft tone",
+              "tts_rate": 0.85,
+              "knowledge_beat": "Keep this field",
+              "motion_beats": ["beat-a"],
+              "crop_factor": 1.2,
+              "custom_unknown_field": "custom"
+            }
+          ]
+        }
+        """);
+
+        var scene = result.Model.Scenes[0];
+        var draft = new ScenePromptMetadata
+        {
+            ScenePurpose = scene.ScenePurpose,
+            ImagePrompt = scene.ImagePrompt,
+            MotionPrompt = scene.MotionPrompt,
+            Voice = "Updated voice",
+            VoiceInstruction = scene.VoiceInstruction,
+            TtsRate = scene.TtsRate,
+            RawSceneJson = scene.RawJson,
+            EffectiveImagePrompt = scene.EffectiveImagePrompt
+        };
+        foreach (var item in ScenePromptMetadata.Parse(scene.RawJson).Extra)
+        {
+            draft.Extra[item.Key] = item.Value;
+        }
+
+        var serialized = draft.Serialize();
+        var parsed = ScenePromptMetadata.Parse(serialized);
+
+        Assert.Equal("Updated voice", parsed.Voice);
+        Assert.Equal("A real scene", parsed.ImagePrompt);
+        Assert.Equal("A real scene", parsed.EffectiveImagePrompt);
+        Assert.Equal(scene.RawJson, parsed.RawSceneJson);
+        Assert.Equal("Keep this field", parsed.Extra["knowledge_beat"]);
+        Assert.Equal("[\"beat-a\"]", parsed.Extra["motion_beats"]);
+        Assert.Equal("1.2", parsed.Extra["crop_factor"]);
+        Assert.Equal("custom", parsed.Extra["custom_unknown_field"]);
+    }
 }

@@ -19,7 +19,7 @@ Sources:
 | Workflow | Observed contract | Dashboard alignment | Status |
 |---|---|---|---|
 | WF01 Collect input | UUID public job, prompt file, character image, voice/music options, Omni Native mode | `RVideoJobCreate`/settings and prompt import expose the same input surface; uploaded JSON is now loaded into `_prompt` before parse | Aligned |
-| WF02 Orchestrator | Normalize BOM, load by `job_uuid`, parse `scenes[]`, upsert scene rows | Parser accepts UTF-8/BOM input, preserves raw prompt and raw scene JSON, and maps current metadata fallbacks | Aligned |
+| WF02 Orchestrator | Normalize BOM, load by `job_uuid`, parse `scenes[]`, upsert scene rows | Parser accepts UTF-8/BOM input, preserves raw prompt and raw scene JSON, and round-trips unknown scene metadata through scene editing | Aligned |
 | WF03 Image worker | Claim, submit once, poll same provider task, fallback only on terminal failure, persist media | Existing Dashboard scene version lifecycle and provider task persistence are used; worker-side polling remains server-owned | Aligned with server runtime |
 | WF04 Video worker | Upload scene image, create video once, poll same task, no new submit during pending | Dashboard preview now shows image and video together while enqueue remains server-owned; provider runtime retains same task semantics | Aligned with server runtime |
 | WF05 Finalizer | Wait for successful clips, gate on AUDIO_READY, merge, complete job | Final video versions and result screen are present. Full Vbee/audio merge parity is server/workflow-owned and remains a Phase B follow-up | Partial |
@@ -32,7 +32,7 @@ Sources:
 - `_doc`, `meta`, `qc`, `motion_beats`, `image_prompt_fallback`, and TTS rate fields are tolerated.
 - Metadata fallbacks include `meta.total_duration_seconds`, `product_name`/`video_title`, `kieu_kich_ban`/`video_objective`, `style`, and `cta`.
 - `motion_prompt` falls back to `video_prompt`; voice falls back to `voice_text`, then `tts_text`.
-- Placeholder image prompts produce a warning and do not become a JSON syntax error.
+- Placeholder image prompts without a usable fallback produce `SCENE_IMAGE_SOURCE_UNRESOLVED` and schema invalidation, while placeholder-with-fallback remains valid.
 - A user-selected 9:16 and 720p value remains valid when the JSON omits aspect ratio or resolution.
 
 ## Database Safety
@@ -45,20 +45,20 @@ Sources:
 
 ## Validation Evidence
 
-The parser regression suite covers the supplied `_doc/meta/scenes/qc` shape, unknown fields, scene count, total duration, prompt aliases, voice aliases, TTS rate, BOM input, fallback prompts, and placeholder warnings.
+The parser regression suite covers the supplied `_doc/meta/scenes/qc` shape, unknown fields, scene count, total duration, prompt aliases, voice aliases, TTS rate, BOM input, fallback prompts, placeholder invalidation, and raw metadata preservation through scene editing.
 
 Validation completed on August 20, 2026:
 
-- `dotnet test Tests\TodoX.Web.Phase1B.Tests.csproj --no-restore --logger "console;verbosity=minimal"`: passed, 65/65.
+- `dotnet test Tests\TodoX.Web.Phase1B.Tests.csproj --no-restore --logger "console;verbosity=minimal"`: passed, 67/67.
 - `dotnet build TodoX.Web.csproj --no-restore /p:UseSharedCompilation=false`: passed, 0 errors.
 - `dotnet format TodoX.Web.csproj whitespace --verify-no-changes --no-restore --include Components/Pages/RenderVideoJobs.razor Services/VideoRender/ScenePromptMetadata.cs Services/VideoRender/TodoXVideoPromptParser.cs Tests/TodoXVideoPromptParserTests.cs`: passed.
 - `git diff --check`: passed.
 - `dotnet publish TodoX.Web.csproj --no-restore -c Release -o ..\artifacts\publish\todox-dashboard /p:UseSharedCompilation=false`: passed.
 - Publish output: `D:\todoX\Dashboard-web\TodoXPortal\todoX-Dashboard-SaaS\artifacts\publish\todox-dashboard`.
 
-The initial parallel build attempt hit a transient compiler DLL lock because build, test, and format were started together; the sequential build above passed. Publish still reports pre-existing Razor nullable warnings and three RVIDEO page nullable warnings, but no errors.
+Publish still reports pre-existing Razor nullable warnings and three RVIDEO page nullable warnings, but no errors.
 
-No production SQL was executed. No commit or push was performed.
+No production SQL was executed.
 
 ## Remaining Phase B Work
 
