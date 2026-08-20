@@ -77,6 +77,16 @@ BEGIN
         RAISE EXCEPTION 'RVIDEO_RUNTIME_VERIFY_FAILED scene_video_versions missing columns: %', array_to_string(missing, ', ');
     END IF;
 
+    IF NOT EXISTS (
+        SELECT 1
+          FROM pg_indexes
+         WHERE schemaname = 'video_render'
+           AND tablename = 'scene_video_versions'
+           AND indexname = 'ix_scene_video_versions_provider_capability_id'
+    ) THEN
+        RAISE EXCEPTION 'RVIDEO_RUNTIME_VERIFY_FAILED scene_video_versions provider_capability_id index is missing.';
+    END IF;
+
     SELECT array_agg(column_name)
       INTO missing
       FROM (VALUES

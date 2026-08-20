@@ -58,6 +58,8 @@ public sealed class TodoXVideoPromptParserTests
         Assert.Equal(24, result.Summary.SceneDurationTotal);
         Assert.Equal(24, result.Summary.DeclaredDurationSeconds);
         Assert.Equal("TodoX Demo", result.Summary.VideoTitle);
+        Assert.Equal("Camera pushes in", result.Model.Scenes[0].MotionPrompt);
+        Assert.Contains("\"qc\"", result.RawText);
     }
 
     [Fact]
@@ -81,6 +83,38 @@ public sealed class TodoXVideoPromptParserTests
         Assert.True(result.IsTodoXSchemaValid);
         Assert.Equal("move camera", result.Model.Scenes[0].MotionPrompt);
         Assert.Equal("narration", result.Model.Scenes[0].Voice);
+    }
+
+    [Fact]
+    public void UsesImageFallbackAndTtsAliases()
+    {
+        var result = new TodoXVideoPromptParser().Parse("""
+        {
+          "aspect_ratio": "9:16",
+          "resolution": "720p",
+          "scenes": [
+            {
+              "scene": 1,
+              "duration_seconds": 8,
+              "image_prompt": "PLACEHOLDER",
+              "image_prompt_fallback": "A real product image",
+              "video_prompt": "slow pan",
+              "tts_text": "Fallback narration",
+              "ttsRate": 1.1
+            }
+          ]
+        }
+        """);
+
+        var scene = result.Model.Scenes[0];
+        Assert.True(result.IsJsonValid);
+        Assert.True(result.IsTodoXSchemaValid);
+        Assert.Equal("A real product image", scene.EffectiveImagePrompt);
+        Assert.Equal("slow pan", scene.MotionPrompt);
+        Assert.Equal("Fallback narration", scene.Voice);
+        Assert.Equal(1.1m, scene.TtsRate);
+        Assert.Equal("9:16", result.Model.AspectRatio);
+        Assert.Equal("720p", result.Model.Resolution);
     }
 
     [Fact]
@@ -114,5 +148,46 @@ public sealed class TodoXVideoPromptParserTests
         Assert.False(result.IsTodoXSchemaValid);
         Assert.Null(result.ErrorMessage);
         Assert.Contains(result.Warnings, warning => warning.Contains("Metadata thiếu", StringComparison.Ordinal));
+    }
+    [Fact]
+    public void PreservesBomAndUnknownSceneFields()
+    {
+        var source = "\uFEFF" + """
+        {
+          "scenes": [
+            {
+              "scene_index": 2,
+              "duration_seconds": 6,
+              "image_prompt": "A real scene",
+              "motion_prompt": "Slow camera move",
+              "tts_rate": "0.85",
+              "knowledge_beat": "Keep this field"
+            }
+          ]
+        }
+        """;
+
+        var result = new TodoXVideoPromptParser().Parse(source);
+        var scene = result.Model.Scenes[0];
+
+        Assert.True(result.IsJsonValid);
+        Assert.True(result.IsTodoXSchemaValid);
+        Assert.Equal(2, scene.Scene);
+        Assert.Equal(0.85m, scene.TtsRate);
+        Assert.Contains("knowledge_beat", scene.RawJson, StringComparison.Ordinal);
+
+        var metadata = ScenePromptMetadata.FromScene(new TodoX.Web.Models.VideoProjectSceneDto
+        {
+            ScenePrompt = new ScenePromptMetadata
+            {
+                ImagePrompt = scene.ImagePrompt,
+                MotionPrompt = scene.MotionPrompt,
+                TtsRate = scene.TtsRate,
+                RawSceneJson = scene.RawJson
+            }.Serialize()
+        });
+
+        Assert.Contains("knowledge_beat", metadata.RawSceneJson, StringComparison.Ordinal);
+        Assert.Equal(0.85m, metadata.TtsRate);
     }
 }

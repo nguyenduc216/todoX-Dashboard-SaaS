@@ -20,15 +20,19 @@ public sealed class TodoXVideoPromptModel
 public sealed class TodoXVideoScenePromptModel
 {
     public int? Scene { get; set; }
+    public string? RawJson { get; set; }
     public string? ScenePurpose { get; set; }
     public int? DurationSeconds { get; set; }
     public string? ImagePrompt { get; set; }
+    public string? ImagePromptFallback { get; set; }
+    public string? EffectiveImagePrompt { get; set; }
     public string? MotionPrompt { get; set; }
     public string? VideoPrompt { get; set; }
     public string? Voice { get; set; }
     public string? VoiceText { get; set; }
     public string? TtsText { get; set; }
     public string? VoiceInstruction { get; set; }
+    public decimal? TtsRate { get; set; }
     public List<string> Warnings { get; set; } = new();
 }
 
@@ -150,6 +154,9 @@ public sealed class TodoXVideoPromptParser : ITodoXVideoPromptParser
                 scene.DurationSeconds = ParseDuration(scene.DurationSeconds?.ToString());
                 scene.MotionPrompt = FirstNonBlank(scene.MotionPrompt, scene.VideoPrompt);
                 scene.Voice = FirstNonBlank(scene.Voice, scene.VoiceText, scene.TtsText);
+                scene.EffectiveImagePrompt = IsPlaceholder(scene.ImagePrompt)
+                    ? FirstUsablePrompt(scene.ImagePromptFallback)
+                    : FirstUsablePrompt(scene.ImagePrompt);
                 AddPlaceholderWarning(scene);
             }
         }
@@ -188,16 +195,19 @@ public sealed class TodoXVideoPromptParser : ITodoXVideoPromptParser
             {
                 model.Scenes.Add(new TodoXVideoScenePromptModel
                 {
-                    Scene = TryGetInt(item, "scene"),
+                    RawJson = item.GetRawText(),
+                    Scene = TryGetInt(item, "scene", "scene_index", "sceneIndex"),
                     ScenePurpose = ReadString(item, "scene_purpose", "purpose"),
                     DurationSeconds = ParseDuration(ReadRaw(item, "duration_seconds", "duration")),
                     ImagePrompt = ReadString(item, "image_prompt"),
+                    ImagePromptFallback = ReadString(item, "image_prompt_fallback", "imagePromptFallback"),
                     MotionPrompt = ReadString(item, "motion_prompt", "video_prompt"),
                     VideoPrompt = ReadString(item, "video_prompt"),
                     Voice = ReadString(item, "voice"),
                     VoiceText = ReadString(item, "voice_text"),
                     TtsText = ReadString(item, "tts_text"),
-                    VoiceInstruction = ReadString(item, "voice_instruction")
+                    VoiceInstruction = ReadString(item, "voice_instruction"),
+                    TtsRate = ReadDecimal(item, "tts_rate", "ttsRate", "speech_rate")
                 });
             }
         }
@@ -313,9 +323,10 @@ public sealed class TodoXVideoPromptParser : ITodoXVideoPromptParser
                 valid = false;
             }
 
-            if (string.IsNullOrWhiteSpace(scene.ImagePrompt))
+            if (string.IsNullOrWhiteSpace(scene.ImagePrompt)
+                && string.IsNullOrWhiteSpace(scene.ImagePromptFallback))
             {
-                warnings.Add($"Scene {scene.Scene ?? index + 1}: thiếu image_prompt.");
+                warnings.Add($"Scene {scene.Scene ?? index + 1}: thiếu image_prompt thực tế hoặc image_prompt_fallback.");
                 valid = false;
             }
 
@@ -359,16 +370,29 @@ public sealed class TodoXVideoPromptParser : ITodoXVideoPromptParser
             return;
         }
 
-        var text = scene.ImagePrompt.Trim();
-        if (text.Contains("[[", StringComparison.OrdinalIgnoreCase)
-            || text.Contains("PLACEHOLDER", StringComparison.OrdinalIgnoreCase)
-            || text.Contains("TODO", StringComparison.OrdinalIgnoreCase)
-            || text.Contains("THAY BẰNG", StringComparison.OrdinalIgnoreCase)
-            || text.Contains("THAY BANG", StringComparison.OrdinalIgnoreCase))
+        if (IsPlaceholder(scene.ImagePrompt))
         {
             scene.Warnings.Add($"Scene {scene.Scene ?? 0}: image_prompt đang là placeholder, cần thay bằng prompt/ảnh thực tế trước khi sinh ảnh.");
         }
     }
+
+    private static bool IsPlaceholder(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        var text = value.Trim();
+        return text.Contains("[[", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("PLACEHOLDER", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("TODO", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("THAY BẰNG", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("THAY BANG", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string? FirstUsablePrompt(params string?[] values)
+        => values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value) && !IsPlaceholder(value))?.Trim();
 
     private static string? FirstNonBlank(params string?[] values)
         => values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
@@ -395,6 +419,31 @@ public sealed class TodoXVideoPromptParser : ITodoXVideoPromptParser
         }
 
         return int.TryParse(text, out direct) ? direct : null;
+    }
+
+    private static decimal? ReadDecimal(JsonElement element, params string[] names)
+    {
+        foreach (var name in names)
+        {
+            if (!element.TryGetProperty(name, out var child))
+            {
+                continue;
+            }
+
+            if (child.ValueKind == JsonValueKind.Number && child.TryGetDecimal(out var number))
+            {
+                return number;
+            }
+
+            if (child.ValueKind == JsonValueKind.String
+                && decimal.TryParse(child.GetString(), System.Globalization.NumberStyles.Number,
+                    System.Globalization.CultureInfo.InvariantCulture, out number))
+            {
+                return number;
+            }
+        }
+
+        return null;
     }
 
     private static string? NormalizeAspectRatio(string? value)
