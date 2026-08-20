@@ -2,7 +2,7 @@
 
 Date: 2026-08-20
 Branch: `integration/rdance-on-construction-video-core`
-Starting SHA: `317e3e8`
+Starting SHA: `ea35d00`
 
 ## Scope
 - Keep RVIDEO video on 79AI only.
@@ -12,11 +12,13 @@ Starting SHA: `317e3e8`
 
 ## What Changed
 - `Services/VideoRender/SceneVideoWorkerHandler.cs`
-  - RVIDEO fallback attempts now carry the current `attemptLogicalRequestId` into billing reconciliation and usage logging.
-  - Attempt-specific metadata now persists the current logical request id.
+  - RVIDEO fallback attempts carry the current `attemptLogicalRequestId` into billing reconciliation and usage logging.
+  - Attempt-specific metadata persists the current logical request id.
   - RVIDEO still routes through `IRVideo79AiVideoService`.
 - `Tests/RVideoVideoHotfixTests.cs`
-  - Added regression coverage for attempt metadata.
+  - Added regression coverage for attempt metadata and fallback indexing.
+- `database/rvideo/verify_rvideo_runtime.sql`
+  - Read-only verification now checks provider, capability, endpoint contract, credentials, and current catalog policy state.
 - `TodoX.Web.csproj`
   - Excludes `artifacts/**` from item globbing so published output does not poison the next build.
 
@@ -35,9 +37,13 @@ Starting SHA: `317e3e8`
 - `dotnet format TodoX.Web.csproj --verify-no-changes` ❌ preexisting whitespace issues outside this hotfix scope
 
 ## Runtime Verification
-- Added `database/rvideo/verify_rvideo_runtime.sql` as a read-only check for provider/capability presence and enabled state.
+- Added `database/rvideo/verify_rvideo_runtime.sql` as a read-only check for provider/capability presence, endpoint contract, credential mapping, and catalog policy state.
 - No production SQL was applied.
 - No migrations were created.
+
+## Model Policy Status
+- Current catalog evidence supports keeping RVIDEO on the existing Seedance-based policy.
+- The requested VEO/Grok-only policy remains blocked because the repo audit does not prove `grok_video_heavy` supports `mode=normal` for this flow.
 
 ## Current Status
 - Code is ready for commit and push.
