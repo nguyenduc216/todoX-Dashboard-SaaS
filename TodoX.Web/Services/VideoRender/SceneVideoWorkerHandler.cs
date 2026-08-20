@@ -199,7 +199,6 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                     capability = RVideoVideoModelPolicy.CapabilityCode
                 }), ct);
 
-            var billingCost = _billing.BuildConfiguredCost(input.EstimatedPoints, 1);
             var tariffSnapshot = string.IsNullOrWhiteSpace(input.TariffSnapshotJson)
                 ? JsonSerializer.Serialize(new
                 {
@@ -215,34 +214,46 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                 }, JsonOptions)
                 : input.TariffSnapshotJson;
 
-            var reservation = await _billing.ReserveAsync(new AiImageBillingReserveRequest
+            var existingTaskId = await _versions.GetSceneVideoProviderTaskIdAsync(version.Id, ct);
+            string? taskId = string.IsNullOrWhiteSpace(existingTaskId) ? null : existingTaskId.Trim();
+            AiImageBillingReservation reservation;
+            if (string.IsNullOrWhiteSpace(taskId))
             {
-                LogicalRequestId = attemptLogicalRequestId,
-                RenderJobId = job.Id.ToString("N"),
-                CustomerId = input.CustomerId,
-                UserId = input.UserId,
-                ProviderId = input.ProviderId,
-                ProviderCapabilityId = input.ProviderCapabilityId,
-                ProviderCode = RVideoVideoModelPolicy.ProviderCode,
-                CapabilityCode = RVideoVideoModelPolicy.CapabilityCode,
-                FeatureCode = "render_job_scene_video",
-                RequestedModel = policy.Model,
-                Cost = billingCost,
-                TrustedPayerContext = input.TrustedPayerContext,
-                TariffSnapshotJson = tariffSnapshot,
-                Metadata = new
+                var billingCost = _billing.BuildConfiguredCost(input.EstimatedPoints, 1);
+                reservation = await _billing.ReserveAsync(new AiImageBillingReserveRequest
                 {
-                    parentJobId = input.ParentJobId,
-                    projectId = input.ProjectId,
-                    sceneId = input.SceneId,
-                    input.SceneIndex,
-                    input.DurationSeconds,
-                    input.Resolution,
-                    input.AspectRatio,
-                    attemptIndex
-                },
-                CreatedBy = input.CreatedBy
-            }, ct);
+                    LogicalRequestId = attemptLogicalRequestId,
+                    RenderJobId = job.Id.ToString("N"),
+                    CustomerId = input.CustomerId,
+                    UserId = input.UserId,
+                    ProviderId = input.ProviderId,
+                    ProviderCapabilityId = input.ProviderCapabilityId,
+                    ProviderCode = RVideoVideoModelPolicy.ProviderCode,
+                    CapabilityCode = RVideoVideoModelPolicy.CapabilityCode,
+                    FeatureCode = "render_job_scene_video",
+                    RequestedModel = policy.Model,
+                    Cost = billingCost,
+                    TrustedPayerContext = input.TrustedPayerContext,
+                    TariffSnapshotJson = tariffSnapshot,
+                    Metadata = new
+                    {
+                        parentJobId = input.ParentJobId,
+                        projectId = input.ProjectId,
+                        sceneId = input.SceneId,
+                        input.SceneIndex,
+                        input.DurationSeconds,
+                        input.Resolution,
+                        input.AspectRatio,
+                        attemptIndex
+                    },
+                    CreatedBy = input.CreatedBy
+                }, ct);
+            }
+            else
+            {
+                reservation = await _billing.GetReservationAsync(attemptLogicalRequestId, ct)
+                    ?? throw new InvalidOperationException($"RVIDEO billing reservation not found for {attemptLogicalRequestId}.");
+            }
 
             if (!reservation.Ok)
             {
@@ -255,8 +266,6 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                 attemptIndex = Math.Min(attemptIndex, RVideoVideoModelPolicy.Models.Count - 1);
             }
 
-            var existingTaskId = await _versions.GetSceneVideoProviderTaskIdAsync(version.Id, ct);
-            string? taskId = string.IsNullOrWhiteSpace(existingTaskId) ? null : existingTaskId.Trim();
             if (string.IsNullOrWhiteSpace(taskId))
             {
                 await _repo.UpdateSceneAsync(scene.Id, VideoSceneStatuses.VideoRendering,
@@ -317,7 +326,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                 if (string.Equals(status.NormalizedStatus, Ai79TaskStatusNormalizer.Running, StringComparison.OrdinalIgnoreCase))
                 {
                     await MarkPendingReconciliationAsync(input, version.Id, attemptLogicalRequestId, tariffSnapshot, "provider_pending", "79AI video task remains pending.", ct, taskId);
-                    await DeferPollAsync(job, taskId!, TimeSpan.FromSeconds(Math.Max(1, _options.PollIntervalSeconds)),
+                    await DeferProviderPollAsync(job, taskId!, TimeSpan.FromSeconds(Math.Max(1, _options.PollIntervalSeconds)),
                         "SCENE_VIDEO_POLL_SCHEDULED", "Video task remains pending; the same provider task will be polled later.", ct);
                     return;
                 }
@@ -388,7 +397,8 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                     ChargedPoints: reservation.ChargedPoints,
                     RefundedPoints: 0,
                     CostSource: input.CostSource ?? "configured_tariff",
-                    AspectRatio: input.AspectRatio), ct);
+                    AspectRatio: input.AspectRatio,
+                    ResultMediaId: saved.Id), ct);
 
                 await _repo.AddProjectEventAsync(project.Id, "SCENE_VIDEO_READY", "info",
                     $"Scene {input.SceneIndex} rendered successfully.",
@@ -637,7 +647,8 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                 ChargedPoints: reservation.ChargedPoints,
                 RefundedPoints: 0,
                 CostSource: input.CostSource ?? "configured_tariff",
-                AspectRatio: input.AspectRatio), ct);
+                AspectRatio: input.AspectRatio,
+                ResultMediaId: saved.Id), ct);
 
             await _repo.AddProjectEventAsync(project.Id, "SCENE_VIDEO_READY", "info",
                 $"Scene {input.SceneIndex} rendered successfully.",
@@ -774,6 +785,31 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
     {
         await _jobs.ScheduleRetryAsync(job.Id, delay, eventCode, message, ct);
         _logger.LogInformation("RVIDEO_VIDEO_POLL_DEFERRED jobId={JobId} providerTaskId={ProviderTaskId} delaySeconds={DelaySeconds}",
+            job.Id, taskId, Math.Max(1, (int)delay.TotalSeconds));
+        throw new RenderJobDeferredException(message);
+    }
+
+    private async Task DeferProviderPollAsync(
+        RenderJobDto job,
+        string taskId,
+        TimeSpan delay,
+        string reasonCode,
+        string message,
+        CancellationToken ct)
+    {
+        var scheduled = await _jobs.ScheduleProviderPollAsync(job.Id, delay, reasonCode, message, ct);
+        if (!scheduled)
+        {
+            var current = await _jobs.GetAsync(job.Id, ct);
+            if (current?.Status is RenderJobStatuses.Completed or RenderJobStatuses.Failed or RenderJobStatuses.Cancelled)
+            {
+                return;
+            }
+
+            throw new InvalidOperationException($"RVIDEO provider poll could not be re-queued for job {job.Id}.");
+        }
+
+        _logger.LogInformation("RVIDEO_VIDEO_PROVIDER_POLL_DEFERRED jobId={JobId} providerTaskId={ProviderTaskId} delaySeconds={DelaySeconds}",
             job.Id, taskId, Math.Max(1, (int)delay.TotalSeconds));
         throw new RenderJobDeferredException(message);
     }

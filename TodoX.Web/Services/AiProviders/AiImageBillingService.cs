@@ -119,6 +119,7 @@ public interface IAiImageBillingService
 {
     AiImageBillingCost BuildConfiguredCost(decimal unitCostPoints, decimal quantity);
     Task<AiImageBillingReservation> ReserveAsync(AiImageBillingReserveRequest request, CancellationToken ct = default);
+    Task<AiImageBillingReservation?> GetReservationAsync(string logicalRequestId, CancellationToken ct = default);
     Task<AiImageBillingCompletion> CompleteAsync(AiImageBillingCompleteRequest request, CancellationToken ct = default);
     Task<AiImageBillingCompletion> MarkPendingReconciliationAsync(AiImageBillingPendingReconciliationRequest request, CancellationToken ct = default);
     Task<IReadOnlyList<AiImageBillingReconciliationItem>> ClaimReconciliationBatchAsync(string workerKey, int batchSize, TimeSpan lockFor, int maxAttempts, CancellationToken ct = default);
@@ -220,6 +221,34 @@ public sealed class AiImageBillingService : IAiImageBillingService
         tx.Commit();
 
         return new AiImageBillingReservation(true, true, payer.PayerType, "reserved", request.LogicalRequestId, chargePoints, reservedId, null, null);
+    }
+
+    public async Task<AiImageBillingReservation?> GetReservationAsync(string logicalRequestId, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(logicalRequestId))
+        {
+            return null;
+        }
+
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        var existing = await conn.QuerySingleOrDefaultAsync<BillingRecord>(
+            """
+            SELECT id AS Id,
+                   logical_request_id AS LogicalRequestId,
+                   payer_type AS PayerType,
+                   COALESCE(payer_wallet_id, wallet_id) AS PayerWalletId,
+                   wallet_transaction_id AS WalletTransactionId,
+                   customer_charged_points AS CustomerChargedPoints,
+                   system_charged_points AS SystemChargedPoints,
+                   status AS Status,
+                   created_by AS CreatedBy
+              FROM billing.ai_image_billing_records
+             WHERE logical_request_id = @logicalRequestId;
+            """,
+            new { logicalRequestId });
+
+        return existing is null ? null : HandleExistingReservation(existing);
     }
 
     public async Task<AiImageBillingCompletion> CompleteAsync(AiImageBillingCompleteRequest request, CancellationToken ct = default)

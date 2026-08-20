@@ -75,7 +75,8 @@ public sealed record SceneVideoVersionCompleteRequest(
     decimal ChargedPoints = 0,
     decimal RefundedPoints = 0,
     string? CostSource = null,
-    string? AspectRatio = null);
+    string? AspectRatio = null,
+    Guid? ResultMediaId = null);
 
 public sealed record FinalVideoVersionCreateRequest(
     long ProjectId,
@@ -137,6 +138,7 @@ public sealed class SceneVideoVersionDto
     public string? StorageKey { get; set; }
     public string? PublicUrl { get; set; }
     public string? SourceFilePath { get; set; }
+    public Guid? ResultMediaId { get; set; }
     public string? ImagePromptSnapshot { get; set; }
     public string? VideoPromptSnapshot { get; set; }
     public string? ProviderCode { get; set; }
@@ -504,11 +506,24 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
             """,
             new
             {
-                versionId, tenant = _tenant.TenantId, sceneId = version.SceneId,
-                request.ProviderCode, modelName = request.ModelName, request.ProviderCapabilityId,
-                request.ProviderTaskId, request.ResultMediaId, request.ObjectKey, request.ImageUrl,
-                request.MimeType, request.BillingLogicalRequestId, request.EstimatedUsd, request.ActualUsd,
-                request.ChargedPoints, request.RefundedPoints, request.ProviderUsageJson, request.CostSource
+                versionId,
+                tenant = _tenant.TenantId,
+                sceneId = version.SceneId,
+                request.ProviderCode,
+                modelName = request.ModelName,
+                request.ProviderCapabilityId,
+                request.ProviderTaskId,
+                request.ResultMediaId,
+                request.ObjectKey,
+                request.ImageUrl,
+                request.MimeType,
+                request.BillingLogicalRequestId,
+                request.EstimatedUsd,
+                request.ActualUsd,
+                request.ChargedPoints,
+                request.RefundedPoints,
+                request.ProviderUsageJson,
+                request.CostSource
             }, tx);
         tx.Commit();
         return true;
@@ -775,6 +790,7 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
                    requested_model=COALESCE(requested_model, @modelName),
                    actual_model=COALESCE(@modelName, actual_model),
                    provider_task_id=COALESCE(@providerTaskId, provider_task_id),
+                   result_media_id=COALESCE(@resultMediaId, result_media_id),
                    public_url=@videoUrl,
                    source_file_path=@videoPath,
                    poster_url=@posterUrl,
@@ -802,6 +818,7 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
                 modelName = request.ModelName,
                 request.ProviderCapabilityId,
                 request.ProviderTaskId,
+                request.ResultMediaId,
                 request.VideoUrl,
                 request.VideoPath,
                 request.PosterUrl,
@@ -1656,7 +1673,7 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
         SELECT id AS Id, project_id AS ProjectId, scene_id AS SceneId, source_image_version_id AS SourceImageVersionId,
                version_number AS VersionNumber, logical_request_id AS LogicalRequestId, status AS Status,
                is_selected AS IsSelected, storage_key AS StorageKey, public_url AS PublicUrl, source_file_path AS SourceFilePath,
-               image_prompt_snapshot AS ImagePromptSnapshot, video_prompt_snapshot AS VideoPromptSnapshot,
+               result_media_id AS ResultMediaId, image_prompt_snapshot AS ImagePromptSnapshot, video_prompt_snapshot AS VideoPromptSnapshot,
                provider_code AS ProviderCode, actual_model AS ModelName, provider_capability_id AS ProviderCapabilityId,
                provider_task_id AS ProviderTaskId, duration_seconds AS DurationSeconds, aspect_ratio AS AspectRatio,
                billing_logical_request_id AS BillingLogicalRequestId, estimated_usd AS EstimatedUsd, actual_usd AS ActualUsd,

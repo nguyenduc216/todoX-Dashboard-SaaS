@@ -30,6 +30,7 @@ public interface IRenderJobService
     Task<RenderJobDto?> ClaimNextExcludingJobTypesAsync(string workerKey, TimeSpan lockFor, IReadOnlyCollection<string> excludedJobTypes, CancellationToken ct = default);
     Task MarkStatusAsync(Guid jobId, string status, object? output = null, string? errorCode = null, string? errorMessage = null, CancellationToken ct = default);
     Task ScheduleRetryAsync(Guid jobId, TimeSpan delay, string errorCode, string errorMessage, CancellationToken ct = default);
+    Task<bool> ScheduleProviderPollAsync(Guid jobId, TimeSpan delay, string reasonCode, string reasonMessage, CancellationToken ct = default);
 }
 
 public sealed class RenderJobService : IRenderJobService
@@ -522,7 +523,7 @@ public sealed class RenderJobService : IRenderJobService
     public async Task ScheduleRetryAsync(Guid jobId, TimeSpan delay, string errorCode, string errorMessage, CancellationToken ct = default)
     {
         using var conn = await _factory.OpenAsync(ct);
-        await conn.ExecuteAsync(
+        var changed = await conn.ExecuteAsync(
             """
             UPDATE render.render_jobs
                SET status='queued',
@@ -538,8 +539,54 @@ public sealed class RenderJobService : IRenderJobService
             """,
             new { jobId, delaySeconds = Math.Max(1, (int)delay.TotalSeconds), errorCode, errorMessage });
 
-        await AddEventAsync(jobId, "JOB_RETRY_SCHEDULED", "Render job retry scheduled.",
+        if (changed > 0)
+        {
+            await AddEventAsync(jobId, "JOB_RETRY_SCHEDULED", "Render job retry scheduled.",
+                new { retryAfterSeconds = Math.Max(1, (int)delay.TotalSeconds), errorCode, errorMessage }, "warning", ct);
+            return;
+        }
+
+        await AddEventAsync(jobId, "JOB_RETRY_NOT_SCHEDULED",
+            "Render job retry was not scheduled because the retry budget or current status blocked the update.",
             new { retryAfterSeconds = Math.Max(1, (int)delay.TotalSeconds), errorCode, errorMessage }, "warning", ct);
+    }
+
+    public async Task<bool> ScheduleProviderPollAsync(
+        Guid jobId,
+        TimeSpan delay,
+        string reasonCode,
+        string reasonMessage,
+        CancellationToken ct = default)
+    {
+        using var conn = await _factory.OpenAsync(ct);
+        var delaySeconds = Math.Max(1, (int)delay.TotalSeconds);
+        var changed = await conn.ExecuteAsync(
+            """
+            UPDATE render.render_jobs
+               SET status='queued',
+                   retry_after=now() + (@delaySeconds || ' seconds')::interval,
+                   error_code=@reasonCode,
+                   error_message=@reasonMessage,
+                   lock_owner=NULL,
+                   lock_until=NULL,
+                   updated_at=now()
+             WHERE id=@jobId
+               AND status IN ('queued', 'preparing', 'rendering', 'post_processing', 'pending_reconciliation');
+            """,
+            new { jobId, delaySeconds, reasonCode, reasonMessage });
+
+        if (changed <= 0)
+        {
+            await AddEventAsync(jobId, "JOB_PROVIDER_POLL_NOT_SCHEDULED",
+                "Provider poll was not scheduled because the render job is no longer active.",
+                new { retryAfterSeconds = delaySeconds, reasonCode, reasonMessage }, "warning", ct);
+            return false;
+        }
+
+        await AddEventAsync(jobId, "JOB_PROVIDER_POLL_SCHEDULED",
+            "Provider poll scheduled without consuming the application retry budget.",
+            new { retryAfterSeconds = delaySeconds, reasonCode, reasonMessage }, "info", ct);
+        return true;
     }
 
     private const string SelectJobSql =
