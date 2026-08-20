@@ -62,7 +62,7 @@ BEGIN
       FROM (VALUES
             ('project_id'), ('scene_id'), ('source_image_version_id'), ('version_number'),
             ('logical_request_id'), ('render_job_id'), ('provider_code'), ('requested_model'),
-            ('actual_model'), ('provider_task_id'), ('result_media_id'), ('storage_key'),
+            ('actual_model'), ('provider_capability_id'), ('provider_task_id'), ('result_media_id'), ('storage_key'),
             ('public_url'), ('duration_seconds'), ('billing_logical_request_id'), ('status'),
             ('error_code'), ('error_message'), ('submitted_at'), ('completed_at'),
             ('created_at'), ('updated_at')) AS required(column_name)
