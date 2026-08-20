@@ -323,10 +323,9 @@ public sealed class TodoXVideoPromptParser : ITodoXVideoPromptParser
                 valid = false;
             }
 
-            if (string.IsNullOrWhiteSpace(scene.ImagePrompt)
-                && string.IsNullOrWhiteSpace(scene.ImagePromptFallback))
+            if (string.IsNullOrWhiteSpace(scene.EffectiveImagePrompt))
             {
-                warnings.Add($"Scene {scene.Scene ?? index + 1}: thiếu image_prompt thực tế hoặc image_prompt_fallback.");
+                warnings.Add($"SCENE_IMAGE_SOURCE_UNRESOLVED: Scene {scene.Scene ?? index + 1} không có image prompt thực tế hoặc fallback dùng được.");
                 valid = false;
             }
 
@@ -372,7 +371,14 @@ public sealed class TodoXVideoPromptParser : ITodoXVideoPromptParser
 
         if (IsPlaceholder(scene.ImagePrompt))
         {
-            scene.Warnings.Add($"Scene {scene.Scene ?? 0}: image_prompt đang là placeholder, cần thay bằng prompt/ảnh thực tế trước khi sinh ảnh.");
+            if (string.IsNullOrWhiteSpace(scene.EffectiveImagePrompt))
+            {
+                scene.Warnings.Add($"SCENE_IMAGE_SOURCE_UNRESOLVED: Scene {scene.Scene ?? 0} image_prompt là placeholder và không có fallback dùng được.");
+            }
+            else
+            {
+                scene.Warnings.Add($"Scene {scene.Scene ?? 0}: image_prompt là placeholder; đã dùng image_prompt_fallback.");
+            }
         }
     }
 

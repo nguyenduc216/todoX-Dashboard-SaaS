@@ -589,6 +589,9 @@ else
         public string? Voice { get; set; }
         public string? VoiceInstruction { get; set; }
         public decimal? TtsRate { get; set; }
+        public string? RawSceneJson { get; set; }
+        public string? EffectiveImagePrompt { get; set; }
+        public Dictionary<string, string> Extra { get; } = new(StringComparer.OrdinalIgnoreCase);
         public Guid? SelectedImageVersionId { get; set; }
         public Guid? SelectedVideoVersionId { get; set; }
         public string AspectRatio { get; set; } = AspectRatioPortrait;
@@ -1231,7 +1234,7 @@ else
     private SceneEditorState CreateSceneDraft(VideoProjectSceneDto scene)
     {
         var metadata = ScenePromptMetadata.FromScene(scene);
-        return new SceneEditorState
+        var state = new SceneEditorState
         {
             SceneId = scene.Id,
             Purpose = metadata.ScenePurpose,
@@ -1240,8 +1243,42 @@ else
             Voice = metadata.Voice,
             VoiceInstruction = metadata.VoiceInstruction,
             TtsRate = metadata.TtsRate,
+            RawSceneJson = metadata.RawSceneJson,
+            EffectiveImagePrompt = metadata.EffectiveImagePrompt,
             AspectRatio = HasProjectAspectRatio ? _aspectRatio : AspectRatioPortrait
         };
+        return WithExtra(state, metadata.Extra);
+    }
+
+    private static SceneEditorState WithExtra(SceneEditorState state, IReadOnlyDictionary<string, string> extra)
+    {
+        foreach (var item in extra)
+        {
+            state.Extra[item.Key] = item.Value;
+        }
+
+        return state;
+    }
+
+    private static ScenePromptMetadata BuildMetadata(SceneEditorState draft)
+    {
+        var metadata = new ScenePromptMetadata
+        {
+            ScenePurpose = TrimOrNull(draft.Purpose),
+            ImagePrompt = TrimOrNull(draft.ImagePrompt),
+            EffectiveImagePrompt = TrimOrNull(draft.EffectiveImagePrompt),
+            MotionPrompt = TrimOrNull(draft.MotionPrompt),
+            Voice = TrimOrNull(draft.Voice),
+            VoiceInstruction = TrimOrNull(draft.VoiceInstruction),
+            TtsRate = draft.TtsRate,
+            RawSceneJson = draft.RawSceneJson
+        };
+        foreach (var item in draft.Extra)
+        {
+            metadata.Extra[item.Key] = item.Value;
+        }
+
+        return metadata;
     }
 
     private void ReconcileSceneDrafts()
@@ -1270,16 +1307,6 @@ else
         draft.IsDirty = true;
     }
 
-    private static ScenePromptMetadata BuildMetadata(SceneEditorState draft)
-        => new()
-        {
-            ScenePurpose = TrimOrNull(draft.Purpose),
-            ImagePrompt = TrimOrNull(draft.ImagePrompt),
-            MotionPrompt = TrimOrNull(draft.MotionPrompt),
-            Voice = TrimOrNull(draft.Voice),
-            VoiceInstruction = TrimOrNull(draft.VoiceInstruction),
-            TtsRate = draft.TtsRate
-        };
 
     private static string? TrimOrNull(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();

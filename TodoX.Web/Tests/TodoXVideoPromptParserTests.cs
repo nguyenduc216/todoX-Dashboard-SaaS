@@ -1,4 +1,4 @@
-using TodoX.Web.Services.VideoRender;
+﻿using TodoX.Web.Services.VideoRender;
 using Xunit;
 
 namespace TodoX.Web.Tests;
@@ -118,6 +118,41 @@ public sealed class TodoXVideoPromptParserTests
     }
 
     [Fact]
+    public void PreservesEffectiveImagePromptThroughSceneMetadataRoundTrip()
+    {
+        var parser = new TodoXVideoPromptParser();
+        var result = parser.Parse("""
+        {
+          "scenes": [
+            {
+              "scene": 1,
+              "duration_seconds": 8,
+              "image_prompt": "PLACEHOLDER",
+              "image_prompt_fallback": "A real product image",
+              "motion_prompt": "slow pan"
+            }
+          ]
+        }
+        """);
+
+        var scene = result.Model.Scenes[0];
+        var metadata = new ScenePromptMetadata
+        {
+            ScenePurpose = scene.ScenePurpose,
+            ImagePrompt = scene.ImagePrompt,
+            MotionPrompt = scene.MotionPrompt,
+            EffectiveImagePrompt = scene.EffectiveImagePrompt,
+            RawSceneJson = scene.RawJson
+        }.Serialize();
+
+        var parsed = ScenePromptMetadata.Parse(metadata);
+
+        Assert.Equal("A real product image", parsed.EffectiveImagePrompt);
+        Assert.Equal("PLACEHOLDER", parsed.ImagePrompt);
+        Assert.Contains("\"effective_image_prompt\"", metadata, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void PlaceholderProducesWarningInsteadOfInvalidJson()
     {
         var result = new TodoXVideoPromptParser().Parse("""
@@ -134,9 +169,9 @@ public sealed class TodoXVideoPromptParserTests
         """);
 
         Assert.True(result.IsJsonValid);
-        Assert.True(result.IsTodoXSchemaValid);
+        Assert.False(result.IsTodoXSchemaValid);
         Assert.Contains(result.Warnings, warning =>
-            warning.Contains("image_prompt đang là placeholder", StringComparison.Ordinal));
+            warning.Contains("SCENE_IMAGE_SOURCE_UNRESOLVED", StringComparison.Ordinal));
     }
 
     [Fact]
