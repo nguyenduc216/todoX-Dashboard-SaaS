@@ -24,6 +24,7 @@ Starting SHA: `317e3e8`
 - `Program.cs` registers `IRVideo79AiVideoService` and the render handlers.
 - `RVideo79AiVideoService` keeps the RVIDEO capability code at `rvideo_scene_video_generation`.
 - `SceneVideoWorkerHandler` uses `attemptLogicalRequestId` for fallback reconciliation and usage logging.
+- Terminal RVIDEO errors now call billing `CompleteAsync(Success=false)` before advancing to the next fallback model.
 - `SceneVideoWorkerHandler` does not call `IYEScaleTaskClient` in the RVIDEO branch.
 - Fallback attempts stop at the last entry in `RVideoVideoModelPolicy.Models`.
 
@@ -42,4 +43,3 @@ Starting SHA: `317e3e8`
 - Code is ready for commit and push.
 - Live smoke test still pending.
 - Not READY yet until submit -> persisted provider_task_id -> same-task poll -> mp4 save is proven in the live environment.
-

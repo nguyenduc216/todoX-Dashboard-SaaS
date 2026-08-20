@@ -324,6 +324,18 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
 
                 if (!string.Equals(status.NormalizedStatus, Ai79TaskStatusNormalizer.Success, StringComparison.OrdinalIgnoreCase))
                 {
+                    var failure = status.ErrorMessage ?? $"79AI video task failed with status {status.NormalizedStatus}.";
+                    await _billing.CompleteAsync(new AiImageBillingCompleteRequest
+                    {
+                        LogicalRequestId = attemptLogicalRequestId,
+                        Success = false,
+                        ActualModel = policy.Model,
+                        ProviderTaskId = taskId,
+                        ProviderUsageJson = status.SanitizedResponseJson,
+                        TariffSnapshotJson = tariffSnapshot,
+                        ErrorMessage = failure
+                    }, ct);
+                    await LogUsageAsync(input, job, attemptLogicalRequestId, reservation.ChargedPoints, status.SanitizedResponseJson, false, failure, taskId, ct);
                     await _versions.FailSceneVideoVersionAsync(version.Id, status.ErrorCode ?? "provider_failure", status.ErrorMessage ?? $"79AI video task failed with status {status.NormalizedStatus}.", ct);
                     var next = RVideoVideoModelPolicy.GetNext(attemptIndex);
                     if (next is not null)
