@@ -1,4 +1,5 @@
 ﻿@page "/render-job"
+@using System.Text
 @using System.Text.Json
 @using System.Text.Json.Nodes
 @using Microsoft.AspNetCore.Components.Forms
@@ -128,6 +129,10 @@ else
                             <MudPaper Class="pa-4 h-100" Outlined="true" rounded="true">
                                 <MudStack Spacing="2" Class="h-100">
                                     <MudTextField T="string" Label="Prompt video" @bind-Value="_prompt" Variant="Variant.Outlined" Lines="10" Immediate="true" />
+                                    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                                        <InputFile OnChange="ImportPromptJsonAsync" accept=".json,application/json,text/json" />
+                                        <MudText Typo="Typo.caption">Chọn file JSON để nạp trực tiếp vào prompt</MudText>
+                                    </MudStack>
                                     <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="CheckPromptAsync">Kiểm tra cấu trúc</MudButton>
                                     <MudSelect T="string" Label="Tỷ lệ video của project" Value="@_aspectRatio" ValueChanged="OnAspectRatioChangedAsync" Variant="Variant.Outlined" Dense="true" Required="true">
                                         <MudSelectItem T="string" Value="@string.Empty">Chọn tỷ lệ trước khi tạo scene</MudSelectItem>
@@ -141,8 +146,8 @@ else
                                             <MudSelectItem T="string" Value="@resolution">@resolution</MudSelectItem>
                                         }
                                     </MudSelect>
-                                    <MudAlert Severity="@( _promptParseResult.IsJsonValid ? (_promptParseResult.IsTodoXPrompt ? Severity.Success : Severity.Info) : Severity.Warning )" Dense="true">
-                                        @(_promptParseResult.IsJsonValid ? (_promptParseResult.IsTodoXPrompt ? "Prompt TodoX hợp lệ." : "Prompt thường.") : "JSON không hợp lệ hoặc chưa parse được.")
+                                    <MudAlert Severity="@PromptValidationSeverity" Dense="true">
+                                        @PromptValidationMessage
                                     </MudAlert>
                                     @if (!string.IsNullOrWhiteSpace(_promptParseResult.ErrorMessage))
                                     {
@@ -157,13 +162,22 @@ else
                                             <MudItem xs="12" md="6"><MudText><b>CTA:</b> @_promptParseResult.Summary.Cta</MudText></MudItem>
                                             <MudItem xs="12" md="6"><MudText><b>DeclaredDuration:</b> @_promptParseResult.Summary.DeclaredDurationSeconds</MudText></MudItem>
                                             <MudItem xs="12" md="6"><MudText><b>SceneCount:</b> @_promptParseResult.Summary.SceneCount</MudText></MudItem>
+                                            <MudItem xs="12" md="6"><MudText><b>Tổng thời lượng scene:</b> @_promptParseResult.Summary.SceneDurationTotal giây</MudText></MudItem>
                                             <MudItem xs="12" md="6"><MudText><b>Tỷ lệ video:</b> @(ProjectAspectRatio)</MudText></MudItem>
                                             <MudItem xs="12" md="6"><MudText><b>Độ phân giải:</b> @(ProjectResolution)</MudText></MudItem>
                                         </MudGrid>
+                                        @if (!string.IsNullOrWhiteSpace(_promptParseResult.Summary.SceneDurationValidationMessage))
+                                        {
+                                            <MudText Color="Color.Success">@_promptParseResult.Summary.SceneDurationValidationMessage</MudText>
+                                        }
                                         @if (_promptParseResult.Summary.HasDurationMismatch)
                                         {
                                             <MudAlert Severity="Severity.Warning" Dense="true">@_promptParseResult.Summary.DurationMismatchMessage</MudAlert>
                                         }
+                                    }
+                                    @foreach (var warning in _promptParseResult.Warnings.Distinct())
+                                    {
+                                        <MudAlert Severity="Severity.Warning" Dense="true">@warning</MudAlert>
                                     }
                                     <MudGrid>
                                         <MudItem xs="12" md="4"><MudNumericField T="int" Label="Tổng số giây" @bind-Value="_totalSeconds" Min="1" Variant="Variant.Outlined" /></MudItem>
@@ -1643,6 +1657,65 @@ else
         return InvokeAsync(StateHasChanged);
     }
 
+    private Severity PromptValidationSeverity
+        => !_promptParseResult.IsJsonValid
+            ? Severity.Warning
+            : !_promptParseResult.IsTodoXSchemaValid
+                ? Severity.Warning
+                : Severity.Success;
+
+    private string PromptValidationMessage
+        => !_promptParseResult.IsJsonValid
+            ? (_promptParseResult.ErrorMessage ?? "Chưa có JSON để kiểm tra.")
+            : !_promptParseResult.IsTodoXPrompt
+                ? "JSON hợp lệ nhưng chưa nhận diện schema TodoX."
+                : !_promptParseResult.IsTodoXSchemaValid
+                    ? "JSON hợp lệ. Schema TodoX chưa đầy đủ; các cảnh báo bên dưới cần được kiểm tra."
+                    : $"JSON hợp lệ. TodoX schema hợp lệ. Có {_promptParseResult.Summary.SceneCount} scene, tổng thời lượng {_promptParseResult.Summary.SceneDurationTotal} giây.";
+
+    private async Task ImportPromptJsonAsync(InputFileChangeEventArgs args)
+    {
+        var file = args.File;
+        if (file is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await using var stream = file.OpenReadStream(8 * 1024 * 1024);
+            using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+            _prompt = await reader.ReadToEndAsync();
+            _promptParseResult = PromptParser.Parse(_prompt);
+            ApplyVideoSettingsFromPrompt();
+            Snackbar.Add(
+                _promptParseResult.IsJsonValid
+                    ? $"Đã nạp JSON {file.Name}."
+                    : "File đã nạp nhưng JSON syntax không hợp lệ.",
+                _promptParseResult.IsJsonValid ? Severity.Success : Severity.Warning);
+        }
+        catch (DecoderFallbackException)
+        {
+            _prompt = string.Empty;
+            _promptParseResult = new TodoXVideoPromptParseResult
+            {
+                ErrorMessage = "File không phải UTF-8 hợp lệ hoặc không đọc được BOM UTF-8."
+            };
+            Snackbar.Add(_promptParseResult.ErrorMessage, Severity.Warning);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "RVIDEO_PROMPT_JSON_IMPORT_FAILED fileName={FileName}", file.Name);
+            _promptParseResult = new TodoXVideoPromptParseResult
+            {
+                ErrorMessage = $"Không thể đọc file JSON: {ex.Message}"
+            };
+            Snackbar.Add(_promptParseResult.ErrorMessage, Severity.Warning);
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
     private Task OnAspectRatioChangedAsync(string value)
     {
         _aspectRatio = NormalizeAspectRatio(value) ?? string.Empty;
@@ -1667,6 +1740,25 @@ else
         if (!string.IsNullOrWhiteSpace(resolution))
         {
             _resolution = resolution;
+        }
+
+        if (_promptParseResult.Summary.DeclaredDurationSeconds is int declaredDuration && declaredDuration > 0)
+        {
+            _totalSeconds = declaredDuration;
+        }
+        else if (_promptParseResult.Summary.SceneDurationTotal > 0)
+        {
+            _totalSeconds = _promptParseResult.Summary.SceneDurationTotal;
+        }
+
+        var sceneDurations = _promptParseResult.Model.Scenes
+            .Where(scene => scene.DurationSeconds is > 0)
+            .Select(scene => scene.DurationSeconds!.Value)
+            .Distinct()
+            .ToList();
+        if (sceneDurations.Count == 1)
+        {
+            _sceneSeconds = sceneDurations[0];
         }
     }
 
