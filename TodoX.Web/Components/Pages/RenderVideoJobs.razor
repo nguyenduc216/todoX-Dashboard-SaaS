@@ -1144,7 +1144,7 @@ else
                 }
                 ReconcileSceneDrafts();
                 RebuildSceneEventState();
-                _defaultImageToVideoProvider = await AiProviders.GetDefaultProviderAsync(AiProviderCatalog.ImageToVideo);
+                _defaultImageToVideoProvider = await AiProviders.GetDefaultProviderAsync(TodoX.Web.Services.VideoRender.RVideoVideoModelPolicy.CapabilityCode);
                 await ReloadJobsAsync();
             }
         }
@@ -2943,7 +2943,7 @@ else
         }
         if (_defaultImageToVideoProvider is null)
         {
-            Snackbar.Add("Chưa cấu hình provider image-to-video.", Severity.Warning);
+            Snackbar.Add("Chưa cấu hình provider video 79AI.", Severity.Warning);
             return;
         }
 
@@ -2991,8 +2991,8 @@ else
             Input = input,
             Prompt = new { projectId = _project.Id, sceneIds },
             LogCode = BuildLogCode(),
-            ProviderCode = TodoX.Web.Services.VideoRender.SceneVideoRenderHandler.RoutingProviderCode,
-            ModelCode = TodoX.Web.Services.VideoRender.SceneVideoRenderHandler.RoutingModelCode,
+            ProviderCode = TodoX.Web.Services.VideoRender.RVideoVideoModelPolicy.ProviderCode,
+            ModelCode = _defaultImageToVideoProvider.ModelName ?? TodoX.Web.Services.VideoRender.RVideoVideoModelPolicy.GetInitial().Model,
             MaxAttempts = 1,
             PointCostEstimate = 0,
             PointStatus = RenderPointStatuses.Pending
@@ -3011,7 +3011,7 @@ else
                     sceneCount = sceneIds.Length,
                     skippedInvalidPromptCount = invalidPromptScenes.Length,
                     skippedInvalidPromptScenes = invalidPromptScenes,
-                    provider = _defaultImageToVideoProvider.ProviderCode,
+                    provider = TodoX.Web.Services.VideoRender.RVideoVideoModelPolicy.ProviderCode,
                     model = _defaultImageToVideoProvider.ModelName
                 });
             var skippedText = invalidPromptScenes.Length > 0
@@ -3101,8 +3101,8 @@ else
             Input = input,
             Prompt = new { projectId = _project.Id, sceneId = scene.Id },
             LogCode = BuildLogCode(),
-            ProviderCode = TodoX.Web.Services.VideoRender.SceneVideoRenderHandler.RoutingProviderCode,
-            ModelCode = TodoX.Web.Services.VideoRender.SceneVideoRenderHandler.RoutingModelCode,
+            ProviderCode = TodoX.Web.Services.VideoRender.RVideoVideoModelPolicy.ProviderCode,
+            ModelCode = _defaultImageToVideoProvider.ModelName ?? TodoX.Web.Services.VideoRender.RVideoVideoModelPolicy.GetInitial().Model,
             MaxAttempts = 1,
             PointCostEstimate = 0,
             PointStatus = RenderPointStatuses.Pending

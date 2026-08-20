@@ -711,11 +711,13 @@ public sealed class VideoRenderRepository
             SELECT public_url AS PublicUrl,
                    source_file_path AS SourceFilePath,
                    storage_key AS StorageKey,
+                   result_media_id AS ResultMediaId,
                    id AS Id
               FROM video_render.scene_image_versions
              WHERE scene_id=@sceneId
                AND tenant_id=@tenant
                AND is_selected=true
+               AND status='completed'
              LIMIT 1;
             """,
             new { sceneId, tenant = _tenant.TenantId });
@@ -956,5 +958,6 @@ public sealed class VideoRenderRepository
         public string? SourceFilePath { get; init; }
         public string? StorageKey { get; init; }
         public Guid? SourceImageVersionId { get; init; }
+        public Guid? ResultMediaId { get; init; }
     }
 }

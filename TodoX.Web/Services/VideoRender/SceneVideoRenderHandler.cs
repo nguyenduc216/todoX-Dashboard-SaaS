@@ -19,6 +19,13 @@ public sealed class SceneVideoRenderInput
     public string? CapabilityConfigJson { get; set; }
 }
 
+public sealed class SceneVideoRenderSourceSnapshot
+{
+    public Guid? SelectedImageVersionId { get; set; }
+    public string? SourceImageUrl { get; set; }
+    public string? SourceImageObjectKey { get; set; }
+}
+
 public sealed class SceneVideoRenderHandler : IRenderJobHandler
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
@@ -28,6 +35,7 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
     public const string RoutingModelCode = "scene_video_default";
 
     private readonly VideoRenderRepository _repo;
+    private readonly ISceneMediaVersioningService _versions;
     private readonly IAiProviderService _providers;
     private readonly AiProviderRepository _providerRepo;
     private readonly IRenderJobService _jobs;
@@ -39,6 +47,7 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
 
     public SceneVideoRenderHandler(
         VideoRenderRepository repo,
+        ISceneMediaVersioningService versions,
         IAiProviderService providers,
         AiProviderRepository providerRepo,
         IRenderJobService jobs,
@@ -47,6 +56,7 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
         ILogger<SceneVideoRenderHandler> logger)
     {
         _repo = repo;
+        _versions = versions;
         _providers = providers;
         _providerRepo = providerRepo;
         _jobs = jobs;
@@ -67,15 +77,28 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
         var project = await _repo.GetProjectAsync(input.ProjectId, ct)
             ?? throw new InvalidOperationException("Video project not found.");
 
-        var option = await _providers.ResolveProviderForCapabilityAsync(AiProviderCatalog.ImageToVideo, providerCapabilityId: null, fromUser: false, ct);
-        if (!string.Equals(option.ProviderCode, "yescale_task_video", StringComparison.OrdinalIgnoreCase))
+        var rvideoBatch = RVideoVideoModelPolicy.Is79AiProvider(job.ProviderCode);
+        var capabilityCode = rvideoBatch ? RVideoVideoModelPolicy.CapabilityCode : AiProviderCatalog.ImageToVideo;
+        var option = await _providers.ResolveProviderForCapabilityAsync(capabilityCode, providerCapabilityId: null, fromUser: false, ct);
+        if (rvideoBatch)
         {
-            throw new InvalidOperationException("The current image-to-video provider is not supported by the TodoX runtime yet.");
+            if (!RVideoVideoModelPolicy.Is79AiProvider(option.ProviderCode)
+                || !string.Equals(option.CapabilityCode, RVideoVideoModelPolicy.CapabilityCode, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("RVIDEO_VIDEO_PROVIDER_MUST_BE_79AI");
+            }
         }
-        if (!string.Equals(option.CapabilityCode, AiProviderCatalog.ImageToVideo, StringComparison.OrdinalIgnoreCase)
-            || !string.Equals(option.ModelName, "omni-flash", StringComparison.OrdinalIgnoreCase))
+        else
         {
-            throw new InvalidOperationException("The current image-to-video runtime must resolve YEScale omni-flash.");
+            if (!string.Equals(option.ProviderCode, "yescale_task_video", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("The current image-to-video provider is not supported by the TodoX runtime yet.");
+            }
+            if (!string.Equals(option.CapabilityCode, AiProviderCatalog.ImageToVideo, StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(option.ModelName, "omni-flash", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("The current image-to-video runtime must resolve YEScale omni-flash.");
+            }
         }
 
         var detail = await _providerRepo.GetProviderAsync(option.ProviderId, ct)
@@ -147,7 +170,20 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
         RenderJobDto parentJob,
         CancellationToken ct)
     {
-        var selectedImage = await _repo.GetSelectedImageProjectionAsync(scene.Id, ct);
+        var selectedImage = await _versions.GetSelectedImageVersionAsync(scene.Id, ct);
+        if (selectedImage is null || selectedImage.Id == Guid.Empty)
+        {
+            await MarkSceneValidationFailedAsync(project.Id, scene, new VideoPromptValidationResult(
+                false,
+                option.ModelName ?? string.Empty,
+                scene.VideoPrompt?.Trim() ?? string.Empty,
+                VideoPromptValidator.CountUnicodeScalars(scene.VideoPrompt?.Trim() ?? string.Empty),
+                VideoPromptValidator.ResolveMaxPromptCharacters(option.ModelName, capability.ConfigJson),
+                "scene_source_image_required",
+                $"Scene {scene.SceneIndex:00}: cần ảnh nguồn đã chọn trước khi render video."), ct);
+            return false;
+        }
+
         var validation = _promptValidator.Validate(scene.VideoPrompt, option.ModelName, capability.ConfigJson, scene.SceneIndex);
         if (!validation.IsValid)
         {
@@ -155,7 +191,7 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
             return false;
         }
 
-        var sourceImageUrl = selectedImage?.PublicUrl;
+        var sourceImageUrl = selectedImage.PublicUrl;
         if (string.IsNullOrWhiteSpace(sourceImageUrl))
         {
             var imageValidation = new VideoPromptValidationResult(
@@ -197,9 +233,9 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
             CustomerId = input.CustomerId,
             CreatedBy = input.CreatedBy,
             TrustedPayerContext = input.TrustedPayerContext,
-            SelectedSourceImageVersionId = selectedImage?.Id,
+            SelectedSourceImageVersionId = selectedImage.Id,
             SourceImageUrl = sourceImageUrl,
-            SourceImageObjectKey = selectedImage?.StorageKey,
+            SourceImageObjectKey = selectedImage.StorageKey,
             ImagePrompt = scene.ImagePrompt,
             VideoPrompt = validation.TrimmedPrompt,
             Voice = null,
@@ -234,8 +270,12 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
             Prompt = new { projectId = project.Id, sceneId = scene.Id, parentJobId = parentJob.Id },
             References = Array.Empty<object>(),
             LogCode = parentJob.LogCode,
-            ProviderCode = option.ProviderCode,
-            ModelCode = option.ModelName,
+            ProviderCode = string.Equals(option.ProviderCode, "yescale_task_video", StringComparison.OrdinalIgnoreCase)
+                ? option.ProviderCode
+                : RVideoVideoModelPolicy.ProviderCode,
+            ModelCode = string.Equals(option.ProviderCode, "yescale_task_video", StringComparison.OrdinalIgnoreCase)
+                ? option.ModelName
+                : (option.ModelName ?? RVideoVideoModelPolicy.GetInitial().Model),
             MaxAttempts = 3,
             PointCostEstimate = 0,
             PointStatus = RenderPointStatuses.Pending
