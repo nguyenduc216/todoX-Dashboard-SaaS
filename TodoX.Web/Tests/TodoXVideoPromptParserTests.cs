@@ -153,6 +153,45 @@ public sealed class TodoXVideoPromptParserTests
     }
 
     [Fact]
+    public void EditedImagePromptReplacesStaleEffectiveImagePromptThroughRoundTrip()
+    {
+        var edited = new ScenePromptMetadata
+        {
+            ImagePrompt = "new prompt",
+            EffectiveImagePrompt = ScenePromptMetadata.NormalizeEditedEffectiveImagePrompt("new prompt", "old prompt", "old prompt"),
+            MotionPrompt = "slow pan"
+        };
+
+        var reloaded = ScenePromptMetadata.Parse(edited.Serialize());
+
+        Assert.Equal("new prompt", reloaded.ImagePrompt);
+        Assert.Equal("new prompt", reloaded.EffectiveImagePrompt);
+    }
+
+    [Fact]
+    public void PlaceholderImagePromptWithoutFallbackIsBlocked()
+    {
+        var effective = ScenePromptMetadata.NormalizeEffectiveImagePrompt(
+            "[[THAY BẰNG ẢNH THỰC TẾ]]",
+            null);
+
+        Assert.Null(effective);
+        Assert.False(ScenePromptMetadata.IsUsableImagePrompt(effective));
+    }
+
+    [Fact]
+    public void PlaceholderEditDoesNotReuseStaleEffectiveImagePrompt()
+    {
+        var effective = ScenePromptMetadata.NormalizeEditedEffectiveImagePrompt(
+            "[[THAY BẰNG ẢNH THỰC TẾ]]",
+            "old prompt",
+            "old prompt");
+
+        Assert.Null(effective);
+        Assert.False(ScenePromptMetadata.IsUsableImagePrompt(effective));
+    }
+
+    [Fact]
     public void PlaceholderProducesWarningInsteadOfInvalidJson()
     {
         var result = new TodoXVideoPromptParser().Parse("""

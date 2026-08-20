@@ -18,6 +18,10 @@
                     <MudTextField T="string" @bind-Value="_voice" Variant="Variant.Outlined" Lines="4" />
                 </MudExpansionPanel>
             </MudExpansionPanels>
+            @if (!string.IsNullOrWhiteSpace(_validationError))
+            {
+                <MudAlert Severity="Severity.Error" Dense="true">@_validationError</MudAlert>
+            }
         </MudStack>
     </DialogContent>
     <DialogActions>
@@ -35,6 +39,7 @@
     private string? _imagePrompt;
     private string? _motionPrompt;
     private string? _voice;
+    private string? _validationError;
 
     private bool CanSubmit
         => !string.IsNullOrWhiteSpace(_imagePrompt)
@@ -49,13 +54,24 @@
 
     private void Submit()
     {
+        var imagePrompt = TrimOrNull(_imagePrompt);
+        var effectiveImagePrompt = ScenePromptMetadata.NormalizeEditedEffectiveImagePrompt(
+            imagePrompt,
+            Metadata.ImagePrompt,
+            Metadata.EffectiveImagePrompt);
+        if (string.IsNullOrWhiteSpace(effectiveImagePrompt))
+        {
+            _validationError = "SCENE_IMAGE_SOURCE_UNRESOLVED: prompt ảnh là placeholder và không có fallback dùng được.";
+            return;
+        }
+
         var result = new ScenePromptMetadata
         {
-            ImagePrompt = TrimOrNull(_imagePrompt),
+            ImagePrompt = imagePrompt,
             MotionPrompt = TrimOrNull(_motionPrompt),
             Voice = TrimOrNull(_voice),
             RawSceneJson = Metadata.RawSceneJson,
-            EffectiveImagePrompt = Metadata.EffectiveImagePrompt
+            EffectiveImagePrompt = effectiveImagePrompt
         };
         foreach (var item in Metadata.Extra)
         {

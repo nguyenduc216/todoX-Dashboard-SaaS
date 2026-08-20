@@ -33,8 +33,25 @@ public sealed class ScenePromptMetadata
         var metadata = Parse(scene.ScenePrompt);
         metadata.ImagePrompt = FirstNonBlank(scene.ImagePrompt, metadata.ImagePrompt);
         metadata.MotionPrompt = FirstNonBlank(scene.VideoPrompt, metadata.MotionPrompt);
+        metadata.EffectiveImagePrompt = NormalizeEffectiveImagePrompt(metadata.ImagePrompt, metadata.EffectiveImagePrompt);
         return metadata;
     }
+
+    public static string? NormalizeEffectiveImagePrompt(string? imagePrompt, string? fallback)
+    {
+        var image = TrimOrNull(imagePrompt);
+        var usableFallback = IsUsableImagePrompt(fallback) ? fallback!.Trim() : null;
+        return IsPlaceholder(image) ? usableFallback : image;
+    }
+
+    public static string? NormalizeEditedEffectiveImagePrompt(string? imagePrompt, string? previousImagePrompt, string? previousEffectiveImagePrompt)
+    {
+        var fallback = IsPlaceholder(previousImagePrompt) ? previousEffectiveImagePrompt : null;
+        return NormalizeEffectiveImagePrompt(imagePrompt, fallback);
+    }
+
+    public static bool IsUsableImagePrompt(string? value)
+        => !string.IsNullOrWhiteSpace(value) && !IsPlaceholder(value);
 
     public static ScenePromptMetadata Parse(string? source)
     {
@@ -137,6 +154,7 @@ public sealed class ScenePromptMetadata
         var parts = new List<string>();
         Add(parts, "scene_purpose", ScenePurpose);
         Add(parts, "image_prompt", ImagePrompt);
+        Add(parts, "effective_image_prompt", EffectiveImagePrompt);
         Add(parts, "motion_prompt", MotionPrompt);
         Add(parts, "voice", Voice);
         Add(parts, "voice_instruction", VoiceInstruction);
@@ -183,6 +201,9 @@ public sealed class ScenePromptMetadata
             case "image_prompt":
                 ImagePrompt = value;
                 break;
+            case "effective_image_prompt":
+                EffectiveImagePrompt = value;
+                break;
             case "motion_prompt":
             case "video_prompt":
                 MotionPrompt = value;
@@ -227,6 +248,24 @@ public sealed class ScenePromptMetadata
 
     private static string? FirstNonBlank(params string?[] values)
         => values.FirstOrDefault(x => !string.IsNullOrWhiteSpace(x))?.Trim();
+
+    private static string? TrimOrNull(string? value)
+        => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static bool IsPlaceholder(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        var text = value.Trim();
+        return text.Contains("[[", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("PLACEHOLDER", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("TODO", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("THAY BẰNG", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("THAY BANG", StringComparison.OrdinalIgnoreCase);
+    }
 
     private static string? ReadJsonString(JsonElement element, params string[] names)
     {

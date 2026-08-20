@@ -329,7 +329,7 @@ else
                                             }
                                             @RenderSceneStatusBadge(scene, "image")
                                             <MudMenu Dense="true" Icon="@Icons.Material.Filled.MoreVert">
-                                                <MudMenuItem Icon="@Icons.Material.Filled.Save" Disabled="@_busy" OnClick="@(() => SaveSceneAsync(scene))">Lưu scene</MudMenuItem>
+                                                <MudMenuItem Icon="@Icons.Material.Filled.Save" Disabled="@_busy" OnClick="@(async () => await SaveSceneAsync(scene))">Lưu scene</MudMenuItem>
                                                 <MudMenuItem Icon="@Icons.Material.Filled.AddPhotoAlternate" Disabled="@IsSceneRendering(scene)" OnClick="@(() => RerenderSceneImageAsync(scene))">@(string.IsNullOrWhiteSpace(ResolveDraftImageUrl(scene, draft)) ? "Tạo ảnh" : "Render lại ảnh")</MudMenuItem>
                                                 <MudMenuItem Icon="@Icons.Material.Filled.Edit" OnClick="@(() => EditScenePromptsAsync(scene))">Chỉnh sửa prompt ảnh</MudMenuItem>
                                                 <MudMenuItem Icon="@Icons.Material.Filled.History" OnClick="@(() => ToggleImageHistoryAsync(scene))">Lịch sử ảnh</MudMenuItem>
@@ -353,6 +353,7 @@ else
                                                 </MudStack>
                                                 <MudStack Row="true" Spacing="1" Class="flex-wrap gap-1">
                                                     <MudTooltip Text="Xem prompt ảnh"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Image" OnClick="@(() => OpenScenePrompt(scene, ScenePromptKind.Image))" aria-label="Xem prompt ảnh" /></MudTooltip>
+                                                    <MudTooltip Text="Xem prompt video"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Movie" OnClick="@(() => OpenScenePrompt(scene, ScenePromptKind.Motion))" aria-label="Xem prompt video" /></MudTooltip>
                                                     <MudTooltip Text="Xem lời thoại"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.RecordVoiceOver" OnClick="@(() => OpenScenePrompt(scene, ScenePromptKind.Voice))" aria-label="Xem lời thoại" /></MudTooltip>
                                                     <MudTooltip Text="Lịch sử ảnh"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.History" OnClick="@(() => ToggleImageHistoryAsync(scene))" aria-label="Lịch sử ảnh" /></MudTooltip>
                                                 </MudStack>
@@ -1295,11 +1296,16 @@ else
     private static ScenePromptMetadata BuildMetadata(SceneEditorState draft)
     {
         var parsed = ScenePromptMetadata.Parse(draft.RawSceneJson);
+        var imagePrompt = TrimOrNull(draft.ImagePrompt) ?? parsed.ImagePrompt;
+        var effectiveImagePrompt = ScenePromptMetadata.NormalizeEditedEffectiveImagePrompt(
+            imagePrompt,
+            parsed.ImagePrompt,
+            TrimOrNull(draft.EffectiveImagePrompt) ?? parsed.EffectiveImagePrompt);
         var metadata = new ScenePromptMetadata
         {
             ScenePurpose = TrimOrNull(draft.Purpose) ?? parsed.ScenePurpose,
-            ImagePrompt = TrimOrNull(draft.ImagePrompt) ?? parsed.ImagePrompt,
-            EffectiveImagePrompt = TrimOrNull(draft.EffectiveImagePrompt) ?? parsed.EffectiveImagePrompt,
+            ImagePrompt = imagePrompt,
+            EffectiveImagePrompt = effectiveImagePrompt,
             MotionPrompt = TrimOrNull(draft.MotionPrompt) ?? parsed.MotionPrompt,
             Voice = TrimOrNull(draft.Voice) ?? parsed.Voice,
             VoiceInstruction = TrimOrNull(draft.VoiceInstruction) ?? parsed.VoiceInstruction,
@@ -2078,11 +2084,16 @@ else
         await Task.CompletedTask;
     }
 
-    private async Task SaveSceneAsync(VideoProjectSceneDto scene)
+    private async Task<bool> SaveSceneAsync(VideoProjectSceneDto scene)
     {
-        if (_projectId is null || AuthState.CurrentUser is null) return;
+        if (_projectId is null || AuthState.CurrentUser is null) return false;
         var draft = GetSceneDraft(scene);
         var metadata = BuildMetadata(draft);
+        if (!ScenePromptMetadata.IsUsableImagePrompt(metadata.EffectiveImagePrompt))
+        {
+            Snackbar.Add("SCENE_IMAGE_SOURCE_UNRESOLVED: prompt ảnh là placeholder và không có fallback dùng được.", Severity.Error);
+            return false;
+        }
         scene.ImagePrompt = metadata.ImagePrompt;
         scene.VideoPrompt = metadata.MotionPrompt;
         scene.ScenePrompt = metadata.Serialize();
@@ -2111,6 +2122,7 @@ else
         await LogProjectEvent("SCENE_SAVED", "info", $"Đã lưu scene {scene.SceneIndex}.", new { scene.Id, scene.SceneIndex, scene.Status, draft.SelectedImageVersionId, draft.SelectedVideoVersionId, AspectRatio = draft.AspectRatio });
         await ReloadAsync();
         await ProjectSaved.InvokeAsync();
+        return true;
     }
 
     private async Task EditScenePromptsAsync(VideoProjectSceneDto scene)
@@ -2442,7 +2454,10 @@ else
         _sceneRerenderErrors.Remove(scene.Id);
         if (draft.IsDirty)
         {
-            await SaveSceneAsync(scene);
+            if (!await SaveSceneAsync(scene))
+            {
+                return;
+            }
             if (_project is null) return;
             scene = _project.Scenes.FirstOrDefault(x => x.Id == scene.Id) ?? scene;
             draft = GetSceneDraft(scene);
@@ -3077,7 +3092,10 @@ else
             var draft = GetSceneDraft(scene);
             if (draft.IsDirty)
             {
-                await SaveSceneAsync(scene);
+                if (!await SaveSceneAsync(scene))
+                {
+                    return;
+                }
             }
         }
 
@@ -3187,7 +3205,10 @@ else
 
         if (draft.IsDirty)
         {
-            await SaveSceneAsync(scene);
+            if (!await SaveSceneAsync(scene))
+            {
+                return;
+            }
             draft = GetSceneDraft(scene);
         }
 
