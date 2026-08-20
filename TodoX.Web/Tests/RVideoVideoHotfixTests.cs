@@ -1,5 +1,7 @@
 using System.Reflection;
 using System.Text.Json;
+using TodoX.Web.Models;
+using TodoX.Web.Services.AiProviders;
 using TodoX.Web.Services.VideoRender;
 using Xunit;
 
@@ -84,5 +86,45 @@ public sealed class RVideoVideoHotfixTests
         using var doc = JsonDocument.Parse(json);
         Assert.Equal("scene-base-fallback-1", doc.RootElement.GetProperty("logicalRequestId").GetString());
         Assert.Equal("task-123", doc.RootElement.GetProperty("providerTaskId").GetString());
+    }
+
+    [Fact]
+    public void RVideoPricingUsesPositiveCapabilityTariffBeforeUnitCostFallback()
+    {
+        var resolver = new YEScaleVideoPricingResolver();
+        var option = new ProviderOptionDto
+        {
+            ProviderId = 18,
+            ProviderCapabilityId = 99,
+            ProviderCode = "79ai",
+            CapabilityCode = RVideoVideoModelPolicy.CapabilityCode,
+            ModelName = "seedance_20_pro",
+            UnitCostPoints = 0
+        };
+        var capability = new AiProviderCapabilityDto
+        {
+            Id = option.ProviderCapabilityId,
+            ProviderId = option.ProviderId,
+            ProviderCode = option.ProviderCode,
+            CapabilityCode = option.CapabilityCode,
+            ConfigJson = """
+                {
+                  "pricing": {
+                    "rules": [
+                      {
+                        "match": { "model": "seedance_20_pro", "duration": 6 },
+                        "chargedPoints": 42,
+                        "costSource": "catalog_todox_ai_model_price"
+                      }
+                    ]
+                  }
+                }
+                """
+        };
+
+        var resolved = resolver.Resolve(option, capability, "9:16", "720p", 6, hasSourceImage: true);
+
+        Assert.Equal(42, resolved.ChargedPoints);
+        Assert.Equal("catalog_todox_ai_model_price", resolved.CostSource);
     }
 }

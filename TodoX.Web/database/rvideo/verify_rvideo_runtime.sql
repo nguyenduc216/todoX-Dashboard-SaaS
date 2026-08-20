@@ -8,6 +8,7 @@ DECLARE
     image_cap_id bigint;
     video_cap_id bigint;
     endpoint_ok boolean;
+    pricing_ok boolean;
     credential_ok boolean;
     requirement_count int;
     veo_omni_flash_count int;
@@ -171,6 +172,17 @@ BEGIN
         RAISE EXCEPTION 'RVIDEO_RUNTIME_VERIFY_FAILED endpoint contract mismatch; expected /image-upload, /create-video, /video.';
     END IF;
 
+    SELECT c.unit_cost_points > 0
+           AND jsonb_typeof(c.config_json->'pricing'->'rules') = 'array'
+           AND jsonb_array_length(c.config_json->'pricing'->'rules') > 0
+      INTO pricing_ok
+      FROM public.todox_ai_provider_capability c
+     WHERE c.id = video_cap_id;
+
+    IF COALESCE(pricing_ok, false) = false THEN
+        RAISE EXCEPTION 'RVIDEO_RUNTIME_VERIFY_FAILED active 79AI video capability has no positive unit cost and catalog pricing rules.';
+    END IF;
+
     SELECT EXISTS (
         SELECT 1
           FROM public.todox_ai_provider_account a
@@ -270,5 +282,6 @@ SELECT
     4 AS current_policy_attempt_count,
     'pass' AS billing_schema_status,
     'pass' AS media_version_schema_status,
+    'positive capability fallback + catalog pricing rules required' AS pricing_status,
     'catalog: veo_omni/flash, veo_3_1/fast, veo_3_1/lite; grok_video_heavy/normal remains blocked unless catalog evidence exists' AS model_catalog_audit,
     'requested VEO/Grok policy requires explicit grok_video_heavy mode=normal evidence' AS policy_note;

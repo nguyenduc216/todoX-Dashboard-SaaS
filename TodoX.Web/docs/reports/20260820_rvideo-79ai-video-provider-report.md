@@ -21,7 +21,11 @@ Starting SHA: `ea35d00`
   - Read-only verification now checks provider, capability, endpoint contract, credentials, and current catalog policy state.
 - `database/rvideo/01_seed_rvideo_79ai_video_capability.sql`
   - Manual additive/idempotent seed for the existing provider `id=18`, `provider_code=79ai`.
+  - Resolves the provider by `provider_code='79ai'` at execution time; it does not hard-code provider id.
+  - Copies positive active Seedance pricing from `todox_ai_model_price` into capability tariff rules and refuses to seed when no positive catalog pricing exists.
   - Does not create a provider or modify image, Timelapse, or RDance capabilities.
+- `Tests/RVideoVideoHotfixTests.cs`
+  - Guards against zero-charge fallback when a positive RVIDEO catalog tariff matches the model/mode/duration.
 - `TodoX.Web.csproj`
   - Excludes `artifacts/**` from item globbing so published output does not poison the next build.
 
@@ -41,6 +45,7 @@ Starting SHA: `ea35d00`
 
 ## Runtime Verification
 - Added `database/rvideo/verify_rvideo_runtime.sql` as a read-only check for provider/capability presence, endpoint contract, credential mapping, and catalog policy state.
+- Verification now requires positive `unit_cost_points` and non-empty capability pricing rules for the active RVIDEO video route.
 - No production SQL was applied.
 - No migrations were created.
 
@@ -49,6 +54,14 @@ Starting SHA: `ea35d00`
 - Catalog evidence confirms `veo_omni/flash`, `veo_3_1/fast`, and `veo_3_1/lite`.
 - The requested VEO/Grok-only policy remains blocked because no catalog evidence proves `grok_video_heavy` supports `mode=normal` for this flow.
 - The capability seed does not change the runtime model policy.
+
+## Pricing Audit
+- `SceneVideoRenderHandler` resolves `ProviderOptionDto.UnitCostPoints`, then calls `IYEScaleVideoPricingResolver.Resolve(...)` while building the child job snapshot.
+- `YEScaleVideoPricingResolver` reads `capability.config_json.pricing.rules`; it does not query `todox_ai_model_price` directly.
+- For the current RVIDEO handler contract, Seedance mode is not passed into the resolver; the seed therefore groups active catalog prices by model/duration and uses the maximum positive variant price for that key, avoiding an undercharge.
+- When no rule matches, the resolver returns `option.UnitCostPoints` as `configured_tariff_fallback`.
+- `SceneVideoWorkerHandler` passes the resolved points to `AiImageBillingService.BuildConfiguredCost(...)`, then `ReserveAsync(...)` reserves that exact customer amount.
+- Therefore a capability value of `0` can produce a zero-point reservation when no tariff rule matches. The migration now prevents that by requiring positive catalog pricing and embedding the catalog rules.
 
 ## Current Status
 - Runtime code has already been committed and pushed.
