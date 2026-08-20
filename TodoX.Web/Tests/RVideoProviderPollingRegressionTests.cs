@@ -74,6 +74,25 @@ public sealed class RVideoProviderPollingRegressionTests
     }
 
     [Fact]
+    public void TransientPollFailureWithPersistedTaskUsesProviderPollScheduler()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "SceneVideoWorkerHandler.cs");
+        var start = source.IndexOf("catch (Ai79TaskPollException ex)", StringComparison.Ordinal);
+        var end = source.IndexOf("        }\n\n        await FailAsync", start, StringComparison.Ordinal);
+
+        Assert.True(start >= 0);
+        Assert.True(end > start);
+
+        var pollCatch = source[start..end];
+        Assert.Contains("if (!string.IsNullOrWhiteSpace(taskId))", pollCatch);
+        Assert.Contains("DeferProviderPollAsync(job, taskId!", pollCatch);
+        Assert.Contains("DeferPollAsync(job, attemptLogicalRequestId", pollCatch);
+        Assert.DoesNotContain("DeferPollAsync(job, taskId!", pollCatch);
+        Assert.Contains("same task ID will be retried", pollCatch);
+        Assert.Contains("before provider submission; application retry will resubmit", pollCatch);
+    }
+
+    [Fact]
     public void ProviderSuccessPathDownloadsAndCompletesSceneVideoVersion()
     {
         var source = ReadRepoFile("Services", "VideoRender", "SceneVideoWorkerHandler.cs");

@@ -408,8 +408,16 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
             catch (Ai79TaskPollException ex)
             {
                 await MarkPendingReconciliationAsync(input, version.Id, attemptLogicalRequestId, tariffSnapshot, "SCENE_VIDEO_POLL_TRANSIENT", ex.Message, CancellationToken.None, taskId);
-                await DeferPollAsync(job, taskId!, TimeSpan.FromSeconds(Math.Max(1, _options.PollIntervalSeconds)),
-                    "SCENE_VIDEO_POLL_TRANSIENT", "Temporary 79AI poll failure; the same task ID will be retried.", CancellationToken.None);
+                if (!string.IsNullOrWhiteSpace(taskId))
+                {
+                    await DeferProviderPollAsync(job, taskId!, TimeSpan.FromSeconds(Math.Max(1, _options.PollIntervalSeconds)),
+                        "SCENE_VIDEO_POLL_TRANSIENT", "Temporary 79AI poll failure; the same task ID will be retried.", CancellationToken.None);
+                }
+                else
+                {
+                    await DeferPollAsync(job, attemptLogicalRequestId, TimeSpan.FromSeconds(Math.Max(1, _options.PollIntervalSeconds)),
+                        "SCENE_VIDEO_POLL_TRANSIENT", "Temporary 79AI poll failure before provider submission; application retry will resubmit.", CancellationToken.None);
+                }
                 return;
             }
         }
