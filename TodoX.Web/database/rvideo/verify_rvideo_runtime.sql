@@ -1,5 +1,5 @@
 -- RVIDEO 79AI runtime verification.
--- Read-only: this script must not INSERT, UPDATE, or DELETE data.
+-- Read-only: this script must not change data.
 
 DO $$
 DECLARE
@@ -10,6 +10,10 @@ DECLARE
     endpoint_ok boolean;
     credential_ok boolean;
     requirement_count int;
+    veo_omni_flash_count int;
+    veo_31_fast_count int;
+    veo_31_lite_count int;
+    grok_normal_count int;
     current_policy_count int;
 BEGIN
     SELECT array_agg(format('%I.%I', schema_name, table_name))
@@ -24,6 +28,7 @@ BEGIN
             ('public', 'todox_ai_provider'),
             ('public', 'todox_ai_provider_capability'),
             ('public', 'todox_ai_provider_model'),
+            ('public', 'todox_ai_model_price'),
             ('public', 'todox_ai_provider_account'),
             ('public', 'todox_ai_provider_account_credential'),
             ('system', 'ai_provider_credentials_secure')) AS required(schema_name, table_name)
@@ -197,6 +202,50 @@ BEGIN
         RAISE EXCEPTION 'RVIDEO_RUNTIME_VERIFY_FAILED current Seedance policy is not fully present in ai provider model catalog.';
     END IF;
 
+    SELECT count(*)
+      INTO veo_omni_flash_count
+      FROM public.todox_ai_provider_model m
+      JOIN public.todox_ai_model_price p ON p.model_id = m.id
+     WHERE lower(btrim(m.provider_code))='79ai'
+       AND lower(btrim(m.provider_model_code))='veo_omni'
+       AND m.enabled = true
+       AND m.is_deprecated = false
+       AND p.active = true
+       AND lower(btrim(p.mode))='flash';
+
+    SELECT count(*)
+      INTO veo_31_fast_count
+      FROM public.todox_ai_provider_model m
+      JOIN public.todox_ai_model_price p ON p.model_id = m.id
+     WHERE lower(btrim(m.provider_code))='79ai'
+       AND lower(btrim(m.provider_model_code))='veo_3_1'
+       AND m.enabled = true
+       AND m.is_deprecated = false
+       AND p.active = true
+       AND lower(btrim(p.mode))='fast';
+
+    SELECT count(*)
+      INTO veo_31_lite_count
+      FROM public.todox_ai_provider_model m
+      JOIN public.todox_ai_model_price p ON p.model_id = m.id
+     WHERE lower(btrim(m.provider_code))='79ai'
+       AND lower(btrim(m.provider_model_code))='veo_3_1'
+       AND m.enabled = true
+       AND m.is_deprecated = false
+       AND p.active = true
+       AND lower(btrim(p.mode))='lite';
+
+    SELECT count(*)
+      INTO grok_normal_count
+      FROM public.todox_ai_provider_model m
+      JOIN public.todox_ai_model_price p ON p.model_id = m.id
+     WHERE lower(btrim(m.provider_code))='79ai'
+       AND lower(btrim(m.provider_model_code))='grok_video_heavy'
+       AND m.enabled = true
+       AND m.is_deprecated = false
+       AND p.active = true
+       AND lower(btrim(p.mode))='normal';
+
     -- The requested VEO/Grok business policy is reported separately. The repo audit
     -- proves model codes exist, but does not prove grok_video_heavy supports mode=normal.
     SELECT count(*)
@@ -207,8 +256,9 @@ BEGIN
        AND enabled = true
        AND is_deprecated = false;
 
-    RAISE NOTICE 'RVIDEO_RUNTIME_VERIFY_PASS image_capability=% video_capability=% provider=79ai current_policy_model_count=% requested_policy_catalog_model_count=% requested_policy_mode_contract=blocked',
-        image_cap_id, video_cap_id, current_policy_count, requirement_count;
+    RAISE NOTICE 'RVIDEO_RUNTIME_VERIFY_PASS image_capability=% video_capability=% provider=79ai current_policy_model_count=% requested_policy_catalog_model_count=% veo_omni_flash=% veo_3_1_fast=% veo_3_1_lite=% grok_video_heavy_normal=% requested_policy_mode_contract=blocked',
+        image_cap_id, video_cap_id, current_policy_count, requirement_count,
+        veo_omni_flash_count, veo_31_fast_count, veo_31_lite_count, grok_normal_count;
 END $$;
 
 SELECT
@@ -220,4 +270,5 @@ SELECT
     4 AS current_policy_attempt_count,
     'pass' AS billing_schema_status,
     'pass' AS media_version_schema_status,
+    'catalog: veo_omni/flash, veo_3_1/fast, veo_3_1/lite; grok_video_heavy/normal remains blocked unless catalog evidence exists' AS model_catalog_audit,
     'requested VEO/Grok policy requires explicit grok_video_heavy mode=normal evidence' AS policy_note;

@@ -19,6 +19,9 @@ Starting SHA: `ea35d00`
   - Added regression coverage for attempt metadata and fallback indexing.
 - `database/rvideo/verify_rvideo_runtime.sql`
   - Read-only verification now checks provider, capability, endpoint contract, credentials, and current catalog policy state.
+- `database/rvideo/01_seed_rvideo_79ai_video_capability.sql`
+  - Manual additive/idempotent seed for the existing provider `id=18`, `provider_code=79ai`.
+  - Does not create a provider or modify image, Timelapse, or RDance capabilities.
 - `TodoX.Web.csproj`
   - Excludes `artifacts/**` from item globbing so published output does not poison the next build.
 
@@ -43,9 +46,12 @@ Starting SHA: `ea35d00`
 
 ## Model Policy Status
 - Current catalog evidence supports keeping RVIDEO on the existing Seedance-based policy.
-- The requested VEO/Grok-only policy remains blocked because the repo audit does not prove `grok_video_heavy` supports `mode=normal` for this flow.
+- Catalog evidence confirms `veo_omni/flash`, `veo_3_1/fast`, and `veo_3_1/lite`.
+- The requested VEO/Grok-only policy remains blocked because no catalog evidence proves `grok_video_heavy` supports `mode=normal` for this flow.
+- The capability seed does not change the runtime model policy.
 
 ## Current Status
-- Code is ready for commit and push.
+- Runtime code has already been committed and pushed.
+- The manual capability seed SQL is prepared locally for review before execution.
 - Live smoke test still pending.
 - Not READY yet until submit -> persisted provider_task_id -> same-task poll -> mp4 save is proven in the live environment.
