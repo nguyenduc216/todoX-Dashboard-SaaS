@@ -165,6 +165,7 @@ builder.Services.AddScoped<TodoX.Web.Services.VideoRender.RVideoJobSettingsRepos
 builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IRVideoJobService, TodoX.Web.Services.VideoRender.RVideoJobService>();
 builder.Services.AddSingleton<TodoX.Web.Services.VideoRender.RVideoSceneJsonService>();
 builder.Services.AddScoped<TodoX.Web.Services.VideoRender.ISceneMediaVersioningService, TodoX.Web.Services.VideoRender.SceneMediaVersioningService>();
+builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IRVideo79AiVideoService, TodoX.Web.Services.VideoRender.RVideo79AiVideoService>();
 builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IYEScaleVideoPricingResolver, TodoX.Web.Services.VideoRender.YEScaleVideoPricingResolver>();
 builder.Services.AddScoped<IDanceSellRepository, DanceSellRepository>();
 builder.Services.AddScoped<IDanceSellCompletionService, DanceSellCompletionService>();
