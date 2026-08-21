@@ -105,6 +105,56 @@ public sealed class RVideoProviderPollingRegressionTests
     }
 
     [Fact]
+    public void RVideoJobDetailAlwaysExitsLoadingStateOnBootstrapFailure()
+    {
+        var source = ReadRepoFile("Components", "Pages", "RVideoJobDetail.razor");
+
+        Assert.Contains("catch (Exception ex)", source);
+        Assert.Contains("finally", source);
+        Assert.Contains("_loading = false;", source);
+        Assert.Contains("RVIDEO_JOB_DETAIL_BOOTSTRAP_FAILED", source);
+    }
+
+    [Fact]
+    public void RVideoLifecycleAutoEnqueuesSceneVideosAfterImagesAreReady()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "RVideoLifecycleWorker.cs");
+
+        Assert.Contains("decision.ShouldQueueVideo", source);
+        Assert.Contains("Where(x => x.IsImageReady)", source);
+        Assert.Contains("Except(activeSceneIds.VideoSceneIds)", source);
+        Assert.Contains("SceneVideoRenderHandler.JobTypeName", source);
+        Assert.Contains("EnqueueForProjectIfNoneActiveAsync", source);
+        Assert.Contains("SCENE_VIDEO_AUTO_ENQUEUED", source);
+    }
+
+    [Fact]
+    public void RVideoProjectProjectionFallsBackToSelectedCompletedSceneVideoVersion()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "VideoRenderRepository.cs");
+
+        Assert.Contains("video_render.scene_video_versions", source);
+        Assert.Contains("is_selected=true", source);
+        Assert.Contains("status='completed'", source);
+        Assert.Contains("scene.SceneVideoUrl = selected.PublicUrl ?? selected.SourceFilePath", source);
+        Assert.Contains("public long SceneId { get; init; }", source);
+    }
+
+    [Fact]
+    public void RVideoCustomerUiDoesNotExposeProviderBrandingOrInlineHistoryPanels()
+    {
+        var source = ReadRepoFile("Components", "Pages", "RenderVideoJobs.razor");
+
+        Assert.DoesNotContain("79AI đang tạo", source);
+        Assert.DoesNotContain("Đã gửi 79AI", source);
+        Assert.DoesNotContain("provider video 79AI", source);
+        Assert.DoesNotContain("provider image-to-video", source);
+        Assert.DoesNotContain("@RenderVideoHistoryPanel(scene)", source);
+        Assert.DoesNotContain("@RenderImageHistoryPanel(scene)", source);
+        Assert.Contains("Chưa cấu hình tạo video", source);
+    }
+
+    [Fact]
     public void RetryUpdateZeroRowsDoesNotEmitFalseSuccessEvent()
     {
         var source = ReadRepoFile("Services", "Render", "RenderJobService.cs");

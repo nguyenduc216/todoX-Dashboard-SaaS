@@ -162,6 +162,39 @@ public sealed class VideoRenderRepository
                 """,
                 new { projectId, tenant = _tenant.TenantId })).ToList();
 
+            var selectedVideoProjections = (await conn.QueryAsync<SceneVersionProjection>(
+                """
+                SELECT scene_id AS SceneId,
+                       public_url AS PublicUrl,
+                       source_file_path AS SourceFilePath,
+                       storage_key AS StorageKey,
+                       id AS Id
+                  FROM video_render.scene_video_versions
+                 WHERE project_id=@projectId
+                   AND tenant_id=@tenant
+                   AND is_selected=true
+                   AND status='completed';
+                """,
+                new { projectId, tenant = _tenant.TenantId })).ToDictionary(x => x.SceneId, x => x);
+
+            foreach (var scene in project.Scenes)
+            {
+                if (!selectedVideoProjections.TryGetValue(scene.Id, out var selected))
+                {
+                    continue;
+                }
+
+                if (string.IsNullOrWhiteSpace(scene.SceneVideoUrl))
+                {
+                    scene.SceneVideoUrl = selected.PublicUrl ?? selected.SourceFilePath;
+                }
+
+                if (string.IsNullOrWhiteSpace(scene.SceneVideoPath))
+                {
+                    scene.SceneVideoPath = selected.SourceFilePath ?? selected.StorageKey;
+                }
+            }
+
             project.Events = (await conn.QueryAsync<VideoProjectEventDto>(
                 """
                 SELECT id AS Id, project_id AS ProjectId, tenant_id AS TenantId, event_type AS EventType,
@@ -953,6 +986,7 @@ public sealed class VideoRenderRepository
 
     public sealed class SceneVersionProjection
     {
+        public long SceneId { get; init; }
         public Guid Id { get; init; }
         public string? PublicUrl { get; init; }
         public string? SourceFilePath { get; init; }

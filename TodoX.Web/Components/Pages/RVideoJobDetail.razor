@@ -1,6 +1,7 @@
 @page "/jobs/rvideo/{JobId:guid}"
 @inject AuthStateService AuthState
 @inject TodoX.Web.Services.VideoRender.IRVideoJobService RVideoJobs
+@inject ILogger<RVideoJobDetail> Logger
 
 <PageTitle>RVIDEO Job</PageTitle>
 @if (!AuthState.IsInitialized || _loading)
@@ -10,9 +11,17 @@
 else if (_view is null)
 {
     <MudAlert Severity="Severity.Error">Không tìm thấy RVIDEO job.</MudAlert>
+    @if (!string.IsNullOrWhiteSpace(_loadWarning))
+    {
+        <MudAlert Severity="Severity.Warning">@_loadWarning</MudAlert>
+    }
 }
 else
 {
+    @if (!string.IsNullOrWhiteSpace(_loadWarning))
+    {
+        <MudAlert Severity="Severity.Warning" Dense="true">@_loadWarning</MudAlert>
+    }
     <RenderVideoJobs Embedded="true" JobId="@JobId" ProjectId="@_view.Project.Id" />
 }
 
@@ -20,13 +29,27 @@ else
     [Parameter] public Guid JobId { get; set; }
     private TodoX.Web.Services.VideoRender.RVideoJobView? _view;
     private bool _loading = true;
+    private string? _loadWarning;
 
     protected override async Task OnParametersSetAsync()
     {
         _loading = true;
-        _view = AuthState.CurrentUser is { IsCustomer: true } user
-            ? await RVideoJobs.GetByJobIdAsync(JobId, user)
-            : null;
-        _loading = false;
+        _loadWarning = null;
+        try
+        {
+            _view = AuthState.CurrentUser is { IsCustomer: true } user
+                ? await RVideoJobs.GetByJobIdAsync(JobId, user)
+                : null;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "RVIDEO_JOB_DETAIL_BOOTSTRAP_FAILED jobId={JobId}", JobId);
+            _view = null;
+            _loadWarning = "Không thể tải đầy đủ dữ liệu RVIDEO. Vui lòng thử tải lại.";
+        }
+        finally
+        {
+            _loading = false;
+        }
     }
 }

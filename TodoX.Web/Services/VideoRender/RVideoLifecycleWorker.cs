@@ -149,11 +149,51 @@ public sealed class RVideoLifecycleWorker : BackgroundService
                 PointStatus = RenderPointStatuses.NotRequired
             }, project.Id, ct);
         }
-        else
+
+        var videoSceneIds = decision.ShouldQueueVideo
+            ? sceneStates
+                .Where(x => x.IsImageReady)
+                .Select(x => x.SceneId)
+                .Except(activeSceneIds.VideoSceneIds)
+                .ToArray()
+            : Array.Empty<long>();
+        if (videoSceneIds.Length > 0)
+        {
+            var input = new SceneVideoRenderInput
+            {
+                ProjectId = project.Id,
+                SceneIds = videoSceneIds,
+                AspectRatio = renderSettings.AspectRatio,
+                Resolution = renderSettings.Resolution,
+                UserId = userId,
+                CustomerId = project.CustomerId,
+                CreatedBy = "rvideo_auto_lifecycle"
+            };
+
+            await jobs.EnqueueForProjectIfNoneActiveAsync(new RenderJobCreateModel
+            {
+                JobType = SceneVideoRenderHandler.JobTypeName,
+                UserId = userId,
+                CustomerId = project.CustomerId,
+                Input = input,
+                Prompt = new { projectId = project.Id, source = "rvideo_auto_lifecycle", stage = "video", sceneIds = videoSceneIds },
+                LogCode = $"video-scene-{project.Id}",
+                ProviderCode = RVideoVideoModelPolicy.ProviderCode,
+                ModelCode = RVideoVideoModelPolicy.GetInitial().Model,
+                MaxAttempts = 1,
+                PointCostEstimate = 0,
+                PointStatus = RenderPointStatuses.Pending
+            }, project.Id, ct);
+
+            await repo.AddProjectEventAsync(project.Id, "SCENE_VIDEO_AUTO_ENQUEUED", "info",
+                "RVIDEO auto lifecycle enqueued scene videos after selected images became ready.",
+                new { projectId = project.Id, sceneIds = videoSceneIds, sceneCount = videoSceneIds.Length }, ct);
+        }
+        else if (imageSceneIds.Length == 0)
         {
             _logger.LogInformation(
-                "RVIDEO_IMAGE_REVIEW_HOLD projectId={ProjectId} imagesReady={ImagesReady} autoVideoDisabled=true",
-                project.Id, sceneStates.Count(x => x.IsImageReady));
+                "RVIDEO_IMAGE_REVIEW_HOLD projectId={ProjectId} imagesReady={ImagesReady} videoPending={VideoPending}",
+                project.Id, sceneStates.Count(x => x.IsImageReady), decision.ShouldQueueVideo);
         }
     }
 

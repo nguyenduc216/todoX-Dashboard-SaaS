@@ -46,6 +46,10 @@ else
     }
     else
     {
+        @if (!string.IsNullOrWhiteSpace(_loadWarning))
+        {
+            <MudAlert Severity="Severity.Warning" Dense="true">@_loadWarning</MudAlert>
+        }
         @if (_projectDialogOpen)
         {
             <div class="render-project-dialog" role="dialog" aria-modal="true">
@@ -345,7 +349,6 @@ else
                                     <MudGrid Class="scene-surface-grid">
                                         <MudItem xs="12" md="5">
                                             <MudStack Spacing="1">
-                                                <MudText Typo="Typo.subtitle2">IMAGE PREVIEW</MudText>
                                                 @RenderSceneImageFrame(scene, sceneState, draft)
                                                 <MudStack Row="true" Spacing="1" Class="flex-wrap gap-1">
                                                     <MudChip T="string" Size="Size.Small" Color="Color.Info">@ProjectAspectRatio</MudChip>
@@ -356,12 +359,12 @@ else
                                                     <MudTooltip Text="Xem prompt video"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Movie" OnClick="@(() => OpenScenePrompt(scene, ScenePromptKind.Motion))" aria-label="Xem prompt video" /></MudTooltip>
                                                     <MudTooltip Text="Xem lời thoại"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.RecordVoiceOver" OnClick="@(() => OpenScenePrompt(scene, ScenePromptKind.Voice))" aria-label="Xem lời thoại" /></MudTooltip>
                                                     <MudTooltip Text="Lịch sử ảnh"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.History" OnClick="@(() => ToggleImageHistoryAsync(scene))" aria-label="Lịch sử ảnh" /></MudTooltip>
+                                                    <MudTooltip Text="Hướng dẫn giọng đọc"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Audiotrack" OnClick="@(() => OpenSceneVoiceInstruction(scene))" aria-label="Xem hướng dẫn giọng đọc" /></MudTooltip>
                                                 </MudStack>
                                             </MudStack>
                                         </MudItem>
                                         <MudItem xs="12" md="7">
                                             <MudStack Spacing="1">
-                                                <MudText Typo="Typo.subtitle2">SCENE INFO</MudText>
                                                 <MudStack Row="true" Spacing="1" Class="flex-wrap gap-1 align-center">
                                                     @RenderSceneStatusBadge(scene, "image")
                                                     @RenderSceneStatusBadge(scene, "video")
@@ -372,7 +375,6 @@ else
                                                 </MudStack>
                                                 <MudText Typo="Typo.body2">Scene @scene.SceneIndex: @scene.Title</MudText>
                                                 <MudText Typo="Typo.caption">@scene.DurationSeconds giây</MudText>
-                                                <MudText Typo="Typo.caption">@ShortText(draft.Voice)</MudText>
                                                 <MudStack Row="true" Spacing="1" Class="flex-wrap gap-1">
                                                     <MudTooltip Text="Tạo video scene">
                                                         <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Movie" Color="Color.Primary"
@@ -399,16 +401,6 @@ else
                                             </MudStack>
                                         </MudItem>
                                     </MudGrid>
-
-                                    @if (_videoHistorySceneId == scene.Id)
-                                    {
-                                        @RenderVideoHistoryPanel(scene)
-                                    }
-
-                                    @if (_imageHistorySceneId == scene.Id)
-                                    {
-                                        @RenderImageHistoryPanel(scene)
-                                    }
                                 </MudStack>
                             </MudPaper>
                         }
@@ -563,6 +555,7 @@ else
 
     private int _tabIndex;
     private bool _busy;
+    private string? _loadWarning;
     private bool _projectDialogOpen;
     private long? _projectId;
     private Guid? _jobId;
@@ -696,8 +689,8 @@ else
             return "Ảnh đã sẵn sàng";
         }
         if (states.Any(x => x == RenderSceneImageVisualState.Downloading)) return "Đang tải kết quả";
-        if (states.Any(x => x == RenderSceneImageVisualState.ProviderProcessing)) return "79AI đang tạo ảnh";
-        if (states.Any(x => x == RenderSceneImageVisualState.ProviderSubmitted)) return "Đã gửi 79AI";
+        if (states.Any(x => x == RenderSceneImageVisualState.ProviderProcessing)) return "Đang xử lý";
+        if (states.Any(x => x == RenderSceneImageVisualState.ProviderSubmitted)) return "Đã gửi yêu cầu";
         if (states.Any(RenderSceneImageUiState.IsActive)) return "Đang tạo ảnh";
         return _project.Scenes.Count > 0 ? "Chuẩn bị scene" : "Thông tin";
     }
@@ -713,35 +706,61 @@ else
             return;
         }
 
-        _jobId = JobId;
-        _projectId = ProjectId ?? QueryProjectId;
-        if (AuthState.CurrentUser is not null)
+        try
         {
-            _coreServices = await CoreCatalog.ListAsync();
-            await LoadCharactersAsync();
-            await LoadAudioCatalogsAsync();
-        }
-        if (AuthState.CurrentUser is not null)
-        {
-            _projectDialogOpen = true;
-            if (_jobId is not null && AuthState.CurrentUser is { IsCustomer: true } user)
+            _loadWarning = null;
+            _jobId = JobId;
+            _projectId = ProjectId ?? QueryProjectId;
+            if (AuthState.CurrentUser is not null)
             {
-                var view = await RVideoJobs.GetByJobIdAsync(_jobId.Value, user);
-                _projectId = view?.Project.Id;
-                if (view is not null)
+                try
                 {
-                    ServiceId = view.CoreJob.ServiceId;
-                    ServiceCode = view.CoreJob.ServiceCode;
+                    _coreServices = await CoreCatalog.ListAsync();
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogWarning(ex, "RVIDEO_BOOTSTRAP_CORE_SERVICES_FAILED");
+                    _loadWarning = "Một phần dữ liệu khởi tạo chưa tải được. Trang vẫn sẵn sàng để tiếp tục.";
+                }
+                await LoadCharactersAsync();
+                await LoadAudioCatalogsAsync();
+            }
+            if (AuthState.CurrentUser is not null)
+            {
+                _projectDialogOpen = true;
+                if (_jobId is not null && AuthState.CurrentUser is { IsCustomer: true } user)
+                {
+                    try
+                    {
+                        var view = await RVideoJobs.GetByJobIdAsync(_jobId.Value, user);
+                        _projectId = view?.Project.Id ?? _projectId;
+                        if (view is not null)
+                        {
+                            ServiceId = view.CoreJob.ServiceId;
+                            ServiceCode = view.CoreJob.ServiceCode;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogWarning(ex, "RVIDEO_BOOTSTRAP_JOB_RESOLVE_FAILED jobId={JobId}", _jobId);
+                        _loadWarning = "Không thể tải đủ metadata job. Đang hiển thị phần project đã có.";
+                    }
+                }
+                if (_projectId is not null)
+                {
+                    await ReloadAsync();
                 }
             }
             if (_projectId is not null)
             {
-                await ReloadAsync();
+                await StartPolling();
             }
         }
-        if (_projectId is not null)
+        catch (Exception ex)
         {
-            await StartPolling();
+            Logger.LogError(ex, "RVIDEO_BOOTSTRAP_FAILED jobId={JobId} projectId={ProjectId}", _jobId, _projectId);
+            _loadWarning = "Không thể hoàn tất khởi tạo RVIDEO. Vui lòng thử tải lại.";
+            _projectDialogOpen = true;
         }
     }
 
@@ -757,38 +776,56 @@ else
         var incomingProjectId = ProjectId ?? QueryProjectId;
         if (incomingProjectId != _projectId || JobId != _jobId)
         {
-            _jobId = JobId;
-            _projectId = incomingProjectId;
-            _sceneDrafts.Clear();
-            _imageVersions.Clear();
-            _videoVersions.Clear();
-            if (AuthState.CurrentUser is not null)
+            try
             {
-                _projectDialogOpen = true;
-                if (_jobId is not null && AuthState.CurrentUser is { IsCustomer: true } user)
+                _loadWarning = null;
+                _jobId = JobId;
+                _projectId = incomingProjectId;
+                _sceneDrafts.Clear();
+                _imageVersions.Clear();
+                _videoVersions.Clear();
+                if (AuthState.CurrentUser is not null)
                 {
-                    var view = await RVideoJobs.GetByJobIdAsync(_jobId.Value, user);
-                    _projectId = view?.Project.Id;
-                    if (view is not null)
+                    _projectDialogOpen = true;
+                    if (_jobId is not null && AuthState.CurrentUser is { IsCustomer: true } user)
                     {
-                        ServiceId = view.CoreJob.ServiceId;
-                        ServiceCode = view.CoreJob.ServiceCode;
+                        try
+                        {
+                            var view = await RVideoJobs.GetByJobIdAsync(_jobId.Value, user);
+                            _projectId = view?.Project.Id ?? _projectId;
+                            if (view is not null)
+                            {
+                                ServiceId = view.CoreJob.ServiceId;
+                                ServiceCode = view.CoreJob.ServiceCode;
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Logger.LogWarning(ex, "RVIDEO_PARAMETER_JOB_RESOLVE_FAILED jobId={JobId}", _jobId);
+                            _loadWarning = "Không thể tải đủ metadata job. Đang hiển thị phần project đã có.";
+                        }
                     }
+                    if (_projectId is null)
+                    {
+                        _project = null;
+                        _prompt = string.Empty;
+                        _aspectRatio = string.Empty;
+                        _resolution = string.Empty;
+                        StopPolling();
+                    }
+                    else
+                    {
+                        await ReloadAsync();
+                        await StartPolling();
+                    }
+                    _tabIndex = 0;
                 }
-                if (_projectId is null)
-                {
-                    _project = null;
-                    _prompt = string.Empty;
-                    _aspectRatio = string.Empty;
-                    _resolution = string.Empty;
-                    StopPolling();
-                }
-                else
-                {
-                    await ReloadAsync();
-                    await StartPolling();
-                }
-                _tabIndex = 0;
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "RVIDEO_PARAMETERS_BOOTSTRAP_FAILED jobId={JobId} projectId={ProjectId}", JobId, incomingProjectId);
+                _loadWarning = "Không thể hoàn tất tải lại dữ liệu RVIDEO. Vui lòng thử refresh.";
+                _projectDialogOpen = true;
             }
         }
     }
@@ -1121,9 +1158,26 @@ else
                 _thinkScenes = _project.ThinkScenes;
                 _prompt = _project.OriginalPrompt;
                 _autoFinish = ReadAutoFinish(_prompt);
-                await LoadRVideoSettingsAsync(_project.Id);
-                _promptParseResult = PromptParser.Parse(_prompt);
-                ApplyVideoSettingsFromPrompt();
+                try
+                {
+                    await LoadRVideoSettingsAsync(_project.Id);
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogWarning(ex, "RVIDEO_RELOAD_SETTINGS_FAILED projectId={ProjectId}", _project.Id);
+                    _loadWarning = "Không thể tải cài đặt RVIDEO. Trang đang dùng dữ liệu project hiện có.";
+                }
+                try
+                {
+                    _promptParseResult = PromptParser.Parse(_prompt);
+                    ApplyVideoSettingsFromPrompt();
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogWarning(ex, "RVIDEO_RELOAD_PROMPT_PARSE_FAILED projectId={ProjectId}", _project.Id);
+                    _promptParseResult = new();
+                    _loadWarning = "Không thể phân tích prompt gốc. Scene preview vẫn được hiển thị.";
+                }
                 _totalSeconds = _project.TotalSeconds;
                 _sceneSeconds = _project.SceneSeconds;
                 if (!_skipCharacter && _characterMode == RVideoCharacterModes.Library && _selectedCharacterId is not null)
@@ -1136,7 +1190,16 @@ else
                 }
                 ReconcileSceneDrafts();
                 RebuildSceneEventState();
-                _defaultImageToVideoProvider = await AiProviders.GetDefaultProviderAsync(TodoX.Web.Services.VideoRender.RVideoVideoModelPolicy.CapabilityCode);
+                try
+                {
+                    _defaultImageToVideoProvider = await AiProviders.GetDefaultProviderAsync(TodoX.Web.Services.VideoRender.RVideoVideoModelPolicy.CapabilityCode);
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogWarning(ex, "RVIDEO_RELOAD_VIDEO_PROVIDER_FAILED projectId={ProjectId}", _project.Id);
+                    _defaultImageToVideoProvider = null;
+                    _loadWarning = "Không thể tải cấu hình tạo video. Có thể xem preview hiện có và thử lại sau.";
+                }
                 await ReloadJobsAsync();
             }
         }
@@ -1556,23 +1619,25 @@ else
         {
             <video src="@videoUrl" poster="@imageUrl" controls class="scene-media-video"></video>
         }
-        else if (string.IsNullOrWhiteSpace(imageUrl))
-        {
-            <div class="scene-thumb-placeholder">Cần chọn/render ảnh trước</div>
-        }
         else if (scene.Status is VideoSceneStatuses.VideoQueued or VideoSceneStatuses.VideoRendering)
         {
             <div class="scene-image-frame scene-image-rendering is-rendering">
-                <img src="@CacheBust(imageUrl, scene.UpdatedAt)" class="scene-media-image scene-image-dim" />
+                @if (!string.IsNullOrWhiteSpace(imageUrl))
+                {
+                    <img src="@CacheBust(imageUrl, scene.UpdatedAt)" class="scene-media-image scene-image-dim" />
+                }
                 <div class="scene-image-shimmer"><span>@SceneLabel(scene.Status)</span></div>
             </div>
+        }
+        else if (string.IsNullOrWhiteSpace(imageUrl))
+        {
+            <div class="scene-thumb-placeholder">Chưa render video</div>
         }
         else
         {
             <div class="scene-video-ready">
                 <img src="@CacheBust(imageUrl, scene.UpdatedAt)" class="scene-media-image scene-image-dim" />
                 <MudText Typo="Typo.caption">Sẵn sàng tạo video</MudText>
-                <MudText Typo="Typo.caption">@ShortText(draft.MotionPrompt)</MudText>
             </div>
         }
         @if (string.Equals(scene.Status, VideoSceneStatuses.Failed, StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(scene.ErrorMessage))
@@ -1599,7 +1664,7 @@ else
             : !HasProjectResolution
                 ? "Cần chọn độ phân giải video"
             : _defaultImageToVideoProvider is null
-                ? "Chưa cấu hình provider image-to-video"
+                ? "Chưa cấu hình tạo video"
             : !IsSceneVideoPromptValid(scene, draft)
                 ? ResolveVideoPromptState(scene, draft).Text
             : string.Empty;
@@ -1616,7 +1681,7 @@ else
             : !HasProjectResolution
                 ? "Cần chọn độ phân giải video"
             : _defaultImageToVideoProvider is null
-                ? "Chưa cấu hình provider image-to-video"
+                ? "Chưa cấu hình tạo video"
                 : !_project.Scenes.Any(scene => CanCreateSceneVideo(scene, GetSceneDraft(scene)))
                     ? "Không có scene nào đủ điều kiện render video"
                     : string.Empty;
@@ -2435,7 +2500,7 @@ else
     }
 
     // ------------------------------------------------------------------
-    // Per-scene re-render - persisted 79AI scene image work item.
+    // Per-scene re-render - persisted scene image work item.
     // ------------------------------------------------------------------
     private async Task RerenderSceneImageAsync(VideoProjectSceneDto scene)
     {
@@ -3014,8 +3079,8 @@ else
 
     private static string SceneStateLabel(RenderSceneImageVisualState state) => state switch
     {
-        RenderSceneImageVisualState.ProviderSubmitted => "Đã gửi 79AI",
-        RenderSceneImageVisualState.ProviderProcessing => "79AI đang tạo ảnh",
+        RenderSceneImageVisualState.ProviderSubmitted => "Đã gửi yêu cầu",
+        RenderSceneImageVisualState.ProviderProcessing => "Đang xử lý",
         RenderSceneImageVisualState.Downloading => "Đang tải kết quả",
         RenderSceneImageVisualState.Rendering => "Đang tạo ảnh...",
         RenderSceneImageVisualState.Queued => "Đang chờ lượt",
@@ -3086,7 +3151,7 @@ else
         }
         if (_defaultImageToVideoProvider is null)
         {
-            Snackbar.Add("Chưa cấu hình provider video 79AI.", Severity.Warning);
+            Snackbar.Add("Chưa cấu hình tạo video.", Severity.Warning);
             return;
         }
 
