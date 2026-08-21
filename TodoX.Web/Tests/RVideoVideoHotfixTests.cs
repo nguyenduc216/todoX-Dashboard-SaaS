@@ -1,7 +1,11 @@
 using System.Reflection;
 using System.Text.Json;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging.Abstractions;
+using TodoX.Web.Services.AiCharacters;
 using TodoX.Web.Models;
 using TodoX.Web.Services.AiProviders;
+using TodoX.Web.Services.Render;
 using TodoX.Web.Services.VideoRender;
 using Xunit;
 
@@ -126,5 +130,100 @@ public sealed class RVideoVideoHotfixTests
 
         Assert.Equal(42, resolved.ChargedPoints);
         Assert.Equal("catalog_todox_ai_model_price", resolved.CostSource);
+    }
+
+    [Fact]
+    public async Task RVideoUploadImageRenderSubmitsReferenceWithoutCharacterId()
+    {
+        var client = new CapturingAi79TaskClient();
+        var service = Create79AiImageService(client);
+
+        var response = await service.GenerateImageAsync(new OpenRouterImageRequest
+        {
+            Model = RVideoImageModelPolicy.GetInitial().Model,
+            RequestedModel = RVideoImageModelPolicy.GetInitial().Model,
+            Prompt = "scene prompt",
+            AspectRatio = "9:16",
+            ReferenceImageBase64 = "data:image/jpeg;base64,abc123"
+        });
+
+        Assert.Equal(AiProviderExecutionState.Pending, response.ExecutionState);
+        Assert.NotNull(client.LastSubmit);
+        Assert.Equal("true", client.LastSubmit!.Options["editImage"]);
+        Assert.Equal("data:image/jpeg;base64,abc123", client.LastSubmit.Options["base64Image"]);
+    }
+
+    [Fact]
+    public async Task RVideoNoneImageRenderSubmitsTextToImageWithoutReference()
+    {
+        var client = new CapturingAi79TaskClient();
+        var service = Create79AiImageService(client);
+
+        var response = await service.GenerateImageAsync(new OpenRouterImageRequest
+        {
+            Model = RVideoImageModelPolicy.GetInitial().Model,
+            RequestedModel = RVideoImageModelPolicy.GetInitial().Model,
+            Prompt = "scene prompt",
+            AspectRatio = "9:16"
+        });
+
+        Assert.Equal(AiProviderExecutionState.Pending, response.ExecutionState);
+        Assert.NotNull(client.LastSubmit);
+        Assert.Equal("false", client.LastSubmit!.Options["editImage"]);
+        Assert.DoesNotContain("base64Image", client.LastSubmit.Options.Keys);
+    }
+
+    private static Gommo79AiImageService Create79AiImageService(CapturingAi79TaskClient client)
+        => new(
+            client,
+            new StaticCredentialResolver(),
+            new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["TimelapseProviderWorkers:Default79AiBaseUrl"] = "https://example.test/ai"
+            }).Build(),
+            NullLogger<Gommo79AiImageService>.Instance);
+
+    private sealed class StaticCredentialResolver : IProviderCredentialResolver
+    {
+        public Task<ResolvedProviderCredential> ResolveAsync(string providerCode, string credentialRole, CancellationToken ct = default)
+            => Task.FromResult(new ResolvedProviderCredential
+            {
+                ProviderAccountId = Guid.NewGuid(),
+                ProviderCode = providerCode,
+                CredentialRole = credentialRole,
+                Secret = "test-token"
+            });
+    }
+
+    private sealed class CapturingAi79TaskClient : IAi79TaskClient
+    {
+        public Ai79TaskSubmitRequest? LastSubmit { get; private set; }
+
+        public Task<Ai79TaskSubmitResult> SubmitAsync(Ai79TaskSubmitRequest request, CancellationToken ct = default)
+        {
+            LastSubmit = request;
+            return Task.FromResult(new Ai79TaskSubmitResult("task-123", """{"id":"task-123"}"""));
+        }
+
+        public Task<Ai79TaskSubmitResult> SubmitMultipartAsync(Ai79MultipartTaskSubmitRequest request, CancellationToken ct = default)
+            => throw new NotSupportedException();
+
+        public Task<Ai79MediaUploadResult> UploadMediaAsync(Ai79MediaUploadRequest request, CancellationToken ct = default)
+            => throw new NotSupportedException();
+
+        public Task<Ai79ProviderMediaListResult> ListImagesAsync(Ai79ProviderMediaListRequest request, CancellationToken ct = default)
+            => throw new NotSupportedException();
+
+        public Task<Ai79ProviderMediaListResult> ListVideosAsync(Ai79ProviderMediaListRequest request, CancellationToken ct = default)
+            => throw new NotSupportedException();
+
+        public Task<Ai79TaskSubmitResult> SubmitMotionControlAsync(Ai79MotionControlSubmitRequest request, CancellationToken ct = default)
+            => throw new NotSupportedException();
+
+        public Task<Ai79ImageUploadResult> UploadImageAsync(Ai79ImageUploadRequest request, CancellationToken ct = default)
+            => throw new NotSupportedException();
+
+        public Task<Ai79TaskStatusResult> GetStatusAsync(Ai79TaskStatusRequest request, CancellationToken ct = default)
+            => throw new NotSupportedException();
     }
 }

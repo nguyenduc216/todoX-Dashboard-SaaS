@@ -1,6 +1,7 @@
 using TodoX.Web.Models;
 using TodoX.Web.Models.Catalog;
 using TodoX.Web.Models.Timelapse;
+using TodoX.Web.Services.Render;
 using TodoX.Web.Services.VideoRender;
 using Xunit;
 
@@ -366,6 +367,98 @@ public sealed class RVideoFoundationTests
             CharacterMode = RVideoCharacterModes.Library,
             SelectedCharacterId = 1
         }));
+    }
+
+    [Fact]
+    public void UploadSnapshotMapsToSceneImageBatchReferenceWithoutCharacterId()
+    {
+        var settings = new RVideoJobSettingsDto
+        {
+            SkipCharacter = false,
+            CharacterMode = RVideoCharacterModes.Upload,
+            CharacterSnapshotJson = """
+                {
+                  "source": "UPLOAD",
+                  "fileUrl": "/uploads/rvideo_character/202608/character.jpg",
+                  "storageKey": "rvideo_character/202608/character.jpg"
+                }
+                """
+        };
+
+        var reference = RVideoSceneImageReferenceSelection.Resolve(settings);
+        var input = new SceneImageBatchInput
+        {
+            ReferenceSource = reference.Source,
+            CharacterId = reference.CharacterId,
+            CharacterReferenceUrl = reference.Url,
+            CharacterReferenceObjectKey = reference.ObjectKey
+        };
+
+        Assert.Equal(RVideoSceneImageReferenceSelection.UploadSource, input.ReferenceSource);
+        Assert.Null(input.CharacterId);
+        Assert.Equal("/uploads/rvideo_character/202608/character.jpg", input.CharacterReferenceUrl);
+        Assert.Equal("rvideo_character/202608/character.jpg", input.CharacterReferenceObjectKey);
+    }
+
+    [Fact]
+    public void UploadModeRequiresSnapshotReferenceBeforeEnqueue()
+    {
+        var settings = new RVideoJobSettingsDto
+        {
+            SkipCharacter = false,
+            CharacterMode = RVideoCharacterModes.Upload,
+            CharacterSnapshotJson = """{"source":"UPLOAD"}"""
+        };
+
+        var ex = Assert.Throws<InvalidOperationException>(() => RVideoSceneImageReferenceSelection.Resolve(settings));
+
+        Assert.Equal("RVVIDEO_UPLOADED_CHARACTER_REFERENCE_UNAVAILABLE", ex.Message);
+    }
+
+    [Fact]
+    public void LibrarySnapshotKeepsSelectedCharacterAndMediaReference()
+    {
+        var settings = new RVideoJobSettingsDto
+        {
+            SkipCharacter = false,
+            CharacterMode = RVideoCharacterModes.Library,
+            SelectedCharacterId = 42,
+            CharacterSnapshotJson = """
+                {
+                  "source": "LIBRARY",
+                  "id": 42,
+                  "masterImageUrl": "/uploads/characters/master.jpg",
+                  "storageKey": "characters/master.jpg",
+                  "normalizedPrompt": "consistent hero"
+                }
+                """
+        };
+
+        var reference = RVideoSceneImageReferenceSelection.Resolve(settings);
+
+        Assert.Equal(RVideoSceneImageReferenceSelection.LibrarySource, reference.Source);
+        Assert.Equal(42, reference.CharacterId);
+        Assert.Equal("/uploads/characters/master.jpg", reference.Url);
+        Assert.Equal("characters/master.jpg", reference.ObjectKey);
+        Assert.Equal("consistent hero", reference.CharacterPrompt);
+    }
+
+    [Fact]
+    public void NoneModeDoesNotRequestSceneImageReference()
+    {
+        var settings = new RVideoJobSettingsDto
+        {
+            SkipCharacter = true,
+            CharacterMode = RVideoCharacterModes.None
+        };
+
+        var reference = RVideoSceneImageReferenceSelection.Resolve(settings);
+
+        Assert.False(reference.ReferenceRequested);
+        Assert.Equal(RVideoSceneImageReferenceSelection.NoneSource, reference.Source);
+        Assert.Null(reference.CharacterId);
+        Assert.Null(reference.Url);
+        Assert.Null(reference.ObjectKey);
     }
 
     [Fact]

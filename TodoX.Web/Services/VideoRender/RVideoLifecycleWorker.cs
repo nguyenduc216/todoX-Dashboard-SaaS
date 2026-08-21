@@ -106,13 +106,29 @@ public sealed class RVideoLifecycleWorker : BackgroundService
         if (!sceneStates.Any(x => x.ImageFailedTerminal && !x.ImageRetryRequested)
             && imageSceneIds.Length > 0)
         {
+            RVideoSceneImageReferenceSelection reference;
+            try
+            {
+                reference = RVideoSceneImageReferenceSelection.Resolve(setting);
+            }
+            catch (InvalidOperationException ex)
+            {
+                _logger.LogWarning(ex, "RVIDEO_IMAGE_REFERENCE_VALIDATION_FAILED projectId={ProjectId}", project.Id);
+                await repo.AddProjectEventAsync(project.Id, "SCENE_IMAGE_REFERENCE_VALIDATION_FAILED", "error",
+                    "RVIDEO scene image reference is unavailable.",
+                    new { projectId = project.Id, error = ex.Message, setting.CharacterMode, setting.SkipCharacter }, ct);
+                return;
+            }
+
             var imageInput = new SceneImageBatchInput
             {
                 ProjectId = project.Id,
                 CapabilityCode = SceneImageRenderContext.RVideoCapabilityCode,
+                ReferenceSource = reference.Source,
                 AspectRatio = renderSettings.AspectRatio,
-                CharacterReferenceObjectKey = ReadSnapshotString(setting.CharacterSnapshotJson, "storageKey"),
-                CharacterReferenceUrl = ReadSnapshotString(setting.CharacterSnapshotJson, "fileUrl", "masterImageUrl"),
+                CharacterId = reference.CharacterId,
+                CharacterReferenceObjectKey = reference.ObjectKey,
+                CharacterReferenceUrl = reference.Url,
                 UserId = userId,
                 CustomerId = project.CustomerId,
                 OnlyMissingOrFailed = true,
@@ -269,21 +285,4 @@ public sealed class RVideoLifecycleWorker : BackgroundService
         return rows.ToList();
     }
 
-    private static string? ReadSnapshotString(string? json, params string[] names)
-    {
-        if (string.IsNullOrWhiteSpace(json)) return null;
-        try
-        {
-            using var document = JsonDocument.Parse(json);
-            foreach (var name in names)
-            {
-                if (document.RootElement.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String)
-                    return value.GetString();
-            }
-        }
-        catch (JsonException)
-        {
-        }
-        return null;
-    }
 }
