@@ -105,14 +105,82 @@ public sealed class RVideoProviderPollingRegressionTests
     }
 
     [Fact]
-    public void RVideoJobDetailAlwaysExitsLoadingStateOnBootstrapFailure()
+    public void RVideoJobDetailWaitsForAuthBeforeLoadingOnHardReload()
     {
         var source = ReadRepoFile("Components", "Pages", "RVideoJobDetail.razor");
 
-        Assert.Contains("catch (Exception ex)", source);
-        Assert.Contains("finally", source);
-        Assert.Contains("_loading = false;", source);
-        Assert.Contains("RVIDEO_JOB_DETAIL_BOOTSTRAP_FAILED", source);
+        Assert.Contains("RVideoDetailBootstrapState.WaitingForAuth", source);
+        Assert.Contains("if (!AuthState.IsInitialized)", source);
+        Assert.Contains("return;", source);
+        Assert.DoesNotContain("!AuthState.IsInitialized || _loading", source);
+        Assert.Contains("RVIDEO_DETAIL_WAITING_AUTH", source);
+    }
+
+    [Fact]
+    public void RVideoJobDetailAuthChangeTriggersSingleGuardedLoad()
+    {
+        var source = ReadRepoFile("Components", "Pages", "RVideoJobDetail.razor");
+
+        Assert.Contains("AuthState.OnChange += HandleAuthStateChanged", source);
+        Assert.Contains("private void HandleAuthStateChanged()", source);
+        Assert.Contains("await LoadJobAsync();", source);
+        Assert.Contains("_loadInProgress || _loadedJobId == JobId", source);
+        Assert.Contains("RVIDEO_DETAIL_AUTH_READY", source);
+    }
+
+    [Fact]
+    public void RVideoJobDetailAuthenticatedCustomerLoadsAfterHydration()
+    {
+        var source = ReadRepoFile("Components", "Pages", "RVideoJobDetail.razor");
+
+        Assert.Contains("AuthState.CurrentUser is not { IsCustomer: true } user", source);
+        Assert.Contains("RVIDEO_DETAIL_LOAD_START", source);
+        Assert.Contains("await RVideoJobs.GetByJobIdAsync(JobId, user, timeout.Token)", source);
+        Assert.Contains("_bootstrapState = RVideoDetailBootstrapState.Ready", source);
+        Assert.Contains("RVIDEO_DETAIL_LOAD_SUCCESS", source);
+        Assert.Contains("<RenderVideoJobs Embedded=\"true\" JobId=\"@JobId\" ProjectId=\"@_view.Project.Id\" />", source);
+    }
+
+    [Fact]
+    public void RVideoJobDetailTimeoutExitsSpinner()
+    {
+        var source = ReadRepoFile("Components", "Pages", "RVideoJobDetail.razor");
+
+        Assert.Contains("CancellationTokenSource(LoadTimeout)", source);
+        Assert.Contains("catch (OperationCanceledException ex) when (timeout?.Token.IsCancellationRequested == true)", source);
+        Assert.Contains("RVIDEO_DETAIL_LOAD_TIMEOUT", source);
+        Assert.Contains("_bootstrapState = RVideoDetailBootstrapState.Error", source);
+        Assert.Contains("_loadInProgress = false", source);
+    }
+
+    [Fact]
+    public void RVideoJobDetailFailedLoadRendersRetryState()
+    {
+        var source = ReadRepoFile("Components", "Pages", "RVideoJobDetail.razor");
+
+        Assert.Contains("RVideoDetailBootstrapState.Error", source);
+        Assert.Contains("OnClick=\"LoadJobAsync\"", source);
+        Assert.Contains("Retry", source);
+        Assert.Contains("RVIDEO_DETAIL_LOAD_FAILED", source);
+        Assert.Contains("_loadedJobId = null", source);
+    }
+
+    [Fact]
+    public void RVideoJobDetailUnsubscribesAuthChangeOnDispose()
+    {
+        var source = ReadRepoFile("Components", "Pages", "RVideoJobDetail.razor");
+
+        Assert.Contains("@implements IDisposable", source);
+        Assert.Contains("public void Dispose()", source);
+        Assert.Contains("AuthState.OnChange -= HandleAuthStateChanged", source);
+    }
+
+    [Fact]
+    public void RenderVideoJobsSkipsJobResolutionWhenProjectIdAlreadySupplied()
+    {
+        var source = ReadRepoFile("Components", "Pages", "RenderVideoJobs.razor");
+
+        Assert.Contains("if (_projectId is null && _jobId is not null && AuthState.CurrentUser is { IsCustomer: true } user)", source);
     }
 
     [Fact]

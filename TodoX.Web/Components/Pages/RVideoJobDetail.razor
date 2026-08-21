@@ -1,55 +1,173 @@
 @page "/jobs/rvideo/{JobId:guid}"
+@implements IDisposable
 @inject AuthStateService AuthState
 @inject TodoX.Web.Services.VideoRender.IRVideoJobService RVideoJobs
 @inject ILogger<RVideoJobDetail> Logger
 
 <PageTitle>RVIDEO Job</PageTitle>
-@if (!AuthState.IsInitialized || _loading)
+@switch (_bootstrapState)
 {
-    <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
-}
-else if (_view is null)
-{
-    <MudAlert Severity="Severity.Error">Không tìm thấy RVIDEO job.</MudAlert>
-    @if (!string.IsNullOrWhiteSpace(_loadWarning))
-    {
-        <MudAlert Severity="Severity.Warning">@_loadWarning</MudAlert>
-    }
-}
-else
-{
-    @if (!string.IsNullOrWhiteSpace(_loadWarning))
-    {
-        <MudAlert Severity="Severity.Warning" Dense="true">@_loadWarning</MudAlert>
-    }
-    <RenderVideoJobs Embedded="true" JobId="@JobId" ProjectId="@_view.Project.Id" />
+    case RVideoDetailBootstrapState.WaitingForAuth:
+        <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+        break;
+    case RVideoDetailBootstrapState.LoadingJob:
+        <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+        break;
+    case RVideoDetailBootstrapState.Error:
+        <MudAlert Severity="@_alertSeverity">
+            @_loadWarning
+        </MudAlert>
+        <MudButton Variant="Variant.Outlined" Color="Color.Warning" OnClick="LoadJobAsync" Disabled="@_loadInProgress">
+            Retry
+        </MudButton>
+        break;
+    case RVideoDetailBootstrapState.Ready:
+        @if (!string.IsNullOrWhiteSpace(_loadWarning))
+        {
+            <MudAlert Severity="Severity.Warning" Dense="true">@_loadWarning</MudAlert>
+        }
+        @if (_view is not null)
+        {
+            <RenderVideoJobs Embedded="true" JobId="@JobId" ProjectId="@_view.Project.Id" />
+        }
+        break;
 }
 
 @code {
+    private static readonly TimeSpan LoadTimeout = TimeSpan.FromSeconds(15);
+
     [Parameter] public Guid JobId { get; set; }
+
     private TodoX.Web.Services.VideoRender.RVideoJobView? _view;
-    private bool _loading = true;
+    private RVideoDetailBootstrapState _bootstrapState = RVideoDetailBootstrapState.WaitingForAuth;
+    private Severity _alertSeverity = Severity.Error;
     private string? _loadWarning;
+    private bool _loadInProgress;
+    private Guid? _loadedJobId;
+    private Guid? _currentJobId;
+
+    private enum RVideoDetailBootstrapState
+    {
+        WaitingForAuth,
+        LoadingJob,
+        Ready,
+        Error
+    }
+
+    protected override void OnInitialized()
+    {
+        AuthState.OnChange += HandleAuthStateChanged;
+    }
 
     protected override async Task OnParametersSetAsync()
     {
-        _loading = true;
+        if (_currentJobId != JobId)
+        {
+            _currentJobId = JobId;
+            _loadedJobId = null;
+            _view = null;
+            _loadWarning = null;
+            _alertSeverity = Severity.Error;
+            _bootstrapState = AuthState.IsInitialized
+                ? RVideoDetailBootstrapState.LoadingJob
+                : RVideoDetailBootstrapState.WaitingForAuth;
+        }
+
+        if (AuthState.IsInitialized)
+        {
+            Logger.LogInformation("RVIDEO_DETAIL_AUTH_READY jobId={JobId}", JobId);
+            await LoadJobAsync();
+        }
+        else
+        {
+            Logger.LogInformation("RVIDEO_DETAIL_WAITING_AUTH jobId={JobId}", JobId);
+            _bootstrapState = RVideoDetailBootstrapState.WaitingForAuth;
+        }
+    }
+
+    public void Dispose()
+    {
+        AuthState.OnChange -= HandleAuthStateChanged;
+    }
+
+    private void HandleAuthStateChanged() => _ = InvokeAsync(async () =>
+    {
+        if (AuthState.IsInitialized)
+        {
+            Logger.LogInformation("RVIDEO_DETAIL_AUTH_READY jobId={JobId}", JobId);
+            await LoadJobAsync();
+        }
+
+        StateHasChanged();
+    });
+
+    private async Task LoadJobAsync()
+    {
+        if (!AuthState.IsInitialized)
+        {
+            Logger.LogInformation("RVIDEO_DETAIL_WAITING_AUTH jobId={JobId}", JobId);
+            _bootstrapState = RVideoDetailBootstrapState.WaitingForAuth;
+            return;
+        }
+
+        if (_loadInProgress || _loadedJobId == JobId)
+        {
+            return;
+        }
+
+        if (AuthState.CurrentUser is not { IsCustomer: true } user)
+        {
+            _view = null;
+            _loadedJobId = null;
+            _loadWarning = "Please sign in with a customer account.";
+            _alertSeverity = Severity.Warning;
+            _bootstrapState = RVideoDetailBootstrapState.Error;
+            return;
+        }
+
+        _loadInProgress = true;
         _loadWarning = null;
+        _alertSeverity = Severity.Error;
+        _bootstrapState = RVideoDetailBootstrapState.LoadingJob;
+        Logger.LogInformation("RVIDEO_DETAIL_LOAD_START jobId={JobId}", JobId);
+        CancellationTokenSource? timeout = null;
         try
         {
-            _view = AuthState.CurrentUser is { IsCustomer: true } user
-                ? await RVideoJobs.GetByJobIdAsync(JobId, user)
-                : null;
+            timeout = new CancellationTokenSource(LoadTimeout);
+            _view = await RVideoJobs.GetByJobIdAsync(JobId, user, timeout.Token);
+            if (_view is null)
+            {
+                _loadedJobId = null;
+                _loadWarning = "RVIDEO job was not found.";
+                _bootstrapState = RVideoDetailBootstrapState.Error;
+            }
+            else
+            {
+                _loadedJobId = JobId;
+                _bootstrapState = RVideoDetailBootstrapState.Ready;
+                Logger.LogInformation("RVIDEO_DETAIL_LOAD_SUCCESS jobId={JobId} projectId={ProjectId}", JobId, _view.Project.Id);
+            }
+        }
+        catch (OperationCanceledException ex) when (timeout?.Token.IsCancellationRequested == true)
+        {
+            Logger.LogWarning(ex, "RVIDEO_DETAIL_LOAD_TIMEOUT jobId={JobId} timeoutSeconds={TimeoutSeconds}", JobId, LoadTimeout.TotalSeconds);
+            _view = null;
+            _loadedJobId = null;
+            _loadWarning = "RVIDEO loading timed out. Please try again.";
+            _bootstrapState = RVideoDetailBootstrapState.Error;
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "RVIDEO_JOB_DETAIL_BOOTSTRAP_FAILED jobId={JobId}", JobId);
+            Logger.LogError(ex, "RVIDEO_DETAIL_LOAD_FAILED jobId={JobId}", JobId);
             _view = null;
-            _loadWarning = "Không thể tải đầy đủ dữ liệu RVIDEO. Vui lòng thử tải lại.";
+            _loadedJobId = null;
+            _loadWarning = "RVIDEO could not be loaded. Please try again.";
+            _bootstrapState = RVideoDetailBootstrapState.Error;
         }
         finally
         {
-            _loading = false;
+            timeout?.Dispose();
+            _loadInProgress = false;
         }
     }
 }

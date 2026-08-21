@@ -728,7 +728,7 @@ else
             if (AuthState.CurrentUser is not null)
             {
                 _projectDialogOpen = true;
-                if (_jobId is not null && AuthState.CurrentUser is { IsCustomer: true } user)
+                if (_projectId is null && _jobId is not null && AuthState.CurrentUser is { IsCustomer: true } user)
                 {
                     try
                     {
@@ -787,7 +787,7 @@ else
                 if (AuthState.CurrentUser is not null)
                 {
                     _projectDialogOpen = true;
-                    if (_jobId is not null && AuthState.CurrentUser is { IsCustomer: true } user)
+                    if (_projectId is null && _jobId is not null && AuthState.CurrentUser is { IsCustomer: true } user)
                     {
                         try
                         {
