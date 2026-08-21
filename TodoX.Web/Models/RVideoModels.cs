@@ -75,6 +75,8 @@ public sealed class RVideoJobSettingsRequest
     public decimal MusicVolume { get; set; } = 0.8m;
 }
 
+public sealed record UploadedCharacterSnapshot(string Source, string FileName, string StorageKey, string FileUrl);
+
 public sealed class RVideoSceneImportDocument
 {
     public string? VideoTitle { get; set; }
@@ -204,6 +206,11 @@ public static class RVideoSceneLifecycleClassifier
 
 public static class RVideoRules
 {
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        PropertyNameCaseInsensitive = true
+    };
+
     public static readonly int[] SupportedDurations = [4, 6, 8, 10];
     public static readonly string[] SupportedAspectRatios = ["16:9", "9:16"];
     public static readonly string[] SupportedResolutions = ["720p", "1080p", "4K"];
@@ -264,7 +271,7 @@ public static class RVideoRules
             request.CharacterSnapshot = null;
         }
         else if (request.CharacterMode == RVideoCharacterModes.Upload
-                 && request.CharacterSnapshot is null)
+                 && !HasUsableUploadedCharacterSnapshot(request.CharacterSnapshot))
         {
             throw new InvalidOperationException("RVVIDEO_UPLOADED_CHARACTER_REQUIRED");
         }
@@ -365,6 +372,50 @@ public static class RVideoRules
             MusicSnapshot = ParseSnapshot(settings.MusicSnapshotJson),
             MusicVolume = settings.MusicVolume
         };
+
+    public static void PreserveValidUploadedCharacterSnapshot(
+        RVideoJobSettingsRequest request,
+        RVideoJobSettingsDto persistedSettings)
+    {
+        if (request.SkipCharacter
+            || !string.Equals(request.CharacterMode, RVideoCharacterModes.Upload, StringComparison.OrdinalIgnoreCase)
+            || HasUsableUploadedCharacterSnapshot(request.CharacterSnapshot)
+            || persistedSettings.SkipCharacter
+            || !string.Equals(persistedSettings.CharacterMode, RVideoCharacterModes.Upload, StringComparison.OrdinalIgnoreCase)
+            || !HasUsableUploadedCharacterSnapshot(persistedSettings.CharacterSnapshotJson))
+        {
+            return;
+        }
+
+        request.CharacterSnapshot = JsonSerializer.Deserialize<UploadedCharacterSnapshot>(
+            persistedSettings.CharacterSnapshotJson!,
+            JsonOptions);
+    }
+
+    public static bool HasUsableUploadedCharacterSnapshot(object? snapshot)
+        => snapshot is not null
+           && HasUsableUploadedCharacterSnapshot(JsonSerializer.Serialize(snapshot, JsonOptions));
+
+    public static bool HasUsableUploadedCharacterSnapshot(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return false;
+
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            var root = document.RootElement;
+            return HasValue(root, "fileUrl") || HasValue(root, "storageKey");
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    private static bool HasValue(JsonElement root, string propertyName)
+        => root.TryGetProperty(propertyName, out var value)
+           && value.ValueKind == JsonValueKind.String
+           && !string.IsNullOrWhiteSpace(value.GetString());
 
     private static object? ParseSnapshot(string? json)
         => string.IsNullOrWhiteSpace(json) ? null : JsonNode.Parse(json) ?? new JsonObject();

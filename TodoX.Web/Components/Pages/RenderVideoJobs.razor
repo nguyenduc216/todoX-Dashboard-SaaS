@@ -544,6 +544,11 @@ else
 }
 
 @code {
+    private static readonly JsonSerializerOptions RVideoJsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        PropertyNameCaseInsensitive = true
+    };
+
     [SupplyParameterFromQuery(Name = "projectId")]
     public long? QueryProjectId { get; set; }
 
@@ -1964,8 +1969,6 @@ else
         return InvokeAsync(StateHasChanged);
     }
 
-    private sealed record UploadedCharacterSnapshot(string Source, string FileName, string StorageKey, string FileUrl);
-
     private static bool ReadAutoFinish(string? prompt)
     {
         if (!TryExtractJsonRange(prompt ?? string.Empty, out var start, out var end))
@@ -2297,7 +2300,7 @@ else
             _uploadedCharacter = null;
             if (!string.IsNullOrWhiteSpace(settings?.CharacterSnapshotJson) && _characterMode == RVideoCharacterModes.Upload)
             {
-                _uploadedCharacter = JsonSerializer.Deserialize<UploadedCharacterSnapshot>(settings.CharacterSnapshotJson);
+                _uploadedCharacter = JsonSerializer.Deserialize<UploadedCharacterSnapshot>(settings.CharacterSnapshotJson, RVideoJsonOptions);
             }
             _voiceMode = RVideoRules.NormalizeVoiceMode(settings?.VoiceMode);
             _voiceCatalogCode = _voiceMode == RVideoVoiceModes.Library ? settings?.VoiceCatalogCode : null;
@@ -2392,7 +2395,6 @@ else
             PointStatus = RenderPointStatuses.NotRequired
         }, _project.Id);
 
-        _batchActive = true;
         if (alreadyActive)
         {
             Logger.LogInformation("VIDEO_RENDER_SCENE_IMAGE_BATCH_ALREADY_ACTIVE projectId={ProjectId} jobId={JobId}", _project.Id, job.Id);
@@ -2415,8 +2417,21 @@ else
         {
             return;
         }
-        await EnqueueBulkSceneImageRenderAsync(onlyMissingOrFailed: true);
-        Snackbar.Add("Đã enqueue render ảnh cho các scene còn thiếu/lỗi.", Severity.Info);
+
+        _batchActive = true;
+        await InvokeAsync(StateHasChanged);
+        try
+        {
+            await EnqueueBulkSceneImageRenderAsync(onlyMissingOrFailed: true);
+            Snackbar.Add("Đã enqueue render ảnh cho các scene còn thiếu/lỗi.", Severity.Info);
+        }
+        catch (Exception ex)
+        {
+            _batchActive = false;
+            Logger.LogError(ex, "VIDEO_RENDER_SCENE_IMAGE_BATCH_ENQUEUE_FAILED projectId={ProjectId}", _project.Id);
+            Snackbar.Add(ex.Message, Severity.Error);
+            await InvokeAsync(StateHasChanged);
+        }
     }
 
     // ------------------------------------------------------------------
@@ -2442,9 +2457,14 @@ else
         {
             if (!await SaveSceneAsync(scene))
             {
+                _sceneRerendering.Remove(scene.Id);
                 return;
             }
-            if (_project is null) return;
+            if (_project is null)
+            {
+                _sceneRerendering.Remove(scene.Id);
+                return;
+            }
             scene = _project.Scenes.FirstOrDefault(x => x.Id == scene.Id) ?? scene;
             draft = GetSceneDraft(scene);
         }
@@ -2452,6 +2472,7 @@ else
         if (await SceneVersions.HasActiveImageVersionAsync(scene.Id))
         {
             Snackbar.Add($"Scene {scene.SceneIndex} đang có phiên bản ảnh được xử lý.", Severity.Info);
+            _sceneRerendering.Remove(scene.Id);
             return;
         }
 
@@ -2571,7 +2592,11 @@ else
             throw new InvalidOperationException("RVVIDEO_PROJECT_NOT_FOUND");
         }
 
-        await RVideoSettings.SaveAsync(_project.Id, BuildRVideoSettingsRequest());
+        var persistedSettings = await RVideoSettings.GetAsync(_project.Id)
+            ?? throw new InvalidOperationException("RVVIDEO_SETTINGS_NOT_FOUND");
+        var request = BuildRVideoSettingsRequest();
+        TodoX.Web.Models.RVideoRules.PreserveValidUploadedCharacterSnapshot(request, persistedSettings);
+        await RVideoSettings.SaveAsync(_project.Id, request);
         var settings = await RVideoSettings.GetAsync(_project.Id)
             ?? throw new InvalidOperationException("RVVIDEO_SETTINGS_NOT_FOUND");
         return TodoX.Web.Services.Render.RVideoSceneImageReferenceSelection.Resolve(settings);

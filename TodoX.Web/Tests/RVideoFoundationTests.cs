@@ -3,6 +3,7 @@ using TodoX.Web.Models.Catalog;
 using TodoX.Web.Models.Timelapse;
 using TodoX.Web.Services.Render;
 using TodoX.Web.Services.VideoRender;
+using System.Text.Json;
 using Xunit;
 
 namespace TodoX.Web.Tests;
@@ -394,6 +395,94 @@ public sealed class RVideoFoundationTests
     }
 
     [Fact]
+    public void CamelCaseUploadedSnapshotDeserializesIntoUploadedCharacterSnapshot()
+    {
+        var snapshot = JsonSerializer.Deserialize<UploadedCharacterSnapshot>(
+            """
+            {
+              "source": "UPLOAD",
+              "fileUrl": "/uploads/rvideo_character/202608/character.jpg",
+              "fileName": "character.jpg",
+              "storageKey": "rvideo_character/202608/character.jpg"
+            }
+            """,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web)
+            {
+                PropertyNameCaseInsensitive = true
+            });
+
+        Assert.NotNull(snapshot);
+        Assert.Equal("UPLOAD", snapshot!.Source);
+        Assert.Equal("/uploads/rvideo_character/202608/character.jpg", snapshot.FileUrl);
+        Assert.Equal("character.jpg", snapshot.FileName);
+        Assert.Equal("rvideo_character/202608/character.jpg", snapshot.StorageKey);
+    }
+
+    [Fact]
+    public void ValidPersistedUploadSnapshotSurvivesEmptyUiSaveRequest()
+    {
+        var request = new RVideoJobSettingsRequest
+        {
+            SkipCharacter = false,
+            CharacterMode = RVideoCharacterModes.Upload,
+            CharacterSnapshot = new UploadedCharacterSnapshot("UPLOAD", "", "", "")
+        };
+        var persisted = new RVideoJobSettingsDto
+        {
+            SkipCharacter = false,
+            CharacterMode = RVideoCharacterModes.Upload,
+            CharacterSnapshotJson = """
+                {
+                  "source": "UPLOAD",
+                  "fileUrl": "/uploads/rvideo_character/202608/character.jpg",
+                  "fileName": "character.jpg",
+                  "storageKey": "rvideo_character/202608/character.jpg"
+                }
+                """
+        };
+
+        RVideoRules.PreserveValidUploadedCharacterSnapshot(request, persisted);
+        Assert.NotNull(request.CharacterSnapshot);
+        var input = RVideoSceneImageReferenceSelection.BuildBatchInput(new RVideoJobSettingsDto
+        {
+            SkipCharacter = request.SkipCharacter,
+            CharacterMode = request.CharacterMode,
+            CharacterSnapshotJson = JsonSerializer.Serialize(request.CharacterSnapshot, new JsonSerializerOptions(JsonSerializerDefaults.Web))
+        });
+
+        Assert.NotNull(request.CharacterSnapshot);
+        Assert.Equal(RVideoSceneImageReferenceSelection.UploadSource, input.ReferenceSource);
+        Assert.Null(input.CharacterId);
+        Assert.Equal("/uploads/rvideo_character/202608/character.jpg", input.CharacterReferenceUrl);
+        Assert.Equal("rvideo_character/202608/character.jpg", input.CharacterReferenceObjectKey);
+    }
+
+    [Fact]
+    public void PerSceneRerenderUploadReferenceUsesPersistedSnapshotWithoutCharacterId()
+    {
+        var settings = new RVideoJobSettingsDto
+        {
+            SkipCharacter = false,
+            CharacterMode = RVideoCharacterModes.Upload,
+            CharacterSnapshotJson = """
+                {
+                  "source": "UPLOAD",
+                  "fileUrl": "/uploads/rvideo_character/202608/character.jpg",
+                  "storageKey": "rvideo_character/202608/character.jpg"
+                }
+                """
+        };
+
+        var reference = RVideoSceneImageReferenceSelection.Resolve(settings);
+
+        Assert.Equal(RVideoSceneImageReferenceSelection.UploadSource, reference.Source);
+        Assert.True(reference.ReferenceRequested);
+        Assert.Null(reference.CharacterId);
+        Assert.Equal("/uploads/rvideo_character/202608/character.jpg", reference.Url);
+        Assert.Equal("rvideo_character/202608/character.jpg", reference.ObjectKey);
+    }
+
+    [Fact]
     public void UploadModeRequiresSnapshotReferenceBeforeEnqueue()
     {
         var settings = new RVideoJobSettingsDto
@@ -406,6 +495,28 @@ public sealed class RVideoFoundationTests
         var ex = Assert.Throws<InvalidOperationException>(() => RVideoSceneImageReferenceSelection.Resolve(settings));
 
         Assert.Equal("RVVIDEO_UPLOADED_CHARACTER_REFERENCE_UNAVAILABLE", ex.Message);
+    }
+
+    [Fact]
+    public void InvalidUploadSnapshotIsNotPreservedForManualRender()
+    {
+        var request = new RVideoJobSettingsRequest
+        {
+            SkipCharacter = false,
+            CharacterMode = RVideoCharacterModes.Upload,
+            CharacterSnapshot = null
+        };
+        var persisted = new RVideoJobSettingsDto
+        {
+            SkipCharacter = false,
+            CharacterMode = RVideoCharacterModes.Upload,
+            CharacterSnapshotJson = """{"source":"UPLOAD","fileUrl":null,"storageKey":null}"""
+        };
+
+        RVideoRules.PreserveValidUploadedCharacterSnapshot(request, persisted);
+
+        var ex = Assert.Throws<InvalidOperationException>(() => RVideoRules.ValidateSettings(request));
+        Assert.Equal("RVVIDEO_UPLOADED_CHARACTER_REQUIRED", ex.Message);
     }
 
     [Fact]
