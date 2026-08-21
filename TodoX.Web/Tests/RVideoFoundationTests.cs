@@ -385,14 +385,7 @@ public sealed class RVideoFoundationTests
                 """
         };
 
-        var reference = RVideoSceneImageReferenceSelection.Resolve(settings);
-        var input = new SceneImageBatchInput
-        {
-            ReferenceSource = reference.Source,
-            CharacterId = reference.CharacterId,
-            CharacterReferenceUrl = reference.Url,
-            CharacterReferenceObjectKey = reference.ObjectKey
-        };
+        var input = RVideoSceneImageReferenceSelection.BuildBatchInput(settings);
 
         Assert.Equal(RVideoSceneImageReferenceSelection.UploadSource, input.ReferenceSource);
         Assert.Null(input.CharacterId);

@@ -81,6 +81,20 @@ public sealed record RVideoSceneImageReferenceSelection(
         return new(true, settings.SelectedCharacterId, libraryObjectKey, libraryUrl, characterPrompt, LibrarySource);
     }
 
+    public static SceneImageBatchInput BuildBatchInput(RVideoJobSettingsDto settings)
+        => BuildBatchInput(Resolve(settings));
+
+    public static SceneImageBatchInput BuildBatchInput(RVideoSceneImageReferenceSelection reference)
+    {
+        return new SceneImageBatchInput
+        {
+            ReferenceSource = reference.Source,
+            CharacterId = reference.CharacterId,
+            CharacterReferenceObjectKey = reference.ObjectKey,
+            CharacterReferenceUrl = reference.Url
+        };
+    }
+
     private static string? ReadSnapshotString(string? json, params string[] names)
     {
         if (string.IsNullOrWhiteSpace(json)) return null;

@@ -2366,30 +2366,16 @@ else
     private async Task EnqueueBulkSceneImageRenderAsync(bool onlyMissingOrFailed)
     {
         if (_project is null || AuthState.CurrentUser is null) return;
-        var reference = TodoX.Web.Services.Render.RVideoSceneImageReferenceSelection.Resolve(
-            _skipCharacter,
-            _characterMode,
-            _uploadedCharacter?.StorageKey,
-            _uploadedCharacter?.FileUrl,
-            ResolveCurrentCharacter()?.Id,
-            ResolveCurrentCharacter()?.MasterImageObjectKey,
-            ResolveCurrentCharacter()?.MasterImageUrl,
-            ResolveCurrentCharacter()?.NormalizedPrompt);
-        var input = new TodoX.Web.Services.Render.SceneImageBatchInput
-        {
-            CapabilityCode = TodoX.Web.Services.Render.SceneImageRenderContext.RVideoCapabilityCode,
-            ReferenceSource = reference.Source,
-            ProjectId = _project.Id,
-            AspectRatio = _aspectRatio,
-            CharacterId = reference.CharacterId,
-            CharacterReferenceObjectKey = reference.ObjectKey,
-            CharacterReferenceUrl = reference.Url,
-            UserId = AuthState.CurrentUser.UserId,
-            CustomerId = AuthState.CurrentUser.CustomerId,
-            CreatedBy = AuthState.CurrentUser.Email ?? AuthState.CurrentUser.UserId.ToString(),
-            TrustedPayerContext = TodoX.Web.Services.AiProviders.AiBillingPayerResolver.CreateTrustedBackgroundContext(AuthState.CurrentUser),
-            OnlyMissingOrFailed = onlyMissingOrFailed
-        };
+        var reference = await PersistAndResolveRVideoImageReferenceAsync();
+        var input = TodoX.Web.Services.Render.RVideoSceneImageReferenceSelection.BuildBatchInput(reference);
+        input.CapabilityCode = TodoX.Web.Services.Render.SceneImageRenderContext.RVideoCapabilityCode;
+        input.ProjectId = _project.Id;
+        input.AspectRatio = _aspectRatio;
+        input.UserId = AuthState.CurrentUser.UserId;
+        input.CustomerId = AuthState.CurrentUser.CustomerId;
+        input.CreatedBy = AuthState.CurrentUser.Email ?? AuthState.CurrentUser.UserId.ToString();
+        input.TrustedPayerContext = TodoX.Web.Services.AiProviders.AiBillingPayerResolver.CreateTrustedBackgroundContext(AuthState.CurrentUser);
+        input.OnlyMissingOrFailed = onlyMissingOrFailed;
 
         var (job, alreadyActive) = await RenderJobs.EnqueueForProjectIfNoneActiveAsync(new RenderJobCreateModel
         {
@@ -2469,19 +2455,11 @@ else
             return;
         }
 
-        var reference = TodoX.Web.Services.Render.RVideoSceneImageReferenceSelection.Resolve(
-            _skipCharacter,
-            _characterMode,
-            _uploadedCharacter?.StorageKey,
-            _uploadedCharacter?.FileUrl,
-            ResolveCurrentCharacter()?.Id,
-            ResolveCurrentCharacter()?.MasterImageObjectKey,
-            ResolveCurrentCharacter()?.MasterImageUrl,
-            ResolveCurrentCharacter()?.NormalizedPrompt);
         await InvokeAsync(StateHasChanged);
 
         try
         {
+            var reference = await PersistAndResolveRVideoImageReferenceAsync();
             var model = TodoX.Web.Services.Render.RVideoImageModelPolicy.GetInitial();
             var promptScene = new VideoProjectSceneDto
             {
@@ -2584,6 +2562,21 @@ else
             await InvokeAsync(StateHasChanged);
         }
     }
+
+    private async Task<TodoX.Web.Services.Render.RVideoSceneImageReferenceSelection>
+        PersistAndResolveRVideoImageReferenceAsync()
+    {
+        if (_project is null)
+        {
+            throw new InvalidOperationException("RVVIDEO_PROJECT_NOT_FOUND");
+        }
+
+        await RVideoSettings.SaveAsync(_project.Id, BuildRVideoSettingsRequest());
+        var settings = await RVideoSettings.GetAsync(_project.Id)
+            ?? throw new InvalidOperationException("RVVIDEO_SETTINGS_NOT_FOUND");
+        return TodoX.Web.Services.Render.RVideoSceneImageReferenceSelection.Resolve(settings);
+    }
+
 
     private bool IsSceneRendering(VideoProjectSceneDto scene) => _sceneRerendering.Contains(scene.Id);
 
