@@ -68,6 +68,19 @@
     pointer-events: none;
 }
 
+.scene-image-spinner {
+    position: absolute;
+    inset: 50% auto auto 50%;
+    z-index: 3;
+    transform: translate(-50%, -50%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 7px;
+    border-radius: 50%;
+    background: rgba(5, 7, 11, 0.62);
+}
+
 @keyframes scene-image-frame-flash {
     0%, 100% {
         filter: brightness(1);

@@ -45,6 +45,18 @@ public class RenderVideoJobsLayoutTests
         Assert.DoesNotContain(".scene-thumb-placeholder", pageCss);
     }
 
+    [Fact]
+    public void PreviewTab_RendersVideoFrameBeforeVideoActions()
+    {
+        var source = File.ReadAllText(RazorPath);
+        var videoFrameIndex = source.IndexOf("<RenderMediaFrame IsVideo=\"true\"", StringComparison.Ordinal);
+        var actionsIndex = source.IndexOf("<div class=\"scene-media-actions\">", videoFrameIndex, StringComparison.Ordinal);
+
+        Assert.True(videoFrameIndex >= 0);
+        Assert.True(actionsIndex >= 0);
+        Assert.True(videoFrameIndex < actionsIndex);
+    }
+
     private static string Between(string source, string startText, string endText)
     {
         var start = source.IndexOf(startText, StringComparison.Ordinal);

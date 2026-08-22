@@ -95,6 +95,12 @@
     min-width: 0;
 }
 
+.scene-media-actions {
+    display: flex;
+    justify-content: center;
+    min-height: 32px;
+}
+
 .scene-details-column {
     min-width: 0;
     display: flex;

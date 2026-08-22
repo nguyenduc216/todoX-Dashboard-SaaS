@@ -20,6 +20,9 @@
                 <img src="@ThumbnailUrl" class="scene-media-image scene-image-dim" />
             }
             <div class="scene-image-shimmer"><span>@ResolvedLoadingText</span></div>
+            <div class="scene-image-spinner" role="status" aria-live="polite">
+                <MudProgressCircular Indeterminate="true" Color="Color.Warning" Size="Size.Small" />
+            </div>
         </div>
     }
     else if (IsFailed)
@@ -40,10 +43,6 @@
     {
         <div class="scene-video-ready">
             <img src="@ThumbnailUrl" class="scene-media-image scene-image-dim" />
-            @if (!string.IsNullOrWhiteSpace(ReadyText))
-            {
-                <div class="scene-video-ready-label">@ReadyText</div>
-            }
         </div>
     }
     else
@@ -99,7 +98,7 @@
         {
             MediaRenderState.Queued => "Đang chờ",
             MediaRenderState.Rendering => IsVideo ? "Đang tạo video" : "Đang tạo ảnh",
-            MediaRenderState.Downloading => "Đang tải kết quả",
+            MediaRenderState.Downloading => "Đang nhận kết quả",
             _ => string.Empty
         };
     private string FrameStyle => $"--render-media-aspect-ratio: {ResolveAspectRatioValue(AspectRatio)}; --render-media-max-width: {ResolveMaxWidth(AspectRatio)}px; --render-media-max-height: {ResolveMaxHeight(AspectRatio)}px;";

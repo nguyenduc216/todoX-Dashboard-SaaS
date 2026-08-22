@@ -348,6 +348,14 @@ public sealed class RVideoProviderPollingRegressionTests
     }
 
     [Fact]
+    public void SharedMediaRendererUsesRealIndeterminateSpinnerForActiveStates()
+    {
+        var source = ReadRepoFile("Components", "Shared", "RenderMediaFrame.razor");
+        Assert.Contains("MudProgressCircular", source);
+        Assert.Contains("Indeterminate=\"true\"", source);
+    }
+
+    [Fact]
     public void RVideoProjectProjectionFallsBackToSelectedCompletedSceneVideoVersion()
     {
         var source = ReadRepoFile("Services", "VideoRender", "VideoRenderRepository.cs");

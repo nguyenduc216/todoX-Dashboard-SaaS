@@ -355,6 +355,7 @@ else
                                                                   OnRetry="@(() => RerenderSceneImageAsync(scene))"
                                                                   OnClick="@(() => OpenScenePreview(scene))" />
                                                 <MudText Typo="Typo.caption" Color="Color.Secondary">@ProjectAspectRatio · @ProjectResolution</MudText>
+                                                <div class="scene-media-actions">
                                                 <MudStack Row="true" Spacing="1" Class="flex-wrap gap-1">
                                                     <MudTooltip Text="Xem prompt ảnh"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Image" OnClick="@(() => OpenScenePrompt(scene, ScenePromptKind.Image))" aria-label="Xem prompt ảnh" /></MudTooltip>
                                                     <MudTooltip Text="Xem prompt video"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Movie" OnClick="@(() => OpenScenePrompt(scene, ScenePromptKind.Motion))" aria-label="Xem prompt video" /></MudTooltip>
@@ -362,10 +363,20 @@ else
                                                     <MudTooltip Text="Lịch sử ảnh"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.History" OnClick="@(() => ToggleImageHistoryAsync(scene))" aria-label="Lịch sử ảnh" /></MudTooltip>
                                                     <MudTooltip Text="Hướng dẫn giọng đọc"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Audiotrack" OnClick="@(() => OpenSceneVoiceInstruction(scene))" aria-label="Xem hướng dẫn giọng đọc" /></MudTooltip>
                                                 </MudStack>
+                                                </div>
                                             </MudStack>
                                         </MudItem>
                                         <MudItem xs="12" md="6">
                                             <MudStack Spacing="1">
+                                                <RenderMediaFrame IsVideo="true"
+                                                                  MediaUrl="@ResolveDraftVideoUrl(scene, draft)"
+                                                                  ThumbnailUrl="@ResolveDraftImageUrl(scene, draft)"
+                                                                  AspectRatio="@ProjectAspectRatio"
+                                                                  State="@ResolveVideoMediaState(scene)"
+                                                                  EmptyText="Chưa render video"
+                                                                  FailedText="Lỗi render video"
+                                                                  OnRetry="@(() => EnqueueSceneVideoAsync(scene))" />
+                                                <div class="scene-media-actions">
                                                 <MudStack Row="true" Spacing="1" Class="flex-wrap gap-1">
                                                     <MudTooltip Text="Tạo video scene">
                                                         <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Movie" Color="Color.Primary"
@@ -384,15 +395,7 @@ else
                                                                        aria-label="Chỉnh prompt scene" />
                                                     </MudTooltip>
                                                 </MudStack>
-                                                <RenderMediaFrame IsVideo="true"
-                                                                  MediaUrl="@ResolveDraftVideoUrl(scene, draft)"
-                                                                  ThumbnailUrl="@ResolveDraftImageUrl(scene, draft)"
-                                                                  AspectRatio="@ProjectAspectRatio"
-                                                                  State="@ResolveVideoMediaState(scene)"
-                                                                  EmptyText="Chưa render video"
-                                                                  FailedText="Lỗi render video"
-                                                                  ReadyText="Sẵn sàng tạo video"
-                                                                  OnRetry="@(() => EnqueueSceneVideoAsync(scene))" />
+                                                </div>
                                                 @if (_sceneRerenderErrors.TryGetValue(scene.Id, out var sceneErr) && !string.IsNullOrWhiteSpace(sceneErr))
                                                 {
                                                     <MudText Typo="Typo.caption" Color="Color.Error">@sceneErr</MudText>
@@ -1189,6 +1192,7 @@ else
                 }
                 ReconcileSceneDrafts();
                 RebuildSceneEventState();
+                await LoadSceneVideoVersionsForStateAsync(_project.Scenes);
                 try
                 {
                     _defaultImageToVideoProvider = await AiProviders.GetDefaultProviderAsync(TodoX.Web.Services.VideoRender.RVideoVideoModelPolicy.CapabilityCode);
@@ -1464,9 +1468,14 @@ else
                                     && !string.IsNullOrWhiteSpace(x.PublicUrl ?? x.SourceFilePath)));
 
     private string ResolveVideoSceneStatus(VideoProjectSceneDto scene)
-        => HasCompletedVideoVersion(scene)
-            ? VideoSceneStatuses.VideoReady
-            : scene.Status;
+        => ResolveVideoMediaState(scene) switch
+        {
+            MediaRenderState.Queued => VideoSceneStatuses.VideoQueued,
+            MediaRenderState.Rendering or MediaRenderState.Downloading => VideoSceneStatuses.VideoRendering,
+            MediaRenderState.Ready => VideoSceneStatuses.VideoReady,
+            MediaRenderState.Failed => VideoSceneStatuses.Failed,
+            _ => scene.Status
+        };
 
     private string ResolveVideoSceneLabel(VideoProjectSceneDto scene)
         => ResolveVideoSceneStatus(scene) switch
@@ -3076,15 +3085,78 @@ else
 
     private MediaRenderState ResolveVideoMediaState(VideoProjectSceneDto scene)
     {
-        var status = ResolveVideoSceneStatus(scene);
+        var versions = _videoVersions.TryGetValue(scene.Id, out var loadedVersions)
+            ? loadedVersions
+            : Array.Empty<TodoX.Web.Services.VideoRender.SceneVideoVersionDto>();
+        var latest = versions.OrderByDescending(x => x.VersionNumber).FirstOrDefault();
+        var selectedCompleted = versions.FirstOrDefault(x =>
+            x.IsSelected
+            && string.Equals(x.Status, "completed", StringComparison.OrdinalIgnoreCase)
+            && HasUsableVideoMedia(x));
+
+        if (selectedCompleted is not null
+            || (!string.IsNullOrWhiteSpace(scene.SceneVideoUrl) && HasCompletedVideoVersion(scene)))
+        {
+            return MediaRenderState.Ready;
+        }
+
+        if (latest is not null)
+        {
+            var latestStatus = latest.Status.Trim().ToLowerInvariant();
+            if (latestStatus is "downloading" or "importing" or "reconciling")
+            {
+                return MediaRenderState.Downloading;
+            }
+
+            if (latestStatus is "submitted" or "processing" or "pending_reconciliation" or "rendering")
+            {
+                return MediaRenderState.Rendering;
+            }
+
+            if (latestStatus == "queued")
+            {
+                return MediaRenderState.Queued;
+            }
+
+            if (latestStatus == "failed")
+            {
+                return MediaRenderState.Failed;
+            }
+        }
+
+        var status = scene.Status.Trim().ToLowerInvariant();
         return status switch
         {
             VideoSceneStatuses.VideoQueued => MediaRenderState.Queued,
-            VideoSceneStatuses.VideoRendering => MediaRenderState.Rendering,
+            VideoSceneStatuses.VideoRendering or "submitted" or "processing" or "pending_reconciliation" => MediaRenderState.Rendering,
+            "downloading" or "importing" or "reconciling" => MediaRenderState.Downloading,
             VideoSceneStatuses.VideoReady => MediaRenderState.Ready,
             VideoSceneStatuses.Failed => MediaRenderState.Failed,
             _ => MediaRenderState.Empty
         };
+    }
+
+    private static bool HasUsableVideoMedia(TodoX.Web.Services.VideoRender.SceneVideoVersionDto version)
+        => !string.IsNullOrWhiteSpace(version.PublicUrl)
+           || !string.IsNullOrWhiteSpace(version.SourceFilePath)
+           || !string.IsNullOrWhiteSpace(version.StorageKey);
+
+    private async Task LoadSceneVideoVersionsForStateAsync(IEnumerable<VideoProjectSceneDto> scenes)
+    {
+        if (AuthState.CurrentUser is null) return;
+
+        var loads = scenes.Select(async scene =>
+        {
+            try
+            {
+                _videoVersions[scene.Id] = await SceneVersions.ListSceneVideoVersionsAsync(scene.Id, AuthState.CurrentUser, 0, 20);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "RVIDEO_LOAD_VIDEO_STATE_FAILED sceneId={SceneId}", scene.Id);
+            }
+        });
+        await Task.WhenAll(loads);
     }
 
     private ActiveCharacterDto? ResolveCurrentCharacter()
