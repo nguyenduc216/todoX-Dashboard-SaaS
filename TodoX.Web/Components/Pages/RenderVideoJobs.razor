@@ -347,7 +347,7 @@ else
                                     </MudStack>
 
                                     <MudGrid Class="scene-surface-grid">
-                                        <MudItem xs="12" md="5">
+                                        <MudItem xs="12" md="6">
                                             <MudStack Spacing="1">
                                                 @RenderSceneImageFrame(scene, sceneState, draft)
                                                 <MudStack Row="true" Spacing="1" Class="flex-wrap gap-1">
@@ -363,7 +363,7 @@ else
                                                 </MudStack>
                                             </MudStack>
                                         </MudItem>
-                                        <MudItem xs="12" md="7">
+                                        <MudItem xs="12" md="6">
                                             <MudStack Spacing="1">
                                                 <MudStack Row="true" Spacing="1" Class="flex-wrap gap-1 align-center">
                                                     @RenderSceneStatusBadge(scene, "image")
@@ -373,8 +373,6 @@ else
                                                         <MudChip T="string" Size="Size.Small" Color="Color.Warning">Chưa lưu</MudChip>
                                                     }
                                                 </MudStack>
-                                                <MudText Typo="Typo.body2">Scene @scene.SceneIndex: @scene.Title</MudText>
-                                                <MudText Typo="Typo.caption">@scene.DurationSeconds giây</MudText>
                                                 <MudStack Row="true" Spacing="1" Class="flex-wrap gap-1">
                                                     <MudTooltip Text="Tạo video scene">
                                                         <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Movie" Color="Color.Primary"
@@ -635,7 +633,7 @@ else
     private const string Resolution1080p = "1080p";
     private const string Resolution4K = "4K";
 
-    private bool CanMerge => _project is not null && _project.Scenes.Count > 0 && _project.Scenes.All(x => x.Status == VideoSceneStatuses.VideoReady);
+    private bool CanMerge => _project is not null && _project.Scenes.Count > 0 && _project.Scenes.All(x => ResolveVideoSceneStatus(x) == VideoSceneStatuses.VideoReady);
 
     private string BuildLogCode() => _projectId is null ? string.Empty : $"video-{_projectId.Value}";
 
@@ -1458,6 +1456,27 @@ else
         return scene.SceneVideoUrl;
     }
 
+    private bool HasCompletedVideoVersion(VideoProjectSceneDto scene)
+        => (!string.IsNullOrWhiteSpace(scene.SceneVideoUrl) || !string.IsNullOrWhiteSpace(scene.SceneVideoPath))
+           || (_videoVersions.TryGetValue(scene.Id, out var versions)
+               && versions.Any(x => x.Status.Equals("completed", StringComparison.OrdinalIgnoreCase)
+                                    && !string.IsNullOrWhiteSpace(x.PublicUrl ?? x.SourceFilePath)));
+
+    private string ResolveVideoSceneStatus(VideoProjectSceneDto scene)
+        => HasCompletedVideoVersion(scene)
+            ? VideoSceneStatuses.VideoReady
+            : scene.Status;
+
+    private string ResolveVideoSceneLabel(VideoProjectSceneDto scene)
+        => ResolveVideoSceneStatus(scene) switch
+        {
+            VideoSceneStatuses.VideoQueued => "Đang chờ",
+            VideoSceneStatuses.VideoRendering => "Đang tạo video",
+            VideoSceneStatuses.VideoReady => "Hoàn tất",
+            VideoSceneStatuses.Failed => "Lỗi",
+            _ => "Chưa render video"
+        };
+
     private string? ResolveDraftVideoPath(VideoProjectSceneDto scene, SceneEditorState draft)
     {
         if (draft.SelectedVideoVersionId is Guid videoVersionId
@@ -1512,7 +1531,8 @@ else
     }
 
     private RenderFragment RenderSceneStatusBadge(VideoProjectSceneDto scene, string taskType) => @<span>
-        @if (IsErrorStatus(scene.Status))
+        @{ var status = string.Equals(taskType, "video", StringComparison.OrdinalIgnoreCase) ? ResolveVideoSceneStatus(scene) : scene.Status; }
+        @if (IsErrorStatus(status))
         {
             <MudTooltip Text="Click để xem chi tiết lỗi">
                 <span class="scene-failed-status-trigger"
@@ -1524,13 +1544,13 @@ else
                       @onclick="@(() => OpenSceneErrorDetailAsync(scene, taskType))"
                       @onkeydown:stopPropagation="true"
                       @onkeydown="@((KeyboardEventArgs e) => OpenSceneErrorKeyDownAsync(e, scene, taskType))">
-                    <MudChip T="string" Color="@SceneColor(scene.Status)">@SceneLabel(scene.Status)</MudChip>
+                    <MudChip T="string" Color="@SceneColor(status)">@SceneLabel(status)</MudChip>
                 </span>
             </MudTooltip>
         }
         else
         {
-            <MudChip T="string" Color="@SceneColor(scene.Status)">@SceneLabel(scene.Status)</MudChip>
+            <MudChip T="string" Color="@SceneColor(status)">@SceneLabel(status)</MudChip>
         }
     </span>;
 
@@ -1575,7 +1595,7 @@ else
             SceneIndex = scene.SceneIndex,
             SceneTitle = scene.Title,
             TaskType = string.Equals(taskType, "video", StringComparison.OrdinalIgnoreCase) ? "video" : "image",
-            Status = scene.Status,
+            Status = string.Equals(taskType, "video", StringComparison.OrdinalIgnoreCase) ? ResolveVideoSceneStatus(scene) : scene.Status,
             ErrorStage = "UNKNOWN",
             ErrorCode = "log_detail_unavailable",
             ErrorMessage = string.IsNullOrWhiteSpace(scene.ErrorMessage) ? message : scene.ErrorMessage,
@@ -1614,19 +1634,20 @@ else
         @{
             var imageUrl = ResolveDraftImageUrl(scene, draft);
             var videoUrl = ResolveDraftVideoUrl(scene, draft);
+            var status = ResolveVideoSceneStatus(scene);
         }
         @if (!string.IsNullOrWhiteSpace(videoUrl))
         {
             <video src="@videoUrl" poster="@imageUrl" controls class="scene-media-video"></video>
         }
-        else if (scene.Status is VideoSceneStatuses.VideoQueued or VideoSceneStatuses.VideoRendering)
+        else if (status is VideoSceneStatuses.VideoQueued or VideoSceneStatuses.VideoRendering)
         {
             <div class="scene-image-frame scene-image-rendering is-rendering">
                 @if (!string.IsNullOrWhiteSpace(imageUrl))
                 {
                     <img src="@CacheBust(imageUrl, scene.UpdatedAt)" class="scene-media-image scene-image-dim" />
                 }
-                <div class="scene-image-shimmer"><span>@SceneLabel(scene.Status)</span></div>
+                <div class="scene-image-shimmer"><span>@ResolveVideoSceneLabel(scene)</span></div>
             </div>
         }
         else if (string.IsNullOrWhiteSpace(imageUrl))
@@ -1652,6 +1673,8 @@ else
            && HasProjectAspectRatio
            && HasProjectResolution
            && _defaultImageToVideoProvider is not null
+           && !HasCompletedVideoVersion(scene)
+           && !string.Equals(ResolveVideoSceneStatus(scene), VideoSceneStatuses.VideoRendering, StringComparison.OrdinalIgnoreCase)
            && IsSceneVideoPromptValid(scene, draft);
 
     private string SceneVideoDisabledReason(VideoProjectSceneDto scene, SceneEditorState draft)
@@ -3335,12 +3358,12 @@ else
 
     private static string SceneLabel(string status) => status switch
     {
-        VideoSceneStatuses.Draft => "Draft",
-        VideoSceneStatuses.ImageReady => "Image ready",
-        VideoSceneStatuses.VideoQueued => "Video queued",
-        VideoSceneStatuses.VideoRendering => "Rendering",
-        VideoSceneStatuses.VideoReady => "Video ready",
-        VideoSceneStatuses.Failed => "Failed",
+        VideoSceneStatuses.Draft => "Nháp",
+        VideoSceneStatuses.ImageReady => "Đã sẵn ảnh",
+        VideoSceneStatuses.VideoQueued => "Đang chờ",
+        VideoSceneStatuses.VideoRendering => "Đang tạo video",
+        VideoSceneStatuses.VideoReady => "Hoàn tất",
+        VideoSceneStatuses.Failed => "Lỗi",
         _ => status
     };
 

@@ -8,7 +8,7 @@ public sealed record RVideoVideoModelPolicyEntry(
     int AttemptIndex,
     string ProviderCode,
     string Model,
-    string Mode);
+    string? Mode);
 
 public static class RVideoVideoModelPolicy
 {
@@ -17,10 +17,10 @@ public static class RVideoVideoModelPolicy
 
     public static readonly IReadOnlyList<RVideoVideoModelPolicyEntry> Models =
     [
-        new(0, ProviderCode, "seedance_20_pro", "fast"),
-        new(1, ProviderCode, "seedance_20_pro", "fast_2"),
-        new(2, ProviderCode, "seedance_20_pro", "professional"),
-        new(3, ProviderCode, "seedance_25_omni", "business_professional")
+        new(0, ProviderCode, "veo_omni", "flash"),
+        new(1, ProviderCode, "veo_3_1", "fast"),
+        new(2, ProviderCode, "veo_3_1", "lite"),
+        new(3, ProviderCode, "grok_video_heavy", null)
     ];
 
     public static RVideoVideoModelPolicyEntry GetInitial() => Models[0];
@@ -206,7 +206,6 @@ public sealed class RVideo79AiVideoService : IRVideo79AiVideoService
         {
             ["type"] = "video",
             ["duration"] = Math.Max(1, request.DurationSeconds).ToString(),
-            ["mode"] = request.Model.Mode,
             ["ratio"] = NormalizeRatio(request.AspectRatio),
             ["resolution"] = NormalizeResolution(request.Resolution),
             ["privacy"] = "PRIVATE",
@@ -214,6 +213,10 @@ public sealed class RVideo79AiVideoService : IRVideo79AiVideoService
             ["project_id"] = request.Runtime.ProjectId,
             ["images"] = imagesJson
         };
+        if (!string.IsNullOrWhiteSpace(request.Model.Mode))
+        {
+            options["mode"] = request.Model.Mode;
+        }
         var raw = new Ai79TaskSubmitRequest(
             request.Runtime.BaseUrl,
             request.Runtime.SubmitPath,

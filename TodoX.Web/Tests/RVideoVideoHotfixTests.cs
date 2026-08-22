@@ -19,9 +19,9 @@ public sealed class RVideoVideoHotfixTests
         Assert.All(RVideoVideoModelPolicy.Models, model =>
         {
             Assert.Equal(RVideoVideoModelPolicy.ProviderCode, model.ProviderCode);
-            Assert.StartsWith("seedance_", model.Model, StringComparison.OrdinalIgnoreCase);
         });
-        Assert.Equal("seedance_20_pro", RVideoVideoModelPolicy.GetInitial().Model);
+        Assert.Equal("veo_omni", RVideoVideoModelPolicy.GetInitial().Model);
+        Assert.Equal("flash", RVideoVideoModelPolicy.GetInitial().Mode);
         Assert.True(RVideoVideoModelPolicy.Is79AiProvider("79ai"));
         Assert.True(RVideoVideoModelPolicy.Is79AiProvider("79ai_video"));
         Assert.False(RVideoVideoModelPolicy.Is79AiProvider("yescale_task_video"));
@@ -93,16 +93,16 @@ public sealed class RVideoVideoHotfixTests
     }
 
     [Fact]
-    public void RVideoPricingUsesPositiveCapabilityTariffBeforeUnitCostFallback()
+    public void VideoRenderPricingUsesPositiveCapabilityTariffBeforeUnitCostFallback()
     {
-        var resolver = new YEScaleVideoPricingResolver();
+        var resolver = new VideoRenderPricingResolver();
         var option = new ProviderOptionDto
         {
             ProviderId = 18,
             ProviderCapabilityId = 99,
             ProviderCode = "79ai",
             CapabilityCode = RVideoVideoModelPolicy.CapabilityCode,
-            ModelName = "seedance_20_pro",
+            ModelName = "veo_omni",
             UnitCostPoints = 0
         };
         var capability = new AiProviderCapabilityDto
@@ -116,7 +116,7 @@ public sealed class RVideoVideoHotfixTests
                   "pricing": {
                     "rules": [
                       {
-                        "match": { "model": "seedance_20_pro", "duration": 6 },
+                        "match": { "model": "veo_omni", "mode": "flash", "duration": 6 },
                         "chargedPoints": 42,
                         "costSource": "catalog_todox_ai_model_price"
                       }
@@ -126,7 +126,7 @@ public sealed class RVideoVideoHotfixTests
                 """
         };
 
-        var resolved = resolver.Resolve(option, capability, "9:16", "720p", 6, hasSourceImage: true);
+        var resolved = resolver.Resolve(option, capability, RVideoVideoModelPolicy.GetInitial(), "9:16", "720p", 6);
 
         Assert.Equal(42, resolved.ChargedPoints);
         Assert.Equal("catalog_todox_ai_model_price", resolved.CostSource);

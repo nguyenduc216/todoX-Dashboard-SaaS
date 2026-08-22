@@ -74,6 +74,26 @@ public sealed class RVideoProviderPollingRegressionTests
     }
 
     [Fact]
+    public void SceneVideoBatchRequiresExplicitSceneIds()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "SceneVideoRenderHandler.cs");
+
+        Assert.Contains("RVIDEO_VIDEO_SCENE_IDS_REQUIRED", source);
+        Assert.DoesNotContain("project.Scenes.Select(x => x.Id).ToHashSet()", source);
+    }
+
+    [Fact]
+    public void SceneVideoChildEnqueueSkipsCompletedAndActiveScenes()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "SceneVideoRenderHandler.cs");
+
+        Assert.Contains("SCENE_VIDEO_ALREADY_COMPLETED_SKIPPED", source);
+        Assert.Contains("SCENE_VIDEO_ALREADY_ACTIVE_SKIPPED", source);
+        Assert.Contains("VideoRenderEligibilityStatus.AlreadyCompleted", source);
+        Assert.Contains("VideoRenderEligibilityStatus.AlreadyActive", source);
+    }
+
+    [Fact]
     public void TransientPollFailureWithPersistedTaskUsesProviderPollScheduler()
     {
         var source = ReadRepoFile("Services", "VideoRender", "SceneVideoWorkerHandler.cs");
@@ -205,6 +225,7 @@ public sealed class RVideoProviderPollingRegressionTests
         Assert.Contains("is_selected=true", source);
         Assert.Contains("status='completed'", source);
         Assert.Contains("scene.SceneVideoUrl = selected.PublicUrl ?? selected.SourceFilePath", source);
+        Assert.Contains("scene.Status = VideoSceneStatuses.VideoReady", source);
         Assert.Contains("public long SceneId { get; init; }", source);
     }
 
@@ -220,6 +241,17 @@ public sealed class RVideoProviderPollingRegressionTests
         Assert.DoesNotContain("@RenderVideoHistoryPanel(scene)", source);
         Assert.DoesNotContain("@RenderImageHistoryPanel(scene)", source);
         Assert.Contains("Chưa cấu hình tạo video", source);
+    }
+
+    [Fact]
+    public void RVideoCustomerUiUsesTwoMediaColumnsAndVideoVersionStatus()
+    {
+        var source = ReadRepoFile("Components", "Pages", "RenderVideoJobs.razor");
+
+        Assert.DoesNotContain("MudItem xs=\"12\" md=\"7\"", source);
+        Assert.Contains("ResolveVideoSceneStatus(scene)", source);
+        Assert.Contains("ResolveVideoSceneLabel(scene)", source);
+        Assert.Contains("HasCompletedVideoVersion(scene)", source);
     }
 
     [Fact]

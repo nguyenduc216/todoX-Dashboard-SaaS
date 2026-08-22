@@ -193,6 +193,8 @@ public sealed class VideoRenderRepository
                 {
                     scene.SceneVideoPath = selected.SourceFilePath ?? selected.StorageKey;
                 }
+
+                scene.Status = VideoSceneStatuses.VideoReady;
             }
 
             project.Events = (await conn.QueryAsync<VideoProjectEventDto>(
