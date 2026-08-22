@@ -296,7 +296,7 @@ else
                         <div class="scene-image-toolbar" role="toolbar" aria-label="Thao tác Scene / Hình ảnh">
                             @if (_batchActive)
                             {
-                                <MudChip T="string" Color="Color.Warning" Icon="@Icons.Material.Filled.HourglassBottom">Đang tạo ảnh tĩnh qua AI provider đã cấu hình...</MudChip>
+                                <MudChip T="string" Color="Color.Warning" Icon="@Icons.Material.Filled.HourglassBottom">Đang tạo ảnh</MudChip>
                             }
                             <MudTooltip Text="Tạo ảnh tĩnh cho các scene còn thiếu hoặc lỗi">
                                 <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.AddPhotoAlternate" OnClick="RenderMissingSceneImagesAsync" Disabled="@_batchActive">Tạo ảnh còn thiếu</MudButton>
@@ -327,10 +327,6 @@ else
                                         </MudStack>
                                         <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center" Class="scene-card-meta flex-wrap gap-1">
                                             <MudChip T="string" Size="Size.Small" Color="Color.Info">@ProjectAspectRatio</MudChip>
-                                            @if (draft.IsDirty)
-                                            {
-                                                <MudChip T="string" Size="Size.Small" Color="Color.Warning">Chưa lưu</MudChip>
-                                            }
                                             @RenderSceneStatusBadge(scene, "image")
                                             <MudMenu Dense="true" Icon="@Icons.Material.Filled.MoreVert">
                                                 <MudMenuItem Icon="@Icons.Material.Filled.Save" Disabled="@_busy" OnClick="@(async () => await SaveSceneAsync(scene))">Lưu scene</MudMenuItem>
@@ -349,11 +345,15 @@ else
                                     <MudGrid Class="scene-surface-grid">
                                         <MudItem xs="12" md="6">
                                             <MudStack Spacing="1">
-                                                @RenderSceneImageFrame(scene, sceneState, draft)
-                                                <MudStack Row="true" Spacing="1" Class="flex-wrap gap-1">
-                                                    <MudChip T="string" Size="Size.Small" Color="Color.Info">@ProjectAspectRatio</MudChip>
-                                                    <MudChip T="string" Size="Size.Small" Color="Color.Default">@ProjectResolution</MudChip>
-                                                </MudStack>
+                                                <RenderMediaFrame IsVideo="false"
+                                                                  MediaUrl="@ResolveDraftImageUrl(scene, draft)"
+                                                                  ThumbnailUrl="@ResolveDraftImageUrl(scene, draft)"
+                                                                  StateClass="@SceneStateCss(sceneState)"
+                                                                  StateLabel="@SceneStateLabel(sceneState)"
+                                                                  EmptyText="Chưa render ảnh"
+                                                                  FailedText="Lỗi render ảnh"
+                                                                  OnClick="@(() => OpenScenePreview(scene))" />
+                                                <MudText Typo="Typo.caption" Color="Color.Secondary">@ProjectAspectRatio · @ProjectResolution</MudText>
                                                 <MudStack Row="true" Spacing="1" Class="flex-wrap gap-1">
                                                     <MudTooltip Text="Xem prompt ảnh"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Image" OnClick="@(() => OpenScenePrompt(scene, ScenePromptKind.Image))" aria-label="Xem prompt ảnh" /></MudTooltip>
                                                     <MudTooltip Text="Xem prompt video"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Movie" OnClick="@(() => OpenScenePrompt(scene, ScenePromptKind.Motion))" aria-label="Xem prompt video" /></MudTooltip>
@@ -365,14 +365,6 @@ else
                                         </MudItem>
                                         <MudItem xs="12" md="6">
                                             <MudStack Spacing="1">
-                                                <MudStack Row="true" Spacing="1" Class="flex-wrap gap-1 align-center">
-                                                    @RenderSceneStatusBadge(scene, "image")
-                                                    @RenderSceneStatusBadge(scene, "video")
-                                                    @if (draft.IsDirty)
-                                                    {
-                                                        <MudChip T="string" Size="Size.Small" Color="Color.Warning">Chưa lưu</MudChip>
-                                                    }
-                                                </MudStack>
                                                 <MudStack Row="true" Spacing="1" Class="flex-wrap gap-1">
                                                     <MudTooltip Text="Tạo video scene">
                                                         <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Movie" Color="Color.Primary"
@@ -391,7 +383,14 @@ else
                                                                        aria-label="Chỉnh prompt scene" />
                                                     </MudTooltip>
                                                 </MudStack>
-                                                @RenderSceneVideoFrame(scene, draft)
+                                                <RenderMediaFrame IsVideo="true"
+                                                                  MediaUrl="@ResolveDraftVideoUrl(scene, draft)"
+                                                                  ThumbnailUrl="@ResolveDraftImageUrl(scene, draft)"
+                                                                  StateClass="@(ResolveVideoFrameStateClass(scene))"
+                                                                  StateLabel="@ResolveVideoSceneLabel(scene)"
+                                                                  EmptyText="Chưa render video"
+                                                                  FailedText="Lỗi render video"
+                                                                  ReadyText="Sẵn sàng tạo video" />
                                                 @if (_sceneRerenderErrors.TryGetValue(scene.Id, out var sceneErr) && !string.IsNullOrWhiteSpace(sceneErr))
                                                 {
                                                     <MudText Typo="Typo.caption" Color="Color.Error">@sceneErr</MudText>
@@ -1601,71 +1600,6 @@ else
             ErrorMessage = string.IsNullOrWhiteSpace(scene.ErrorMessage) ? message : scene.ErrorMessage,
             UpdatedAt = new DateTimeOffset(DateTime.SpecifyKind(scene.UpdatedAt, DateTimeKind.Utc))
         };
-
-    private RenderFragment RenderSceneImageFrame(VideoProjectSceneDto scene, RenderSceneImageVisualState sceneState, SceneEditorState draft) => @<div class="scene-media-square">
-        @{
-            var imageUrl = ResolveDraftImageUrl(scene, draft);
-        }
-        @if (sceneState == RenderSceneImageVisualState.Ready && !string.IsNullOrWhiteSpace(imageUrl))
-        {
-            <img src="@CacheBust(imageUrl, scene.UpdatedAt)" class="scene-media-image" @onclick="@(() => OpenScenePreview(scene))" />
-        }
-        else if (RenderSceneImageUiState.IsActive(sceneState))
-        {
-            <div class="scene-image-frame @SceneStateCss(sceneState) is-rendering">
-                @if (!string.IsNullOrWhiteSpace(imageUrl))
-                {
-                    <img src="@CacheBust(imageUrl, scene.UpdatedAt)" class="scene-media-image scene-image-dim" />
-                }
-                <div class="scene-image-shimmer"><span>@SceneStateLabel(sceneState)</span></div>
-            </div>
-        }
-        else if (sceneState == RenderSceneImageVisualState.Failed)
-        {
-            <div class="scene-thumb-placeholder scene-image-failed">Lỗi render ảnh</div>
-        }
-        else
-        {
-            <div class="scene-thumb-placeholder">Chưa render ảnh</div>
-        }
-    </div>;
-
-    private RenderFragment RenderSceneVideoFrame(VideoProjectSceneDto scene, SceneEditorState draft) => @<div class="scene-media-square">
-        @{
-            var imageUrl = ResolveDraftImageUrl(scene, draft);
-            var videoUrl = ResolveDraftVideoUrl(scene, draft);
-            var status = ResolveVideoSceneStatus(scene);
-        }
-        @if (!string.IsNullOrWhiteSpace(videoUrl))
-        {
-            <video src="@videoUrl" poster="@imageUrl" controls class="scene-media-video"></video>
-        }
-        else if (status is VideoSceneStatuses.VideoQueued or VideoSceneStatuses.VideoRendering)
-        {
-            <div class="scene-image-frame scene-image-rendering is-rendering">
-                @if (!string.IsNullOrWhiteSpace(imageUrl))
-                {
-                    <img src="@CacheBust(imageUrl, scene.UpdatedAt)" class="scene-media-image scene-image-dim" />
-                }
-                <div class="scene-image-shimmer"><span>@ResolveVideoSceneLabel(scene)</span></div>
-            </div>
-        }
-        else if (string.IsNullOrWhiteSpace(imageUrl))
-        {
-            <div class="scene-thumb-placeholder">Chưa render video</div>
-        }
-        else
-        {
-            <div class="scene-video-ready">
-                <img src="@CacheBust(imageUrl, scene.UpdatedAt)" class="scene-media-image scene-image-dim" />
-                <MudText Typo="Typo.caption">Sẵn sàng tạo video</MudText>
-            </div>
-        }
-        @if (string.Equals(scene.Status, VideoSceneStatuses.Failed, StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(scene.ErrorMessage))
-        {
-            <MudText Typo="Typo.caption" Color="Color.Error">@scene.ErrorMessage</MudText>
-        }
-    </div>;
 
     private bool CanCreateSceneVideo(VideoProjectSceneDto scene, SceneEditorState draft)
         => !string.IsNullOrWhiteSpace(ResolveDraftImageUrl(scene, draft))
@@ -3111,6 +3045,18 @@ else
         RenderSceneImageVisualState.Failed => "Lỗi render",
         _ => string.Empty
     };
+
+    private string ResolveVideoFrameStateClass(VideoProjectSceneDto scene)
+    {
+        var status = ResolveVideoSceneStatus(scene);
+        return status switch
+        {
+            VideoSceneStatuses.VideoQueued => "scene-image-queued",
+            VideoSceneStatuses.VideoRendering => "scene-image-rendering",
+            VideoSceneStatuses.Failed => "scene-image-failed",
+            _ => string.Empty
+        };
+    }
 
     private ActiveCharacterDto? ResolveCurrentCharacter()
         => _selectedCharacter ?? (_project?.CharacterId is long characterId ? _characters.FirstOrDefault(x => x.Id == characterId) : null);

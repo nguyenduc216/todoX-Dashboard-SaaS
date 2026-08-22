@@ -1,0 +1,59 @@
+@namespace TodoX.Web.Components.Shared
+
+<div class="scene-media-square">
+    @if (HasReadyMedia)
+    {
+        @if (IsVideo)
+        {
+            <video src="@MediaUrl" poster="@ThumbnailUrl" controls class="scene-media-video"></video>
+        }
+        else
+        {
+            <img src="@MediaUrl" class="scene-media-image" @onclick="OnClick" />
+        }
+    }
+    else if (IsActive)
+    {
+        <div class="scene-image-frame @StateClass is-rendering">
+            @if (!string.IsNullOrWhiteSpace(ThumbnailUrl))
+            {
+                <img src="@ThumbnailUrl" class="scene-media-image scene-image-dim" />
+            }
+            <div class="scene-image-shimmer"><span>@StateLabel</span></div>
+        </div>
+    }
+    else if (IsFailed)
+    {
+        <div class="scene-thumb-placeholder scene-image-failed">@FailedText</div>
+    }
+    else if (!string.IsNullOrWhiteSpace(ThumbnailUrl) && IsVideo)
+    {
+        <div class="scene-video-ready">
+            <img src="@ThumbnailUrl" class="scene-media-image scene-image-dim" />
+            @if (!string.IsNullOrWhiteSpace(ReadyText))
+            {
+                <MudText Typo="Typo.caption">@ReadyText</MudText>
+            }
+        </div>
+    }
+    else
+    {
+        <div class="scene-thumb-placeholder">@EmptyText</div>
+    }
+</div>
+
+@code {
+    [Parameter] public bool IsVideo { get; set; }
+    [Parameter] public string? MediaUrl { get; set; }
+    [Parameter] public string? ThumbnailUrl { get; set; }
+    [Parameter] public string StateClass { get; set; } = string.Empty;
+    [Parameter] public string StateLabel { get; set; } = string.Empty;
+    [Parameter] public string EmptyText { get; set; } = string.Empty;
+    [Parameter] public string FailedText { get; set; } = string.Empty;
+    [Parameter] public string? ReadyText { get; set; }
+    [Parameter] public EventCallback OnClick { get; set; }
+
+    private bool HasReadyMedia => !string.IsNullOrWhiteSpace(MediaUrl);
+    private bool IsActive => !string.IsNullOrWhiteSpace(StateClass);
+    private bool IsFailed => FailedText.Length > 0 && StateClass.Contains("failed", StringComparison.OrdinalIgnoreCase);
+}
