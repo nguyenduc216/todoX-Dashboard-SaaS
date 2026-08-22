@@ -1,173 +1,3 @@
-/* Per-scene static image render states for /render-job.
-   Animation is confined to the individual scene image frame — the table itself never flashes,
-   and the frame keeps a fixed size so rows do not jump while rendering. */
-
-.scene-image-frame {
-    position: relative;
-    width: 96px;
-    height: 170px; /* 9:16 aspect for the scene thumb */
-    border-radius: 10px;
-    overflow: hidden;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: var(--mud-palette-background-grey, #f2f2f5);
-    border: 1px solid var(--mud-palette-lines-default, #d9d9e3);
-}
-
-.scene-image-frame.is-rendering {
-    animation: scene-image-frame-flash 1.05s ease-in-out infinite;
-}
-
-.scene-image-frame .scene-thumb {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-}
-
-.scene-image-dim {
-    opacity: 0.35;
-    filter: saturate(0.6);
-}
-
-.scene-image-label {
-    position: relative;
-    z-index: 2;
-    font-size: 11px;
-    font-weight: 600;
-    text-align: center;
-    padding: 2px 6px;
-    border-radius: 6px;
-    color: #1f1f1f;
-    background: rgba(255, 255, 255, 0.78);
-    pointer-events: none;
-}
-
-/* Shimmer sweep used by queued / rendering / retrying states. */
-.scene-image-shimmer {
-    position: absolute;
-    inset: 0;
-    z-index: 1;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background:
-        linear-gradient(115deg, transparent 0%, rgba(255, 200, 61, 0.22) 42%, transparent 68%),
-        rgba(5, 7, 11, 0.38);
-    background-size: 220% 100%;
-    color: #ffc83d;
-    font-weight: 800;
-    animation: scene-image-shimmer-flash 0.95s ease-in-out infinite;
-    pointer-events: none;
-}
-
-.scene-image-shimmer span {
-    position: relative;
-    z-index: 2;
-    padding: 4px 8px;
-    border-radius: 999px;
-    background: rgba(5, 7, 11, 0.58);
-    pointer-events: none;
-}
-
-@keyframes scene-shimmer-sweep {
-    0% { background-position: 180% 0; }
-    100% { background-position: -80% 0; }
-}
-
-@keyframes scene-image-frame-flash {
-    0%, 100% {
-        filter: brightness(1);
-        box-shadow: inset 0 0 0 1px rgba(255, 200, 61, 0.28), 0 0 0 rgba(255, 200, 61, 0);
-    }
-
-    50% {
-        filter: brightness(1.1);
-        box-shadow: inset 0 0 0 1px rgba(255, 200, 61, 0.72), 0 0 18px rgba(255, 200, 61, 0.34);
-    }
-}
-
-@keyframes scene-image-shimmer-flash {
-    0% {
-        background-position: 180% 0;
-        opacity: 0.72;
-    }
-
-    50% {
-        opacity: 1;
-    }
-
-    100% {
-        background-position: -80% 0;
-        opacity: 0.78;
-    }
-}
-
-/* Rendering: warm active tint. */
-.scene-image-rendering {
-    border-color: var(--mud-palette-warning, #f0a000);
-    box-shadow: inset 0 0 0 1px var(--mud-palette-warning, #f0a000);
-}
-
-.scene-image-submitted,
-.scene-image-processing,
-.scene-image-downloading {
-    border-color: #ffc83d;
-    box-shadow: inset 0 0 0 1px rgba(255, 200, 61, 0.68);
-}
-
-.scene-image-submitted .scene-image-shimmer,
-.scene-image-processing .scene-image-shimmer {
-    animation: scene-image-shimmer-flash 1.05s ease-in-out infinite;
-}
-
-/* Queued: neutral, calmer shimmer. */
-.scene-image-queued .scene-image-shimmer {
-    animation-duration: 2s;
-    opacity: 0.7;
-}
-
-/* Retrying (quota wait): amber pulse, slower so it reads as "waiting". */
-.scene-image-retrying {
-    border-color: var(--mud-palette-warning, #f0a000);
-}
-
-.scene-image-retrying .scene-image-shimmer {
-    background: linear-gradient(
-        100deg,
-        rgba(240, 160, 0, 0) 20%,
-        rgba(240, 160, 0, 0.35) 50%,
-        rgba(240, 160, 0, 0) 80%
-    );
-    background-size: 200% 100%;
-    animation-duration: 2.4s;
-}
-
-/* Failed: static red frame, no animation. */
-.scene-image-failed {
-    border-color: var(--mud-palette-error, #d32f2f);
-    background: rgba(211, 47, 47, 0.08);
-}
-
-.scene-image-failed .scene-image-label {
-    color: var(--mud-palette-error, #d32f2f);
-    background: rgba(255, 255, 255, 0.85);
-}
-
-/* Respect reduced-motion preferences. */
-@media (prefers-reduced-motion: reduce) {
-    .scene-image-shimmer {
-        animation: none;
-        opacity: 0.5;
-    }
-
-    .scene-image-frame.is-rendering {
-        animation: none;
-    }
-}
-
 .render-project-card {
     height: 100%;
     border-radius: 8px;
@@ -197,17 +27,6 @@
     width: 100%;
     height: 100%;
     object-fit: cover;
-    display: block;
-}
-
-.scene-media-image,
-.scene-media-video {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    object-fit: contain;
-    object-position: center;
     display: block;
 }
 
@@ -310,31 +129,6 @@
     display: grid;
     grid-template-columns: minmax(120px, 0.75fr) minmax(180px, 1.5fr) minmax(180px, 1.5fr);
     gap: 8px;
-}
-
-.scene-media-square {
-    position: relative;
-    width: min(100%, 190px);
-    max-height: 250px;
-    aspect-ratio: 1 / 1;
-    overflow: hidden;
-    border-radius: 10px;
-    background: #10161d;
-    border: 1px solid var(--mud-palette-lines-default, #d9d9e3);
-    margin-inline: auto;
-}
-
-.scene-media-frame {
-    width: 100%;
-    aspect-ratio: 1 / 1;
-    overflow: hidden;
-    background: var(--mud-palette-background-grey, #f2f2f5);
-    border: 1px solid var(--mud-palette-lines-default, #d9d9e3);
-    display: flex;
-    flex-direction: column;
-    align-items: stretch;
-    justify-content: center;
-    margin-top: 8px;
 }
 
 .render-project-dialog {
@@ -471,12 +265,6 @@
     width: 100%;
 }
 
-.scene-video-card .scene-media-square,
-.scene-video-card .scene-media-frame {
-    max-width: 100%;
-    max-height: 210px;
-}
-
 .render-result-scroll video {
     max-height: min(62dvh, 620px);
     object-fit: contain;
@@ -491,54 +279,6 @@
     padding: 12px 16px;
     background: var(--mud-palette-background, #fff);
     border-top: 1px solid var(--mud-palette-lines-default, #d9d9e3);
-}
-
-.scene-media-square .scene-image-frame,
-.scene-media-frame .scene-image-frame {
-    width: 100%;
-    height: 100%;
-    border: 0;
-    border-radius: 0;
-}
-
-.scene-video-ready {
-    position: relative;
-    width: 100%;
-    height: 100%;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-    text-align: center;
-    padding: 12px;
-}
-
-.scene-video-ready .scene-media-image {
-    position: absolute;
-    inset: 0;
-}
-
-.scene-video-ready .mud-typography {
-    position: relative;
-    z-index: 1;
-    max-width: 100%;
-    padding: 2px 6px;
-    border-radius: 6px;
-    background: rgba(255, 255, 255, 0.82);
-}
-
-.scene-thumb-placeholder {
-    width: 100%;
-    height: 100%;
-    min-height: 160px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    text-align: center;
-    padding: 12px;
-    color: var(--mud-palette-text-secondary, #666);
-    background: var(--mud-palette-background-grey, #f2f2f5);
 }
 
 @media (max-width: 1100px) {
@@ -564,10 +304,5 @@
     .scene-voice-row,
     .scene-video-grid {
         grid-template-columns: minmax(0, 1fr);
-    }
-
-    .scene-media-square {
-        width: min(100%, 260px);
-        max-height: 260px;
     }
 }

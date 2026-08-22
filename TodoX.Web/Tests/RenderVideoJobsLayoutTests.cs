@@ -10,6 +10,8 @@ public class RenderVideoJobsLayoutTests
         ? RepoRoot
         : Path.Combine(RepoRoot, "TodoX.Web");
     private static readonly string RazorPath = Path.Combine(WebRoot, "Components", "Pages", "RenderVideoJobs.razor");
+    private static readonly string PageCssPath = Path.Combine(WebRoot, "Components", "Pages", "RenderVideoJobs.razor.css");
+    private static readonly string FrameCssPath = Path.Combine(WebRoot, "Components", "Shared", "RenderMediaFrame.razor.css");
 
     [Fact]
     public void PreviewTab_UsesSharedMediaFrameAndNoMiddleColumn()
@@ -19,10 +21,28 @@ public class RenderVideoJobsLayoutTests
 
         Assert.Contains("<RenderMediaFrame IsVideo=\"false\"", previewTab);
         Assert.Contains("<RenderMediaFrame IsVideo=\"true\"", previewTab);
+        Assert.Equal(2, Regex.Matches(previewTab, "AspectRatio=\"@ProjectAspectRatio\"").Count);
         Assert.Equal(2, Regex.Matches(previewTab, "<RenderMediaFrame\\s+IsVideo=").Count);
         Assert.DoesNotContain("scene-details-column", previewTab);
         Assert.DoesNotContain("Đang tạo ảnh tĩnh qua AI provider", previewTab);
         Assert.Contains("Đang tạo ảnh", razor);
+    }
+
+    [Fact]
+    public void SharedMediaFrame_MovesChildVisualCssOutOfParentStylesheet()
+    {
+        var pageCss = File.ReadAllText(PageCssPath);
+        var frameCss = File.ReadAllText(FrameCssPath);
+
+        Assert.Contains(".scene-media-square", frameCss);
+        Assert.Contains(".scene-media-image", frameCss);
+        Assert.Contains(".scene-image-frame", frameCss);
+        Assert.Contains(".scene-video-ready-label", frameCss);
+        Assert.Contains("aspect-ratio: var(--render-media-aspect-ratio, 1 / 1)", frameCss);
+        Assert.DoesNotContain(".scene-media-square", pageCss);
+        Assert.DoesNotContain(".scene-image-frame", pageCss);
+        Assert.DoesNotContain(".scene-video-ready", pageCss);
+        Assert.DoesNotContain(".scene-thumb-placeholder", pageCss);
     }
 
     private static string Between(string source, string startText, string endText)

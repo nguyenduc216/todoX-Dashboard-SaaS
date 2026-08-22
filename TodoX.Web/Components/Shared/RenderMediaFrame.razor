@@ -1,6 +1,6 @@
 @namespace TodoX.Web.Components.Shared
 
-<div class="scene-media-square">
+<div class="scene-media-square" style="@FrameStyle">
     @if (HasReadyMedia)
     {
         @if (IsVideo)
@@ -32,7 +32,7 @@
             <img src="@ThumbnailUrl" class="scene-media-image scene-image-dim" />
             @if (!string.IsNullOrWhiteSpace(ReadyText))
             {
-                <MudText Typo="Typo.caption">@ReadyText</MudText>
+                <div class="scene-video-ready-label">@ReadyText</div>
             }
         </div>
     }
@@ -51,9 +51,38 @@
     [Parameter] public string EmptyText { get; set; } = string.Empty;
     [Parameter] public string FailedText { get; set; } = string.Empty;
     [Parameter] public string? ReadyText { get; set; }
+    [Parameter] public string AspectRatio { get; set; } = "1:1";
     [Parameter] public EventCallback OnClick { get; set; }
 
     private bool HasReadyMedia => !string.IsNullOrWhiteSpace(MediaUrl);
     private bool IsActive => !string.IsNullOrWhiteSpace(StateClass);
     private bool IsFailed => FailedText.Length > 0 && StateClass.Contains("failed", StringComparison.OrdinalIgnoreCase);
+    private string FrameStyle => $"--render-media-aspect-ratio: {ResolveAspectRatioValue(AspectRatio)}; --render-media-max-width: {ResolveMaxWidth(AspectRatio)}px; --render-media-max-height: {ResolveMaxHeight(AspectRatio)}px;";
+
+    private static string ResolveAspectRatioValue(string value)
+        => value.Trim() switch
+        {
+            "16:9" => "16 / 9",
+            "9:16" => "9 / 16",
+            "1:1" => "1 / 1",
+            _ => "1 / 1"
+        };
+
+    private static int ResolveMaxWidth(string value)
+        => value.Trim() switch
+        {
+            "16:9" => 280,
+            "9:16" => 210,
+            "1:1" => 220,
+            _ => 220
+        };
+
+    private static int ResolveMaxHeight(string value)
+        => value.Trim() switch
+        {
+            "16:9" => 220,
+            "9:16" => 380,
+            "1:1" => 240,
+            _ => 240
+        };
 }
