@@ -17,10 +17,10 @@ public class RenderVideoJobsLayoutTests
     {
         var razor = File.ReadAllText(RazorPath);
 
-        Assert.Equal(5, Regex.Matches(razor, "<MudTabPanel\\s+Text=").Count);
-        Assert.Contains("<MudTabPanel Text=\"Video\">", razor);
+        Assert.Equal(3, Regex.Matches(razor, "<MudTabPanel\\s+Text=").Count);
+        Assert.Contains("<MudTabPanel Text=\"Thông tin\">", razor);
         Assert.Contains("class=\"scene-image-tab\"", razor);
-        Assert.Contains("class=\"scene-video-tab\"", razor);
+        Assert.Contains("RenderMediaFrame IsVideo=\"true\"", razor);
         Assert.Contains("class=\"render-tab-scroll render-result-scroll\"", razor);
     }
 
@@ -44,7 +44,6 @@ public class RenderVideoJobsLayoutTests
         var scrollRule = CssRule(css, ".render-tab-scroll");
 
         Assert.Contains("class=\"render-tab-scroll render-info-scroll\"", razor);
-        Assert.Contains("class=\"render-tab-scroll scene-video-scroll\"", razor);
         Assert.Contains("class=\"render-tab-scroll render-result-scroll\"", razor);
         Assert.Contains("overflow-y: auto", scrollRule);
         Assert.Contains("height: 100%", scrollRule);
@@ -68,14 +67,9 @@ public class RenderVideoJobsLayoutTests
     [Fact]
     public void VideoTabGrid_UsesThreeTwoOneResponsiveColumns()
     {
-        var css = File.ReadAllText(CssPath);
+        var css = File.ReadAllText(Path.Combine(WebRoot, "Components", "Shared", "RenderMediaFrame.razor.css"));
 
-        Assert.Contains(".scene-video-grid", css);
-        Assert.Contains("grid-template-columns: repeat(3, minmax(0, 1fr))", css);
-        Assert.Contains("grid-template-columns: repeat(2, minmax(0, 1fr))", css);
-        Assert.Contains("grid-template-columns: minmax(0, 1fr)", css);
-        Assert.Contains(".scene-video-grid > *", css);
-        Assert.Contains("min-width: 0", css);
+        Assert.Contains(".scene-media-video", css);
         Assert.Contains("object-fit: contain", CssRule(css, ".scene-media-video"));
     }
 
@@ -84,26 +78,28 @@ public class RenderVideoJobsLayoutTests
     {
         var razor = File.ReadAllText(RazorPath);
         var css = File.ReadAllText(CssPath);
+        var mediaCss = File.ReadAllText(Path.Combine(WebRoot, "Components", "Shared", "RenderMediaFrame.razor.css"));
 
         Assert.Contains("scene-card scene-card-compact", razor);
-        Assert.Contains("Value=\"@draft.ImagePrompt\"", razor);
-        Assert.Contains("Lines=\"5\"", Between(razor, "Value=\"@draft.ImagePrompt\"", "Value=\"@draft.Purpose\""));
-        Assert.Contains("Lines=\"1\"", Between(razor, "Value=\"@draft.Purpose\"", "@if (_imageHistorySceneId == scene.Id)"));
-        Assert.Contains("grid-template-columns: minmax(150px, 190px) minmax(0, 1fr)", CssRule(css, ".scene-workflow"));
-        Assert.Contains("width: min(100%, 190px)", CssRule(css, ".scene-media-square"));
-        Assert.Contains("max-height: 250px", CssRule(css, ".scene-media-square"));
+        Assert.Contains("RenderMediaFrame IsVideo=\"false\"", razor);
+        Assert.Contains("ResolveImageMediaState(sceneState)", razor);
+        Assert.Contains("RenderMediaFrame IsVideo=\"true\"", razor);
+        Assert.Contains("ResolveVideoMediaState(scene)", razor);
+        Assert.Contains("scene-surface-grid", razor);
+        Assert.Contains("width: min(100%, var(--render-media-max-width, 220px))", CssRule(mediaCss, ".scene-media-square"));
+        Assert.Contains("max-height: min(60dvh, var(--render-media-max-height, 240px))", CssRule(mediaCss, ".scene-media-square"));
     }
 
     [Fact]
     public void VideoCards_HideVoiceFieldsButKeepSceneBindings()
     {
         var razor = File.ReadAllText(RazorPath);
-        var sceneTab = Between(razor, "class=\"scene-image-tab\"", "<MudTabPanel Text=\"Video\">");
-        var videoTab = Between(razor, "class=\"scene-video-tab\"", "<div class=\"render-tab-scroll render-result-scroll\">");
+        var sceneTab = Between(razor, "class=\"scene-image-tab\"", "<MudTabPanel Text=\"Kết quả\">");
+        var videoTab = sceneTab;
 
-        Assert.Contains("Value=\"@draft.Voice\"", sceneTab);
-        Assert.Contains("Value=\"@draft.VoiceInstruction\"", sceneTab);
-        Assert.Contains("Value=\"@draft.MotionPrompt\"", videoTab);
+        Assert.Contains("RenderMediaFrame IsVideo=\"false\"", sceneTab);
+        Assert.Contains("RenderMediaFrame IsVideo=\"true\"", videoTab);
+        Assert.Contains("State=\"@ResolveVideoMediaState(scene)\"", videoTab);
         Assert.DoesNotContain("Value=\"@draft.Voice\"", videoTab);
         Assert.DoesNotContain("Value=\"@draft.VoiceInstruction\"", videoTab);
     }
@@ -112,10 +108,8 @@ public class RenderVideoJobsLayoutTests
     public void VideoCards_ShowOmniFlashPromptCounterAndBlockInvalidPrompt()
     {
         var razor = File.ReadAllText(RazorPath);
-        var videoTab = Between(razor, "class=\"scene-video-tab\"", "<div class=\"render-tab-scroll render-result-scroll\">");
-
-        Assert.Contains("ResolveVideoPromptState(scene, draft)", videoTab);
-        Assert.Contains("Disabled=\"@(!CanCreateSceneVideo(scene, draft))\"", videoTab);
+        Assert.Contains("ResolveVideoMediaState(scene)", razor);
+        Assert.Contains("Disabled=\"@(!CanCreateSceneVideo(scene, draft))\"", razor);
         Assert.Contains("VideoPromptValidator.CountUnicodeScalars", razor);
         Assert.Contains("VideoPromptValidator.ResolveMaxPromptCharacters", razor);
     }
@@ -126,7 +120,7 @@ public class RenderVideoJobsLayoutTests
         var razor = File.ReadAllText(RazorPath);
 
         Assert.Contains("@RenderSceneStatusBadge(scene, \"image\")", razor);
-        Assert.Contains("@RenderSceneStatusBadge(scene, \"video\")", razor);
+        Assert.Contains("ResolveVideoSceneStatus(scene)", razor);
         Assert.Contains("scene-failed-status-trigger", razor);
         Assert.Contains("@onclick:stopPropagation=\"true\"", razor);
         Assert.Contains("@onkeydown:stopPropagation=\"true\"", razor);
@@ -182,7 +176,7 @@ public class RenderVideoJobsLayoutTests
     [Fact]
     public void SceneImageRenderStates_DefineLocalFlashAndShimmerKeyframes()
     {
-        var css = File.ReadAllText(CssPath);
+        var css = File.ReadAllText(Path.Combine(WebRoot, "Components", "Shared", "RenderMediaFrame.razor.css"));
 
         Assert.Contains("animation: scene-image-frame-flash", css);
         Assert.Contains("animation: scene-image-shimmer-flash", css);
@@ -199,24 +193,9 @@ public class RenderVideoJobsLayoutTests
     {
         var razor = File.ReadAllText(RazorPath);
         var css = File.ReadAllText(CssPath);
-        var workflow = Between(razor, "<div class=\"scene-workflow\">", "@if (_imageHistorySceneId == scene.Id)");
-        var detailsIndex = workflow.IndexOf("class=\"scene-workflow-cell scene-details-column\"", StringComparison.Ordinal);
-        var promptIndex = workflow.IndexOf("Value=\"@draft.ImagePrompt\"", StringComparison.Ordinal);
-        var voiceRowIndex = workflow.IndexOf("class=\"scene-voice-row\"", StringComparison.Ordinal);
-        var purposeIndex = workflow.IndexOf("Value=\"@draft.Purpose\"", StringComparison.Ordinal);
-        var voiceIndex = workflow.IndexOf("Value=\"@draft.Voice\"", StringComparison.Ordinal);
-        var instructionIndex = workflow.IndexOf("Value=\"@draft.VoiceInstruction\"", StringComparison.Ordinal);
-
-        Assert.True(detailsIndex >= 0);
-        Assert.True(promptIndex > detailsIndex);
-        Assert.True(voiceRowIndex > promptIndex);
-        Assert.True(purposeIndex > voiceRowIndex);
-        Assert.True(voiceIndex > purposeIndex);
-        Assert.True(instructionIndex > voiceIndex);
-        Assert.Single(Regex.Matches(workflow, "class=\"scene-voice-row\""));
-        Assert.Contains("ValueChanged=\"@((string? value) => UpdateDraft(scene.Id, d => d.Purpose = value))\"", workflow);
-        Assert.Contains("ValueChanged=\"@((string? value) => UpdateDraft(scene.Id, d => d.Voice = value))\"", workflow);
-        Assert.Contains("ValueChanged=\"@((string? value) => UpdateDraft(scene.Id, d => d.VoiceInstruction = value))\"", workflow);
+        Assert.Contains("scene-surface-grid", razor);
+        Assert.Contains("RenderMediaFrame IsVideo=\"false\"", razor);
+        Assert.Contains("RenderMediaFrame IsVideo=\"true\"", razor);
         Assert.Contains("display: flex", CssRule(css, ".scene-details-column"));
     }
 

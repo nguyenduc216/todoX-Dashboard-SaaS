@@ -330,7 +330,11 @@
                             }
                             else
                             {
-                                <MudAlert Severity="Severity.Info">Video chuyển động sẽ xuất hiện sau khi tải nguồn hoàn tất.</MudAlert>
+                                <RenderMediaFrame IsVideo="true"
+                                                  State="@ResolveDanceMediaState(_job?.Status)"
+                                                  AspectRatio="9:16"
+                                                  EmptyText="Video chuyển động sẽ xuất hiện sau khi tải nguồn hoàn tất."
+                                                  FailedText="Lỗi render video" />
                             }
                         </MudPaper>
                     </MudItem>
@@ -393,14 +397,12 @@
                     {
                         <MudPaper Class="todox-panel pa-4">
                             <MudText Typo="Typo.h6">@_title</MudText>
-                            <div class="rdance-result-frame">
-                                <MudIcon Icon="@Icons.Material.Filled.Movie" Size="Size.Large" />
-                                <div class="rdance-processing-overlay" aria-label="Rendering video">
-                                    <span class="rdance-processing-sweep"></span>
-                                    <span class="rdance-processing-spinner"></span>
-                                    <span class="rdance-processing-dots"><i></i><i></i><i></i></span>
-                                </div>
-                            </div>
+                            <RenderMediaFrame IsVideo="true"
+                                              State="@ResolveDanceMediaState(_job.Status)"
+                                              AspectRatio="9:16"
+                                              EmptyText="Đang tạo video"
+                                              LoadingLabel="@ResultProgressText"
+                                              FailedText="Lỗi render video" />
                             <MudText Typo="Typo.body1" Class="mt-3">@ResultProgressText</MudText>
                         </MudPaper>
                     }
@@ -408,9 +410,10 @@
                     {
                         <MudPaper Class="todox-panel pa-4">
                             <MudText Typo="Typo.h6">@_title</MudText>
-                            <div class="rdance-result-frame is-failed">
-                                <MudIcon Icon="@Icons.Material.Filled.ErrorOutline" Size="Size.Large" />
-                            </div>
+                            <RenderMediaFrame IsVideo="true"
+                                              State="@MediaRenderState.Failed"
+                                              AspectRatio="9:16"
+                                              FailedText="Lỗi render video" />
                             <MudAlert Severity="@(_job.Status == DanceSellJobStatuses.Timeout ? Severity.Warning : Severity.Error)" Class="mt-3">
                                 @ResultErrorText
                             </MudAlert>
@@ -1184,16 +1187,25 @@
         _ => Color.Default
     };
 
-    private static RenderFragment Preview(string? url, string alt) => @<div class="rdance-media-preview">
-        @if (!string.IsNullOrWhiteSpace(url))
+    private static RenderFragment Preview(string? url, string alt) => @<RenderMediaFrame IsVideo="false"
+                                                                                           MediaUrl="@url"
+                                                                                           ThumbnailUrl="@url"
+                                                                                           State="@(string.IsNullOrWhiteSpace(url) ? MediaRenderState.Empty : MediaRenderState.Ready)"
+                                                                                           AspectRatio="9:16"
+                                                                                           EmptyText="@alt"
+                                                                                           FailedText="Lỗi tải ảnh" />;
+
+    private static MediaRenderState ResolveDanceMediaState(string? status)
+        => status switch
         {
-            <img src="@url" alt="@alt" />
-        }
-        else
-        {
-            <MudIcon Icon="@Icons.Material.Filled.Image" Size="Size.Large" />
-        }
-    </div>;
+            DanceSellJobStatuses.Queued
+                or DanceSellJobStatuses.Submitted => MediaRenderState.Queued,
+            DanceSellJobStatuses.Rendering => MediaRenderState.Rendering,
+            DanceSellJobStatuses.Completed => MediaRenderState.Ready,
+            DanceSellJobStatuses.Failed
+                or DanceSellJobStatuses.Timeout => MediaRenderState.Failed,
+            _ => MediaRenderState.Empty
+        };
 
     private static Color StatusColor(string status) => status switch
     {

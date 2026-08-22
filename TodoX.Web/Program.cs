@@ -190,6 +190,7 @@ builder.Services.AddScoped<IDanceSellReferenceProviderFactory, DanceSellReferenc
 builder.Services.AddScoped<IRenderJobHandler, TodoX.Web.Services.VideoRender.SceneVideoRenderHandler>();
 builder.Services.AddScoped<IRenderJobHandler, TodoX.Web.Services.VideoRender.SceneVideoWorkerHandler>();
 builder.Services.AddScoped<IRenderJobHandler, TodoX.Web.Services.VideoRender.VideoRenderMergeHandler>();
+builder.Services.AddScoped<IRVideoSceneVideoAutoChainService, RVideoSceneVideoAutoChainService>();
 builder.Services.AddScoped<IRenderJobHandler, TodoX.Web.Services.Render.SceneImageBatchRenderHandler>();
 builder.Services.AddScoped<IRenderJobHandler, TodoX.Web.Services.Render.SceneImageRenderWorkItemHandler>();
 builder.Services.AddScoped<IRenderJobHandler, DanceSellRenderHandler>();

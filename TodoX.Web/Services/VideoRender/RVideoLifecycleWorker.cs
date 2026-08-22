@@ -41,10 +41,11 @@ public sealed class RVideoLifecycleWorker : BackgroundService
                 var repository = scope.ServiceProvider.GetRequiredService<VideoRenderRepository>();
                 var rvideoJobs = scope.ServiceProvider.GetRequiredService<IRVideoJobService>();
                 var jobs = scope.ServiceProvider.GetRequiredService<IRenderJobService>();
+                var autoChain = scope.ServiceProvider.GetRequiredService<IRVideoSceneVideoAutoChainService>();
                 var catalog = scope.ServiceProvider.GetRequiredService<IAiStudioCatalogService>();
                 foreach (var setting in settings)
                 {
-                    await EvaluateProjectAsync(setting, repository, rvideoJobs, jobs, factory, tenant, catalog, stoppingToken);
+                    await EvaluateProjectAsync(setting, repository, rvideoJobs, jobs, autoChain, factory, tenant, catalog, stoppingToken);
                 }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -60,7 +61,7 @@ public sealed class RVideoLifecycleWorker : BackgroundService
         }
     }
 
-    private async Task EvaluateProjectAsync(RVideoJobSettingsDto setting, VideoRenderRepository repo, IRVideoJobService rvideoJobs, IRenderJobService jobs, TodoXConnectionFactory factory, TenantContext tenant, IAiStudioCatalogService catalog, CancellationToken ct)
+    private async Task EvaluateProjectAsync(RVideoJobSettingsDto setting, VideoRenderRepository repo, IRVideoJobService rvideoJobs, IRenderJobService jobs, IRVideoSceneVideoAutoChainService autoChain, TodoXConnectionFactory factory, TenantContext tenant, IAiStudioCatalogService catalog, CancellationToken ct)
     {
         var project = await repo.GetProjectAsync(setting.ProjectId, ct);
         if (project is null || project.Scenes.Count == 0) return;
@@ -150,46 +151,17 @@ public sealed class RVideoLifecycleWorker : BackgroundService
             }, project.Id, ct);
         }
 
-        var videoSceneIds = decision.ShouldQueueVideo
-            ? sceneStates
-                .Where(x => x.IsImageReady)
-                .Select(x => x.SceneId)
-                .Except(activeSceneIds.VideoSceneIds)
-                .ToArray()
-            : Array.Empty<long>();
-        if (videoSceneIds.Length > 0)
+        var readyScenes = sceneStates
+            .Where(x => x.IsImageReady)
+            .Select(x => x.SceneId)
+            .Except(activeSceneIds.VideoSceneIds)
+            .ToArray();
+        foreach (var sceneId in readyScenes)
         {
-            var input = new SceneVideoRenderInput
-            {
-                ProjectId = project.Id,
-                SceneIds = videoSceneIds,
-                AspectRatio = renderSettings.AspectRatio,
-                Resolution = renderSettings.Resolution,
-                UserId = userId,
-                CustomerId = project.CustomerId,
-                CreatedBy = "rvideo_auto_lifecycle"
-            };
-
-            await jobs.EnqueueForProjectIfNoneActiveAsync(new RenderJobCreateModel
-            {
-                JobType = SceneVideoRenderHandler.JobTypeName,
-                UserId = userId,
-                CustomerId = project.CustomerId,
-                Input = input,
-                Prompt = new { projectId = project.Id, source = "rvideo_auto_lifecycle", stage = "video", sceneIds = videoSceneIds },
-                LogCode = $"video-scene-{project.Id}",
-                ProviderCode = RVideoVideoModelPolicy.ProviderCode,
-                ModelCode = RVideoVideoModelPolicy.GetInitial().Model,
-                MaxAttempts = 1,
-                PointCostEstimate = 0,
-                PointStatus = RenderPointStatuses.Pending
-            }, project.Id, ct);
-
-            await repo.AddProjectEventAsync(project.Id, "SCENE_VIDEO_AUTO_ENQUEUED", "info",
-                "RVIDEO auto lifecycle enqueued scene videos after selected images became ready.",
-                new { projectId = project.Id, sceneIds = videoSceneIds, sceneCount = videoSceneIds.Length }, ct);
+            await autoChain.TryEnqueueSceneVideoAsync(project.Id, sceneId, "RVIDEO_LIFECYCLE", ct);
         }
-        else if (imageSceneIds.Length == 0)
+
+        if (imageSceneIds.Length == 0 && readyScenes.Length == 0)
         {
             _logger.LogInformation(
                 "RVIDEO_IMAGE_REVIEW_HOLD projectId={ProjectId} imagesReady={ImagesReady} videoPending={VideoPending}",

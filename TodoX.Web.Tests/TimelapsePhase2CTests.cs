@@ -702,6 +702,7 @@ public class TimelapsePhase2CTests
     {
         var razor = ReadSource("TodoX.Web", "Components", "Pages", "TimelapseJobDetail.razor");
         var css = ReadSource("TodoX.Web", "Components", "Pages", "TimelapseJobDetail.razor.css");
+        var mediaCss = ReadSource("TodoX.Web", "Components", "Shared", "RenderMediaFrame.razor.css");
 
         Assert.Contains("video-stage-card", razor, StringComparison.Ordinal);
         Assert.Contains("PreviewClass(\"video-preview\"", razor, StringComparison.Ordinal);
@@ -715,7 +716,7 @@ public class TimelapsePhase2CTests
         Assert.Contains("min-width: 0;", css, StringComparison.Ordinal);
         Assert.Contains("max-width: 100%;", css, StringComparison.Ordinal);
         Assert.Contains("overflow: hidden;", css, StringComparison.Ordinal);
-        Assert.Contains("object-fit: cover;", css, StringComparison.Ordinal);
+        Assert.Contains("object-fit: contain;", mediaCss, StringComparison.Ordinal);
         Assert.Contains("aspect-ratio: 16 / 9;", css, StringComparison.Ordinal);
         Assert.DoesNotContain(".clip-input-thumbnails", css, StringComparison.Ordinal);
         Assert.DoesNotContain(".clip-input-reference", css, StringComparison.Ordinal);
@@ -726,13 +727,13 @@ public class TimelapsePhase2CTests
     {
         var razor = ReadSource("TodoX.Web", "Components", "Pages", "TimelapseJobDetail.razor");
         var pageCss = ReadSource("TodoX.Web", "Components", "Pages", "TimelapseJobDetail.razor.css");
+        var sharedMediaCss = ReadSource("TodoX.Web", "Components", "Shared", "RenderMediaFrame.razor.css");
         var overlay = ReadSource("TodoX.Web", "Components", "Timelapse", "TimelapseProcessingOverlay.razor");
         var overlayCss = ReadSource("TodoX.Web", "Components", "Timelapse", "TimelapseProcessingOverlay.razor.css");
 
-        Assert.Contains("TimelapseOperationStatuses.Rendering => $\"{classes} tl-loading-skeleton tl-active-render\"", razor, StringComparison.Ordinal);
-        Assert.Contains("TimelapseOperationStatuses.Waiting => $\"{classes} tl-loading-skeleton tl-loading-shimmer\"", razor, StringComparison.Ordinal);
-        Assert.Contains("<TimelapseProcessingOverlay IsVideo=\"false\" />", razor, StringComparison.Ordinal);
-        Assert.Contains("<TimelapseProcessingOverlay IsVideo=\"true\" />", razor, StringComparison.Ordinal);
+        Assert.Contains("ResolveTimelapseMediaState", razor, StringComparison.Ordinal);
+        Assert.Contains("<RenderMediaFrame IsVideo=\"false\"", razor, StringComparison.Ordinal);
+        Assert.Contains("<RenderMediaFrame IsVideo=\"true\"", razor, StringComparison.Ordinal);
         Assert.DoesNotContain("RenderProcessingOverlay", razor, StringComparison.Ordinal);
         Assert.DoesNotContain("RenderTreeBuilder", razor, StringComparison.Ordinal);
         Assert.DoesNotContain(".tl-processing-mask", pageCss, StringComparison.Ordinal);
@@ -782,7 +783,7 @@ public class TimelapsePhase2CTests
         Assert.DoesNotContain(".mud-icon-root", overlayCss, StringComparison.Ordinal);
         Assert.Contains("transform: rotate(360deg);", overlayCss, StringComparison.Ordinal);
         Assert.Contains("@media (prefers-reduced-motion: reduce)", overlayCss, StringComparison.Ordinal);
-        Assert.Contains("window.matchMedia('(prefers-reduced-motion: reduce)').matches", pageCss, StringComparison.Ordinal);
+        Assert.Contains("@media (prefers-reduced-motion: reduce)", sharedMediaCss, StringComparison.Ordinal);
 
         var reducedMotionStart = overlayCss.IndexOf("@media (prefers-reduced-motion: reduce)", StringComparison.Ordinal);
         var reducedMotion = overlayCss[reducedMotionStart..];

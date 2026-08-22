@@ -349,8 +349,7 @@ else
                                                                   MediaUrl="@ResolveDraftImageUrl(scene, draft)"
                                                                   ThumbnailUrl="@ResolveDraftImageUrl(scene, draft)"
                                                                   AspectRatio="@ProjectAspectRatio"
-                                                                  StateClass="@SceneStateCss(sceneState)"
-                                                                  StateLabel="@SceneStateLabel(sceneState)"
+                                                                  State="@ResolveImageMediaState(sceneState)"
                                                                   EmptyText="Chưa render ảnh"
                                                                   FailedText="Lỗi render ảnh"
                                                                   OnClick="@(() => OpenScenePreview(scene))" />
@@ -388,8 +387,7 @@ else
                                                                   MediaUrl="@ResolveDraftVideoUrl(scene, draft)"
                                                                   ThumbnailUrl="@ResolveDraftImageUrl(scene, draft)"
                                                                   AspectRatio="@ProjectAspectRatio"
-                                                                  StateClass="@(ResolveVideoFrameStateClass(scene))"
-                                                                  StateLabel="@ResolveVideoSceneLabel(scene)"
+                                                                  State="@ResolveVideoMediaState(scene)"
                                                                   EmptyText="Chưa render video"
                                                                   FailedText="Lỗi render video"
                                                                   ReadyText="Sẵn sàng tạo video" />
@@ -3048,15 +3046,30 @@ else
         _ => string.Empty
     };
 
-    private string ResolveVideoFrameStateClass(VideoProjectSceneDto scene)
+    private static MediaRenderState ResolveImageMediaState(RenderSceneImageVisualState state)
+        => state switch
+        {
+            RenderSceneImageVisualState.Queued
+                or RenderSceneImageVisualState.ProviderSubmitted
+                or RenderSceneImageVisualState.ProviderProcessing
+                or RenderSceneImageVisualState.Rendering
+                or RenderSceneImageVisualState.Retrying => MediaRenderState.Rendering,
+            RenderSceneImageVisualState.Downloading => MediaRenderState.Downloading,
+            RenderSceneImageVisualState.Ready => MediaRenderState.Ready,
+            RenderSceneImageVisualState.Failed => MediaRenderState.Failed,
+            _ => MediaRenderState.Empty
+        };
+
+    private MediaRenderState ResolveVideoMediaState(VideoProjectSceneDto scene)
     {
         var status = ResolveVideoSceneStatus(scene);
         return status switch
         {
-            VideoSceneStatuses.VideoQueued => "scene-image-queued",
-            VideoSceneStatuses.VideoRendering => "scene-image-rendering",
-            VideoSceneStatuses.Failed => "scene-image-failed",
-            _ => string.Empty
+            VideoSceneStatuses.VideoQueued => MediaRenderState.Queued,
+            VideoSceneStatuses.VideoRendering => MediaRenderState.Rendering,
+            VideoSceneStatuses.VideoReady => MediaRenderState.Ready,
+            VideoSceneStatuses.Failed => MediaRenderState.Failed,
+            _ => MediaRenderState.Empty
         };
     }
 

@@ -259,12 +259,66 @@ public sealed class RVideoProviderPollingRegressionTests
     {
         var source = ReadRepoFile("Services", "VideoRender", "RVideoLifecycleWorker.cs");
 
-        Assert.Contains("decision.ShouldQueueVideo", source);
+        Assert.Contains("IRVideoSceneVideoAutoChainService", source);
+        Assert.Contains("TryEnqueueSceneVideoAsync(project.Id, sceneId, \"RVIDEO_LIFECYCLE\"", source);
         Assert.Contains("Where(x => x.IsImageReady)", source);
-        Assert.Contains("Except(activeSceneIds.VideoSceneIds)", source);
-        Assert.Contains("SceneVideoRenderHandler.JobTypeName", source);
-        Assert.Contains("EnqueueForProjectIfNoneActiveAsync", source);
+        Assert.DoesNotContain("var videoSceneIds = decision.ShouldQueueVideo", source);
+    }
+
+    [Fact]
+    public void SceneImageReadyTriggersSceneScopedAutoChain()
+    {
+        var source = ReadRepoFile("Services", "Render", "SceneImageRenderWorkItemHandler.cs");
+
+        Assert.Contains("SCENE_IMAGE_READY", source);
+        Assert.Contains("_autoChain.TryEnqueueSceneVideoAsync(input.ProjectId, input.SceneId, \"SCENE_IMAGE_READY\"", source);
+        Assert.DoesNotContain("SCENE_VIDEO_AUTO_ENQUEUED", source);
+    }
+
+    [Fact]
+    public void AutoChainUsesSceneScopedLogicalRequestKeyAndSceneIds()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "RVideoSceneVideoAutoChainService.cs");
+
+        Assert.Contains("BuildLogicalRequestKey(long projectId, long sceneId)", source);
+        Assert.Contains("SceneIds = new[] { sceneId }", source);
+        Assert.Contains("LogCode = logicalRequestKey", source);
+        Assert.Contains("EnqueueForLogCodeIfNoneActiveAsync", source);
+        Assert.Contains("SCENE_VIDEO_AUTO_ENQUEUE_SKIPPED", source);
+        Assert.Contains("SCENE_VIDEO_AUTO_ENQUEUE_REQUESTED", source);
         Assert.Contains("SCENE_VIDEO_AUTO_ENQUEUED", source);
+    }
+
+    [Fact]
+    public void RenderJobServiceAddsLogCodeScopedIdempotentEnqueue()
+    {
+        var source = ReadRepoFile("Services", "Render", "RenderJobService.cs");
+
+        Assert.Contains("EnqueueForLogCodeIfNoneActiveAsync", source);
+        Assert.Contains("BuildLogCodeJobLockName", source);
+        Assert.Contains("log_code = @logCode", source);
+    }
+
+    [Fact]
+    public void SharedMediaStateRendererIsUsedByRVideoTimelapseAndRDance()
+    {
+        var frame = ReadRepoFile("Components", "Shared", "RenderMediaFrame.razor");
+        var rvideo = ReadRepoFile("Components", "Pages", "RenderVideoJobs.razor");
+        var timelapse = ReadRepoFile("Components", "Pages", "TimelapseJobDetail.razor");
+        var rdance = ReadRepoFile("Components", "Pages", "RDanceJobDetail.razor");
+
+        Assert.Contains("MediaRenderState", frame);
+        Assert.Contains("State=\"@ResolveImageMediaState(sceneState)\"", rvideo);
+        Assert.Contains("State=\"@ResolveTimelapseMediaState(image.Status)\"", timelapse);
+        Assert.Contains("RenderMediaFrame", rdance);
+    }
+
+    [Fact]
+    public void SharedMediaRendererKeepsFailedStateStatic()
+    {
+        var source = ReadRepoFile("Components", "Shared", "RenderMediaFrame.razor");
+        Assert.Contains("private bool IsAnimated => EffectiveState is MediaRenderState.Queued", source);
+        Assert.Contains("private bool IsFailed => EffectiveState == MediaRenderState.Failed", source);
     }
 
     [Fact]
@@ -301,7 +355,7 @@ public sealed class RVideoProviderPollingRegressionTests
 
         Assert.DoesNotContain("MudItem xs=\"12\" md=\"7\"", source);
         Assert.Contains("ResolveVideoSceneStatus(scene)", source);
-        Assert.Contains("ResolveVideoSceneLabel(scene)", source);
+        Assert.Contains("ResolveVideoMediaState(scene)", source);
         Assert.Contains("HasCompletedVideoVersion(scene)", source);
     }
 

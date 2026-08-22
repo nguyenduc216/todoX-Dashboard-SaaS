@@ -308,6 +308,7 @@ public sealed class DanceSellRenderHandlerTests
 
         public Task<RenderJobDto> EnqueueAsync(RenderJobCreateModel model, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<(RenderJobDto Job, bool AlreadyActive)> EnqueueForProjectIfNoneActiveAsync(RenderJobCreateModel model, long projectId, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<(RenderJobDto Job, bool AlreadyActive)> EnqueueForLogCodeIfNoneActiveAsync(RenderJobCreateModel model, string logCode, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<RenderJobDto?> GetAsync(Guid jobId, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<RenderJobDto?> GetByLogCodeAsync(string logCode, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<RenderJobDto>> ListByLogCodeAsync(string logCode, CancellationToken ct = default) => throw new NotImplementedException();
@@ -319,6 +320,7 @@ public sealed class DanceSellRenderHandlerTests
         public Task<RenderJobDto?> ClaimNextByJobTypeAsync(string workerKey, TimeSpan lockFor, IReadOnlyCollection<string> jobTypes, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<RenderJobDto?> ClaimNextExcludingJobTypesAsync(string workerKey, TimeSpan lockFor, IReadOnlyCollection<string> excludedJobTypes, CancellationToken ct = default) => throw new NotImplementedException();
         public Task ScheduleRetryAsync(Guid jobId, TimeSpan delay, string errorCode, string errorMessage, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<bool> ScheduleProviderPollAsync(Guid jobId, TimeSpan delay, string reasonCode, string reasonMessage, CancellationToken ct = default) => throw new NotImplementedException();
     }
 
     private sealed class CapturingProviderService : IAiProviderService

@@ -17,6 +17,8 @@ public interface IRenderJobService
     /// </summary>
     Task<(RenderJobDto Job, bool AlreadyActive)> EnqueueForProjectIfNoneActiveAsync(RenderJobCreateModel model, long projectId, CancellationToken ct = default);
 
+    Task<(RenderJobDto Job, bool AlreadyActive)> EnqueueForLogCodeIfNoneActiveAsync(RenderJobCreateModel model, string logCode, CancellationToken ct = default);
+
     Task<RenderJobDto?> GetAsync(Guid jobId, CancellationToken ct = default);
     Task<RenderJobDto?> GetByLogCodeAsync(string logCode, CancellationToken ct = default);
     Task<IReadOnlyList<RenderJobDto>> ListByLogCodeAsync(string logCode, CancellationToken ct = default);
@@ -206,6 +208,105 @@ public sealed class RenderJobService : IRenderJobService
             job.Priority,
             job.PointCostEstimate,
             job.PointStatus
+        }, ct: ct);
+
+        return (job, false);
+    }
+
+    public async Task<(RenderJobDto Job, bool AlreadyActive)> EnqueueForLogCodeIfNoneActiveAsync(RenderJobCreateModel model, string logCode, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(model.JobType))
+        {
+            throw new ArgumentException("Job type is required.", nameof(model));
+        }
+
+        if (string.IsNullOrWhiteSpace(logCode))
+        {
+            throw new ArgumentException("Log code is required.", nameof(logCode));
+        }
+
+        await _tenant.EnsureLoadedAsync(ct);
+        var jobType = model.JobType.Trim();
+        var uniqueLogCode = logCode.Trim();
+        var initialStatus = NormalizeInitialStatus(model.InitialStatus);
+
+        using var conn = await _factory.OpenAsync(ct);
+        using var tx = conn.BeginTransaction();
+        await conn.ExecuteAsync(
+            "SELECT pg_advisory_xact_lock(hashtextextended(@lockName, 0));",
+            new { lockName = BuildLogCodeJobLockName(jobType, uniqueLogCode) },
+            tx);
+
+        var active = await conn.QuerySingleOrDefaultAsync<RenderJobDto>(
+            SelectJobSql +
+            """
+             WHERE job_type = @jobType
+               AND log_code = @logCode
+               AND status IN ('queued', 'preparing', 'rendering', 'post_processing', 'pending_reconciliation')
+             ORDER BY queued_at DESC, created_at DESC
+             LIMIT 1;
+            """,
+            new { jobType, logCode = uniqueLogCode }, tx);
+
+        if (active is not null)
+        {
+            tx.Commit();
+            return (active, true);
+        }
+
+        var inputJson = ToJson(model.Input ?? new { });
+        var promptJson = ToJson(model.Prompt ?? new { });
+        var referenceJson = ToJson(model.References ?? Array.Empty<object>());
+        var customerScope = model.CustomerId is null ? "system" : "customer";
+
+        RenderJobDto job;
+        try
+        {
+            job = await conn.QuerySingleAsync<RenderJobDto>(
+                InsertJobSql,
+                new
+                {
+                    tenant = _tenant.TenantId,
+                    user = model.UserId,
+                    customer = model.CustomerId,
+                    type = jobType,
+                    status = initialStatus,
+                    priority = model.Priority,
+                    input = inputJson,
+                    prompt = promptJson,
+                    refs = referenceJson,
+                    logCode = uniqueLogCode,
+                    pointCost = model.PointCostEstimate,
+                    pointStatus = model.PointStatus,
+                    provider = model.ProviderCode,
+                    model = model.ModelCode,
+                    maxAttempts = Math.Max(1, model.MaxAttempts)
+                }, tx);
+        }
+        catch (PostgresException ex) when (IsRenderJobsCustomerIdNotNullViolation(ex))
+        {
+            tx.Rollback();
+            _logger.LogError(ex,
+                "RENDER_JOB_ENQUEUE_SCHEMA_MISMATCH jobType={JobType} userId={UserId} customerId={CustomerId} tenantId={TenantId} customerScope={CustomerScope} logCode={LogCode} sqlState={SqlState} schema={Schema} table={Table} column={Column}",
+                jobType, model.UserId, model.CustomerId, _tenant.TenantId, customerScope, uniqueLogCode,
+                ex.SqlState, ex.SchemaName, ex.TableName, ex.ColumnName);
+            throw new InvalidOperationException(
+                "Database render_jobs chưa đồng bộ: customer_id đang NOT NULL trong khi system/admin job không có customer. "
+                + "Vui lòng chạy file SQL đồng bộ database do quản trị viên cung cấp.", ex);
+        }
+
+        tx.Commit();
+
+        var eventType = initialStatus == RenderJobStatuses.Draft ? "JOB_CREATED" : "JOB_QUEUED";
+        var eventMessage = initialStatus == RenderJobStatuses.Draft ? "Render job draft saved." : "Render job queued.";
+        await AddEventAsync(job.Id, eventType, eventMessage, new
+        {
+            job.JobType,
+            job.Status,
+            job.Priority,
+            job.PointCostEstimate,
+            job.PointStatus,
+            logCode = uniqueLogCode
         }, ct: ct);
 
         return (job, false);
@@ -489,6 +590,9 @@ public sealed class RenderJobService : IRenderJobService
 
     public static string BuildProjectJobLockName(string jobType, long projectId)
         => $"render.render_jobs:{jobType.Trim().ToLowerInvariant()}:{projectId}";
+
+    public static string BuildLogCodeJobLockName(string jobType, string logCode)
+        => $"render.render_jobs:{jobType.Trim().ToLowerInvariant()}:log:{logCode.Trim().ToLowerInvariant()}";
 
     public static bool IsRenderJobsCustomerIdNotNullViolation(PostgresException ex)
         => ex.SqlState == PostgresErrorCodes.NotNullViolation

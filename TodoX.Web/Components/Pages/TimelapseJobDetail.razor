@@ -314,42 +314,15 @@
                                             </MudChip>
                                         </div>
                                         <div class="@PreviewClass("image-preview", image.Status)">
-                                            @if (!string.IsNullOrWhiteSpace(image.PublicUrl))
-                                            {
-                                                <img src="@image.PublicUrl" alt="@($"{image.ProgressPercent}%")" />
-                                            }
-                                            else if (image.IsOriginal)
-                                            {
-                                                <MudIcon Icon="@Icons.Material.Filled.Image" Size="Size.Large" />
-                                                <span>Ảnh thành phẩm chưa sẵn sàng</span>
-                                            }
-                                            else if (IsPendingOperation(image.Status))
-                                            {
-                                                <div class="tl-loading-content" role="status" aria-live="polite">
-                                                    <span class="tl-loading-icon">
-                                                        <MudIcon Icon="@Icons.Material.Filled.Image" Size="Size.Large" />
-                                                    </span>
-                                                    <strong>@ImageLoadingTitle(image)</strong>
-                                                    <span>@ImagePlaceholderText(image)</span>
-                                                    @if (IsRenderingOperation(image.Status))
-                                                    {
-                                                        <span class="tl-image-scan" aria-hidden="true"></span>
-                                                    }
-                                                </div>
-                                                @if (IsRenderingOperation(image.Status))
-                                                {
-                                                    <span class="tl-active-scanline tl-image-scanline" aria-hidden="true"></span>
-                                                }
-                                            }
-                                            else
-                                            {
-                                                <MudIcon Icon="@Icons.Material.Filled.Image" Size="Size.Large" />
-                                                <span>@ImagePlaceholderText(image)</span>
-                                            }
-                                            @if (IsRenderingOperation(image.Status))
-                                            {
-                                                <TimelapseProcessingOverlay IsVideo="false" />
-                                            }
+                                            <RenderMediaFrame IsVideo="false"
+                                                              MediaUrl="@image.PublicUrl"
+                                                              ThumbnailUrl="@image.PublicUrl"
+                                                              AspectRatio="@FormatRatio(_job.Snapshot.Ratio)"
+                                                              State="@ResolveTimelapseMediaState(image.Status)"
+                                                              LoadingLabel="@ImageLoadingTitle(image)"
+                                                              EmptyText="@ImagePlaceholderText(image)"
+                                                              FailedText="Lỗi render ảnh"
+                                                              ReadyText="Hoàn tất" />
                                         </div>
                                         <div class="tl-image-card-footer">
                                             <div class="tl-image-meta-row">
@@ -464,39 +437,15 @@
                                             </MudChip>
                                         </div>
                                         <div class="@PreviewClass("video-preview", clip.Status)">
-                                            @if (TimelapseVideoOrchestration.HasCompletedPreview(clip) || (IsRenderingOperation(clip.Status) && !string.IsNullOrWhiteSpace(clip.PublicUrl)))
-                                            {
-                                                <video src="@clip.PublicUrl" controls playsinline preload="metadata"></video>
-                                            }
-                                            else if (IsPendingOperation(clip.Status))
-                                            {
-                                                <div class="tl-loading-content" role="status" aria-live="polite">
-                                                    <span class="tl-loading-icon">
-                                                        <MudIcon Icon="@Icons.Material.Filled.Movie" Size="Size.Large" />
-                                                    </span>
-                                                    <strong>@VideoLoadingTitle(clip)</strong>
-                                                    <span>@VideoPlaceholderText(clip)</span>
-                                                    @if (IsRenderingOperation(clip.Status))
-                                                    {
-                                                        <span class="tl-video-wave" aria-hidden="true">
-                                                            <i></i><i></i><i></i><i></i><i></i>
-                                                        </span>
-                                                    }
-                                                </div>
-                                                @if (IsRenderingOperation(clip.Status))
-                                                {
-                                                    <span class="tl-active-scanline tl-video-scanline" aria-hidden="true"></span>
-                                                }
-                                            }
-                                            else
-                                            {
-                                                <MudIcon Icon="@Icons.Material.Filled.Movie" Size="Size.Large" />
-                                                <span>@VideoPlaceholderText(clip)</span>
-                                            }
-                                            @if (IsRenderingOperation(clip.Status))
-                                            {
-                                                <TimelapseProcessingOverlay IsVideo="true" />
-                                            }
+                                            <RenderMediaFrame IsVideo="true"
+                                                              MediaUrl="@(TimelapseVideoOrchestration.HasCompletedPreview(clip) || (IsRenderingOperation(clip.Status) && !string.IsNullOrWhiteSpace(clip.PublicUrl)) ? clip.PublicUrl : null)"
+                                                              ThumbnailUrl="@clip.PublicUrl"
+                                                              AspectRatio="@FormatRatio(_job.Snapshot.Ratio)"
+                                                              State="@ResolveTimelapseMediaState(clip.Status)"
+                                                              LoadingLabel="@VideoLoadingTitle(clip)"
+                                                              EmptyText="@VideoPlaceholderText(clip)"
+                                                              FailedText="Lỗi render video"
+                                                              ReadyText="Hoàn tất" />
                                         </div>
                                         <div class="tl-video-card-footer">
                                             <MudText Typo="Typo.caption" Color="Color.Secondary">@FormatClipStartedAt(clip)</MudText>
@@ -1284,6 +1233,16 @@
     private static bool IsRenderingOperation(string? status)
         => status == TimelapseOperationStatuses.Rendering;
 
+    private static MediaRenderState ResolveTimelapseMediaState(string? status)
+        => status switch
+        {
+            TimelapseOperationStatuses.Waiting => MediaRenderState.Queued,
+            TimelapseOperationStatuses.Rendering => MediaRenderState.Rendering,
+            TimelapseOperationStatuses.Completed => MediaRenderState.Ready,
+            TimelapseOperationStatuses.Failed => MediaRenderState.Failed,
+            _ => MediaRenderState.Empty
+        };
+
     private static bool CanCancelOperation(string? status)
         => status is TimelapseOperationStatuses.Waiting or TimelapseOperationStatuses.Rendering;
 
@@ -1300,15 +1259,7 @@
         };
 
     private static string PreviewClass(string baseClass, string? status)
-    {
-        var classes = $"stage-preview {baseClass} {OperationStateClass(status)}";
-        return status switch
-        {
-            TimelapseOperationStatuses.Rendering => $"{classes} tl-loading-skeleton tl-active-render",
-            TimelapseOperationStatuses.Waiting => $"{classes} tl-loading-skeleton tl-loading-shimmer",
-            _ => classes
-        };
-    }
+        => $"stage-preview {baseClass} {OperationStateClass(status)}";
 
     private static string SafeRefreshError(Exception ex)
         => ex is UnauthorizedAccessException

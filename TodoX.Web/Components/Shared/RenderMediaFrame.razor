@@ -14,12 +14,12 @@
     }
     else if (IsActive)
     {
-        <div class="scene-image-frame @StateClass is-rendering">
+        <div class="scene-image-frame @StateCssClass @(IsAnimated ? "is-rendering" : string.Empty)">
             @if (!string.IsNullOrWhiteSpace(ThumbnailUrl))
             {
                 <img src="@ThumbnailUrl" class="scene-media-image scene-image-dim" />
             }
-            <div class="scene-image-shimmer"><span>@StateLabel</span></div>
+            <div class="scene-image-shimmer"><span>@ResolvedLoadingText</span></div>
         </div>
     }
     else if (IsFailed)
@@ -46,6 +46,8 @@
     [Parameter] public bool IsVideo { get; set; }
     [Parameter] public string? MediaUrl { get; set; }
     [Parameter] public string? ThumbnailUrl { get; set; }
+    [Parameter] public MediaRenderState State { get; set; } = MediaRenderState.Empty;
+    [Parameter] public string? LoadingLabel { get; set; }
     [Parameter] public string StateClass { get; set; } = string.Empty;
     [Parameter] public string StateLabel { get; set; } = string.Empty;
     [Parameter] public string EmptyText { get; set; } = string.Empty;
@@ -55,8 +57,40 @@
     [Parameter] public EventCallback OnClick { get; set; }
 
     private bool HasReadyMedia => !string.IsNullOrWhiteSpace(MediaUrl);
-    private bool IsActive => !string.IsNullOrWhiteSpace(StateClass);
-    private bool IsFailed => FailedText.Length > 0 && StateClass.Contains("failed", StringComparison.OrdinalIgnoreCase);
+    private MediaRenderState EffectiveState => State != MediaRenderState.Empty
+        ? State
+        : StateClass switch
+        {
+            var value when value.Contains("queued", StringComparison.OrdinalIgnoreCase) => MediaRenderState.Queued,
+            var value when value.Contains("downloading", StringComparison.OrdinalIgnoreCase) => MediaRenderState.Downloading,
+            var value when value.Contains("failed", StringComparison.OrdinalIgnoreCase) => MediaRenderState.Failed,
+            var value when value.Contains("render", StringComparison.OrdinalIgnoreCase)
+                || value.Contains("processing", StringComparison.OrdinalIgnoreCase)
+                || value.Contains("submitted", StringComparison.OrdinalIgnoreCase) => MediaRenderState.Rendering,
+            _ => MediaRenderState.Empty
+        };
+    private bool IsActive => EffectiveState is MediaRenderState.Queued or MediaRenderState.Rendering or MediaRenderState.Downloading;
+    private bool IsFailed => EffectiveState == MediaRenderState.Failed;
+    private bool IsAnimated => EffectiveState is MediaRenderState.Queued or MediaRenderState.Rendering or MediaRenderState.Downloading;
+    private string StateCssClass => EffectiveState switch
+    {
+        MediaRenderState.Queued => "scene-image-queued",
+        MediaRenderState.Rendering => "scene-image-rendering",
+        MediaRenderState.Downloading => "scene-image-downloading",
+        MediaRenderState.Failed => "scene-image-failed",
+        _ => string.Empty
+    };
+    private string ResolvedLoadingText => !string.IsNullOrWhiteSpace(LoadingLabel)
+        ? LoadingLabel
+        : !string.IsNullOrWhiteSpace(StateLabel)
+            ? StateLabel
+            : EffectiveState switch
+        {
+            MediaRenderState.Queued => "Đang chờ",
+            MediaRenderState.Rendering => IsVideo ? "Đang tạo video" : "Đang tạo ảnh",
+            MediaRenderState.Downloading => "Đang tải kết quả",
+            _ => string.Empty
+        };
     private string FrameStyle => $"--render-media-aspect-ratio: {ResolveAspectRatioValue(AspectRatio)}; --render-media-max-width: {ResolveMaxWidth(AspectRatio)}px; --render-media-max-height: {ResolveMaxHeight(AspectRatio)}px;";
 
     private static string ResolveAspectRatioValue(string value)

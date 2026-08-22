@@ -14,6 +14,7 @@ public sealed class SceneImageRenderWorkItemHandler : IRenderJobHandler
     private readonly ISceneImageRenderService _images;
     private readonly ISceneMediaVersioningService _versions;
     private readonly IRenderJobService _jobs;
+    private readonly IRVideoSceneVideoAutoChainService _autoChain;
     private readonly ILogger<SceneImageRenderWorkItemHandler> _logger;
 
     public SceneImageRenderWorkItemHandler(
@@ -21,12 +22,14 @@ public sealed class SceneImageRenderWorkItemHandler : IRenderJobHandler
         ISceneImageRenderService images,
         ISceneMediaVersioningService versions,
         IRenderJobService jobs,
+        IRVideoSceneVideoAutoChainService autoChain,
         ILogger<SceneImageRenderWorkItemHandler> logger)
     {
         _repo = repo;
         _images = images;
         _versions = versions;
         _jobs = jobs;
+        _autoChain = autoChain;
         _logger = logger;
     }
 
@@ -122,6 +125,8 @@ public sealed class SceneImageRenderWorkItemHandler : IRenderJobHandler
                 $"Scene {input.SceneIndex} image ready.",
                 new { jobId = job.Id, sceneId = input.SceneId, imageVersionId = input.ImageVersionId,
                     provider = outcome.ProviderCode, model = outcome.ModelName }, ct);
+
+            await _autoChain.TryEnqueueSceneVideoAsync(input.ProjectId, input.SceneId, "SCENE_IMAGE_READY", ct);
         }
         catch (Ai79TaskPollException ex)
         {
