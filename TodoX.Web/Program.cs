@@ -158,6 +158,30 @@ if (TodoX.Web.Services.AiProviders.AiImageBillingFeatureFlags.IsReconciliationWo
     builder.Services.AddHostedService<TodoX.Web.Services.AiProviders.AiImageBillingReconciliationWorker>();
 }
 builder.Services.Configure<TodoX.Web.Services.VideoRender.VideoRenderOptions>(builder.Configuration.GetSection("VideoRender"));
+builder.Services.Configure<TodoX.Web.Services.VideoRender.VbeeOptions>(builder.Configuration.GetSection(TodoX.Web.Services.VideoRender.VbeeOptions.SectionName));
+builder.Services.PostConfigure<TodoX.Web.Services.VideoRender.VbeeOptions>(options =>
+{
+    ApplyEnv("VBEE_API_BASE_URL", value => options.ApiBaseUrl = value);
+    ApplyEnv("VBEE_TTS_PATH", value => options.TtsPath = value);
+    ApplyEnv("VBEE_API_TOKEN", value => options.ApiToken = value);
+    ApplyEnv("VBEE_APP_ID", value => options.AppId = value);
+    ApplyEnv("VBEE_CALLBACK_URL", value => options.CallbackUrl = value);
+    ApplyEnv("VBEE_CALLBACK_SECRET", value => options.CallbackSecret = value);
+    ApplyEnvInt("VBEE_DEFAULT_SAMPLE_RATE", value => options.DefaultSampleRate = value);
+    ApplyEnvInt("VBEE_DEFAULT_BITRATE", value => options.DefaultBitrate = value);
+    ApplyEnvDecimal("VBEE_DEFAULT_SPEED_RATE", value => options.DefaultSpeedRate = value);
+    ApplyEnvInt("VBEE_HTTP_TIMEOUT_SECONDS", value => options.HttpTimeoutSeconds = value);
+    ApplyEnvInt("VBEE_POLL_INTERVAL_SECONDS", value => options.PollIntervalSeconds = value);
+    ApplyEnvInt("VBEE_MAX_POLL_COUNT", value => options.MaxPollCount = value);
+});
+builder.Services.AddHttpClient<TodoX.Web.Services.VideoRender.IVbeeVoiceClient, TodoX.Web.Services.VideoRender.VbeeVoiceClient>()
+    .ConfigureHttpClient((sp, client) =>
+    {
+        var options = sp.GetRequiredService<IOptionsMonitor<TodoX.Web.Services.VideoRender.VbeeOptions>>().CurrentValue;
+        client.Timeout = options.HttpTimeout;
+    });
+builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IRVideoSceneAudioAutoChainService, TodoX.Web.Services.VideoRender.RVideoSceneAudioAutoChainService>();
+builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IRVideoSceneMediaFinalizerService, TodoX.Web.Services.VideoRender.RVideoSceneMediaFinalizerService>();
 builder.Services.AddSingleton<TodoX.Web.Services.VideoRender.ITodoXVideoPromptParser, TodoX.Web.Services.VideoRender.TodoXVideoPromptParser>();
 builder.Services.AddSingleton<TodoX.Web.Services.VideoRender.IVideoPromptValidator, TodoX.Web.Services.VideoRender.VideoPromptValidator>();
 builder.Services.AddScoped<TodoX.Web.Services.VideoRender.VideoRenderRepository>();
@@ -188,6 +212,8 @@ builder.Services.AddScoped<IDanceSellReferenceProvider, KieDanceSellReferencePro
 builder.Services.AddScoped<IDanceSellReferenceProvider, Ai79DanceSellReferenceProvider>();
 builder.Services.AddScoped<IDanceSellReferenceProviderFactory, DanceSellReferenceProviderFactory>();
 builder.Services.AddScoped<IRenderJobHandler, TodoX.Web.Services.VideoRender.SceneVideoRenderHandler>();
+builder.Services.AddScoped<IRenderJobHandler, TodoX.Web.Services.VideoRender.SceneAudioRenderHandler>();
+builder.Services.AddScoped<IRenderJobHandler, TodoX.Web.Services.VideoRender.SceneAudioMuxHandler>();
 builder.Services.AddScoped<IRenderJobHandler, TodoX.Web.Services.VideoRender.SceneVideoWorkerHandler>();
 builder.Services.AddScoped<IRenderJobHandler, TodoX.Web.Services.VideoRender.VideoRenderMergeHandler>();
 builder.Services.AddScoped<IRVideoSceneVideoAutoChainService, RVideoSceneVideoAutoChainService>();
@@ -235,6 +261,15 @@ static void ApplyEnvInt(string key, Action<int> apply)
 {
     var value = Environment.GetEnvironmentVariable(key);
     if (int.TryParse(value, out var parsed))
+    {
+        apply(parsed);
+    }
+}
+
+static void ApplyEnvDecimal(string key, Action<decimal> apply)
+{
+    var value = Environment.GetEnvironmentVariable(key);
+    if (decimal.TryParse(value, out var parsed))
     {
         apply(parsed);
     }
@@ -443,6 +478,7 @@ app.MapDanceSellPhase1Endpoints();
 app.MapDanceSellPhase2Endpoints();
 app.MapAiStudioCatalogEndpoints();
 app.MapRVideoEndpoints();
+app.MapSceneAudioEndpoints();
 
 app.MapPost("/api/ai/cost/estimate", async (
     TodoX.Web.Services.AiProviders.IAiPricingService pricing,

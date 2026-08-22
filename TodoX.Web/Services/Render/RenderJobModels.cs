@@ -87,6 +87,8 @@ public static class RenderJobTypes
     public const string Timelapse = "timelapse";
     public const string RenderVideoBatch = "render_video_job";
     public const string RenderSceneVideo = "render_scene_video";
+    public const string RenderSceneAudio = "render_scene_audio";
+    public const string RenderSceneAudioMux = "render_scene_audio_mux";
     public const string MergeProjectVideo = "merge_video_job";
     public const string DanceSell = "dance_sell";
 }

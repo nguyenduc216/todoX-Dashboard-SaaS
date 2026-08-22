@@ -41,11 +41,12 @@ public sealed class RVideoLifecycleWorker : BackgroundService
                 var repository = scope.ServiceProvider.GetRequiredService<VideoRenderRepository>();
                 var rvideoJobs = scope.ServiceProvider.GetRequiredService<IRVideoJobService>();
                 var jobs = scope.ServiceProvider.GetRequiredService<IRenderJobService>();
+                var audioAutoChain = scope.ServiceProvider.GetRequiredService<IRVideoSceneAudioAutoChainService>();
                 var autoChain = scope.ServiceProvider.GetRequiredService<IRVideoSceneVideoAutoChainService>();
                 var catalog = scope.ServiceProvider.GetRequiredService<IAiStudioCatalogService>();
                 foreach (var setting in settings)
                 {
-                    await EvaluateProjectAsync(setting, repository, rvideoJobs, jobs, autoChain, factory, tenant, catalog, stoppingToken);
+                    await EvaluateProjectAsync(setting, repository, rvideoJobs, jobs, audioAutoChain, autoChain, factory, tenant, catalog, stoppingToken);
                 }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -61,7 +62,7 @@ public sealed class RVideoLifecycleWorker : BackgroundService
         }
     }
 
-    private async Task EvaluateProjectAsync(RVideoJobSettingsDto setting, VideoRenderRepository repo, IRVideoJobService rvideoJobs, IRenderJobService jobs, IRVideoSceneVideoAutoChainService autoChain, TodoXConnectionFactory factory, TenantContext tenant, IAiStudioCatalogService catalog, CancellationToken ct)
+    private async Task EvaluateProjectAsync(RVideoJobSettingsDto setting, VideoRenderRepository repo, IRVideoJobService rvideoJobs, IRenderJobService jobs, IRVideoSceneAudioAutoChainService audioAutoChain, IRVideoSceneVideoAutoChainService autoChain, TodoXConnectionFactory factory, TenantContext tenant, IAiStudioCatalogService catalog, CancellationToken ct)
     {
         var project = await repo.GetProjectAsync(setting.ProjectId, ct);
         if (project is null || project.Scenes.Count == 0) return;
@@ -156,6 +157,12 @@ public sealed class RVideoLifecycleWorker : BackgroundService
             .Select(x => x.SceneId)
             .Except(activeSceneIds.VideoSceneIds)
             .ToArray();
+        foreach (var sceneId in project.Scenes
+                     .Where(scene => RVideoRules.RequiresExternalVoice(scene, setting))
+                     .Select(scene => scene.Id))
+        {
+            await audioAutoChain.TryEnqueueSceneAudioAsync(project.Id, sceneId, "RVIDEO_LIFECYCLE", ct);
+        }
         foreach (var sceneId in readyScenes)
         {
             await autoChain.TryEnqueueSceneVideoAsync(project.Id, sceneId, "RVIDEO_LIFECYCLE", ct);

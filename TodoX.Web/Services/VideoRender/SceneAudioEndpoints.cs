@@ -1,0 +1,145 @@
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using Dapper;
+using TodoX.Web.Data;
+using TodoX.Web.Models;
+using TodoX.Web.Services.Media;
+
+namespace TodoX.Web.Services.VideoRender;
+
+public static class SceneAudioEndpoints
+{
+    public static void MapSceneAudioEndpoints(this WebApplication app)
+    {
+        app.MapPost("/api/providers/vbee/callback", HandleVbeeCallbackAsync).DisableAntiforgery();
+    }
+
+    private static async Task<IResult> HandleVbeeCallbackAsync(
+        HttpRequest request,
+        TenantContext tenant,
+        TodoXConnectionFactory factory,
+        IVbeeVoiceClient vbee,
+        ISceneMediaVersioningService versions,
+        IMediaFileService media,
+        IRVideoSceneMediaFinalizerService finalizer,
+        CancellationToken ct)
+    {
+        await tenant.EnsureLoadedAsync(ct);
+        var payload = await vbee.ParseCallbackAsync(request, ct);
+        if (string.IsNullOrWhiteSpace(payload.RequestId))
+        {
+            return Results.BadRequest(new { success = false, message = "Missing request_id." });
+        }
+
+        using (var conn = await factory.OpenAsync(ct))
+        {
+            await conn.ExecuteAsync(
+                """
+                INSERT INTO video_render.vbee_callback_inbox
+                    (tenant_id, provider_code, provider_task_id, scene_id, scene_audio_version_id,
+                     raw_payload_json, received_at, updated_at)
+                VALUES
+                    (@tenantId, 'vbee', @requestId, @sceneId, @sceneAudioVersionId,
+                     CAST(@rawPayload AS jsonb), now(), now())
+                ON CONFLICT (tenant_id, provider_task_id)
+                DO UPDATE SET
+                    scene_id=COALESCE(EXCLUDED.scene_id, video_render.vbee_callback_inbox.scene_id),
+                    scene_audio_version_id=COALESCE(EXCLUDED.scene_audio_version_id, video_render.vbee_callback_inbox.scene_audio_version_id),
+                    raw_payload_json=EXCLUDED.raw_payload_json,
+                    updated_at=now();
+                """,
+                new
+                {
+                    tenantId = tenant.TenantId,
+                    requestId = payload.RequestId,
+                    sceneId = payload.SceneId,
+                    sceneAudioVersionId = (Guid?)null,
+                    rawPayload = JsonSerializer.Serialize(payload.Raw, new JsonSerializerOptions(JsonSerializerDefaults.Web))
+                });
+        }
+
+        var version = await versions.GetSceneAudioVersionByProviderTaskIdAsync(payload.RequestId, ct);
+        if (version is null)
+        {
+            return Results.Ok(new { success = true, request_id = payload.RequestId, matched = false });
+        }
+
+        using (var conn = await factory.OpenAsync(ct))
+        {
+            await conn.ExecuteAsync(
+                """
+                UPDATE video_render.vbee_callback_inbox
+                   SET scene_audio_version_id=@sceneAudioVersionId,
+                       updated_at=now()
+                 WHERE tenant_id=@tenantId AND provider_task_id=@requestId;
+                """,
+                new { tenantId = tenant.TenantId, requestId = payload.RequestId, sceneAudioVersionId = version.Id });
+        }
+
+        if (string.Equals(version.Status, "completed", StringComparison.OrdinalIgnoreCase))
+        {
+            return Results.Ok(new { success = true, request_id = payload.RequestId, matched = true, already_completed = true });
+        }
+
+        if (string.Equals(payload.Status, "FAILED", StringComparison.OrdinalIgnoreCase)
+            || !string.IsNullOrWhiteSpace(payload.ErrorCode)
+            || !string.IsNullOrWhiteSpace(payload.ErrorMessage))
+        {
+            await versions.FailSceneAudioVersionAsync(version.Id, payload.ErrorCode ?? "VBEE_FAILED", payload.ErrorMessage ?? "Vbee callback failed.", ct);
+            return Results.Ok(new { success = true, request_id = payload.RequestId, matched = true, status = "failed" });
+        }
+
+        if (string.IsNullOrWhiteSpace(payload.AudioUrl))
+        {
+            return Results.Ok(new { success = true, request_id = payload.RequestId, matched = true, status = payload.Status ?? "SUBMITTED" });
+        }
+
+        await CompleteSceneAudioAsync(tenant.TenantId, version, payload.RequestId, payload.AudioUrl!, media, versions, finalizer, ct);
+        return Results.Ok(new { success = true, request_id = payload.RequestId, matched = true, status = "completed" });
+    }
+
+    private static async Task CompleteSceneAudioAsync(
+        Guid tenantId,
+        SceneAudioVersionDto version,
+        string requestId,
+        string audioUrl,
+        IMediaFileService media,
+        ISceneMediaVersioningService versions,
+        IRVideoSceneMediaFinalizerService finalizer,
+        CancellationToken ct)
+    {
+        if (string.Equals(version.Status, "completed", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var saved = await media.DownloadAndSaveBinaryAtObjectKeyAsync(
+            audioUrl,
+            version.StorageKey ?? SceneMediaStorageKeys.SceneAudioOutput(tenantId, version.ProjectId, version.SceneId, version.Id),
+            "scene_audio",
+            "audio/mpeg",
+            userId: null,
+            customerId: null,
+            tenantId,
+            ct);
+
+        await versions.CompleteSceneAudioVersionAsync(version.Id, new SceneAudioVersionCompleteRequest(
+            saved.PublicUrl ?? saved.FileUrl,
+            saved.ObjectKey,
+            DurationSeconds: null,
+            ProviderCode: "vbee",
+            ModelName: version.VoiceCatalogCode,
+            ProviderCapabilityId: null,
+            ProviderTaskId: requestId,
+            BillingLogicalRequestId: version.LogicalRequestId,
+            EstimatedUsd: null,
+            ActualUsd: null,
+            ChargedPoints: 0,
+            RefundedPoints: 0,
+            CostSource: "configured_tariff",
+            ResultMediaId: saved.Id,
+            MimeType: saved.MimeType), ct);
+
+        await finalizer.TryFinalizeSceneMediaAsync(version.ProjectId, version.SceneId, "VBEE_CALLBACK", ct);
+    }
+}

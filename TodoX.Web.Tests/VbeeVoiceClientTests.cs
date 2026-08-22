@@ -1,0 +1,103 @@
+using System.Net;
+using Microsoft.Extensions.Options;
+using TodoX.Web.Services.VideoRender;
+using Xunit;
+
+namespace TodoX.Web.Tests;
+
+public sealed class VbeeVoiceClientTests
+{
+    [Fact]
+    public async Task SubmitAsync_UsesVbeeContractAndOmitsZeroSampleRate()
+    {
+        var handler = new FakeHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("""{"request_id":"req-123","audio_url":"https://cdn.example.com/out.mp3"}""")
+        });
+        var client = CreateClient(handler, new VbeeOptions
+        {
+            ApiBaseUrl = "https://vbee.example/api/v1",
+            TtsPath = "/tts",
+            ApiToken = "token-123",
+            AppId = "app-456"
+        });
+
+        var result = await client.SubmitAsync(new VbeeVoiceSubmitRequest(
+            "voice-01",
+            "Xin chao",
+            1.0m,
+            null,
+            "https://dashboard.example.com/api/providers/vbee/callback",
+            null,
+            0,
+            160,
+            1.25m,
+            null));
+
+        Assert.Equal("req-123", result.RequestId);
+        Assert.Equal("https://cdn.example.com/out.mp3", result.AudioUrl);
+        Assert.Equal(HttpMethod.Post, handler.LastRequest?.Method);
+        Assert.Equal("https://vbee.example/api/v1/tts", handler.LastRequest?.RequestUri?.ToString());
+        Assert.Equal("Bearer", handler.LastRequest?.Headers.Authorization?.Scheme);
+        Assert.Equal("token-123", handler.LastRequest?.Headers.Authorization?.Parameter);
+
+        var body = handler.LastBody ?? string.Empty;
+        Assert.Contains("\"app_id\":\"app-456\"", body);
+        Assert.Contains("\"callback_url\":\"https://dashboard.example.com/api/providers/vbee/callback\"", body);
+        Assert.Contains("\"input_text\":\"Xin chao\"", body);
+        Assert.Contains("\"voice_code\":\"voice-01\"", body);
+        Assert.Contains("\"audio_type\":\"mp3\"", body);
+        Assert.Contains("\"bitrate\":160", body);
+        Assert.Contains("\"speed_rate\":1.25", body);
+        Assert.DoesNotContain("sample_rate", body);
+    }
+
+    [Fact]
+    public async Task ParseCallbackPayloadAsync_ReadsRequestIdAndAudioUrl()
+    {
+        var client = CreateClient(new FakeHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)), new VbeeOptions
+        {
+            ApiBaseUrl = "https://vbee.example/api/v1",
+            TtsPath = "/tts",
+            ApiToken = "token-123",
+            AppId = "app-456"
+        });
+
+        var result = await client.ParseCallbackPayloadAsync("""
+        {"request_id":"req-abc","scene_id":42,"status":"SUCCESS","audio_url":"https://cdn.example.com/callback.mp3"}
+        """);
+
+        Assert.Equal("req-abc", result.RequestId);
+        Assert.Equal(42, result.SceneId);
+        Assert.Equal("https://cdn.example.com/callback.mp3", result.AudioUrl);
+        Assert.Equal("SUCCESS", result.Status);
+    }
+
+    private static VbeeVoiceClient CreateClient(FakeHttpMessageHandler handler, VbeeOptions options)
+        => new(new HttpClient(handler), new StaticOptionsMonitor<VbeeOptions>(options));
+
+    private sealed class FakeHttpMessageHandler : HttpMessageHandler
+    {
+        private readonly Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> _handler;
+
+        public FakeHttpMessageHandler(Func<HttpRequestMessage, HttpResponseMessage> handler)
+            : this((request, _) => Task.FromResult(handler(request)))
+        {
+        }
+
+        public FakeHttpMessageHandler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> handler)
+        {
+            _handler = handler;
+        }
+
+        public HttpRequestMessage? LastRequest { get; private set; }
+        public string? LastBody { get; private set; }
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            LastRequest = request;
+            LastBody = request.Content is null ? null : await request.Content.ReadAsStringAsync(cancellationToken);
+            return await _handler(request, cancellationToken);
+        }
+    }
+}

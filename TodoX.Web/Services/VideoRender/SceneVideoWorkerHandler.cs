@@ -59,6 +59,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
     private readonly IRenderJobService _jobs;
     private readonly TenantContext _tenant;
     private readonly IConfiguration _config;
+    private readonly IRVideoSceneMediaFinalizerService _finalizer;
     private readonly ILogger<SceneVideoWorkerHandler> _logger;
     private readonly VideoRenderOptions _options;
 
@@ -75,6 +76,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         IRenderJobService jobs,
         TenantContext tenant,
         IConfiguration config,
+        IRVideoSceneMediaFinalizerService finalizer,
         IOptionsMonitor<VideoRenderOptions> options,
         ILogger<SceneVideoWorkerHandler> logger)
     {
@@ -88,6 +90,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         _jobs = jobs;
         _tenant = tenant;
         _config = config;
+        _finalizer = finalizer;
         _logger = logger;
         _options = options.CurrentValue;
     }
@@ -459,6 +462,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                     await _repo.AddProjectEventAsync(project.Id, "SCENE_VIDEO_READY", "info",
                         $"Scene {input.SceneIndex} rendered successfully.",
                         new { jobId = job.Id, input.SceneId, input.SceneIndex, taskId, videoUrl = saved.PublicUrl ?? saved.FileUrl }, ct);
+                    await _finalizer.TryFinalizeSceneMediaAsync(project.Id, scene.Id, "SCENE_VIDEO_READY", ct);
                     return;
                 }
                 catch (VideoReconciliationException ex)

@@ -64,6 +64,22 @@ CREATE INDEX IF NOT EXISTS ix_scene_audio_history ON video_render.scene_audio_ve
 CREATE INDEX IF NOT EXISTS ix_scene_audio_logical_billing ON video_render.scene_audio_versions(billing_logical_request_id);
 CREATE INDEX IF NOT EXISTS ix_scene_audio_provider_task ON video_render.scene_audio_versions(provider_task_id);
 
+CREATE TABLE IF NOT EXISTS video_render.vbee_callback_inbox (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id uuid NOT NULL,
+  provider_code text NOT NULL DEFAULT 'vbee',
+  provider_task_id text NOT NULL,
+  scene_id bigint NULL,
+  scene_audio_version_id uuid NULL,
+  raw_payload_json jsonb NOT NULL DEFAULT '{}'::jsonb,
+  received_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT ux_vbee_callback_inbox_tenant_task UNIQUE(tenant_id, provider_task_id)
+);
+
+CREATE INDEX IF NOT EXISTS ix_vbee_callback_inbox_scene_id ON video_render.vbee_callback_inbox(scene_id);
+CREATE INDEX IF NOT EXISTS ix_vbee_callback_inbox_scene_audio_version_id ON video_render.vbee_callback_inbox(scene_audio_version_id);
+
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='fk_scene_audio_version') THEN
     ALTER TABLE video_render.video_project_scenes

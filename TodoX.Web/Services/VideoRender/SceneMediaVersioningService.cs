@@ -322,7 +322,11 @@ public interface ISceneMediaVersioningService
     Task FailSceneAudioVersionAsync(Guid versionId, string? errorCode, string? errorMessage, CancellationToken ct = default);
     Task MarkSceneAudioVersionSubmittedAsync(Guid versionId, string? providerCode, string? modelName, long? providerCapabilityId, string providerTaskId, CancellationToken ct = default);
     Task<string?> GetSceneAudioProviderTaskIdAsync(Guid versionId, CancellationToken ct = default);
+    Task<SceneAudioVersionDto?> GetSceneAudioVersionByProviderTaskIdAsync(string providerTaskId, CancellationToken ct = default);
     Task MarkSceneAudioPendingReconciliationAsync(Guid versionId, string? errorCode, string? errorMessage, CancellationToken ct = default);
+    Task<bool> HasActiveAudioVersionAsync(long sceneId, CancellationToken ct = default);
+    Task<SceneAudioVersionDto?> GetSelectedAudioVersionAsync(long sceneId, CancellationToken ct = default);
+    Task<SceneVideoVersionDto?> GetSelectedVideoVersionAsync(long sceneId, CancellationToken ct = default);
     Task<IReadOnlyList<SceneAudioVersionDto>> ListSceneAudioVersionsAsync(long sceneId, int skip = 0, int take = 20, CancellationToken ct = default);
     Task<IReadOnlyList<SceneAudioVersionDto>> ListSceneAudioVersionsAsync(long sceneId, CurrentUserSession user, int skip = 0, int take = 20, CancellationToken ct = default);
     Task SelectSceneAudioVersionAsync(long sceneId, Guid versionId, Guid? selectedBy, CancellationToken ct = default);
@@ -1252,6 +1256,20 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
             new { versionId, tenant = _tenant.TenantId });
     }
 
+    public async Task<SceneAudioVersionDto?> GetSceneAudioVersionByProviderTaskIdAsync(string providerTaskId, CancellationToken ct = default)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        return await conn.QuerySingleOrDefaultAsync<SceneAudioVersionDto>(
+            SelectSceneAudioVersionSql +
+            """
+             WHERE provider_task_id=@providerTaskId AND tenant_id=@tenant
+             ORDER BY created_at DESC
+             LIMIT 1;
+            """,
+            new { providerTaskId, tenant = _tenant.TenantId });
+    }
+
     public async Task MarkSceneAudioPendingReconciliationAsync(Guid versionId, string? errorCode, string? errorMessage, CancellationToken ct = default)
     {
         await _tenant.EnsureLoadedAsync(ct);
@@ -1266,6 +1284,50 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
              WHERE id=@versionId AND tenant_id=@tenant;
             """,
             new { versionId, tenant = _tenant.TenantId, errorCode, errorMessage });
+    }
+
+    public async Task<bool> HasActiveAudioVersionAsync(long sceneId, CancellationToken ct = default)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        var count = await conn.ExecuteScalarAsync<int>(
+            """
+            SELECT COUNT(*)
+              FROM video_render.scene_audio_versions
+             WHERE scene_id=@sceneId
+               AND tenant_id=@tenant
+               AND status IN ('queued','submitted','processing','pending_reconciliation')
+            """,
+            new { sceneId, tenant = _tenant.TenantId });
+        return count > 0;
+    }
+
+    public async Task<SceneAudioVersionDto?> GetSelectedAudioVersionAsync(long sceneId, CancellationToken ct = default)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        return await conn.QuerySingleOrDefaultAsync<SceneAudioVersionDto>(
+            SelectSceneAudioVersionSql +
+            """
+             WHERE scene_id=@sceneId AND tenant_id=@tenant AND is_selected=true AND status='completed'
+             ORDER BY version_number DESC
+             LIMIT 1;
+            """,
+            new { sceneId, tenant = _tenant.TenantId });
+    }
+
+    public async Task<SceneVideoVersionDto?> GetSelectedVideoVersionAsync(long sceneId, CancellationToken ct = default)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        return await conn.QuerySingleOrDefaultAsync<SceneVideoVersionDto>(
+            SelectSceneVideoVersionSql +
+            """
+             WHERE scene_id=@sceneId AND tenant_id=@tenant AND is_selected=true AND status='completed'
+             ORDER BY version_number DESC
+             LIMIT 1;
+            """,
+            new { sceneId, tenant = _tenant.TenantId });
     }
 
     public async Task<IReadOnlyList<SceneAudioVersionDto>> ListSceneAudioVersionsAsync(long sceneId, int skip = 0, int take = 20, CancellationToken ct = default)
