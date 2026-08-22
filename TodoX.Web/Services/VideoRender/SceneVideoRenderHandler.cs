@@ -11,9 +11,8 @@ public sealed class SceneVideoRenderInput
     public long[] SceneIds { get; set; } = Array.Empty<long>();
     public string AspectRatio { get; set; } = "9:16";
     public string Resolution { get; set; } = "720P";
-    public Guid UserId { get; set; }
+    public Guid? UserId { get; set; }
     public Guid? CustomerId { get; set; }
-    public string? CreatedBy { get; set; }
     public AiBillingTrustedPayerContext? TrustedPayerContext { get; set; }
     public string? ProviderConfigJson { get; set; }
     public string? CapabilityConfigJson { get; set; }
@@ -252,7 +251,6 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
             SceneIndex = scene.SceneIndex,
             UserId = input.UserId,
             CustomerId = input.CustomerId,
-            CreatedBy = input.CreatedBy,
             TrustedPayerContext = input.TrustedPayerContext,
             SelectedSourceImageVersionId = selectedImage.Id,
             SourceImageUrl = sourceImageUrl,

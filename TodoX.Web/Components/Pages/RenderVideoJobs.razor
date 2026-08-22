@@ -2410,7 +2410,6 @@ else
         input.AspectRatio = _aspectRatio;
         input.UserId = AuthState.CurrentUser.UserId;
         input.CustomerId = AuthState.CurrentUser.CustomerId;
-        input.CreatedBy = AuthState.CurrentUser.Email ?? AuthState.CurrentUser.UserId.ToString();
         input.TrustedPayerContext = TodoX.Web.Services.AiProviders.AiBillingPayerResolver.CreateTrustedBackgroundContext(AuthState.CurrentUser);
         input.OnlyMissingOrFailed = onlyMissingOrFailed;
 
@@ -3260,7 +3259,6 @@ else
             Resolution = _resolution,
             UserId = AuthState.CurrentUser.UserId,
             CustomerId = AuthState.CurrentUser.CustomerId,
-            CreatedBy = AuthState.CurrentUser.Email ?? AuthState.CurrentUser.UserId.ToString(),
             TrustedPayerContext = TodoX.Web.Services.AiProviders.AiBillingPayerResolver.CreateTrustedBackgroundContext(AuthState.CurrentUser)
         };
 
@@ -3373,7 +3371,6 @@ else
             Resolution = _resolution,
             UserId = AuthState.CurrentUser.UserId,
             CustomerId = AuthState.CurrentUser.CustomerId,
-            CreatedBy = AuthState.CurrentUser.Email ?? AuthState.CurrentUser.UserId.ToString(),
             TrustedPayerContext = TodoX.Web.Services.AiProviders.AiBillingPayerResolver.CreateTrustedBackgroundContext(AuthState.CurrentUser)
         };
 

@@ -356,6 +356,28 @@ public sealed class RVideoProviderPollingRegressionTests
     }
 
     [Fact]
+    public void RVideoVideoWorkItemContractsKeepUserIdNullableAndDropCreatedByText()
+    {
+        var renderHandler = ReadRepoFile("Services", "VideoRender", "SceneVideoRenderHandler.cs");
+        var workerHandler = ReadRepoFile("Services", "VideoRender", "SceneVideoWorkerHandler.cs");
+
+        Assert.Contains("public Guid? UserId { get; set; }", renderHandler);
+        Assert.Contains("public Guid? UserId { get; set; }", workerHandler);
+        Assert.DoesNotContain("public string? CreatedBy", renderHandler);
+        Assert.DoesNotContain("public string? CreatedBy", workerHandler);
+    }
+
+    [Fact]
+    public void RVideoAutoChainUsesNullableProjectUserId()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "RVideoSceneVideoAutoChainService.cs");
+
+        Assert.Contains("UserId = project.UserId", source);
+        Assert.DoesNotContain("UserId = project.UserId ?? Guid.Empty", source);
+        Assert.DoesNotContain("CreatedBy = triggerSource", source);
+    }
+
+    [Fact]
     public void RVideoProjectProjectionFallsBackToSelectedCompletedSceneVideoVersion()
     {
         var source = ReadRepoFile("Services", "VideoRender", "VideoRenderRepository.cs");

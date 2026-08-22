@@ -89,9 +89,8 @@ public sealed class RVideoSceneVideoAutoChainService : IRVideoSceneVideoAutoChai
             SceneIds = new[] { sceneId },
             AspectRatio = renderSettings.AspectRatio,
             Resolution = renderSettings.Resolution,
-            UserId = project.UserId ?? Guid.Empty,
+            UserId = project.UserId,
             CustomerId = project.CustomerId,
-            CreatedBy = triggerSource
         };
 
         var model = new RenderJobCreateModel

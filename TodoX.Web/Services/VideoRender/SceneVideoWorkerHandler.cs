@@ -13,9 +13,8 @@ public sealed class SceneVideoRenderWorkItemInput
     public long ProjectId { get; set; }
     public long SceneId { get; set; }
     public int SceneIndex { get; set; }
-    public Guid UserId { get; set; }
+    public Guid? UserId { get; set; }
     public Guid? CustomerId { get; set; }
-    public string? CreatedBy { get; set; }
     public AiBillingTrustedPayerContext? TrustedPayerContext { get; set; }
     public Guid? SelectedSourceImageVersionId { get; set; }
     public string? SourceImageUrl { get; set; }
@@ -238,7 +237,6 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                         input.AspectRatio,
                         attemptIndex
                     },
-                    CreatedBy = input.CreatedBy
                 }, ct);
             }
             else
@@ -645,7 +643,6 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                 input.Resolution,
                 input.AspectRatio
             },
-            CreatedBy = input.CreatedBy
         }, ct);
 
         if (!reservation.Ok)
@@ -1024,7 +1021,6 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
             Status = success ? "success" : "failed",
             ErrorMessage = errorMessage,
             MetadataJson = BuildUsageMetadata(input, logicalRequestId, providerTaskId, providerUsageJson, chargedPoints),
-            CreatedBy = input.CreatedBy
         }, ct);
     }
 
