@@ -82,10 +82,9 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
             ?? throw new InvalidOperationException("Video project not found.");
 
         var route = await _routing.ResolveAsync(RVideoVideoModelPolicy.CapabilityCode, providerCapabilityId: null, fromUser: false, ct);
-        if (!RVideoVideoModelPolicy.Is79AiProvider(route.ProviderCode)
-            || !string.Equals(route.CapabilityCode, RVideoVideoModelPolicy.CapabilityCode, StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(route.CapabilityCode, RVideoVideoModelPolicy.CapabilityCode, StringComparison.OrdinalIgnoreCase))
         {
-            throw new InvalidOperationException("RVIDEO_VIDEO_PROVIDER_MUST_BE_79AI");
+            throw new InvalidOperationException("RVIDEO_VIDEO_CAPABILITY_ROUTE_INVALID");
         }
         input.ProviderConfigJson = route.ProviderConfigJson;
         input.CapabilityConfigJson = route.CapabilityConfigJson;
@@ -223,8 +222,14 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
                 ModelName = route.ModelName,
                 ConfigJson = route.CapabilityConfigJson
             },
-            RVideoVideoModelPolicy.Models.FirstOrDefault(x => string.Equals(x.Model, route.ModelName, StringComparison.OrdinalIgnoreCase))
-            ?? RVideoVideoModelPolicy.GetInitial(),
+            RVideoVideoModelPolicy.Models.FirstOrDefault(x =>
+                string.Equals(x.ProviderCode, route.ProviderCode, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(x.Model, route.ModelName, StringComparison.OrdinalIgnoreCase))
+            ?? new RVideoVideoModelPolicyEntry(
+                0,
+                route.ProviderCode,
+                route.ModelName ?? RVideoVideoModelPolicy.GetInitial().Model,
+                null),
             input.AspectRatio,
             input.Resolution,
             scene.DurationSeconds);
@@ -286,12 +291,8 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
             Prompt = new { projectId = project.Id, sceneId = scene.Id, parentJobId = parentJob.Id },
             References = Array.Empty<object>(),
             LogCode = parentJob.LogCode,
-            ProviderCode = string.Equals(route.ProviderCode, "yescale_task_video", StringComparison.OrdinalIgnoreCase)
-                ? route.ProviderCode
-                : RVideoVideoModelPolicy.ProviderCode,
-            ModelCode = string.Equals(route.ProviderCode, "yescale_task_video", StringComparison.OrdinalIgnoreCase)
-                ? route.ModelName
-                : (route.ModelName ?? RVideoVideoModelPolicy.GetInitial().Model),
+            ProviderCode = route.ProviderCode,
+            ModelCode = route.ModelName,
             MaxAttempts = 3,
             PointCostEstimate = 0,
             PointStatus = RenderPointStatuses.Pending

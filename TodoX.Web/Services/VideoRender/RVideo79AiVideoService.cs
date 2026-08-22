@@ -83,7 +83,7 @@ public sealed record RVideo79AiVideoSubmitResult(string TaskId, string Sanitized
 
 public interface IRVideo79AiVideoService
 {
-    Task<RVideo79AiRuntime> ResolveRuntimeAsync(CancellationToken ct = default);
+    Task<RVideo79AiRuntime> ResolveRuntimeAsync(long providerId, long providerCapabilityId, string providerCode, CancellationToken ct = default);
     Task<RVideo79AiProviderImageAsset> UploadSourceImageAsync(RVideo79AiRuntime runtime, RVideo79AiVideoSourceImage source, CancellationToken ct = default);
     Task<RVideo79AiVideoSubmitResult> SubmitAsync(RVideo79AiVideoSubmitRequest request, CancellationToken ct = default);
     Task<Ai79TaskStatusResult> PollAsync(RVideo79AiRuntime runtime, string taskId, CancellationToken ct = default);
@@ -92,7 +92,6 @@ public interface IRVideo79AiVideoService
 public sealed class RVideo79AiVideoService : IRVideo79AiVideoService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
-    private readonly IAiProviderService _providers;
     private readonly AiProviderRepository _providerRepository;
     private readonly IProviderCredentialResolver _credentials;
     private readonly IProviderCredentialRepository _credentialRepository;
@@ -101,7 +100,6 @@ public sealed class RVideo79AiVideoService : IRVideo79AiVideoService
     private readonly IConfiguration _configuration;
 
     public RVideo79AiVideoService(
-        IAiProviderService providers,
         AiProviderRepository providerRepository,
         IProviderCredentialResolver credentials,
         IProviderCredentialRepository credentialRepository,
@@ -109,7 +107,6 @@ public sealed class RVideo79AiVideoService : IRVideo79AiVideoService
         IMediaFileService media,
         IConfiguration configuration)
     {
-        _providers = providers;
         _providerRepository = providerRepository;
         _credentials = credentials;
         _credentialRepository = credentialRepository;
@@ -118,28 +115,23 @@ public sealed class RVideo79AiVideoService : IRVideo79AiVideoService
         _configuration = configuration;
     }
 
-    public async Task<RVideo79AiRuntime> ResolveRuntimeAsync(CancellationToken ct = default)
+    public async Task<RVideo79AiRuntime> ResolveRuntimeAsync(long providerId, long providerCapabilityId, string providerCode, CancellationToken ct = default)
     {
-        var option = await _providers.ResolveProviderForCapabilityAsync(
-            RVideoVideoModelPolicy.CapabilityCode,
-            providerCapabilityId: null,
-            fromUser: false,
-            ct);
-        if (!RVideoVideoModelPolicy.Is79AiProvider(option.ProviderCode))
+        if (!RVideoVideoModelPolicy.Is79AiProvider(providerCode))
         {
             throw new InvalidOperationException("RVIDEO_VIDEO_PROVIDER_MUST_BE_79AI");
         }
 
-        var provider = await _providerRepository.GetProviderAsync(option.ProviderId, ct)
+        var provider = await _providerRepository.GetProviderAsync(providerId, ct)
             ?? throw new InvalidOperationException("Configured 79AI provider could not be loaded.");
-        var capability = provider.Capabilities.FirstOrDefault(x => x.Id == option.ProviderCapabilityId)
+        var capability = provider.Capabilities.FirstOrDefault(x => x.Id == providerCapabilityId)
             ?? throw new InvalidOperationException("Configured RVIDEO 79AI video capability could not be loaded.");
-        var credential = await _credentials.ResolveAsync(option.ProviderCode, "access_token", ct);
+        var credential = await _credentials.ResolveAsync(providerCode, "access_token", ct);
         var account = await _credentialRepository.GetAccountByIdAsync(credential.ProviderAccountId, ct);
         return new RVideo79AiRuntime(
-            option.ProviderId,
-            option.ProviderCapabilityId,
-            option.ProviderCode,
+            providerId,
+            providerCapabilityId,
+            providerCode,
             FirstNonBlank(provider.BaseUrl, ReadString(account?.ConfigJson, "base_url"), ReadString(provider.ConfigJson, "base_url"), _configuration["TimelapseProviderWorkers:Default79AiBaseUrl"], "https://api.gommo.net/ai")!,
             RequirePath(FirstNonBlank(ReadString(capability.ConfigJson, "submit_path"), ReadString(provider.ConfigJson, "video_submit_path"), capability.EndpointPath, "/create-video"), "/create-video"),
             RequirePath(FirstNonBlank(ReadString(capability.ConfigJson, "poll_path"), ReadString(provider.ConfigJson, "video_poll_path"), "/video"), "/video"),
@@ -149,7 +141,7 @@ public sealed class RVideo79AiVideoService : IRVideo79AiVideoService
             credential,
             provider.ConfigJson,
             capability.ConfigJson,
-            option.UnitCostPoints);
+            capability.UnitCostPoints);
     }
 
     public async Task<RVideo79AiProviderImageAsset> UploadSourceImageAsync(RVideo79AiRuntime runtime, RVideo79AiVideoSourceImage source, CancellationToken ct = default)

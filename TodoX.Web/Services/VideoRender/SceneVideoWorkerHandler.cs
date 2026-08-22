@@ -53,8 +53,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
     private readonly ISceneMediaVersioningService _versions;
     private readonly IAiImageBillingService _billing;
     private readonly IAiProviderService _providers;
-    private readonly IYEScaleTaskClient _tasks;
-    private readonly IRVideo79AiVideoService _rvideo79Ai;
+    private readonly IVideoGenerationProviderAdapterResolver _providerAdapters;
     private readonly IMediaFileService _media;
     private readonly IVideoPromptValidator _promptValidator;
     private readonly IRenderJobService _jobs;
@@ -70,8 +69,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         ISceneMediaVersioningService versions,
         IAiImageBillingService billing,
         IAiProviderService providers,
-        IYEScaleTaskClient tasks,
-        IRVideo79AiVideoService rvideo79Ai,
+        IVideoGenerationProviderAdapterResolver providerAdapters,
         IMediaFileService media,
         IVideoPromptValidator promptValidator,
         IRenderJobService jobs,
@@ -84,8 +82,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         _versions = versions;
         _billing = billing;
         _providers = providers;
-        _tasks = tasks;
-        _rvideo79Ai = rvideo79Ai;
+        _providerAdapters = providerAdapters;
         _media = media;
         _promptValidator = promptValidator;
         _jobs = jobs;
@@ -109,16 +106,10 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         var scene = project.Scenes.FirstOrDefault(x => x.Id == input.SceneId)
             ?? throw new InvalidOperationException("Video scene not found.");
 
-        if (RVideoVideoModelPolicy.Is79AiProvider(job.ProviderCode) || string.Equals(input.CapabilityCode, RVideoVideoModelPolicy.CapabilityCode, StringComparison.OrdinalIgnoreCase))
-        {
-            await HandleRVideoAsync(job, input, project, scene, ct);
-            return;
-        }
-
-        await HandleYescaleAsync(job, input, project, scene, ct);
+        await HandleProviderVideoAsync(job, input, project, scene, ct);
     }
 
-    private async Task HandleRVideoAsync(
+    private async Task HandleProviderVideoAsync(
         RenderJobDto job,
         SceneVideoRenderWorkItemInput input,
         VideoProjectDto project,
@@ -126,11 +117,11 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         CancellationToken ct)
     {
         var sourceVersion = await ResolveSourceImageVersionAsync(scene.Id, input.SelectedSourceImageVersionId, ct)
-            ?? throw new InvalidOperationException("RVIDEO_SOURCE_IMAGE_UNAVAILABLE");
+            ?? throw new InvalidOperationException("SCENE_VIDEO_SOURCE_IMAGE_UNAVAILABLE");
 
         var validation = _promptValidator.Validate(
             input.VideoPrompt,
-            input.ModelName ?? RVideoVideoModelPolicy.GetInitial().Model,
+            input.ModelName,
             input.CapabilityConfigJson,
             input.SceneIndex);
         input.VideoPrompt = validation.TrimmedPrompt;
@@ -163,8 +154,8 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         var attemptIndex = ResolveNextAttemptIndex(input.LogicalRequestId, attemptVersions);
         while (attemptIndex < RVideoVideoModelPolicy.Models.Count)
         {
-            var policy = RVideoVideoModelPolicy.GetByAttemptIndex(attemptIndex)
-                ?? throw new InvalidOperationException("RVIDEO_VIDEO_POLICY_MISSING");
+            var policy = GetAttemptPolicy(input, attemptIndex)
+                ?? throw new InvalidOperationException("SCENE_VIDEO_PROVIDER_POLICY_MISSING");
             var attemptLogicalRequestId = BuildAttemptLogicalRequestId(input.LogicalRequestId, attemptIndex);
             var version = await _versions.CreateQueuedSceneVideoVersionAsync(new SceneVideoVersionCreateRequest(
                 input.ProjectId,
@@ -195,8 +186,8 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                     attemptIndex,
                     policy.Model,
                     policy.Mode,
-                    provider = RVideoVideoModelPolicy.ProviderCode,
-                    capability = RVideoVideoModelPolicy.CapabilityCode
+                    provider = input.ProviderCode,
+                    capability = input.CapabilityCode
                 }), ct);
 
             var tariffSnapshot = string.IsNullOrWhiteSpace(input.TariffSnapshotJson)
@@ -228,8 +219,8 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                     UserId = input.UserId,
                     ProviderId = input.ProviderId,
                     ProviderCapabilityId = input.ProviderCapabilityId,
-                    ProviderCode = RVideoVideoModelPolicy.ProviderCode,
-                    CapabilityCode = RVideoVideoModelPolicy.CapabilityCode,
+                    ProviderCode = input.ProviderCode,
+                    CapabilityCode = input.CapabilityCode,
                     FeatureCode = "render_job_scene_video",
                     RequestedModel = policy.Model,
                     Cost = billingCost,
@@ -252,7 +243,16 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
             else
             {
                 reservation = await _billing.GetReservationAsync(attemptLogicalRequestId, ct)
-                    ?? throw new InvalidOperationException($"RVIDEO billing reservation not found for {attemptLogicalRequestId}.");
+                    ?? new AiImageBillingReservation(
+                        true,
+                        false,
+                        "recovered",
+                        "pending_reconciliation",
+                        attemptLogicalRequestId,
+                        0,
+                        null,
+                        null,
+                        null);
             }
 
             if (!reservation.Ok)
@@ -261,9 +261,11 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                 throw new RenderJobTerminalFailureException(reservation.ErrorMessage ?? "Unable to reserve billing.");
             }
 
-            if (!reservation.ShouldSubmitProvider)
+            if (!reservation.ShouldSubmitProvider && string.IsNullOrWhiteSpace(taskId))
             {
-                attemptIndex = Math.Min(attemptIndex, RVideoVideoModelPolicy.Models.Count - 1);
+                await MarkPendingReconciliationAsync(input, version.Id, attemptLogicalRequestId, tariffSnapshot,
+                    "missing_task_id", "Existing billing reservation has no provider_task_id.", ct);
+                throw new RenderJobPendingReconciliationException("Missing provider_task_id for scene video reconciliation.");
             }
 
             if (string.IsNullOrWhiteSpace(taskId))
@@ -273,38 +275,41 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
 
                 try
                 {
-                    var runtime = await _rvideo79Ai.ResolveRuntimeAsync(ct);
                     var sourceMedia = await ResolveSourceImageMediaAsync(sourceVersion, ct);
-                    var sourceAsset = await _rvideo79Ai.UploadSourceImageAsync(runtime, new RVideo79AiVideoSourceImage(
-                        sourceVersion.Id,
-                        sourceVersion.StorageKey,
-                        sourceVersion.PublicUrl,
-                        sourceMedia?.FileName,
-                        sourceMedia?.MimeType), ct);
-                    var submit = await _rvideo79Ai.SubmitAsync(new RVideo79AiVideoSubmitRequest(
-                        runtime,
-                        policy,
+                    var adapter = _providerAdapters.Resolve(input.ProviderCode, input.CapabilityCode);
+                    var submit = await adapter.SubmitAsync(new VideoProviderSubmitRequest(
+                        input.ProviderId,
+                        input.ProviderCapabilityId,
+                        input.ProviderCode,
+                        input.CapabilityCode,
+                        policy.Model,
+                        policy.Mode,
                         input.VideoPrompt ?? string.Empty,
                         input.AspectRatio,
                         input.Resolution,
                         input.DurationSeconds,
-                        sourceAsset), ct);
-                    taskId = string.IsNullOrWhiteSpace(submit.TaskId) ? null : submit.TaskId.Trim();
+                        new VideoProviderSourceImage(
+                            sourceVersion.ResultMediaId,
+                            sourceVersion.StorageKey,
+                            sourceVersion.PublicUrl,
+                            sourceMedia?.FileName,
+                            sourceMedia?.MimeType)), ct);
+                    taskId = string.IsNullOrWhiteSpace(submit.ProviderTaskId) ? null : submit.ProviderTaskId.Trim();
                     if (string.IsNullOrWhiteSpace(taskId))
                     {
-                        throw new InvalidOperationException("RVIDEO submit response is missing task_id.");
+                        throw new InvalidOperationException("Video provider submit response is missing task_id.");
                     }
 
-                    await _versions.MarkSceneVideoVersionSubmittedAsync(version.Id, RVideoVideoModelPolicy.ProviderCode, policy.Model, input.ProviderCapabilityId, taskId, ct);
+                    await _versions.MarkSceneVideoVersionSubmittedAsync(version.Id, input.ProviderCode, policy.Model, input.ProviderCapabilityId, taskId, ct);
                     await _repo.AddProjectEventAsync(project.Id, "SCENE_VIDEO_PROVIDER_SUBMITTED", "info",
-                        $"Scene {input.SceneIndex} submitted to 79AI.",
-                        new { jobId = job.Id, input.SceneId, input.SceneIndex, taskId, model = policy.Model, attemptIndex }, ct);
+                        $"Scene {input.SceneIndex} submitted to its configured video provider.",
+                        new { jobId = job.Id, input.SceneId, input.SceneIndex, taskId, model = policy.Model, input.ProviderCode, attemptIndex }, ct);
                 }
-                catch (Ai79TaskSubmitException ex) when (IsTransientSubmit(ex))
+                catch (VideoProviderTransientException ex)
                 {
                     await MarkPendingReconciliationAsync(input, version.Id, attemptLogicalRequestId, tariffSnapshot, ex.ErrorCode ?? "submit_transient", ex.Message, CancellationToken.None, null);
                     await DeferPollAsync(job, attemptLogicalRequestId, TimeSpan.FromSeconds(Math.Max(1, _options.PollIntervalSeconds)),
-                        "SCENE_VIDEO_POLL_SCHEDULED", "79AI submit transient; retry will reuse the same task flow.", CancellationToken.None);
+                        "SCENE_VIDEO_POLL_SCHEDULED", "Video provider submit transient; retry will reuse the same task flow.", CancellationToken.None);
                     return;
                 }
             }
@@ -322,42 +327,50 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
 
             try
             {
-                var status = await _rvideo79Ai.PollAsync(await _rvideo79Ai.ResolveRuntimeAsync(ct), taskId!, ct);
-                if (string.Equals(status.NormalizedStatus, Ai79TaskStatusNormalizer.Running, StringComparison.OrdinalIgnoreCase))
+                var adapter = _providerAdapters.Resolve(input.ProviderCode, input.CapabilityCode);
+                var status = await adapter.PollAsync(new VideoProviderPollRequest(
+                    input.ProviderId,
+                    input.ProviderCapabilityId,
+                    input.ProviderCode,
+                    input.CapabilityCode,
+                    taskId!), ct);
+                if (status.Status is VideoProviderTaskStatus.Queued or VideoProviderTaskStatus.Processing)
                 {
-                    await MarkPendingReconciliationAsync(input, version.Id, attemptLogicalRequestId, tariffSnapshot, "provider_pending", "79AI video task remains pending.", ct, taskId);
+                    await MarkPendingReconciliationAsync(input, version.Id, attemptLogicalRequestId, tariffSnapshot, "provider_pending", "Video provider task remains pending.", ct, taskId);
                     await DeferProviderPollAsync(job, taskId!, TimeSpan.FromSeconds(Math.Max(1, _options.PollIntervalSeconds)),
                         "SCENE_VIDEO_POLL_SCHEDULED", "Video task remains pending; the same provider task will be polled later.", ct);
                     return;
                 }
 
-                if (!string.Equals(status.NormalizedStatus, Ai79TaskStatusNormalizer.Success, StringComparison.OrdinalIgnoreCase))
+                if (status.Status != VideoProviderTaskStatus.Success)
                 {
-                    var failure = status.ErrorMessage ?? $"79AI video task failed with status {status.NormalizedStatus}.";
-                    await _billing.CompleteAsync(new AiImageBillingCompleteRequest
+                    var failure = status.ErrorMessage ?? $"Video provider task failed with status {status.Status}.";
+                    if (reservation.BillingRecordId is not null)
                     {
-                        LogicalRequestId = attemptLogicalRequestId,
-                        Success = false,
-                        ActualModel = policy.Model,
-                        ProviderTaskId = taskId,
-                        ProviderUsageJson = status.SanitizedResponseJson,
-                        TariffSnapshotJson = tariffSnapshot,
-                        ErrorMessage = failure
-                    }, ct);
+                        await _billing.CompleteAsync(new AiImageBillingCompleteRequest
+                        {
+                            LogicalRequestId = attemptLogicalRequestId,
+                            Success = false,
+                            ActualModel = status.ActualModel ?? policy.Model,
+                            ProviderTaskId = taskId,
+                            ProviderUsageJson = status.SanitizedResponseJson,
+                            TariffSnapshotJson = tariffSnapshot,
+                            ErrorMessage = failure
+                        }, ct);
+                    }
                     await LogUsageAsync(input, job, attemptLogicalRequestId, reservation.ChargedPoints, status.SanitizedResponseJson, false, failure, taskId, ct);
-                    await _versions.FailSceneVideoVersionAsync(version.Id, status.ErrorCode ?? "provider_failure", status.ErrorMessage ?? $"79AI video task failed with status {status.NormalizedStatus}.", ct);
-                    var next = RVideoVideoModelPolicy.GetNext(attemptIndex);
-                    if (next is not null)
+                    await _versions.FailSceneVideoVersionAsync(version.Id, status.ErrorCode ?? "provider_failure", failure, ct);
+                    if (GetAttemptPolicy(input, attemptIndex + 1) is not null)
                     {
-                        attemptIndex = next.AttemptIndex;
+                        attemptIndex++;
                         continue;
                     }
 
-                    await FailAsync(project.Id, scene, version.Id, "provider_failure", status.ErrorMessage ?? $"79AI video task failed with status {status.NormalizedStatus}.", ct);
-                    throw new RenderJobTerminalFailureException(status.ErrorMessage ?? $"79AI video task failed with status {status.NormalizedStatus}.");
+                    await FailAsync(project.Id, scene, version.Id, "provider_failure", failure, ct);
+                    throw new RenderJobTerminalFailureException(failure);
                 }
 
-                var outputUrl = status.OutputUrl ?? throw new InvalidOperationException($"79AI returned SUCCESS but no output video URL. task_id={taskId}");
+                var outputUrl = status.OutputUrl ?? throw new InvalidOperationException($"Video provider returned SUCCESS but no output video URL. task_id={taskId}");
                 await _tenant.EnsureLoadedAsync(ct);
                 var objectKey = version.StorageKey ?? SceneMediaStorageKeys.SceneVideoOutput(_tenant.TenantId, project.Id, scene.Id, version.Id);
                 var saved = await _media.DownloadAndSaveBinaryAtObjectKeyAsync(
@@ -370,15 +383,18 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                     _tenant.TenantId,
                     ct);
 
-                await _billing.CompleteAsync(new AiImageBillingCompleteRequest
+                if (reservation.BillingRecordId is not null)
                 {
-                    LogicalRequestId = attemptLogicalRequestId,
-                    Success = true,
-                    ActualModel = policy.Model,
-                    ProviderTaskId = taskId,
-                    ProviderUsageJson = status.SanitizedResponseJson,
-                    TariffSnapshotJson = tariffSnapshot
-                }, ct);
+                    await _billing.CompleteAsync(new AiImageBillingCompleteRequest
+                    {
+                        LogicalRequestId = attemptLogicalRequestId,
+                        Success = true,
+                        ActualModel = status.ActualModel ?? policy.Model,
+                        ProviderTaskId = taskId,
+                        ProviderUsageJson = status.SanitizedResponseJson,
+                        TariffSnapshotJson = tariffSnapshot
+                    }, ct);
+                }
                 await LogUsageAsync(input, job, attemptLogicalRequestId, reservation.ChargedPoints, status.SanitizedResponseJson, true, null, taskId, ct);
 
                 await _versions.CompleteSceneVideoVersionAsync(version.Id, new SceneVideoVersionCompleteRequest(
@@ -387,8 +403,8 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                     PosterUrl: sourceVersion.PublicUrl ?? input.SourceImageUrl,
                     DurationSeconds: input.DurationSeconds,
                     MimeType: "video/mp4",
-                    ProviderCode: RVideoVideoModelPolicy.ProviderCode,
-                    ModelName: policy.Model,
+                    ProviderCode: input.ProviderCode,
+                    ModelName: status.ActualModel ?? policy.Model,
                     ProviderCapabilityId: input.ProviderCapabilityId,
                     ProviderTaskId: taskId,
                     BillingLogicalRequestId: attemptLogicalRequestId,
@@ -405,28 +421,29 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                     new { jobId = job.Id, input.SceneId, input.SceneIndex, taskId, videoUrl = saved.PublicUrl ?? saved.FileUrl }, ct);
                 return;
             }
-            catch (Ai79TaskPollException ex)
+            catch (VideoProviderTransientException ex)
             {
                 await MarkPendingReconciliationAsync(input, version.Id, attemptLogicalRequestId, tariffSnapshot, "SCENE_VIDEO_POLL_TRANSIENT", ex.Message, CancellationToken.None, taskId);
                 if (!string.IsNullOrWhiteSpace(taskId))
                 {
                     await DeferProviderPollAsync(job, taskId!, TimeSpan.FromSeconds(Math.Max(1, _options.PollIntervalSeconds)),
-                        "SCENE_VIDEO_POLL_TRANSIENT", "Temporary 79AI poll failure; the same task ID will be retried.", CancellationToken.None);
+                        "SCENE_VIDEO_POLL_TRANSIENT", "Temporary provider poll failure; the same task ID will be retried.", CancellationToken.None);
                 }
                 else
                 {
                     await DeferPollAsync(job, attemptLogicalRequestId, TimeSpan.FromSeconds(Math.Max(1, _options.PollIntervalSeconds)),
-                        "SCENE_VIDEO_POLL_TRANSIENT", "Temporary 79AI poll failure before provider submission; application retry will resubmit.", CancellationToken.None);
+                        "SCENE_VIDEO_POLL_TRANSIENT", "Temporary provider poll failure before provider submission; application retry will resubmit.", CancellationToken.None);
                 }
                 return;
             }
         }
 
-        await FailAsync(project.Id, scene, Guid.Empty, "provider_failure", "79AI fallback attempts exhausted.", ct);
-        throw new RenderJobTerminalFailureException("79AI fallback attempts exhausted.");
+        await FailAsync(project.Id, scene, Guid.Empty, "provider_failure", "Configured provider fallback attempts exhausted.", ct);
+        throw new RenderJobTerminalFailureException("Configured provider fallback attempts exhausted.");
     }
 
-    private async Task HandleYescaleAsync(
+    #if false
+    private async Task LegacyProviderPathDisabledAsync(
         RenderJobDto job,
         SceneVideoRenderWorkItemInput input,
         VideoProjectDto project,
@@ -546,7 +563,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                 await _repo.UpdateSceneAsync(scene.Id, VideoSceneStatuses.VideoRendering,
                     errorMessage: null, title: scene.Title, scenePrompt: scene.ScenePrompt, imagePrompt: scene.ImagePrompt, videoPrompt: scene.VideoPrompt, ct: ct);
 
-                var payload = YEScaleVideoModelMapper.BuildSubmitRequest(
+                var payload = LegacyVideoMapper.BuildSubmitRequest(
                     input.ModelName ?? string.Empty,
                     input.VideoPrompt,
                     input.SourceImageUrl,
@@ -560,12 +577,12 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                 taskId = string.IsNullOrWhiteSpace(submit.TaskId) ? null : submit.TaskId.Trim();
                 if (string.IsNullOrWhiteSpace(taskId))
                 {
-                    throw new InvalidOperationException("YEScale submit response is missing task_id.");
+                    throw new InvalidOperationException("Provider submit response is missing task_id.");
                 }
 
                 await _versions.MarkSceneVideoVersionSubmittedAsync(version.Id, input.ProviderCode, input.ModelName, input.ProviderCapabilityId, taskId, ct);
                 await _repo.AddProjectEventAsync(project.Id, "SCENE_VIDEO_PROVIDER_SUBMITTED", "info",
-                    $"Scene {input.SceneIndex} submitted to YEScale.",
+                    $"Scene {input.SceneIndex} submitted to the provider.",
                     new { jobId = job.Id, input.SceneId, input.SceneIndex, taskId, input.ModelName }, ct);
                 await DeferPollAsync(job, taskId, TimeSpan.FromSeconds(Math.Max(1, _options.PollIntervalSeconds)),
                     "SCENE_VIDEO_POLL_SCHEDULED", "Video task submitted; polling will continue in a later worker pass.", ct);
@@ -586,11 +603,11 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
             {
                 if (normalized is not ("QUEUED" or "PENDING" or "SUBMITTED" or "PROCESSING" or "RUNNING"))
                 {
-                    throw new YEScaleTaskException($"YEScale returned unsupported status: {terminal.Status}", errorCode: "unknown_status", taskId: taskId);
+                    throw new InvalidOperationException($"Provider returned unsupported status: {terminal.Status}");
                 }
 
                 await MarkPendingReconciliationAsync(input, version.Id, input.LogicalRequestId, tariffSnapshot, "provider_pending",
-                    $"YEScale video task remains {terminal.Status}.", ct, taskId);
+                    $"Provider video task remains {terminal.Status}.", ct, taskId);
                 await DeferPollAsync(job, taskId, TimeSpan.FromSeconds(Math.Max(1, _options.PollIntervalSeconds)),
                     "SCENE_VIDEO_POLL_SCHEDULED", "Video task remains pending; the same provider task will be polled later.", ct);
             }
@@ -614,7 +631,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
             }
 
             var outputUrl = ExtractVideoUrl(terminal, input.SourceImageUrl)
-                ?? throw new InvalidOperationException($"YEScale returned SUCCESS but no output video URL. task_id={taskId}");
+                ?? throw new InvalidOperationException($"Provider returned SUCCESS but no output video URL. task_id={taskId}");
 
             await _tenant.EnsureLoadedAsync(ct);
             var objectKey = version.StorageKey ?? SceneMediaStorageKeys.SceneVideoOutput(_tenant.TenantId, project.Id, scene.Id, version.Id);
@@ -666,13 +683,14 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         {
             throw;
         }
-        catch (YEScaleTaskException ex) when (ex.IsTransient && !string.IsNullOrWhiteSpace(taskId))
+        catch (InvalidOperationException ex) when (!string.IsNullOrWhiteSpace(taskId))
         {
             await MarkPendingReconciliationAsync(input, version.Id, input.LogicalRequestId, tariffSnapshot, ex.ErrorCode ?? ex.GetType().Name, ex.Message, CancellationToken.None, taskId);
             await DeferPollAsync(job, taskId, TimeSpan.FromSeconds(Math.Max(1, _options.PollIntervalSeconds)),
-                "SCENE_VIDEO_POLL_TRANSIENT", "Temporary YEScale poll failure; the same task ID will be retried.", CancellationToken.None);
+                "SCENE_VIDEO_POLL_TRANSIENT", "Temporary provider poll failure; the same task ID will be retried.", CancellationToken.None);
         }
     }
+    #endif
 
     private async Task<SceneImageVersionDto?> ResolveSourceImageVersionAsync(long sceneId, Guid? selectedVersionId, CancellationToken ct)
     {
@@ -748,6 +766,19 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         }
 
         return Math.Max(0, maxAttempt + 1);
+    }
+
+    private static RVideoVideoModelPolicyEntry? GetAttemptPolicy(SceneVideoRenderWorkItemInput input, int attemptIndex)
+    {
+        if (RVideoVideoModelPolicy.Is79AiProvider(input.ProviderCode)
+            && string.Equals(input.CapabilityCode, RVideoVideoModelPolicy.CapabilityCode, StringComparison.OrdinalIgnoreCase))
+        {
+            return RVideoVideoModelPolicy.GetByAttemptIndex(attemptIndex);
+        }
+
+        return attemptIndex == 0
+            ? new RVideoVideoModelPolicyEntry(0, input.ProviderCode, input.ModelName ?? string.Empty, null)
+            : null;
     }
 
     private static bool IsMatchingLogicalRequestId(string value, string logicalRequestId)
@@ -946,7 +977,8 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
             new { sceneId = scene.Id, scene.SceneIndex, errorCode, error = errorMessage }, ct);
     }
 
-    private static string? ExtractVideoUrl(YEScaleTaskStatusResponse response, string? sourceImageUrl)
+    #if false
+    private static string? ExtractVideoUrl(object response, string? sourceImageUrl)
     {
         if (response.Extra is null)
         {
@@ -1011,7 +1043,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         return null;
     }
 
-    private static string ExtractFailureMessage(YEScaleTaskStatusResponse response)
+    private static string ExtractFailureMessage(object response)
     {
         if (response.Error is JsonElement error)
         {
@@ -1029,8 +1061,9 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
             }
         }
 
-        return $"YEScale video task failed with status {response.Status ?? "unknown"}.";
+        return "Provider video task failed.";
     }
+    #endif
 
     private string ResolvePhysicalPath(string? objectKey)
     {

@@ -56,6 +56,10 @@ public sealed class RVideoProviderPollingRegressionTests
     {
         var source = ReadRepoFile("Services", "VideoRender", "SceneVideoWorkerHandler.cs");
 
+        Assert.DoesNotContain("IYEScaleTaskClient", source);
+        Assert.DoesNotContain("HandleYescaleAsync", source);
+        Assert.DoesNotContain("YEScale", source, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("IVideoGenerationProviderAdapterResolver", source);
         Assert.Contains("GetReservationAsync(attemptLogicalRequestId", source);
         Assert.Contains("DeferProviderPollAsync(job, taskId!", source);
         Assert.Contains("if (string.IsNullOrWhiteSpace(taskId))", source);
@@ -97,7 +101,7 @@ public sealed class RVideoProviderPollingRegressionTests
     public void TransientPollFailureWithPersistedTaskUsesProviderPollScheduler()
     {
         var source = ReadRepoFile("Services", "VideoRender", "SceneVideoWorkerHandler.cs");
-        var start = source.IndexOf("catch (Ai79TaskPollException ex)", StringComparison.Ordinal);
+        var start = source.IndexOf("catch (VideoProviderTransientException ex)", StringComparison.Ordinal);
         var end = source.IndexOf("        }\n\n        await FailAsync", start, StringComparison.Ordinal);
 
         Assert.True(start >= 0);
@@ -122,6 +126,53 @@ public sealed class RVideoProviderPollingRegressionTests
         Assert.Contains("ProviderTaskId: taskId", source);
         Assert.Contains("ResultMediaId: saved.Id", source);
         Assert.Contains("saved.PublicUrl ?? saved.FileUrl", source);
+    }
+
+    [Fact]
+    public void ProviderSuccessReconcilesExistingTaskWithoutResubmit()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "SceneVideoWorkerHandler.cs");
+        var existingTaskBlock = source[
+            source.IndexOf("var existingTaskId = await _versions.GetSceneVideoProviderTaskIdAsync", StringComparison.Ordinal)..];
+        var submitBlock = existingTaskBlock[..existingTaskBlock.IndexOf("if (string.IsNullOrWhiteSpace(taskId))", StringComparison.Ordinal)];
+
+        Assert.Contains("GetSceneVideoProviderTaskIdAsync", existingTaskBlock);
+        Assert.Contains("GetReservationAsync(attemptLogicalRequestId", existingTaskBlock);
+        Assert.DoesNotContain("SubmitAsync", submitBlock);
+        Assert.Contains("adapter.PollAsync", existingTaskBlock);
+        Assert.Contains("CompleteSceneVideoVersionAsync", existingTaskBlock);
+    }
+
+    [Fact]
+    public void PersistentReconciliationWorkerReschedulesExistingProviderTasks()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "SceneVideoReconciliationWorker.cs");
+
+        Assert.Contains("ListPersistentSceneVideoReconciliationJobsAsync", source);
+        Assert.Contains("ScheduleProviderPollAsync", source);
+        Assert.Contains("existing provider task", source);
+        Assert.Contains("RenderQueue:Enabled", source);
+    }
+
+    [Fact]
+    public void SceneVideoChildJobPersistsResolvedProviderAndModel()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "SceneVideoRenderHandler.cs");
+
+        Assert.Contains("ProviderCode = route.ProviderCode", source);
+        Assert.Contains("ModelCode = route.ModelName", source);
+        Assert.DoesNotContain("yescale_task_video", source, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("RVideoVideoModelPolicy.ProviderCode", source);
+    }
+
+    [Fact]
+    public void ProviderAdapterResolutionIsCapabilityBased()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "VideoGenerationProviderAdapter.cs");
+
+        Assert.Contains("CanHandle(string providerCode, string capabilityCode)", source);
+        Assert.Contains("adapter.CanHandle(providerCode, capabilityCode)", source);
+        Assert.Contains("VIDEO_PROVIDER_ADAPTER_UNAVAILABLE", source);
     }
 
     [Fact]

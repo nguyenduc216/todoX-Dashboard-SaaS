@@ -996,4 +996,24 @@ public sealed class VideoRenderRepository
         public Guid? SourceImageVersionId { get; init; }
         public Guid? ResultMediaId { get; init; }
     }
+
+    public async Task<IReadOnlyList<Guid>> ListPersistentSceneVideoReconciliationJobsAsync(CancellationToken ct = default)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        var jobs = await conn.QueryAsync<Guid>(
+            """
+            SELECT DISTINCT v.render_job_id
+              FROM video_render.scene_video_versions v
+              JOIN render.render_jobs j ON j.id=v.render_job_id AND j.tenant_id=v.tenant_id
+             WHERE v.tenant_id=@tenant
+               AND v.provider_task_id IS NOT NULL
+               AND btrim(v.provider_task_id) <> ''
+               AND v.status IN ('submitted', 'processing', 'pending_reconciliation', 'rendering')
+               AND j.job_type='render_scene_video'
+               AND j.status IN ('rendering', 'pending_reconciliation');
+            """,
+            new { tenant = _tenant.TenantId });
+        return jobs.ToList();
+    }
 }

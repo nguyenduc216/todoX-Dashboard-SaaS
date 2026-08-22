@@ -167,6 +167,8 @@ builder.Services.AddSingleton<TodoX.Web.Services.VideoRender.RVideoSceneJsonServ
 builder.Services.AddScoped<TodoX.Web.Services.VideoRender.ISceneMediaVersioningService, TodoX.Web.Services.VideoRender.SceneMediaVersioningService>();
 builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IRVideo79AiVideoService, TodoX.Web.Services.VideoRender.RVideo79AiVideoService>();
 builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IVideoProviderRoutingService, TodoX.Web.Services.VideoRender.VideoProviderRoutingService>();
+builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IVideoGenerationProviderAdapterResolver, TodoX.Web.Services.VideoRender.VideoGenerationProviderAdapterResolver>();
+builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IVideoGenerationProviderAdapter, TodoX.Web.Services.VideoRender.Ai79VideoGenerationProviderAdapter>();
 builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IVideoRenderPricingResolver, TodoX.Web.Services.VideoRender.VideoRenderPricingResolver>();
 builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IVideoRenderEligibilityService, TodoX.Web.Services.VideoRender.VideoRenderEligibilityService>();
 builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IYEScaleVideoPricingResolver, TodoX.Web.Services.VideoRender.YEScaleVideoPricingResolver>();
@@ -202,6 +204,7 @@ builder.Services.AddScoped<IRenderJobService, RenderJobService>();
 builder.Services.AddScoped<IRenderJobDispatcher, RenderJobDispatcher>();
 builder.Services.AddHostedService<RenderJobWorker>();
 builder.Services.AddHostedService<TodoX.Web.Services.Render.SceneVideoJobWorker>();
+builder.Services.AddHostedService<TodoX.Web.Services.VideoRender.SceneVideoReconciliationWorker>();
 builder.Services.AddHostedService<TodoX.Web.Services.VideoRender.RVideoLifecycleWorker>();
 builder.Services.AddHostedService<TodoX.Web.Services.Timelapse.TimelapseImageWorker>();
 builder.Services.AddHostedService<TodoX.Web.Services.Timelapse.TimelapseVideoWorker>();
