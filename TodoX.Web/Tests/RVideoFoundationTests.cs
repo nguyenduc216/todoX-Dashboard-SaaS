@@ -325,6 +325,25 @@ public sealed class RVideoFoundationTests
         }));
     }
 
+    [Fact]
+    public void RequiresExternalVoiceUsesLibraryModeAndNarrationText()
+    {
+        var scene = new VideoProjectSceneDto
+        {
+            ScenePrompt = new ScenePromptMetadata
+            {
+                Voice = "Read this line"
+            }.Serialize()
+        };
+        var settings = new RVideoJobSettingsDto
+        {
+            VoiceMode = RVideoVoiceModes.Library
+        };
+
+        Assert.True(RVideoRules.RequiresExternalVoice(scene, settings));
+        Assert.False(RVideoRules.RequiresExternalVoice(scene, new RVideoJobSettingsDto { VoiceMode = RVideoVoiceModes.None }));
+    }
+
     [Theory]
     [InlineData("16:9", "1080p")]
     [InlineData("9:16", "720p")]

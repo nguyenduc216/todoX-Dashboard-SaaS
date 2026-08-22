@@ -3,15 +3,16 @@ BEGIN;
 WITH target_core_job AS (
     SELECT '3454d911-4d57-4ef4-9b99-7178282a6e5f'::uuid AS core_job_id
 ),
-target_projects AS (
+target_project AS (
     SELECT p.id AS project_id
       FROM video_render.video_projects p
       JOIN target_core_job t ON p.core_job_id = t.core_job_id
+     LIMIT 1
 ),
-candidate_jobs AS (
+target_jobs AS (
     SELECT j.id
       FROM render.render_jobs j
-      JOIN target_projects p ON (j.input_json->>'projectId') = p.project_id::text
+      JOIN target_project p ON (j.input_json->>'projectId') = p.project_id::text
      WHERE j.job_type = 'render_scene_video'
        AND j.status = 'failed'
        AND (
@@ -19,7 +20,11 @@ candidate_jobs AS (
             OR j.error_message ILIKE '%42804%'
             OR j.error_message ILIKE '%created_by%'
        )
-       AND EXISTS (
+),
+candidate_jobs AS (
+    SELECT j.id
+      FROM target_jobs j
+     WHERE EXISTS (
             SELECT 1
               FROM video_render.scene_video_versions v
              WHERE v.render_job_id = j.id
@@ -63,7 +68,7 @@ reopen_scenes AS (
 )
 SELECT
     (SELECT core_job_id FROM target_core_job) AS core_job_id,
-    (SELECT array_agg(project_id ORDER BY project_id) FROM target_projects) AS project_ids,
+    (SELECT array_agg(project_id ORDER BY project_id) FROM target_project) AS project_ids,
     (SELECT count(*) FROM candidate_jobs) AS candidate_jobs,
     (SELECT count(*) FROM reopen_jobs) AS reopened_jobs,
     (SELECT count(*) FROM reopen_versions) AS reopened_versions,

@@ -320,6 +320,17 @@ public static class RVideoRules
             throw new InvalidOperationException("RVVIDEO_LIBRARY_MUSIC_UNAVAILABLE");
     }
 
+    public static bool RequiresExternalVoice(VideoProjectSceneDto scene, RVideoJobSettingsDto? settings)
+    {
+        if (settings is null || !string.Equals(settings.VoiceMode, RVideoVoiceModes.Library, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var metadata = ScenePromptMetadata.FromScene(scene);
+        return !string.IsNullOrWhiteSpace(metadata.Voice);
+    }
+
     public static bool NeedsImageWork(string sceneStatus)
         => string.Equals(sceneStatus, VideoSceneStatuses.Draft, StringComparison.OrdinalIgnoreCase);
 

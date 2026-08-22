@@ -12,6 +12,11 @@ public sealed class ScenePromptMetadata
         "image_prompt",
         "motion_prompt",
         "voice",
+        "voice_text",
+        "dialogue",
+        "dialogue_text",
+        "narration",
+        "tts_text",
         "voice_instruction",
         "tts_rate",
         "raw_scene_json",
@@ -72,7 +77,7 @@ public sealed class ScenePromptMetadata
                     metadata.ScenePurpose = ReadJsonString(root, "scene_purpose", "scenePurpose", "purpose");
                     metadata.ImagePrompt = ReadJsonString(root, "image_prompt", "imagePrompt");
                     metadata.MotionPrompt = ReadJsonString(root, "motion_prompt", "motionPrompt", "video_prompt", "videoPrompt");
-                    metadata.Voice = ReadJsonString(root, "voice");
+                    metadata.Voice = ReadJsonString(root, "voice", "voice_text", "dialogue", "dialogue_text", "narration", "tts_text");
                     metadata.VoiceInstruction = ReadJsonString(root, "voice_instruction", "voiceInstruction");
                     metadata.TtsRate = ReadJsonDecimal(root, "tts_rate", "ttsRate", "speech_rate");
                     metadata.RawSceneJson = ReadJsonString(root, "raw_scene_json", "rawSceneJson");
@@ -209,6 +214,11 @@ public sealed class ScenePromptMetadata
                 MotionPrompt = value;
                 break;
             case "voice":
+            case "voice_text":
+            case "dialogue":
+            case "dialogue_text":
+            case "narration":
+            case "tts_text":
                 Voice = value;
                 break;
             case "voice_instruction":
@@ -236,6 +246,11 @@ public sealed class ScenePromptMetadata
             or "motionprompt"
             or "videoprompt"
             or "voice"
+            or "voicetext"
+            or "dialogue"
+            or "dialoguetext"
+            or "narration"
+            or "ttstext"
             or "voiceinstruction"
             or "ttsrate"
             or "rawscenejson"

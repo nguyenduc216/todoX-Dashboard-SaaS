@@ -1,0 +1,36 @@
+@namespace TodoX.Web.Components.Dialogs
+
+<MudDialog>
+    <DialogContent>
+        <MudStack Spacing="2">
+            <MudText Typo="Typo.h6">Voice version @Model.VersionNumber</MudText>
+            <MudStack Row="true" Spacing="1" Class="flex-wrap gap-1">
+                <MudChip T="string" Size="Size.Small" Color="Color.Info">@Model.Status</MudChip>
+                @if (Model.IsSelected)
+                {
+                    <MudChip T="string" Size="Size.Small" Color="Color.Success">Đang dùng</MudChip>
+                }
+                @if (Model.DurationSeconds is decimal durationSeconds)
+                {
+                    <MudChip T="string" Size="Size.Small" Color="Color.Default">@durationSeconds giây</MudChip>
+                }
+            </MudStack>
+            <MudText Typo="Typo.body2">Voice: @(Model.VoiceCatalogCode ?? "n/a")</MudText>
+            <MudText Typo="Typo.body2">TTS rate: @(Model.TtsRate?.ToString("0.###") ?? "n/a")</MudText>
+            <MudText Typo="Typo.body2">Narration: @(Model.NarrationTextSnapshot ?? "n/a")</MudText>
+            <MudText Typo="Typo.body2">Instruction: @(Model.VoiceInstructionSnapshot ?? "n/a")</MudText>
+            @if (!string.IsNullOrWhiteSpace(Model.PublicUrl))
+            {
+                <audio controls preload="metadata" src="@Model.PublicUrl" style="width:100%"></audio>
+            }
+            else
+            {
+                <MudAlert Severity="Severity.Info" Dense="true">Chưa có URL audio công khai.</MudAlert>
+            }
+        </MudStack>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [Parameter, EditorRequired] public TodoX.Web.Services.VideoRender.SceneAudioVersionDto Model { get; set; } = default!;
+}

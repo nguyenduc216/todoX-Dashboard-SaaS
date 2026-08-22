@@ -386,6 +386,17 @@ else
                                                                        OnClick="@(() => RenderSceneVideoAsync(scene))"
                                                                        aria-label="Tạo video scene" />
                                                     </MudTooltip>
+                                                    @if (RequiresExternalVoice(scene))
+                                                    {
+                                                        <MudTooltip Text="@ResolveVoiceTooltip(scene)">
+                                                            <MudIconButton Size="Size.Small"
+                                                                           Icon="@ResolveVoiceIcon(scene)"
+                                                                           Color="@ResolveVoiceColor(scene)"
+                                                                           Disabled="@ResolveVoiceDisabled(scene)"
+                                                                           OnClick="@(() => OpenSceneVoicePlayerAsync(scene))"
+                                                                           aria-label="Xem voice scene" />
+                                                        </MudTooltip>
+                                                    }
                                                     <MudTooltip Text="Lịch sử video">
                                                         <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.History" Color="Color.Default"
                                                                        OnClick="@(() => ToggleVideoHistoryAsync(scene))"
@@ -603,6 +614,7 @@ else
     private readonly Dictionary<long, RenderSceneImageVisualState> _sceneEventState = new();
     private readonly Dictionary<long, IReadOnlyList<TodoX.Web.Services.VideoRender.SceneImageVersionDto>> _imageVersions = new();
     private readonly Dictionary<long, IReadOnlyList<TodoX.Web.Services.VideoRender.SceneVideoVersionDto>> _videoVersions = new();
+    private readonly Dictionary<long, IReadOnlyList<TodoX.Web.Services.VideoRender.SceneAudioVersionDto>> _audioVersions = new();
     private readonly Dictionary<long, SceneEditorState> _sceneDrafts = new();
     private IReadOnlyList<TodoX.Web.Services.VideoRender.FinalVideoVersionDto> _finalVersions = Array.Empty<TodoX.Web.Services.VideoRender.FinalVideoVersionDto>();
     private readonly Dictionary<Guid, IReadOnlyList<TodoX.Web.Services.VideoRender.FinalVideoVersionItemDto>> _finalVersionItems = new();
@@ -789,6 +801,7 @@ else
                 _sceneDrafts.Clear();
                 _imageVersions.Clear();
                 _videoVersions.Clear();
+                _audioVersions.Clear();
                 if (AuthState.CurrentUser is not null)
                 {
                     _projectDialogOpen = true;
@@ -1196,6 +1209,7 @@ else
                 ReconcileSceneDrafts();
                 RebuildSceneEventState();
                 await LoadSceneVideoVersionsForStateAsync(_project.Scenes);
+                await LoadSceneAudioVersionsForStateAsync(_project.Scenes);
                 try
                 {
                     _defaultImageToVideoProvider = await AiProviders.GetDefaultProviderAsync(TodoX.Web.Services.VideoRender.RVideoVideoModelPolicy.CapabilityCode);
@@ -2679,6 +2693,105 @@ else
         Snackbar.Add($"Đã tải {_videoVersions[scene.Id].Count} phiên bản video cho scene {scene.SceneIndex}.", Severity.Info);
     }
 
+    private async Task LoadAudioHistoryAsync(VideoProjectSceneDto scene)
+    {
+        if (AuthState.CurrentUser is null) return;
+        _audioVersions[scene.Id] = await SceneVersions.ListSceneAudioVersionsAsync(scene.Id, AuthState.CurrentUser, 0, 20);
+        Snackbar.Add($"Đã tải {_audioVersions[scene.Id].Count} phiên bản voice cho scene {scene.SceneIndex}.", Severity.Info);
+    }
+
+    private Task OpenSceneVoicePlayerAsync(VideoProjectSceneDto scene)
+    {
+        if (AuthState.CurrentUser is null)
+        {
+            return Task.CompletedTask;
+        }
+
+        var version = ResolveVoiceVersion(scene);
+        if (version is null)
+        {
+            Snackbar.Add("Chưa có voice khả dụng cho scene này.", Severity.Info);
+            return Task.CompletedTask;
+        }
+
+        var parameters = new DialogParameters<Components.Dialogs.SceneAudioVersionDialog>
+        {
+            { x => x.Model, version }
+        };
+        var options = new DialogOptions { CloseButton = true, FullWidth = true, MaxWidth = MaxWidth.Small };
+        _ = DialogService.ShowAsync<Components.Dialogs.SceneAudioVersionDialog>($"Voice scene {scene.SceneIndex:00}", parameters, options);
+        return Task.CompletedTask;
+    }
+
+    private TodoX.Web.Services.VideoRender.SceneAudioVersionDto? ResolveVoiceVersion(VideoProjectSceneDto scene)
+    {
+        if (!_audioVersions.TryGetValue(scene.Id, out var versions) || versions.Count == 0)
+        {
+            return null;
+        }
+
+        return versions.OrderByDescending(x => x.VersionNumber).FirstOrDefault();
+    }
+
+    private MediaRenderState ResolveVoiceMediaState(VideoProjectSceneDto scene)
+    {
+        if (!RequiresExternalVoice(scene))
+        {
+            return MediaRenderState.Empty;
+        }
+
+        var version = ResolveVoiceVersion(scene);
+        if (version is null)
+        {
+            return MediaRenderState.Queued;
+        }
+
+        var status = version.Status.Trim().ToLowerInvariant();
+        return status switch
+        {
+            "queued" => MediaRenderState.Queued,
+            "submitted" or "processing" or "pending_reconciliation" or "rendering" => MediaRenderState.Rendering,
+            "downloading" or "importing" or "reconciling" => MediaRenderState.Downloading,
+            "completed" => MediaRenderState.Ready,
+            "failed" => MediaRenderState.Failed,
+            _ => MediaRenderState.Empty
+        };
+    }
+
+    private string ResolveVoiceTooltip(VideoProjectSceneDto scene)
+        => ResolveVoiceMediaState(scene) switch
+        {
+            MediaRenderState.Queued or MediaRenderState.Rendering or MediaRenderState.Downloading => "Đang tạo giọng đọc",
+            MediaRenderState.Ready => "Nghe giọng đọc",
+            MediaRenderState.Failed => "Tạo giọng đọc thất bại",
+            _ => "Giọng đọc"
+        };
+
+    private string ResolveVoiceIcon(VideoProjectSceneDto scene)
+        => ResolveVoiceMediaState(scene) switch
+        {
+            MediaRenderState.Ready => Icons.Material.Filled.RecordVoiceOver,
+            MediaRenderState.Failed => Icons.Material.Filled.ErrorOutline,
+            MediaRenderState.Queued or MediaRenderState.Rendering or MediaRenderState.Downloading => Icons.Material.Filled.HourglassTop,
+            _ => Icons.Material.Filled.RecordVoiceOver
+        };
+
+    private Color ResolveVoiceColor(VideoProjectSceneDto scene)
+        => ResolveVoiceMediaState(scene) switch
+        {
+            MediaRenderState.Ready => Color.Success,
+            MediaRenderState.Failed => Color.Error,
+            MediaRenderState.Queued or MediaRenderState.Rendering or MediaRenderState.Downloading => Color.Warning,
+            _ => Color.Default
+        };
+
+    private bool ResolveVoiceDisabled(VideoProjectSceneDto scene)
+        => ResolveVoiceMediaState(scene) is MediaRenderState.Queued or MediaRenderState.Rendering or MediaRenderState.Downloading;
+
+    private bool RequiresExternalVoice(VideoProjectSceneDto scene)
+        => string.Equals(_voiceMode, RVideoVoiceModes.Library, StringComparison.OrdinalIgnoreCase)
+           && !string.IsNullOrWhiteSpace(TodoX.Web.Services.VideoRender.ScenePromptMetadata.FromScene(scene).Voice);
+
     private async Task SelectImageVersionAsync(VideoProjectSceneDto scene, TodoX.Web.Services.VideoRender.SceneImageVersionDto version)
     {
         if (AuthState.CurrentUser is null) return;
@@ -3156,6 +3269,24 @@ else
             catch (Exception ex)
             {
                 Logger.LogWarning(ex, "RVIDEO_LOAD_VIDEO_STATE_FAILED sceneId={SceneId}", scene.Id);
+            }
+        });
+        await Task.WhenAll(loads);
+    }
+
+    private async Task LoadSceneAudioVersionsForStateAsync(IEnumerable<VideoProjectSceneDto> scenes)
+    {
+        if (AuthState.CurrentUser is null) return;
+
+        var loads = scenes.Select(async scene =>
+        {
+            try
+            {
+                _audioVersions[scene.Id] = await SceneVersions.ListSceneAudioVersionsAsync(scene.Id, AuthState.CurrentUser, 0, 20);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "RVIDEO_LOAD_AUDIO_STATE_FAILED sceneId={SceneId}", scene.Id);
             }
         });
         await Task.WhenAll(loads);

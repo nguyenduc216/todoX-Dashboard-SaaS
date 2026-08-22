@@ -57,6 +57,20 @@ public class RenderVideoJobsLayoutTests
         Assert.True(videoFrameIndex < actionsIndex);
     }
 
+    [Fact]
+    public void VideoActions_UseConditionalExternalVoiceIconAndAudioDialog()
+    {
+        var source = File.ReadAllText(RazorPath);
+
+        Assert.Contains("RequiresExternalVoice(scene)", source);
+        Assert.Contains("ResolveVoiceMediaState(scene)", source);
+        Assert.Contains("OpenSceneVoicePlayerAsync(scene)", source);
+        Assert.Contains("SceneAudioVersionDialog", source);
+        Assert.Contains("Đang tạo giọng đọc", source);
+        Assert.Contains("Nghe giọng đọc", source);
+        Assert.Contains("Tạo giọng đọc thất bại", source);
+    }
+
     private static string Between(string source, string startText, string endText)
     {
         var start = source.IndexOf(startText, StringComparison.Ordinal);

@@ -117,6 +117,25 @@ public sealed class TodoXVideoPromptParserTests
         Assert.Equal("720p", result.Model.Resolution);
     }
 
+    [Theory]
+    [InlineData("dialogue", "Narration A")]
+    [InlineData("dialogue_text", "Narration B")]
+    [InlineData("narration", "Narration C")]
+    [InlineData("tts_text", "Narration D")]
+    public void ScenePromptMetadata_NormalizesVoiceAliases(string key, string expectedVoice)
+    {
+        var metadata = ScenePromptMetadata.Parse($$"""
+        {
+          "{{key}}": "{{expectedVoice}}",
+          "voice_instruction": "Soft tone"
+        }
+        """);
+
+        Assert.Equal(expectedVoice, metadata.Voice);
+        Assert.Equal("Soft tone", metadata.VoiceInstruction);
+        Assert.Contains("\"voice\":", metadata.Serialize(), StringComparison.Ordinal);
+    }
+
     [Fact]
     public void PreservesEffectiveImagePromptThroughSceneMetadataRoundTrip()
     {

@@ -71,6 +71,7 @@ public sealed class VideoProjectSceneDto
     public string? StaticImageUrl { get; set; }
     public string? SceneVideoPath { get; set; }
     public string? SceneVideoUrl { get; set; }
+    public Guid? SelectedAudioVersionId { get; set; }
     public string Status { get; set; } = VideoSceneStatuses.Draft;
     public string? ErrorMessage { get; set; }
     public DateTime CreatedAt { get; set; }

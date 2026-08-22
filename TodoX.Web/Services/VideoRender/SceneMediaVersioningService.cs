@@ -59,6 +59,22 @@ public sealed record SceneVideoVersionCreateRequest(
     object SceneSnapshot,
     object RenderConfigSnapshot);
 
+public sealed record SceneAudioVersionCreateRequest(
+    long ProjectId,
+    long SceneId,
+    Guid? UserId,
+    Guid? CustomerId,
+    Guid? RenderJobId,
+    string LogicalRequestId,
+    string? VoiceCatalogCode,
+    string? VoiceSnapshotJson,
+    string? NarrationTextSnapshot,
+    string? VoiceInstructionSnapshot,
+    decimal? TtsRate,
+    decimal? DurationSeconds,
+    object SceneSnapshot,
+    object RenderConfigSnapshot);
+
 public sealed record SceneVideoVersionCompleteRequest(
     string? VideoUrl,
     string? VideoPath,
@@ -77,6 +93,23 @@ public sealed record SceneVideoVersionCompleteRequest(
     string? CostSource = null,
     string? AspectRatio = null,
     Guid? ResultMediaId = null);
+
+public sealed record SceneAudioVersionCompleteRequest(
+    string? AudioUrl,
+    string? AudioPath,
+    decimal? DurationSeconds = null,
+    string? ProviderCode = null,
+    string? ModelName = null,
+    long? ProviderCapabilityId = null,
+    string? ProviderTaskId = null,
+    string? BillingLogicalRequestId = null,
+    decimal? EstimatedUsd = null,
+    decimal? ActualUsd = null,
+    decimal ChargedPoints = 0,
+    decimal RefundedPoints = 0,
+    string? CostSource = null,
+    Guid? ResultMediaId = null,
+    string? MimeType = null);
 
 public sealed record FinalVideoVersionCreateRequest(
     long ProjectId,
@@ -153,7 +186,42 @@ public sealed class SceneVideoVersionDto
     public decimal ChargedPoints { get; set; }
     public decimal RefundedPoints { get; set; }
     public string? CostSource { get; set; }
+    public Guid? VoiceAudioVersionId { get; set; }
     public string? PosterUrl { get; set; }
+    public string? ErrorMessage { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+}
+
+public sealed class SceneAudioVersionDto
+{
+    public Guid Id { get; set; }
+    public long ProjectId { get; set; }
+    public long SceneId { get; set; }
+    public int VersionNumber { get; set; }
+    public string LogicalRequestId { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public bool IsSelected { get; set; }
+    public string? StorageKey { get; set; }
+    public string? PublicUrl { get; set; }
+    public string? SourceFilePath { get; set; }
+    public Guid? ResultMediaId { get; set; }
+    public string? VoiceCatalogCode { get; set; }
+    public string? VoiceSnapshotJson { get; set; }
+    public string? NarrationTextSnapshot { get; set; }
+    public string? VoiceInstructionSnapshot { get; set; }
+    public decimal? TtsRate { get; set; }
+    public decimal? DurationSeconds { get; set; }
+    public string? ProviderCode { get; set; }
+    public string? ModelName { get; set; }
+    public long? ProviderCapabilityId { get; set; }
+    public string? ProviderTaskId { get; set; }
+    public string? BillingLogicalRequestId { get; set; }
+    public decimal? EstimatedUsd { get; set; }
+    public decimal? ActualUsd { get; set; }
+    public decimal ChargedPoints { get; set; }
+    public decimal RefundedPoints { get; set; }
+    public string? CostSource { get; set; }
+    public string? MimeType { get; set; }
     public string? ErrorMessage { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
 }
@@ -249,6 +317,16 @@ public interface ISceneMediaVersioningService
     Task MarkSceneVideoVersionSubmittedAsync(Guid versionId, string? providerCode, string? modelName, long? providerCapabilityId, string providerTaskId, CancellationToken ct = default);
     Task<string?> GetSceneVideoProviderTaskIdAsync(Guid versionId, CancellationToken ct = default);
     Task MarkSceneVideoPendingReconciliationAsync(Guid versionId, string? errorCode, string? errorMessage, CancellationToken ct = default);
+    Task<SceneAudioVersionDto> CreateQueuedSceneAudioVersionAsync(SceneAudioVersionCreateRequest request, CancellationToken ct = default);
+    Task CompleteSceneAudioVersionAsync(Guid versionId, SceneAudioVersionCompleteRequest request, CancellationToken ct = default);
+    Task FailSceneAudioVersionAsync(Guid versionId, string? errorCode, string? errorMessage, CancellationToken ct = default);
+    Task MarkSceneAudioVersionSubmittedAsync(Guid versionId, string? providerCode, string? modelName, long? providerCapabilityId, string providerTaskId, CancellationToken ct = default);
+    Task<string?> GetSceneAudioProviderTaskIdAsync(Guid versionId, CancellationToken ct = default);
+    Task MarkSceneAudioPendingReconciliationAsync(Guid versionId, string? errorCode, string? errorMessage, CancellationToken ct = default);
+    Task<IReadOnlyList<SceneAudioVersionDto>> ListSceneAudioVersionsAsync(long sceneId, int skip = 0, int take = 20, CancellationToken ct = default);
+    Task<IReadOnlyList<SceneAudioVersionDto>> ListSceneAudioVersionsAsync(long sceneId, CurrentUserSession user, int skip = 0, int take = 20, CancellationToken ct = default);
+    Task SelectSceneAudioVersionAsync(long sceneId, Guid versionId, Guid? selectedBy, CancellationToken ct = default);
+    Task SelectSceneAudioVersionAsync(long sceneId, Guid versionId, CurrentUserSession user, CancellationToken ct = default);
     Task<FinalVideoVersionDto> CreateQueuedFinalVideoVersionAsync(FinalVideoVersionCreateRequest request, CancellationToken ct = default);
     Task CompleteFinalVideoVersionAsync(Guid versionId, FinalVideoVersionCompleteRequest request, CancellationToken ct = default);
     Task FailFinalVideoVersionAsync(Guid versionId, string? errorCode, string? errorMessage, CancellationToken ct = default);
@@ -968,6 +1046,288 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
             new { versionId, tenant = _tenant.TenantId, errorCode, errorMessage });
     }
 
+    public async Task<SceneAudioVersionDto> CreateQueuedSceneAudioVersionAsync(SceneAudioVersionCreateRequest request, CancellationToken ct = default)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        using var tx = conn.BeginTransaction();
+
+        await LockSceneAsync(conn, tx, request.ProjectId, request.SceneId, _tenant.TenantId);
+        var existing = await conn.QuerySingleOrDefaultAsync<SceneAudioVersionDto>(
+            SelectSceneAudioVersionSql + " WHERE logical_request_id=@logicalRequestId AND tenant_id=@tenant;",
+            new { request.LogicalRequestId, tenant = _tenant.TenantId }, tx);
+        if (existing is not null)
+        {
+            if (request.RenderJobId is not null)
+            {
+                await conn.ExecuteAsync(
+                    """
+                    UPDATE video_render.scene_audio_versions
+                       SET render_job_id=COALESCE(render_job_id, @renderJobId),
+                           updated_at=now()
+                     WHERE id=@id AND tenant_id=@tenant;
+                    """,
+                    new { existing.Id, request.RenderJobId, tenant = _tenant.TenantId }, tx);
+            }
+            tx.Commit();
+            return existing;
+        }
+
+        var versionNumber = await conn.ExecuteScalarAsync<int>(
+            "SELECT COALESCE(max(version_number), 0) + 1 FROM video_render.scene_audio_versions WHERE scene_id=@sceneId AND project_id=@projectId AND tenant_id=@tenant;",
+            new { request.SceneId, request.ProjectId, tenant = _tenant.TenantId }, tx);
+        var id = Guid.NewGuid();
+        var storageKey = SceneMediaStorageKeys.SceneAudioOutput(_tenant.TenantId, request.ProjectId, request.SceneId, id);
+
+        await conn.ExecuteAsync(
+            """
+            INSERT INTO video_render.scene_audio_versions
+                (id, project_id, scene_id, tenant_id, customer_id, created_by,
+                 version_number, logical_request_id, render_job_id,
+                 voice_catalog_code, voice_snapshot_json, narration_text_snapshot,
+                 voice_instruction_snapshot, tts_rate, duration_seconds,
+                 scene_snapshot_json, render_config_json, storage_key, status, created_at, updated_at)
+            VALUES
+                (@id, @projectId, @sceneId, @tenant, @customer, @user,
+                 @versionNumber, @logicalRequestId, @renderJobId,
+                 @voiceCatalogCode, CAST(@voiceSnapshotJson AS jsonb), @narrationTextSnapshot,
+                 @voiceInstructionSnapshot, @ttsRate, @durationSeconds,
+                 CAST(@sceneSnapshot AS jsonb), CAST(@renderConfig AS jsonb), @storageKey, 'queued', now(), now());
+            """,
+            new
+            {
+                id,
+                request.ProjectId,
+                request.SceneId,
+                tenant = _tenant.TenantId,
+                customer = request.CustomerId,
+                user = request.UserId,
+                versionNumber,
+                logicalRequestId = request.LogicalRequestId,
+                request.RenderJobId,
+                request.VoiceCatalogCode,
+                voiceSnapshotJson = string.IsNullOrWhiteSpace(request.VoiceSnapshotJson) ? "{}" : request.VoiceSnapshotJson,
+                request.NarrationTextSnapshot,
+                request.VoiceInstructionSnapshot,
+                request.TtsRate,
+                request.DurationSeconds,
+                sceneSnapshot = ToJson(request.SceneSnapshot),
+                renderConfig = ToJson(request.RenderConfigSnapshot),
+                storageKey
+            }, tx);
+
+        tx.Commit();
+        return new SceneAudioVersionDto
+        {
+            Id = id,
+            ProjectId = request.ProjectId,
+            SceneId = request.SceneId,
+            VersionNumber = versionNumber,
+            LogicalRequestId = request.LogicalRequestId,
+            Status = "queued",
+            StorageKey = storageKey,
+            VoiceCatalogCode = request.VoiceCatalogCode,
+            VoiceSnapshotJson = request.VoiceSnapshotJson,
+            NarrationTextSnapshot = request.NarrationTextSnapshot,
+            VoiceInstructionSnapshot = request.VoiceInstructionSnapshot,
+            TtsRate = request.TtsRate,
+            DurationSeconds = request.DurationSeconds
+        };
+    }
+
+    public async Task CompleteSceneAudioVersionAsync(Guid versionId, SceneAudioVersionCompleteRequest request, CancellationToken ct = default)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        using var tx = conn.BeginTransaction();
+
+        var version = await conn.QuerySingleAsync<SceneAudioVersionDto>(
+            SelectSceneAudioVersionSql + " WHERE id=@versionId AND tenant_id=@tenant FOR UPDATE;",
+            new { versionId, tenant = _tenant.TenantId }, tx);
+        await conn.ExecuteAsync(
+            "UPDATE video_render.scene_audio_versions SET is_selected=false WHERE scene_id=@sceneId AND project_id=@projectId AND tenant_id=@tenant;",
+            new { version.SceneId, version.ProjectId, tenant = _tenant.TenantId }, tx);
+        await conn.ExecuteAsync(
+            """
+            UPDATE video_render.scene_audio_versions
+               SET status='completed',
+                   provider_code=COALESCE(@providerCode, provider_code),
+                   provider_capability_id=COALESCE(@providerCapabilityId, provider_capability_id),
+                   requested_model=COALESCE(requested_model, @modelName),
+                   actual_model=COALESCE(@modelName, actual_model),
+                   provider_task_id=COALESCE(@providerTaskId, provider_task_id),
+                   result_media_id=COALESCE(@resultMediaId, result_media_id),
+                   public_url=@audioUrl,
+                   source_file_path=@audioPath,
+                   duration_seconds=@durationSeconds,
+                   mime_type=@mimeType,
+                   billing_logical_request_id=COALESCE(@billingLogicalRequestId, billing_logical_request_id),
+                   estimated_usd=COALESCE(@estimatedUsd, estimated_usd),
+                   actual_usd=@actualUsd,
+                   charged_points=@chargedPoints,
+                   refunded_points=@refundedPoints,
+                   cost_source=COALESCE(@costSource, cost_source),
+                   is_selected=true,
+                   selected_at=now(),
+                   selected_by=created_by,
+                   completed_at=now(),
+                   updated_at=now()
+             WHERE id=@versionId AND tenant_id=@tenant;
+            """,
+            new
+            {
+                versionId,
+                tenant = _tenant.TenantId,
+                request.ProviderCode,
+                modelName = request.ModelName,
+                request.ProviderCapabilityId,
+                request.ProviderTaskId,
+                request.ResultMediaId,
+                request.AudioUrl,
+                request.AudioPath,
+                request.DurationSeconds,
+                request.MimeType,
+                request.BillingLogicalRequestId,
+                request.EstimatedUsd,
+                request.ActualUsd,
+                request.ChargedPoints,
+                request.RefundedPoints,
+                request.CostSource
+            }, tx);
+        await conn.ExecuteAsync(
+            """
+            UPDATE video_render.video_project_scenes
+               SET selected_audio_version_id=@versionId,
+                   updated_at=now()
+             WHERE id=@sceneId AND tenant_id=@tenant;
+            """,
+            new { versionId, sceneId = version.SceneId, tenant = _tenant.TenantId }, tx);
+        await conn.ExecuteAsync(
+            """
+            UPDATE video_render.scene_video_versions
+               SET voice_audio_version_id=@versionId,
+                   updated_at=now()
+             WHERE scene_id=@sceneId AND tenant_id=@tenant AND is_selected=true;
+            """,
+            new { versionId, sceneId = version.SceneId, tenant = _tenant.TenantId }, tx);
+        tx.Commit();
+    }
+
+    public async Task FailSceneAudioVersionAsync(Guid versionId, string? errorCode, string? errorMessage, CancellationToken ct = default)
+    {
+        await UpdateVersionFailureAsync("video_render.scene_audio_versions", versionId, errorCode, errorMessage, ct);
+    }
+
+    public async Task MarkSceneAudioVersionSubmittedAsync(Guid versionId, string? providerCode, string? modelName, long? providerCapabilityId, string providerTaskId, CancellationToken ct = default)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        await conn.ExecuteAsync(
+            """
+            UPDATE video_render.scene_audio_versions
+               SET status='submitted',
+                   provider_code=COALESCE(@providerCode, provider_code),
+                   provider_capability_id=COALESCE(@providerCapabilityId, provider_capability_id),
+                   requested_model=COALESCE(requested_model, @modelName),
+                   actual_model=COALESCE(@modelName, actual_model),
+                   provider_task_id=@providerTaskId,
+                   submitted_at=COALESCE(submitted_at, now()),
+                   updated_at=now()
+             WHERE id=@versionId AND tenant_id=@tenant;
+            """,
+            new { versionId, tenant = _tenant.TenantId, providerCode, modelName, providerCapabilityId, providerTaskId });
+    }
+
+    public async Task<string?> GetSceneAudioProviderTaskIdAsync(Guid versionId, CancellationToken ct = default)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        return await conn.ExecuteScalarAsync<string?>(
+            """
+            SELECT provider_task_id
+              FROM video_render.scene_audio_versions
+             WHERE id=@versionId AND tenant_id=@tenant
+             LIMIT 1;
+            """,
+            new { versionId, tenant = _tenant.TenantId });
+    }
+
+    public async Task MarkSceneAudioPendingReconciliationAsync(Guid versionId, string? errorCode, string? errorMessage, CancellationToken ct = default)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        await conn.ExecuteAsync(
+            """
+            UPDATE video_render.scene_audio_versions
+               SET status='pending_reconciliation',
+                   error_code=@errorCode,
+                   error_message=@errorMessage,
+                   updated_at=now()
+             WHERE id=@versionId AND tenant_id=@tenant;
+            """,
+            new { versionId, tenant = _tenant.TenantId, errorCode, errorMessage });
+    }
+
+    public async Task<IReadOnlyList<SceneAudioVersionDto>> ListSceneAudioVersionsAsync(long sceneId, int skip = 0, int take = 20, CancellationToken ct = default)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        var rows = await conn.QueryAsync<SceneAudioVersionDto>(
+            SelectSceneAudioVersionSql +
+            """
+             WHERE scene_id=@sceneId AND tenant_id=@tenant
+             ORDER BY version_number DESC
+             OFFSET @skip LIMIT @take;
+            """,
+            new { sceneId, tenant = _tenant.TenantId, skip = Math.Max(0, skip), take = Math.Clamp(take, 1, 100) });
+        return rows.ToList();
+    }
+
+    public async Task<IReadOnlyList<SceneAudioVersionDto>> ListSceneAudioVersionsAsync(long sceneId, CurrentUserSession user, int skip = 0, int take = 20, CancellationToken ct = default)
+    {
+        await EnsureSceneAccessAsync(sceneId, user, ct);
+        return await ListSceneAudioVersionsAsync(sceneId, skip, take, ct);
+    }
+
+    public async Task SelectSceneAudioVersionAsync(long sceneId, Guid versionId, Guid? selectedBy, CancellationToken ct = default)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        using var tx = conn.BeginTransaction();
+        var version = await conn.QuerySingleAsync<SceneAudioVersionDto>(
+            SelectSceneAudioVersionSql +
+            """
+             WHERE id=@versionId AND scene_id=@sceneId AND tenant_id=@tenant AND status='completed'
+             FOR UPDATE;
+            """,
+            new { versionId, sceneId, tenant = _tenant.TenantId }, tx);
+        await conn.ExecuteAsync(
+            "UPDATE video_render.scene_audio_versions SET is_selected=false WHERE scene_id=@sceneId AND project_id=@projectId AND tenant_id=@tenant;",
+            new { sceneId, projectId = version.ProjectId, tenant = _tenant.TenantId }, tx);
+        await conn.ExecuteAsync(
+            """
+            UPDATE video_render.scene_audio_versions
+               SET is_selected=true, selected_at=now(), selected_by=@selectedBy, updated_at=now()
+             WHERE id=@versionId;
+            UPDATE video_render.video_project_scenes
+               SET selected_audio_version_id=@versionId,
+                   updated_at=now()
+             WHERE id=@sceneId AND tenant_id=@tenant;
+            UPDATE video_render.scene_video_versions
+               SET voice_audio_version_id=@versionId,
+                   updated_at=now()
+             WHERE scene_id=@sceneId AND tenant_id=@tenant AND is_selected=true;
+            """,
+            new { versionId, sceneId, tenant = _tenant.TenantId, selectedBy }, tx);
+        tx.Commit();
+    }
+
+    public async Task SelectSceneAudioVersionAsync(long sceneId, Guid versionId, CurrentUserSession user, CancellationToken ct = default)
+    {
+        await EnsureSceneAccessAsync(sceneId, user, ct);
+        await SelectSceneAudioVersionAsync(sceneId, versionId, user.UserId, ct);
+    }
+
     public async Task<FinalVideoVersionDto> CreateQueuedFinalVideoVersionAsync(FinalVideoVersionCreateRequest request, CancellationToken ct = default)
     {
         await _tenant.EnsureLoadedAsync(ct);
@@ -1678,8 +2038,25 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
                provider_task_id AS ProviderTaskId, duration_seconds AS DurationSeconds, aspect_ratio AS AspectRatio,
                billing_logical_request_id AS BillingLogicalRequestId, estimated_usd AS EstimatedUsd, actual_usd AS ActualUsd,
                charged_points AS ChargedPoints, refunded_points AS RefundedPoints, cost_source AS CostSource,
+               voice_audio_version_id AS VoiceAudioVersionId,
                poster_url AS PosterUrl, error_message AS ErrorMessage, created_at AS CreatedAt
           FROM video_render.scene_video_versions
+        """;
+
+    private const string SelectSceneAudioVersionSql =
+        """
+        SELECT id AS Id, project_id AS ProjectId, scene_id AS SceneId,
+               version_number AS VersionNumber, logical_request_id AS LogicalRequestId, status AS Status,
+               is_selected AS IsSelected, storage_key AS StorageKey, public_url AS PublicUrl, source_file_path AS SourceFilePath,
+               result_media_id AS ResultMediaId, voice_catalog_code AS VoiceCatalogCode, voice_snapshot_json::text AS VoiceSnapshotJson,
+               narration_text_snapshot AS NarrationTextSnapshot, voice_instruction_snapshot AS VoiceInstructionSnapshot,
+               tts_rate AS TtsRate, duration_seconds AS DurationSeconds, provider_code AS ProviderCode,
+               actual_model AS ModelName, provider_capability_id AS ProviderCapabilityId,
+               provider_task_id AS ProviderTaskId, billing_logical_request_id AS BillingLogicalRequestId,
+               estimated_usd AS EstimatedUsd, actual_usd AS ActualUsd, charged_points AS ChargedPoints,
+               refunded_points AS RefundedPoints, cost_source AS CostSource, mime_type AS MimeType,
+               error_message AS ErrorMessage, created_at AS CreatedAt
+          FROM video_render.scene_audio_versions
         """;
 
     private const string SelectFinalVideoVersionSql =
@@ -1831,6 +2208,9 @@ public static class SceneMediaStorageKeys
 
     public static string SceneVideoOutput(Guid tenantId, long projectId, long sceneId, Guid videoVersionId)
         => $"render-projects/{tenantId:N}/{projectId}/scenes/{sceneId}/videos/{videoVersionId:N}/output/scene-video.mp4";
+
+    public static string SceneAudioOutput(Guid tenantId, long projectId, long sceneId, Guid audioVersionId)
+        => $"render-projects/{tenantId:N}/{projectId}/scenes/{sceneId}/audio/{audioVersionId:N}/output/scene-audio.mp3";
 
     public static string FinalVideoOutput(Guid tenantId, long projectId, Guid finalVideoVersionId)
         => $"render-projects/{tenantId:N}/{projectId}/final-videos/{finalVideoVersionId:N}/output/final-video.mp4";

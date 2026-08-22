@@ -155,6 +155,7 @@ public sealed class VideoRenderRepository
                        title AS Title, duration_seconds AS DurationSeconds, scene_prompt AS ScenePrompt,
                        image_prompt AS ImagePrompt, video_prompt AS VideoPrompt, static_image_path AS StaticImagePath,
                        static_image_url AS StaticImageUrl, scene_video_path AS SceneVideoPath, scene_video_url AS SceneVideoUrl,
+                       selected_audio_version_id AS SelectedAudioVersionId,
                        status AS Status, error_message AS ErrorMessage, created_at AS CreatedAt, updated_at AS UpdatedAt
                   FROM video_render.video_project_scenes
                  WHERE project_id=@projectId AND tenant_id=@tenant
@@ -415,6 +416,7 @@ public sealed class VideoRenderRepository
                        title AS Title, duration_seconds AS DurationSeconds, scene_prompt AS ScenePrompt,
                        image_prompt AS ImagePrompt, video_prompt AS VideoPrompt, static_image_path AS StaticImagePath,
                        static_image_url AS StaticImageUrl, scene_video_path AS SceneVideoPath, scene_video_url AS SceneVideoUrl,
+                       selected_audio_version_id AS SelectedAudioVersionId,
                        status AS Status, error_message AS ErrorMessage, created_at AS CreatedAt, updated_at AS UpdatedAt
                   FROM video_render.video_project_scenes
                  WHERE id=@sceneId AND tenant_id=@tenant;
@@ -689,6 +691,7 @@ public sealed class VideoRenderRepository
                           title AS Title, duration_seconds AS DurationSeconds, scene_prompt AS ScenePrompt,
                           image_prompt AS ImagePrompt, video_prompt AS VideoPrompt, static_image_path AS StaticImagePath,
                           static_image_url AS StaticImageUrl, scene_video_path AS SceneVideoPath, scene_video_url AS SceneVideoUrl,
+                          selected_audio_version_id AS SelectedAudioVersionId,
                           status AS Status, error_message AS ErrorMessage, created_at AS CreatedAt, updated_at AS UpdatedAt;
                 """,
                 new
