@@ -378,6 +378,18 @@ public sealed class RVideoProviderPollingRegressionTests
     }
 
     [Fact]
+    public void RVideoRetryUiDisablesTheRetryButtonAndFlipsSceneToQueuedImmediately()
+    {
+        var frame = ReadRepoFile("Components", "Shared", "RenderMediaFrame.razor");
+        var page = ReadRepoFile("Components", "Pages", "RenderVideoJobs.razor");
+
+        Assert.Contains("Disabled=\"@RetryDisabled\"", frame);
+        Assert.Contains("RetryDisabled=\"@_sceneVideoRetrying.Contains(scene.Id)\"", page);
+        Assert.Contains("scene.Status = VideoSceneStatuses.VideoQueued;", page);
+        Assert.Contains("_sceneVideoRetrying.Add(scene.Id)", page);
+    }
+
+    [Fact]
     public void RVideoProjectProjectionFallsBackToSelectedCompletedSceneVideoVersion()
     {
         var source = ReadRepoFile("Services", "VideoRender", "VideoRenderRepository.cs");
