@@ -352,6 +352,7 @@ else
                                                                   State="@ResolveImageMediaState(sceneState)"
                                                                   EmptyText="Chưa render ảnh"
                                                                   FailedText="Lỗi render ảnh"
+                                                                  OnRetry="@(() => RerenderSceneImageAsync(scene))"
                                                                   OnClick="@(() => OpenScenePreview(scene))" />
                                                 <MudText Typo="Typo.caption" Color="Color.Secondary">@ProjectAspectRatio · @ProjectResolution</MudText>
                                                 <MudStack Row="true" Spacing="1" Class="flex-wrap gap-1">
@@ -390,7 +391,8 @@ else
                                                                   State="@ResolveVideoMediaState(scene)"
                                                                   EmptyText="Chưa render video"
                                                                   FailedText="Lỗi render video"
-                                                                  ReadyText="Sẵn sàng tạo video" />
+                                                                  ReadyText="Sẵn sàng tạo video"
+                                                                  OnRetry="@(() => EnqueueSceneVideoAsync(scene))" />
                                                 @if (_sceneRerenderErrors.TryGetValue(scene.Id, out var sceneErr) && !string.IsNullOrWhiteSpace(sceneErr))
                                                 {
                                                     <MudText Typo="Typo.caption" Color="Color.Error">@sceneErr</MudText>
@@ -2079,7 +2081,8 @@ else
                 // has settled to avoid churn.
                 var hasPendingSceneImages = HasPendingSceneImages();
                 var scenesPending = _batchActive || HasActiveSceneRenders();
-                var videoActive = _project.Status is VideoProjectStatuses.Rendering or VideoProjectStatuses.Merging;
+                var videoActive = _project.Status is VideoProjectStatuses.Rendering or VideoProjectStatuses.Merging
+                                  || _project.Scenes.Any(IsVideoSceneActive);
                 if (scenesPending || videoActive)
                 {
                     await InvokeAsync(ReloadAsync);
@@ -2925,7 +2928,17 @@ else
     // True when any scene is actively being processed (queued, rendering, or retrying) per events or UI state.
     private bool HasActiveSceneRenders()
         => _sceneEventState.Values.Any(RenderSceneImageUiState.IsActive)
-           || _sceneRerendering.Count > 0;
+           || _sceneRerendering.Count > 0
+           || (_project?.Scenes.Any(IsVideoSceneActive) ?? false);
+
+    private static bool IsVideoSceneActive(VideoProjectSceneDto scene)
+        => scene.Status?.Trim().ToLowerInvariant() is
+            VideoSceneStatuses.VideoQueued or
+            VideoSceneStatuses.VideoRendering or
+            "submitted" or
+            "processing" or
+            "pending_reconciliation" or
+            "downloading";
 
     private RenderSceneImageVisualState ResolveSceneImageState(VideoProjectSceneDto scene)
     {
@@ -3050,7 +3063,8 @@ else
         => state switch
         {
             RenderSceneImageVisualState.Queued
-                or RenderSceneImageVisualState.ProviderSubmitted
+                => MediaRenderState.Queued,
+            RenderSceneImageVisualState.ProviderSubmitted
                 or RenderSceneImageVisualState.ProviderProcessing
                 or RenderSceneImageVisualState.Rendering
                 or RenderSceneImageVisualState.Retrying => MediaRenderState.Rendering,

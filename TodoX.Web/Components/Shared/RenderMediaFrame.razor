@@ -24,7 +24,17 @@
     }
     else if (IsFailed)
     {
-        <div class="scene-thumb-placeholder scene-image-failed">@FailedText</div>
+        <div class="scene-thumb-placeholder scene-image-failed">
+            <MudIcon Icon="@Icons.Material.Filled.ErrorOutline" Color="Color.Error" Size="Size.Medium" />
+            <span>@FailedText</span>
+            @if (OnRetry.HasDelegate)
+            {
+                <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error"
+                           StartIcon="@Icons.Material.Filled.Refresh" OnClick="OnRetry">
+                    Thử lại
+                </MudButton>
+            }
+        </div>
     }
     else if (!string.IsNullOrWhiteSpace(ThumbnailUrl) && IsVideo)
     {
@@ -53,6 +63,7 @@
     [Parameter] public string EmptyText { get; set; } = string.Empty;
     [Parameter] public string FailedText { get; set; } = string.Empty;
     [Parameter] public string? ReadyText { get; set; }
+    [Parameter] public EventCallback OnRetry { get; set; }
     [Parameter] public string AspectRatio { get; set; } = "1:1";
     [Parameter] public EventCallback OnClick { get; set; }
 

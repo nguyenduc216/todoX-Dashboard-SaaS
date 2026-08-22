@@ -48,6 +48,7 @@ public sealed class SceneVideoRenderWorkItemInput
 public sealed class SceneVideoWorkerHandler : IRenderJobHandler
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private const int DefaultMaxReconciliationRetries = 3;
 
     private readonly VideoRenderRepository _repo;
     private readonly ISceneMediaVersioningService _versions;
@@ -336,6 +337,17 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                     taskId!), ct);
                 if (status.Status is VideoProviderTaskStatus.Queued or VideoProviderTaskStatus.Processing)
                 {
+                    await _repo.AddProjectEventAsync(project.Id, "SCENE_VIDEO_PROVIDER_PROCESSING", "info",
+                        $"Scene {input.SceneIndex} provider task is still processing.",
+                        new
+                        {
+                            jobId = job.Id,
+                            sceneId = input.SceneId,
+                            sceneIndex = input.SceneIndex,
+                            providerTaskId = taskId,
+                            normalizedStatus = status.Status,
+                            providerRawResponse = status.SanitizedResponseJson
+                        }, ct);
                     await MarkPendingReconciliationAsync(input, version.Id, attemptLogicalRequestId, tariffSnapshot, "provider_pending", "Video provider task remains pending.", ct, taskId);
                     await DeferProviderPollAsync(job, taskId!, TimeSpan.FromSeconds(Math.Max(1, _options.PollIntervalSeconds)),
                         "SCENE_VIDEO_POLL_SCHEDULED", "Video task remains pending; the same provider task will be polled later.", ct);
@@ -370,56 +382,100 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                     throw new RenderJobTerminalFailureException(failure);
                 }
 
-                var outputUrl = status.OutputUrl ?? throw new InvalidOperationException($"Video provider returned SUCCESS but no output video URL. task_id={taskId}");
-                await _tenant.EnsureLoadedAsync(ct);
-                var objectKey = version.StorageKey ?? SceneMediaStorageKeys.SceneVideoOutput(_tenant.TenantId, project.Id, scene.Id, version.Id);
-                var saved = await _media.DownloadAndSaveBinaryAtObjectKeyAsync(
-                    outputUrl,
-                    objectKey,
-                    "video_scene_video",
-                    "video/mp4",
-                    input.UserId,
-                    input.CustomerId,
-                    _tenant.TenantId,
-                    ct);
-
-                if (reservation.BillingRecordId is not null)
+                try
                 {
-                    await _billing.CompleteAsync(new AiImageBillingCompleteRequest
+                    var outputUrl = status.OutputUrl;
+                    if (string.IsNullOrWhiteSpace(outputUrl)
+                        || !Uri.TryCreate(outputUrl, UriKind.Absolute, out var outputUri)
+                        || outputUri.Scheme is not ("http" or "https"))
                     {
-                        LogicalRequestId = attemptLogicalRequestId,
-                        Success = true,
-                        ActualModel = status.ActualModel ?? policy.Model,
-                        ProviderTaskId = taskId,
-                        ProviderUsageJson = status.SanitizedResponseJson,
-                        TariffSnapshotJson = tariffSnapshot
-                    }, ct);
+                        throw new VideoReconciliationException(
+                            "PROVIDER_OUTPUT_URL_MISSING",
+                            $"79AI returned SUCCESS without a usable output video URL. task_id={taskId}");
+                    }
+
+                    await _repo.AddProjectEventAsync(project.Id, "SCENE_VIDEO_RESULT_DOWNLOADING", "info",
+                        $"Scene {input.SceneIndex} provider result is being imported into TodoX.",
+                        new
+                        {
+                            jobId = job.Id,
+                            sceneId = input.SceneId,
+                            sceneIndex = input.SceneIndex,
+                            providerTaskId = taskId,
+                            outputUrl
+                        }, ct);
+
+                    await _tenant.EnsureLoadedAsync(ct);
+                    var objectKey = version.StorageKey ?? SceneMediaStorageKeys.SceneVideoOutput(_tenant.TenantId, project.Id, scene.Id, version.Id);
+                    var saved = await _media.DownloadAndSaveBinaryAtObjectKeyAsync(
+                        outputUrl,
+                        objectKey,
+                        "video_scene_video",
+                        "video/mp4",
+                        input.UserId,
+                        input.CustomerId,
+                        _tenant.TenantId,
+                        ct);
+
+                    if (saved is null || saved.Id == Guid.Empty
+                        || string.IsNullOrWhiteSpace(saved.PublicUrl ?? saved.FileUrl))
+                    {
+                        throw new VideoReconciliationException(
+                            "MEDIA_STORAGE_FAILED",
+                            $"TodoX did not persist a usable video result for task_id={taskId}.");
+                    }
+
+                    await _versions.CompleteSceneVideoVersionAsync(version.Id, new SceneVideoVersionCompleteRequest(
+                        saved.PublicUrl ?? saved.FileUrl,
+                        ResolvePhysicalPath(saved.ObjectKey),
+                        PosterUrl: sourceVersion.PublicUrl ?? input.SourceImageUrl,
+                        DurationSeconds: input.DurationSeconds,
+                        MimeType: "video/mp4",
+                        ProviderCode: input.ProviderCode,
+                        ModelName: status.ActualModel ?? policy.Model,
+                        ProviderCapabilityId: input.ProviderCapabilityId,
+                        ProviderTaskId: taskId,
+                        BillingLogicalRequestId: attemptLogicalRequestId,
+                        EstimatedUsd: input.EstimatedUsd,
+                        ActualUsd: null,
+                        ChargedPoints: reservation.ChargedPoints,
+                        RefundedPoints: 0,
+                        CostSource: input.CostSource ?? "configured_tariff",
+                        AspectRatio: input.AspectRatio,
+                        ResultMediaId: saved.Id), ct);
+
+                    if (reservation.BillingRecordId is not null)
+                    {
+                        await _billing.CompleteAsync(new AiImageBillingCompleteRequest
+                        {
+                            LogicalRequestId = attemptLogicalRequestId,
+                            Success = true,
+                            ActualModel = status.ActualModel ?? policy.Model,
+                            ProviderTaskId = taskId,
+                            ProviderUsageJson = status.SanitizedResponseJson,
+                            TariffSnapshotJson = tariffSnapshot
+                        }, ct);
+                    }
+                    await LogUsageAsync(input, job, attemptLogicalRequestId, reservation.ChargedPoints, status.SanitizedResponseJson, true, null, taskId, ct);
+
+                    await _repo.AddProjectEventAsync(project.Id, "SCENE_VIDEO_READY", "info",
+                        $"Scene {input.SceneIndex} rendered successfully.",
+                        new { jobId = job.Id, input.SceneId, input.SceneIndex, taskId, videoUrl = saved.PublicUrl ?? saved.FileUrl }, ct);
+                    return;
                 }
-                await LogUsageAsync(input, job, attemptLogicalRequestId, reservation.ChargedPoints, status.SanitizedResponseJson, true, null, taskId, ct);
-
-                await _versions.CompleteSceneVideoVersionAsync(version.Id, new SceneVideoVersionCompleteRequest(
-                    saved.PublicUrl ?? saved.FileUrl,
-                    ResolvePhysicalPath(saved.ObjectKey),
-                    PosterUrl: sourceVersion.PublicUrl ?? input.SourceImageUrl,
-                    DurationSeconds: input.DurationSeconds,
-                    MimeType: "video/mp4",
-                    ProviderCode: input.ProviderCode,
-                    ModelName: status.ActualModel ?? policy.Model,
-                    ProviderCapabilityId: input.ProviderCapabilityId,
-                    ProviderTaskId: taskId,
-                    BillingLogicalRequestId: attemptLogicalRequestId,
-                    EstimatedUsd: input.EstimatedUsd,
-                    ActualUsd: null,
-                    ChargedPoints: reservation.ChargedPoints,
-                    RefundedPoints: 0,
-                    CostSource: input.CostSource ?? "configured_tariff",
-                    AspectRatio: input.AspectRatio,
-                    ResultMediaId: saved.Id), ct);
-
-                await _repo.AddProjectEventAsync(project.Id, "SCENE_VIDEO_READY", "info",
-                    $"Scene {input.SceneIndex} rendered successfully.",
-                    new { jobId = job.Id, input.SceneId, input.SceneIndex, taskId, videoUrl = saved.PublicUrl ?? saved.FileUrl }, ct);
-                return;
+                catch (VideoReconciliationException ex)
+                {
+                    await HandleReconciliationFailureAsync(
+                        job, project, scene, version.Id, input, attemptLogicalRequestId, tariffSnapshot, taskId, ex.ErrorCode, ex.Message, ct);
+                    return;
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    await HandleReconciliationFailureAsync(
+                        job, project, scene, version.Id, input, attemptLogicalRequestId, tariffSnapshot, taskId,
+                        "PROVIDER_SUCCESS_RECONCILIATION_FAILED", ex.Message, ct);
+                    return;
+                }
             }
             catch (VideoProviderTransientException ex)
             {
@@ -440,6 +496,56 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
 
         await FailAsync(project.Id, scene, Guid.Empty, "provider_failure", "Configured provider fallback attempts exhausted.", ct);
         throw new RenderJobTerminalFailureException("Configured provider fallback attempts exhausted.");
+    }
+
+    private async Task HandleReconciliationFailureAsync(
+        RenderJobDto job,
+        VideoProjectDto project,
+        VideoProjectSceneDto scene,
+        Guid versionId,
+        SceneVideoRenderWorkItemInput input,
+        string logicalRequestId,
+        string? tariffSnapshot,
+        string providerTaskId,
+        string errorCode,
+        string errorMessage,
+        CancellationToken ct)
+    {
+        var retryLimit = Math.Max(1, _config.GetValue("VideoRender:MaxReconciliationRetries", DefaultMaxReconciliationRetries));
+        var currentAttempt = await _jobs.GetProviderReconciliationAttemptCountAsync(job.Id, ct) + 1;
+        if (currentAttempt < retryLimit)
+        {
+            await MarkPendingReconciliationAsync(input, versionId, logicalRequestId, tariffSnapshot, errorCode, errorMessage, ct, providerTaskId);
+            await _jobs.ScheduleProviderPollAsync(
+                job.Id,
+                TimeSpan.FromSeconds(Math.Max(1, _options.PollIntervalSeconds)),
+                "SCENE_VIDEO_RECONCILIATION_RETRY",
+                errorMessage,
+                ct);
+            throw new RenderJobDeferredException(errorMessage);
+        }
+
+        var finalCode = errorCode is "PROVIDER_OUTPUT_URL_MISSING" or "MEDIA_STORAGE_FAILED"
+            ? errorCode
+            : "PROVIDER_SUCCESS_RECONCILIATION_FAILED";
+        await _versions.FailSceneVideoVersionAsync(versionId, finalCode, errorMessage, ct);
+        await _repo.UpdateSceneAsync(scene.Id, VideoSceneStatuses.Failed,
+            errorMessage: errorMessage, title: scene.Title, scenePrompt: scene.ScenePrompt,
+            imagePrompt: scene.ImagePrompt, videoPrompt: scene.VideoPrompt, ct: ct);
+        await _repo.AddProjectEventAsync(project.Id, "SCENE_VIDEO_FAILED", "error",
+            $"Scene {input.SceneIndex} result reconciliation failed.",
+            new
+            {
+                jobId = job.Id,
+                sceneId = input.SceneId,
+                sceneIndex = input.SceneIndex,
+                providerTaskId,
+                errorCode = finalCode,
+                errorMessage,
+                reconciliationAttempt = currentAttempt,
+                maxReconciliationRetries = retryLimit
+            }, ct);
+        throw new RenderJobTerminalFailureException(errorMessage);
     }
 
     #if false
@@ -875,6 +981,17 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         {
             await _versions.MarkSceneVideoPendingReconciliationAsync(versionId, errorCode, errorMessage, ct);
         }
+    }
+
+    private sealed class VideoReconciliationException : InvalidOperationException
+    {
+        public VideoReconciliationException(string errorCode, string message)
+            : base(message)
+        {
+            ErrorCode = errorCode;
+        }
+
+        public string ErrorCode { get; }
     }
 
     private async Task LogUsageAsync(

@@ -25,6 +25,7 @@ public interface IRenderJobService
     Task<IReadOnlyList<RenderJobEventDto>> GetEventsAsync(Guid jobId, CancellationToken ct = default);
     Task<IReadOnlyList<RenderJobEventDto>> GetEventsByLogCodeAsync(string logCode, CancellationToken ct = default);
     Task AddEventAsync(Guid jobId, string eventType, string message, object? data = null, string level = "info", CancellationToken ct = default);
+    Task<int> GetProviderReconciliationAttemptCountAsync(Guid jobId, CancellationToken ct = default);
     Task<bool> CancelAsync(Guid jobId, string reason, Guid? userId = null, CancellationToken ct = default);
     Task<RenderJobDto?> RetryAsync(Guid jobId, Guid? userId = null, CancellationToken ct = default);
     Task<RenderJobDto?> ClaimNextAsync(string workerKey, TimeSpan lockFor, CancellationToken ct = default);
@@ -691,6 +692,20 @@ public sealed class RenderJobService : IRenderJobService
             "Provider poll scheduled without consuming the application retry budget.",
             new { retryAfterSeconds = delaySeconds, reasonCode, reasonMessage }, "info", ct);
         return true;
+    }
+
+    public async Task<int> GetProviderReconciliationAttemptCountAsync(Guid jobId, CancellationToken ct = default)
+    {
+        using var conn = await _factory.OpenAsync(ct);
+        return await conn.ExecuteScalarAsync<int>(
+            """
+            SELECT COUNT(*)::int
+              FROM render.render_job_events
+             WHERE job_id=@jobId
+               AND event_type='JOB_PROVIDER_POLL_SCHEDULED'
+               AND COALESCE(data_json->>'reasonCode', '')='SCENE_VIDEO_RECONCILIATION_RETRY';
+            """,
+            new { jobId });
     }
 
     private const string SelectJobSql =

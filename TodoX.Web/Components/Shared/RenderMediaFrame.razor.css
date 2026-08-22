@@ -184,6 +184,11 @@
     background: var(--mud-palette-background-grey, #f2f2f5);
 }
 
+.scene-image-failed {
+    gap: 8px;
+    flex-direction: column;
+}
+
 @media (prefers-reduced-motion: reduce) {
     .scene-image-shimmer {
         animation: none;

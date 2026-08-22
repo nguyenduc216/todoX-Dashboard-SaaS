@@ -129,6 +129,32 @@ public sealed class RVideoProviderPollingRegressionTests
     }
 
     [Fact]
+    public void ProviderSuccessReconciliationIsBoundedAndEndsInFailedState()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "SceneVideoWorkerHandler.cs");
+
+        Assert.Contains("MaxReconciliationRetries", source);
+        Assert.Contains("PROVIDER_OUTPUT_URL_MISSING", source);
+        Assert.Contains("MEDIA_STORAGE_FAILED", source);
+        Assert.Contains("PROVIDER_SUCCESS_RECONCILIATION_FAILED", source);
+        Assert.Contains("await _versions.FailSceneVideoVersionAsync", source);
+        Assert.Contains("VideoSceneStatuses.Failed", source);
+        Assert.Contains("GetProviderReconciliationAttemptCountAsync", source);
+        Assert.Contains("throw new RenderJobDeferredException", source);
+        Assert.Contains("throw new RenderJobTerminalFailureException", source);
+    }
+
+    [Fact]
+    public void VideoPollingRefreshDoesNotDependOnlyOnProjectStatus()
+    {
+        var source = ReadRepoFile("Components", "Pages", "RenderVideoJobs.razor");
+
+        Assert.Contains("_project.Scenes.Any(IsVideoSceneActive)", source);
+        Assert.Contains("\"pending_reconciliation\"", source);
+        Assert.Contains("HasActiveSceneRenders()", source);
+    }
+
+    [Fact]
     public void ProviderSuccessReconcilesExistingTaskWithoutResubmit()
     {
         var source = ReadRepoFile("Services", "VideoRender", "SceneVideoWorkerHandler.cs");
