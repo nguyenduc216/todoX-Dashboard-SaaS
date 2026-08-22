@@ -1,5 +1,6 @@
 using TodoX.Web.Models;
 using TodoX.Web.Services.Render;
+using Microsoft.Extensions.Options;
 
 namespace TodoX.Web.Services.VideoRender;
 
@@ -14,6 +15,8 @@ public sealed class RVideoSceneMediaFinalizerService : IRVideoSceneMediaFinalize
     private readonly ISceneMediaVersioningService _versions;
     private readonly RVideoJobSettingsRepository _settings;
     private readonly IRenderJobService _jobs;
+    private readonly IWebHostEnvironment _env;
+    private readonly IOptionsMonitor<VideoRenderOptions> _options;
     private readonly ILogger<RVideoSceneMediaFinalizerService> _logger;
 
     public RVideoSceneMediaFinalizerService(
@@ -21,12 +24,16 @@ public sealed class RVideoSceneMediaFinalizerService : IRVideoSceneMediaFinalize
         ISceneMediaVersioningService versions,
         RVideoJobSettingsRepository settings,
         IRenderJobService jobs,
+        IWebHostEnvironment env,
+        IOptionsMonitor<VideoRenderOptions> options,
         ILogger<RVideoSceneMediaFinalizerService> logger)
     {
         _repo = repo;
         _versions = versions;
         _settings = settings;
         _jobs = jobs;
+        _env = env;
+        _options = options;
         _logger = logger;
     }
 
@@ -66,9 +73,7 @@ public sealed class RVideoSceneMediaFinalizerService : IRVideoSceneMediaFinalize
         }
 
         if (selectedVideo.VoiceAudioVersionId == selectedAudio.Id
-            && string.Equals(selectedVideo.Status, "completed", StringComparison.OrdinalIgnoreCase)
-            && !string.IsNullOrWhiteSpace(selectedVideo.PublicUrl)
-            && selectedVideo.PublicUrl.Contains("/audio/", StringComparison.OrdinalIgnoreCase) == false)
+            && FinalMuxMediaExists(selectedVideo))
         {
             return false;
         }
@@ -132,6 +137,44 @@ public sealed class RVideoSceneMediaFinalizerService : IRVideoSceneMediaFinalize
 
     public static string BuildLogicalRequestKey(long projectId, long sceneId)
         => $"rvideo-auto-mux:{projectId}:{sceneId}";
+
+    internal static bool ShouldSkipMux(SceneVideoVersionDto selectedVideo, SceneAudioVersionDto selectedAudio, string contentRootPath, string storageRoot)
+        => selectedVideo.VoiceAudioVersionId == selectedAudio.Id
+           && !string.IsNullOrWhiteSpace(selectedVideo.PublicUrl)
+           && !string.IsNullOrWhiteSpace(selectedVideo.SourceFilePath)
+           && File.Exists(ResolveLocalPath(selectedVideo.SourceFilePath, contentRootPath, storageRoot));
+
+    private bool FinalMuxMediaExists(SceneVideoVersionDto selectedVideo)
+        => !string.IsNullOrWhiteSpace(selectedVideo.PublicUrl)
+           && !string.IsNullOrWhiteSpace(selectedVideo.SourceFilePath)
+           && File.Exists(ResolveLocalPath(selectedVideo.SourceFilePath));
+
+    private string ResolveLocalPath(string objectKeyOrPath)
+    {
+        if (Path.IsPathRooted(objectKeyOrPath))
+        {
+            return objectKeyOrPath;
+        }
+
+        var storageRoot = _options.CurrentValue.StorageRoot;
+        var root = Path.IsPathRooted(storageRoot)
+            ? storageRoot
+            : Path.Combine(_env.ContentRootPath, storageRoot ?? string.Empty);
+        return Path.Combine(root, objectKeyOrPath.Replace('/', Path.DirectorySeparatorChar));
+    }
+
+    private static string ResolveLocalPath(string objectKeyOrPath, string contentRootPath, string storageRoot)
+    {
+        if (Path.IsPathRooted(objectKeyOrPath))
+        {
+            return objectKeyOrPath;
+        }
+
+        var root = Path.IsPathRooted(storageRoot)
+            ? storageRoot
+            : Path.Combine(contentRootPath, storageRoot ?? string.Empty);
+        return Path.Combine(root, objectKeyOrPath.Replace('/', Path.DirectorySeparatorChar));
+    }
 }
 
 public sealed class SceneAudioMuxWorkItemInput
@@ -146,4 +189,3 @@ public sealed class SceneAudioMuxWorkItemInput
     public Guid? CustomerId { get; set; }
     public string? TriggerSource { get; set; }
 }
-

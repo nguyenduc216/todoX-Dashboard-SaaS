@@ -81,6 +81,7 @@ public sealed record SceneVideoVersionCompleteRequest(
     string? PosterUrl,
     decimal? DurationSeconds,
     string? MimeType,
+    Guid? VoiceAudioVersionId = null,
     string? ProviderCode = null,
     string? ModelName = null,
     long? ProviderCapabilityId = null,
@@ -211,6 +212,7 @@ public sealed class SceneAudioVersionDto
     public string? VoiceInstructionSnapshot { get; set; }
     public decimal? TtsRate { get; set; }
     public decimal? DurationSeconds { get; set; }
+    public string? RenderConfigJson { get; set; }
     public string? ProviderCode { get; set; }
     public string? ModelName { get; set; }
     public long? ProviderCapabilityId { get; set; }
@@ -321,6 +323,7 @@ public interface ISceneMediaVersioningService
     Task CompleteSceneAudioVersionAsync(Guid versionId, SceneAudioVersionCompleteRequest request, CancellationToken ct = default);
     Task FailSceneAudioVersionAsync(Guid versionId, string? errorCode, string? errorMessage, CancellationToken ct = default);
     Task MarkSceneAudioVersionSubmittedAsync(Guid versionId, string? providerCode, string? modelName, long? providerCapabilityId, string providerTaskId, CancellationToken ct = default);
+    Task UpdateSceneAudioVersionRenderConfigAsync(Guid versionId, string renderConfigJson, CancellationToken ct = default);
     Task<string?> GetSceneAudioProviderTaskIdAsync(Guid versionId, CancellationToken ct = default);
     Task<SceneAudioVersionDto?> GetSceneAudioVersionByProviderTaskIdAsync(string providerTaskId, CancellationToken ct = default);
     Task MarkSceneAudioPendingReconciliationAsync(Guid versionId, string? errorCode, string? errorMessage, CancellationToken ct = default);
@@ -867,6 +870,7 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
             """
             UPDATE video_render.scene_video_versions
                SET status='completed',
+                   voice_audio_version_id=COALESCE(@voiceAudioVersionId, voice_audio_version_id),
                    provider_code=COALESCE(@providerCode, provider_code),
                    provider_capability_id=COALESCE(@providerCapabilityId, provider_capability_id),
                    requested_model=COALESCE(requested_model, @modelName),
@@ -1135,7 +1139,8 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
             NarrationTextSnapshot = request.NarrationTextSnapshot,
             VoiceInstructionSnapshot = request.VoiceInstructionSnapshot,
             TtsRate = request.TtsRate,
-            DurationSeconds = request.DurationSeconds
+            DurationSeconds = request.DurationSeconds,
+            RenderConfigJson = ToJson(request.RenderConfigSnapshot)
         };
     }
 
@@ -1240,6 +1245,20 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
              WHERE id=@versionId AND tenant_id=@tenant;
             """,
             new { versionId, tenant = _tenant.TenantId, providerCode, modelName, providerCapabilityId, providerTaskId });
+    }
+
+    public async Task UpdateSceneAudioVersionRenderConfigAsync(Guid versionId, string renderConfigJson, CancellationToken ct = default)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        await conn.ExecuteAsync(
+            """
+            UPDATE video_render.scene_audio_versions
+               SET render_config_json=CAST(@renderConfigJson AS jsonb),
+                   updated_at=now()
+             WHERE id=@versionId AND tenant_id=@tenant;
+            """,
+            new { versionId, tenant = _tenant.TenantId, renderConfigJson });
     }
 
     public async Task<string?> GetSceneAudioProviderTaskIdAsync(Guid versionId, CancellationToken ct = default)
@@ -2112,7 +2131,7 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
                is_selected AS IsSelected, storage_key AS StorageKey, public_url AS PublicUrl, source_file_path AS SourceFilePath,
                result_media_id AS ResultMediaId, voice_catalog_code AS VoiceCatalogCode, voice_snapshot_json::text AS VoiceSnapshotJson,
                narration_text_snapshot AS NarrationTextSnapshot, voice_instruction_snapshot AS VoiceInstructionSnapshot,
-               tts_rate AS TtsRate, duration_seconds AS DurationSeconds, provider_code AS ProviderCode,
+               tts_rate AS TtsRate, duration_seconds AS DurationSeconds, render_config_json::text AS RenderConfigJson, provider_code AS ProviderCode,
                actual_model AS ModelName, provider_capability_id AS ProviderCapabilityId,
                provider_task_id AS ProviderTaskId, billing_logical_request_id AS BillingLogicalRequestId,
                estimated_usd AS EstimatedUsd, actual_usd AS ActualUsd, charged_points AS ChargedPoints,

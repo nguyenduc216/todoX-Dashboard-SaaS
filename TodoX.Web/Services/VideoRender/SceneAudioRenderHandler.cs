@@ -155,6 +155,30 @@ public sealed class SceneAudioRenderHandler : IRenderJobHandler
         var audioUrl = ReadString(status, "audio_link", "audio_url", "audioUrl", "download_url", "downloadUrl", "url");
         var errorCode = ReadString(status, "error_code", "errorCode", "code");
         var errorMessage = ReadString(status, "error_message", "errorMessage", "message", "error");
+        var sampleRateRetryApplied = HasSampleRateRetryApplied(version.RenderConfigJson);
+
+        if (TryResolveSampleRateRetry(status, errorCode, errorMessage, sampleRate, sampleRateRetryApplied, out var retryRate))
+        {
+            var fallbackRate = retryRate;
+            var retryConfigJson = BuildSampleRateRetryConfigJson(version.RenderConfigJson, sampleRate, fallbackRate, requestId);
+            await _versions.UpdateSceneAudioVersionRenderConfigAsync(version.Id, retryConfigJson, ct);
+            await _repo.AddProjectEventAsync(project.Id, "SCENE_AUDIO_SAMPLE_RATE_RETRY", "warning",
+                $"Scene {scene.SceneIndex} external voice retry with fallback sample rate.",
+                BuildEventData(project.Id, scene.Id, scene.SceneIndex, input, version.Id, requestId, normalizedStatus ?? "SAMPLE_RATE_RETRY", sampleRate, audioUrl, errorCode, errorMessage, true, sampleRate, fallbackRate), ct);
+
+            var retryRequest = submitRequest with { SampleRate = fallbackRate };
+            var retrySubmitted = await _vbee.SubmitAsync(retryRequest, ct);
+            var retryRequestId = NormalizeRequestId(retrySubmitted.RequestId) ?? requestId;
+            if (IsDirectAudio(retrySubmitted.AudioUrl))
+            {
+                await CompleteFromAudioUrlAsync(project, scene, version, input, retryRequestId, retrySubmitted.AudioUrl!, retrySubmitted.Response, ct);
+                return;
+            }
+
+            await _versions.MarkSceneAudioVersionSubmittedAsync(version.Id, "vbee", voice?.ProviderCode ?? input.VoiceCode, null, retryRequestId, ct);
+            await _jobs.ScheduleRetryAsync(job.Id, _options.CurrentValue.PollInterval, "VBEE_SAMPLE_RATE_RETRY", "Waiting for the retried Vbee request.", ct);
+            throw new RenderJobDeferredException("Waiting for retried Vbee request.");
+        }
 
         if (string.Equals(normalizedStatus, "SUCCESS", StringComparison.OrdinalIgnoreCase) && IsDirectAudio(audioUrl))
         {
@@ -172,26 +196,6 @@ public sealed class SceneAudioRenderHandler : IRenderJobHandler
                 $"Scene {scene.SceneIndex} external voice failed.",
                 BuildEventData(project.Id, scene.Id, scene.SceneIndex, input, version.Id, requestId, normalizedStatus ?? "FAILED", sampleRate, audioUrl, errorCode, errorMessage), ct);
             throw new RenderJobTerminalFailureException(errorMessage ?? "Vbee submission failed.");
-        }
-
-        if (TryResolveSampleRateRetry(status, errorCode, errorMessage, sampleRate, out var retryRate))
-        {
-            await _repo.AddProjectEventAsync(project.Id, "SCENE_AUDIO_SAMPLE_RATE_RETRY", "warning",
-                $"Scene {scene.SceneIndex} external voice retry with fallback sample rate.",
-                BuildEventData(project.Id, scene.Id, scene.SceneIndex, input, version.Id, requestId, normalizedStatus ?? "SAMPLE_RATE_RETRY", sampleRate, audioUrl, errorCode, errorMessage), ct);
-
-            var retryRequest = submitRequest with { SampleRate = retryRate };
-            var retrySubmitted = await _vbee.SubmitAsync(retryRequest, ct);
-            var retryRequestId = NormalizeRequestId(retrySubmitted.RequestId) ?? requestId;
-            if (IsDirectAudio(retrySubmitted.AudioUrl))
-            {
-                await CompleteFromAudioUrlAsync(project, scene, version, input, retryRequestId, retrySubmitted.AudioUrl!, retrySubmitted.Response, ct);
-                return;
-            }
-
-            await _versions.MarkSceneAudioVersionSubmittedAsync(version.Id, "vbee", voice?.ProviderCode ?? input.VoiceCode, null, retryRequestId, ct);
-            await _jobs.ScheduleRetryAsync(job.Id, _options.CurrentValue.PollInterval, "VBEE_SAMPLE_RATE_RETRY", "Waiting for the retried Vbee request.", ct);
-            throw new RenderJobDeferredException("Waiting for retried Vbee request.");
         }
 
         await _versions.MarkSceneAudioVersionSubmittedAsync(version.Id, "vbee", voice?.ProviderCode ?? input.VoiceCode, null, requestId, ct);
@@ -267,10 +271,10 @@ public sealed class SceneAudioRenderHandler : IRenderJobHandler
         => status?.Trim().ToUpperInvariant() is "FAILED" or "FAILURE" or "ERROR" or "REJECTED" or "CANCELLED" or "CANCELED"
            || !string.IsNullOrWhiteSpace(errorCode);
 
-    private static bool TryResolveSampleRateRetry(JsonObject providerResponse, string? errorCode, string? errorMessage, int currentSampleRate, out int retryRate)
+    internal static bool TryResolveSampleRateRetry(JsonObject providerResponse, string? errorCode, string? errorMessage, int currentSampleRate, bool sampleRateRetryApplied, out int retryRate)
     {
         retryRate = 0;
-        if (currentSampleRate <= 0)
+        if (sampleRateRetryApplied || currentSampleRate <= 0)
         {
             return false;
         }
@@ -284,6 +288,48 @@ public sealed class SceneAudioRenderHandler : IRenderJobHandler
 
         retryRate = 0;
         return true;
+    }
+
+    internal static bool HasSampleRateRetryApplied(string? renderConfigJson)
+    {
+        if (string.IsNullOrWhiteSpace(renderConfigJson))
+        {
+            return false;
+        }
+
+        try
+        {
+            var root = JsonNode.Parse(renderConfigJson) as JsonObject;
+            return root?["vbee_retry"]?["sample_rate_retry_applied"]?.GetValue<bool>() == true;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    internal static string BuildSampleRateRetryConfigJson(string? renderConfigJson, int originalSampleRate, int fallbackSampleRate, string requestId)
+    {
+        JsonObject root;
+        try
+        {
+            root = JsonNode.Parse(string.IsNullOrWhiteSpace(renderConfigJson) ? "{}" : renderConfigJson) as JsonObject ?? new JsonObject();
+        }
+        catch (JsonException)
+        {
+            root = new JsonObject();
+        }
+
+        root["vbee_retry"] = new JsonObject
+        {
+            ["sample_rate_retry_applied"] = true,
+            ["original_sample_rate"] = originalSampleRate,
+            ["fallback_sample_rate"] = fallbackSampleRate,
+            ["request_id"] = requestId,
+            ["updated_at_utc"] = DateTimeOffset.UtcNow
+        };
+
+        return root.ToJsonString(JsonOptions);
     }
 
     private static string? NormalizeRequestId(string? requestId)
@@ -312,7 +358,10 @@ public sealed class SceneAudioRenderHandler : IRenderJobHandler
         int sampleRate,
         string? audioUrl = null,
         string? errorCode = null,
-        string? errorMessage = null)
+        string? errorMessage = null,
+        bool? sampleRateRetryApplied = null,
+        int? originalSampleRate = null,
+        int? fallbackSampleRate = null)
         => new
         {
             projectId,
@@ -329,7 +378,10 @@ public sealed class SceneAudioRenderHandler : IRenderJobHandler
             input.TtsRate,
             audioUrl,
             errorCode,
-            errorMessage
+            errorMessage,
+            sampleRateRetryApplied,
+            originalSampleRate,
+            fallbackSampleRate
         };
 
 }

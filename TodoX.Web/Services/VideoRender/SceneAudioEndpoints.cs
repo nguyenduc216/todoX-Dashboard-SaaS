@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Dapper;
+using Microsoft.Extensions.Options;
 using TodoX.Web.Data;
 using TodoX.Web.Models;
 using TodoX.Web.Services.Media;
@@ -14,17 +15,49 @@ public static class SceneAudioEndpoints
         app.MapPost("/api/providers/vbee/callback", HandleVbeeCallbackAsync).DisableAntiforgery();
     }
 
+    public static VbeeCallbackAuthorizationStatus GetCallbackAuthorizationStatus(HttpRequest request, string? configuredSecret)
+    {
+        if (string.IsNullOrWhiteSpace(configuredSecret))
+        {
+            return VbeeCallbackAuthorizationStatus.NotConfigured;
+        }
+
+        var provided = request.Headers["X-VBEE-CALLBACK-SECRET"].FirstOrDefault()
+                       ?? request.Query["secret"].FirstOrDefault()
+                       ?? request.Query["callback_secret"].FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(provided))
+        {
+            return VbeeCallbackAuthorizationStatus.MissingSecret;
+        }
+
+        return string.Equals(provided, configuredSecret, StringComparison.Ordinal)
+            ? VbeeCallbackAuthorizationStatus.Authorized
+            : VbeeCallbackAuthorizationStatus.InvalidSecret;
+    }
+
     private static async Task<IResult> HandleVbeeCallbackAsync(
         HttpRequest request,
         TenantContext tenant,
         TodoXConnectionFactory factory,
         IVbeeVoiceClient vbee,
+        IOptionsMonitor<VbeeOptions> options,
         ISceneMediaVersioningService versions,
         IMediaFileService media,
         IRVideoSceneMediaFinalizerService finalizer,
         CancellationToken ct)
     {
         await tenant.EnsureLoadedAsync(ct);
+        var authorization = GetCallbackAuthorizationStatus(request, options.CurrentValue.CallbackSecret);
+        if (authorization == VbeeCallbackAuthorizationStatus.NotConfigured)
+        {
+            return Results.Json(new { success = false, message = "Vbee callback secret is not configured." }, statusCode: StatusCodes.Status503ServiceUnavailable);
+        }
+
+        if (authorization is VbeeCallbackAuthorizationStatus.MissingSecret or VbeeCallbackAuthorizationStatus.InvalidSecret)
+        {
+            return Results.Json(new { success = false, message = "Invalid callback secret." }, statusCode: StatusCodes.Status401Unauthorized);
+        }
+
         var payload = await vbee.ParseCallbackAsync(request, ct);
         if (string.IsNullOrWhiteSpace(payload.RequestId))
         {
@@ -142,4 +175,12 @@ public static class SceneAudioEndpoints
 
         await finalizer.TryFinalizeSceneMediaAsync(version.ProjectId, version.SceneId, "VBEE_CALLBACK", ct);
     }
+}
+
+public enum VbeeCallbackAuthorizationStatus
+{
+    NotConfigured,
+    MissingSecret,
+    InvalidSecret,
+    Authorized
 }

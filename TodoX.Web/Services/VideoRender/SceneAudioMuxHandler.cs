@@ -134,24 +134,8 @@ public sealed class SceneAudioMuxHandler : IRenderJobHandler
 
         var relative = Path.GetRelativePath(root, finalPath).Replace(Path.DirectorySeparatorChar, '/');
         var url = $"{_options.CurrentValue.PublicBase.TrimEnd('/')}/{relative}";
-        await _versions.CompleteSceneVideoVersionAsync(sceneVideo.Id, new SceneVideoVersionCompleteRequest(
-            url,
-            sourceVideoPath,
-            PosterUrl: sceneVideo.PosterUrl,
-            DurationSeconds: sceneVideo.DurationSeconds ?? scene.DurationSeconds,
-            MimeType: "video/mp4",
-            ProviderCode: sceneVideo.ProviderCode,
-            ModelName: sceneVideo.ModelName,
-            ProviderCapabilityId: sceneVideo.ProviderCapabilityId,
-            ProviderTaskId: sceneVideo.ProviderTaskId,
-            BillingLogicalRequestId: sceneVideo.BillingLogicalRequestId,
-            EstimatedUsd: sceneVideo.EstimatedUsd,
-            ActualUsd: sceneVideo.ActualUsd,
-            ChargedPoints: sceneVideo.ChargedPoints,
-            RefundedPoints: sceneVideo.RefundedPoints,
-            CostSource: sceneVideo.CostSource,
-            AspectRatio: sceneVideo.AspectRatio,
-            ResultMediaId: sceneVideo.ResultMediaId), ct);
+        var completion = BuildCompletionRequest(sceneVideo, input.AudioVersionId, url, finalPath, scene.DurationSeconds);
+        await _versions.CompleteSceneVideoVersionAsync(sceneVideo.Id, completion, ct);
 
         await _repo.AddProjectEventAsync(project.Id, "SCENE_AUDIO_MUX_READY", "info",
             $"Scene {scene.SceneIndex} external voice mux completed.",
@@ -163,6 +147,7 @@ public sealed class SceneAudioMuxHandler : IRenderJobHandler
                 input.SceneVideoVersionId,
                 input.AudioVersionId,
                 input.LogicalRequestId,
+                sourceVideoPath,
                 finalPath,
                 url
             }, ct);
@@ -177,6 +162,7 @@ public sealed class SceneAudioMuxHandler : IRenderJobHandler
                 input.SceneVideoVersionId,
                 input.AudioVersionId,
                 input.LogicalRequestId,
+                sourceVideoPath,
                 finalPath,
                 url
             }, ct);
@@ -200,4 +186,30 @@ public sealed class SceneAudioMuxHandler : IRenderJobHandler
 
     private string ResolveRoot(string? path)
         => Path.IsPathRooted(path) ? path! : Path.Combine(_env.ContentRootPath, path ?? string.Empty);
+
+    internal static SceneVideoVersionCompleteRequest BuildCompletionRequest(
+        SceneVideoVersionDto sceneVideo,
+        Guid voiceAudioVersionId,
+        string finalUrl,
+        string finalPath,
+        int sceneDurationSeconds)
+        => new(
+            finalUrl,
+            finalPath,
+            PosterUrl: sceneVideo.PosterUrl,
+            DurationSeconds: sceneVideo.DurationSeconds ?? sceneDurationSeconds,
+            MimeType: "video/mp4",
+            VoiceAudioVersionId: voiceAudioVersionId,
+            ProviderCode: sceneVideo.ProviderCode,
+            ModelName: sceneVideo.ModelName,
+            ProviderCapabilityId: sceneVideo.ProviderCapabilityId,
+            ProviderTaskId: sceneVideo.ProviderTaskId,
+            BillingLogicalRequestId: sceneVideo.BillingLogicalRequestId,
+            EstimatedUsd: sceneVideo.EstimatedUsd,
+            ActualUsd: sceneVideo.ActualUsd,
+            ChargedPoints: sceneVideo.ChargedPoints,
+            RefundedPoints: sceneVideo.RefundedPoints,
+            CostSource: sceneVideo.CostSource,
+            AspectRatio: sceneVideo.AspectRatio,
+            ResultMediaId: sceneVideo.ResultMediaId);
 }
