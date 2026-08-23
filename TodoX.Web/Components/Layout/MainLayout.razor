@@ -129,9 +129,9 @@
     <MudMainContent Class="todox-content">
         <div class="todox-breadcrumb">
             <MudIcon Icon="@Icons.Material.Filled.Home" Size="Size.Small" />
-            <span>Dashboard</span>
+            <span>@BreadcrumbRootLabel</span>
             <span class="todox-breadcrumb-separator">›</span>
-            <span class="todox-breadcrumb-muted">Overview</span>
+            <span class="todox-breadcrumb-muted">@BreadcrumbLeafLabel</span>
         </div>
 
         @Body
@@ -165,6 +165,8 @@
     private string UserEmail => AuthState.CurrentUser?.Email ?? "";
     private string? UserAvatarUrl => AuthState.CurrentUser?.AvatarUrl;
     private int NotificationCount => 3;
+    private string BreadcrumbRootLabel => AuthState.CurrentUser?.IsCustomer == true ? "Trang chủ" : "Dashboard";
+    private string BreadcrumbLeafLabel => AuthState.CurrentUser?.IsCustomer == true ? "Tổng quan" : "Overview";
 
     private bool Can(string permission) => AuthState.CurrentUser?.Can(permission) == true;
     private bool CanModule(string module) => AuthState.CurrentUser?.CanViewModule(module) == true;
@@ -241,6 +243,13 @@
 
     private async Task LoadNavigationMenuAsync()
     {
+        if (AuthState.CurrentUser is null)
+        {
+            _menuGroups = Array.Empty<NavigationMenuGroupDto>();
+            _menuLoaded = true;
+            return;
+        }
+
         if (!AuthState.IsAuthenticated && !IsPublicRoute())
         {
             _menuGroups = Array.Empty<NavigationMenuGroupDto>();
@@ -251,15 +260,24 @@
         try
         {
             var groups = await NavigationMenus.GetActiveMenuAsync();
-            _menuGroups = ApplyMenuVisibility(MergeSupplementalMenu(groups)).ToList();
+            _menuGroups = AuthState.CurrentUser?.IsCustomer == true
+                ? BuildCustomerMenu(groups)
+                : ApplyMenuVisibility(MergeSupplementalMenu(groups)).ToList();
+
             if (_menuGroups.Count == 0)
             {
-                _menuGroups = ApplyMenuVisibility(MergeSupplementalMenu(BuildFallbackMenu())).ToList();
+                var fallback = BuildFallbackMenu();
+                _menuGroups = AuthState.CurrentUser?.IsCustomer == true
+                    ? BuildCustomerMenu(fallback)
+                    : ApplyMenuVisibility(MergeSupplementalMenu(fallback)).ToList();
             }
         }
         catch
         {
-            _menuGroups = ApplyMenuVisibility(MergeSupplementalMenu(BuildFallbackMenu())).ToList();
+            var fallback = BuildFallbackMenu();
+            _menuGroups = AuthState.CurrentUser?.IsCustomer == true
+                ? BuildCustomerMenu(fallback)
+                : ApplyMenuVisibility(MergeSupplementalMenu(fallback)).ToList();
         }
 
         _menuLoaded = true;
@@ -290,6 +308,137 @@
                 Items = visibleItems
             };
         }
+    }
+
+    private IReadOnlyList<NavigationMenuGroupDto> BuildCustomerMenu(IEnumerable<NavigationMenuGroupDto> groups)
+    {
+        var fallback = BuildFallbackMenu();
+        var sourceItems = groups.SelectMany(x => x.Items)
+            .Concat(fallback.SelectMany(x => x.Items))
+            .GroupBy(x => x.Code, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(x => x.Key, x => x.First(), StringComparer.OrdinalIgnoreCase);
+
+        NavigationMenuItemDto Item(string code, Func<NavigationMenuItemDto> factory)
+        {
+            if (sourceItems.TryGetValue(code, out var existing))
+            {
+                return CloneItem(existing);
+            }
+
+            return factory();
+        }
+
+        NavigationMenuGroupDto Group(string code, string title, string iconKey, int sortOrder, bool expanded, params NavigationMenuItemDto[] items)
+        {
+            var groupId = Guid.NewGuid();
+            foreach (var item in items)
+            {
+                item.GroupId = groupId;
+            }
+
+            return new NavigationMenuGroupDto
+            {
+                Id = groupId,
+                Code = code,
+                Title = title,
+                IconKey = iconKey,
+                SortOrder = sortOrder,
+                DefaultExpanded = expanded,
+                Items = items.ToList()
+            };
+        }
+
+        return new[]
+        {
+            Group("overview", "Trang chủ", "Dashboard", 10, true,
+                Item("dashboard", () => new NavigationMenuItemDto
+                {
+                    Id = Guid.NewGuid(),
+                    Code = "dashboard",
+                    Title = "Trang chủ",
+                    Href = "/",
+                    IconKey = "Dashboard",
+                    ModuleKeys = Array.Empty<string>(),
+                    VisibilityPolicy = "always",
+                    MatchAll = true,
+                    SortOrder = 10
+                })),
+            Group("customer_workspace", "Video của tôi", "Movie", 20, true,
+                Item("customer_create_video", () => new NavigationMenuItemDto
+                {
+                    Id = Guid.NewGuid(),
+                    Code = "customer_create_video",
+                    Title = "Tạo video",
+                    Href = "/create",
+                    IconKey = "Movie",
+                    ModuleKeys = Array.Empty<string>(),
+                    VisibilityPolicy = "customer_only",
+                    MatchAll = true,
+                    SortOrder = 10
+                }),
+                Item("customer_jobs", () => new NavigationMenuItemDto
+                {
+                    Id = Guid.NewGuid(),
+                    Code = "customer_jobs",
+                    Title = "Jobs của tôi",
+                    Href = "/jobs",
+                    IconKey = "VideoLibrary",
+                    ModuleKeys = Array.Empty<string>(),
+                    VisibilityPolicy = "customer_only",
+                    MatchAll = false,
+                    SortOrder = 20
+                })),
+            Group("ai_studio", "AI Studio", "AutoFixHigh", 30, true,
+                Item("ai_characters", () => new NavigationMenuItemDto
+                {
+                    Id = Guid.NewGuid(),
+                    Code = "ai_characters",
+                    Title = "Characters",
+                    Href = "/ai-assets/characters",
+                    IconKey = "FaceRetouchingNatural",
+                    ModuleKeys = Array.Empty<string>(),
+                    VisibilityPolicy = "customer_only",
+                    MatchAll = false,
+                    SortOrder = 10
+                })),
+            Group("social_marketing", "Kênh mạng xã hội", "Public", 40, true,
+                Item("customer_pages", () => new NavigationMenuItemDto
+                {
+                    Id = Guid.NewGuid(),
+                    Code = "customer_pages",
+                    Title = "Trang mạng xã hội",
+                    Href = "/my-pages",
+                    IconKey = "Public",
+                    ModuleKeys = Array.Empty<string>(),
+                    VisibilityPolicy = "customer_only",
+                    MatchAll = false,
+                    SortOrder = 10
+                }),
+                Item("reference_videos", () => new NavigationMenuItemDto
+                {
+                    Id = Guid.NewGuid(),
+                    Code = "reference_videos",
+                    Title = "Link video tham chiếu",
+                    Href = "/reference-videos",
+                    IconKey = "VideoLibrary",
+                    ModuleKeys = Array.Empty<string>(),
+                    VisibilityPolicy = "customer_only",
+                    MatchAll = false,
+                    SortOrder = 20
+                }),
+                Item("reup_campaigns", () => new NavigationMenuItemDto
+                {
+                    Id = Guid.NewGuid(),
+                    Code = "reup_campaigns",
+                    Title = "Chiến dịch Reup",
+                    Href = "/reup-campaigns",
+                    IconKey = "Campaign",
+                    ModuleKeys = Array.Empty<string>(),
+                    VisibilityPolicy = "customer_only",
+                    MatchAll = false,
+                    SortOrder = 30
+                }))
+        };
     }
 
     private static IReadOnlyList<NavigationMenuGroupDto> MergeSupplementalMenu(IEnumerable<NavigationMenuGroupDto> groups)
@@ -452,8 +601,28 @@
             Items = group.Items.ToList()
         };
 
+    private static NavigationMenuItemDto CloneItem(NavigationMenuItemDto item)
+        => new()
+        {
+            Id = item.Id,
+            GroupId = item.GroupId,
+            Code = item.Code,
+            Title = item.Title,
+            Href = item.Href,
+            IconKey = item.IconKey,
+            ModuleKeys = item.ModuleKeys.ToArray(),
+            VisibilityPolicy = item.VisibilityPolicy,
+            MatchAll = item.MatchAll,
+            SortOrder = item.SortOrder
+        };
+
     private bool IsMenuItemVisible(NavigationMenuItemDto item)
     {
+        if (AuthState.CurrentUser?.IsCustomer == true && NavigationAccessRules.IsAdminOnlyPath(item.Href))
+        {
+            return false;
+        }
+
         if (item.VisibilityPolicy.Equals("always", StringComparison.OrdinalIgnoreCase))
         {
             return true;

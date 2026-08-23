@@ -1,0 +1,253 @@
+@using TodoX.Web.Models.Catalog
+@using TodoX.Web.Models.Timelapse
+@inject AuthStateService AuthState
+@inject CatalogRepository Catalog
+@inject VideoRenderRepository VideoRepo
+@inject IAiCharacterService Characters
+@inject NavigationManager Navigation
+
+<MudStack Spacing="4">
+    <div>
+        <MudText Typo="Typo.h4" Class="todox-page-title">Xin chào, @CustomerName 👋</MudText>
+        <MudText Typo="Typo.body1" Class="todox-page-subtitle">Hôm nay bạn muốn tạo nội dung gì?</MudText>
+    </div>
+
+    @if (_loading)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+    }
+    else if (!string.IsNullOrWhiteSpace(_error))
+    {
+        <MudAlert Severity="Severity.Error">@_error</MudAlert>
+    }
+    else
+    {
+        <MudGrid>
+            @foreach (var service in _services)
+            {
+                <MudItem xs="12" sm="6" lg="4">
+                    <MudPaper Class="todox-card pa-4 h-100" rounded="true">
+                        <MudStack Spacing="2" Class="h-100">
+                            <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="gap-3">
+                                <MudIcon Icon="@ResolveIcon(service.ServiceType)" Color="Color.Warning" Size="Size.Large" />
+                                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Default">@service.ServiceType</MudChip>
+                            </MudStack>
+                            <div>
+                                <MudText Typo="Typo.h6">@service.DisplayName</MudText>
+                                <MudText Typo="Typo.body2" Color="Color.Secondary">@service.Description</MudText>
+                            </div>
+                            <MudSpacer />
+                            <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="gap-3 flex-wrap">
+                                <MudText Typo="Typo.caption" Class="todox-page-subtitle">@service.StartingPriceSummary</MudText>
+                                <MudButton Variant="Variant.Filled"
+                                           Color="Color.Warning"
+                                           StartIcon="@Icons.Material.Filled.ArrowForward"
+                                           OnClick="@(() => OpenService(service))">
+                                    Tạo ngay
+                                </MudButton>
+                            </MudStack>
+                        </MudStack>
+                    </MudPaper>
+                </MudItem>
+            }
+        </MudGrid>
+
+        <MudGrid>
+            <MudItem xs="12" sm="6" lg="4">
+                <MudPaper Class="todox-card pa-4" rounded="true">
+                    <MudText Typo="Typo.subtitle2">Video đang xử lý</MudText>
+                    <div class="todox-stat-value">@_processingCount</div>
+                </MudPaper>
+            </MudItem>
+            <MudItem xs="12" sm="6" lg="4">
+                <MudPaper Class="todox-card pa-4" rounded="true">
+                    <MudText Typo="Typo.subtitle2">Hoàn thành</MudText>
+                    <div class="todox-stat-value">@_completedCount</div>
+                </MudPaper>
+            </MudItem>
+            <MudItem xs="12" sm="6" lg="4">
+                <MudPaper Class="todox-card pa-4" rounded="true">
+                    <MudText Typo="Typo.subtitle2">Characters</MudText>
+                    <div class="todox-stat-value">@_characterCount</div>
+                </MudPaper>
+            </MudItem>
+        </MudGrid>
+
+        <MudPaper Class="todox-card pa-4" rounded="true">
+            <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="mb-3">
+                <MudText Typo="Typo.h6">Video gần đây</MudText>
+                <MudButton Variant="Variant.Text" Color="Color.Warning" Href="/jobs" EndIcon="@Icons.Material.Filled.ArrowForward">
+                    Xem tất cả
+                </MudButton>
+            </MudStack>
+
+            @if (_recentVideos.Count == 0)
+            {
+                <MudAlert Severity="Severity.Info">Chưa có video nào.</MudAlert>
+            }
+            else
+            {
+                <MudList T="string" Dense="true">
+                    @foreach (var video in _recentVideos)
+                    {
+                        <MudListItem T="string">
+                            <MudStack Spacing="1" Class="w-100">
+                                <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="gap-3 flex-wrap">
+                                    <MudText Typo="Typo.subtitle2">@GetVideoTitle(video)</MudText>
+                                    <MudChip T="string" Size="Size.Small" Color="@GetStatusColor(video.Status)" Variant="Variant.Filled">
+                                        @GetStatusLabel(video.Status)
+                                    </MudChip>
+                                </MudStack>
+                                <MudText Typo="Typo.body2" Color="Color.Secondary">
+                                    @GetVideoSummary(video)
+                                </MudText>
+                                <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+                                    <MudText Typo="Typo.caption" Class="todox-page-subtitle">
+                                        @video.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")
+                                    </MudText>
+                                    <MudButton Variant="Variant.Text"
+                                               Color="Color.Warning"
+                                               Href="@($"/jobs/rvideo/{video.Id}")">
+                                        Xem chi tiết
+                                    </MudButton>
+                                </MudStack>
+                            </MudStack>
+                        </MudListItem>
+                        <MudDivider />
+                    }
+                </MudList>
+            }
+        </MudPaper>
+    }
+</MudStack>
+
+@code {
+    private IReadOnlyList<CatalogServiceView> _services = Array.Empty<CatalogServiceView>();
+    private IReadOnlyList<VideoProjectListItemDto> _recentVideos = Array.Empty<VideoProjectListItemDto>();
+    private bool _loading = true;
+    private string? _error;
+    private int _processingCount;
+    private int _completedCount;
+    private int _characterCount;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+    }
+
+    private string CustomerName => AuthState.CurrentUser?.DisplayName ?? "bạn";
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _error = null;
+
+        try
+        {
+            var user = AuthState.CurrentUser;
+            if (user is not { IsCustomer: true })
+            {
+                _services = Array.Empty<CatalogServiceView>();
+                _recentVideos = Array.Empty<VideoProjectListItemDto>();
+                _processingCount = 0;
+                _completedCount = 0;
+                _characterCount = 0;
+                return;
+            }
+
+            var servicesTask = Catalog.GetActiveCatalogServicesAsync();
+            var videosTask = VideoRepo.ListProjectsAsync(user, 0, 100);
+            var charactersTask = Characters.GetActiveCharactersAsync(user);
+            await Task.WhenAll(servicesTask, videosTask, charactersTask);
+
+            _services = servicesTask.Result
+                .Where(x => CustomerServiceRouting.Resolve(x.ServiceType, x.Id, x.ServiceCode).Destination != CustomerServiceDestination.Unavailable)
+                .OrderBy(x => x.SortOrder)
+                .ThenBy(x => x.DisplayName, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            var allProjects = videosTask.Result.OrderByDescending(x => x.UpdatedAt).ThenByDescending(x => x.CreatedAt).ToList();
+            _recentVideos = allProjects.Take(5).ToList();
+            _processingCount = allProjects.Count(x => IsProcessing(x.Status));
+            _completedCount = allProjects.Count(x => IsCompleted(x.Status));
+            _characterCount = charactersTask.Result.Count;
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void OpenService(CatalogServiceView service)
+    {
+        var route = CustomerServiceRouting.Resolve(service.ServiceType, service.Id, service.ServiceCode);
+        if (!string.IsNullOrWhiteSpace(route.Route))
+        {
+            Navigation.NavigateTo(route.Route);
+        }
+    }
+
+    private static bool IsProcessing(string status)
+        => status is VideoProjectStatuses.Rendering or VideoProjectStatuses.Merging or VideoProjectStatuses.ReadyToMerge;
+
+    private static bool IsCompleted(string status)
+        => string.Equals(status, VideoProjectStatuses.Completed, StringComparison.OrdinalIgnoreCase);
+
+    private static string GetVideoTitle(VideoProjectListItemDto video)
+        => string.IsNullOrWhiteSpace(video.Title) ? "Video mới" : video.Title;
+
+    private static string GetVideoSummary(VideoProjectListItemDto video)
+    {
+        var parts = new List<string>();
+        if (!string.IsNullOrWhiteSpace(video.CharacterName))
+        {
+            parts.Add(video.CharacterName);
+        }
+
+        if (video.SceneCount > 0)
+        {
+            parts.Add($"{video.SceneCount} scene");
+        }
+
+        if (video.VideoReadyCount > 0)
+        {
+            parts.Add($"{video.VideoReadyCount}/{video.SceneCount} đã render");
+        }
+
+        return parts.Count == 0 ? video.OriginalPrompt : string.Join(" · ", parts);
+    }
+
+    private static string GetStatusLabel(string status)
+        => status switch
+        {
+            var value when string.Equals(value, VideoProjectStatuses.Completed, StringComparison.OrdinalIgnoreCase) => "Hoàn thành",
+            var value when string.Equals(value, VideoProjectStatuses.Rendering, StringComparison.OrdinalIgnoreCase) => "Đang xử lý",
+            var value when string.Equals(value, VideoProjectStatuses.Merging, StringComparison.OrdinalIgnoreCase) => "Đang ghép",
+            var value when string.Equals(value, VideoProjectStatuses.ReadyToMerge, StringComparison.OrdinalIgnoreCase) => "Chờ ghép",
+            var value when string.Equals(value, VideoProjectStatuses.Failed, StringComparison.OrdinalIgnoreCase) => "Lỗi",
+            _ => status
+        };
+
+    private static Color GetStatusColor(string status)
+        => status switch
+        {
+            var value when string.Equals(value, VideoProjectStatuses.Completed, StringComparison.OrdinalIgnoreCase) => Color.Success,
+            var value when string.Equals(value, VideoProjectStatuses.Failed, StringComparison.OrdinalIgnoreCase) => Color.Error,
+            var value when string.Equals(value, VideoProjectStatuses.Rendering, StringComparison.OrdinalIgnoreCase) => Color.Warning,
+            var value when string.Equals(value, VideoProjectStatuses.Merging, StringComparison.OrdinalIgnoreCase) => Color.Info,
+            _ => Color.Default
+        };
+
+    private static string ResolveIcon(string? serviceType)
+        => serviceType switch
+        {
+            TodoX.Web.Models.Catalog.TodoXServiceEngineTypes.Timelapse => Icons.Material.Filled.Construction,
+            TodoX.Web.Models.Catalog.TodoXServiceEngineTypes.RVideo => Icons.Material.Filled.Movie,
+            TodoX.Web.Models.Catalog.TodoXServiceEngineTypes.RDance => Icons.Material.Filled.DirectionsRun,
+            _ => Icons.Material.Filled.AutoFixHigh
+        };
+}

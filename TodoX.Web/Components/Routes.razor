@@ -1,6 +1,30 @@
+@using TodoX.Web.Components.Pages
+@inject AuthStateService AuthState
+@inject NavigationManager Navigation
+
 <Router AppAssembly="typeof(Program).Assembly" NotFoundPage="typeof(Pages.NotFound)">
     <Found Context="routeData">
-        <RouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)" />
+        @if (ShouldHoldForAuth)
+        {
+            <div class="p-4">
+                <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+            </div>
+        }
+        else if (!NavigationAccessRules.CanAccessPath(AuthState.CurrentUser, CurrentPath))
+        {
+            <AccessDenied />
+        }
+        else
+        {
+            <RouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)" />
+        }
         <FocusOnNavigate RouteData="routeData" Selector="h1" />
     </Found>
 </Router>
+
+@code {
+    private string CurrentPath => NavigationAccessRules.NormalizePath(new Uri(Navigation.Uri).AbsolutePath);
+
+    private bool ShouldHoldForAuth
+        => !AuthState.IsInitialized && !NavigationAccessRules.IsPublicPath(CurrentPath);
+}

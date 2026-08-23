@@ -1,0 +1,13 @@
+@page "/access-denied"
+
+<PageTitle>403 Forbidden</PageTitle>
+
+<MudStack Class="pa-6" Spacing="3" AlignItems="AlignItems.Start">
+    <MudText Typo="Typo.h4" Class="todox-page-title">Bạn không có quyền truy cập</MudText>
+    <MudText Typo="Typo.body1" Class="todox-page-subtitle">
+        Trang này chỉ dành cho tài khoản quản trị hoặc không thuộc phạm vi hiện tại của bạn.
+    </MudText>
+    <MudButton Variant="Variant.Filled" Color="Color.Warning" Href="/" StartIcon="@Icons.Material.Filled.ArrowBack">
+        Về trang chủ
+    </MudButton>
+</MudStack>
