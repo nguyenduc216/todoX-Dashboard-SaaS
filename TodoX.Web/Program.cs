@@ -50,6 +50,7 @@ builder.Services.Configure<SharedMediaOptions>(builder.Configuration.GetSection(
 builder.Services.AddScoped<AuditRepository>();
 builder.Services.AddScoped<BillingRepository>();
 builder.Services.AddScoped<CatalogRepository>();
+builder.Services.AddScoped<ICustomerDashboardService, CustomerDashboardService>();
 builder.Services.AddScoped<CatalogAdminRepository>();
 builder.Services.AddScoped<IAiStudioCatalogService, AiStudioCatalogService>();
 builder.Services.AddScoped<IServiceSellPriceResolver, ServiceSellPriceResolver>();

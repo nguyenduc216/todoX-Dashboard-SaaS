@@ -6,7 +6,7 @@ public static class AiStudioCatalogEndpoints
 {
     public static void MapAiStudioCatalogEndpoints(this WebApplication app)
     {
-        var admin = app.MapGroup("/api/admin/ai-studio");
+        var admin = app.MapGroup("/api/admin/ai-studio").RequireTodoXAdmin();
         admin.MapGet("/voices", ListAdminVoicesAsync);
         admin.MapGet("/voices/{id:guid}", GetAdminVoiceAsync);
         admin.MapPost("/voices", SaveVoiceAsync).DisableAntiforgery();

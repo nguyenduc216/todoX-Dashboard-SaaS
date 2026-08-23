@@ -130,8 +130,11 @@
         <div class="todox-breadcrumb">
             <MudIcon Icon="@Icons.Material.Filled.Home" Size="Size.Small" />
             <span>@BreadcrumbRootLabel</span>
-            <span class="todox-breadcrumb-separator">›</span>
-            <span class="todox-breadcrumb-muted">@BreadcrumbLeafLabel</span>
+            @if (!string.IsNullOrWhiteSpace(BreadcrumbLeafLabel))
+            {
+                <span class="todox-breadcrumb-separator">›</span>
+                <span class="todox-breadcrumb-muted">@BreadcrumbLeafLabel</span>
+            }
         </div>
 
         @Body
@@ -165,8 +168,9 @@
     private string UserEmail => AuthState.CurrentUser?.Email ?? "";
     private string? UserAvatarUrl => AuthState.CurrentUser?.AvatarUrl;
     private int NotificationCount => 3;
-    private string BreadcrumbRootLabel => AuthState.CurrentUser?.IsCustomer == true ? "Trang chủ" : "Dashboard";
-    private string BreadcrumbLeafLabel => AuthState.CurrentUser?.IsCustomer == true ? "Tổng quan" : "Overview";
+    private string CurrentPath => NavigationAccessRules.NormalizePath(new Uri(Navigation.Uri).AbsolutePath);
+    private string BreadcrumbRootLabel => AuthState.CurrentUser?.IsCustomer == true ? GetCustomerBreadcrumb().Root : "Dashboard";
+    private string BreadcrumbLeafLabel => AuthState.CurrentUser?.IsCustomer == true ? GetCustomerBreadcrumb().Leaf : "Overview";
 
     private bool Can(string permission) => AuthState.CurrentUser?.Can(permission) == true;
     private bool CanModule(string module) => AuthState.CurrentUser?.CanViewModule(module) == true;
@@ -240,6 +244,20 @@
            || AuthState.CurrentUser?.Role is TodoXUserRole.Admin or TodoXUserRole.SystemOperator
            || CanModule("settings")
            || CanModule("services");
+
+    private (string Root, string Leaf) GetCustomerBreadcrumb()
+        => CurrentPath switch
+        {
+            "/" => ("Trang chủ", string.Empty),
+            "/create" => ("Video của tôi", "Tạo video"),
+            "/jobs" => ("Video của tôi", "Jobs của tôi"),
+            var path when path.StartsWith("/jobs/", StringComparison.OrdinalIgnoreCase) => ("Video của tôi", "Chi tiết job"),
+            "/ai-assets/characters" => ("AI Studio", "Characters"),
+            "/my-pages" => ("Kênh mạng xã hội", "Trang mạng xã hội"),
+            "/reference-videos" => ("Kênh mạng xã hội", "Link video tham chiếu"),
+            "/reup-campaigns" => ("Kênh mạng xã hội", "Chiến dịch Reup"),
+            _ => ("Trang chủ", "Tổng quan")
+        };
 
     private async Task LoadNavigationMenuAsync()
     {

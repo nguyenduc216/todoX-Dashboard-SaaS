@@ -35,7 +35,7 @@ public static class DanceSellPhase2Endpoints
         group.MapPost("/jobs/{id:guid}/retry-reference", GenerateReferenceAsync).DisableAntiforgery();
         group.MapPost("/jobs/{id:guid}/retry-motion", RetryAsync).DisableAntiforgery();
 
-        var admin = app.MapGroup("/api/admin");
+        var admin = app.MapGroup("/api/admin").RequireTodoXAdmin();
         admin.MapGet("/ai-operation-logs", SearchOperationLogsAsync);
         admin.MapGet("/ai-operation-logs/{id:guid}", GetOperationLogAsync);
         admin.MapPost("/ai-operation-logs/{id:guid}/refund", RefundOperationAsync).DisableAntiforgery();
