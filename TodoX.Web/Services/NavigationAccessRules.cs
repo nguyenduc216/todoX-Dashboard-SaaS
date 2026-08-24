@@ -23,8 +23,7 @@ public static class NavigationAccessRules
     public static bool IsPublicPath(string? path)
     {
         path = NormalizePath(path);
-        return path is "/"
-            or "/access-denied"
+        return path is "/access-denied"
             or "/privacy"
             or "/terms"
             or "/data-deletion"

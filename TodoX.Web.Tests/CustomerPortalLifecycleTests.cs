@@ -10,11 +10,15 @@ public sealed class CustomerPortalLifecycleTests
     {
         var routes = ReadSource("TodoX.Web", "Components", "Routes.razor");
         var layout = ReadSource("TodoX.Web", "Components", "Layout", "MainLayout.razor");
+        var home = ReadSource("TodoX.Web", "Components", "Pages", "Home.razor");
 
         Assert.Contains("@inject AccountService Accounts", routes, StringComparison.Ordinal);
         Assert.Contains("AuthState.InitializeAsync(id => Accounts.RehydrateSessionAsync(id))", routes, StringComparison.Ordinal);
         Assert.Contains("Navigation.NavigateTo(\"/login\", replace: true)", routes, StringComparison.Ordinal);
         Assert.DoesNotContain("AuthState.InitializeAsync(id => Accounts.RehydrateSessionAsync(id))", layout, StringComparison.Ordinal);
+        Assert.DoesNotContain("GetCustomersAsync()", home, StringComparison.Ordinal);
+        Assert.DoesNotContain("GetSystemUsersAsync()", home, StringComparison.Ordinal);
+        Assert.DoesNotContain("GetCustomerAccountsAsync()", home, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -27,7 +31,8 @@ public sealed class CustomerPortalLifecycleTests
     {
         var routes = ReadSource("TodoX.Web", "Components", "Routes.razor");
 
-        Assert.Contains("!AuthState.IsInitialized && !NavigationAccessRules.IsPublicPath(CurrentPath)", routes, StringComparison.Ordinal);
+        Assert.Contains("else if (_initializing || !AuthState.IsInitialized)", routes, StringComparison.Ordinal);
+        Assert.Contains("await BootstrapAuthAsync();", routes, StringComparison.Ordinal);
         Assert.Contains("Đang tải phiên đăng nhập", routes, StringComparison.Ordinal);
         Assert.NotEqual("/", path);
     }

@@ -5,7 +5,18 @@
 
 <Router AppAssembly="typeof(Program).Assembly" NotFoundPage="typeof(Pages.NotFound)">
     <Found Context="routeData">
-        @if (!AuthState.IsInitialized && !NavigationAccessRules.IsPublicPath(CurrentPath))
+        @if (_authBootstrapError is not null)
+        {
+            <div class="d-flex justify-content-center align-items-center min-vh-100">
+                <MudPaper Class="pa-6 text-center" Elevation="2">
+                    <MudAlert Severity="Severity.Error">@_authBootstrapError</MudAlert>
+                    <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Refresh" OnClick="RetryBootstrapAsync">
+                        Thử lại
+                    </MudButton>
+                </MudPaper>
+            </div>
+        }
+        else if (_initializing || !AuthState.IsInitialized)
         {
             <div class="d-flex justify-content-center align-items-center min-vh-100">
                 <MudPaper Class="pa-6 text-center" Elevation="2">
@@ -30,6 +41,8 @@
     private string CurrentPath => NavigationAccessRules.NormalizePath(new Uri(Navigation.Uri).AbsolutePath);
 
     private bool _initializing;
+    private string? _authBootstrapError;
+    private static readonly TimeSpan AuthBootstrapTimeout = TimeSpan.FromSeconds(12);
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -38,20 +51,52 @@
             return;
         }
 
+        await BootstrapAuthAsync();
+    }
+
+    private async Task RetryBootstrapAsync()
+    {
+        AuthState.ResetInitializationForRetry();
+        await BootstrapAuthAsync();
+    }
+
+    private async Task BootstrapAuthAsync()
+    {
+        _authBootstrapError = null;
         _initializing = true;
+        await InvokeAsync(StateHasChanged);
+
         try
         {
-            await AuthState.InitializeAsync(id => Accounts.RehydrateSessionAsync(id));
-            if (AuthState.IsInitialized
-                && !AuthState.IsAuthenticated
-                && !NavigationAccessRules.IsPublicPath(CurrentPath))
+            var bootstrap = AuthState.InitializeAsync(id => Accounts.RehydrateSessionAsync(id));
+            var completed = await Task.WhenAny(bootstrap, Task.Delay(AuthBootstrapTimeout));
+            if (completed != bootstrap)
             {
-                Navigation.NavigateTo("/login", replace: true);
+                _authBootstrapError = "Không thể tải phiên đăng nhập.";
+                AuthState.ResetInitializationForRetry();
             }
+            else
+            {
+                await bootstrap;
+                if (AuthState.IsInitialized
+                    && !AuthState.IsAuthenticated
+                    && !NavigationAccessRules.IsPublicPath(CurrentPath))
+                {
+                    Navigation.NavigateTo("/login", replace: true);
+                    return;
+                }
+            }
+        }
+        catch
+        {
+            _authBootstrapError = "Không thể tải phiên đăng nhập.";
+            AuthState.ResetInitializationForRetry();
         }
         finally
         {
             _initializing = false;
         }
+
+        await InvokeAsync(StateHasChanged);
     }
 }
