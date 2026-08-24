@@ -66,10 +66,11 @@ public sealed class CustomerDashboardService : ICustomerDashboardService
         await _tenant.EnsureLoadedAsync(ct);
         var month = CurrentApplicationMonthUtcRange();
         using var conn = await _factory.OpenAsync(ct);
+        var processingStatuses = CustomerDashboardStatusRules.ProcessingStatuses.Select(x => x.ToLowerInvariant()).ToArray();
 
-        var renderCountsTask = conn.QuerySingleAsync<DashboardCountsRow>(new CommandDefinition(
+        var renderCounts = await conn.QuerySingleAsync<DashboardCountsRow>(new CommandDefinition(
             """
-            SELECT count(*) FILTER (WHERE status = ANY(@processingStatuses))::int AS ProcessingCount,
+            SELECT count(*) FILTER (WHERE lower(status) = ANY(@processingStatuses))::int AS ProcessingCount,
                    count(*) FILTER (WHERE lower(status)=@completedStatus AND completed_at >= @monthStartUtc AND completed_at < @monthEndUtc)::int AS CompletedThisMonthCount
               FROM render.render_jobs
              WHERE tenant_id = @tenantId
@@ -80,7 +81,7 @@ public sealed class CustomerDashboardService : ICustomerDashboardService
             {
                 tenantId = _tenant.TenantId,
                 customerId = user.CustomerId,
-                processingStatuses = CustomerDashboardStatusRules.ProcessingStatuses,
+                processingStatuses,
                 completedStatus = RenderJobStatuses.Completed,
                 month.MonthStartUtc,
                 month.MonthEndUtc,
@@ -88,9 +89,9 @@ public sealed class CustomerDashboardService : ICustomerDashboardService
             },
             cancellationToken: ct));
 
-        var danceCountsTask = conn.QuerySingleAsync<DashboardCountsRow>(new CommandDefinition(
+        var danceCounts = await conn.QuerySingleAsync<DashboardCountsRow>(new CommandDefinition(
             """
-            SELECT count(*) FILTER (WHERE status = ANY(@processingStatuses))::int AS ProcessingCount,
+            SELECT count(*) FILTER (WHERE lower(status) = ANY(@processingStatuses))::int AS ProcessingCount,
                    count(*) FILTER (WHERE lower(status)=@completedStatus AND completed_at >= @monthStartUtc AND completed_at < @monthEndUtc)::int AS CompletedThisMonthCount
              FROM dance_sell.dance_sell_jobs
              WHERE tenant_id = @tenantId
@@ -100,14 +101,14 @@ public sealed class CustomerDashboardService : ICustomerDashboardService
             {
                 tenantId = _tenant.TenantId,
                 customerId = user.CustomerId,
-                processingStatuses = CustomerDashboardStatusRules.ProcessingStatuses,
+                processingStatuses,
                 completedStatus = DanceSellJobStatuses.Completed,
                 month.MonthStartUtc,
                 month.MonthEndUtc
             },
             cancellationToken: ct));
 
-        var recentRenderTask = conn.QueryAsync<RecentRenderJobRow>(new CommandDefinition(
+        var recentRender = (await conn.QueryAsync<RecentRenderJobRow>(new CommandDefinition(
             """
             SELECT r.id AS Id,
                    r.job_type AS JobType,
@@ -135,9 +136,9 @@ public sealed class CustomerDashboardService : ICustomerDashboardService
                 renderJobTypes = CustomerDashboardWorkflowRules.SupportedRenderJobTypes,
                 limit = Math.Clamp(recentLimit, 1, 20)
             },
-            cancellationToken: ct));
+            cancellationToken: ct))).ToList();
 
-        var recentDanceTask = conn.QueryAsync<RecentDanceJobRow>(new CommandDefinition(
+        var recentDance = (await conn.QueryAsync<RecentDanceJobRow>(new CommandDefinition(
             """
             SELECT id AS Id,
                    status AS Status,
@@ -158,15 +159,13 @@ public sealed class CustomerDashboardService : ICustomerDashboardService
                 customerId = user.CustomerId,
                 limit = Math.Clamp(recentLimit, 1, 20)
             },
-            cancellationToken: ct));
+            cancellationToken: ct))).ToList();
 
-        var charactersTask = _characters.GetActiveCharactersAsync(user);
+        var characters = await _characters.GetActiveCharactersAsync(user);
 
-        await Task.WhenAll(renderCountsTask, danceCountsTask, recentRenderTask, recentDanceTask, charactersTask);
-
-        var recentJobs = recentRenderTask.Result
+        var recentJobs = recentRender
             .Select(MapRenderJob)
-            .Concat(recentDanceTask.Result.Select(MapDanceJob))
+            .Concat(recentDance.Select(MapDanceJob))
             .OrderByDescending(x => x.UpdatedAt)
             .ThenByDescending(x => x.CreatedAt)
             .Take(Math.Clamp(recentLimit, 1, 20))
@@ -174,9 +173,9 @@ public sealed class CustomerDashboardService : ICustomerDashboardService
 
         return new CustomerDashboardDto
         {
-            ProcessingCount = renderCountsTask.Result.ProcessingCount + danceCountsTask.Result.ProcessingCount,
-            CompletedThisMonthCount = renderCountsTask.Result.CompletedThisMonthCount + danceCountsTask.Result.CompletedThisMonthCount,
-            CharacterCount = charactersTask.Result.Count,
+            ProcessingCount = renderCounts.ProcessingCount + danceCounts.ProcessingCount,
+            CompletedThisMonthCount = renderCounts.CompletedThisMonthCount + danceCounts.CompletedThisMonthCount,
+            CharacterCount = characters.Count,
             RecentJobs = recentJobs
         };
     }
