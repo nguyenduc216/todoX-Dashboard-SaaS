@@ -1248,6 +1248,13 @@ public sealed class TimelapseWorkflowService : ITimelapseWorkflowService
         var image = images.FirstOrDefault(x => TimelapseOperationStatuses.IsActive(x.Status));
         if (image is not null)
         {
+            if (TimelapseImageExecutionPhase.IsWaitingForWorker(image))
+            {
+                return TimelapseImageExecutionPhase.IsStuckWaitingForWorker(image, DateTime.UtcNow, TimeSpan.FromMinutes(2))
+                    ? $"Tiến độ ảnh: {imageProgress.Percent}% · Đang chờ hệ thống xử lý lâu hơn bình thường"
+                    : $"Tiến độ ảnh: {imageProgress.Percent}% · Đang chờ xử lý";
+            }
+
             return $"Tiến độ ảnh: {imageProgress.Percent}% · Đang tạo ảnh {image.ProgressPercent}%";
         }
 

@@ -185,6 +185,30 @@ public sealed class TimelapseStageImage
     public DateTime? CompletedAt { get; set; }
 }
 
+public static class TimelapseImageExecutionPhase
+{
+    public const string QueuedForWorker = "QUEUED_FOR_WORKER";
+    public const string Claimed = "CLAIMED";
+    public const string Submitted = "SUBMITTED";
+
+    public static string? Resolve(TimelapseStageImage image, bool hasWorkerClaim = false)
+        => image.Status != TimelapseOperationStatuses.Rendering
+            ? null
+            : hasWorkerClaim && string.IsNullOrWhiteSpace(image.ProviderTaskId)
+                ? Claimed
+            : string.IsNullOrWhiteSpace(image.ProviderTaskId)
+                ? QueuedForWorker
+                : Submitted;
+
+    public static bool IsWaitingForWorker(TimelapseStageImage image)
+        => Resolve(image) == QueuedForWorker;
+
+    public static bool IsStuckWaitingForWorker(TimelapseStageImage image, DateTime nowUtc, TimeSpan threshold)
+        => IsWaitingForWorker(image)
+           && image.StartedAt.HasValue
+           && nowUtc - image.StartedAt.Value.ToUniversalTime() >= threshold;
+}
+
 public sealed class TimelapseVideoClip
 {
     public int ClipIndex { get; set; }

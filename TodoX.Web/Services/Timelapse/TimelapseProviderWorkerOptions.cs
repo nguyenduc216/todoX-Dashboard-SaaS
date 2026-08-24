@@ -28,6 +28,7 @@ public sealed class TimelapseProviderWorkerOptions
     public int IdleDelayMs { get; set; } = 1500;
     public int PollDelayMs { get; set; } = 1500;
     public int ClaimMinutes { get; set; } = 10;
+    public int HeartbeatSeconds { get; set; } = 60;
     public int FinalizerFfmpegTimeoutSeconds { get; set; } = 120;
     public string ProviderCode { get; set; } = "79ai";
     public string ImageCapabilityCode { get; set; } = "image_generation";

@@ -9,6 +9,7 @@ namespace TodoX.Web.Services.Timelapse;
 public interface ITimelapseWorkerRepository
 {
     Task<TimelapseImageWorkItem?> ClaimImageAsync(string workerKey, TimeSpan claimFor, CancellationToken ct = default);
+    Task<TimelapseImageClaimDiagnostic?> DiagnoseImageClaimAsync(Guid jobId, int progressPercent, CancellationToken ct = default);
     Task<TimelapseVideoWorkItem?> ClaimVideoAsync(string workerKey, TimeSpan claimFor, CancellationToken ct = default);
     Task<TimelapseFinalizerWorkItem?> ClaimFinalizerAsync(string workerKey, TimeSpan claimFor, CancellationToken ct = default);
     Task SaveImageSubmittedAsync(Guid stageId, int attempt, string providerCode, string model, string taskId, string requestJson, string responseJson, CancellationToken ct = default);
@@ -115,6 +116,49 @@ public sealed class TimelapseWorkerRepository : ITimelapseWorkerRepository
         tx.Commit();
 
         return row is null ? null : ToImageWorkItem(row);
+    }
+
+    public async Task<TimelapseImageClaimDiagnostic?> DiagnoseImageClaimAsync(Guid jobId, int progressPercent, CancellationToken ct = default)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        return await conn.QuerySingleOrDefaultAsync<TimelapseImageClaimDiagnostic>(
+            """
+            SELECT s.status AS StageStatus,
+                   v.status AS VersionStatus,
+                   j.status AS ParentJobStatus,
+                   d.status AS DependencyStatus,
+                   (d.result_media_id IS NOT NULL) AS HasDependencyMedia,
+                   (NULLIF(d.public_url,'') IS NOT NULL OR NULLIF(d.object_key,'') IS NOT NULL) AS HasDependencyReference,
+                   (COALESCE((v.request_json->'worker_claim'->>'until')::timestamptz, '-infinity'::timestamptz) <= now()) AS ClaimExpired,
+                   (s.tenant_id=@tenant) AS TenantMatches,
+                   (
+                       s.tenant_id=@tenant
+                       AND s.status='RENDERING'
+                       AND v.status='RENDERING'
+                       AND j.status <> 'cancelled'
+                       AND (
+                           s.depends_on_progress_percent IS NULL
+                           OR (
+                               d.status='COMPLETED'
+                               AND d.result_media_id IS NOT NULL
+                               AND (NULLIF(d.public_url,'') IS NOT NULL OR NULLIF(d.object_key,'') IS NOT NULL)
+                           )
+                       )
+                       AND COALESCE((v.request_json->'worker_claim'->>'until')::timestamptz, '-infinity'::timestamptz) <= now()
+                   ) AS Eligible
+              FROM timelapse.timelapse_image_stages s
+              JOIN render.render_jobs j ON j.id=s.job_id
+              LEFT JOIN timelapse.timelapse_image_stage_versions v
+                ON v.image_stage_id=s.id
+               AND v.attempt=s.active_attempt
+              LEFT JOIN timelapse.timelapse_image_stages d
+                ON d.job_id=s.job_id
+               AND d.progress_percent=s.depends_on_progress_percent
+             WHERE s.job_id=@jobId
+               AND s.progress_percent=@progressPercent;
+            """,
+            new { tenant = _tenant.TenantId, jobId, progressPercent });
     }
 
     public async Task<TimelapseVideoWorkItem?> ClaimVideoAsync(string workerKey, TimeSpan claimFor, CancellationToken ct = default)
@@ -1113,6 +1157,19 @@ public sealed record TimelapseImageWorkItem(
     Guid? DependencyMediaId,
     string? DependencyPublicUrl,
     string? DependencyObjectKey);
+
+public sealed class TimelapseImageClaimDiagnostic
+{
+    public string? StageStatus { get; set; }
+    public string? VersionStatus { get; set; }
+    public string? ParentJobStatus { get; set; }
+    public string? DependencyStatus { get; set; }
+    public bool HasDependencyMedia { get; set; }
+    public bool HasDependencyReference { get; set; }
+    public bool ClaimExpired { get; set; }
+    public bool TenantMatches { get; set; }
+    public bool Eligible { get; set; }
+}
 
 public sealed record TimelapseVideoWorkItem(
     Guid Id,

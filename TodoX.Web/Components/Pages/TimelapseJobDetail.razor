@@ -366,6 +366,14 @@
                                         {
                                             <MudText Typo="Typo.caption" Color="Color.Secondary">Đang chờ ảnh @image.DependsOnProgressPercent% hoàn thành</MudText>
                                         }
+                                        @if (!image.IsOriginal && TimelapseImageExecutionPhase.IsWaitingForWorker(image))
+                                        {
+                                            <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                                @(TimelapseImageExecutionPhase.IsStuckWaitingForWorker(image, DateTime.UtcNow, TimeSpan.FromMinutes(2))
+                                                    ? "Đang chờ hệ thống xử lý lâu hơn bình thường."
+                                                    : "Đang chờ xử lý")
+                                            </MudText>
+                                        }
                                         @if (image.Status != TimelapseOperationStatuses.Cancelled && !string.IsNullOrWhiteSpace(image.ErrorMessage))
                                         {
                                             <MudAlert Severity="Severity.Error" Dense="true">@FriendlyOperationError(image.ErrorMessage, "ảnh")</MudAlert>
@@ -1219,7 +1227,9 @@
 
     private static string ImageLoadingTitle(TimelapseStageImage image)
         => image.Status == TimelapseOperationStatuses.Rendering
-            ? "Đang tạo ảnh..."
+            ? TimelapseImageExecutionPhase.IsWaitingForWorker(image)
+                ? "Đang chờ xử lý..."
+                : "Đang tạo ảnh..."
             : $"Đang chờ ảnh {image.ProgressPercent}%";
 
     private static string VideoLoadingTitle(TimelapseVideoClip clip)
