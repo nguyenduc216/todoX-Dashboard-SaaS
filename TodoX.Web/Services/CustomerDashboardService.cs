@@ -119,7 +119,7 @@ public sealed class CustomerDashboardService : ICustomerDashboardService
                    r.input_json::text AS InputJson,
                    r.created_at AS CreatedAt,
                    COALESCE(r.updated_at, r.created_at) AS UpdatedAt,
-                   s.name AS ServiceName,
+                   s.service_name AS ServiceName,
                    s.service_code AS ServiceCode
               FROM render.render_jobs r
               LEFT JOIN catalog.services s ON s.id = r.service_id

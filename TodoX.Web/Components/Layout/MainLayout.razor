@@ -340,10 +340,28 @@
         {
             if (sourceItems.TryGetValue(code, out var existing))
             {
-                return CloneItem(existing);
+                var item = CloneItem(existing);
+                if (string.Equals(code, "dashboard", StringComparison.OrdinalIgnoreCase))
+                {
+                    item.Title = "Trang chủ";
+                    item.Href = "/";
+                    item.VisibilityPolicy = "always";
+                    item.MatchAll = true;
+                }
+
+                return item;
             }
 
-            return factory();
+            var created = factory();
+            if (string.Equals(code, "dashboard", StringComparison.OrdinalIgnoreCase))
+            {
+                created.Title = "Trang chủ";
+                created.Href = "/";
+                created.VisibilityPolicy = "always";
+                created.MatchAll = true;
+            }
+
+            return created;
         }
 
         NavigationMenuGroupDto Group(string code, string title, string iconKey, int sortOrder, bool expanded, params NavigationMenuItemDto[] items)

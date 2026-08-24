@@ -34,6 +34,21 @@ public sealed class CustomerDashboardServiceTests
         Assert.Contains("lower(status) = ANY(@processingStatuses)", source);
         Assert.DoesNotContain("status = ANY(@processingStatuses)", source);
         Assert.DoesNotContain("DanceSell", GetSupportedRenderJobTypesSection(source));
+        Assert.Contains("s.service_name AS ServiceName", source);
+        Assert.DoesNotContain("s.name AS ServiceName", source);
+    }
+
+    [Fact]
+    public void CustomerMenu_ForcesDashboardTitleAndRootRouteForCustomer()
+    {
+        var source = File.ReadAllText(Path.Combine(WebRoot, "Components", "Layout", "MainLayout.razor"), Encoding.UTF8);
+
+        var block = Between(source, "NavigationMenuItemDto Item(string code, Func<NavigationMenuItemDto> factory)", "NavigationMenuGroupDto Group(string code, string title, string iconKey, int sortOrder, bool expanded, params NavigationMenuItemDto[] items)");
+        Assert.Contains("if (string.Equals(code, \"dashboard\", StringComparison.OrdinalIgnoreCase))", block);
+        Assert.Contains("item.Title = \"Trang chủ\";", block);
+        Assert.Contains("item.Href = \"/\";", block);
+        Assert.Contains("created.Title = \"Trang chủ\";", block);
+        Assert.Contains("created.Href = \"/\";", block);
     }
 
     private static string GetSupportedRenderJobTypesSection(string source)
@@ -45,5 +60,16 @@ public sealed class CustomerDashboardServiceTests
         Assert.True(end > start);
 
         return source[start..(end + 2)];
+    }
+
+    private static string Between(string source, string startText, string endText)
+    {
+        var start = source.IndexOf(startText, StringComparison.Ordinal);
+        Assert.True(start >= 0, $"Start marker '{startText}' was not found.");
+
+        var end = source.IndexOf(endText, start, StringComparison.Ordinal);
+        Assert.True(end > start, $"End marker '{endText}' was not found after '{startText}'.");
+
+        return source[start..end];
     }
 }
