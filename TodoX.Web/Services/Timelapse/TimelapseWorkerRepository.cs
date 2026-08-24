@@ -59,9 +59,20 @@ public sealed class TimelapseWorkerRepository : ITimelapseWorkerRepository
                   JOIN timelapse.timelapse_image_stage_versions v
                     ON v.image_stage_id=s.id
                    AND v.attempt=s.active_attempt
+                  LEFT JOIN timelapse.timelapse_image_stages d
+                    ON d.job_id=s.job_id
+                   AND d.progress_percent=s.depends_on_progress_percent
                  WHERE s.tenant_id=@tenant
                    AND s.status='RENDERING'
                    AND v.status='RENDERING'
+                   AND (
+                       s.depends_on_progress_percent IS NULL
+                       OR (
+                           d.status='COMPLETED'
+                           AND d.result_media_id IS NOT NULL
+                           AND (NULLIF(d.public_url,'') IS NOT NULL OR NULLIF(d.object_key,'') IS NOT NULL)
+                       )
+                   )
                    AND COALESCE((v.request_json->'worker_claim'->>'until')::timestamptz, '-infinity'::timestamptz) <= now()
                  ORDER BY s.started_at NULLS FIRST, s.stage_index
                  LIMIT 1
@@ -802,7 +813,14 @@ public sealed class TimelapseWorkerRepository : ITimelapseWorkerRepository
              WHERE s.job_id=@jobId
                AND s.is_original=false
                AND s.status IN ('WAITING','FAILED','INVALIDATED')
-               AND (s.depends_on_progress_percent IS NULL OR d.status='COMPLETED')
+               AND (
+                   s.depends_on_progress_percent IS NULL
+                   OR (
+                       d.status='COMPLETED'
+                       AND d.result_media_id IS NOT NULL
+                       AND (NULLIF(d.public_url,'') IS NOT NULL OR NULLIF(d.object_key,'') IS NOT NULL)
+                   )
+               )
              ORDER BY s.progress_percent DESC
              LIMIT 1;
             """,

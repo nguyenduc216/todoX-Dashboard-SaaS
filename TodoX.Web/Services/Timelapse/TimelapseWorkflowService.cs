@@ -231,6 +231,13 @@ public sealed class TimelapseWorkflowService : ITimelapseWorkflowService
         }
 
         await EnsureImageRetryAllowedAsync(conn, tx, jobId, stage, snapshot.SceneCount);
+        TimelapsePromptResolver.ValidateProviderPrompt(
+            TimelapsePromptResolver.ResolveImagePrompt(
+                snapshot,
+                stage.ProgressPercent,
+                updatePrompt
+                    ? TimelapsePromptSnapshot.WithCustomerOverride(stage.PromptSnapshotJson, prompt!)
+                    : stage.PromptSnapshotJson));
 
         var impact = TimelapseRerenderImpactPlanner.Plan(snapshot.SceneCount, stage.ProgressPercent);
         await conn.ExecuteAsync(
@@ -796,7 +803,14 @@ public sealed class TimelapseWorkflowService : ITimelapseWorkflowService
              WHERE s.job_id=@jobId
                AND s.is_original=false
                AND s.status IN ('WAITING','FAILED','INVALIDATED')
-               AND (s.depends_on_progress_percent IS NULL OR d.status='COMPLETED')
+               AND (
+                   s.depends_on_progress_percent IS NULL
+                   OR (
+                       d.status='COMPLETED'
+                       AND d.result_media_id IS NOT NULL
+                       AND (NULLIF(d.public_url,'') IS NOT NULL OR NULLIF(d.object_key,'') IS NOT NULL)
+                   )
+               )
              ORDER BY s.progress_percent DESC
              LIMIT 1;
             """,

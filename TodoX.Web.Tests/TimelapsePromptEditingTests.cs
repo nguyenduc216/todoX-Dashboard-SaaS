@@ -76,6 +76,49 @@ public class TimelapsePromptEditingTests
     }
 
     [Fact]
+    public void ImagePrompt_CompilesLandscapeProfilePhaseInsteadOfSendingRawProfileJson()
+    {
+        var snapshot = new TimelapseJobSnapshot
+        {
+            ProfileName = "Landscape construction",
+            ProfileCode = "landscape"
+        };
+        var profileSnapshot = """
+            {
+              "ProfileJson": "{\"id\":27,\"enabled\":true,\"category\":\"landscape\",\"select_no\":71,\"phase_rules\":[{\"min_progress\":80,\"max_progress\":100,\"phase_goal\":\"finish the exterior landscape installation\",\"prompt_fragment\":\"Install the final paving and planting details.\",\"must_exist\":[\"finished path\"],\"must_not_exist\":[\"construction debris\"]}],\"continuity_rules\":{\"must_preserve\":[\"same site layout\"]}}"
+            }
+            """;
+
+        var prompt = TimelapsePromptResolver.ResolveImagePrompt(snapshot, 80, profileSnapshot);
+
+        Assert.Contains("finish the exterior landscape installation", prompt, StringComparison.Ordinal);
+        Assert.Contains("Install the final paving and planting details", prompt, StringComparison.Ordinal);
+        Assert.Contains("Must exist: finished path", prompt, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"id\"", prompt, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"select_no\"", prompt, StringComparison.Ordinal);
+        TimelapsePromptResolver.ValidateProviderPrompt(prompt);
+    }
+
+    [Fact]
+    public void ImagePromptValidation_RejectsRawProfileMetadataBeforeProviderSubmit()
+    {
+        var exception = Assert.Throws<TimelapseInvalidCompiledPromptException>(() =>
+            TimelapsePromptResolver.ValidateProviderPrompt("{\"id\":27,\"select_no\":71,\"category\":\"landscape\"}"));
+
+        Assert.Equal(TimelapsePromptResolver.InvalidCompiledPromptErrorCode, exception.ErrorCode);
+    }
+
+    [Fact]
+    public void TimelapseImageClaim_RequiresUsableCompletedDependency()
+    {
+        var repository = ReadSource("TodoX.Web", "Services", "Timelapse", "TimelapseWorkerRepository.cs");
+
+        Assert.Contains("d.status='COMPLETED'", repository, StringComparison.Ordinal);
+        Assert.Contains("d.result_media_id IS NOT NULL", repository, StringComparison.Ordinal);
+        Assert.Contains("NULLIF(d.public_url,'') IS NOT NULL OR NULLIF(d.object_key,'') IS NOT NULL", repository, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void PromptEditingPolicy_BlocksRenderingButAllowsStoppedStages()
     {
         Assert.False(TimelapsePromptSnapshot.CanEdit(TimelapseOperationStatuses.Rendering));

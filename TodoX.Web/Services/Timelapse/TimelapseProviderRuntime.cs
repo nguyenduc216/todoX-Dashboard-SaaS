@@ -272,13 +272,57 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
             "Chưa cấu hình model Seedream cho Timelapse.",
             ct: ct);
         var reference = await ResolveImageReferenceAsync(item, ct);
-        var prompt = TimelapsePromptResolver.ResolveImagePrompt(item.Snapshot, item.ProgressPercent, item.PromptSnapshotJson);
-        var request = BuildImageSubmitRequest(provider, prompt, reference, NormalizeImageRatio(item.Snapshot.Ratio));
+        SubmitRequestEnvelope? request = null;
 
         Ai79TaskSubmitResult submit;
         try
         {
+            var prompt = TimelapsePromptResolver.ResolveImagePrompt(item.Snapshot, item.ProgressPercent, item.PromptSnapshotJson);
+            TimelapsePromptResolver.ValidateProviderPrompt(prompt);
+            request = BuildImageSubmitRequest(provider, prompt, reference, NormalizeImageRatio(item.Snapshot.Ratio));
             submit = await _taskClient.SubmitAsync(request.Raw, ct);
+        }
+        catch (TimelapseInvalidCompiledPromptException ex)
+        {
+            var saved = await _repo.SaveImageSubmitFailedAsync(
+                item.Id,
+                item.Attempt,
+                provider.ProviderCode,
+                provider.Model,
+                ex.ErrorCode,
+                ex.Message,
+                request?.SanitizedJson ?? "{}",
+                "{}",
+                ct);
+            _logger.LogError(
+                ex,
+                "TIMELAPSE_IMAGE_INVALID_PROMPT jobId={JobId} progress={Progress} attempt={Attempt} provider={ProviderCode} model={Model} promptLength={PromptLength}",
+                item.JobId,
+                item.ProgressPercent,
+                item.Attempt,
+                provider.ProviderCode,
+                provider.Model,
+                ex.PromptLength);
+            if (!saved)
+            {
+                _logger.LogWarning("TIMELAPSE_IMAGE_INVALID_PROMPT_STALE jobId={JobId} progress={Progress} attempt={Attempt}",
+                    item.JobId, item.ProgressPercent, item.Attempt);
+                return;
+            }
+            await TryAddSubmitFailureEventAsync(
+                item.JobId,
+                "TIMELAPSE_IMAGE_FAILED",
+                "Timelapse image prompt was rejected locally before provider submit.",
+                new { item.ProgressPercent, item.Attempt, provider.ProviderCode, model = provider.Model, errorCode = ex.ErrorCode },
+                ct);
+            await _coreLifecycle.FailAsync(
+                item.JobId,
+                item.Snapshot,
+                ex.ErrorCode,
+                ex.Message,
+                CoreFailureBillingPolicy.ReleaseReservation,
+                ct);
+            return;
         }
         catch (Ai79TaskSubmitException ex)
         {
@@ -289,7 +333,7 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
                 provider.Model,
                 ex.ErrorCode ?? "submit_failed",
                 ex.ErrorMessage,
-                request.SanitizedJson,
+                request!.SanitizedJson,
                 ex.SanitizedResponseJson,
                 ct);
             _logger.LogError(
@@ -1051,6 +1095,7 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
 public static class TimelapsePromptResolver
 {
     public const int MaxProviderPromptLength = 4200;
+    public const string InvalidCompiledPromptErrorCode = "timelapse_invalid_compiled_prompt";
 
     public static string ResolveImagePrompt(TimelapseJobSnapshot snapshot, int progressPercent, string promptSnapshotJson)
     {
@@ -1060,13 +1105,38 @@ public static class TimelapsePromptResolver
             return customerOverride;
         }
 
-        var profileText = ExtractProfilePrompt(promptSnapshotJson);
+        var profileText = ExtractProfilePrompt(promptSnapshotJson, progressPercent);
         return string.Join("\n", new[]
         {
             profileText,
             $"Timelapse construction progress: {progressPercent}%.",
-            $"Profile: {snapshot.ProfileName}."
+            $"Profile: {CleanText(snapshot.ProfileName) ?? "Timelapse"}.",
+            "Keep the same construction site, architecture, camera, perspective, and permanent elements while advancing only the requested construction phase."
         }.Where(x => !string.IsNullOrWhiteSpace(x)));
+    }
+
+    public static void ValidateProviderPrompt(string prompt)
+    {
+        var value = CleanText(prompt);
+        if (value is null)
+        {
+            throw new TimelapseInvalidCompiledPromptException("Compiled Timelapse image prompt is empty.", 0);
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(value);
+            if (doc.RootElement.ValueKind == JsonValueKind.Object && HasProfileMetadata(doc.RootElement))
+            {
+                throw new TimelapseInvalidCompiledPromptException(
+                    "Compiled Timelapse image prompt contains raw profile metadata.",
+                    value.Length);
+            }
+        }
+        catch (JsonException)
+        {
+            // Plain text prompts are expected and do not need JSON parsing.
+        }
     }
 
     public static string ResolveVideoPrompt(
@@ -1148,7 +1218,7 @@ public static class TimelapsePromptResolver
         return value[..maxLength].TrimEnd();
     }
 
-    private static string ExtractProfilePrompt(string promptSnapshotJson)
+    private static string ExtractProfilePrompt(string promptSnapshotJson, int progressPercent)
     {
         if (string.IsNullOrWhiteSpace(promptSnapshotJson))
         {
@@ -1160,12 +1230,12 @@ public static class TimelapsePromptResolver
             using var doc = JsonDocument.Parse(promptSnapshotJson);
             if (doc.RootElement.TryGetProperty("profileJson", out var camel))
             {
-                return ExtractImagePromptField(camel);
+                return CompileImageProfilePrompt(camel, progressPercent);
             }
 
             if (doc.RootElement.TryGetProperty("ProfileJson", out var pascal))
             {
-                return ExtractImagePromptField(pascal);
+                return CompileImageProfilePrompt(pascal, progressPercent);
             }
         }
         catch (JsonException)
@@ -1174,6 +1244,60 @@ public static class TimelapsePromptResolver
         }
 
         return string.Empty;
+    }
+
+    private static string CompileImageProfilePrompt(JsonElement profileElement, int progressPercent)
+    {
+        if (profileElement.ValueKind == JsonValueKind.String)
+        {
+            var text = profileElement.GetString();
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return string.Empty;
+            }
+
+            try
+            {
+                using var nested = JsonDocument.Parse(text);
+                return nested.RootElement.ValueKind == JsonValueKind.Object
+                    ? CompileImageProfilePrompt(nested.RootElement, progressPercent)
+                    : CleanText(text) ?? string.Empty;
+            }
+            catch (JsonException)
+            {
+                return CleanText(text) ?? string.Empty;
+            }
+        }
+
+        if (profileElement.ValueKind != JsonValueKind.Object)
+        {
+            return string.Empty;
+        }
+
+        var target = ResolveTargetRule(profileElement, progressPercent, 0);
+        JsonElement? imageGeneration = profileElement.TryGetProperty("image_generation", out var imageGenerationValue)
+            && imageGenerationValue.ValueKind == JsonValueKind.Object
+                ? imageGenerationValue
+                : null;
+        var parts = new List<string>();
+
+        AddText(parts, ReadStringAny(target, "image_prompt", "imagePrompt", "prompt", "construction_prompt", "base_prompt"));
+        AddText(parts, ReadStringAny(profileElement, "image_prompt", "imagePrompt", "prompt", "construction_prompt", "base_prompt"));
+        AddText(parts, ReadStringAny(target, "image_generation_instructions", "imageGenerationInstructions", "instructions"));
+        AddText(parts, ReadStringAny(imageGeneration, "prompt", "image_prompt", "instructions", "prompt_template"));
+        AddText(parts, ReadStringAny(target, "phase_goal", "phaseGoal"));
+        AddText(parts, ReadStringAny(target, "prompt_fragment", "promptFragment"));
+        AddList(parts, "Must exist", ReadElement(target, "must_exist") ?? ReadElement(target, "mustExist"));
+        AddList(parts, "Must not exist", ReadElement(target, "must_not_exist") ?? ReadElement(target, "mustNotExist"));
+
+        JsonElement? continuity = profileElement.TryGetProperty("continuity_rules", out var continuityValue)
+            && continuityValue.ValueKind == JsonValueKind.Object
+                ? continuityValue
+                : null;
+        AddList(parts, "Preserve", ReadElement(continuity, "must_preserve") ?? ReadElement(continuity, "mustPreserve"));
+        AddList(parts, "Avoid", ReadElement(continuity, "must_avoid") ?? ReadElement(continuity, "mustAvoid"));
+
+        return string.Join("\n", parts.Where(x => !string.IsNullOrWhiteSpace(x)));
     }
 
     private static string ExtractVideoProfilePrompt(
@@ -1327,6 +1451,20 @@ public static class TimelapsePromptResolver
             ? CleanText(value.GetString())
             : null;
 
+    private static string? ReadStringAny(JsonElement? element, params string[] names)
+    {
+        foreach (var name in names)
+        {
+            var value = ReadString(element, name);
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+        }
+
+        return null;
+    }
+
     private static int? ReadNumber(JsonElement element, string name)
     {
         if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty(name, out var value))
@@ -1370,6 +1508,23 @@ public static class TimelapsePromptResolver
             : string.Empty;
     }
 
+    private static void AddText(List<string> parts, string? value)
+    {
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            parts.Add(value);
+        }
+    }
+
+    private static void AddList(List<string> parts, string label, JsonElement? value)
+    {
+        var text = ListToText(value);
+        if (!string.IsNullOrWhiteSpace(text))
+        {
+            parts.Add($"{label}: {text}");
+        }
+    }
+
     private static string? CleanText(string? value)
     {
         if (string.IsNullOrWhiteSpace(value))
@@ -1385,7 +1540,7 @@ public static class TimelapsePromptResolver
     {
         if (element.ValueKind == JsonValueKind.String)
         {
-            return element.GetString() ?? string.Empty;
+            return CleanText(element.GetString()) ?? string.Empty;
         }
 
         if (element.ValueKind == JsonValueKind.Object)
@@ -1394,13 +1549,39 @@ public static class TimelapsePromptResolver
             {
                 if (element.TryGetProperty(key, out var value) && value.ValueKind == JsonValueKind.String)
                 {
-                    return value.GetString() ?? string.Empty;
+                    return CleanText(value.GetString()) ?? string.Empty;
                 }
             }
         }
 
-        return element.GetRawText();
+        return string.Empty;
     }
+
+    private static bool HasProfileMetadata(JsonElement element)
+    {
+        foreach (var key in new[] { "id", "enabled", "category", "select_no", "created_at", "updated_at", "profile_code", "profile_name", "profile_json" })
+        {
+            if (element.TryGetProperty(key, out _))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+}
+
+public sealed class TimelapseInvalidCompiledPromptException : InvalidOperationException
+{
+    public TimelapseInvalidCompiledPromptException(string message, int promptLength)
+        : base(message)
+    {
+        ErrorCode = TimelapsePromptResolver.InvalidCompiledPromptErrorCode;
+        PromptLength = promptLength;
+    }
+
+    public string ErrorCode { get; }
+    public int PromptLength { get; }
 }
 
 public sealed record TimelapseVideoPromptEnvelope(

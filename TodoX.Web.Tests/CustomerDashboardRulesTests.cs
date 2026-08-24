@@ -1,4 +1,5 @@
 using TodoX.Web.Models;
+using TodoX.Web.Models.Catalog;
 using TodoX.Web.Services;
 using TodoX.Web.Services.Render;
 using Xunit;
