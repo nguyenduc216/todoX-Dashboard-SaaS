@@ -182,18 +182,8 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (firstRender)
+        if (firstRender && AuthState.IsInitialized)
         {
-            if (!AuthState.IsInitialized)
-            {
-                await AuthState.InitializeAsync(id => Accounts.RehydrateSessionAsync(id));
-            }
-
-            if (!AuthState.IsAuthenticated && !IsPublicRoute())
-            {
-                Navigation.NavigateTo("/login", forceLoad: false);
-            }
-
             await LoadNavigationMenuAsync();
             StateHasChanged();
         }

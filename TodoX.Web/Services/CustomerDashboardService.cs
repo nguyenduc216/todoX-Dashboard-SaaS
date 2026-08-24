@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using Dapper;
 using TodoX.Web.Data;
@@ -45,25 +46,32 @@ public sealed class CustomerDashboardService : ICustomerDashboardService
     private readonly TodoXConnectionFactory _factory;
     private readonly TenantContext _tenant;
     private readonly IAiCharacterService _characters;
+    private readonly ILogger<CustomerDashboardService> _logger;
 
     public CustomerDashboardService(
         TodoXConnectionFactory factory,
         TenantContext tenant,
-        IAiCharacterService characters)
+        IAiCharacterService characters,
+        ILogger<CustomerDashboardService> logger)
     {
         _factory = factory;
         _tenant = tenant;
         _characters = characters;
+        _logger = logger;
     }
 
     public async Task<CustomerDashboardDto> GetDashboardAsync(CurrentUserSession user, int recentLimit = 5, CancellationToken ct = default)
     {
+        var stopwatch = Stopwatch.StartNew();
+        _logger.LogInformation("CUSTOMER_DASHBOARD_LOAD_START userId={UserId} customerId={CustomerId}", user.UserId, user.CustomerId);
         if (user is not { IsAuthenticated: true, IsCustomer: true } || user.CustomerId is null)
         {
             return new CustomerDashboardDto();
         }
 
         await _tenant.EnsureLoadedAsync(ct);
+        _logger.LogInformation("CUSTOMER_DASHBOARD_TENANT_READY elapsedMs={ElapsedMs} tenantId={TenantId} customerId={CustomerId}",
+            stopwatch.ElapsedMilliseconds, _tenant.TenantId, user.CustomerId);
         var month = CurrentApplicationMonthUtcRange();
         using var conn = await _factory.OpenAsync(ct);
         var processingStatuses = CustomerDashboardStatusRules.ProcessingStatuses.Select(x => x.ToLowerInvariant()).ToArray();
@@ -88,6 +96,8 @@ public sealed class CustomerDashboardService : ICustomerDashboardService
                 renderJobTypes = CustomerDashboardWorkflowRules.SupportedRenderJobTypes
             },
             cancellationToken: ct));
+        _logger.LogInformation("CUSTOMER_DASHBOARD_RENDER_COUNTS_DONE elapsedMs={ElapsedMs} tenantId={TenantId} customerId={CustomerId}",
+            stopwatch.ElapsedMilliseconds, _tenant.TenantId, user.CustomerId);
 
         var danceCounts = await conn.QuerySingleAsync<DashboardCountsRow>(new CommandDefinition(
             """
@@ -107,6 +117,8 @@ public sealed class CustomerDashboardService : ICustomerDashboardService
                 month.MonthEndUtc
             },
             cancellationToken: ct));
+        _logger.LogInformation("CUSTOMER_DASHBOARD_DANCE_COUNTS_DONE elapsedMs={ElapsedMs} tenantId={TenantId} customerId={CustomerId}",
+            stopwatch.ElapsedMilliseconds, _tenant.TenantId, user.CustomerId);
 
         var recentRender = (await conn.QueryAsync<RecentRenderJobRow>(new CommandDefinition(
             """
@@ -137,6 +149,8 @@ public sealed class CustomerDashboardService : ICustomerDashboardService
                 limit = Math.Clamp(recentLimit, 1, 20)
             },
             cancellationToken: ct))).ToList();
+        _logger.LogInformation("CUSTOMER_DASHBOARD_RECENT_RENDER_DONE elapsedMs={ElapsedMs} tenantId={TenantId} customerId={CustomerId}",
+            stopwatch.ElapsedMilliseconds, _tenant.TenantId, user.CustomerId);
 
         var recentDance = (await conn.QueryAsync<RecentDanceJobRow>(new CommandDefinition(
             """
@@ -160,8 +174,21 @@ public sealed class CustomerDashboardService : ICustomerDashboardService
                 limit = Math.Clamp(recentLimit, 1, 20)
             },
             cancellationToken: ct))).ToList();
+        _logger.LogInformation("CUSTOMER_DASHBOARD_RECENT_DANCE_DONE elapsedMs={ElapsedMs} tenantId={TenantId} customerId={CustomerId}",
+            stopwatch.ElapsedMilliseconds, _tenant.TenantId, user.CustomerId);
 
-        var characters = await _characters.GetActiveCharactersAsync(user);
+        IReadOnlyList<ActiveCharacterDto> characters = Array.Empty<ActiveCharacterDto>();
+        try
+        {
+            characters = await _characters.GetActiveCharactersAsync(user, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "CUSTOMER_DASHBOARD_CHARACTERS_FAILED elapsedMs={ElapsedMs} tenantId={TenantId} customerId={CustomerId}",
+                stopwatch.ElapsedMilliseconds, _tenant.TenantId, user.CustomerId);
+        }
+        _logger.LogInformation("CUSTOMER_DASHBOARD_CHARACTERS_DONE elapsedMs={ElapsedMs} tenantId={TenantId} customerId={CustomerId}",
+            stopwatch.ElapsedMilliseconds, _tenant.TenantId, user.CustomerId);
 
         var recentJobs = recentRender
             .Select(MapRenderJob)
@@ -171,13 +198,16 @@ public sealed class CustomerDashboardService : ICustomerDashboardService
             .Take(Math.Clamp(recentLimit, 1, 20))
             .ToList();
 
-        return new CustomerDashboardDto
+        var result = new CustomerDashboardDto
         {
             ProcessingCount = renderCounts.ProcessingCount + danceCounts.ProcessingCount,
             CompletedThisMonthCount = renderCounts.CompletedThisMonthCount + danceCounts.CompletedThisMonthCount,
             CharacterCount = characters.Count,
             RecentJobs = recentJobs
         };
+        _logger.LogInformation("CUSTOMER_DASHBOARD_LOAD_DONE elapsedMs={ElapsedMs} tenantId={TenantId} customerId={CustomerId}",
+            stopwatch.ElapsedMilliseconds, _tenant.TenantId, user.CustomerId);
+        return result;
     }
 
     internal static (DateTime MonthStartUtc, DateTime MonthEndUtc) CurrentApplicationMonthUtcRange(DateTime? nowUtc = null, TimeZoneInfo? timeZone = null)

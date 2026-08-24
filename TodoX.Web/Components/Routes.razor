@@ -1,13 +1,17 @@
 @using TodoX.Web.Components.Pages
 @inject AuthStateService AuthState
+@inject AccountService Accounts
 @inject NavigationManager Navigation
 
 <Router AppAssembly="typeof(Program).Assembly" NotFoundPage="typeof(Pages.NotFound)">
     <Found Context="routeData">
-        @if (ShouldHoldForAuth)
+        @if (!AuthState.IsInitialized && !NavigationAccessRules.IsPublicPath(CurrentPath))
         {
-            <div class="p-4">
-                <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+            <div class="d-flex justify-content-center align-items-center min-vh-100">
+                <MudPaper Class="pa-6 text-center" Elevation="2">
+                    <MudProgressCircular Indeterminate="true" Color="Color.Warning" />
+                    <MudText Class="mt-3">Đang tải phiên đăng nhập...</MudText>
+                </MudPaper>
             </div>
         }
         else if (!NavigationAccessRules.CanAccessPath(AuthState.CurrentUser, CurrentPath))
@@ -25,6 +29,29 @@
 @code {
     private string CurrentPath => NavigationAccessRules.NormalizePath(new Uri(Navigation.Uri).AbsolutePath);
 
-    private bool ShouldHoldForAuth
-        => !AuthState.IsInitialized && !NavigationAccessRules.IsPublicPath(CurrentPath);
+    private bool _initializing;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || AuthState.IsInitialized || _initializing)
+        {
+            return;
+        }
+
+        _initializing = true;
+        try
+        {
+            await AuthState.InitializeAsync(id => Accounts.RehydrateSessionAsync(id));
+            if (AuthState.IsInitialized
+                && !AuthState.IsAuthenticated
+                && !NavigationAccessRules.IsPublicPath(CurrentPath))
+            {
+                Navigation.NavigateTo("/login", replace: true);
+            }
+        }
+        finally
+        {
+            _initializing = false;
+        }
+    }
 }

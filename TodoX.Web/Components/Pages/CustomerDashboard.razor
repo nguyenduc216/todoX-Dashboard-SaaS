@@ -5,6 +5,7 @@
 @inject ICustomerDashboardService Dashboard
 @inject NavigationManager Navigation
 @inject ILogger<CustomerDashboard> Logger
+@implements IDisposable
 
 <MudStack Spacing="4">
     <div>
@@ -12,16 +13,29 @@
         <MudText Typo="Typo.body1" Class="todox-page-subtitle">Hôm nay bạn muốn tạo nội dung gì?</MudText>
     </div>
 
-    @if (_loading)
+    @if (_state == DashboardLoadState.Loading)
     {
-        <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+        <MudPaper Class="todox-card pa-6 d-flex flex-column align-items-center" Elevation="1">
+            <MudProgressCircular Indeterminate="true" Color="Color.Warning" />
+            <MudText Class="mt-3">Đang tải trang chủ...</MudText>
+        </MudPaper>
     }
-    else if (!string.IsNullOrWhiteSpace(_error))
+    else if (_state == DashboardLoadState.Error)
     {
-        <MudAlert Severity="Severity.Error">@_error</MudAlert>
+        <MudPaper Class="todox-card pa-6 d-flex flex-column align-items-center" Elevation="1">
+            <MudAlert Severity="Severity.Error" Class="w-100">@_error</MudAlert>
+            <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Refresh" OnClick="RetryAsync">
+                Thử lại
+            </MudButton>
+        </MudPaper>
     }
     else
     {
+        @if (_state == DashboardLoadState.PartialSuccess)
+        {
+            <MudAlert Severity="Severity.Warning" Dense="true">Một số dữ liệu phụ chưa tải được. Bạn vẫn có thể sử dụng trang chủ.</MudAlert>
+        }
+
         <MudGrid>
             @foreach (var service in _services)
             {
@@ -117,57 +131,120 @@
 @code {
     private IReadOnlyList<CatalogServiceView> _services = Array.Empty<CatalogServiceView>();
     private IReadOnlyList<CustomerRecentJobDto> _recentJobs = Array.Empty<CustomerRecentJobDto>();
-    private bool _loading = true;
+    private DashboardLoadState _state = DashboardLoadState.Loading;
     private string? _error;
     private int _processingCount;
     private int _completedThisMonthCount;
     private int _characterCount;
+    private Task? _loadTask;
+    private CancellationTokenSource? _loadCancellation;
 
-    protected override async Task OnInitializedAsync() => await LoadAsync();
+    protected override async Task OnInitializedAsync()
+    {
+        AuthState.OnChange += HandleAuthChange;
+        await EnsureLoadedAsync();
+    }
 
     private string CustomerName => AuthState.CurrentUser?.DisplayName ?? "bạn";
 
-    private async Task LoadAsync()
+    private Task EnsureLoadedAsync()
     {
-        _loading = true;
+        if (_loadTask is null && AuthState.IsInitialized && AuthState.CurrentUser is { IsCustomer: true } user)
+        {
+            _loadTask = LoadAsync(user);
+        }
+
+        return _loadTask ?? Task.CompletedTask;
+    }
+
+    private async Task LoadAsync(CurrentUserSession user)
+    {
+        _state = DashboardLoadState.Loading;
         _error = null;
+        _loadCancellation?.Dispose();
+        _loadCancellation = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var ct = _loadCancellation.Token;
 
         try
         {
-            var user = AuthState.CurrentUser;
-            if (user is not { IsCustomer: true })
+            if (!AuthState.IsInitialized || !user.IsCustomer)
             {
-                _services = Array.Empty<CatalogServiceView>();
-                _recentJobs = Array.Empty<CustomerRecentJobDto>();
-                _processingCount = 0;
-                _completedThisMonthCount = 0;
-                _characterCount = 0;
+                _state = DashboardLoadState.Empty;
                 return;
             }
 
-            var servicesTask = Catalog.GetActiveCatalogServicesAsync();
-            var dashboardTask = Dashboard.GetDashboardAsync(user);
-            await Task.WhenAll(servicesTask, dashboardTask);
+            Logger.LogInformation("CUSTOMER_DASHBOARD_AUTH_READY userId={UserId} customerId={CustomerId}", user.UserId, user.CustomerId);
+            var dashboard = await Dashboard.GetDashboardAsync(user, ct: ct).WaitAsync(ct);
 
-            _services = servicesTask.Result
+            IReadOnlyList<CatalogServiceView> services;
+            try
+            {
+                services = await Catalog.GetActiveCatalogServicesAsync().WaitAsync(ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "CUSTOMER_DASHBOARD_CATALOG_FAILED userId={UserId} customerId={CustomerId}", user.UserId, user.CustomerId);
+                services = Array.Empty<CatalogServiceView>();
+            }
+
+            _services = services
                 .Where(x => CustomerServiceRouting.Resolve(x.ServiceType, x.Id, x.ServiceCode).Destination != CustomerServiceDestination.Unavailable)
                 .OrderBy(x => x.SortOrder)
                 .ThenBy(x => x.DisplayName, StringComparer.OrdinalIgnoreCase)
                 .ToList();
-            _recentJobs = dashboardTask.Result.RecentJobs;
-            _processingCount = dashboardTask.Result.ProcessingCount;
-            _completedThisMonthCount = dashboardTask.Result.CompletedThisMonthCount;
-            _characterCount = dashboardTask.Result.CharacterCount;
+            _recentJobs = dashboard.RecentJobs;
+            _processingCount = dashboard.ProcessingCount;
+            _completedThisMonthCount = dashboard.CompletedThisMonthCount;
+            _characterCount = dashboard.CharacterCount;
+            _state = services.Count == 0 ? DashboardLoadState.PartialSuccess : DashboardLoadState.Success;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            _state = DashboardLoadState.Error;
+            _error = "Không thể tải dữ liệu trang chủ. Vui lòng thử lại.";
+            Logger.LogWarning("CUSTOMER_DASHBOARD_LOAD_FAILED reason=timeout userId={UserId} customerId={CustomerId}", user.UserId, user.CustomerId);
         }
         catch (Exception ex)
         {
+            _state = DashboardLoadState.Error;
             Logger.LogError(ex, "CUSTOMER_DASHBOARD_LOAD_FAILED userId={UserId} customerId={CustomerId}", AuthState.CurrentUser?.UserId, AuthState.CurrentUser?.CustomerId);
             _error = "Không thể tải dữ liệu trang chủ. Vui lòng thử lại.";
         }
         finally
         {
-            _loading = false;
+            _loadCancellation?.Dispose();
+            _loadCancellation = null;
+            await InvokeAsync(StateHasChanged);
         }
+    }
+
+    private async Task RetryAsync()
+    {
+        _loadTask = null;
+        await EnsureLoadedAsync();
+    }
+
+    private void HandleAuthChange()
+        => _ = InvokeAsync(async () =>
+        {
+            if (!AuthState.IsInitialized || AuthState.CurrentUser is not { IsCustomer: true } || _loadTask is not null)
+            {
+                return;
+            }
+
+            await EnsureLoadedAsync();
+            StateHasChanged();
+        });
+
+    public void Dispose()
+    {
+        AuthState.OnChange -= HandleAuthChange;
+        _loadCancellation?.Cancel();
+        _loadCancellation?.Dispose();
     }
 
     private void OpenService(CatalogServiceView service)
@@ -196,4 +273,13 @@
             TodoXServiceEngineTypes.RDance => Icons.Material.Filled.DirectionsRun,
             _ => Icons.Material.Filled.AutoFixHigh
         };
+
+    private enum DashboardLoadState
+    {
+        Loading,
+        Success,
+        PartialSuccess,
+        Error,
+        Empty
+    }
 }
