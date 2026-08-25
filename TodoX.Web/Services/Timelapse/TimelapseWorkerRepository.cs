@@ -114,7 +114,7 @@ public sealed class TimelapseWorkerRepository : ITimelapseWorkerRepository
                    AND COALESCE((v.request_json->'worker_claim'->>'until')::timestamptz, '-infinity'::timestamptz) <= now()
                  ORDER BY s.started_at NULLS FIRST, s.stage_index
                  LIMIT 1
-                 FOR UPDATE SKIP LOCKED
+                 FOR UPDATE OF s, v SKIP LOCKED
             )
             UPDATE timelapse.timelapse_image_stage_versions v
                SET request_json=jsonb_set(

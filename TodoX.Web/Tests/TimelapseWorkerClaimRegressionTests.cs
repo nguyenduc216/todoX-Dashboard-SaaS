@@ -36,7 +36,8 @@ public sealed class TimelapseWorkerClaimRegressionTests
         Assert.Contains("d.result_media_id IS NOT NULL", claim);
         Assert.Contains("NULLIF(d.public_url,'') IS NOT NULL OR NULLIF(d.object_key,'') IS NOT NULL", claim);
         Assert.Contains("COALESCE((v.request_json->'worker_claim'->>'until')::timestamptz, '-infinity'::timestamptz) <= now()", claim);
-        Assert.Contains("FOR UPDATE SKIP LOCKED", claim);
+        Assert.Contains("FOR UPDATE OF s, v SKIP LOCKED", claim);
+        Assert.DoesNotContain("FOR UPDATE SKIP LOCKED", claim);
         Assert.DoesNotContain("active_attempt=active_attempt+1", claim);
     }
 
