@@ -64,7 +64,7 @@ public sealed class TimelapseWorkerRepository : ITimelapseWorkerRepository
         using var tx = conn.BeginTransaction();
         var row = await conn.QuerySingleOrDefaultAsync<ImageRow>(
             """
-            WITH candidate AS (
+            WITH candidate AS MATERIALIZED (
                 SELECT s.id AS Id,
                        s.tenant_id AS TenantId,
                        s.job_id AS JobId,
@@ -114,7 +114,14 @@ public sealed class TimelapseWorkerRepository : ITimelapseWorkerRepository
                    AND COALESCE((v.request_json->'worker_claim'->>'until')::timestamptz, '-infinity'::timestamptz) <= now()
                  ORDER BY s.started_at NULLS FIRST, s.stage_index
                  LIMIT 1
-                 FOR UPDATE OF s, v SKIP LOCKED
+            ), locked AS (
+                SELECT v.image_stage_id AS Id,
+                       v.attempt AS Attempt
+                  FROM timelapse.timelapse_image_stage_versions v
+                  JOIN candidate c
+                    ON c.Id=v.image_stage_id
+                   AND c.Attempt=v.attempt
+                 FOR UPDATE OF v SKIP LOCKED
             )
             UPDATE timelapse.timelapse_image_stage_versions v
                SET request_json=jsonb_set(
@@ -124,6 +131,9 @@ public sealed class TimelapseWorkerRepository : ITimelapseWorkerRepository
                        true),
                    updated_at=now()
               FROM candidate c
+              JOIN locked l
+                ON l.Id=c.Id
+               AND l.Attempt=c.Attempt
              WHERE v.image_stage_id=c.Id
                AND v.attempt=c.Attempt
              RETURNING c.Id AS Id,

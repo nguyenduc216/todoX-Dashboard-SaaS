@@ -36,9 +36,30 @@ public sealed class TimelapseWorkerClaimRegressionTests
         Assert.Contains("d.result_media_id IS NOT NULL", claim);
         Assert.Contains("NULLIF(d.public_url,'') IS NOT NULL OR NULLIF(d.object_key,'') IS NOT NULL", claim);
         Assert.Contains("COALESCE((v.request_json->'worker_claim'->>'until')::timestamptz, '-infinity'::timestamptz) <= now()", claim);
-        Assert.Contains("FOR UPDATE OF s, v SKIP LOCKED", claim);
+        Assert.Contains("FOR UPDATE OF v SKIP LOCKED", claim);
+        Assert.DoesNotContain("FOR UPDATE OF s", claim);
         Assert.DoesNotContain("FOR UPDATE SKIP LOCKED", claim);
         Assert.DoesNotContain("active_attempt=active_attempt+1", claim);
+    }
+
+    [Fact]
+    public void ImageClaimSeparatesOuterJoinCandidateFromVersionLockForConcurrentWorkers()
+    {
+        var source = ReadRepoFile("Services", "Timelapse", "TimelapseWorkerRepository.cs");
+        var claim = Between(source, "public async Task<TimelapseImageWorkItem?> ClaimImageAsync", "public async Task<int> DiagnoseImageClaimsAsync");
+        var candidate = Between(claim, "WITH candidate AS MATERIALIZED", "), locked AS");
+        var locked = Between(claim, "), locked AS", "UPDATE timelapse.timelapse_image_stage_versions v");
+        var update = Between(claim, "UPDATE timelapse.timelapse_image_stage_versions v", "tx.Commit();");
+
+        Assert.DoesNotContain("FOR UPDATE", candidate);
+        Assert.Contains("LEFT JOIN timelapse.timelapse_image_stages d", candidate);
+        Assert.Contains("FROM timelapse.timelapse_image_stage_versions v", locked);
+        Assert.Contains("JOIN candidate c", locked);
+        Assert.DoesNotContain("LEFT JOIN", locked);
+        Assert.Contains("FOR UPDATE OF v SKIP LOCKED", locked);
+        Assert.Contains("JOIN locked l", update);
+        Assert.Contains("ON l.Id=c.Id", update);
+        Assert.Contains("AND l.Attempt=c.Attempt", update);
     }
 
     [Fact]
