@@ -55,7 +55,7 @@
                 <MudItem xs="12" lg="8">
                     <MudPaper Class="todox-card timelapse-form-card pa-4" rounded="true">
                         <MudStack Spacing="3">
-                            <MudTextField T="string" Label="Tên job" @bind-Value="_request.Title" Variant="Variant.Outlined" />
+                            <MudTextField T="string" Label="Tên job" @bind-Value="_request.Title" @bind-Value:after="ScheduleAutoSave" Variant="Variant.Outlined" />
 
                             <MudStack Spacing="1">
                                 <MudText Typo="Typo.subtitle2">Ảnh thành phẩm / ảnh tham chiếu</MudText>
@@ -84,7 +84,7 @@
                                 }
                             </MudStack>
 
-                            <MudSelect T="string" Label="Loại công trình" @bind-Value="_request.ProfileCode" Variant="Variant.Outlined" Required="true">
+                            <MudSelect T="string" Label="Loại công trình" @bind-Value="_request.ProfileCode" @bind-Value:after="ScheduleAutoSave" Variant="Variant.Outlined" Required="true">
                                 @foreach (var profile in _profiles)
                                 {
                                     <MudSelectItem T="string" Value="@profile.ProfileCode">@profile.ProfileName</MudSelectItem>
@@ -130,12 +130,16 @@
                                     </button>
                                 </div>
                             </MudStack>
-                            <MudSwitch T="bool" Color="Color.Warning" @bind-Value="_request.AutoFinish">
+                            <MudSwitch T="bool" Color="Color.Warning" @bind-Value="_request.AutoFinish" @bind-Value:after="ScheduleAutoSave">
                                 Tự động hoàn thành
                             </MudSwitch>
                             <MudText Typo="Typo.caption" Class="timelapse-auto-finish-help">
                                 Hệ thống sẽ tự động tạo ảnh trung gian, tạo các video scene và ghép video hoàn chỉnh khi dữ liệu sẵn sàng.
                             </MudText>
+                            @if (!string.IsNullOrWhiteSpace(_saveStatus))
+                            {
+                                <MudText Typo="Typo.caption" Color="@(_saveError is null ? Color.Secondary : Color.Error)">@_saveStatus</MudText>
+                            }
 
                             @if (_profiles.Count == 0)
                             {
@@ -209,6 +213,11 @@
     private bool _loadingService = true;
     private bool _priceLoading;
     private int _priceLoadVersion;
+    private Guid? _draftJobId;
+    private CancellationTokenSource? _autoSaveCts;
+    private readonly SemaphoreSlim _autoSaveGate = new(1, 1);
+    private string? _saveStatus;
+    private string? _saveError;
 
     private string PageHeading => _selectedService?.DisplayName ?? "Tạo video Timelapse AI";
     private string PageSubtitle => _selectedService is null
@@ -227,7 +236,13 @@
         await LoadPageAsync();
     }
 
-    public void Dispose() => AuthState.OnChange -= HandleAuthChange;
+    public void Dispose()
+    {
+        AuthState.OnChange -= HandleAuthChange;
+        _autoSaveCts?.Cancel();
+        _autoSaveCts?.Dispose();
+        _autoSaveGate.Dispose();
+    }
 
     private void HandleAuthChange() => _ = InvokeAsync(async () =>
     {
@@ -258,6 +273,7 @@
         finally
         {
             _loadingService = false;
+            ScheduleAutoSave();
         }
     }
 
@@ -328,6 +344,7 @@
         await using var buffer = new MemoryStream();
         await stream.CopyToAsync(buffer);
         _previewDataUrl = $"data:{_selectedFile.ContentType};base64,{Convert.ToBase64String(buffer.ToArray())}";
+        ScheduleAutoSave();
     }
 
     private bool ValidateSelectedImage(bool showSnackbar)
@@ -362,6 +379,7 @@
     {
         _selectedFile = null;
         _previewDataUrl = null;
+        ScheduleAutoSave();
     }
 
     private void ApplySelectedServiceFromQuery()
@@ -384,15 +402,21 @@
     {
         _request.SceneCount = sceneCount;
         await RefreshPriceEstimateAsync();
+        ScheduleAutoSave();
     }
 
     private async Task SelectMode(string mode)
     {
         _request.VideoMode = mode;
         await RefreshPriceEstimateAsync();
+        ScheduleAutoSave();
     }
 
-    private void SelectRatio(string ratio) => _request.Ratio = ratio;
+    private void SelectRatio(string ratio)
+    {
+        _request.Ratio = ratio;
+        ScheduleAutoSave();
+    }
 
     private bool IsSceneSelected(int sceneCount) => _request.SceneCount == sceneCount;
 
@@ -473,16 +497,7 @@
         _busy = true;
         try
         {
-            await using var stream = _selectedFile!.OpenReadStream(MaxImageBytes);
-            await using var buffer = new MemoryStream();
-            await stream.CopyToAsync(buffer);
-
-            var job = await Jobs.CreateDraftAsync(
-                _request,
-                buffer.ToArray(),
-                _selectedFile.Name,
-                _selectedFile.ContentType,
-                AuthState.CurrentUser);
+            var job = await EnsureDraftSavedAsync(CancellationToken.None);
 
             if (_request.AutoFinish)
             {
@@ -497,6 +512,102 @@
         finally
         {
             _busy = false;
+        }
+    }
+
+    private void ScheduleAutoSave()
+    {
+        if (!CanAutoSave)
+        {
+            return;
+        }
+
+        _autoSaveCts?.Cancel();
+        _autoSaveCts?.Dispose();
+        _autoSaveCts = new CancellationTokenSource();
+        var token = _autoSaveCts.Token;
+        _ = InvokeAsync(async () =>
+        {
+            try
+            {
+                await Task.Delay(700, token);
+                await EnsureDraftSavedAsync(token);
+            }
+            catch (OperationCanceledException) when (token.IsCancellationRequested)
+            {
+            }
+            catch (Exception ex)
+            {
+                _saveError = ex.Message;
+                _saveStatus = "Không thể tự lưu bản nháp. Vui lòng thử lại.";
+                await InvokeAsync(StateHasChanged);
+            }
+        });
+    }
+
+    private bool CanAutoSave
+        => AuthState.CurrentUser is { IsCustomer: true }
+           && ServiceReady
+           && HasValidImage
+           && HasValidPrice
+           && _profiles.Count > 0;
+
+    private async Task<TimelapseJobView> EnsureDraftSavedAsync(CancellationToken ct)
+    {
+        if (!CanAutoSave || AuthState.CurrentUser is not { IsCustomer: true } user || _selectedFile is null)
+        {
+            throw new InvalidOperationException("Vui lòng hoàn tất các thông tin bắt buộc trước khi lưu.");
+        }
+
+        await _autoSaveGate.WaitAsync(ct);
+        try
+        {
+            _saveError = null;
+            _saveStatus = "Đang lưu...";
+            await InvokeAsync(StateHasChanged);
+
+            await using var stream = _selectedFile.OpenReadStream(MaxImageBytes);
+            await using var buffer = new MemoryStream();
+            await stream.CopyToAsync(buffer, ct);
+
+            TimelapseJobView job;
+            if (_draftJobId is Guid draftId)
+            {
+                job = await Jobs.UpdateDraftAsync(
+                    draftId,
+                    _request,
+                    buffer.ToArray(),
+                    _selectedFile.Name,
+                    _selectedFile.ContentType,
+                    user,
+                    ct);
+            }
+            else
+            {
+                job = await Jobs.CreateDraftAsync(
+                    _request,
+                    buffer.ToArray(),
+                    _selectedFile.Name,
+                    _selectedFile.ContentType,
+                    user,
+                    ct);
+                _draftJobId = job.Id;
+            }
+
+            _saveStatus = "Đã lưu bản nháp";
+            await InvokeAsync(StateHasChanged);
+            return job;
+        }
+        catch (Exception ex)
+        {
+            _saveError = ex.Message;
+            _saveStatus = "Không thể tự lưu bản nháp. Vui lòng thử lại.";
+            await InvokeAsync(StateHasChanged);
+            throw;
+        }
+        finally
+        {
+            _autoSaveGate.Release();
         }
     }
 

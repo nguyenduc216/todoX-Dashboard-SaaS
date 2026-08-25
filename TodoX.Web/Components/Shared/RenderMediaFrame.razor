@@ -5,11 +5,42 @@
     {
         @if (IsVideo)
         {
-            <video src="@MediaUrl" poster="@ThumbnailUrl" controls class="scene-media-video"></video>
+            <button type="button"
+                    class="scene-media-hit-area"
+                    aria-label="@VideoAriaLabel"
+                    title="@VideoAriaLabel"
+                    disabled="@(!OnClick.HasDelegate)"
+                    @onclick="OnClick">
+                <video src="@MediaUrl"
+                       poster="@ThumbnailUrl"
+                       muted
+                       preload="metadata"
+                       playsinline
+                       class="scene-media-video"></video>
+                @if (OnClick.HasDelegate)
+                {
+                    <span class="scene-media-overlay scene-media-play-overlay" aria-hidden="true">
+                        <MudIcon Icon="@Icons.Material.Filled.PlayArrow" />
+                    </span>
+                }
+            </button>
         }
         else
         {
-            <img src="@MediaUrl" class="scene-media-image" @onclick="OnClick" />
+            <button type="button"
+                    class="scene-media-hit-area"
+                    aria-label="@ImageAriaLabel"
+                    title="@ImageAriaLabel"
+                    disabled="@(!OnClick.HasDelegate)"
+                    @onclick="OnClick">
+                <img src="@MediaUrl" class="scene-media-image" alt="@ImageAriaLabel" />
+                @if (OnClick.HasDelegate)
+                {
+                    <span class="scene-media-overlay scene-media-view-overlay" aria-hidden="true">
+                        <MudIcon Icon="@Icons.Material.Filled.Visibility" />
+                    </span>
+                }
+            </button>
         }
     }
     else if (IsActive)
@@ -66,6 +97,8 @@
     [Parameter] public EventCallback OnRetry { get; set; }
     [Parameter] public string AspectRatio { get; set; } = "1:1";
     [Parameter] public EventCallback OnClick { get; set; }
+    [Parameter] public string ImageAriaLabel { get; set; } = "Xem ảnh";
+    [Parameter] public string VideoAriaLabel { get; set; } = "Phát video";
 
     private bool HasReadyMedia => !string.IsNullOrWhiteSpace(MediaUrl);
     private MediaRenderState EffectiveState => State != MediaRenderState.Empty

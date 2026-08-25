@@ -322,7 +322,9 @@
                                                               LoadingLabel="@ImageLoadingTitle(image)"
                                                               EmptyText="@ImagePlaceholderText(image)"
                                                               FailedText="Lỗi render ảnh"
-                                                              ReadyText="Hoàn tất" />
+                                                              ReadyText="Hoàn tất"
+                                                              ImageAriaLabel="@($"Xem ảnh {image.ProgressPercent}%")"
+                                                              OnClick="@(() => OpenImagePreviewAsync(image))" />
                                         </div>
                                         <div class="tl-image-card-footer">
                                             <div class="tl-image-meta-row">
@@ -446,14 +448,16 @@
                                         </div>
                                         <div class="@PreviewClass("video-preview", clip.Status)">
                                             <RenderMediaFrame IsVideo="true"
-                                                              MediaUrl="@(TimelapseVideoOrchestration.HasCompletedPreview(clip) || (IsRenderingOperation(clip.Status) && !string.IsNullOrWhiteSpace(clip.PublicUrl)) ? clip.PublicUrl : null)"
+                                                              MediaUrl="@((TimelapseVideoOrchestration.HasCompletedPreview(clip) || IsRenderingOperation(clip.Status)) ? clip.PublicUrl : null)"
                                                               ThumbnailUrl="@clip.PublicUrl"
                                                               AspectRatio="@FormatRatio(_job.Snapshot.Ratio)"
                                                               State="@ResolveTimelapseMediaState(clip.Status)"
                                                               LoadingLabel="@VideoLoadingTitle(clip)"
                                                               EmptyText="@VideoPlaceholderText(clip)"
                                                               FailedText="Lỗi render video"
-                                                              ReadyText="Hoàn tất" />
+                                                              ReadyText="Hoàn tất"
+                                                              VideoAriaLabel="@($"Phát video {clip.StartProgressPercent}% đến {clip.EndProgressPercent}%")"
+                                                              OnClick="@(() => OpenVideoPreviewAsync(clip))" />
                                         </div>
                                         <div class="tl-video-card-footer">
                                             <MudText Typo="Typo.caption" Color="Color.Secondary">@FormatClipStartedAt(clip)</MudText>
@@ -953,6 +957,44 @@
                         : "Đã lưu prompt cho ảnh Timelapse.",
                 Severity.Success);
         });
+    }
+
+    private Task OpenImagePreviewAsync(TimelapseStageImage image)
+    {
+        if (string.IsNullOrWhiteSpace(image.PublicUrl))
+        {
+            return Task.CompletedTask;
+        }
+
+        var title = image.IsOriginal ? "Ảnh gốc / thành phẩm" : $"Ảnh AI {image.ProgressPercent}%";
+        var parameters = new DialogParameters
+        {
+            [nameof(Components.Dialogs.ReferenceImageLightboxDialog.Title)] = title,
+            [nameof(Components.Dialogs.ReferenceImageLightboxDialog.ImageUrl)] = image.PublicUrl,
+            [nameof(Components.Dialogs.ReferenceImageLightboxDialog.FileName)] = title
+        };
+        var options = new DialogOptions { CloseButton = true, FullWidth = true, MaxWidth = MaxWidth.Large };
+        _ = DialogService.ShowAsync<Components.Dialogs.ReferenceImageLightboxDialog>(title, parameters, options);
+        return Task.CompletedTask;
+    }
+
+    private Task OpenVideoPreviewAsync(TimelapseVideoClip clip)
+    {
+        if (string.IsNullOrWhiteSpace(clip.PublicUrl))
+        {
+            return Task.CompletedTask;
+        }
+
+        var title = $"Video {clip.StartProgressPercent}% đến {clip.EndProgressPercent}%";
+        var parameters = new DialogParameters
+        {
+            [nameof(Components.Dialogs.LandingIndustryVideoPreviewDialog.Title)] = title,
+            [nameof(Components.Dialogs.LandingIndustryVideoPreviewDialog.VideoUrl)] = clip.PublicUrl,
+            [nameof(Components.Dialogs.LandingIndustryVideoPreviewDialog.AspectRatio)] = FormatRatio(_job!.Snapshot.Ratio)
+        };
+        var options = new DialogOptions { CloseButton = true, FullWidth = true, MaxWidth = MaxWidth.Large };
+        _ = DialogService.ShowAsync<Components.Dialogs.LandingIndustryVideoPreviewDialog>(title, parameters, options);
+        return Task.CompletedTask;
     }
 
     private async Task RetryImageAsync(TimelapseStageImage image)
