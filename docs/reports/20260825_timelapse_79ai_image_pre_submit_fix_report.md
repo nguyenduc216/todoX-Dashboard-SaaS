@@ -51,6 +51,6 @@ Pre-submit resolve failures now emit `TIMELAPSE_IMAGE_PROVIDER_RESOLVE_FAILED` a
 Pre-existing `dotnet format --verify-no-changes` failures remain in unrelated files such as `AccountRepository.cs`, `AiImageRenderRouter.cs`, `Gommo79AiImageService.cs`, `AuditRepository.cs`, `ChibiAvatarService.Generate.cs`, `SceneImageBatchRenderHandler.cs`, `SceneVideoWorkerHandler.cs`, `RVideoJobService.cs`, `WalletService.cs`, and `Gommo79AiImageServiceTests.cs`.
 
 ## L. GIT
-- Commit SHA: pending
+- Commit SHA: `799bac3`
 - Commit message: `fix(timelapse): unblock 79ai image model resolution`
 - Pushed branch: `integration/rdance-on-construction-video-core`
