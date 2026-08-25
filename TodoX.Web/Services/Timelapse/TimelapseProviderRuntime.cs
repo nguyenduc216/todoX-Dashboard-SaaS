@@ -387,8 +387,79 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
                 new { stageId = item.Id, item.Attempt, providerCode = provider.ProviderCode, model = provider.Model, capabilityCode = _options.ImageCapabilityCode, providerAccountId = provider.Credential.ProviderAccountId },
                 ct);
             var reference = await ResolveImageReferenceAsync(item, ct);
+            var continuityProfile = TimelapsePromptResolver.ResolveLandscapeContinuityProfile(item.PromptSnapshotJson);
+            var continuityAnchor = continuityProfile is null
+                ? null
+                : TimelapsePromptResolver.ResolveLandscapeContinuityAnchor(
+                    item.ProgressPercent,
+                    item.DependsOnProgressPercent,
+                    item.DependencyMediaId);
+            if (continuityProfile is not null)
+            {
+                await TryAddSubmitEventAsync(
+                    item.JobId,
+                    "TIMELAPSE_LANDSCAPE_CONTINUITY_ANCHORS",
+                    "Timelapse landscape continuity anchors selected.",
+                    new
+                    {
+                        stageId = item.Id,
+                        profileCode = continuityProfile.ProfileCode,
+                        continuityProfile.SelectNo,
+                        item.ProgressPercent,
+                        adjacentProgressPercent = continuityAnchor?.AdjacentProgressPercent,
+                        anchorStrategy = continuityAnchor?.AnchorStrategy,
+                        adjacentStageId = continuityAnchor?.AdjacentStageId,
+                        referenceMediaId = continuityAnchor?.ReferenceMediaId,
+                        reason = continuityAnchor?.Reason
+                    },
+                    ct);
+            }
             var prompt = TimelapsePromptResolver.ResolveImagePrompt(item.Snapshot, item.ProgressPercent, item.PromptSnapshotJson);
             TimelapsePromptResolver.ValidateProviderPrompt(prompt);
+            if (continuityProfile is not null)
+            {
+                var validation = TimelapsePromptResolver.ValidateLandscapeContinuityPrompt(prompt, continuityProfile);
+                await TryAddSubmitEventAsync(
+                    item.JobId,
+                    "TIMELAPSE_LANDSCAPE_CONTINUITY_RULES_APPLIED",
+                    "Timelapse landscape continuity rules applied to compiled image prompt.",
+                    new
+                    {
+                        stageId = item.Id,
+                        profileCode = continuityProfile.ProfileCode,
+                        continuityProfile.SelectNo,
+                        item.ProgressPercent,
+                        adjacentProgressPercent = continuityAnchor?.AdjacentProgressPercent,
+                        anchorStrategy = continuityAnchor?.AnchorStrategy,
+                        continuityProfile.Intent,
+                        promptLength = prompt.Length
+                    },
+                    ct);
+                await TryAddSubmitEventAsync(
+                    item.JobId,
+                    validation.Passed ? "TIMELAPSE_LANDSCAPE_CONTINUITY_VALIDATION_PASSED" : "TIMELAPSE_LANDSCAPE_CONTINUITY_VALIDATION_FAILED",
+                    validation.Passed
+                        ? "Timelapse landscape continuity rules were applied and validated."
+                        : "Timelapse landscape continuity rules were not fully present in the compiled prompt.",
+                    new
+                    {
+                        stageId = item.Id,
+                        profileCode = continuityProfile.ProfileCode,
+                        continuityProfile.SelectNo,
+                        item.ProgressPercent,
+                        adjacentProgressPercent = continuityAnchor?.AdjacentProgressPercent,
+                        anchorStrategy = continuityAnchor?.AnchorStrategy,
+                        validation.MissingRules,
+                        reasonCode = validation.Passed ? "validated" : "missing_prompt_rules"
+                    },
+                    ct);
+                if (!validation.Passed)
+                {
+                    throw new TimelapseInvalidCompiledPromptException(
+                        "Compiled Timelapse landscape prompt is missing continuity rules.",
+                        prompt.Length);
+                }
+            }
             var ratio = NormalizeImageRatio(item.Snapshot.Ratio);
             request = BuildImageSubmitRequest(provider, prompt, reference, ratio);
             await TryAddSubmitEventAsync(
@@ -1690,20 +1761,135 @@ public static class TimelapsePromptResolver
     public static string ResolveImagePrompt(TimelapseJobSnapshot snapshot, int progressPercent, string promptSnapshotJson)
     {
         var customerOverride = TimelapsePromptSnapshot.GetCustomerOverride(promptSnapshotJson);
-        if (!string.IsNullOrWhiteSpace(customerOverride))
+        var profileText = ExtractProfilePrompt(promptSnapshotJson, progressPercent);
+        var continuityProfile = ResolveLandscapeContinuityProfile(promptSnapshotJson);
+        if (continuityProfile is null && !string.IsNullOrWhiteSpace(customerOverride))
         {
             return customerOverride;
         }
 
-        var profileText = ExtractProfilePrompt(promptSnapshotJson, progressPercent);
+        var continuityText = continuityProfile is not null
+            ? BuildLandscapeContinuityPrompt(continuityProfile, progressPercent)
+            : string.Empty;
         return string.Join("\n", new[]
         {
+            customerOverride,
             profileText,
+            continuityText,
             $"Timelapse construction progress: {progressPercent}%.",
             $"Profile: {CleanText(snapshot.ProfileName) ?? "Timelapse"}.",
             "Keep the same construction site, architecture, camera, perspective, and permanent elements while advancing only the requested construction phase."
         }.Where(x => !string.IsNullOrWhiteSpace(x)));
     }
+
+    public static LandscapeContinuityProfile? ResolveLandscapeContinuityProfile(string promptSnapshotJson)
+    {
+        var profile = ExtractProfileJsonElement(promptSnapshotJson);
+        if (profile is not { ValueKind: JsonValueKind.Object } value)
+        {
+            return null;
+        }
+
+        var code = ReadStringAny(value, "profile_code", "profileCode", "category", "profile_name", "profileName");
+        var selectNo = ReadNumber(value, "select_no") ?? ReadNumber(value, "selectNo");
+        if (selectNo == 71 || string.Equals(code, "landscape_balcony_install_v1", StringComparison.OrdinalIgnoreCase))
+        {
+            return new LandscapeContinuityProfile(71, "landscape_balcony_install_v1", "installation progression");
+        }
+
+        if (selectNo == 72 || string.Equals(code, "landscape_garden_growth_v1", StringComparison.OrdinalIgnoreCase))
+        {
+            return new LandscapeContinuityProfile(72, "landscape_garden_growth_v1", "growth progression");
+        }
+
+        if (selectNo == 73 || string.Equals(code, "landscape_balcony_hybrid_v1", StringComparison.OrdinalIgnoreCase))
+        {
+            return new LandscapeContinuityProfile(73, "landscape_balcony_hybrid_v1", "hybrid install and landscape progression");
+        }
+
+        return null;
+    }
+
+    public static ContinuityPromptValidation ValidateLandscapeContinuityPrompt(string prompt, LandscapeContinuityProfile profile)
+    {
+        var required = new List<string>
+        {
+            "immediately adjacent stage",
+            "same real balcony/garden",
+            "monotonic progress",
+            "preserve architecture",
+            "do not redesign",
+            "must not regress"
+        };
+
+        required.AddRange(profile.SelectNo switch
+        {
+            71 => new[] { "installation progression", "flooring", "planters", "installed components" },
+            72 => new[] { "growth progression", "planting zones", "major pot/planter locations", "hardscape" },
+            73 => new[] { "hybrid install and landscape progression", "plants already introduced", "completed flooring", "installed fixtures" },
+            _ => Array.Empty<string>()
+        });
+
+        var missing = required
+            .Where(rule => !prompt.Contains(rule, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        return new ContinuityPromptValidation(missing.Length == 0, missing);
+    }
+
+    public static LandscapeContinuityAnchor ResolveLandscapeContinuityAnchor(
+        int progressPercent,
+        int? dependsOnProgressPercent,
+        Guid? dependencyMediaId)
+        => new(
+            progressPercent,
+            dependsOnProgressPercent,
+            "reverse_immediate_adjacent_stage",
+            null,
+            dependencyMediaId,
+            "current stage graph generates images in descending progress order from the completed 100% image");
+
+    private static string BuildLandscapeContinuityPrompt(LandscapeContinuityProfile profile, int progressPercent)
+        => string.Join("\n", new[]
+        {
+            $"Profile {ProfileLabel(profile.SelectNo)} is {profile.Intent}.",
+            "Treat the reference image as the immediately adjacent stage of the same real balcony/garden project.",
+            "Preserve architecture, camera, perspective, railing, walls, doors, windows, fixed structures, hardscape, and overall layout identity.",
+            "Represent strict monotonic progress only: 0% < 20% < 40% < 60% < 80% < 100%.",
+            $"At {progressPercent}%, change only the amount of progress needed for this phase while staying derived from the adjacent stage.",
+            "Do not redesign, randomly relocate major objects, change the camera, or make established layout elements disappear.",
+            "Must not regress between adjacent stages; if generating an earlier stage, remove only logically necessary later completion while preserving scene identity.",
+            ProfileSpecificContinuityRules(profile.SelectNo)
+        });
+
+    private static string ProfileSpecificContinuityRules(int selectNo)
+        => selectNo switch
+        {
+            71 => "7A installation progression: preserve installed components, flooring/deck progress, planters, benches, hardscape layout, permanent fixtures, and construction/install direction; 20% must be visibly earlier than 40%, 60% must be substantially more complete, and 80% must be near-finished relative to 100%.",
+            72 => "7B growth progression: preserve planting zones, major pot/planter locations, hardscape, growth direction, scene identity, and existing major greenery; later stages must not lose greenery density or established planting layout.",
+            73 => "7C hybrid install and landscape progression: preserve plants already introduced, completed flooring/deck areas, installed fixtures, major decor/furniture when established, and both install state and greenery continuity.",
+            _ => string.Empty
+        };
+
+    private static string ProfileLabel(int selectNo)
+        => selectNo switch
+        {
+            71 => "7A",
+            72 => "7B",
+            73 => "7C",
+            _ => selectNo.ToString()
+        };
+
+    public sealed record LandscapeContinuityProfile(int SelectNo, string ProfileCode, string Intent);
+
+    public sealed record ContinuityPromptValidation(bool Passed, IReadOnlyList<string> MissingRules);
+
+    public sealed record LandscapeContinuityAnchor(
+        int ProgressPercent,
+        int? AdjacentProgressPercent,
+        string AnchorStrategy,
+        Guid? AdjacentStageId,
+        Guid? ReferenceMediaId,
+        string Reason);
 
     public static void ValidateProviderPrompt(string prompt)
     {
@@ -1838,6 +2024,7 @@ public static class TimelapsePromptResolver
 
     private static string CompileImageProfilePrompt(JsonElement profileElement, int progressPercent)
     {
+        profileElement = NormalizeProfileElement(profileElement);
         if (profileElement.ValueKind == JsonValueKind.String)
         {
             var text = profileElement.GetString();
@@ -1879,6 +2066,9 @@ public static class TimelapsePromptResolver
         AddText(parts, ReadStringAny(target, "prompt_fragment", "promptFragment"));
         AddList(parts, "Must exist", ReadElement(target, "must_exist") ?? ReadElement(target, "mustExist"));
         AddList(parts, "Must not exist", ReadElement(target, "must_not_exist") ?? ReadElement(target, "mustNotExist"));
+        AddList(parts, "Preserve from adjacent stage", ReadElement(target, "preserve_from_adjacent_stage") ?? ReadElement(target, "preserveFromAdjacentStage"));
+        AddList(parts, "Allowed changes", ReadElement(target, "allowed_changes") ?? ReadElement(target, "allowedChanges"));
+        AddList(parts, "Forbidden changes", ReadElement(target, "forbidden_changes") ?? ReadElement(target, "forbiddenChanges"));
 
         JsonElement? continuity = profileElement.TryGetProperty("continuity_rules", out var continuityValue)
             && continuityValue.ValueKind == JsonValueKind.Object
@@ -1960,12 +2150,14 @@ public static class TimelapsePromptResolver
             using var doc = JsonDocument.Parse(promptSnapshotJson);
             if (doc.RootElement.TryGetProperty("profileJson", out var camel))
             {
-                return ParseProfileElement(camel);
+                var parsed = ParseProfileElement(camel);
+                return parsed is null ? null : NormalizeProfileElement(parsed.Value).Clone();
             }
 
             if (doc.RootElement.TryGetProperty("ProfileJson", out var pascal))
             {
-                return ParseProfileElement(pascal);
+                var parsed = ParseProfileElement(pascal);
+                return parsed is null ? null : NormalizeProfileElement(parsed.Value).Clone();
             }
         }
         catch (JsonException)
@@ -1974,6 +2166,26 @@ public static class TimelapsePromptResolver
         }
 
         return null;
+    }
+
+    private static JsonElement NormalizeProfileElement(JsonElement element)
+    {
+        if (element.ValueKind != JsonValueKind.Object)
+        {
+            return element;
+        }
+
+        if (element.TryGetProperty("profile_json", out var nested)
+            || element.TryGetProperty("profileJson", out nested))
+        {
+            var parsed = ParseProfileElement(nested);
+            if (parsed is not null)
+            {
+                return parsed.Value;
+            }
+        }
+
+        return element;
     }
 
     private static JsonElement? ParseProfileElement(JsonElement element)
