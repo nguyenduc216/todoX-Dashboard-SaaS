@@ -99,6 +99,137 @@ public class TimelapsePromptEditingTests
         TimelapsePromptResolver.ValidateProviderPrompt(prompt);
     }
 
+    [Theory]
+    [InlineData(71, "landscape_balcony_install_v1", "installation progression", "flooring", "installed components")]
+    [InlineData(72, "landscape_garden_growth_v1", "growth progression", "planting zones", "major pot/planter locations")]
+    [InlineData(73, "landscape_balcony_hybrid_v1", "hybrid install and landscape progression", "completed flooring", "plants already introduced")]
+    public void LandscapeProfiles_CompileAdjacentContinuityRulesByIntent(
+        int selectNo,
+        string profileCode,
+        string intent,
+        string preservedFirst,
+        string preservedSecond)
+    {
+        var profileSnapshot = JsonSerializer.Serialize(new
+        {
+            ProfileJson = new
+            {
+                select_no = selectNo,
+                profile_code = profileCode,
+                phase_rules = new[]
+                {
+                    new
+                    {
+                        min_progress = 40,
+                        max_progress = 60,
+                        phase_goal = intent,
+                        must_exist = new[] { "same shell" },
+                        must_not_exist = new[] { "random redesign" },
+                        preserve_from_adjacent_stage = new[] { preservedFirst },
+                        allowed_changes = new[] { "phase-appropriate progress" },
+                        forbidden_changes = new[] { "camera drift" }
+                    }
+                },
+                continuity_rules = new
+                {
+                    must_preserve = new[] { preservedSecond },
+                    must_avoid = new[] { "regression" }
+                }
+            }
+        });
+
+        var profile = TimelapsePromptResolver.ResolveLandscapeContinuityProfile(profileSnapshot);
+        var prompt = TimelapsePromptResolver.ResolveImagePrompt(
+            new TimelapseJobSnapshot { ProfileCode = profileCode, ProfileName = profileCode },
+            40,
+            profileSnapshot);
+
+        Assert.NotNull(profile);
+        Assert.Equal(selectNo, profile!.SelectNo);
+        Assert.Contains(intent, prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(preservedFirst, prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(preservedSecond, prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("immediately adjacent stage", prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("same real balcony/garden", prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("must not regress", prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.True(TimelapsePromptResolver.ValidateLandscapeContinuityPrompt(prompt, profile).Passed);
+    }
+
+    [Theory]
+    [InlineData(71, 80, 100)]
+    [InlineData(71, 60, 80)]
+    [InlineData(71, 40, 60)]
+    [InlineData(71, 20, 40)]
+    [InlineData(71, 0, 20)]
+    [InlineData(72, 80, 100)]
+    [InlineData(72, 60, 80)]
+    [InlineData(72, 40, 60)]
+    [InlineData(72, 20, 40)]
+    [InlineData(72, 0, 20)]
+    [InlineData(73, 80, 100)]
+    [InlineData(73, 60, 80)]
+    [InlineData(73, 40, 60)]
+    [InlineData(73, 20, 40)]
+    [InlineData(73, 0, 20)]
+    public void LandscapeProfiles_UseReverseImmediateAdjacentStageAsPrimaryAnchor(
+        int selectNo,
+        int progressPercent,
+        int expectedAdjacentProgress)
+    {
+        var mediaId = Guid.NewGuid();
+        var anchor = TimelapsePromptResolver.ResolveLandscapeContinuityAnchor(
+            progressPercent,
+            expectedAdjacentProgress,
+            mediaId);
+
+        Assert.Equal(progressPercent, anchor.ProgressPercent);
+        Assert.Equal(expectedAdjacentProgress, anchor.AdjacentProgressPercent);
+        Assert.Equal("reverse_immediate_adjacent_stage", anchor.AnchorStrategy);
+        Assert.Equal(mediaId, anchor.ReferenceMediaId);
+        Assert.Contains("descending progress order", anchor.Reason, StringComparison.OrdinalIgnoreCase);
+
+        var graph = TimelapseStageGraphBuilder.Build(5);
+        Assert.Contains(progressPercent, graph.GeneratedImageOrder);
+        Assert.Contains(expectedAdjacentProgress, graph.ImageProgressions);
+        Assert.True(expectedAdjacentProgress > progressPercent, $"7{(char)('A' + selectNo - 71)} should anchor to the next later generated/completed stage.");
+    }
+
+    [Fact]
+    public void Landscape7A_RecognizesNestedDatabaseProfileJsonAndRejectsRegressionLanguageGap()
+    {
+        const string snapshot = """
+            {"ProfileJson":{"profile_json":{"select_no":71,"profile_code":"landscape_balcony_install_v1"}}}
+            """;
+
+        var profile = TimelapsePromptResolver.ResolveLandscapeContinuityProfile(snapshot);
+        var prompt = TimelapsePromptResolver.ResolveImagePrompt(
+            new TimelapseJobSnapshot { ProfileName = "Landscape 7A" },
+            80,
+            snapshot);
+
+        Assert.NotNull(profile);
+        Assert.Equal(71, profile!.SelectNo);
+        Assert.Contains("near-finished", prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("must not regress", prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.False(TimelapsePromptResolver.ValidateLandscapeContinuityPrompt(
+            "immediately adjacent stage", profile).Passed);
+    }
+
+    [Fact]
+    public void LandscapeContinuity_SourceContractsUseStructuredEventsAndKeep79AiRoute()
+    {
+        var runtime = ReadSource("TodoX.Web", "Services", "Timelapse", "TimelapseProviderRuntime.cs");
+
+        Assert.Contains("TIMELAPSE_LANDSCAPE_CONTINUITY_ANCHORS", runtime, StringComparison.Ordinal);
+        Assert.Contains("TIMELAPSE_LANDSCAPE_CONTINUITY_RULES_APPLIED", runtime, StringComparison.Ordinal);
+        Assert.Contains("TIMELAPSE_LANDSCAPE_CONTINUITY_VALIDATION_PASSED", runtime, StringComparison.Ordinal);
+        Assert.Contains("TIMELAPSE_LANDSCAPE_CONTINUITY_VALIDATION_FAILED", runtime, StringComparison.Ordinal);
+        Assert.Contains("reverse_immediate_adjacent_stage", runtime, StringComparison.Ordinal);
+        Assert.Contains("/generateImage", runtime, StringComparison.Ordinal);
+        Assert.Contains("/image", runtime, StringComparison.Ordinal);
+        Assert.DoesNotContain("YEScale", runtime, StringComparison.OrdinalIgnoreCase);
+    }
+
     [Fact]
     public void ImagePromptValidation_RejectsRawProfileMetadataBeforeProviderSubmit()
     {
