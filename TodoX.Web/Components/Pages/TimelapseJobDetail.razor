@@ -376,7 +376,7 @@
                                         }
                                         @if (image.Status != TimelapseOperationStatuses.Cancelled && !string.IsNullOrWhiteSpace(image.ErrorMessage))
                                         {
-                                            <MudAlert Severity="Severity.Error" Dense="true">@FriendlyOperationError(image.ErrorMessage, "ảnh")</MudAlert>
+                                            <MudAlert Severity="Severity.Error" Dense="true">@FriendlyOperationError(image.ErrorMessage, image.ProgressPercent, "ảnh")</MudAlert>
                                         }
                                         @if (!image.IsOriginal && CanRetryImage(image.Status))
                                         {
@@ -469,7 +469,7 @@
                                         </div>
                                         @if (clip.Status != TimelapseOperationStatuses.Cancelled && !string.IsNullOrWhiteSpace(clip.ErrorMessage))
                                         {
-                                            <MudAlert Severity="Severity.Error" Dense="true">@FriendlyOperationError(clip.ErrorMessage, "video")</MudAlert>
+                                            <MudAlert Severity="Severity.Error" Dense="true">@FriendlyOperationError(clip.ErrorMessage, null, "video")</MudAlert>
                                         }
                                         @if (CanRetry(clip.Status))
                                         {
@@ -1327,8 +1327,12 @@
             ? $"Bắt đầu: {clip.StartedAt.Value.ToLocalTime():HH:mm dd/MM}"
             : "Chưa bắt đầu";
 
-    private static string FriendlyOperationError(string? message, string mediaType)
-        => $"Không thể tạo {mediaType}. Vui lòng bấm Render lại để thử lại.";
+    private static string FriendlyOperationError(string? message, int? progressPercent, string mediaType)
+        => mediaType == "video"
+            ? "Có lỗi xảy ra khi tạo video."
+            : progressPercent is > 0
+                ? $"Không thể tạo ảnh AI tại mốc {progressPercent}%."
+                : "Không thể tạo ảnh AI.";
 
     private static string FormatRatio(string ratio)
         => string.Equals(ratio, TimelapseRequestRules.PortraitRatio, StringComparison.OrdinalIgnoreCase)

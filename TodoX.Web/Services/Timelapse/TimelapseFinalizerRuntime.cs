@@ -146,7 +146,7 @@ public sealed class TimelapseFinalizerRuntime : ITimelapseFinalizerRuntime
                 item.JobId,
                 item.Snapshot,
                 ex.GetType().Name,
-                ex.Message,
+                "Có lỗi xảy ra khi hoàn thiện video.",
                 CoreFailureBillingPolicy.KeepCharge,
                 ct);
         }

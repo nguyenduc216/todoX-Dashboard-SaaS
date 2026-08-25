@@ -238,6 +238,10 @@ public sealed class TimelapseWorkerClaimRegressionTests
         Assert.Contains("TimelapseImageExecutionPhase.IsWaitingForWorker(image)", page);
         Assert.Contains("TIMELAPSE_IMAGE_SUBMIT_BEGIN", runtime);
         Assert.Contains("TIMELAPSE_IMAGE_SUBMITTED", runtime);
+        Assert.Contains("TIMELAPSE_IMAGE_MODEL_SUBMITTED", runtime);
+        Assert.Contains("TIMELAPSE_IMAGE_MODEL_SUCCEEDED", runtime);
+        Assert.True(runtime.IndexOf("\"TIMELAPSE_IMAGE_MODEL_SUBMITTED\"", StringComparison.Ordinal)
+            < runtime.IndexOf("\"TIMELAPSE_IMAGE_MODEL_SUCCEEDED\"", StringComparison.Ordinal));
         Assert.Contains("TIMELAPSE_IMAGE_FAILED", runtime);
         Assert.Contains("TIMELAPSE_RENDER_STARTED", workflow);
     }
@@ -268,6 +272,9 @@ public sealed class TimelapseWorkerClaimRegressionTests
         Assert.Contains("SaveImageFallbackAsync", repository);
         Assert.Contains("item.Attempt,", runtime);
         Assert.Contains("TIMELAPSE_IMAGE_MODEL_FALLBACK", runtime);
+        Assert.Contains("TIMELAPSE_IMAGE_MODEL_FAILED", runtime);
+        Assert.Contains("providerTaskId = item.ProviderTaskId", runtime);
+        Assert.Contains("image_model_attempts", runtime);
         Assert.Contains("await _repo.ReleaseImageClaimAsync(item.Id, item.Attempt, ct);", runtime);
         Assert.DoesNotContain("active_attempt=active_attempt+1", runtime);
         Assert.DoesNotContain("CreateImageAttempt", runtime);

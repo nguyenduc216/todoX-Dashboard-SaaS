@@ -126,7 +126,21 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
                 item.TenantId,
                 ct);
 
-            if (!await _repo.SaveImageCompletedAsync(item.Id, item.Attempt, media.Id, media.ObjectKey!, media.PublicUrl ?? media.FileUrl!, status.SanitizedResponseJson, ct))
+            var completedAt = DateTimeOffset.UtcNow;
+            var completedAttempt = new
+            {
+                model = item.ProviderModel,
+                providerTaskId = item.ProviderTaskId,
+                status = "succeeded",
+                errorCode = (string?)null,
+                errorMessage = (string?)null,
+                submittedAt = (DateTimeOffset?)null,
+                failedAt = (DateTimeOffset?)null,
+                completedAt,
+                mediaId = media.Id
+            };
+            var completedResponseJson = AppendImageModelAttempt(status.SanitizedResponseJson, completedAttempt);
+            if (!await _repo.SaveImageCompletedAsync(item.Id, item.Attempt, media.Id, media.ObjectKey!, media.PublicUrl ?? media.FileUrl!, completedResponseJson, ct))
             {
                 _logger.LogWarning("TIMELAPSE_IMAGE_COMPLETE_STALE jobId={JobId} progress={Progress} attempt={Attempt} taskId={TaskId}",
                     item.JobId, item.ProgressPercent, item.Attempt, item.ProviderTaskId);
@@ -136,7 +150,21 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
             _logger.LogInformation("TIMELAPSE_IMAGE_COMPLETE jobId={JobId} progress={Progress} attempt={Attempt} taskId={TaskId} mediaId={MediaId}",
                 item.JobId, item.ProgressPercent, item.Attempt, item.ProviderTaskId, media.Id);
             await _renderJobs.AddEventAsync(item.JobId, "TIMELAPSE_IMAGE_COMPLETE", "Timelapse image saved to TodoX media.",
-                new { item.ProgressPercent, item.Attempt, taskId = item.ProviderTaskId, mediaId = media.Id }, ct: ct);
+                new { item.ProgressPercent, item.Attempt, providerTaskId = item.ProviderTaskId, taskId = item.ProviderTaskId, mediaId = media.Id }, ct: ct);
+            await _renderJobs.AddEventAsync(item.JobId, "TIMELAPSE_IMAGE_MODEL_SUCCEEDED", "Timelapse image model completed and media was saved.",
+                new
+                {
+                    item.ProgressPercent,
+                    item.Attempt,
+                    item.ProviderCode,
+                    model = item.ProviderModel,
+                    providerTaskId = item.ProviderTaskId,
+                    taskId = item.ProviderTaskId,
+                    status = "succeeded",
+                    mediaId = media.Id,
+                    completedAt
+                },
+                ct: ct);
             await _repo.AdvanceAfterImageCompletedAsync(item.JobId, ct);
             await _coreLifecycle.AdvanceAsync(
                 item.JobId,
@@ -366,7 +394,7 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
                 item.JobId,
                 item.Snapshot,
                 ex.ErrorCode,
-                ex.Message,
+                ImageFailureMessage(item.ProgressPercent),
                 CoreFailureBillingPolicy.ReleaseReservation,
                 ct);
             return;
@@ -414,20 +442,43 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
                 item.JobId,
                 item.Snapshot,
                 ex.ErrorCode ?? "submit_failed",
-                ex.ErrorMessage,
+                ImageFailureMessage(item.ProgressPercent),
                 CoreFailureBillingPolicy.ReleaseReservation,
                 ct);
             return;
         }
 
-        await _repo.SaveImageSubmittedAsync(item.Id, item.Attempt, provider.ProviderCode, provider.Model, submit.TaskId, request.SanitizedJson, submit.SanitizedResponseJson, ct);
+        var submittedAt = DateTimeOffset.UtcNow;
+        var submittedAttempt = new
+        {
+            model = provider.Model,
+            providerTaskId = submit.TaskId,
+            status = "submitted",
+            errorCode = (string?)null,
+            errorMessage = (string?)null,
+            submittedAt,
+            failedAt = (DateTimeOffset?)null
+        };
+        var submittedRequestJson = AppendImageModelAttempt(request.SanitizedJson, submittedAttempt);
+        var submittedResponseJson = AppendImageModelAttempt(submit.SanitizedResponseJson, submittedAttempt);
+        await _repo.SaveImageSubmittedAsync(item.Id, item.Attempt, provider.ProviderCode, provider.Model, submit.TaskId, submittedRequestJson, submittedResponseJson, ct);
         _logger.LogInformation("TIMELAPSE_IMAGE_SUBMIT jobId={JobId} progress={Progress} attempt={Attempt} provider={ProviderCode} model={Model} taskId={TaskId}",
             item.JobId, item.ProgressPercent, item.Attempt, provider.ProviderCode, provider.Model, submit.TaskId);
         await _renderJobs.AddEventAsync(
             item.JobId,
-            "TIMELAPSE_IMAGE_MODEL_SUCCEEDED",
+            "TIMELAPSE_IMAGE_MODEL_SUBMITTED",
             "Timelapse image model submitted successfully.",
-            new { item.ProgressPercent, item.Attempt, provider.ProviderCode, model = provider.Model, taskId = submit.TaskId },
+            new
+            {
+                item.ProgressPercent,
+                item.Attempt,
+                provider.ProviderCode,
+                model = provider.Model,
+                providerTaskId = submit.TaskId,
+                taskId = submit.TaskId,
+                status = "submitted",
+                submittedAt
+            },
             ct: ct);
         await TryAddSubmitEventAsync(
             item.JobId,
@@ -537,7 +588,7 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
                 item.JobId,
                 item.Snapshot,
                 ex.ErrorCode ?? "submit_failed",
-                ex.ErrorMessage,
+                "Có lỗi xảy ra khi tạo video.",
                 CoreFailureBillingPolicy.ReleaseReservation,
                 ct);
             return;
@@ -1027,11 +1078,16 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
             or HttpStatusCode.ServiceUnavailable
             or HttpStatusCode.GatewayTimeout;
 
+    private static string ImageFailureMessage(int progressPercent)
+        => progressPercent > 0
+            ? $"Không thể tạo ảnh AI tại mốc {progressPercent}%."
+            : "Không thể tạo ảnh AI.";
+
     private async Task FailImageAsync(TimelapseImageWorkItem item, string? errorCode, string errorMessage, string responseJson, CancellationToken ct)
     {
         var saved = await _repo.SaveImageFailedAsync(item.Id, item.Attempt, errorCode, errorMessage, responseJson, ct);
         await _renderJobs.AddEventAsync(item.JobId, "TIMELAPSE_IMAGE_FAILED", "Timelapse image task failed.",
-            new { item.ProgressPercent, item.Attempt, taskId = item.ProviderTaskId, errorCode, errorMessage }, "error", ct);
+            new { item.ProgressPercent, item.Attempt, providerTaskId = item.ProviderTaskId, taskId = item.ProviderTaskId, errorCode, errorMessage }, "error", ct);
         if (!saved)
         {
             _logger.LogWarning("TIMELAPSE_IMAGE_FAILED_STALE jobId={JobId} progress={Progress} attempt={Attempt} taskId={TaskId}",
@@ -1042,7 +1098,7 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
             item.JobId,
             item.Snapshot,
             errorCode,
-            errorMessage,
+            ImageFailureMessage(item.ProgressPercent),
             FailurePolicy(item.ProviderTaskId),
             ct);
     }
@@ -1058,18 +1114,31 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
         CancellationToken ct)
     {
         var nextModel = _imageModelSelector.GetNext(currentModel, HasImageReference(item));
+        var failedAt = DateTimeOffset.UtcNow;
+        var failedAttempt = new
+        {
+            model = currentModel,
+            providerTaskId = item.ProviderTaskId,
+            status = "failed",
+            errorCode,
+            errorMessage,
+            submittedAt = (DateTimeOffset?)null,
+            failedAt
+        };
         if (string.IsNullOrWhiteSpace(nextModel))
         {
             await _renderJobs.AddEventAsync(
                 item.JobId,
                 "TIMELAPSE_IMAGE_MODEL_EXHAUSTED",
                 "Timelapse image model chain exhausted.",
-                new { item.ProgressPercent, item.Attempt, currentModel, errorCode, errorMessage },
+                new { item.ProgressPercent, item.Attempt, currentModel, failedModel = currentModel, providerTaskId = item.ProviderTaskId, taskId = item.ProviderTaskId, errorCode, errorMessage, failedAt },
                 "error",
                 ct);
             return false;
         }
 
+        var requestWithAttempts = AppendImageModelAttempt(StripWorkerClaim(requestJson), failedAttempt);
+        var responseWithAttempts = AppendImageModelAttempt(responseJson, failedAttempt);
         var saved = await _repo.SaveImageFallbackAsync(
             item.Id,
             item.Attempt,
@@ -1077,8 +1146,8 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
             nextModel,
             errorCode,
             errorMessage,
-            StripWorkerClaim(requestJson),
-            responseJson,
+            requestWithAttempts,
+            responseWithAttempts,
             ct);
         if (!saved)
         {
@@ -1090,14 +1159,14 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
             item.JobId,
             "TIMELAPSE_IMAGE_MODEL_FAILED",
             "Timelapse image model failed.",
-            new { item.ProgressPercent, item.Attempt, currentModel, nextModel, errorCode, errorMessage },
+            new { item.ProgressPercent, item.Attempt, currentModel, failedModel = currentModel, nextModel, providerTaskId = item.ProviderTaskId, taskId = item.ProviderTaskId, status = "failed", errorCode, errorMessage, failedAt },
             "warning",
             ct);
         await _renderJobs.AddEventAsync(
             item.JobId,
             "TIMELAPSE_IMAGE_MODEL_FALLBACK",
             "Timelapse image worker will retry the next model in the chain.",
-            new { item.ProgressPercent, item.Attempt, currentModel, nextModel },
+            new { item.ProgressPercent, item.Attempt, currentModel, failedModel = currentModel, nextModel, providerTaskId = item.ProviderTaskId, taskId = item.ProviderTaskId, errorCode, errorMessage, failedAt },
             "warning",
             ct);
         return true;
@@ -1176,11 +1245,68 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
         }
     }
 
+    private static string AppendImageModelAttempt(string? json, object attempt)
+    {
+        try
+        {
+            using var buffer = new MemoryStream();
+            using (var writer = new Utf8JsonWriter(buffer))
+            {
+                writer.WriteStartObject();
+                if (!string.IsNullOrWhiteSpace(json))
+                {
+                    using var doc = JsonDocument.Parse(json);
+                    if (doc.RootElement.ValueKind == JsonValueKind.Object)
+                    {
+                        foreach (var property in doc.RootElement.EnumerateObject())
+                        {
+                            if (!string.Equals(property.Name, "image_model_attempts", StringComparison.OrdinalIgnoreCase))
+                            {
+                                property.WriteTo(writer);
+                            }
+                        }
+
+                        writer.WritePropertyName("image_model_attempts");
+                        writer.WriteStartArray();
+                        if (doc.RootElement.TryGetProperty("image_model_attempts", out var attempts)
+                            && attempts.ValueKind == JsonValueKind.Array)
+                        {
+                            foreach (var existing in attempts.EnumerateArray())
+                            {
+                                existing.WriteTo(writer);
+                            }
+                        }
+
+                        JsonSerializer.Serialize(writer, attempt, JsonOptions);
+                        writer.WriteEndArray();
+                        writer.WriteEndObject();
+                        return Encoding.UTF8.GetString(buffer.ToArray());
+                    }
+                }
+
+                writer.WritePropertyName("image_model_attempts");
+                writer.WriteStartArray();
+                JsonSerializer.Serialize(writer, attempt, JsonOptions);
+                writer.WriteEndArray();
+                writer.WriteEndObject();
+                return Encoding.UTF8.GetString(buffer.ToArray());
+            }
+        }
+        catch (JsonException)
+        {
+            return JsonSerializer.Serialize(new
+            {
+                providerResponseParseFailed = true,
+                image_model_attempts = new[] { attempt }
+            }, JsonOptions);
+        }
+    }
+
     private async Task FailVideoAsync(TimelapseVideoWorkItem item, string? errorCode, string errorMessage, string responseJson, CancellationToken ct)
     {
         var saved = await _repo.SaveVideoFailedAsync(item.Id, item.Attempt, errorCode, errorMessage, responseJson, ct);
         await _renderJobs.AddEventAsync(item.JobId, "TIMELAPSE_VIDEO_FAILED", "Timelapse video task failed.",
-            new { item.ClipIndex, item.Attempt, taskId = item.ProviderTaskId, errorCode, errorMessage }, "error", ct);
+            new { item.ClipIndex, item.Attempt, providerTaskId = item.ProviderTaskId, taskId = item.ProviderTaskId, errorCode, errorMessage }, "error", ct);
         if (!saved)
         {
             _logger.LogWarning("TIMELAPSE_VIDEO_FAILED_STALE jobId={JobId} clip={ClipIndex} attempt={Attempt} taskId={TaskId}",
@@ -1191,7 +1317,7 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
             item.JobId,
             item.Snapshot,
             errorCode,
-            errorMessage,
+            "Có lỗi xảy ra khi tạo video.",
             FailurePolicy(item.ProviderTaskId),
             ct);
     }
