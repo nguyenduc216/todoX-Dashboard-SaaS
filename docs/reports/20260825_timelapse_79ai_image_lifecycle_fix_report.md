@@ -86,7 +86,7 @@ Output directory:
 D:\todoX\Dashboard-web\TodoXPortal\todoX-Dashboard-SaaS\artifacts\publish\todox-dashboard
 ```
 
-Publish result and final commit SHA are recorded after the publish/commit steps complete.
+Publish completed successfully. Commit SHA: `3f06278`.
 
 ## Changed files
 
@@ -106,3 +106,5 @@ Required commit message:
 fix(timelapse): persist fallback safely and log 79ai image lifecycle
 ```
 
+Commit: `3f06278`  
+Push: completed to `origin/integration/rdance-on-construction-video-core`.
