@@ -1,7 +1,9 @@
 using System.Data;
+using System.Collections.Concurrent;
 using System.Text.Json;
 using Dapper;
 using TodoX.Web.Data;
+using TodoX.Web.Services.Render;
 using TodoX.Web.Models.Timelapse;
 
 namespace TodoX.Web.Services.Timelapse;
@@ -9,6 +11,7 @@ namespace TodoX.Web.Services.Timelapse;
 public interface ITimelapseWorkerRepository
 {
     Task<TimelapseImageWorkItem?> ClaimImageAsync(string workerKey, TimeSpan claimFor, CancellationToken ct = default);
+    Task<int> DiagnoseImageClaimsAsync(string workerKey, TimeSpan staleAfter, CancellationToken ct = default);
     Task<TimelapseImageClaimDiagnostic?> DiagnoseImageClaimAsync(Guid jobId, int progressPercent, CancellationToken ct = default);
     Task<TimelapseVideoWorkItem?> ClaimVideoAsync(string workerKey, TimeSpan claimFor, CancellationToken ct = default);
     Task<TimelapseFinalizerWorkItem?> ClaimFinalizerAsync(string workerKey, TimeSpan claimFor, CancellationToken ct = default);
@@ -37,11 +40,21 @@ public sealed class TimelapseWorkerRepository : ITimelapseWorkerRepository
 
     private readonly TodoXConnectionFactory _factory;
     private readonly TenantContext _tenant;
+    private readonly IRenderJobService _renderJobs;
+    private readonly ILogger<TimelapseWorkerRepository> _logger;
 
-    public TimelapseWorkerRepository(TodoXConnectionFactory factory, TenantContext tenant)
+    private static readonly ConcurrentDictionary<string, DateTimeOffset> ClaimDiagnosticThrottle = new(StringComparer.Ordinal);
+
+    public TimelapseWorkerRepository(
+        TodoXConnectionFactory factory,
+        TenantContext tenant,
+        IRenderJobService renderJobs,
+        ILogger<TimelapseWorkerRepository> logger)
     {
         _factory = factory;
         _tenant = tenant;
+        _renderJobs = renderJobs;
+        _logger = logger;
     }
 
     public async Task<TimelapseImageWorkItem?> ClaimImageAsync(string workerKey, TimeSpan claimFor, CancellationToken ct = default)
@@ -52,7 +65,30 @@ public sealed class TimelapseWorkerRepository : ITimelapseWorkerRepository
         var row = await conn.QuerySingleOrDefaultAsync<ImageRow>(
             """
             WITH candidate AS (
-                SELECT s.id
+                SELECT s.id AS Id,
+                       s.tenant_id AS TenantId,
+                       s.job_id AS JobId,
+                       s.stage_index AS StageIndex,
+                       s.progress_percent AS ProgressPercent,
+                       s.depends_on_progress_percent AS DependsOnProgressPercent,
+                       s.active_attempt AS Attempt,
+                       s.prompt_snapshot_json::text AS PromptSnapshotJson,
+                       s.provider_task_id AS ProviderTaskId,
+                       s.provider_code AS ProviderCode,
+                       s.provider_model AS ProviderModel,
+                       s.status AS StageStatus,
+                       v.status AS VersionStatus,
+                       j.status AS ParentJobStatus,
+                       j.tenant_id AS ParentTenantId,
+                       j.user_id AS UserId,
+                       j.customer_id AS CustomerId,
+                       j.input_json::text AS SnapshotJson,
+                       d.status AS DependencyStatus,
+                       d.progress_percent AS DependencyProgress,
+                       d.result_media_id AS DependencyMediaId,
+                       d.public_url AS DependencyPublicUrl,
+                       d.object_key AS DependencyObjectKey,
+                       COALESCE((v.request_json->'worker_claim'->>'until')::timestamptz, '-infinity'::timestamptz) AS ClaimUntil
                   FROM timelapse.timelapse_image_stages s
                   JOIN render.render_jobs j
                     ON j.id=s.job_id
@@ -66,6 +102,7 @@ public sealed class TimelapseWorkerRepository : ITimelapseWorkerRepository
                  WHERE s.tenant_id=@tenant
                    AND s.status='RENDERING'
                    AND v.status='RENDERING'
+                   AND j.status <> 'cancelled'
                    AND (
                        s.depends_on_progress_percent IS NULL
                        OR (
@@ -86,31 +123,33 @@ public sealed class TimelapseWorkerRepository : ITimelapseWorkerRepository
                        jsonb_build_object('worker', @workerKey, 'until', (now() + @claimFor::interval)),
                        true),
                    updated_at=now()
-              FROM timelapse.timelapse_image_stages s
-              JOIN render.render_jobs j ON j.id=s.job_id
-              LEFT JOIN timelapse.timelapse_image_stages d
-                ON d.job_id=s.job_id
-               AND d.progress_percent=s.depends_on_progress_percent
-              JOIN candidate c ON c.id=s.id
-             WHERE v.image_stage_id=s.id
-               AND v.attempt=s.active_attempt
-             RETURNING s.id AS Id,
-                       s.tenant_id AS TenantId,
-                       s.job_id AS JobId,
-                       j.user_id AS UserId,
-                       j.customer_id AS CustomerId,
-                       j.input_json::text AS SnapshotJson,
-                       s.stage_index AS StageIndex,
-                       s.progress_percent AS ProgressPercent,
-                       s.depends_on_progress_percent AS DependsOnProgressPercent,
-                       s.active_attempt AS Attempt,
-                       s.prompt_snapshot_json::text AS PromptSnapshotJson,
-                       s.provider_task_id AS ProviderTaskId,
-                       s.provider_code AS ProviderCode,
-                       s.provider_model AS ProviderModel,
-                       d.result_media_id AS DependencyMediaId,
-                       d.public_url AS DependencyPublicUrl,
-                       d.object_key AS DependencyObjectKey;
+              FROM candidate c
+             WHERE v.image_stage_id=c.Id
+               AND v.attempt=c.Attempt
+             RETURNING c.Id AS Id,
+                       c.TenantId AS TenantId,
+                       c.JobId AS JobId,
+                       c.StageIndex AS StageIndex,
+                       c.ProgressPercent AS ProgressPercent,
+                       c.DependsOnProgressPercent AS DependsOnProgressPercent,
+                       c.Attempt AS Attempt,
+                       c.PromptSnapshotJson AS PromptSnapshotJson,
+                       c.ProviderTaskId AS ProviderTaskId,
+                       c.ProviderCode AS ProviderCode,
+                       c.ProviderModel AS ProviderModel,
+                       c.UserId AS UserId,
+                       c.CustomerId AS CustomerId,
+                       c.SnapshotJson AS SnapshotJson,
+                       c.DependencyMediaId AS DependencyMediaId,
+                       c.DependencyPublicUrl AS DependencyPublicUrl,
+                       c.DependencyObjectKey AS DependencyObjectKey,
+                       c.StageStatus AS StageStatus,
+                       c.VersionStatus AS VersionStatus,
+                       c.ParentJobStatus AS ParentJobStatus,
+                       c.ParentTenantId AS ParentTenantId,
+                       c.DependencyStatus AS DependencyStatus,
+                       c.DependencyProgress AS DependencyProgress,
+                       c.ClaimUntil AS ClaimUntil;
             """,
             new { tenant = _tenant.TenantId, workerKey, claimFor = ToPgInterval(claimFor) }, tx);
         tx.Commit();
@@ -118,35 +157,145 @@ public sealed class TimelapseWorkerRepository : ITimelapseWorkerRepository
         return row is null ? null : ToImageWorkItem(row);
     }
 
+    public async Task<int> DiagnoseImageClaimsAsync(string workerKey, TimeSpan staleAfter, CancellationToken ct = default)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        var rows = (await conn.QueryAsync<ImageRow>(
+            """
+            SELECT s.id AS Id,
+                   s.tenant_id AS TenantId,
+                   s.job_id AS JobId,
+                   s.stage_index AS StageIndex,
+                   s.progress_percent AS ProgressPercent,
+                   s.depends_on_progress_percent AS DependsOnProgressPercent,
+                   s.active_attempt AS Attempt,
+                   s.prompt_snapshot_json::text AS PromptSnapshotJson,
+                   s.provider_task_id AS ProviderTaskId,
+                   s.provider_code AS ProviderCode,
+                   s.provider_model AS ProviderModel,
+                   s.status AS StageStatus,
+                   v.status AS VersionStatus,
+                   j.status AS ParentJobStatus,
+                   j.tenant_id AS ParentTenantId,
+                   j.user_id AS UserId,
+                   j.customer_id AS CustomerId,
+                   j.input_json::text AS SnapshotJson,
+                   d.status AS DependencyStatus,
+                   d.progress_percent AS DependencyProgress,
+                   d.result_media_id AS DependencyMediaId,
+                   d.public_url AS DependencyPublicUrl,
+                   d.object_key AS DependencyObjectKey,
+                   COALESCE((v.request_json->'worker_claim'->>'until')::timestamptz, '-infinity'::timestamptz) AS ClaimUntil
+              FROM timelapse.timelapse_image_stages s
+              JOIN render.render_jobs j
+                ON j.id=s.job_id
+              LEFT JOIN timelapse.timelapse_image_stage_versions v
+                ON v.image_stage_id=s.id
+               AND v.attempt=s.active_attempt
+              LEFT JOIN timelapse.timelapse_image_stages d
+                ON d.job_id=s.job_id
+               AND d.progress_percent=s.depends_on_progress_percent
+             WHERE s.tenant_id=@tenant
+               AND s.status='RENDERING'
+               AND v.status='RENDERING'
+               AND j.status <> 'cancelled'
+               AND s.started_at IS NOT NULL
+               AND s.started_at <= now() - @staleAfter::interval
+             ORDER BY s.started_at NULLS FIRST, s.stage_index
+             LIMIT 10;
+            """,
+            new { tenant = _tenant.TenantId, staleAfter = ToPgInterval(staleAfter) })).ToList();
+
+        var written = 0;
+        foreach (var row in rows)
+        {
+            var evaluation = EvaluateImageClaim(
+                _tenant.TenantId,
+                row.TenantId,
+                row.StageStatus,
+                row.VersionStatus,
+                row.ParentJobStatus,
+                row.DependencyStatus,
+                row.DependencyProgress,
+                row.DependencyMediaId,
+                row.DependencyPublicUrl,
+                row.DependencyObjectKey,
+                row.ClaimUntil);
+            var eventType = evaluation.Eligible ? "TIMELAPSE_IMAGE_STUCK_BEFORE_CLAIM" : "TIMELAPSE_IMAGE_CLAIM_SKIPPED";
+            if (!ShouldWriteClaimDiagnostic(row.Id, evaluation.Reason))
+            {
+                continue;
+            }
+
+            await TryAddJobEventAsync(
+                row.JobId,
+                eventType,
+                evaluation.Eligible
+                    ? "Eligible Timelapse image stage remained unclaimed beyond the diagnostic threshold."
+                    : "Timelapse image stage was not claimable.",
+                new
+                {
+                    jobId = row.JobId,
+                    stageId = row.Id,
+                    progressPercent = row.ProgressPercent,
+                    attempt = row.Attempt,
+                    workerKey,
+                    workerTenantId = _tenant.TenantId,
+                    stageTenantId = row.TenantId,
+                    parentTenantId = row.ParentTenantId,
+                    eligible = evaluation.Eligible,
+                    reason = evaluation.Reason,
+                    stageStatus = row.StageStatus,
+                    versionStatus = row.VersionStatus,
+                    parentJobStatus = row.ParentJobStatus,
+                    dependencyProgress = row.DependencyProgress,
+                    dependencyStatus = row.DependencyStatus,
+                    hasDependencyMedia = row.DependencyMediaId is not null,
+                    hasDependencyReference = !string.IsNullOrWhiteSpace(row.DependencyPublicUrl) || !string.IsNullOrWhiteSpace(row.DependencyObjectKey),
+                    providerTaskId = row.ProviderTaskId,
+                    claimUntil = row.ClaimUntil,
+                    machine = Environment.MachineName,
+                    processId = Environment.ProcessId
+                },
+                evaluation.Eligible ? "warning" : "info",
+                ct);
+            written++;
+        }
+
+        return written;
+    }
+
     public async Task<TimelapseImageClaimDiagnostic?> DiagnoseImageClaimAsync(Guid jobId, int progressPercent, CancellationToken ct = default)
     {
         await _tenant.EnsureLoadedAsync(ct);
         using var conn = await _factory.OpenAsync(ct);
-        return await conn.QuerySingleOrDefaultAsync<TimelapseImageClaimDiagnostic>(
+        var row = await conn.QuerySingleOrDefaultAsync<ImageRow>(
             """
-            SELECT s.status AS StageStatus,
+            SELECT s.id AS Id,
+                   s.tenant_id AS TenantId,
+                   s.job_id AS JobId,
+                   s.stage_index AS StageIndex,
+                   s.progress_percent AS ProgressPercent,
+                   s.depends_on_progress_percent AS DependsOnProgressPercent,
+                   s.active_attempt AS Attempt,
+                   s.prompt_snapshot_json::text AS PromptSnapshotJson,
+                   s.provider_task_id AS ProviderTaskId,
+                   s.provider_code AS ProviderCode,
+                   s.provider_model AS ProviderModel,
+                   s.status AS StageStatus,
                    v.status AS VersionStatus,
                    j.status AS ParentJobStatus,
+                   j.tenant_id AS ParentTenantId,
+                   j.user_id AS UserId,
+                   j.customer_id AS CustomerId,
+                   j.input_json::text AS SnapshotJson,
                    d.status AS DependencyStatus,
-                   (d.result_media_id IS NOT NULL) AS HasDependencyMedia,
-                   (NULLIF(d.public_url,'') IS NOT NULL OR NULLIF(d.object_key,'') IS NOT NULL) AS HasDependencyReference,
-                   (COALESCE((v.request_json->'worker_claim'->>'until')::timestamptz, '-infinity'::timestamptz) <= now()) AS ClaimExpired,
-                   (s.tenant_id=@tenant) AS TenantMatches,
-                   (
-                       s.tenant_id=@tenant
-                       AND s.status='RENDERING'
-                       AND v.status='RENDERING'
-                       AND j.status <> 'cancelled'
-                       AND (
-                           s.depends_on_progress_percent IS NULL
-                           OR (
-                               d.status='COMPLETED'
-                               AND d.result_media_id IS NOT NULL
-                               AND (NULLIF(d.public_url,'') IS NOT NULL OR NULLIF(d.object_key,'') IS NOT NULL)
-                           )
-                       )
-                       AND COALESCE((v.request_json->'worker_claim'->>'until')::timestamptz, '-infinity'::timestamptz) <= now()
-                   ) AS Eligible
+                   d.progress_percent AS DependencyProgress,
+                   d.result_media_id AS DependencyMediaId,
+                   d.public_url AS DependencyPublicUrl,
+                   d.object_key AS DependencyObjectKey,
+                   COALESCE((v.request_json->'worker_claim'->>'until')::timestamptz, '-infinity'::timestamptz) AS ClaimUntil
               FROM timelapse.timelapse_image_stages s
               JOIN render.render_jobs j ON j.id=s.job_id
               LEFT JOIN timelapse.timelapse_image_stage_versions v
@@ -159,6 +308,46 @@ public sealed class TimelapseWorkerRepository : ITimelapseWorkerRepository
                AND s.progress_percent=@progressPercent;
             """,
             new { tenant = _tenant.TenantId, jobId, progressPercent });
+        if (row is null)
+        {
+            return null;
+        }
+
+        var evaluation = EvaluateImageClaim(
+            _tenant.TenantId,
+            row.TenantId,
+            row.StageStatus,
+            row.VersionStatus,
+            row.ParentJobStatus,
+            row.DependencyStatus,
+            row.DependencyProgress,
+            row.DependencyMediaId,
+            row.DependencyPublicUrl,
+            row.DependencyObjectKey,
+            row.ClaimUntil);
+        return new TimelapseImageClaimDiagnostic
+        {
+            StageId = row.Id,
+            JobId = row.JobId,
+            StageTenantId = row.TenantId,
+            WorkerTenantId = _tenant.TenantId,
+            ParentTenantId = row.ParentTenantId,
+            ProgressPercent = row.ProgressPercent,
+            ActiveAttempt = row.Attempt,
+            StageStatus = row.StageStatus,
+            VersionStatus = row.VersionStatus,
+            ParentJobStatus = row.ParentJobStatus,
+            DependencyProgress = row.DependencyProgress,
+            DependencyStatus = row.DependencyStatus,
+            HasDependencyMedia = row.DependencyMediaId is not null,
+            HasDependencyReference = !string.IsNullOrWhiteSpace(row.DependencyPublicUrl) || !string.IsNullOrWhiteSpace(row.DependencyObjectKey),
+            ClaimUntil = row.ClaimUntil,
+            ClaimExpired = row.ClaimUntil <= DateTimeOffset.UtcNow,
+            ProviderTaskId = row.ProviderTaskId,
+            TenantMatches = evaluation.TenantMatches,
+            Eligible = evaluation.Eligible,
+            Reason = evaluation.Reason
+        };
     }
 
     public async Task<TimelapseVideoWorkItem?> ClaimVideoAsync(string workerKey, TimeSpan claimFor, CancellationToken ct = default)
@@ -998,6 +1187,87 @@ public sealed class TimelapseWorkerRepository : ITimelapseWorkerRepository
     private static string Clip(string? value)
         => string.IsNullOrWhiteSpace(value) ? "Timelapse provider operation failed." : value.Trim()[..Math.Min(value.Trim().Length, 1000)];
 
+    internal static TimelapseImageClaimEvaluation EvaluateImageClaim(
+        Guid workerTenantId,
+        Guid stageTenantId,
+        string? stageStatus,
+        string? versionStatus,
+        string? parentJobStatus,
+        string? dependencyStatus,
+        int? dependencyProgress,
+        Guid? dependencyMediaId,
+        string? dependencyPublicUrl,
+        string? dependencyObjectKey,
+        DateTimeOffset claimUntil)
+    {
+        if (stageTenantId != workerTenantId)
+        {
+            return new TimelapseImageClaimEvaluation(false, false, "TENANT_MISMATCH");
+        }
+
+        if (!string.Equals(stageStatus, "RENDERING", StringComparison.OrdinalIgnoreCase))
+        {
+            return new TimelapseImageClaimEvaluation(true, false, "STAGE_NOT_RENDERING");
+        }
+
+        if (!string.Equals(versionStatus, "RENDERING", StringComparison.OrdinalIgnoreCase))
+        {
+            return new TimelapseImageClaimEvaluation(true, false, "VERSION_NOT_RENDERING");
+        }
+
+        if (string.Equals(parentJobStatus, "cancelled", StringComparison.OrdinalIgnoreCase))
+        {
+            return new TimelapseImageClaimEvaluation(true, false, "PARENT_CANCELLED");
+        }
+
+        if (dependencyProgress is not null)
+        {
+            if (!string.Equals(dependencyStatus, "COMPLETED", StringComparison.OrdinalIgnoreCase))
+            {
+                return new TimelapseImageClaimEvaluation(true, false, "DEPENDENCY_NOT_COMPLETED");
+            }
+
+            if (dependencyMediaId is null)
+            {
+                return new TimelapseImageClaimEvaluation(true, false, "DEPENDENCY_MEDIA_MISSING");
+            }
+
+            if (string.IsNullOrWhiteSpace(dependencyPublicUrl) && string.IsNullOrWhiteSpace(dependencyObjectKey))
+            {
+                return new TimelapseImageClaimEvaluation(true, false, "DEPENDENCY_REFERENCE_MISSING");
+            }
+        }
+
+        if (claimUntil > DateTimeOffset.UtcNow)
+        {
+            return new TimelapseImageClaimEvaluation(true, false, "CLAIM_NOT_EXPIRED");
+        }
+
+        return new TimelapseImageClaimEvaluation(true, true, "ELIGIBLE");
+    }
+
+    internal static bool ShouldWriteClaimDiagnostic(Guid stageId, string reason)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var key = $"{stageId:N}:{reason}";
+        return ClaimDiagnosticThrottle.AddOrUpdate(
+            key,
+            _ => now,
+            (_, last) => now - last >= TimeSpan.FromMinutes(1) ? now : last) == now;
+    }
+
+    private async Task TryAddJobEventAsync(Guid jobId, string eventType, string message, object data, string level, CancellationToken ct)
+    {
+        try
+        {
+            await _renderJobs.AddEventAsync(jobId, eventType, message, data, level, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "TIMELAPSE_WORKER_EVENT_WRITE_FAILED jobId={JobId} eventType={EventType}", jobId, eventType);
+        }
+    }
+
     private static TimelapseJobSnapshot DeserializeSnapshot(string json)
         => JsonSerializer.Deserialize<TimelapseJobSnapshot>(json, JsonOptions)
            ?? throw new InvalidOperationException("Timelapse job snapshot is invalid.");
@@ -1081,6 +1351,7 @@ public sealed class TimelapseWorkerRepository : ITimelapseWorkerRepository
         public Guid Id { get; set; }
         public Guid TenantId { get; set; }
         public Guid JobId { get; set; }
+        public Guid ParentTenantId { get; set; }
         public Guid? UserId { get; set; }
         public Guid? CustomerId { get; set; }
         public string SnapshotJson { get; set; } = "{}";
@@ -1092,9 +1363,15 @@ public sealed class TimelapseWorkerRepository : ITimelapseWorkerRepository
         public string? ProviderTaskId { get; set; }
         public string? ProviderCode { get; set; }
         public string? ProviderModel { get; set; }
+        public string? StageStatus { get; set; }
+        public string? VersionStatus { get; set; }
+        public string? ParentJobStatus { get; set; }
+        public string? DependencyStatus { get; set; }
+        public int? DependencyProgress { get; set; }
         public Guid? DependencyMediaId { get; set; }
         public string? DependencyPublicUrl { get; set; }
         public string? DependencyObjectKey { get; set; }
+        public DateTimeOffset ClaimUntil { get; set; }
     }
 
     private sealed class VideoRow
@@ -1160,16 +1437,29 @@ public sealed record TimelapseImageWorkItem(
 
 public sealed class TimelapseImageClaimDiagnostic
 {
+    public Guid StageId { get; set; }
+    public Guid JobId { get; set; }
+    public Guid StageTenantId { get; set; }
+    public Guid WorkerTenantId { get; set; }
+    public Guid ParentTenantId { get; set; }
+    public int ProgressPercent { get; set; }
+    public int ActiveAttempt { get; set; }
     public string? StageStatus { get; set; }
     public string? VersionStatus { get; set; }
     public string? ParentJobStatus { get; set; }
+    public int? DependencyProgress { get; set; }
     public string? DependencyStatus { get; set; }
     public bool HasDependencyMedia { get; set; }
     public bool HasDependencyReference { get; set; }
+    public DateTimeOffset ClaimUntil { get; set; }
     public bool ClaimExpired { get; set; }
+    public string? ProviderTaskId { get; set; }
     public bool TenantMatches { get; set; }
     public bool Eligible { get; set; }
+    public string? Reason { get; set; }
 }
+
+internal sealed record TimelapseImageClaimEvaluation(bool TenantMatches, bool Eligible, string Reason);
 
 public sealed record TimelapseVideoWorkItem(
     Guid Id,

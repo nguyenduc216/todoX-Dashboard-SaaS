@@ -8,21 +8,33 @@ public sealed class TenantContext
 {
     private readonly TodoXConnectionFactory _factory;
     private readonly string _tenantCode;
+    private readonly Guid? _tenantIdOverride;
     private Guid? _tenantId;
 
     public TenantContext(TodoXConnectionFactory factory, IConfiguration configuration)
     {
         _factory = factory;
         _tenantCode = configuration["TodoX:TenantCode"] ?? "TODOX_INTERNAL";
+        _tenantIdOverride = Guid.TryParse(configuration["TodoX:TenantId"], out var tenantId)
+            ? tenantId
+            : null;
     }
 
     public Guid TenantId => _tenantId
         ?? throw new InvalidOperationException("TenantContext has not been initialized. Call EnsureLoadedAsync first.");
 
+    public string TenantCode => _tenantCode;
+
     public async Task EnsureLoadedAsync(CancellationToken ct = default)
     {
         if (_tenantId.HasValue)
         {
+            return;
+        }
+
+        if (_tenantIdOverride.HasValue)
+        {
+            _tenantId = _tenantIdOverride;
             return;
         }
 

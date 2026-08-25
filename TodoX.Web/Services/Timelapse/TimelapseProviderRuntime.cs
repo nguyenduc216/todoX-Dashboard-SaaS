@@ -280,6 +280,12 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
             var prompt = TimelapsePromptResolver.ResolveImagePrompt(item.Snapshot, item.ProgressPercent, item.PromptSnapshotJson);
             TimelapsePromptResolver.ValidateProviderPrompt(prompt);
             request = BuildImageSubmitRequest(provider, prompt, reference, NormalizeImageRatio(item.Snapshot.Ratio));
+            await TryAddSubmitEventAsync(
+                item.JobId,
+                "TIMELAPSE_IMAGE_SUBMIT_BEGIN",
+                "Timelapse image submit started.",
+                new { item.ProgressPercent, item.Attempt, provider.ProviderCode, model = provider.Model },
+                ct);
             submit = await _taskClient.SubmitAsync(request.Raw, ct);
         }
         catch (TimelapseInvalidCompiledPromptException ex)
@@ -371,8 +377,12 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
         await _repo.SaveImageSubmittedAsync(item.Id, item.Attempt, provider.ProviderCode, provider.Model, submit.TaskId, request.SanitizedJson, submit.SanitizedResponseJson, ct);
         _logger.LogInformation("TIMELAPSE_IMAGE_SUBMIT jobId={JobId} progress={Progress} attempt={Attempt} provider={ProviderCode} model={Model} taskId={TaskId}",
             item.JobId, item.ProgressPercent, item.Attempt, provider.ProviderCode, provider.Model, submit.TaskId);
-        await _renderJobs.AddEventAsync(item.JobId, "TIMELAPSE_IMAGE_SUBMIT", "Timelapse image task submitted to 79AI.",
-            new { item.ProgressPercent, item.Attempt, provider.ProviderCode, model = provider.Model, taskId = submit.TaskId }, ct: ct);
+        await TryAddSubmitEventAsync(
+            item.JobId,
+            "TIMELAPSE_IMAGE_SUBMITTED",
+            "Timelapse image task submitted to 79AI.",
+            new { item.ProgressPercent, item.Attempt, provider.ProviderCode, model = provider.Model, taskId = submit.TaskId },
+            ct);
     }
 
     private async Task SubmitVideoAsync(TimelapseVideoWorkItem item, CancellationToken ct)
@@ -1018,6 +1028,18 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "TIMELAPSE_SUBMIT_FAILURE_EVENT_WRITE_FAILED jobId={JobId} eventType={EventType}", jobId, eventType);
+        }
+    }
+
+    private async Task TryAddSubmitEventAsync(Guid jobId, string eventType, string message, object metadata, CancellationToken ct)
+    {
+        try
+        {
+            await _renderJobs.AddEventAsync(jobId, eventType, message, metadata, ct: ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "TIMELAPSE_IMAGE_EVENT_WRITE_FAILED jobId={JobId} eventType={EventType}", jobId, eventType);
         }
     }
 

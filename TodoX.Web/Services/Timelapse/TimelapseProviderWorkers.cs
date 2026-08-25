@@ -17,8 +17,21 @@ public sealed class TimelapseImageWorker : BackgroundService
         _logger = logger;
     }
 
-    protected override Task ExecuteAsync(CancellationToken stoppingToken)
-        => TimelapseWorkerLoop.RunAsync(
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        using (var scope = _scopeFactory.CreateScope())
+        {
+            var tenant = scope.ServiceProvider.GetRequiredService<TenantContext>();
+            await tenant.EnsureLoadedAsync(stoppingToken);
+            _logger.LogInformation(
+                "TIMELAPSE_IMAGE_WORKER_TENANT worker=timelapse-image tenantId={TenantId} tenantCode={TenantCode} machine={MachineName} processId={ProcessId}",
+                tenant.TenantId,
+                tenant.TenantCode,
+                Environment.MachineName,
+                Environment.ProcessId);
+        }
+
+        await TimelapseWorkerLoop.RunAsync(
             "timelapse-image",
             _options.ImageParallelism,
             _config,
@@ -31,6 +44,7 @@ public sealed class TimelapseImageWorker : BackgroundService
                 var item = await repo.ClaimImageAsync(workerKey, claimFor, ct);
                 if (item is null)
                 {
+                    await repo.DiagnoseImageClaimsAsync(workerKey, TimeSpan.FromSeconds(60), ct);
                     return new TimelapseWorkerIterationResult(false, false);
                 }
 
@@ -40,6 +54,7 @@ public sealed class TimelapseImageWorker : BackgroundService
                 return new TimelapseWorkerIterationResult(true, true);
             },
             stoppingToken);
+    }
 }
 
 public sealed class TimelapseVideoWorker : BackgroundService
@@ -139,14 +154,18 @@ internal static class TimelapseWorkerLoop
         var claimMinutes = Math.Max(1, options.ClaimMinutes);
 
         logger.LogInformation(
-            "TIMELAPSE_WORKER_START worker={WorkerName} renderQueueEnabled={RenderQueueEnabled} timelapseEnabled={TimelapseEnabled} configuredParallelism={ConfiguredParallelism} effectiveParallelism={EffectiveParallelism} idleDelayMs={IdleDelayMs} claimMinutes={ClaimMinutes} machineName={MachineName} processId={ProcessId}",
+            "TIMELAPSE_WORKER_START worker={WorkerName} renderQueueEnabled={RenderQueueEnabled} timelapseEnabled={TimelapseEnabled} configuredParallelism={ConfiguredParallelism} effectiveParallelism={EffectiveParallelism} idleDelayMs={IdleDelayMs} pollDelayMs={PollDelayMs} claimMinutes={ClaimMinutes} providerCode={ProviderCode} imageCapabilityCode={ImageCapabilityCode} imageModelName={ImageModelName} machineName={MachineName} processId={ProcessId}",
             workerName,
             renderQueueEnabled,
             options.Enabled,
             parallelism,
             effectiveParallelism,
             idleDelayMs,
+            Math.Max(250, options.PollDelayMs),
             claimMinutes,
+            options.ProviderCode,
+            options.ImageCapabilityCode,
+            options.ImageModelName,
             Environment.MachineName,
             Environment.ProcessId);
 

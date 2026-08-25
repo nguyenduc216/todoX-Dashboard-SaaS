@@ -1,4 +1,5 @@
 using TodoX.Web.Models.Timelapse;
+using TodoX.Web.Services.Timelapse;
 using Xunit;
 
 namespace TodoX.Web.Tests;
@@ -27,7 +28,7 @@ public sealed class TimelapseWorkerClaimRegressionTests
     public void ImageClaimPreservesDependencyAndExpiredClaimRulesForRestartRecovery()
     {
         var source = ReadRepoFile("Services", "Timelapse", "TimelapseWorkerRepository.cs");
-        var claim = Between(source, "public async Task<TimelapseImageWorkItem?> ClaimImageAsync", "public async Task<TimelapseImageClaimDiagnostic?> DiagnoseImageClaimAsync");
+        var claim = Between(source, "public async Task<TimelapseImageWorkItem?> ClaimImageAsync", "public async Task<int> DiagnoseImageClaimsAsync");
 
         Assert.Contains("s.status='RENDERING'", claim);
         Assert.Contains("v.status='RENDERING'", claim);
@@ -40,16 +41,80 @@ public sealed class TimelapseWorkerClaimRegressionTests
     }
 
     [Fact]
-    public void ImageClaimDiagnosticMatchesEligibilityRules()
+    public void ImageClaimDiagnosticAndStuckDiagnosticsExposeReasonedEligibility()
     {
         var source = ReadRepoFile("Services", "Timelapse", "TimelapseWorkerRepository.cs");
 
         Assert.Contains("Task<TimelapseImageClaimDiagnostic?> DiagnoseImageClaimAsync", source);
+        Assert.Contains("Task<int> DiagnoseImageClaimsAsync", source);
+        Assert.Contains("StageId", source);
+        Assert.Contains("ParentTenantId", source);
+        Assert.Contains("ProviderTaskId", source);
+        Assert.Contains("Reason", source);
         Assert.Contains("HasDependencyMedia", source);
         Assert.Contains("HasDependencyReference", source);
         Assert.Contains("ClaimExpired", source);
         Assert.Contains("TenantMatches", source);
         Assert.Contains("Eligible", source);
+        Assert.Contains("TIMELAPSE_IMAGE_STUCK_BEFORE_CLAIM", source);
+        Assert.Contains("TIMELAPSE_IMAGE_CLAIM_SKIPPED", source);
+    }
+
+    [Fact]
+    public void ClaimRuleEvaluation_CoversTenantMismatchAndExpiredClaimRecovery()
+    {
+        var workerTenantId = Guid.NewGuid();
+        var otherTenantId = Guid.NewGuid();
+
+        var eligible = TimelapseWorkerRepository.EvaluateImageClaim(
+            workerTenantId,
+            workerTenantId,
+            "RENDERING",
+            "RENDERING",
+            "GENERATING_IMAGES",
+            null,
+            null,
+            null,
+            null,
+            null,
+            DateTimeOffset.UtcNow.AddMinutes(-1));
+
+        Assert.True(eligible.TenantMatches);
+        Assert.True(eligible.Eligible);
+        Assert.Equal("ELIGIBLE", eligible.Reason);
+
+        var mismatch = TimelapseWorkerRepository.EvaluateImageClaim(
+            workerTenantId,
+            otherTenantId,
+            "RENDERING",
+            "RENDERING",
+            "GENERATING_IMAGES",
+            null,
+            null,
+            null,
+            null,
+            null,
+            DateTimeOffset.UtcNow.AddMinutes(-1));
+
+        Assert.False(mismatch.TenantMatches);
+        Assert.False(mismatch.Eligible);
+        Assert.Equal("TENANT_MISMATCH", mismatch.Reason);
+
+        var claimBlocked = TimelapseWorkerRepository.EvaluateImageClaim(
+            workerTenantId,
+            workerTenantId,
+            "RENDERING",
+            "RENDERING",
+            "GENERATING_IMAGES",
+            null,
+            null,
+            null,
+            null,
+            null,
+            DateTimeOffset.UtcNow.AddMinutes(5));
+
+        Assert.False(claimBlocked.Eligible);
+        Assert.Equal("CLAIM_NOT_EXPIRED", claimBlocked.Reason);
     }
 
     [Fact]
@@ -58,6 +123,7 @@ public sealed class TimelapseWorkerClaimRegressionTests
         var source = ReadRepoFile("Services", "Timelapse", "TimelapseProviderWorkers.cs");
 
         Assert.Contains("TIMELAPSE_WORKER_START", source);
+        Assert.Contains("TIMELAPSE_IMAGE_WORKER_TENANT", source);
         Assert.Contains("TIMELAPSE_WORKER_DISABLED", source);
         Assert.Contains("TIMELAPSE_WORKER_PARALLELISM_NORMALIZED", source);
         Assert.Contains("TIMELAPSE_WORKER_HEARTBEAT", source);
@@ -69,6 +135,9 @@ public sealed class TimelapseWorkerClaimRegressionTests
         Assert.Contains("ShouldLogNullClaim", source);
         Assert.Contains("Math.Max(1, parallelism)", source);
         Assert.Contains("TimelapseWorkerIterationResult", source);
+        Assert.Contains("pollDelayMs={PollDelayMs}", source);
+        Assert.Contains("providerCode={ProviderCode}", source);
+        Assert.Contains("imageModelName={ImageModelName}", source);
     }
 
     [Fact]
@@ -76,12 +145,13 @@ public sealed class TimelapseWorkerClaimRegressionTests
     {
         var workflow = ReadRepoFile("Services", "Timelapse", "TimelapseWorkflowService.cs");
         var page = ReadRepoFile("Components", "Pages", "TimelapseJobDetail.razor");
+        var runtime = ReadRepoFile("Services", "Timelapse", "TimelapseProviderRuntime.cs");
 
-        Assert.Contains("Đang chờ xử lý", workflow);
-        Assert.Contains("Đang chờ hệ thống xử lý lâu hơn bình thường", workflow);
         Assert.Contains("TimelapseImageExecutionPhase.IsWaitingForWorker(image)", page);
-        Assert.Contains("Đang chờ xử lý...", page);
-        Assert.Contains("Đang chờ hệ thống xử lý lâu hơn bình thường.", page);
+        Assert.Contains("TIMELAPSE_IMAGE_SUBMIT_BEGIN", runtime);
+        Assert.Contains("TIMELAPSE_IMAGE_SUBMITTED", runtime);
+        Assert.Contains("TIMELAPSE_IMAGE_FAILED", runtime);
+        Assert.Contains("TIEN", workflow, StringComparison.OrdinalIgnoreCase);
     }
 
     private static string Between(string source, string startMarker, string endMarker)
