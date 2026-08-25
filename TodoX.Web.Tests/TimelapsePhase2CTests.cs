@@ -1,5 +1,7 @@
 using System.Reflection;
 using System.Text.Json;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using TodoX.Web.Services.AiProviders;
 using TodoX.Web.Services.Timelapse;
 using Xunit;
@@ -326,6 +328,53 @@ public class TimelapsePhase2CTests
         Assert.Contains("provider_task_id=NULL", workerRepository, StringComparison.Ordinal);
         Assert.Contains("_options.ImageCapabilityCode", runtime, StringComparison.Ordinal);
         Assert.Contains("SelectImageModel(item.ProviderModel", runtime, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ImageRetry_ResetsModelChainAndProviderTaskForNewAttemptOnly()
+    {
+        var workflow = ReadSource("TodoX.Web", "Services", "Timelapse", "TimelapseWorkflowService.cs");
+        var workerRepository = ReadSource("TodoX.Web", "Services", "Timelapse", "TimelapseWorkerRepository.cs");
+        var runtime = ReadSource("TodoX.Web", "Services", "Timelapse", "TimelapseProviderRuntime.cs");
+
+        var workflowStart = workflow.IndexOf("private async Task StartNextImageIfReadyAsync", StringComparison.Ordinal);
+        var workflowEnd = workflow.IndexOf("private async Task StartReadyVideosAsync", workflowStart, StringComparison.Ordinal);
+        var workflowStarter = workflow[workflowStart..workflowEnd];
+        Assert.Contains("provider_code=NULL", workflowStarter, StringComparison.Ordinal);
+        Assert.Contains("provider_model=NULL", workflowStarter, StringComparison.Ordinal);
+        Assert.Contains("provider_task_id=NULL", workflowStarter, StringComparison.Ordinal);
+        Assert.Contains("error_code=NULL", workflowStarter, StringComparison.Ordinal);
+        Assert.Contains("error_message=NULL", workflowStarter, StringComparison.Ordinal);
+
+        var workerStart = workerRepository.IndexOf("private async Task StartNextImageIfReadyAsync", StringComparison.Ordinal);
+        var workerEnd = workerRepository.IndexOf("private async Task StartReadyVideosAsync", workerStart, StringComparison.Ordinal);
+        var workerStarter = workerRepository[workerStart..workerEnd];
+        Assert.Contains("provider_code=NULL", workerStarter, StringComparison.Ordinal);
+        Assert.Contains("provider_model=NULL", workerStarter, StringComparison.Ordinal);
+        Assert.Contains("provider_task_id=NULL", workerStarter, StringComparison.Ordinal);
+        Assert.Contains("error_code=NULL", workerStarter, StringComparison.Ordinal);
+        Assert.Contains("error_message=NULL", workerStarter, StringComparison.Ordinal);
+
+        var rerenderEvent = workflow[workflow.IndexOf("TIMELAPSE_IMAGE_RERENDER_REQUESTED", StringComparison.Ordinal)..];
+        Assert.Contains("stageId = stage.Id", rerenderEvent, StringComparison.Ordinal);
+        Assert.Contains("oldAttempt", rerenderEvent, StringComparison.Ordinal);
+        Assert.Contains("newAttempt", rerenderEvent, StringComparison.Ordinal);
+        Assert.Contains("previousModel", rerenderEvent, StringComparison.Ordinal);
+        Assert.Contains("resetModelChain = true", rerenderEvent, StringComparison.Ordinal);
+        Assert.Contains("startingModel = (string?)null", rerenderEvent, StringComparison.Ordinal);
+
+        Assert.Contains("SelectImageModel(item.ProviderModel, hasReference)", runtime, StringComparison.Ordinal);
+        Assert.Contains("SaveImageFallbackAsync(", runtime, StringComparison.Ordinal);
+        Assert.Contains("nextModel", runtime, StringComparison.Ordinal);
+        Assert.True(runtime.IndexOf("SaveImageFallbackAsync(", StringComparison.Ordinal)
+            < runtime.IndexOf("TIMELAPSE_IMAGE_MODEL_FALLBACK", StringComparison.Ordinal));
+
+        var selector = new TimelapseImageModelSelector(Options.Create(new TimelapseProviderWorkerOptions
+        {
+            ImageModelsWithReference = new[] { "google_image_gen_banana_2", "seedream_5_0" }
+        }), NullLogger<TimelapseImageModelSelector>.Instance);
+        Assert.Equal("google_image_gen_banana_2", selector.GetNext(null, hasReference: true));
+        Assert.Equal("seedream_5_0", selector.GetNext("google_image_gen_banana_2", hasReference: true));
     }
 
     [Fact]

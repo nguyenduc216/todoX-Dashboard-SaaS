@@ -172,6 +172,8 @@ public sealed class TimelapseWorkflowService : ITimelapseWorkflowService
                    progress_percent AS ProgressPercent,
                    is_original AS IsOriginal,
                    status AS Status,
+                   active_attempt AS ActiveAttempt,
+                   provider_model AS ProviderModel,
                    prompt_snapshot_json::text AS PromptSnapshotJson
               FROM timelapse.timelapse_image_stages
              WHERE tenant_id=@tenant
@@ -240,6 +242,8 @@ public sealed class TimelapseWorkflowService : ITimelapseWorkflowService
                     : stage.PromptSnapshotJson));
 
         var impact = TimelapseRerenderImpactPlanner.Plan(snapshot.SceneCount, stage.ProgressPercent);
+        var oldAttempt = stage.ActiveAttempt;
+        var previousModel = stage.ProviderModel;
         await conn.ExecuteAsync(
             """
             UPDATE timelapse.timelapse_image_stages
@@ -277,6 +281,9 @@ public sealed class TimelapseWorkflowService : ITimelapseWorkflowService
             """,
             new { jobId, tenant = _tenant.TenantId, status = TimelapseParentStatuses.GeneratingImages }, tx);
         await StartNextImageIfReadyAsync(conn, tx, jobId);
+        var newAttempt = await conn.QuerySingleAsync<int>(
+            "SELECT active_attempt FROM timelapse.timelapse_image_stages WHERE id=@stageId;",
+            new { stageId = stage.Id }, tx);
         tx.Commit();
 
         if (updatePrompt)
@@ -290,7 +297,12 @@ public sealed class TimelapseWorkflowService : ITimelapseWorkflowService
             "Customer requested image rerender; dependent earlier images and related videos were invalidated.",
             new
             {
-                imageStageId = stage.Id,
+                stageId = stage.Id,
+                oldAttempt,
+                newAttempt,
+                previousModel,
+                resetModelChain = true,
+                startingModel = (string?)null,
                 progressPercent = stage.ProgressPercent,
                 invalidImages = impact.ImageProgressesToInvalidate,
                 invalidVideos = impact.VideoClipIndexesToInvalidate,
@@ -823,6 +835,8 @@ public sealed class TimelapseWorkflowService : ITimelapseWorkflowService
                 UPDATE timelapse.timelapse_image_stages
                    SET active_attempt=active_attempt+1,
                        status='RENDERING',
+                       provider_code=NULL,
+                       provider_model=NULL,
                        provider_task_id=NULL,
                        error_code=NULL,
                        error_message=NULL,
@@ -1310,6 +1324,8 @@ public sealed class TimelapseWorkflowService : ITimelapseWorkflowService
         public int ProgressPercent { get; set; }
         public bool IsOriginal { get; set; }
         public string Status { get; set; } = string.Empty;
+        public int ActiveAttempt { get; set; }
+        public string? ProviderModel { get; set; }
         public string PromptSnapshotJson { get; set; } = "{}";
     }
 

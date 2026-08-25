@@ -1133,7 +1133,7 @@ public sealed class TimelapseWorkerRepository : ITimelapseWorkerRepository
         if (stage is not null)
         {
             var attempt = await conn.QuerySingleAsync<int>(
-                "UPDATE timelapse.timelapse_image_stages SET active_attempt=active_attempt+1, status='RENDERING', provider_task_id=NULL, started_at=now(), updated_at=now() WHERE id=@id RETURNING active_attempt;",
+                "UPDATE timelapse.timelapse_image_stages SET active_attempt=active_attempt+1, status='RENDERING', provider_code=NULL, provider_model=NULL, provider_task_id=NULL, error_code=NULL, error_message=NULL, started_at=now(), completed_at=NULL, updated_at=now() WHERE id=@id RETURNING active_attempt;",
                 new { stage.Id }, tx);
             await conn.ExecuteAsync(
                 """
