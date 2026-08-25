@@ -87,8 +87,7 @@ public sealed class TimelapseWorkerRepository : ITimelapseWorkerRepository
                        d.progress_percent AS DependencyProgress,
                        d.result_media_id AS DependencyMediaId,
                        d.public_url AS DependencyPublicUrl,
-                       d.object_key AS DependencyObjectKey,
-                       COALESCE((v.request_json->'worker_claim'->>'until')::timestamptz, '-infinity'::timestamptz) AS ClaimUntil
+                       d.object_key AS DependencyObjectKey
                   FROM timelapse.timelapse_image_stages s
                   JOIN render.render_jobs j
                     ON j.id=s.job_id
@@ -158,8 +157,7 @@ public sealed class TimelapseWorkerRepository : ITimelapseWorkerRepository
                        c.ParentJobStatus AS ParentJobStatus,
                        c.ParentTenantId AS ParentTenantId,
                        c.DependencyStatus AS DependencyStatus,
-                       c.DependencyProgress AS DependencyProgress,
-                       c.ClaimUntil AS ClaimUntil;
+                       c.DependencyProgress AS DependencyProgress;
             """,
             new { tenant = _tenant.TenantId, workerKey, claimFor = ToPgInterval(claimFor) }, tx);
         tx.Commit();
@@ -196,7 +194,7 @@ public sealed class TimelapseWorkerRepository : ITimelapseWorkerRepository
                    d.result_media_id AS DependencyMediaId,
                    d.public_url AS DependencyPublicUrl,
                    d.object_key AS DependencyObjectKey,
-                   COALESCE((v.request_json->'worker_claim'->>'until')::timestamptz, '-infinity'::timestamptz) AS ClaimUntil
+                   (v.request_json->'worker_claim'->>'until')::timestamptz AS ClaimUntil
               FROM timelapse.timelapse_image_stages s
               JOIN render.render_jobs j
                 ON j.id=s.job_id
@@ -305,7 +303,7 @@ public sealed class TimelapseWorkerRepository : ITimelapseWorkerRepository
                    d.result_media_id AS DependencyMediaId,
                    d.public_url AS DependencyPublicUrl,
                    d.object_key AS DependencyObjectKey,
-                   COALESCE((v.request_json->'worker_claim'->>'until')::timestamptz, '-infinity'::timestamptz) AS ClaimUntil
+                   (v.request_json->'worker_claim'->>'until')::timestamptz AS ClaimUntil
               FROM timelapse.timelapse_image_stages s
               JOIN render.render_jobs j ON j.id=s.job_id
               LEFT JOIN timelapse.timelapse_image_stage_versions v
@@ -352,7 +350,7 @@ public sealed class TimelapseWorkerRepository : ITimelapseWorkerRepository
             HasDependencyMedia = row.DependencyMediaId is not null,
             HasDependencyReference = !string.IsNullOrWhiteSpace(row.DependencyPublicUrl) || !string.IsNullOrWhiteSpace(row.DependencyObjectKey),
             ClaimUntil = row.ClaimUntil,
-            ClaimExpired = row.ClaimUntil <= DateTimeOffset.UtcNow,
+            ClaimExpired = row.ClaimUntil is null || row.ClaimUntil <= DateTimeOffset.UtcNow,
             ProviderTaskId = row.ProviderTaskId,
             TenantMatches = evaluation.TenantMatches,
             Eligible = evaluation.Eligible,
@@ -1208,7 +1206,7 @@ public sealed class TimelapseWorkerRepository : ITimelapseWorkerRepository
         Guid? dependencyMediaId,
         string? dependencyPublicUrl,
         string? dependencyObjectKey,
-        DateTimeOffset claimUntil)
+        DateTimeOffset? claimUntil)
     {
         if (stageTenantId != workerTenantId)
         {
@@ -1248,7 +1246,7 @@ public sealed class TimelapseWorkerRepository : ITimelapseWorkerRepository
             }
         }
 
-        if (claimUntil > DateTimeOffset.UtcNow)
+        if (claimUntil.HasValue && claimUntil.Value > DateTimeOffset.UtcNow)
         {
             return new TimelapseImageClaimEvaluation(true, false, "CLAIM_NOT_EXPIRED");
         }
@@ -1381,7 +1379,7 @@ public sealed class TimelapseWorkerRepository : ITimelapseWorkerRepository
         public Guid? DependencyMediaId { get; set; }
         public string? DependencyPublicUrl { get; set; }
         public string? DependencyObjectKey { get; set; }
-        public DateTimeOffset ClaimUntil { get; set; }
+        public DateTimeOffset? ClaimUntil { get; set; }
     }
 
     private sealed class VideoRow
@@ -1461,7 +1459,7 @@ public sealed class TimelapseImageClaimDiagnostic
     public string? DependencyStatus { get; set; }
     public bool HasDependencyMedia { get; set; }
     public bool HasDependencyReference { get; set; }
-    public DateTimeOffset ClaimUntil { get; set; }
+    public DateTimeOffset? ClaimUntil { get; set; }
     public bool ClaimExpired { get; set; }
     public string? ProviderTaskId { get; set; }
     public bool TenantMatches { get; set; }

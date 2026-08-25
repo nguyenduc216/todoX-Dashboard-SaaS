@@ -39,6 +39,7 @@ public sealed class TimelapseWorkerClaimRegressionTests
         Assert.Contains("FOR UPDATE OF v SKIP LOCKED", claim);
         Assert.DoesNotContain("FOR UPDATE OF s", claim);
         Assert.DoesNotContain("FOR UPDATE SKIP LOCKED", claim);
+        Assert.DoesNotContain("AS ClaimUntil", claim);
         Assert.DoesNotContain("active_attempt=active_attempt+1", claim);
     }
 
@@ -87,6 +88,23 @@ public sealed class TimelapseWorkerClaimRegressionTests
     {
         var workerTenantId = Guid.NewGuid();
         var otherTenantId = Guid.NewGuid();
+
+        var unclaimed = TimelapseWorkerRepository.EvaluateImageClaim(
+            workerTenantId,
+            workerTenantId,
+            "RENDERING",
+            "RENDERING",
+            "GENERATING_IMAGES",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null);
+
+        Assert.True(unclaimed.TenantMatches);
+        Assert.True(unclaimed.Eligible);
+        Assert.Equal("ELIGIBLE", unclaimed.Reason);
 
         var eligible = TimelapseWorkerRepository.EvaluateImageClaim(
             workerTenantId,
@@ -137,6 +155,16 @@ public sealed class TimelapseWorkerClaimRegressionTests
 
         Assert.False(claimBlocked.Eligible);
         Assert.Equal("CLAIM_NOT_EXPIRED", claimBlocked.Reason);
+    }
+
+    [Fact]
+    public void DiagnosticClaimUntilUsesNullableTimestampWithoutInfinitySentinel()
+    {
+        var source = ReadRepoFile("Services", "Timelapse", "TimelapseWorkerRepository.cs");
+
+        Assert.Contains("(v.request_json->'worker_claim'->>'until')::timestamptz AS ClaimUntil", source);
+        Assert.DoesNotContain("COALESCE((v.request_json->'worker_claim'->>'until')::timestamptz, '-infinity'::timestamptz) AS ClaimUntil", source);
+        Assert.Contains("ClaimExpired = row.ClaimUntil is null || row.ClaimUntil <= DateTimeOffset.UtcNow", source);
     }
 
     [Fact]
