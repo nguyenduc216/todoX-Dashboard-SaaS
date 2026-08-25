@@ -166,7 +166,9 @@ public class TimelapsePhase2CTests
         Assert.DoesNotContain("GetDefaultAsync", runtime, StringComparison.Ordinal);
         Assert.DoesNotContain("GetFirstByPriorityAsync", runtime, StringComparison.Ordinal);
 
-        Assert.Contains("Chưa cấu hình model Seedream cho Timelapse.", runtime, StringComparison.Ordinal);
+        Assert.Contains("$\"Chưa cấu hình model {model} cho Timelapse image.\"", runtime, StringComparison.Ordinal);
+        Assert.Contains("FirstNonBlank(option.ModelName, capability.ModelName)", runtime, StringComparison.Ordinal);
+        Assert.Contains("TIMELAPSE_IMAGE_PROVIDER_RESOLVE_FAILED", runtime, StringComparison.Ordinal);
         Assert.Contains("Chưa cấu hình model Seedance cho Timelapse.", runtime, StringComparison.Ordinal);
         Assert.DoesNotContain("google_image_gen_banana_2_cheap", runtime, StringComparison.Ordinal);
         Assert.DoesNotContain("ImageAICreativeRender", runtime, StringComparison.Ordinal);

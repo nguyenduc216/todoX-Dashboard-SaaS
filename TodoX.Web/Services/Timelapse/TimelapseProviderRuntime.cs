@@ -339,7 +339,7 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
                 _options.ImageCapabilityCode,
                 model,
                 isImage: true,
-            "Chưa cấu hình model Seedream cho Timelapse.",
+                $"Chưa cấu hình model {model} cho Timelapse image.",
                 ct: ct);
             var reference = await ResolveImageReferenceAsync(item, ct);
             var prompt = TimelapsePromptResolver.ResolveImagePrompt(item.Snapshot, item.ProgressPercent, item.PromptSnapshotJson);
@@ -461,6 +461,15 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
             var providerCode = provider?.ProviderCode ?? item.ProviderCode ?? _options.ProviderCode;
             var currentModel = provider?.Model ?? model;
             var errorCode = ex.GetType().Name;
+            if (provider is null)
+            {
+                await TryAddSubmitFailureEventAsync(
+                    item.JobId,
+                    "TIMELAPSE_IMAGE_PROVIDER_RESOLVE_FAILED",
+                    "Timelapse image 79AI provider/model resolution failed before submit.",
+                    new { item.ProgressPercent, item.Attempt, model = currentModel, errorCode, errorMessage = ex.Message },
+                    ct);
+            }
             if (await TryFallbackImageAsync(item, providerCode, currentModel, errorCode, ex.Message, request?.SanitizedJson ?? "{}", "{}", ct))
             {
                 return;
@@ -738,8 +747,8 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
             provider.ConfigJson,
             capability.EndpointPath,
             _options);
-        var model = capability.ModelName
-            ?? throw new InvalidOperationException(unavailableMessage);
+        var model = FirstNonBlank(option.ModelName, capability.ModelName)
+            ?? throw new InvalidOperationException($"Chưa cấu hình model {modelName} cho Timelapse {(isImage ? "image" : "video")}.");
         var imageMode = isImage
             ? FirstNonBlank(
                 ReadString(capability.ConfigJson, "mode"),
