@@ -258,6 +258,21 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
                 item.JobId, item.ClipIndex, item.Attempt, item.ProviderTaskId, status.NormalizedStatus);
             await _renderJobs.AddEventAsync(item.JobId, "TIMELAPSE_VIDEO_POLL", "Timelapse video task polled.",
                 new { item.ClipIndex, item.Attempt, taskId = item.ProviderTaskId, status = status.NormalizedStatus }, ct: ct);
+            await TryAddSubmitEventAsync(item.JobId, "TIMELAPSE_VIDEO_POLL_RESPONSE", "Timelapse video poll response received.",
+                new
+                {
+                    jobId = item.JobId,
+                    clipId = item.Id,
+                    item.ClipIndex,
+                    item.Attempt,
+                    item.StartProgressPercent,
+                    item.EndProgressPercent,
+                    providerTaskId = item.ProviderTaskId,
+                    providerStatus = ReadJsonString(status.SanitizedResponseJson, "status"),
+                    normalizedStatus = status.NormalizedStatus,
+                    errorCode = status.ErrorCode,
+                    errorMessage = status.NormalizedStatus == Ai79TaskStatusNormalizer.Failed ? SanitizeEventMessage(status.ErrorMessage) : null
+                }, ct);
 
             if (status.NormalizedStatus == Ai79TaskStatusNormalizer.Running)
             {
@@ -299,6 +314,22 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
                 item.JobId, item.ClipIndex, item.Attempt, item.ProviderTaskId, media.Id);
             await _renderJobs.AddEventAsync(item.JobId, "TIMELAPSE_VIDEO_COMPLETE", "Timelapse video clip saved to TodoX media.",
                 new { item.ClipIndex, item.Attempt, taskId = item.ProviderTaskId, mediaId = media.Id }, ct: ct);
+            await TryAddSubmitEventAsync(
+                item.JobId,
+                "TIMELAPSE_VIDEO_COMPLETED",
+                "Timelapse video clip completed and media was persisted.",
+                new
+                {
+                    jobId = item.JobId,
+                    clipId = item.Id,
+                    item.ClipIndex,
+                    item.StartProgressPercent,
+                    item.EndProgressPercent,
+                    providerTaskId = item.ProviderTaskId,
+                    mediaId = media.Id,
+                    publicUrl = media.PublicUrl ?? media.FileUrl
+                },
+                ct);
             var finalizerStarted = await _repo.AdvanceAfterVideoCompletedAsync(item.JobId, ct);
             if (finalizerStarted)
             {
@@ -714,6 +745,44 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
 
     private async Task SubmitVideoAsync(TimelapseVideoWorkItem item, CancellationToken ct)
     {
+        var directionValidation = TimelapseVideoDirectionValidator.Validate(
+            new TimelapseVideoEdge(item.ClipIndex, item.StartProgressPercent, item.EndProgressPercent),
+            item.StartStageId,
+            item.StartStageProgressPercent,
+            item.EndStageId,
+            item.EndStageProgressPercent,
+            item.StartMediaId,
+            item.EndMediaId);
+        await TryAddSubmitEventAsync(
+            item.JobId,
+            "TIMELAPSE_VIDEO_DIRECTION_VALIDATION_BEGIN",
+            "Timelapse video direction validation started.",
+            BuildDirectionEventData(item, directionValidation),
+            ct);
+        if (!directionValidation.IsValid)
+        {
+            await TryAddSubmitEventAsync(
+                item.JobId,
+                "TIMELAPSE_VIDEO_DIRECTION_VALIDATION_FAILED",
+                "Timelapse video direction validation failed before provider submit.",
+                BuildDirectionEventData(item, directionValidation),
+                ct);
+            await FailVideoAsync(
+                item,
+                directionValidation.ErrorCode,
+                directionValidation.ErrorMessage ?? "Timelapse video direction is invalid.",
+                "{}",
+                ct);
+            return;
+        }
+
+        await TryAddSubmitEventAsync(
+            item.JobId,
+            "TIMELAPSE_VIDEO_DIRECTION_VALIDATION_PASSED",
+            "Timelapse video direction validation passed.",
+            BuildDirectionEventData(item, directionValidation),
+            ct);
+
         var provider = await Resolve79AiRuntimeAsync(
             _options.VideoCapabilityCode,
             _options.VideoModelName,
@@ -731,6 +800,23 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
             item.StartProgressPercent,
             item.EndProgressPercent,
             FirstNonBlank(item.StartPromptSnapshotJson, item.EndPromptSnapshotJson));
+        await TryAddSubmitEventAsync(
+            item.JobId,
+            "TIMELAPSE_VIDEO_PROMPT_COMPILED",
+            "Timelapse forward-only video prompt compiled.",
+            new
+            {
+                jobId = item.JobId,
+                clipId = item.Id,
+                item.ClipIndex,
+                item.StartProgressPercent,
+                item.EndProgressPercent,
+                profileCode = item.Snapshot.ProfileCode,
+                promptLength = prompt.Prompt.Length,
+                profilePromptLength = prompt.ProfilePromptLength,
+                profilePromptTruncated = prompt.ProfilePromptTruncated
+            },
+            ct);
         var resolution = ResolveVideoResolution(item.VideoMode);
         var startDescriptor = await BuildVideoImageDescriptorAsync(
             provider,
@@ -748,7 +834,28 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
             item.EndObjectKey,
             item.EndResponseJson,
             ct);
-        var imagesJson = JsonSerializer.Serialize(new[] { startDescriptor, endDescriptor }, JsonOptions);
+        var imagesJson = BuildVideoImagePairJson(startDescriptor, endDescriptor);
+        await TryAddSubmitEventAsync(
+            item.JobId,
+            "TIMELAPSE_VIDEO_SUBMIT_BEGIN",
+            "Timelapse video submit begins with the validated forward image pair.",
+            new
+            {
+                jobId = item.JobId,
+                clipId = item.Id,
+                item.ClipIndex,
+                item.StartProgressPercent,
+                item.EndProgressPercent,
+                startStageId = item.StartStageId,
+                endStageId = item.EndStageId,
+                startMediaId = item.StartMediaId,
+                endMediaId = item.EndMediaId,
+                startPublicUrl = startDescriptor.url,
+                endPublicUrl = endDescriptor.url,
+                providerModel = provider.Model,
+                direction = "forward"
+            },
+            ct);
         var request = BuildSubmitRequest(provider, prompt.Prompt, [], new Dictionary<string, string?>
         {
             ["type"] = "video",
@@ -764,6 +871,7 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
             ["end_progress_percent"] = item.EndProgressPercent.ToString()
         }, Ai79TaskOperation.Video, null, null, new
         {
+            direction = "forward",
             prompt_length = prompt.Prompt.Length,
             profile_prompt_length = prompt.ProfilePromptLength,
             profile_prompt_truncated = prompt.ProfilePromptTruncated
@@ -819,11 +927,81 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
         }
 
         await _repo.SaveVideoSubmittedAsync(item.Id, item.Attempt, provider.ProviderCode, provider.Model, submit.TaskId, request.SanitizedJson, submit.SanitizedResponseJson, ct);
+        await TryAddSubmitEventAsync(
+            item.JobId,
+            "TIMELAPSE_VIDEO_SUBMIT_RESPONSE",
+            "Timelapse video provider submit response received.",
+            new
+            {
+                jobId = item.JobId,
+                clipId = item.Id,
+                item.ClipIndex,
+                item.StartProgressPercent,
+                item.EndProgressPercent,
+                startStageId = item.StartStageId,
+                endStageId = item.EndStageId,
+                startMediaId = item.StartMediaId,
+                endMediaId = item.EndMediaId,
+                providerModel = provider.Model,
+                providerTaskId = submit.TaskId,
+                direction = "forward"
+            },
+            ct);
+        await TryAddSubmitEventAsync(
+            item.JobId,
+            "TIMELAPSE_VIDEO_SUBMITTED",
+            "Timelapse video task submitted to 79AI with forward direction.",
+            new
+            {
+                jobId = item.JobId,
+                clipId = item.Id,
+                item.ClipIndex,
+                item.StartProgressPercent,
+                item.EndProgressPercent,
+                startStageId = item.StartStageId,
+                endStageId = item.EndStageId,
+                startMediaId = item.StartMediaId,
+                endMediaId = item.EndMediaId,
+                providerCode = provider.ProviderCode,
+                providerModel = provider.Model,
+                providerTaskId = submit.TaskId,
+                direction = "forward"
+            },
+            ct);
         _logger.LogInformation("TIMELAPSE_VIDEO_SUBMIT jobId={JobId} clip={ClipIndex} attempt={Attempt} provider={ProviderCode} model={Model} taskId={TaskId}",
             item.JobId, item.ClipIndex, item.Attempt, provider.ProviderCode, provider.Model, submit.TaskId);
         await _renderJobs.AddEventAsync(item.JobId, "TIMELAPSE_VIDEO_SUBMIT", "Timelapse video task submitted to 79AI.",
             new { item.ClipIndex, item.Attempt, provider.ProviderCode, model = provider.Model, taskId = submit.TaskId }, ct: ct);
     }
+
+    private static object BuildDirectionEventData(
+        TimelapseVideoWorkItem item,
+        TimelapseVideoDirectionValidation validation)
+        => new
+        {
+            jobId = item.JobId,
+            clipId = item.Id,
+            item.ClipIndex,
+            profileCode = item.Snapshot.ProfileCode,
+            item.StartProgressPercent,
+            item.EndProgressPercent,
+            startStageId = item.StartStageId,
+            endStageId = item.EndStageId,
+            startStageProgressPercent = item.StartStageProgressPercent,
+            endStageProgressPercent = item.EndStageProgressPercent,
+            startMediaId = item.StartMediaId,
+            endMediaId = item.EndMediaId,
+            startPublicUrl = item.StartPublicUrl,
+            endPublicUrl = item.EndPublicUrl,
+            direction = validation.IsValid ? "forward" : "invalid",
+            errorCode = validation.ErrorCode,
+            errorMessage = validation.ErrorMessage
+        };
+
+    internal static string BuildVideoImagePairJson(
+        TimelapseVideoImageDescriptor startDescriptor,
+        TimelapseVideoImageDescriptor endDescriptor)
+        => JsonSerializer.Serialize(new[] { startDescriptor, endDescriptor }, JsonOptions);
 
     private string ResolveVideoResolution(string? videoMode)
     {
@@ -1136,7 +1314,7 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
     private static bool PathsEqual(string left, string right)
         => string.Equals(left.Trim().TrimStart('/'), right.Trim().TrimStart('/'), StringComparison.OrdinalIgnoreCase);
 
-    private async Task<VideoImageDescriptor> BuildVideoImageDescriptorAsync(
+    private async Task<TimelapseVideoImageDescriptor> BuildVideoImageDescriptorAsync(
         Ai79RuntimeProvider provider,
         int progressPercent,
         Guid? mediaId,
@@ -1151,7 +1329,7 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
         if (!string.IsNullOrWhiteSpace(idBase))
         {
             var projectId = FirstNonBlank(ExtractImageInfoString(responseJson, "project_id"), _options.DefaultImageProjectId)!;
-            return new VideoImageDescriptor(idBase!, projectId, url, fileName);
+            return new TimelapseVideoImageDescriptor(idBase!, projectId, url, fileName);
         }
 
         var media = await ResolveVideoInputMediaAsync(mediaId, objectKey, publicUrl, ct);
@@ -1172,7 +1350,7 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
             bytes.Length),
             ct);
         var uploadedUrl = ResolveProviderImageUrl(upload.Url);
-        return new VideoImageDescriptor(upload.IdBase, upload.ProjectId, uploadedUrl, upload.FileName);
+        return new TimelapseVideoImageDescriptor(upload.IdBase, upload.ProjectId, uploadedUrl, upload.FileName);
     }
 
     private async Task<MediaFileDto> ResolveVideoInputMediaAsync(Guid? mediaId, string? objectKey, string publicUrl, CancellationToken ct)
@@ -1735,7 +1913,7 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
 
     private sealed record ImageReferencePayload(string DataUri, string MimeType, int Bytes);
 
-    private sealed record VideoImageDescriptor(
+    internal sealed record TimelapseVideoImageDescriptor(
         string id_base,
         string project_id,
         string url,
@@ -1960,20 +2138,43 @@ public static class TimelapsePromptResolver
         int clipIndex,
         int startProgress,
         int endProgress)
-        => string.Join("\n", new[]
+    {
+        var profileCode = snapshot.ProfileCode.Trim().ToLowerInvariant();
+        var profileRules = profileCode switch
+        {
+            "landscape_balcony_install_v1" =>
+                "Installation progression: add and install components, complete flooring or deck, position planters and furniture, and clean up toward the later progress. Workers may install, arrange, and finish. Never pull flooring apart, dismantle installed structures, or remove permanent planter layouts.",
+            "landscape_garden_growth_v1" =>
+                "Growth progression: plants gradually become denser and more established, with more foliage and maturing planting in the same zones. Never shrink plants, make established greenery disappear, dismantle planting zones, or show reverse growth.",
+            "landscape_balcony_hybrid_v1" =>
+                "Hybrid progression: construction and installation advance while greenery also becomes more established. Never remove flooring, make plants disappear, regress the hybrid layout, or make the later frame less complete than the earlier frame.",
+            _ => "Preserve every permanent object and advance only the work needed to reach the later stage."
+        };
+
+        return string.Join("\n", new[]
         {
             $"Use the configured TodoX Construction Timelapse profile semantics for {snapshot.ProfileName}.",
             $"Create clip {clipIndex} as a smooth construction progress transition from {startProgress}% to {endProgress}%.",
             "Use @image1 as the exact starting frame and @image2 as the exact ending frame.",
+            "Follow forward chronological progression.",
+            "Begin from the earlier-progress reference state.",
+            "End at the later-progress reference state.",
+            "The scene must become progressively more complete.",
+            "Never reverse construction or landscaping progress.",
+            "Never dismantle completed flooring, deck, planters, fixtures or permanent elements.",
+            "Do not remove elements that belong to the later stage.",
             "The scene must remain the same building, architecture, footprint, floor count, window/opening layout, roof geometry, camera, lens, perspective, framing, and environment.",
             "Never remove permanent elements visible in @image1.",
             "Do not demolish, reset, rebuild from scratch, duplicate, morph, or scene-cut the construction.",
             "Only add or advance work necessary to reach @image2.",
             "The final frame must converge visually to @image2.",
+            "The first frame must match the earlier-progress reference image. The final frame must converge to the later-progress reference image. All intermediate motion must move monotonically from earlier to later completion.",
+            profileRules,
             "Workers may move naturally and perform temporary construction actions, but they must not alter the architecture randomly.",
             "No subtitles, no captions, no watermarks, no logos, no UI, no text overlays.",
             $"Duration requirement: exactly {TimelapseRequestRules.RuntimeClipDurationSeconds} seconds."
         });
+    }
 
     private static string FitOptionalPrompt(string optionalPrompt, int maxLength, out bool truncated)
     {

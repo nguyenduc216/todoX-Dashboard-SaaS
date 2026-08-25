@@ -296,6 +296,88 @@ public static class TimelapseVideoOrchestration
            && !string.IsNullOrWhiteSpace(clip.PublicUrl);
 }
 
+public sealed record TimelapseVideoDirectionValidation(
+    bool IsValid,
+    string? ErrorCode,
+    string? ErrorMessage);
+
+public static class TimelapseVideoDirectionValidator
+{
+    public static TimelapseVideoDirectionValidation Validate(
+        TimelapseVideoEdge clip,
+        Guid? startStageId,
+        int? startStageProgressPercent,
+        Guid? endStageId,
+        int? endStageProgressPercent,
+        Guid? startMediaId,
+        Guid? endMediaId)
+        => Validate(
+            clip.StartProgressPercent,
+            clip.EndProgressPercent,
+            startStageId,
+            startStageProgressPercent,
+            endStageId,
+            endStageProgressPercent,
+            startMediaId,
+            endMediaId);
+
+    public static TimelapseVideoDirectionValidation Validate(
+        int startProgressPercent,
+        int endProgressPercent,
+        Guid? startStageId,
+        int? startStageProgressPercent,
+        Guid? endStageId,
+        int? endStageProgressPercent,
+        Guid? startMediaId,
+        Guid? endMediaId)
+    {
+        if (startProgressPercent >= endProgressPercent)
+        {
+            return Invalid("timelapse_video_direction_invalid", "Timelapse video progress must move forward.");
+        }
+
+        if (startStageProgressPercent != startProgressPercent)
+        {
+            return Invalid("timelapse_video_start_stage_mismatch", "Timelapse video start stage does not match its progress metadata.");
+        }
+
+        if (endStageProgressPercent != endProgressPercent)
+        {
+            return Invalid("timelapse_video_end_stage_mismatch", "Timelapse video end stage does not match its progress metadata.");
+        }
+
+        if (startStageId is null || startStageId == Guid.Empty)
+        {
+            return Invalid("timelapse_video_missing_start_media", "Timelapse video start stage is missing.");
+        }
+
+        if (endStageId is null || endStageId == Guid.Empty)
+        {
+            return Invalid("timelapse_video_missing_end_media", "Timelapse video end stage is missing.");
+        }
+
+        if (startMediaId is null || startMediaId == Guid.Empty)
+        {
+            return Invalid("timelapse_video_missing_start_media", "Timelapse video start media is missing.");
+        }
+
+        if (endMediaId is null || endMediaId == Guid.Empty)
+        {
+            return Invalid("timelapse_video_missing_end_media", "Timelapse video end media is missing.");
+        }
+
+        if (startMediaId == endMediaId)
+        {
+            return Invalid("timelapse_video_direction_invalid", "Timelapse video start and end media must be different.");
+        }
+
+        return new TimelapseVideoDirectionValidation(true, null, null);
+    }
+
+    private static TimelapseVideoDirectionValidation Invalid(string errorCode, string message)
+        => new(false, errorCode, message);
+}
+
 public static class TimelapseStatusText
 {
     public static string Parent(string? status)

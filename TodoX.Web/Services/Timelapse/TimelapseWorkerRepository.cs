@@ -425,11 +425,15 @@ public sealed class TimelapseWorkerRepository : ITimelapseWorkerRepository
                        c.duration_seconds AS DurationSeconds,
                        c.video_mode AS VideoMode,
                        c.ratio AS Ratio,
+                       start_img.id AS StartStageId,
+                       start_img.progress_percent AS StartStageProgressPercent,
                        start_img.result_media_id AS StartMediaId,
                        start_img.public_url AS StartPublicUrl,
                        start_img.object_key AS StartObjectKey,
                        start_img.prompt_snapshot_json::text AS StartPromptSnapshotJson,
                        start_v.response_json::text AS StartResponseJson,
+                       end_img.id AS EndStageId,
+                       end_img.progress_percent AS EndStageProgressPercent,
                        end_img.result_media_id AS EndMediaId,
                        end_img.public_url AS EndPublicUrl,
                        end_img.object_key AS EndObjectKey,
@@ -1381,11 +1385,15 @@ public sealed class TimelapseWorkerRepository : ITimelapseWorkerRepository
             row.DurationSeconds,
             row.VideoMode,
             row.Ratio,
+            row.StartStageId,
+            row.StartStageProgressPercent,
             row.StartMediaId,
             row.StartPublicUrl,
             row.StartObjectKey,
             row.StartPromptSnapshotJson,
             row.StartResponseJson,
+            row.EndStageId,
+            row.EndStageProgressPercent,
             row.EndMediaId,
             row.EndPublicUrl,
             row.EndObjectKey,
@@ -1463,11 +1471,15 @@ public sealed class TimelapseWorkerRepository : ITimelapseWorkerRepository
         public int DurationSeconds { get; set; }
         public string VideoMode { get; set; } = string.Empty;
         public string Ratio { get; set; } = string.Empty;
+        public Guid? StartStageId { get; set; }
+        public int? StartStageProgressPercent { get; set; }
         public Guid? StartMediaId { get; set; }
         public string? StartPublicUrl { get; set; }
         public string? StartObjectKey { get; set; }
         public string? StartPromptSnapshotJson { get; set; }
         public string? StartResponseJson { get; set; }
+        public Guid? EndStageId { get; set; }
+        public int? EndStageProgressPercent { get; set; }
         public Guid? EndMediaId { get; set; }
         public string? EndPublicUrl { get; set; }
         public string? EndObjectKey { get; set; }
@@ -1549,11 +1561,15 @@ public sealed record TimelapseVideoWorkItem(
     int DurationSeconds,
     string VideoMode,
     string Ratio,
+    Guid? StartStageId,
+    int? StartStageProgressPercent,
     Guid? StartMediaId,
     string? StartPublicUrl,
     string? StartObjectKey,
     string? StartPromptSnapshotJson,
     string? StartResponseJson,
+    Guid? EndStageId,
+    int? EndStageProgressPercent,
     Guid? EndMediaId,
     string? EndPublicUrl,
     string? EndObjectKey,
