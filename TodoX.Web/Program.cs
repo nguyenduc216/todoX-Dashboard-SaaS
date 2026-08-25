@@ -249,6 +249,9 @@ builder.Services.AddSingleton<ReupTaskPageGate>();
 builder.Services.AddHostedService<ReupCampaignWorker>();
 var app = builder.Build();
 
+app.Logger.LogInformation(
+    "TIMELAPSE_HOSTED_SERVICES_CONFIGURED imageWorker=true videoWorker=true finalizerWorker=true renderWorker=true sceneVideoWorker=true rVideoLifecycleWorker=true reupWorker=true");
+
 static void ApplyEnv(string key, Action<string> apply)
 {
     var value = Environment.GetEnvironmentVariable(key);

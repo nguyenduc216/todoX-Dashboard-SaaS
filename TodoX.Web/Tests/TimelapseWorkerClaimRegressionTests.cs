@@ -122,7 +122,18 @@ public sealed class TimelapseWorkerClaimRegressionTests
     {
         var source = ReadRepoFile("Services", "Timelapse", "TimelapseProviderWorkers.cs");
 
-        Assert.Contains("TIMELAPSE_WORKER_START", source);
+        Assert.Contains("TIMELAPSE_IMAGE_WORKER_EXECUTE_START", source);
+        Assert.Contains("TIMELAPSE_IMAGE_WORKER_CONFIG", source);
+        Assert.Contains("TIMELAPSE_IMAGE_WORKER_TENANT_READY", source);
+        Assert.Contains("TIMELAPSE_IMAGE_WORKER_LOOP_ENTER", source);
+        Assert.Contains("TIMELAPSE_IMAGE_WORKER_CLAIM_BEGIN", source);
+        Assert.Contains("TIMELAPSE_IMAGE_WORKER_CLAIM_RESULT", source);
+        Assert.Contains("TIMELAPSE_IMAGE_WORKER_PROCESS_BEGIN", source);
+        Assert.Contains("TIMELAPSE_IMAGE_WORKER_FATAL", source);
+        Assert.Contains("TIMELAPSE_WORKER_LOOP_ENTER", source);
+        Assert.Contains("TIMELAPSE_WORKER_LANE_ENTER", source);
+        Assert.Contains("TIMELAPSE_WORKER_CLAIM_RESULT", source);
+        Assert.Contains("TIMELAPSE_WORKER_FATAL", source);
         Assert.Contains("TIMELAPSE_IMAGE_WORKER_TENANT", source);
         Assert.Contains("TIMELAPSE_WORKER_DISABLED", source);
         Assert.Contains("TIMELAPSE_WORKER_PARALLELISM_NORMALIZED", source);
@@ -141,6 +152,33 @@ public sealed class TimelapseWorkerClaimRegressionTests
     }
 
     [Fact]
+    public void TimelapseImageWorkerIsSelfRecoveringBeforeClaimLoopStarts()
+    {
+        var source = ReadRepoFile("Services", "Timelapse", "TimelapseProviderWorkers.cs");
+        var execute = Between(source, "protected override async Task ExecuteAsync", "public sealed class TimelapseVideoWorker");
+
+        Assert.Contains("TIMELAPSE_IMAGE_WORKER_EXECUTE_START", execute);
+        Assert.Contains("TIMELAPSE_IMAGE_WORKER_CONFIG", execute);
+        Assert.Contains("TIMELAPSE_IMAGE_WORKER_TENANT_READY", execute);
+        Assert.Contains("TIMELAPSE_IMAGE_WORKER_LOOP_ENTER", execute);
+        Assert.Contains("TIMELAPSE_IMAGE_WORKER_FATAL", execute);
+        Assert.Contains("while (!stoppingToken.IsCancellationRequested)", execute);
+        Assert.Contains("catch (Exception ex)", execute);
+        Assert.Contains("await Task.Delay(startupRetryDelay, stoppingToken);", execute);
+    }
+
+    [Fact]
+    public void ProgramLogsTimelapseHostedServiceRegistrationOnce()
+    {
+        var source = ReadRepoFile("Program.cs");
+
+        Assert.Contains("TIMELAPSE_HOSTED_SERVICES_CONFIGURED", source);
+        Assert.Contains("imageWorker=true", source);
+        Assert.Contains("videoWorker=true", source);
+        Assert.Contains("finalizerWorker=true", source);
+    }
+
+    [Fact]
     public void CustomerUiDistinguishesWorkerWaitFromProviderSubmission()
     {
         var workflow = ReadRepoFile("Services", "Timelapse", "TimelapseWorkflowService.cs");
@@ -151,7 +189,7 @@ public sealed class TimelapseWorkerClaimRegressionTests
         Assert.Contains("TIMELAPSE_IMAGE_SUBMIT_BEGIN", runtime);
         Assert.Contains("TIMELAPSE_IMAGE_SUBMITTED", runtime);
         Assert.Contains("TIMELAPSE_IMAGE_FAILED", runtime);
-        Assert.Contains("TIEN", workflow, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("TIMELAPSE_RENDER_STARTED", workflow);
     }
 
     private static string Between(string source, string startMarker, string endMarker)

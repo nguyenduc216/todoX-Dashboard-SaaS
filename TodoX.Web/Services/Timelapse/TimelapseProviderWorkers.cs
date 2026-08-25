@@ -19,41 +19,110 @@ public sealed class TimelapseImageWorker : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        using (var scope = _scopeFactory.CreateScope())
+        var startupRetryDelay = TimeSpan.FromMilliseconds(Math.Max(1000, _options.IdleDelayMs));
+        while (!stoppingToken.IsCancellationRequested)
         {
-            var tenant = scope.ServiceProvider.GetRequiredService<TenantContext>();
-            await tenant.EnsureLoadedAsync(stoppingToken);
             _logger.LogInformation(
-                "TIMELAPSE_IMAGE_WORKER_TENANT worker=timelapse-image tenantId={TenantId} tenantCode={TenantCode} machine={MachineName} processId={ProcessId}",
-                tenant.TenantId,
-                tenant.TenantCode,
+                "TIMELAPSE_IMAGE_WORKER_EXECUTE_START worker=timelapse-image machineName={MachineName} processId={ProcessId}",
                 Environment.MachineName,
                 Environment.ProcessId);
-        }
+            _logger.LogInformation(
+                "TIMELAPSE_IMAGE_WORKER_CONFIG worker=timelapse-image renderQueueEnabled={RenderQueueEnabled} timelapseEnabled={TimelapseEnabled} configuredParallelism={ConfiguredParallelism} effectiveParallelism={EffectiveParallelism} idleDelayMs={IdleDelayMs} pollDelayMs={PollDelayMs} claimMinutes={ClaimMinutes} heartbeatSeconds={HeartbeatSeconds} providerCode={ProviderCode} imageCapabilityCode={ImageCapabilityCode} imageModelName={ImageModelName}",
+                _config.GetValue("RenderQueue:Enabled", false),
+                _options.Enabled,
+                _options.ImageParallelism,
+                Math.Max(1, _options.ImageParallelism),
+                Math.Max(250, _options.IdleDelayMs),
+                Math.Max(250, _options.PollDelayMs),
+                Math.Max(1, _options.ClaimMinutes),
+                Math.Max(15, _options.HeartbeatSeconds),
+                _options.ProviderCode,
+                _options.ImageCapabilityCode,
+                _options.ImageModelName);
 
-        await TimelapseWorkerLoop.RunAsync(
-            "timelapse-image",
-            _options.ImageParallelism,
-            _config,
-            _options,
-            _scopeFactory,
-            _logger,
-            async (scope, workerKey, claimFor, ct) =>
+            try
             {
-                var repo = scope.ServiceProvider.GetRequiredService<ITimelapseWorkerRepository>();
-                var item = await repo.ClaimImageAsync(workerKey, claimFor, ct);
-                if (item is null)
+                using var scope = _scopeFactory.CreateScope();
+                var tenant = scope.ServiceProvider.GetRequiredService<TenantContext>();
+                await tenant.EnsureLoadedAsync(stoppingToken);
+                _logger.LogInformation(
+                    "TIMELAPSE_IMAGE_WORKER_TENANT_READY worker=timelapse-image tenantId={TenantId} tenantCode={TenantCode} machine={MachineName} processId={ProcessId}",
+                    tenant.TenantId,
+                    tenant.TenantCode,
+                    Environment.MachineName,
+                    Environment.ProcessId);
+
+                _logger.LogInformation(
+                    "TIMELAPSE_IMAGE_WORKER_LOOP_ENTER worker=timelapse-image effectiveParallelism={EffectiveParallelism} machine={MachineName} processId={ProcessId}",
+                    Math.Max(1, _options.ImageParallelism),
+                    Environment.MachineName,
+                    Environment.ProcessId);
+
+                await TimelapseWorkerLoop.RunAsync(
+                    "timelapse-image",
+                    _options.ImageParallelism,
+                    _config,
+                    _options,
+                    _scopeFactory,
+                    _logger,
+                    async (laneScope, workerKey, claimFor, ct) =>
+                    {
+                        var repo = laneScope.ServiceProvider.GetRequiredService<ITimelapseWorkerRepository>();
+                        _logger.LogInformation(
+                            "TIMELAPSE_IMAGE_WORKER_CLAIM_BEGIN worker=timelapse-image workerKey={WorkerKey} claimMinutes={ClaimMinutes}",
+                            workerKey,
+                            Math.Max(1, _options.ClaimMinutes));
+                        var item = await repo.ClaimImageAsync(workerKey, claimFor, ct);
+                        _logger.LogInformation(
+                            "TIMELAPSE_IMAGE_WORKER_CLAIM_RESULT worker=timelapse-image workerKey={WorkerKey} claimed={Claimed} stageId={StageId} attempt={Attempt} providerTaskIdPresent={ProviderTaskIdPresent}",
+                            workerKey,
+                            item is not null,
+                            item?.Id,
+                            item?.Attempt,
+                            item is not null && !string.IsNullOrWhiteSpace(item.ProviderTaskId));
+                        if (item is null)
+                        {
+                            await repo.DiagnoseImageClaimsAsync(workerKey, TimeSpan.FromSeconds(60), ct);
+                            return new TimelapseWorkerIterationResult(false, false);
+                        }
+
+                        _logger.LogInformation(
+                            "TIMELAPSE_WORKER_CLAIM_RETURNED worker={WorkerName} workerKey={WorkerKey} stageId={StageId} attempt={Attempt} providerTaskIdPresent={ProviderTaskIdPresent}",
+                            "timelapse-image",
+                            workerKey,
+                            item.Id,
+                            item.Attempt,
+                            !string.IsNullOrWhiteSpace(item.ProviderTaskId));
+
+                        _logger.LogInformation(
+                            "TIMELAPSE_IMAGE_WORKER_PROCESS_BEGIN worker=timelapse-image workerKey={WorkerKey} stageId={StageId} attempt={Attempt}",
+                            workerKey,
+                            item.Id,
+                            item.Attempt);
+                        await laneScope.ServiceProvider.GetRequiredService<ITimelapseProviderRuntime>().ProcessImageAsync(item, ct);
+                        return new TimelapseWorkerIterationResult(true, true);
+                    },
+                    stoppingToken);
+                return;
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex,
+                    "TIMELAPSE_IMAGE_WORKER_FATAL worker=timelapse-image machine={MachineName} processId={ProcessId}",
+                    Environment.MachineName,
+                    Environment.ProcessId);
+                if (stoppingToken.IsCancellationRequested)
                 {
-                    await repo.DiagnoseImageClaimsAsync(workerKey, TimeSpan.FromSeconds(60), ct);
-                    return new TimelapseWorkerIterationResult(false, false);
+                    break;
                 }
 
-                _logger.LogInformation("TIMELAPSE_WORKER_CLAIM_RETURNED worker={WorkerName} workerKey={WorkerKey} stageId={StageId} attempt={Attempt} providerTaskIdPresent={ProviderTaskIdPresent}",
-                    "timelapse-image", workerKey, item.Id, item.Attempt, !string.IsNullOrWhiteSpace(item.ProviderTaskId));
-                await scope.ServiceProvider.GetRequiredService<ITimelapseProviderRuntime>().ProcessImageAsync(item, ct);
-                return new TimelapseWorkerIterationResult(true, true);
-            },
-            stoppingToken);
+                await Task.Delay(startupRetryDelay, stoppingToken);
+            }
+        }
     }
 }
 
@@ -154,7 +223,7 @@ internal static class TimelapseWorkerLoop
         var claimMinutes = Math.Max(1, options.ClaimMinutes);
 
         logger.LogInformation(
-            "TIMELAPSE_WORKER_START worker={WorkerName} renderQueueEnabled={RenderQueueEnabled} timelapseEnabled={TimelapseEnabled} configuredParallelism={ConfiguredParallelism} effectiveParallelism={EffectiveParallelism} idleDelayMs={IdleDelayMs} pollDelayMs={PollDelayMs} claimMinutes={ClaimMinutes} providerCode={ProviderCode} imageCapabilityCode={ImageCapabilityCode} imageModelName={ImageModelName} machineName={MachineName} processId={ProcessId}",
+            "TIMELAPSE_WORKER_LOOP_ENTER worker={WorkerName} renderQueueEnabled={RenderQueueEnabled} timelapseEnabled={TimelapseEnabled} configuredParallelism={ConfiguredParallelism} effectiveParallelism={EffectiveParallelism} idleDelayMs={IdleDelayMs} pollDelayMs={PollDelayMs} claimMinutes={ClaimMinutes} providerCode={ProviderCode} imageCapabilityCode={ImageCapabilityCode} imageModelName={ImageModelName} machineName={MachineName} processId={ProcessId}",
             workerName,
             renderQueueEnabled,
             options.Enabled,
@@ -211,7 +280,7 @@ internal static class TimelapseWorkerLoop
         var heartbeat = new TimelapseWorkerHeartbeat(workerName, workerKey, heartbeatEvery);
 
         logger.LogInformation(
-            "TIMELAPSE_WORKER_LANE_START worker={WorkerName} lane={Lane} workerKey={WorkerKey} idleDelayMs={IdleDelayMs} pollDelayMs={PollDelayMs} claimMinutes={ClaimMinutes}",
+            "TIMELAPSE_WORKER_LANE_ENTER worker={WorkerName} lane={Lane} workerKey={WorkerKey} idleDelayMs={IdleDelayMs} pollDelayMs={PollDelayMs} claimMinutes={ClaimMinutes}",
             workerName,
             lane,
             workerKey,
@@ -225,9 +294,16 @@ internal static class TimelapseWorkerLoop
             {
                 using var scope = scopeFactory.CreateScope();
                 heartbeat.MarkLoop();
-                logger.LogDebug("TIMELAPSE_WORKER_CLAIM_BEGIN worker={WorkerName} lane={Lane} workerKey={WorkerKey}", workerName, lane, workerKey);
+                logger.LogInformation("TIMELAPSE_WORKER_CLAIM_BEGIN worker={WorkerName} lane={Lane} workerKey={WorkerKey}", workerName, lane, workerKey);
                 var result = await processOneAsync(scope, workerKey, claimFor, stoppingToken);
                 heartbeat.MarkClaimResult(result.Claimed, result.Succeeded);
+                logger.LogInformation(
+                    "TIMELAPSE_WORKER_CLAIM_RESULT worker={WorkerName} lane={Lane} workerKey={WorkerKey} claimed={Claimed} succeeded={Succeeded}",
+                    workerName,
+                    lane,
+                    workerKey,
+                    result.Claimed,
+                    result.Succeeded);
                 if (result.Claimed)
                 {
                     logger.LogInformation("TIMELAPSE_WORKER_CLAIMED worker={WorkerName} lane={Lane} workerKey={WorkerKey}", workerName, lane, workerKey);
@@ -248,6 +324,7 @@ internal static class TimelapseWorkerLoop
             {
                 heartbeat.MarkError();
                 logger.LogError(ex, "TIMELAPSE_WORKER_ERROR worker={WorkerName} lane={Lane} workerKey={WorkerKey}", workerName, lane, workerKey);
+                logger.LogError(ex, "TIMELAPSE_WORKER_FATAL worker={WorkerName} lane={Lane} workerKey={WorkerKey}", workerName, lane, workerKey);
                 heartbeat.LogIfDue(logger, lane, force: true);
                 await Task.Delay(idleDelay, stoppingToken);
             }
