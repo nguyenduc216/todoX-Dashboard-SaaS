@@ -986,7 +986,9 @@ public sealed class Ai79TaskClient : IAi79TaskClient
             }
         }
 
-        return FindTaskIdAlias(element);
+        return operation == Ai79TaskOperation.Video
+            ? FindTaskIdAlias(element)
+            : null;
     }
 
     private static string? FindVideoIdBase(JsonElement element)

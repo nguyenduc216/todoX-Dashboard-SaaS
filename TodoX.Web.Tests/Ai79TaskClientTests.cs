@@ -75,6 +75,7 @@ public sealed class Ai79TaskClientTests
         Assert.DoesNotContain("secret-token", result.SanitizedResponseJson, StringComparison.Ordinal);
         var request = Assert.Single(handler.Requests);
         Assert.Equal("https://api.gommo.net/ai/generateImage", request.Uri);
+        Assert.StartsWith("application/x-www-form-urlencoded", request.ContentType, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("access_token=secret-token", request.Body, StringComparison.Ordinal);
         Assert.Contains("domain=79ai.net", request.Body, StringComparison.Ordinal);
         Assert.Contains("model=seedream_5_0", request.Body, StringComparison.Ordinal);
@@ -716,6 +717,51 @@ public sealed class Ai79TaskClientTests
         Assert.Contains("model-row-1", ex.SanitizedResponseJson, StringComparison.Ordinal);
         Assert.DoesNotContain("secret-token", ex.SanitizedResponseJson, StringComparison.Ordinal);
         Assert.Contains("***", ex.SanitizedResponseJson, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ImageSubmit_DoesNotUseTaskIdAliasesInsteadOfImageInfoIdBase()
+    {
+        var handler = new RecordingJsonHandler("""{"success":true,"task_id":"wrong-task-id"}""");
+        var client = new Ai79TaskClient(new HttpClient(handler));
+
+        var ex = await Assert.ThrowsAsync<Ai79TaskSubmitException>(() => client.SubmitAsync(new Ai79TaskSubmitRequest(
+            "https://api.gommo.net/ai",
+            "/generateImage",
+            "secret-token",
+            "79ai.net",
+            "google_image_gen_banana_2",
+            "prompt",
+            ["data:image/jpeg;base64,AQID"],
+            new Dictionary<string, string?> { ["action_type"] = "create" },
+            Ai79TaskOperation.Image,
+            "base64Image")));
+
+        Assert.Equal("missing_task_id", ex.ErrorCode);
+    }
+
+    [Theory]
+    [InlineData("PENDING_ACTIVE")]
+    [InlineData("PENDING_PROCESSING")]
+    public void ImageStatus_PendingStatesRemainRunning(string status)
+        => Assert.Equal(Ai79TaskStatusNormalizer.Running, Ai79TaskStatusNormalizer.Normalize(status));
+
+    [Fact]
+    public void TimelapseImageModels_SelectPrimaryForFreshAttemptAndFallbackInConfiguredOrder()
+    {
+        var options = Microsoft.Extensions.Options.Options.Create(new TodoX.Web.Services.Timelapse.TimelapseProviderWorkerOptions
+        {
+            ImageModelsWithReference = ["google_image_gen_banana_2", "seedream_5_0"],
+            ImageModelsWithoutReference = ["seedream_5_0", "google_image_gen_banana_2"]
+        });
+        var selector = new TodoX.Web.Services.Timelapse.TimelapseImageModelSelector(
+            options,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<TodoX.Web.Services.Timelapse.TimelapseImageModelSelector>.Instance);
+
+        Assert.Equal("google_image_gen_banana_2", selector.Select(true)[0]);
+        Assert.Equal("seedream_5_0", selector.Select(false)[0]);
+        Assert.Equal("seedream_5_0", selector.GetNext("google_image_gen_banana_2", true));
+        Assert.Equal("google_image_gen_banana_2", selector.GetNext("seedream_5_0", false));
     }
 
     [Fact]
