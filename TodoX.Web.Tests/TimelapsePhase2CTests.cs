@@ -1195,6 +1195,67 @@ public class TimelapsePhase2CTests
         }
     }
 
+    [Fact]
+    public void StripWorkerClaim_InvalidJsonReturnsValidEmptyObject()
+    {
+        var result = TimelapseProviderRuntime.StripWorkerClaim("{not-json");
+
+        using var document = JsonDocument.Parse(result);
+        Assert.Equal(JsonValueKind.Object, document.RootElement.ValueKind);
+        Assert.Empty(document.RootElement.EnumerateObject());
+    }
+
+    [Fact]
+    public void AppendImageModelAttempt_MalformedResponseIsWrappedAsValidJson()
+    {
+        var rawResponse = "provider said \"failed\"\npath=C:\\image\\fallback";
+        var result = TimelapseProviderRuntime.AppendImageModelAttempt(rawResponse, new
+        {
+            model = "google_image_gen_banana_2",
+            errorMessage = "Unicode: \u0110\u1eb7c bi\u1ec7t"
+        });
+
+        using var document = JsonDocument.Parse(result);
+        Assert.True(document.RootElement.GetProperty("providerResponseParseFailed").GetBoolean());
+        Assert.Equal(rawResponse, document.RootElement.GetProperty("rawResponse").GetString());
+        Assert.Equal(JsonValueKind.Array, document.RootElement.GetProperty("image_model_attempts").ValueKind);
+    }
+
+    [Fact]
+    public void TimelapseImageLifecycle_Logs79AiStagesAndKeepsSubmitMetadataRedacted()
+    {
+        var source = ReadSource("TodoX.Web", "Services", "Timelapse", "TimelapseProviderRuntime.cs");
+
+        var events = new[]
+        {
+            "TIMELAPSE_IMAGE_MODEL_SELECTED",
+            "TIMELAPSE_IMAGE_PROVIDER_RESOLVE_BEGIN",
+            "TIMELAPSE_IMAGE_PROVIDER_RESOLVED",
+            "TIMELAPSE_IMAGE_SUBMIT_BEGIN",
+            "TIMELAPSE_IMAGE_SUBMIT_RESPONSE",
+            "TIMELAPSE_IMAGE_POLL_RESPONSE",
+            "TIMELAPSE_IMAGE_COMPLETED",
+            "TIMELAPSE_IMAGE_SUBMIT_FAILED",
+            "TIMELAPSE_IMAGE_FALLBACK_JSON_INVALID",
+            "TIMELAPSE_IMAGE_FALLBACK_PERSIST_FAILED",
+            "TIMELAPSE_IMAGE_MODEL_FALLBACK"
+        };
+
+        foreach (var eventName in events)
+        {
+            Assert.Contains(eventName, source, StringComparison.Ordinal);
+        }
+
+        Assert.True(source.IndexOf("TIMELAPSE_IMAGE_SUBMIT_BEGIN", StringComparison.Ordinal)
+            < source.IndexOf("_taskClient.SubmitAsync", StringComparison.Ordinal));
+        Assert.True(source.IndexOf("_taskClient.SubmitAsync", StringComparison.Ordinal)
+            < source.IndexOf("TIMELAPSE_IMAGE_SUBMIT_RESPONSE", StringComparison.Ordinal));
+        Assert.True(source.IndexOf("TIMELAPSE_IMAGE_FALLBACK_JSON_INVALID", StringComparison.Ordinal)
+            < source.IndexOf("TIMELAPSE_IMAGE_MODEL_FALLBACK", StringComparison.Ordinal));
+        Assert.DoesNotContain("access_token", source[source.IndexOf("TIMELAPSE_IMAGE_SUBMIT_BEGIN", StringComparison.Ordinal)..source.IndexOf("_taskClient.SubmitAsync", StringComparison.Ordinal)], StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("base64", source[source.IndexOf("TIMELAPSE_IMAGE_SUBMIT_BEGIN", StringComparison.Ordinal)..source.IndexOf("_taskClient.SubmitAsync", StringComparison.Ordinal)], StringComparison.OrdinalIgnoreCase);
+    }
+
     private static string ReadSource(params string[] parts)
     {
         var root = FindRepoRoot();

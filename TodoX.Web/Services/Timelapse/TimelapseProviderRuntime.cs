@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net;
 using System.Text;
 using System.Text.Json;
@@ -87,6 +88,24 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
                 item.JobId, item.ProgressPercent, item.Attempt, item.ProviderTaskId, status.NormalizedStatus);
             await _renderJobs.AddEventAsync(item.JobId, "TIMELAPSE_IMAGE_POLL", "Timelapse image task polled.",
                 new { item.ProgressPercent, item.Attempt, taskId = item.ProviderTaskId, status = status.NormalizedStatus }, ct: ct);
+            await TryAddSubmitEventAsync(
+                item.JobId,
+                "TIMELAPSE_IMAGE_POLL_RESPONSE",
+                "Timelapse image poll response received.",
+                new
+                {
+                    stageId = item.Id,
+                    item.Attempt,
+                    providerCode = item.ProviderCode ?? _options.ProviderCode,
+                    model = item.ProviderModel,
+                    providerTaskId = item.ProviderTaskId,
+                    normalizedStatus = status.NormalizedStatus,
+                    providerStatus = ReadJsonString(status.SanitizedResponseJson, "status"),
+                    resultUrl = status.NormalizedStatus == Ai79TaskStatusNormalizer.Success ? status.OutputUrl : null,
+                    errorCode = status.ErrorCode,
+                    errorMessage = status.NormalizedStatus == Ai79TaskStatusNormalizer.Failed ? SanitizeEventMessage(status.ErrorMessage) : null
+                },
+                ct);
 
             if (status.NormalizedStatus == Ai79TaskStatusNormalizer.Running)
             {
@@ -151,6 +170,8 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
                 item.JobId, item.ProgressPercent, item.Attempt, item.ProviderTaskId, media.Id);
             await _renderJobs.AddEventAsync(item.JobId, "TIMELAPSE_IMAGE_COMPLETE", "Timelapse image saved to TodoX media.",
                 new { item.ProgressPercent, item.Attempt, providerTaskId = item.ProviderTaskId, taskId = item.ProviderTaskId, mediaId = media.Id }, ct: ct);
+            await TryAddSubmitEventAsync(item.JobId, "TIMELAPSE_IMAGE_COMPLETED", "Timelapse image completed.",
+                new { stageId = item.Id, item.ProgressPercent, item.Attempt, providerCode = item.ProviderCode ?? _options.ProviderCode, model = item.ProviderModel, providerTaskId = item.ProviderTaskId, mediaId = media.Id, publicUrl = media.PublicUrl ?? media.FileUrl }, ct);
             await _renderJobs.AddEventAsync(item.JobId, "TIMELAPSE_IMAGE_MODEL_SUCCEEDED", "Timelapse image model completed and media was saved.",
                 new
                 {
@@ -326,32 +347,79 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
         Ai79RuntimeProvider? provider = null;
         SubmitRequestEnvelope? request = null;
         Ai79TaskSubmitResult submit;
+        var submitTimer = Stopwatch.StartNew();
         try
         {
             model = SelectImageModel(item.ProviderModel, hasReference);
+            var selectedModels = _imageModelSelector.Select(hasReference);
             await _renderJobs.AddEventAsync(
                 item.JobId,
                 "TIMELAPSE_IMAGE_MODEL_SELECTED",
                 "Timelapse image model selected.",
-                new { item.ProgressPercent, item.Attempt, model, hasReference },
+                new
+                {
+                    stageId = item.Id,
+                    item.ProgressPercent,
+                    item.Attempt,
+                    hasReference,
+                    selectedModel = model,
+                    fallbackModels = selectedModels.Skip(1).ToArray(),
+                    providerCode = _options.ProviderCode,
+                    modelCode = model
+                },
                 ct: ct);
+            await TryAddSubmitEventAsync(
+                item.JobId,
+                "TIMELAPSE_IMAGE_PROVIDER_RESOLVE_BEGIN",
+                "Timelapse image provider resolution started.",
+                new { stageId = item.Id, item.ProgressPercent, item.Attempt, providerCode = _options.ProviderCode, model, capabilityCode = _options.ImageCapabilityCode },
+                ct);
             provider = await Resolve79AiRuntimeAsync(
                 _options.ImageCapabilityCode,
                 model,
                 isImage: true,
                 $"Chưa cấu hình model {model} cho Timelapse image.",
                 ct: ct);
+            await TryAddSubmitEventAsync(
+                item.JobId,
+                "TIMELAPSE_IMAGE_PROVIDER_RESOLVED",
+                "Timelapse image provider resolved.",
+                new { stageId = item.Id, item.Attempt, providerCode = provider.ProviderCode, model = provider.Model, capabilityCode = _options.ImageCapabilityCode, providerAccountId = provider.Credential.ProviderAccountId },
+                ct);
             var reference = await ResolveImageReferenceAsync(item, ct);
             var prompt = TimelapsePromptResolver.ResolveImagePrompt(item.Snapshot, item.ProgressPercent, item.PromptSnapshotJson);
             TimelapsePromptResolver.ValidateProviderPrompt(prompt);
-            request = BuildImageSubmitRequest(provider, prompt, reference, NormalizeImageRatio(item.Snapshot.Ratio));
+            var ratio = NormalizeImageRatio(item.Snapshot.Ratio);
+            request = BuildImageSubmitRequest(provider, prompt, reference, ratio);
             await TryAddSubmitEventAsync(
                 item.JobId,
                 "TIMELAPSE_IMAGE_SUBMIT_BEGIN",
                 "Timelapse image submit started.",
-                new { item.ProgressPercent, item.Attempt, provider.ProviderCode, model = provider.Model },
+                new
+                {
+                    stageId = item.Id,
+                    item.ProgressPercent,
+                    item.Attempt,
+                    providerCode = provider.ProviderCode,
+                    model = provider.Model,
+                    endpoint = provider.SubmitPath,
+                    domain = provider.Domain,
+                    ratio,
+                    mode = provider.ImageMode,
+                    resolution = provider.ImageResolution,
+                    editImage = true,
+                    hasReference,
+                    referenceMimeType = reference.MimeType,
+                    promptLength = prompt.Length
+                },
                 ct);
             submit = await _taskClient.SubmitAsync(request.Raw, ct);
+            await TryAddSubmitEventAsync(
+                item.JobId,
+                "TIMELAPSE_IMAGE_SUBMIT_RESPONSE",
+                "Timelapse image submit response received.",
+                new { stageId = item.Id, item.ProgressPercent, item.Attempt, providerCode = provider.ProviderCode, model = provider.Model, success = true, providerTaskId = submit.TaskId, runtimeMs = submitTimer.ElapsedMilliseconds },
+                ct);
         }
         catch (TimelapseInvalidCompiledPromptException ex)
         {
@@ -406,6 +474,24 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
         {
             var providerCode = provider?.ProviderCode ?? item.ProviderCode ?? _options.ProviderCode;
             var currentModel = provider?.Model ?? model;
+            await TryAddSubmitFailureEventAsync(
+                item.JobId,
+                "TIMELAPSE_IMAGE_SUBMIT_FAILED",
+                "Timelapse image submit failed before a valid provider response.",
+                new
+                {
+                    stageId = item.Id,
+                    item.ProgressPercent,
+                    item.Attempt,
+                    providerCode,
+                    model = currentModel,
+                    errorType = ex.GetType().Name,
+                    errorCode = ex.ErrorCode,
+                    errorMessage = SanitizeEventMessage(ex.ErrorMessage),
+                    httpStatus = ex.HttpStatusCode is null ? (int?)null : (int)ex.HttpStatusCode,
+                    durationMs = submitTimer.ElapsedMilliseconds
+                },
+                ct);
             if (await TryFallbackImageAsync(item, providerCode, currentModel, ex.ErrorCode ?? "submit_failed", ex.ErrorMessage, request?.SanitizedJson ?? "{}", ex.SanitizedResponseJson, ct))
             {
                 return;
@@ -467,7 +553,16 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
                     item.JobId,
                     "TIMELAPSE_IMAGE_PROVIDER_RESOLVE_FAILED",
                     "Timelapse image 79AI provider/model resolution failed before submit.",
-                    new { item.ProgressPercent, item.Attempt, model = currentModel, errorCode, errorMessage = ex.Message },
+                    new { stageId = item.Id, item.ProgressPercent, item.Attempt, providerCode, model = currentModel, capabilityCode = _options.ImageCapabilityCode, errorType = ex.GetType().Name, errorCode, errorMessage = SanitizeEventMessage(ex.Message) },
+                    ct);
+            }
+            else
+            {
+                await TryAddSubmitFailureEventAsync(
+                    item.JobId,
+                    "TIMELAPSE_IMAGE_SUBMIT_FAILED",
+                    "Timelapse image submit failed before a valid provider response.",
+                    new { stageId = item.Id, item.ProgressPercent, item.Attempt, providerCode, model = currentModel, errorType = ex.GetType().Name, errorCode, errorMessage = SanitizeEventMessage(ex.Message), durationMs = submitTimer.ElapsedMilliseconds },
                     ct);
             }
             if (await TryFallbackImageAsync(item, providerCode, currentModel, errorCode, ex.Message, request?.SanitizedJson ?? "{}", "{}", ct))
@@ -1198,18 +1293,64 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
 
         var requestWithAttempts = AppendImageModelAttempt(StripWorkerClaim(requestJson), failedAttempt);
         var responseWithAttempts = AppendImageModelAttempt(responseJson, failedAttempt);
-        var saved = await _repo.SaveImageFallbackAsync(
-            item.Id,
-            item.Attempt,
-            providerCode,
-            nextModel,
-            errorCode,
-            errorMessage,
-            requestWithAttempts,
-            responseWithAttempts,
-            ct);
+        if (!TryValidateJson(requestWithAttempts, out var requestParseError))
+        {
+            await TryAddSubmitFailureEventAsync(
+                item.JobId,
+                "TIMELAPSE_IMAGE_FALLBACK_JSON_INVALID",
+                "Timelapse image fallback request JSON was invalid before persistence.",
+                new { stageId = item.Id, item.Attempt, model = currentModel, field = "requestJson", length = requestWithAttempts.Length, parseError = SanitizeEventMessage(requestParseError) },
+                ct);
+            await _repo.ReleaseImageClaimAsync(item.Id, item.Attempt, CancellationToken.None);
+            return false;
+        }
+
+        if (!TryValidateJson(responseWithAttempts, out var responseParseError))
+        {
+            await TryAddSubmitFailureEventAsync(
+                item.JobId,
+                "TIMELAPSE_IMAGE_FALLBACK_JSON_INVALID",
+                "Timelapse image fallback response JSON was invalid before persistence.",
+                new { stageId = item.Id, item.Attempt, model = currentModel, field = "responseJson", length = responseWithAttempts.Length, parseError = SanitizeEventMessage(responseParseError) },
+                ct);
+            await _repo.ReleaseImageClaimAsync(item.Id, item.Attempt, CancellationToken.None);
+            return false;
+        }
+
+        bool saved;
+        try
+        {
+            saved = await _repo.SaveImageFallbackAsync(
+                item.Id,
+                item.Attempt,
+                providerCode,
+                nextModel,
+                errorCode,
+                errorMessage,
+                requestWithAttempts,
+                responseWithAttempts,
+                ct);
+        }
+        catch (Exception ex)
+        {
+            await TryAddSubmitFailureEventAsync(
+                item.JobId,
+                "TIMELAPSE_IMAGE_FALLBACK_PERSIST_FAILED",
+                "Timelapse image fallback persistence failed.",
+                new { stageId = item.Id, item.Attempt, model = currentModel, nextModel, errorType = ex.GetType().Name, errorMessage = SanitizeEventMessage(ex.Message) },
+                CancellationToken.None);
+            await _repo.ReleaseImageClaimAsync(item.Id, item.Attempt, CancellationToken.None);
+            return false;
+        }
         if (!saved)
         {
+            await TryAddSubmitFailureEventAsync(
+                item.JobId,
+                "TIMELAPSE_IMAGE_FALLBACK_PERSIST_FAILED",
+                "Timelapse image fallback persistence did not update the active attempt.",
+                new { stageId = item.Id, item.Attempt, model = currentModel, nextModel, errorType = "stale_attempt" },
+                CancellationToken.None);
+            await _repo.ReleaseImageClaimAsync(item.Id, item.Attempt, CancellationToken.None);
             return false;
         }
 
@@ -1225,7 +1366,7 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
             item.JobId,
             "TIMELAPSE_IMAGE_MODEL_FALLBACK",
             "Timelapse image worker will retry the next model in the chain.",
-            new { item.ProgressPercent, item.Attempt, currentModel, failedModel = currentModel, nextModel, providerTaskId = item.ProviderTaskId, taskId = item.ProviderTaskId, errorCode, errorMessage, failedAt },
+            new { stageId = item.Id, item.ProgressPercent, item.Attempt, currentModel, failedModel = currentModel, nextModel, providerTaskId = item.ProviderTaskId, taskId = item.ProviderTaskId, failureStage = ResolveImageFailureStage(errorCode), errorCode, errorMessage = SanitizeEventMessage(errorMessage), failedAt },
             "warning",
             ct);
         return true;
@@ -1266,7 +1407,7 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
            || !string.IsNullOrWhiteSpace(item.DependencyPublicUrl)
            || item.Snapshot.OriginalImage.MediaId != Guid.Empty;
 
-    private static string StripWorkerClaim(string requestJson)
+    internal static string StripWorkerClaim(string requestJson)
     {
         if (string.IsNullOrWhiteSpace(requestJson))
         {
@@ -1301,11 +1442,11 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
         }
         catch (JsonException)
         {
-            return requestJson;
+            return "{}";
         }
     }
 
-    private static string AppendImageModelAttempt(string? json, object attempt)
+    internal static string AppendImageModelAttempt(string? json, object attempt)
     {
         try
         {
@@ -1360,10 +1501,66 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
             return JsonSerializer.Serialize(new
             {
                 providerResponseParseFailed = true,
+                rawResponse = json,
                 image_model_attempts = new[] { attempt }
             }, JsonOptions);
         }
     }
+
+    internal static bool TryValidateJson(string? json, out string? parseError)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            parseError = null;
+            return true;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            parseError = null;
+            return true;
+        }
+        catch (JsonException ex)
+        {
+            parseError = ex.Message;
+            return false;
+        }
+    }
+
+    private static string? ReadJsonString(string? json, string propertyName)
+    {
+        if (!TryValidateJson(json, out _))
+        {
+            return null;
+        }
+
+        using var document = JsonDocument.Parse(json!);
+        return document.RootElement.ValueKind == JsonValueKind.Object
+            && document.RootElement.TryGetProperty(propertyName, out var value)
+            && value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : null;
+    }
+
+    private static string SanitizeEventMessage(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        return value.Replace("access_token", "[redacted]", StringComparison.OrdinalIgnoreCase)
+            .Replace("Authorization", "[redacted]", StringComparison.OrdinalIgnoreCase)
+            .Trim()[..Math.Min(value.Trim().Length, 500)];
+    }
+
+    private static string ResolveImageFailureStage(string? errorCode)
+        => (errorCode ?? string.Empty).Contains("poll", StringComparison.OrdinalIgnoreCase)
+            ? "poll"
+            : (errorCode ?? string.Empty).Contains("resolve", StringComparison.OrdinalIgnoreCase)
+                ? "provider_resolve"
+                : "submit";
 
     private async Task FailVideoAsync(TimelapseVideoWorkItem item, string? errorCode, string errorMessage, string responseJson, CancellationToken ct)
     {
