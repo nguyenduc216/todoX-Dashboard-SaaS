@@ -21,6 +21,7 @@ public interface ITimelapseWorkerRepository
     Task<bool> SaveVideoCompletedAsync(Guid clipId, int attempt, Guid mediaId, string objectKey, string publicUrl, string responseJson, CancellationToken ct = default);
     Task<bool> SaveFinalizerCompletedAsync(Guid finalOutputId, Guid jobId, Guid mediaId, string objectKey, string publicUrl, string responseJson, CancellationToken ct = default);
     Task<bool> SaveImageSubmitFailedAsync(Guid stageId, int attempt, string providerCode, string model, string? errorCode, string errorMessage, string requestJson, string responseJson, CancellationToken ct = default);
+    Task<bool> SaveImageFallbackAsync(Guid stageId, int attempt, string providerCode, string model, string? errorCode, string errorMessage, string requestJson, string responseJson, CancellationToken ct = default);
     Task<bool> SaveVideoSubmitFailedAsync(Guid clipId, int attempt, string providerCode, string model, string? errorCode, string errorMessage, string requestJson, string responseJson, CancellationToken ct = default);
     Task<bool> SaveImageFailedAsync(Guid stageId, int attempt, string? errorCode, string errorMessage, string responseJson, CancellationToken ct = default);
     Task<bool> SaveVideoFailedAsync(Guid clipId, int attempt, string? errorCode, string errorMessage, string responseJson, CancellationToken ct = default);
@@ -583,6 +584,9 @@ public sealed class TimelapseWorkerRepository : ITimelapseWorkerRepository
     public Task<bool> SaveImageSubmitFailedAsync(Guid stageId, int attempt, string providerCode, string model, string? errorCode, string errorMessage, string requestJson, string responseJson, CancellationToken ct = default)
         => UpdateOperationFailedAsync("timelapse.timelapse_image_stages", "timelapse.timelapse_image_stage_versions", "image_stage_id", stageId, attempt, errorCode, errorMessage, responseJson, requestJson, providerCode, model, true, ct);
 
+    public Task<bool> SaveImageFallbackAsync(Guid stageId, int attempt, string providerCode, string model, string? errorCode, string errorMessage, string requestJson, string responseJson, CancellationToken ct = default)
+        => UpdateImageFallbackAsync(stageId, attempt, providerCode, model, errorCode, errorMessage, requestJson, responseJson, ct);
+
     public Task<bool> SaveVideoSubmitFailedAsync(Guid clipId, int attempt, string providerCode, string model, string? errorCode, string errorMessage, string requestJson, string responseJson, CancellationToken ct = default)
         => UpdateOperationFailedAsync("timelapse.timelapse_video_clips", "timelapse.timelapse_video_clip_versions", "video_clip_id", clipId, attempt, errorCode, errorMessage, responseJson, requestJson, providerCode, model, true, ct);
 
@@ -1024,6 +1028,65 @@ public sealed class TimelapseWorkerRepository : ITimelapseWorkerRepository
 
         tx.Commit();
         return true;
+    }
+
+    private async Task<bool> UpdateImageFallbackAsync(
+        Guid stageId,
+        int attempt,
+        string providerCode,
+        string model,
+        string? errorCode,
+        string errorMessage,
+        string requestJson,
+        string responseJson,
+        CancellationToken ct)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        using var tx = conn.BeginTransaction();
+        var changed = await conn.ExecuteAsync(
+            """
+            UPDATE timelapse.timelapse_image_stages
+               SET provider_code=COALESCE(@providerCode, provider_code),
+                   provider_model=@model,
+                   provider_task_id=NULL,
+                   error_code=@errorCode,
+                   error_message=@errorMessage,
+                   updated_at=now()
+             WHERE id=@id
+               AND active_attempt=@attempt
+               AND status='RENDERING';
+
+            UPDATE timelapse.timelapse_image_stage_versions
+               SET provider_code=COALESCE(@providerCode, provider_code),
+                   provider_model=@model,
+                   provider_task_id=NULL,
+                   request_json=CASE
+                       WHEN @requestJson IS NULL THEN request_json
+                       ELSE CAST(@requestJson AS jsonb)
+                   END,
+                   response_json=CAST(@responseJson AS jsonb),
+                   error_code=@errorCode,
+                   error_message=@errorMessage,
+                   updated_at=now()
+             WHERE image_stage_id=@id
+               AND attempt=@attempt
+               AND status='RENDERING';
+            """,
+            new
+            {
+                id = stageId,
+                attempt,
+                providerCode,
+                model,
+                requestJson,
+                errorCode,
+                errorMessage = Clip(errorMessage),
+                responseJson
+            },
+            tx);
+        tx.Commit();
+        return changed > 0;
     }
 
     private async Task ReleaseClaimAsync(string versionTable, string versionFk, Guid id, int attempt, CancellationToken ct)

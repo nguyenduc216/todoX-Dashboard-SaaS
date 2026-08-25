@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
 using TodoX.Web.Models;
@@ -31,6 +32,7 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
     private readonly ITimelapseWorkerRepository _repo;
     private readonly ITimelapseCoreLifecycleBridge _coreLifecycle;
     private readonly IRenderJobService _renderJobs;
+    private readonly TimelapseImageModelSelector _imageModelSelector;
     private readonly IConfiguration _configuration;
     private readonly TimelapseProviderWorkerOptions _options;
     private readonly ILogger<TimelapseProviderRuntime> _logger;
@@ -44,6 +46,7 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
         ITimelapseWorkerRepository repo,
         ITimelapseCoreLifecycleBridge coreLifecycle,
         IRenderJobService renderJobs,
+        TimelapseImageModelSelector imageModelSelector,
         IConfiguration configuration,
         IOptions<TimelapseProviderWorkerOptions> options,
         ILogger<TimelapseProviderRuntime> logger)
@@ -56,6 +59,7 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
         _repo = repo;
         _coreLifecycle = coreLifecycle;
         _renderJobs = renderJobs;
+        _imageModelSelector = imageModelSelector;
         _configuration = configuration;
         _options = options.Value;
         _logger = logger;
@@ -75,10 +79,9 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
                 item.ProviderCode,
                 item.ProviderTaskId,
                 _options.ImageCapabilityCode,
-                _options.ImageModelName,
+                item.ProviderModel,
                 isImage: true,
                 "Chưa cấu hình model Seedream cho Timelapse.",
-                item.ProviderModel,
                 ct);
             _logger.LogInformation("TIMELAPSE_IMAGE_POLL jobId={JobId} progress={Progress} attempt={Attempt} taskId={TaskId} status={Status}",
                 item.JobId, item.ProgressPercent, item.Attempt, item.ProviderTaskId, status.NormalizedStatus);
@@ -93,12 +96,22 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
 
             if (status.NormalizedStatus == Ai79TaskStatusNormalizer.Failed)
             {
+                if (await TryFallbackImageAsync(item, status.ErrorCode, status.ErrorMessage ?? "79AI image task failed.", status.SanitizedResponseJson, ct))
+                {
+                    return;
+                }
+
                 await FailImageAsync(item, status.ErrorCode, status.ErrorMessage ?? "79AI image task failed.", status.SanitizedResponseJson, ct);
                 return;
             }
 
             if (string.IsNullOrWhiteSpace(status.OutputUrl))
             {
+                if (await TryFallbackImageAsync(item, "missing_output", "79AI image task completed without an output URL.", status.SanitizedResponseJson, ct))
+                {
+                    return;
+                }
+
                 await FailImageAsync(item, "missing_output", "79AI image task completed without an output URL.", status.SanitizedResponseJson, ct);
                 return;
             }
@@ -150,10 +163,26 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
             await _renderJobs.AddEventAsync(item.JobId, "TIMELAPSE_IMAGE_POLL_TRANSIENT", "Timelapse image poll had a transient provider error.",
                 new { item.ProgressPercent, item.Attempt, taskId = item.ProviderTaskId, httpStatus = ex.HttpStatusCode is null ? (int?)null : (int)ex.HttpStatusCode }, "warning", CancellationToken.None);
         }
+        catch (Ai79TaskPollException ex)
+        {
+            _logger.LogWarning(ex, "TIMELAPSE_IMAGE_POLL_FAILED jobId={JobId} progress={Progress} attempt={Attempt} taskId={TaskId}",
+                item.JobId, item.ProgressPercent, item.Attempt, item.ProviderTaskId);
+            if (await TryFallbackImageAsync(item, "poll_failed", ex.Message, ex.SanitizedResponseJson, ct))
+            {
+                return;
+            }
+
+            await FailImageAsync(item, "poll_failed", ex.Message, ex.SanitizedResponseJson, ct);
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "TIMELAPSE_IMAGE_FAILED jobId={JobId} progress={Progress} attempt={Attempt} taskId={TaskId}",
                 item.JobId, item.ProgressPercent, item.Attempt, item.ProviderTaskId);
+            if (await TryFallbackImageAsync(item, ex.GetType().Name, ex.Message, "{}", ct))
+            {
+                return;
+            }
+
             await FailImageAsync(item, ex.GetType().Name, ex.Message, "{}", ct);
         }
     }
@@ -175,7 +204,6 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
                 _options.VideoModelName,
                 isImage: false,
                 "Chưa cấu hình model Seedance cho Timelapse.",
-                item.ProviderModel,
                 ct);
             _logger.LogInformation("TIMELAPSE_VIDEO_POLL jobId={JobId} clip={ClipIndex} attempt={Attempt} taskId={TaskId} status={Status}",
                 item.JobId, item.ClipIndex, item.Attempt, item.ProviderTaskId, status.NormalizedStatus);
@@ -265,9 +293,17 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
 
     private async Task SubmitImageAsync(TimelapseImageWorkItem item, CancellationToken ct)
     {
+        var hasReference = HasImageReference(item);
+        var model = SelectImageModel(item.ProviderModel, hasReference);
+        await _renderJobs.AddEventAsync(
+            item.JobId,
+            "TIMELAPSE_IMAGE_MODEL_SELECTED",
+            "Timelapse image model selected.",
+            new { item.ProgressPercent, item.Attempt, model, hasReference },
+            ct: ct);
         var provider = await Resolve79AiRuntimeAsync(
             _options.ImageCapabilityCode,
-            _options.ImageModelName,
+            model,
             isImage: true,
             "Chưa cấu hình model Seedream cho Timelapse.",
             ct: ct);
@@ -290,6 +326,11 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
         }
         catch (TimelapseInvalidCompiledPromptException ex)
         {
+            if (await TryFallbackImageAsync(item, provider.ProviderCode, provider.Model, ex.ErrorCode, ex.Message, request?.SanitizedJson ?? "{}", "{}", ct))
+            {
+                return;
+            }
+
             var saved = await _repo.SaveImageSubmitFailedAsync(
                 item.Id,
                 item.Attempt,
@@ -332,6 +373,11 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
         }
         catch (Ai79TaskSubmitException ex)
         {
+            if (await TryFallbackImageAsync(item, provider.ProviderCode, provider.Model, ex.ErrorCode ?? "submit_failed", ex.ErrorMessage, request?.SanitizedJson ?? "{}", ex.SanitizedResponseJson, ct))
+            {
+                return;
+            }
+
             var saved = await _repo.SaveImageSubmitFailedAsync(
                 item.Id,
                 item.Attempt,
@@ -377,6 +423,12 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
         await _repo.SaveImageSubmittedAsync(item.Id, item.Attempt, provider.ProviderCode, provider.Model, submit.TaskId, request.SanitizedJson, submit.SanitizedResponseJson, ct);
         _logger.LogInformation("TIMELAPSE_IMAGE_SUBMIT jobId={JobId} progress={Progress} attempt={Attempt} provider={ProviderCode} model={Model} taskId={TaskId}",
             item.JobId, item.ProgressPercent, item.Attempt, provider.ProviderCode, provider.Model, submit.TaskId);
+        await _renderJobs.AddEventAsync(
+            item.JobId,
+            "TIMELAPSE_IMAGE_MODEL_SUCCEEDED",
+            "Timelapse image model submitted successfully.",
+            new { item.ProgressPercent, item.Attempt, provider.ProviderCode, model = provider.Model, taskId = submit.TaskId },
+            ct: ct);
         await TryAddSubmitEventAsync(
             item.JobId,
             "TIMELAPSE_IMAGE_SUBMITTED",
@@ -514,10 +566,9 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
         string? providerCode,
         string? taskId,
         string capabilityCode,
-        string modelName,
+        string? modelName,
         bool isImage,
         string unavailableMessage,
-        string? persistedModel,
         CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(taskId))
@@ -525,14 +576,16 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
             throw new InvalidOperationException("Missing 79AI provider task id.");
         }
 
+        var resolvedModelName = modelName
+            ?? throw new InvalidOperationException("Missing persisted 79AI provider model.");
         var provider = await Resolve79AiRuntimeAsync(
             capabilityCode,
-            modelName,
+            resolvedModelName,
             isImage,
             unavailableMessage,
             providerCode,
-            persistedModel,
-            ct);
+            expectedModel: modelName,
+            ct: ct);
         return await _taskClient.GetStatusAsync(new Ai79TaskStatusRequest(
             provider.BaseUrl,
             provider.PollPath,
@@ -992,6 +1045,135 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
             errorMessage,
             FailurePolicy(item.ProviderTaskId),
             ct);
+    }
+
+    private async Task<bool> TryFallbackImageAsync(
+        TimelapseImageWorkItem item,
+        string providerCode,
+        string currentModel,
+        string? errorCode,
+        string errorMessage,
+        string requestJson,
+        string responseJson,
+        CancellationToken ct)
+    {
+        var nextModel = _imageModelSelector.GetNext(currentModel, HasImageReference(item));
+        if (string.IsNullOrWhiteSpace(nextModel))
+        {
+            await _renderJobs.AddEventAsync(
+                item.JobId,
+                "TIMELAPSE_IMAGE_MODEL_EXHAUSTED",
+                "Timelapse image model chain exhausted.",
+                new { item.ProgressPercent, item.Attempt, currentModel, errorCode, errorMessage },
+                "error",
+                ct);
+            return false;
+        }
+
+        var saved = await _repo.SaveImageFallbackAsync(
+            item.Id,
+            item.Attempt,
+            providerCode,
+            nextModel,
+            errorCode,
+            errorMessage,
+            StripWorkerClaim(requestJson),
+            responseJson,
+            ct);
+        if (!saved)
+        {
+            return false;
+        }
+
+        await _repo.ReleaseImageClaimAsync(item.Id, item.Attempt, ct);
+        await _renderJobs.AddEventAsync(
+            item.JobId,
+            "TIMELAPSE_IMAGE_MODEL_FAILED",
+            "Timelapse image model failed.",
+            new { item.ProgressPercent, item.Attempt, currentModel, nextModel, errorCode, errorMessage },
+            "warning",
+            ct);
+        await _renderJobs.AddEventAsync(
+            item.JobId,
+            "TIMELAPSE_IMAGE_MODEL_FALLBACK",
+            "Timelapse image worker will retry the next model in the chain.",
+            new { item.ProgressPercent, item.Attempt, currentModel, nextModel },
+            "warning",
+            ct);
+        return true;
+    }
+
+    private string SelectImageModel(string? currentModel, bool hasReference)
+        => string.IsNullOrWhiteSpace(currentModel)
+            ? _imageModelSelector.Select(hasReference)[0]
+            : currentModel;
+
+    private Task<bool> TryFallbackImageAsync(
+        TimelapseImageWorkItem item,
+        string? errorCode,
+        string errorMessage,
+        string responseJson,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(item.ProviderModel))
+        {
+            return Task.FromResult(false);
+        }
+
+        return TryFallbackImageAsync(
+            item,
+            item.ProviderCode ?? _options.ProviderCode,
+            item.ProviderModel,
+            errorCode,
+            errorMessage,
+            "{}",
+            responseJson,
+            ct);
+    }
+
+    private static bool HasImageReference(TimelapseImageWorkItem item)
+        => item.DependencyMediaId is not null
+           || !string.IsNullOrWhiteSpace(item.DependencyObjectKey)
+           || !string.IsNullOrWhiteSpace(item.DependencyPublicUrl)
+           || item.Snapshot.OriginalImage.MediaId != Guid.Empty;
+
+    private static string StripWorkerClaim(string requestJson)
+    {
+        if (string.IsNullOrWhiteSpace(requestJson))
+        {
+            return "{}";
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(requestJson);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return requestJson;
+            }
+
+            using var buffer = new MemoryStream();
+            using (var writer = new Utf8JsonWriter(buffer))
+            {
+                writer.WriteStartObject();
+                foreach (var property in doc.RootElement.EnumerateObject())
+                {
+                    if (string.Equals(property.Name, "worker_claim", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    property.WriteTo(writer);
+                }
+                writer.WriteEndObject();
+            }
+
+            return Encoding.UTF8.GetString(buffer.ToArray());
+        }
+        catch (JsonException)
+        {
+            return requestJson;
+        }
     }
 
     private async Task FailVideoAsync(TimelapseVideoWorkItem item, string? errorCode, string errorMessage, string responseJson, CancellationToken ct)

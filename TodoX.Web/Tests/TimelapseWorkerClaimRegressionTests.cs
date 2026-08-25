@@ -242,6 +242,37 @@ public sealed class TimelapseWorkerClaimRegressionTests
         Assert.Contains("TIMELAPSE_RENDER_STARTED", workflow);
     }
 
+    [Fact]
+    public void ImageModelChainUses79AiPrimaryAndFallbackWithoutWrapping()
+    {
+        var options = ReadRepoFile("Services", "Timelapse", "TimelapseProviderWorkerOptions.cs");
+        var runtime = ReadRepoFile("Services", "Timelapse", "TimelapseProviderRuntime.cs");
+        var config = ReadRepoFile("appsettings.json");
+
+        Assert.Contains("NanoBanana2ModelName = \"google_image_gen_banana_2\"", options);
+        Assert.Contains("Seedream50ModelName = \"seedream_5_0\"", options);
+        Assert.Contains("\"ImageModelName\": \"google_image_gen_banana_2\"", config);
+        Assert.Contains("\"ImageModelsWithReference\"", config);
+        Assert.Contains("\"ImageModelsWithoutReference\"", config);
+        Assert.Contains("GetNext(currentModel, HasImageReference(item))", runtime);
+        Assert.Contains("return index + 1 < models.Length ? models[index + 1] : null;", ReadRepoFile("Services", "Timelapse", "TimelapseImageModelSelector.cs"));
+        Assert.DoesNotContain("next ?? _imageModelSelector.Select(hasReference)[0]", runtime);
+    }
+
+    [Fact]
+    public void ImageFallbackPreservesAttemptAndPersistsNextModel()
+    {
+        var repository = ReadRepoFile("Services", "Timelapse", "TimelapseWorkerRepository.cs");
+        var runtime = ReadRepoFile("Services", "Timelapse", "TimelapseProviderRuntime.cs");
+
+        Assert.Contains("SaveImageFallbackAsync", repository);
+        Assert.Contains("item.Attempt,", runtime);
+        Assert.Contains("TIMELAPSE_IMAGE_MODEL_FALLBACK", runtime);
+        Assert.Contains("await _repo.ReleaseImageClaimAsync(item.Id, item.Attempt, ct);", runtime);
+        Assert.DoesNotContain("active_attempt=active_attempt+1", runtime);
+        Assert.DoesNotContain("CreateImageAttempt", runtime);
+    }
+
     private static string Between(string source, string startMarker, string endMarker)
     {
         var start = source.IndexOf(startMarker, StringComparison.Ordinal);

@@ -58,6 +58,7 @@ builder.Services.AddScoped<ITimelapseProfileRepository, TimelapseProfileReposito
 builder.Services.AddScoped<ITimelapseWorkflowService, TimelapseWorkflowService>();
 builder.Services.AddScoped<ITimelapseJobService, TimelapseJobService>();
 builder.Services.Configure<TimelapseProviderWorkerOptions>(builder.Configuration.GetSection(TimelapseProviderWorkerOptions.SectionName));
+builder.Services.AddScoped<TimelapseImageModelSelector>();
 builder.Services.AddScoped<ITimelapseWorkerRepository, TimelapseWorkerRepository>();
 builder.Services.AddScoped<ITimelapseCoreLifecycleBridge, TimelapseCoreLifecycleBridge>();
 builder.Services.AddScoped<IConstructionTimelapseExecutionBridge, ConstructionTimelapseExecutionBridge>();

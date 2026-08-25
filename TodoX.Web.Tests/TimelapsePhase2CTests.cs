@@ -23,7 +23,7 @@ public class TimelapsePhase2CTests
         Assert.Contains("\"DefaultVideoSubmitPath\": \"/create-video\"", ReadSource("TodoX.Web", "appsettings.json"), StringComparison.Ordinal);
         Assert.Contains("\"ProviderCode\": \"79ai\"", ReadSource("TodoX.Web", "appsettings.json"), StringComparison.Ordinal);
         Assert.Contains("\"ImageCapabilityCode\": \"image_generation\"", ReadSource("TodoX.Web", "appsettings.json"), StringComparison.Ordinal);
-        Assert.Contains("\"ImageModelName\": \"seedream_5_0\"", ReadSource("TodoX.Web", "appsettings.json"), StringComparison.Ordinal);
+        Assert.Contains("\"ImageModelName\": \"google_image_gen_banana_2\"", ReadSource("TodoX.Web", "appsettings.json"), StringComparison.Ordinal);
         Assert.Contains("\"VideoCapabilityCode\": \"image_to_video\"", ReadSource("TodoX.Web", "appsettings.json"), StringComparison.Ordinal);
         Assert.Contains("\"VideoModelName\": \"seedance_20_pro\"", ReadSource("TodoX.Web", "appsettings.json"), StringComparison.Ordinal);
         Assert.Contains("\"DefaultVideoResolution\": \"720p\"", ReadSource("TodoX.Web", "appsettings.json"), StringComparison.Ordinal);
@@ -154,7 +154,7 @@ public class TimelapsePhase2CTests
 
         Assert.Contains("ProviderCode { get; set; } = \"79ai\"", options, StringComparison.Ordinal);
         Assert.Contains("ImageCapabilityCode { get; set; } = \"image_generation\"", options, StringComparison.Ordinal);
-        Assert.Contains("ImageModelName { get; set; } = \"seedream_5_0\"", options, StringComparison.Ordinal);
+        Assert.Contains("ImageModelName { get; set; } = NanoBanana2ModelName", options, StringComparison.Ordinal);
         Assert.Contains("VideoCapabilityCode { get; set; } = \"image_to_video\"", options, StringComparison.Ordinal);
         Assert.Contains("VideoModelName { get; set; } = \"seedance_20_pro\"", options, StringComparison.Ordinal);
 
@@ -321,7 +321,7 @@ public class TimelapsePhase2CTests
         Assert.Contains("INSERT INTO timelapse.timelapse_image_stage_versions", workflow, StringComparison.Ordinal);
         Assert.Contains("provider_task_id=NULL", workerRepository, StringComparison.Ordinal);
         Assert.Contains("_options.ImageCapabilityCode", runtime, StringComparison.Ordinal);
-        Assert.Contains("_options.ImageModelName", runtime, StringComparison.Ordinal);
+        Assert.Contains("SelectImageModel(item.ProviderModel", runtime, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -366,7 +366,7 @@ public class TimelapsePhase2CTests
         var runtime = ReadSource("TodoX.Web", "Services", "Timelapse", "TimelapseProviderRuntime.cs");
         var options = ReadSource("TodoX.Web", "Services", "Timelapse", "TimelapseProviderWorkerOptions.cs");
 
-        Assert.Contains("ImageModelName { get; set; } = \"seedream_5_0\"", options, StringComparison.Ordinal);
+        Assert.Contains("ImageModelName { get; set; } = NanoBanana2ModelName", options, StringComparison.Ordinal);
         Assert.Contains("DefaultImageUploadPath { get; set; } = \"/image-upload\"", options, StringComparison.Ordinal);
         Assert.Contains("DefaultImageReferenceField { get; set; } = \"base64Image\"", options, StringComparison.Ordinal);
         Assert.Contains("DefaultImageMode { get; set; } = \"vip\"", options, StringComparison.Ordinal);

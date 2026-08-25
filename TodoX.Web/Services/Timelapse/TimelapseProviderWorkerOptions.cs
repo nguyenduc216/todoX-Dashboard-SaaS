@@ -3,6 +3,7 @@ namespace TodoX.Web.Services.Timelapse;
 public sealed class TimelapseProviderWorkerOptions
 {
     private const string Seedream50ModelName = "seedream_5_0";
+    private const string NanoBanana2ModelName = "google_image_gen_banana_2";
 
     private static readonly HashSet<string> SupportedVideoResolutions =
         new(StringComparer.OrdinalIgnoreCase)
@@ -32,7 +33,9 @@ public sealed class TimelapseProviderWorkerOptions
     public int FinalizerFfmpegTimeoutSeconds { get; set; } = 120;
     public string ProviderCode { get; set; } = "79ai";
     public string ImageCapabilityCode { get; set; } = "image_generation";
-    public string ImageModelName { get; set; } = "seedream_5_0";
+    public string ImageModelName { get; set; } = NanoBanana2ModelName;
+    public string[] ImageModelsWithReference { get; set; } = [NanoBanana2ModelName, Seedream50ModelName];
+    public string[] ImageModelsWithoutReference { get; set; } = [Seedream50ModelName, NanoBanana2ModelName];
     public string VideoCapabilityCode { get; set; } = "image_to_video";
     public string VideoModelName { get; set; } = "seedance_20_pro";
     public string Default79AiBaseUrl { get; set; } = "https://api.gommo.net/ai";
@@ -76,6 +79,21 @@ public sealed class TimelapseProviderWorkerOptions
 
             throw new InvalidOperationException(
                 "Cấu hình độ phân giải ảnh Timelapse cho seedream_5_0 không hợp lệ. Giá trị hỗ trợ: 2k, 4k.");
+        }
+
+        if (string.Equals(modelName, NanoBanana2ModelName, StringComparison.OrdinalIgnoreCase))
+        {
+            if (string.IsNullOrWhiteSpace(normalized))
+            {
+                return "2k";
+            }
+
+            return normalized switch
+            {
+                "1k" or "2k" or "4k" or "8k" or "10k" or "12k" => normalized,
+                _ => throw new InvalidOperationException(
+                    "Cau hinh do phan giai anh Timelapse cho google_image_gen_banana_2 khong hop le. Gia tri ho tro: 1k, 2k, 4k, 8k, 10k, 12k.")
+            };
         }
 
         if (string.IsNullOrWhiteSpace(normalized))
