@@ -1,3 +1,5 @@
+using System.Reflection;
+using System.Text.Json;
 using TodoX.Web.Services.AiProviders;
 using TodoX.Web.Services.Timelapse;
 using Xunit;
@@ -1154,6 +1156,43 @@ public class TimelapsePhase2CTests
         Assert.Contains("media persistence", report, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("state advancement", report, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("finalizer", report, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void AppendImageModelAttempt_FlushesBeforeReadingBufferAndProducesValidFallbackJson()
+    {
+        var runtimeSource = ReadSource("TodoX.Web", "Services", "Timelapse", "TimelapseProviderRuntime.cs");
+        var method = typeof(TimelapseProviderRuntime).GetMethod(
+            "AppendImageModelAttempt",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+        Assert.Contains("writer.Flush();", runtimeSource, StringComparison.Ordinal);
+        Assert.DoesNotContain("return Encoding.UTF8.GetString(buffer.ToArray());\n            }", runtimeSource, StringComparison.Ordinal);
+
+        var attempt = new
+        {
+            model = "google_image_gen_banana_2",
+            providerTaskId = (string?)null,
+            errorCode = "resolve_failed",
+            errorMessage = "Chưa cấu hình model \"google_image_gen_banana_2\" cho Timelapse image.\nPath: C:\\fallback",
+            failedAt = DateTimeOffset.UtcNow
+        };
+
+        var cases = new[]
+        {
+            "{}",
+            "{\"worker_claim\":{\"worker\":\"test\"},\"prompt\":\"x\"}",
+            "{\"image_model_attempts\":[{\"model\":\"old\",\"status\":\"failed\"}]}"
+        };
+
+        foreach (var input in cases)
+        {
+            var result = (string)method!.Invoke(null, new object?[] { input, attempt })!;
+            using var document = JsonDocument.Parse(result);
+            var attempts = document.RootElement.GetProperty("image_model_attempts");
+            Assert.Equal(JsonValueKind.Array, attempts.ValueKind);
+            Assert.True(attempts.GetArrayLength() >= (input.Contains("image_model_attempts", StringComparison.Ordinal) ? 2 : 1));
+        }
     }
 
     private static string ReadSource(params string[] parts)

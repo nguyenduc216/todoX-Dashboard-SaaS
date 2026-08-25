@@ -1340,6 +1340,7 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
                         JsonSerializer.Serialize(writer, attempt, JsonOptions);
                         writer.WriteEndArray();
                         writer.WriteEndObject();
+                        writer.Flush();
                         return Encoding.UTF8.GetString(buffer.ToArray());
                     }
                 }
@@ -1349,8 +1350,10 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
                 JsonSerializer.Serialize(writer, attempt, JsonOptions);
                 writer.WriteEndArray();
                 writer.WriteEndObject();
-                return Encoding.UTF8.GetString(buffer.ToArray());
+                writer.Flush();
             }
+
+            return Encoding.UTF8.GetString(buffer.ToArray());
         }
         catch (JsonException)
         {
