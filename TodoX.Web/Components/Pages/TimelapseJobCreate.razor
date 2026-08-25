@@ -227,7 +227,13 @@
     private bool HasValidImage => _selectedFile is not null && ValidateSelectedImage(showSnackbar: false);
     private bool HasValidPrice => _priceEstimate is { Success: true, VideoScenePrice: not null };
     private bool ServiceReady => _selectedService is { Enabled: true } && string.Equals(_selectedService.ServiceType, TodoXServiceEngineTypes.Timelapse, StringComparison.OrdinalIgnoreCase);
-    private bool SubmitDisabled => _busy || _priceLoading || _profiles.Count == 0 || !ServiceReady || !HasValidImage || !HasValidPrice;
+    private bool CanStartWorkflow
+        => AuthState.CurrentUser is { IsCustomer: true }
+           && !_priceLoading
+           && ServiceReady
+           && HasValidPrice
+           && TimelapseRequestRules.Validate(_request, HasValidImage).Count == 0;
+    private bool SubmitDisabled => _busy || !CanStartWorkflow;
 
     protected override async Task OnInitializedAsync()
     {
@@ -469,28 +475,15 @@
 
     private async Task CreateDraftAsync()
     {
-        if (!ServiceReady)
+        if (!CanStartWorkflow)
         {
-            Snackbar.Add(_serviceWarning ?? "Dịch vụ Timelapse hiện chưa khả dụng.", Severity.Warning);
+            Snackbar.Add(FirstWorkflowReadinessError(), Severity.Warning);
             return;
         }
 
-        if (!ValidateSelectedImage(showSnackbar: true) || AuthState.CurrentUser is null)
+        if (AuthState.CurrentUser is not { IsCustomer: true } user)
         {
-            Snackbar.Add("Vui lòng chọn ảnh thành phẩm / ảnh tham chiếu.", Severity.Warning);
-            return;
-        }
-
-        if (!HasValidPrice)
-        {
-            Snackbar.Add(PriceMessage, Severity.Warning);
-            return;
-        }
-
-        var errors = TimelapseRequestRules.Validate(_request, true);
-        if (errors.Count > 0)
-        {
-            Snackbar.Add(errors[0], Severity.Warning);
+            Snackbar.Add("Vui lòng đăng nhập bằng tài khoản khách hàng.", Severity.Warning);
             return;
         }
 
@@ -501,7 +494,7 @@
 
             if (_request.AutoFinish)
             {
-                job = await Jobs.StartOrResumeAsync(job.Id, AuthState.CurrentUser);
+                job = await Jobs.StartOrResumeAsync(job.Id, user);
             }
             Navigation.NavigateTo($"/jobs/timelapse/{job.Id}");
         }
@@ -547,10 +540,7 @@
 
     private bool CanAutoSave
         => AuthState.CurrentUser is { IsCustomer: true }
-           && ServiceReady
-           && HasValidImage
-           && HasValidPrice
-           && _profiles.Count > 0;
+           && CanStartWorkflow;
 
     private async Task<TimelapseJobView> EnsureDraftSavedAsync(CancellationToken ct)
     {
@@ -612,4 +602,20 @@
     }
 
     private static string FormatPoints(decimal value) => $"{value:0.##} điểm";
+
+    private string FirstWorkflowReadinessError()
+    {
+        if (!ServiceReady)
+        {
+            return _serviceWarning ?? "Dịch vụ Timelapse hiện chưa khả dụng.";
+        }
+
+        if (!HasValidPrice)
+        {
+            return PriceMessage;
+        }
+
+        return TimelapseRequestRules.Validate(_request, ValidateSelectedImage(showSnackbar: true)).FirstOrDefault()
+            ?? "Vui lòng hoàn tất các thông tin bắt buộc trước khi tạo video.";
+    }
 }
