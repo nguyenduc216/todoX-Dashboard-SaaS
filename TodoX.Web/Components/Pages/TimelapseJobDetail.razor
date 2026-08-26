@@ -344,6 +344,17 @@
                                                                        OnClick="@(() => OpenImagePromptAsync(image))"
                                                                        aria-label="@($"Xem hoặc chỉnh sửa prompt ảnh {image.ProgressPercent}%")" />
                                                     </MudTooltip>
+                                                    @if (image.Attempt > 0)
+                                                    {
+                                                        <MudTooltip Text="Xem các lần render ảnh trước">
+                                                            <MudIconButton Icon="@Icons.Material.Filled.History"
+                                                                           Size="Size.Small"
+                                                                           Color="Color.Warning"
+                                                                           Disabled="@_busy"
+                                                                           OnClick="@(() => OpenSceneImageHistoryAsync(image))"
+                                                                           aria-label="@($"Xem lịch sử ảnh {image.ProgressPercent}%")" />
+                                                        </MudTooltip>
+                                                    }
                                                 }
                                                 else
                                                 {
@@ -531,6 +542,12 @@
                             <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Download" Href="@_job.Workflow.FinalOutput.PublicUrl" Target="_blank">
                                 Tải video
                             </MudButton>
+                            <MudButton Variant="Variant.Outlined"
+                                       StartIcon="@Icons.Material.Filled.History"
+                                       Disabled="@_busy"
+                                       OnClick="OpenFinalVideoHistoryAsync">
+                                LỊCH SỬ VIDEO
+                            </MudButton>
                         </MudStack>
                     }
                     else if (_job.Workflow.FinalOutput?.Status == TimelapseOperationStatuses.Failed)
@@ -548,6 +565,12 @@
                                        Disabled="@(!_job.Workflow.CanFinalize || _busy)"
                                        OnClick="StartFinalizerAsync">
                                 Hoàn thiện lại
+                            </MudButton>
+                            <MudButton Variant="Variant.Outlined"
+                                       StartIcon="@Icons.Material.Filled.History"
+                                       Disabled="@_busy"
+                                       OnClick="OpenFinalVideoHistoryAsync">
+                                LỊCH SỬ VIDEO
                             </MudButton>
                         </MudStack>
                     }
@@ -1034,6 +1057,30 @@
         await OpenHistoryDialogAsync($"Lịch sử video {clip.StartProgressPercent}% → {clip.EndProgressPercent}%", history, true);
     }
 
+    private async Task OpenSceneImageHistoryAsync(TimelapseStageImage image)
+    {
+        var currentUser = AuthState.CurrentUser;
+        if (_job is null || currentUser is null)
+        {
+            return;
+        }
+
+        var history = await Jobs.ListSceneImageHistoryAsync(JobId, image.ProgressPercent, currentUser);
+        await OpenHistoryDialogAsync($"Lịch sử ảnh {image.ProgressPercent}%", history, false);
+    }
+
+    private async Task OpenFinalVideoHistoryAsync()
+    {
+        var currentUser = AuthState.CurrentUser;
+        if (_job is null || currentUser is null)
+        {
+            return;
+        }
+
+        var history = await Jobs.ListFinalVideoHistoryAsync(JobId, currentUser);
+        await OpenHistoryDialogAsync("Lịch sử video hoàn chỉnh", history, true);
+    }
+
     private async Task OpenHistoryDialogAsync(string title, IReadOnlyList<TimelapseHistoryItem> history, bool isSceneVideo)
     {
         var items = history.Select(item => new MediaHistoryItem
@@ -1045,7 +1092,7 @@
             StatusColor = HistoryStatusColor(item.Status),
             CreatedAt = item.CreatedAt.HasValue ? new DateTimeOffset(DateTime.SpecifyKind(item.CreatedAt.Value, DateTimeKind.Utc)) : DateTimeOffset.UtcNow,
             IsSelected = item.IsSelected,
-            CanSelect = item.Status == TimelapseOperationStatuses.Completed && !item.IsSelected,
+            CanSelect = item.Status == TimelapseOperationStatuses.Completed && !item.IsSelected && !string.IsNullOrWhiteSpace(item.PublicUrl),
             IsVideo = isSceneVideo || item.Kind is "video" or "final",
             MediaUrl = item.PublicUrl,
             Metadata = string.IsNullOrWhiteSpace(item.ProviderCode) && string.IsNullOrWhiteSpace(item.ProviderModel)

@@ -307,6 +307,7 @@ public sealed class TimelapseHistoryItem
     public string? ProviderCode { get; set; }
     public string? ProviderModel { get; set; }
     public DateTime? CreatedAt { get; set; }
+    public DateTime? CompletedAt { get; set; }
     public string Label { get; set; } = string.Empty;
     public bool IsSelected { get; set; }
 }

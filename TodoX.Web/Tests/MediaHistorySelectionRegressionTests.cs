@@ -62,6 +62,39 @@ public sealed class MediaHistorySelectionRegressionTests
         Assert.Contains("ListSceneVideoHistoryAsync(Guid jobId, int clipIndex, CurrentUserSession currentUser", jobService);
     }
 
+    [Fact]
+    public void TimelapseImageHistoryAndFinalHistoryUseSharedDialogAndCurrentPointers()
+    {
+        var page = ReadRepoFile("Components", "Pages", "TimelapseJobDetail.razor");
+        var workflow = ReadRepoFile("Services", "Timelapse", "TimelapseWorkflowService.cs");
+        var jobService = ReadRepoFile("Services", "Timelapse", "TimelapseJobService.cs");
+
+        Assert.Contains("OpenSceneImageHistoryAsync(TimelapseStageImage image)", page);
+        Assert.Contains("ListSceneImageHistoryAsync(JobId, image.ProgressPercent", page);
+        Assert.Contains("OpenFinalVideoHistoryAsync", page);
+        Assert.Contains("ListFinalVideoHistoryAsync(JobId, currentUser)", page);
+        Assert.Contains("LỊCH SỬ VIDEO", page);
+        Assert.Contains("ListFinalVideoHistoryAsync(Guid jobId, CancellationToken", workflow);
+        Assert.Contains("ListFinalVideoHistoryAsync(Guid jobId, CurrentUserSession currentUser", jobService);
+        Assert.Contains("f.result_media_id::text = j.output_json->>'mediaId'", workflow);
+        Assert.Contains("f.object_key = j.output_json->>'objectKey'", workflow);
+        Assert.Contains("f.public_url = j.output_json->>'publicUrl'", workflow);
+        Assert.Contains("COALESCE(f.completed_at, f.started_at, f.created_at)", workflow);
+        Assert.DoesNotContain("f.version=(SELECT max(version)", workflow);
+    }
+
+    [Fact]
+    public void TimelapseHistoryKeepsFailedAttemptsVisibleAndSelectionRequiresCompletedStatus()
+    {
+        var page = ReadRepoFile("Components", "Pages", "TimelapseJobDetail.razor");
+        var workflow = ReadRepoFile("Services", "Timelapse", "TimelapseWorkflowService.cs");
+
+        Assert.Contains("v.status='COMPLETED'", workflow);
+        Assert.Contains("CanSelect = item.Status == TimelapseOperationStatuses.Completed && !item.IsSelected && !string.IsNullOrWhiteSpace(item.PublicUrl)", page);
+        Assert.Contains("FROM timelapse.timelapse_final_outputs", workflow);
+        Assert.Contains("f.error_message AS ErrorMessage", workflow);
+    }
+
     private static string ReadRepoFile(params string[] parts)
         => File.ReadAllText(Path.Combine(new[] { AppContext.BaseDirectory, "..", "..", "..", ".." }.Concat(parts).ToArray()));
 }

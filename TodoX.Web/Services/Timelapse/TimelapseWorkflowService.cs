@@ -14,6 +14,7 @@ public interface ITimelapseWorkflowService
     Task<IReadOnlyList<TimelapseHistoryItem>> ListHistoryAsync(Guid jobId, CancellationToken ct = default);
     Task<IReadOnlyList<TimelapseHistoryItem>> ListSceneImageHistoryAsync(Guid jobId, int progressPercent, CancellationToken ct = default);
     Task<IReadOnlyList<TimelapseHistoryItem>> ListSceneVideoHistoryAsync(Guid jobId, int clipIndex, CancellationToken ct = default);
+    Task<IReadOnlyList<TimelapseHistoryItem>> ListFinalVideoHistoryAsync(Guid jobId, CancellationToken ct = default);
     Task<TimelapseWorkflowState> SelectHistoryAsync(Guid jobId, string kind, Guid entityId, int version, CurrentUserSession currentUser, CancellationToken ct = default);
     Task<TimelapseWorkflowState> StartOrResumeAsync(Guid jobId, TimelapseJobSnapshot snapshot, CurrentUserSession currentUser, CancellationToken ct = default);
     Task<TimelapseWorkflowState> RetryImageAsync(Guid jobId, int progressPercent, TimelapseJobSnapshot snapshot, CurrentUserSession currentUser, CancellationToken ct = default);
@@ -81,6 +82,36 @@ public sealed class TimelapseWorkflowService : ITimelapseWorkflowService
         return await ListHistoryInternalAsync(jobId, clipIndex, ct);
     }
 
+    public async Task<IReadOnlyList<TimelapseHistoryItem>> ListFinalVideoHistoryAsync(Guid jobId, CancellationToken ct = default)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        var rows = await conn.QueryAsync<TimelapseHistoryItem>("""
+            SELECT 'final' AS Kind, f.id AS EntityId, f.version AS Version, f.status AS Status,
+                   f.public_url AS PublicUrl, f.error_message AS ErrorMessage, NULL AS ProviderCode,
+                   NULL AS ProviderModel, COALESCE(f.completed_at, f.started_at, f.created_at) AS CreatedAt, f.completed_at AS CompletedAt,
+                   'Video hoàn chỉnh' AS Label,
+                   (
+                       (NULLIF(j.output_json->>'mediaId', '') IS NOT NULL
+                           AND f.result_media_id IS NOT NULL
+                           AND f.result_media_id::text = j.output_json->>'mediaId')
+                       OR (NULLIF(j.output_json->>'mediaId', '') IS NULL
+                           AND NULLIF(j.output_json->>'objectKey', '') IS NOT NULL
+                           AND f.object_key = j.output_json->>'objectKey')
+                       OR (NULLIF(j.output_json->>'mediaId', '') IS NULL
+                           AND NULLIF(j.output_json->>'objectKey', '') IS NULL
+                           AND NULLIF(j.output_json->>'publicUrl', '') IS NOT NULL
+                           AND f.public_url = j.output_json->>'publicUrl')
+                   ) AS IsSelected
+              FROM timelapse.timelapse_final_outputs f
+              JOIN render.render_jobs j ON j.id=f.job_id AND j.tenant_id=@tenant
+             WHERE f.tenant_id=@tenant
+               AND f.job_id=@jobId
+             ORDER BY CreatedAt DESC NULLS LAST, Version DESC;
+            """, new { tenant = _tenant.TenantId, jobId });
+        return rows.ToList();
+    }
+
     public async Task<TimelapseWorkflowState> SelectHistoryAsync(Guid jobId, string kind, Guid entityId, int version, CurrentUserSession currentUser, CancellationToken ct = default)
     {
         EnsureCustomer(currentUser);
@@ -119,23 +150,38 @@ public sealed class TimelapseWorkflowService : ITimelapseWorkflowService
         var rows = await conn.QueryAsync<TimelapseHistoryItem>("""
             SELECT 'image' AS Kind, v.image_stage_id AS EntityId, v.attempt AS Version, v.status AS Status,
                    v.public_url AS PublicUrl, v.error_message AS ErrorMessage, v.provider_code AS ProviderCode,
-                   v.provider_model AS ProviderModel, COALESCE(v.completed_at, v.started_at) AS CreatedAt,
+                   v.provider_model AS ProviderModel, COALESCE(v.completed_at, v.started_at) AS CreatedAt, v.completed_at AS CompletedAt,
                    'Ảnh ' || s.progress_percent || '%' AS Label, (s.active_attempt=v.attempt) AS IsSelected
               FROM timelapse.timelapse_image_stage_versions v JOIN timelapse.timelapse_image_stages s ON s.id=v.image_stage_id
              WHERE v.job_id=@jobId
             UNION ALL
             SELECT 'video', v.video_clip_id, v.attempt, v.status, v.public_url, v.error_message,
-                   v.provider_code, v.provider_model, COALESCE(v.completed_at, v.started_at),
+                   v.provider_code, v.provider_model, COALESCE(v.completed_at, v.started_at), v.completed_at,
                    'Clip ' || c.clip_index, (c.active_attempt=v.attempt)
               FROM timelapse.timelapse_video_clip_versions v JOIN timelapse.timelapse_video_clips c ON c.id=v.video_clip_id
              WHERE v.job_id=@jobId
                AND (@clipIndex IS NULL OR c.clip_index=@clipIndex)
             UNION ALL
-            SELECT 'final', f.id, f.version, f.status, f.public_url, f.error_message, NULL, NULL, f.completed_at,
-                   'Video hoàn chỉnh', f.version=(SELECT max(version) FROM timelapse.timelapse_final_outputs WHERE job_id=@jobId)
-              FROM timelapse.timelapse_final_outputs f WHERE f.job_id=@jobId
+            SELECT 'final', f.id, f.version, f.status, f.public_url, f.error_message, NULL, NULL, COALESCE(f.completed_at, f.started_at, f.created_at), f.completed_at,
+                   'Video hoàn chỉnh',
+                   (
+                       (NULLIF(j.output_json->>'mediaId', '') IS NOT NULL
+                           AND f.result_media_id IS NOT NULL
+                           AND f.result_media_id::text = j.output_json->>'mediaId')
+                       OR (NULLIF(j.output_json->>'mediaId', '') IS NULL
+                           AND NULLIF(j.output_json->>'objectKey', '') IS NOT NULL
+                           AND f.object_key = j.output_json->>'objectKey')
+                       OR (NULLIF(j.output_json->>'mediaId', '') IS NULL
+                           AND NULLIF(j.output_json->>'objectKey', '') IS NULL
+                           AND NULLIF(j.output_json->>'publicUrl', '') IS NOT NULL
+                           AND f.public_url = j.output_json->>'publicUrl')
+                   )
+              FROM timelapse.timelapse_final_outputs f
+              JOIN render.render_jobs j ON j.id=f.job_id AND j.tenant_id=@tenant
+             WHERE f.tenant_id=@tenant
+               AND f.job_id=@jobId
              ORDER BY CreatedAt DESC NULLS LAST, Version DESC;
-            """, new { jobId, clipIndex });
+            """, new { tenant = _tenant.TenantId, jobId, clipIndex });
         return clipIndex.HasValue
             ? rows.Where(row => row.Kind == "video").ToList()
             : rows.ToList();
@@ -1265,12 +1311,27 @@ public sealed class TimelapseWorkflowService : ITimelapseWorkflowService
                    object_key AS ObjectKey,
                    error_message AS ErrorMessage,
                    completed_at AS CompletedAt
-              FROM timelapse.timelapse_final_outputs
-             WHERE job_id=@jobId
-             ORDER BY version DESC
+              FROM timelapse.timelapse_final_outputs f
+              JOIN render.render_jobs j ON j.id=f.job_id AND j.tenant_id=@tenant
+             WHERE f.tenant_id=@tenant
+               AND f.job_id=@jobId
+             ORDER BY CASE
+                          WHEN (
+                              (NULLIF(j.output_json->>'mediaId', '') IS NOT NULL
+                                  AND f.result_media_id IS NOT NULL
+                                  AND f.result_media_id::text = j.output_json->>'mediaId')
+                              OR (NULLIF(j.output_json->>'mediaId', '') IS NULL
+                                  AND NULLIF(j.output_json->>'objectKey', '') IS NOT NULL
+                                  AND f.object_key = j.output_json->>'objectKey')
+                              OR (NULLIF(j.output_json->>'mediaId', '') IS NULL
+                                  AND NULLIF(j.output_json->>'objectKey', '') IS NULL
+                                  AND NULLIF(j.output_json->>'publicUrl', '') IS NOT NULL
+                                  AND f.public_url = j.output_json->>'publicUrl')
+                          ) THEN 0 ELSE 1 END,
+                      f.version DESC
              LIMIT 1;
             """,
-            new { jobId }, tx);
+            new { tenant = _tenant.TenantId, jobId }, tx);
 
         var hasActive = images.Any(x => TimelapseOperationStatuses.IsActive(x.Status))
                         || videos.Any(x => TimelapseOperationStatuses.IsActive(x.Status))
