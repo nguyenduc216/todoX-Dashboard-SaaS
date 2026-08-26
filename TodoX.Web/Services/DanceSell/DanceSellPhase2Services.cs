@@ -1443,8 +1443,7 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
             throw new InvalidOperationException("DANCE_SELL_DIRECT_REFERENCE_ONLY");
         }
 
-        await _repo.ClearProductAsync(job.Id, ct);
-        await _repo.ResetReferenceAsync(job.Id, ct: ct);
+        await _repo.RemoveProductAndUseCharacterReferenceAsync(job.Id, ct);
         return await _repo.GetByIdAsync(job.Id, ct) ?? job;
     }
 

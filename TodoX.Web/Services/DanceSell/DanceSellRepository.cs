@@ -18,6 +18,7 @@ public interface IDanceSellRepository
     Task UpdateCharacterAsync(Guid id, Guid mediaId, string objectKey, string publicUrl, CancellationToken ct = default);
     Task UpdateProductAsync(Guid id, Guid mediaId, string objectKey, string publicUrl, CancellationToken ct = default);
     Task ClearProductAsync(Guid id, CancellationToken ct = default);
+    Task RemoveProductAndUseCharacterReferenceAsync(Guid id, CancellationToken ct = default);
     Task UpdateDirectReferenceAsync(Guid id, Guid mediaId, string objectKey, string publicUrl, CancellationToken ct = default);
     Task UpdateMotionUploadAsync(Guid id, Guid mediaId, string objectKey, string publicUrl, CancellationToken ct = default);
     Task UpdateMotionTikTokAsync(Guid id, string sourceUrl, Guid mediaId, string objectKey, string publicUrl, CancellationToken ct = default);
@@ -357,6 +358,53 @@ public sealed class DanceSellRepository : IDanceSellRepository
                    product_image_url=NULL,
                    updated_at=now()
              WHERE id=@id;
+            """,
+            new { id });
+    }
+
+    public async Task RemoveProductAndUseCharacterReferenceAsync(Guid id, CancellationToken ct = default)
+    {
+        using var conn = await _factory.OpenAsync(ct);
+        await conn.ExecuteAsync(
+            """
+            UPDATE dance_sell.dance_sell_jobs
+               SET product_media_id=NULL,
+                   product_object_key=NULL,
+                   product_image_url=NULL,
+                   prepared_reference_media_id=character_media_id,
+                   prepared_reference_object_key=character_object_key,
+                   prepared_reference_url=character_image_url,
+                   prepared_reference_status=CASE
+                       WHEN character_media_id IS NOT NULL
+                            AND NULLIF(character_image_url, '') IS NOT NULL
+                       THEN 'approved'
+                       ELSE 'not_created'
+                   END,
+                   prepared_reference_approved_at=CASE
+                       WHEN character_media_id IS NOT NULL
+                            AND NULLIF(character_image_url, '') IS NOT NULL
+                       THEN now()
+                       ELSE NULL
+                   END,
+                   reference_approved_at=CASE
+                       WHEN character_media_id IS NOT NULL
+                            AND NULLIF(character_image_url, '') IS NOT NULL
+                       THEN now()
+                       ELSE NULL
+                   END,
+                   source_stage_error=NULL,
+                   current_stage=CASE
+                       WHEN character_media_id IS NOT NULL
+                            AND NULLIF(character_image_url, '') IS NOT NULL
+                       THEN 'reference_approved'
+                       ELSE 'reference_inputs'
+                   END,
+                   updated_at=now()
+             WHERE id=@id;
+
+            UPDATE dance_sell.dance_sell_reference_versions
+               SET is_selected=false
+             WHERE dance_sell_job_id=@id;
             """,
             new { id });
     }

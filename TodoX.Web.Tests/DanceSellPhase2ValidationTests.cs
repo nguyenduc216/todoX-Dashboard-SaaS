@@ -131,6 +131,25 @@ public sealed class DanceSellPhase2ValidationTests
     }
 
     [Fact]
+    public void RemoveProduct_UsesTheCurrentCharacterAsAnApprovedReference()
+    {
+        var root = FindRepoRoot();
+        var service = File.ReadAllText(Path.Combine(root, "TodoX.Web/Services/DanceSell/DanceSellPhase2Services.cs"));
+        var repository = File.ReadAllText(Path.Combine(root, "TodoX.Web/Services/DanceSell/DanceSellRepository.cs"));
+        var removeProduct = GetMethodSection(service, "RemoveProductAsync");
+        var transition = GetMethodSection(repository, "RemoveProductAndUseCharacterReferenceAsync");
+
+        Assert.Contains("await _repo.RemoveProductAndUseCharacterReferenceAsync(job.Id, ct)", removeProduct, StringComparison.Ordinal);
+        Assert.DoesNotContain("ResetReferenceAsync", removeProduct, StringComparison.Ordinal);
+        Assert.Contains("product_media_id=NULL", transition, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("product_image_url=NULL", transition, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("prepared_reference_media_id=character_media_id", transition, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("prepared_reference_url=character_image_url", transition, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("THEN 'approved'", transition, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("SET is_selected=false", transition, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void ReferenceGenerateAsync_CatchesAllPostGeneratingSetupStages()
     {
         var root = FindRepoRoot();

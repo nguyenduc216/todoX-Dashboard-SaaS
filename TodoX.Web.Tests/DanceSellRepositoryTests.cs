@@ -84,6 +84,23 @@ public sealed class DanceSellRepositoryTests
     }
 
     [Fact]
+    public void RemoveProductSql_AtomicallyPromotesCharacterToApprovedReference()
+    {
+        var source = ReadRepositorySource();
+        var section = GetMethodSection(source, "RemoveProductAndUseCharacterReferenceAsync");
+
+        Assert.Contains("product_media_id=NULL", section, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("product_object_key=NULL", section, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("product_image_url=NULL", section, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("prepared_reference_media_id=character_media_id", section, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("prepared_reference_object_key=character_object_key", section, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("prepared_reference_url=character_image_url", section, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("prepared_reference_status=CASE", section, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("THEN 'approved'", section, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("SET is_selected=false", section, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void UnapproveReferenceSql_PreservesHistoryAndClearsApprovalState()
     {
         var source = ReadRepositorySource();

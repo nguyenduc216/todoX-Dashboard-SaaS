@@ -178,6 +178,8 @@ public sealed class RDanceFashionDemoPageTests
             "hoặc bấm để chọn ảnh",
             "PNG / JPG / JPEG / WEBP · tối đa @MaxImageLabel",
             "Thay ảnh",
+            "Gỡ ảnh",
+            "Icons.Material.Filled.DeleteOutline",
             "private const string AcceptedImageTypes = \"image/png,image/jpeg,image/webp\"",
             "private string MaxImageLabel",
             "private bool _characterDragActive",
@@ -207,6 +209,7 @@ public sealed class RDanceFashionDemoPageTests
         Assert.DoesNotContain("Tạo ảnh AI", page, StringComparison.Ordinal);
         Assert.DoesNotContain("Dùng ảnh người mẫu", page, StringComparison.Ordinal);
         Assert.DoesNotContain("AI sẽ kết hợp ảnh người mẫu và ảnh sản phẩm", page, StringComparison.Ordinal);
+        Assert.Contains("OnClick=\"RemoveProductAsync\"", page, StringComparison.Ordinal);
     }
 
     [Fact]
