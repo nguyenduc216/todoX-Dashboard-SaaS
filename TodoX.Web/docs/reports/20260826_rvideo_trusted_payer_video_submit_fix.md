@@ -121,7 +121,7 @@ Unchanged:
 YEScale was not modified. I also checked the control plane with `yescale_list_models` for `veo_omni`; it returned no matches, which confirmed this fix did not depend on changing YEScale data.
 
 ## 20. Git Commit SHA
-Final SHA is recorded after the report commit is amended.
+Implementation commit: `9d3de64`.
 
 ## 21. Branch Pushed
-Branch push is recorded after the final commit is pushed.
+`integration/rdance-on-construction-video-core` is the target branch.
