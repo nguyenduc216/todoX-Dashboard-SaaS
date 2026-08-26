@@ -412,7 +412,7 @@ public sealed class DanceSellReferenceImageService : IDanceSellReferenceImageSer
                 ProductMediaId = job.ProductMediaId,
                 PlacementMode = job.PlacementMode ?? DanceSellPlacementModes.HoldProduct,
                 CustomInstruction = job.CustomPlacementInstruction,
-                Prompt = job.Prompt,
+                Prompt = BuildReferencePrompt(job),
                 ProviderCode = route.ProviderCode,
                 ProviderModel = route.ModelName,
                 RequestJson = requestJson,
@@ -663,18 +663,31 @@ public sealed class DanceSellReferenceImageService : IDanceSellReferenceImageSer
     }
 
     internal static string BuildReferencePrompt(DanceSellJobDto job)
-        => job.ProductMediaId is null || string.IsNullOrWhiteSpace(job.ProductImageUrl)
+        => !string.IsNullOrWhiteSpace(job.ImagePrompt)
+            ? job.ImagePrompt.Trim()
+            : job.ProductMediaId is null || string.IsNullOrWhiteSpace(job.ProductImageUrl)
             ? """
-PERSON ONLY REFERENCE IMAGE
+PERSON ONLY REFERENCE IMAGE – SINGLE FINAL IMAGE
 
 Use the supplied person image as the sole visual reference.
 - Preserve exact identity, face, body, pose, anatomy, camera angle and lighting
 - Do not add, infer or mention any product, clothing reference or additional subject
 
+OUTPUT REQUIREMENT:
+- Generate exactly ONE final image.
+- Show exactly ONE person.
+- Use one single full-frame composition.
+- Do NOT create a collage.
+- Do NOT create a triptych.
+- Do NOT create multiple panels.
+- Do NOT duplicate the person.
+- Do NOT create before/after layouts.
+- Do NOT create alternate variants.
+
 Photorealistic, clean image suitable for video generation.
 """
             : """
-VIRTUAL TRY-ON – PREVIEW ONLY
+VIRTUAL TRY-ON – SINGLE FINAL IMAGE
 
 Use IMAGE 1 as FIXED BASE BODY.
 - Preserve exact body pose, limb angles, shoulder alignment, head tilt, camera angle
@@ -687,6 +700,18 @@ Apply clothing from IMAGE 2 with exact design, color, texture, pattern
 
 If conflict occurs between clothing and pose:
 → Prioritize BODY POSE from IMAGE 1 over clothing realism
+
+OUTPUT REQUIREMENT:
+- Generate exactly ONE final image.
+- Show exactly ONE person.
+- Use one single full-frame composition.
+- Do NOT create a collage.
+- Do NOT create a triptych.
+- Do NOT create multiple panels.
+- Do NOT create before/after comparisons.
+- Do NOT show multiple clothing variants.
+- Do NOT duplicate the person.
+- Do NOT show the original outfit beside the new outfit.
 
 Photorealistic, product preview quality.
 """;
@@ -741,7 +766,7 @@ Photorealistic, product preview quality.
             VersionNo = versions.Count == 0 ? 1 : versions.Max(x => x.VersionNo) + 1,
             CharacterMediaId = job.CharacterMediaId,
             PlacementMode = job.PlacementMode ?? DanceSellPlacementModes.HoldProduct,
-            Prompt = job.Prompt,
+            Prompt = BuildReferencePrompt(job),
             ProviderCode = "local_composite",
             ProviderModel = "local_composite",
             RequestJson = DanceSellRepository.ToJson(new { source = "character_input" }),
@@ -779,7 +804,7 @@ Photorealistic, product preview quality.
             CharacterMediaId = job.CharacterMediaId,
             ProductMediaId = null,
             PlacementMode = job.PlacementMode ?? DanceSellPlacementModes.HoldProduct,
-            Prompt = job.Prompt,
+            Prompt = BuildReferencePrompt(job),
             ProviderCode = "local_composite",
             ProviderModel = "character_input",
             RequestJson = DanceSellRepository.ToJson(new { source = "character_input", job.CharacterMediaId }),

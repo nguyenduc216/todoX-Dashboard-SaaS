@@ -4,6 +4,7 @@
 @using Microsoft.Extensions.Options
 @using TodoX.Web.Services.DanceSell
 @using TodoX.Web.Services.Render
+@using TodoX.Web.Components.Dialogs
 @inject AuthStateService AuthState
 @inject IDanceSellPhase2Service DanceSell
 @inject IDanceSellReferenceImageService References
@@ -263,6 +264,16 @@
                                 }
                             </div>
                             <MudChip T="string" Color="@ReferenceColor" Size="Size.Small">@ReferenceLabel</MudChip>
+                            @if (_job?.CharacterMediaId is not null)
+                            {
+                                <MudTooltip Text="Xem / chỉnh prompt">
+                                    <MudIconButton Icon="@Icons.Material.Filled.EditNote"
+                                                   Color="Color.Primary"
+                                                   Size="Size.Small"
+                                                   Disabled="@_busy"
+                                                   OnClick="OpenReferencePromptAsync" />
+                                </MudTooltip>
+                            }
                             @if (_job?.PreparedReferenceStatus == DanceSellReferenceStatuses.Approved)
                             {
                                 <MudChip T="string" Color="Color.Success" Size="Size.Small">Đã duyệt</MudChip>
@@ -272,9 +283,11 @@
                             {
                                 <MudButton Variant="Variant.Outlined" Color="Color.Warning" Disabled="@_busy" OnClick="ApproveLatestReferenceAsync">Duyệt ảnh</MudButton>
                             }
-                            else if (_job?.PreparedReferenceStatus == DanceSellReferenceStatuses.Failed || _latestReference?.Status == DanceSellReferenceStatuses.Failed)
+                            @if (_job?.ProductMediaId is not null
+                                && (_job?.PreparedReferenceStatus is DanceSellReferenceStatuses.Ready or DanceSellReferenceStatuses.Approved or DanceSellReferenceStatuses.Failed
+                                    || _latestReference?.Status == DanceSellReferenceStatuses.Failed))
                             {
-                                <MudButton Variant="Variant.Filled" Color="Color.Warning" Disabled="@(_busy || _job?.CharacterMediaId is null)" OnClick="AutoPrepareReferenceAsync">Tạo lại ảnh</MudButton>
+                                <MudButton Variant="Variant.Filled" Color="Color.Warning" Disabled="@(_busy || _job?.CharacterMediaId is null)" OnClick="RegenerateReferenceAsync">Tạo lại ảnh</MudButton>
                             }
                         </MudPaper>
                     </MudItem>
@@ -1036,6 +1049,67 @@
         }
     }
 
+    private async Task OpenReferencePromptAsync()
+    {
+        if (_job is null)
+        {
+            return;
+        }
+
+        var parameters = new DialogParameters<RDanceReferencePromptDialog>
+        {
+            { x => x.Prompt, DanceSellReferenceImageService.BuildReferencePrompt(_job) }
+        };
+        var dialog = await DialogService.ShowAsync<RDanceReferencePromptDialog>("Prompt tạo ảnh", parameters);
+        var result = await dialog.Result;
+        if (result?.Canceled != false || result.Data is not RDanceReferencePromptDialogResult promptResult)
+        {
+            return;
+        }
+
+        await RunAsync(async () =>
+        {
+            await SaveReferencePromptAsync(promptResult.Prompt, reload: !promptResult.Regenerate);
+            if (promptResult.Regenerate)
+            {
+                await GenerateReferenceAsync();
+            }
+        });
+    }
+
+    private async Task SaveReferencePromptAsync(string prompt, bool reload = true)
+    {
+        _job = await DanceSell.UpdateBusinessAsync(_job!.Id, new DanceSellUpdateBusinessRequest
+        {
+            Title = _title,
+            Prompt = BuildPrompt(),
+            PlacementMode = DanceSellPlacementModes.WearProduct,
+            ReferenceMode = DanceSellReferenceModes.GenerateReference,
+            Mode = "720p",
+            CharacterOrientation = "image",
+            ImagePrompt = prompt,
+            AutoFinish = _autoFinish
+        }, AuthState.CurrentUser!);
+        if (reload)
+        {
+            await ReloadAsync();
+        }
+    }
+
+    private async Task GenerateReferenceAsync()
+    {
+        EnsureReferenceProviderReady();
+        await References.GenerateAsync(_job!.Id, AuthState.CurrentUser!);
+        _referenceVersions = await DanceRepo.ListReferenceVersionsAsync(_job.Id);
+        _latestReference = _referenceVersions.OrderByDescending(x => x.VersionNo).FirstOrDefault();
+        await ReloadAsync();
+    }
+
+    private async Task RegenerateReferenceAsync() => await RunAsync(async () =>
+    {
+        await GenerateReferenceAsync();
+    });
+
     private async Task SetAutoFinishAsync(bool value)
     {
         if (!CanEditAutoFinish || _job is null)
@@ -1128,6 +1202,7 @@
             ReferenceMode = DanceSellReferenceModes.GenerateReference,
             Mode = "720p",
             CharacterOrientation = "image",
+            ImagePrompt = _job?.ImagePrompt,
             AutoFinish = _autoFinish
         }, AuthState.CurrentUser!);
 

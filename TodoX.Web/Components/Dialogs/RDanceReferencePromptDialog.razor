@@ -1,0 +1,29 @@
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">Prompt tạo ảnh</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudTextField T="string" @bind-Value="_prompt" Variant="Variant.Outlined" Lines="16" FullWidth="true" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton Variant="Variant.Text" OnClick="Cancel">Hủy</MudButton>
+        <MudButton Variant="Variant.Outlined" Color="Color.Primary" Disabled="@string.IsNullOrWhiteSpace(_prompt)" OnClick="Save">Lưu prompt</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Warning" Disabled="@string.IsNullOrWhiteSpace(_prompt)" OnClick="Regenerate">Tạo lại ảnh</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@namespace TodoX.Web.Components.Dialogs
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter] public string Prompt { get; set; } = string.Empty;
+
+    private string _prompt = string.Empty;
+
+    protected override void OnInitialized() => _prompt = Prompt;
+
+    private void Save() => MudDialog.Close(DialogResult.Ok(new RDanceReferencePromptDialogResult(_prompt.Trim(), false)));
+    private void Regenerate() => MudDialog.Close(DialogResult.Ok(new RDanceReferencePromptDialogResult(_prompt.Trim(), true)));
+    private void Cancel() => MudDialog.Cancel();
+}

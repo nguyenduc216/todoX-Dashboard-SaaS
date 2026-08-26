@@ -171,6 +171,9 @@ public sealed class Ai79DanceSellReferenceProvider : IDanceSellReferenceProvider
         var characterUrl = KiePayloadBuilder.ValidatePublicHttpsUrl(request.CharacterImageUrl, "subjects[0][url]");
         var hasProduct = !string.IsNullOrWhiteSpace(request.ProductImageUrl);
         var productUrl = hasProduct ? KiePayloadBuilder.ValidatePublicHttpsUrl(request.ProductImageUrl!, "subjects[1][url]") : null;
+        var prompt = string.IsNullOrWhiteSpace(request.Prompt)
+            ? BuildReferencePrompt(hasProduct)
+            : request.Prompt.Trim();
         var ratio = "16:9";
         var category = "FASHION";
         var resolution = "2k";
@@ -202,7 +205,7 @@ public sealed class Ai79DanceSellReferenceProvider : IDanceSellReferenceProvider
             runtime.Credential.Secret,
             runtime.Domain,
             runtime.Model,
-            BuildReferencePrompt(hasProduct),
+            prompt,
             [],
             options,
             Ai79TaskOperation.Image);
@@ -213,7 +216,7 @@ public sealed class Ai79DanceSellReferenceProvider : IDanceSellReferenceProvider
             model = runtime.Model,
             endpointPath = runtime.SubmitPath,
             domain = runtime.Domain,
-            prompt = BuildReferencePrompt(hasProduct),
+            prompt,
             action_type = "create",
             sync = false,
             project_id = projectId,
@@ -326,13 +329,36 @@ Apply clothing from IMAGE 2 with exact design, color, texture, pattern
 If conflict occurs between clothing and pose:
 → Prioritize BODY POSE from IMAGE 1 over clothing realism
 
+OUTPUT REQUIREMENT:
+- Generate exactly ONE final image.
+- Show exactly ONE person.
+- Use one single full-frame composition.
+- Do NOT create a collage.
+- Do NOT create a triptych.
+- Do NOT create multiple panels.
+- Do NOT create before/after comparisons.
+- Do NOT show multiple clothing variants.
+- Do NOT duplicate the person.
+- Do NOT show the original outfit beside the new outfit.
+
 Photorealistic, product preview quality.
 """ : """
-PERSON ONLY REFERENCE IMAGE
+PERSON ONLY REFERENCE IMAGE – SINGLE FINAL IMAGE
 
 Use the supplied person image as the sole visual reference.
 - Preserve exact identity, face, body, pose, anatomy, camera angle and lighting
 - Do not add, infer or mention any product, clothing reference or additional subject
+
+OUTPUT REQUIREMENT:
+- Generate exactly ONE final image.
+- Show exactly ONE person.
+- Use one single full-frame composition.
+- Do NOT create a collage.
+- Do NOT create a triptych.
+- Do NOT create multiple panels.
+- Do NOT duplicate the person.
+- Do NOT create before/after layouts.
+- Do NOT create alternate variants.
 
 Photorealistic, clean image suitable for video generation.
 """;
