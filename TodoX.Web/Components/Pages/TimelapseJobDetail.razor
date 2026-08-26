@@ -481,6 +481,16 @@
                                         {
                                             <MudAlert Severity="Severity.Error" Dense="true">@FriendlyOperationError(clip.ErrorMessage, null, "video")</MudAlert>
                                         }
+                                        @if (clip.Attempt > 0)
+                                        {
+                                            <MudButton Size="Size.Small"
+                                                       Variant="Variant.Outlined"
+                                                       StartIcon="@Icons.Material.Filled.History"
+                                                       Disabled="@_busy"
+                                                       OnClick="@(() => OpenSceneVideoHistoryAsync(clip))">
+                                                LỊCH SỬ
+                                            </MudButton>
+                                        }
                                         @if (CanRetry(clip.Status))
                                         {
                                             <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh" Disabled="@_busy" OnClick="@(() => RetryVideoAsync(clip.ClipIndex))">
@@ -1005,32 +1015,85 @@
 
     private async Task OpenHistoryAsync()
     {
-        if (_job is null || AuthState.CurrentUser is null) return;
-        var history = await Jobs.ListHistoryAsync(JobId, AuthState.CurrentUser);
+        var currentUser = AuthState.CurrentUser;
+        if (_job is null || currentUser is null) return;
+
+        var history = await Jobs.ListHistoryAsync(JobId, currentUser);
+        await OpenHistoryDialogAsync("Lịch sử Timelapse", history, false);
+    }
+
+    private async Task OpenSceneVideoHistoryAsync(TimelapseVideoClip clip)
+    {
+        var currentUser = AuthState.CurrentUser;
+        if (_job is null || currentUser is null)
+        {
+            return;
+        }
+
+        var history = await Jobs.ListSceneVideoHistoryAsync(JobId, clip.ClipIndex, currentUser);
+        await OpenHistoryDialogAsync($"Lịch sử video {clip.StartProgressPercent}% → {clip.EndProgressPercent}%", history, true);
+    }
+
+    private async Task OpenHistoryDialogAsync(string title, IReadOnlyList<TimelapseHistoryItem> history, bool isSceneVideo)
+    {
         var items = history.Select(item => new MediaHistoryItem
         {
-            Key = $"{item.Kind}:{item.EntityId:N}:{item.Version}", VersionLabel = $"v{item.Version}", Title = item.Label,
-            Status = item.Status, StatusColor = item.Status == TimelapseOperationStatuses.Completed ? Color.Success : item.Status == TimelapseOperationStatuses.Failed ? Color.Error : Color.Warning,
+            Key = $"{item.Kind}:{item.EntityId:N}:{item.Version}",
+            VersionLabel = $"Lần {item.Version}",
+            Title = item.Label,
+            Status = item.Status,
+            StatusColor = HistoryStatusColor(item.Status),
             CreatedAt = item.CreatedAt.HasValue ? new DateTimeOffset(DateTime.SpecifyKind(item.CreatedAt.Value, DateTimeKind.Utc)) : DateTimeOffset.UtcNow,
-            IsSelected = item.IsSelected, CanSelect = item.Status == TimelapseOperationStatuses.Completed && !item.IsSelected,
-            IsVideo = item.Kind is "video" or "final", MediaUrl = item.PublicUrl, Error = item.ErrorMessage
+            IsSelected = item.IsSelected,
+            CanSelect = item.Status == TimelapseOperationStatuses.Completed && !item.IsSelected,
+            IsVideo = isSceneVideo || item.Kind is "video" or "final",
+            MediaUrl = item.PublicUrl,
+            Metadata = string.IsNullOrWhiteSpace(item.ProviderCode) && string.IsNullOrWhiteSpace(item.ProviderModel)
+                ? null
+                : $"{item.ProviderCode ?? "provider"} / {item.ProviderModel ?? "model"}",
+            Error = item.ErrorMessage
         }).ToList();
-        var dialog = await DialogService.ShowAsync<MediaHistoryDialog>("Lịch sử Timelapse", new DialogParameters<MediaHistoryDialog>
+        var dialog = await DialogService.ShowAsync<MediaHistoryDialog>(title, new DialogParameters<MediaHistoryDialog>
         {
-            { x => x.Title, "Lịch sử Timelapse" }, { x => x.Items, items }
+            { x => x.Title, title }, { x => x.Items, items }
         }, new DialogOptions { CloseButton = true, FullWidth = true, MaxWidth = MaxWidth.Medium });
         var result = await dialog.Result;
-        if (result?.Canceled != false || result.Data is not string key) return;
+        if (result?.Canceled != false || result.Data is not string key)
+        {
+            return;
+        }
+
         var parts = key.Split(':');
-        if (parts.Length != 3 || !Guid.TryParse(parts[1], out var entityId) || !int.TryParse(parts[2], out var version)) return;
+        if (parts.Length != 3 || !Guid.TryParse(parts[1], out var entityId) || !int.TryParse(parts[2], out var version))
+        {
+            return;
+        }
+
         var selected = history.FirstOrDefault(x => x.Kind == parts[0] && x.EntityId == entityId && x.Version == version);
-        if (selected is null) return;
+        if (selected is null)
+        {
+            return;
+        }
+
         await RunActionAsync(async () =>
         {
-            _job = await Jobs.SelectHistoryAsync(JobId, selected, AuthState.CurrentUser);
+            var currentUser = AuthState.CurrentUser;
+            if (currentUser is null)
+            {
+                return;
+            }
+
+            _job = await Jobs.SelectHistoryAsync(JobId, selected, currentUser);
             Snackbar.Add("Đã chọn lại phiên bản Timelapse.", Severity.Success);
         });
     }
+
+    private static Color HistoryStatusColor(string status)
+        => status == TimelapseOperationStatuses.Completed
+            ? Color.Success
+            : status == TimelapseOperationStatuses.Failed
+                ? Color.Error
+                : Color.Warning;
 
     private async Task RetryImageAsync(TimelapseStageImage image)
     {

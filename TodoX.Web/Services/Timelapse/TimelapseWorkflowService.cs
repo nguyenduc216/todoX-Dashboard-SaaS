@@ -12,6 +12,8 @@ public interface ITimelapseWorkflowService
 {
     Task<TimelapseWorkflowState> GetStateAsync(Guid jobId, CancellationToken ct = default);
     Task<IReadOnlyList<TimelapseHistoryItem>> ListHistoryAsync(Guid jobId, CancellationToken ct = default);
+    Task<IReadOnlyList<TimelapseHistoryItem>> ListSceneImageHistoryAsync(Guid jobId, int progressPercent, CancellationToken ct = default);
+    Task<IReadOnlyList<TimelapseHistoryItem>> ListSceneVideoHistoryAsync(Guid jobId, int clipIndex, CancellationToken ct = default);
     Task<TimelapseWorkflowState> SelectHistoryAsync(Guid jobId, string kind, Guid entityId, int version, CurrentUserSession currentUser, CancellationToken ct = default);
     Task<TimelapseWorkflowState> StartOrResumeAsync(Guid jobId, TimelapseJobSnapshot snapshot, CurrentUserSession currentUser, CancellationToken ct = default);
     Task<TimelapseWorkflowState> RetryImageAsync(Guid jobId, int progressPercent, TimelapseJobSnapshot snapshot, CurrentUserSession currentUser, CancellationToken ct = default);
@@ -54,26 +56,29 @@ public sealed class TimelapseWorkflowService : ITimelapseWorkflowService
 
     public async Task<IReadOnlyList<TimelapseHistoryItem>> ListHistoryAsync(Guid jobId, CancellationToken ct = default)
     {
+        return await ListHistoryInternalAsync(jobId, null, ct);
+    }
+
+    public async Task<IReadOnlyList<TimelapseHistoryItem>> ListSceneImageHistoryAsync(Guid jobId, int progressPercent, CancellationToken ct = default)
+    {
         await _tenant.EnsureLoadedAsync(ct);
         using var conn = await _factory.OpenAsync(ct);
         var rows = await conn.QueryAsync<TimelapseHistoryItem>("""
             SELECT 'image' AS Kind, v.image_stage_id AS EntityId, v.attempt AS Version, v.status AS Status,
-                   v.public_url AS PublicUrl, v.error_message AS ErrorMessage, COALESCE(v.completed_at, v.started_at) AS CreatedAt,
+                   v.public_url AS PublicUrl, v.error_message AS ErrorMessage, v.provider_code AS ProviderCode,
+                   v.provider_model AS ProviderModel, COALESCE(v.completed_at, v.started_at) AS CreatedAt,
                    'Ảnh ' || s.progress_percent || '%' AS Label, (s.active_attempt=v.attempt) AS IsSelected
               FROM timelapse.timelapse_image_stage_versions v JOIN timelapse.timelapse_image_stages s ON s.id=v.image_stage_id
              WHERE v.job_id=@jobId
-            UNION ALL
-            SELECT 'video', v.video_clip_id, v.attempt, v.status, v.public_url, v.error_message,
-                   COALESCE(v.completed_at, v.started_at), 'Clip ' || c.clip_index, (c.active_attempt=v.attempt)
-              FROM timelapse.timelapse_video_clip_versions v JOIN timelapse.timelapse_video_clips c ON c.id=v.video_clip_id
-             WHERE v.job_id=@jobId
-            UNION ALL
-            SELECT 'final', f.id, f.version, f.status, f.public_url, f.error_message, f.completed_at,
-                   'Video hoàn chỉnh', f.version=(SELECT max(version) FROM timelapse.timelapse_final_outputs WHERE job_id=@jobId)
-              FROM timelapse.timelapse_final_outputs f WHERE f.job_id=@jobId
+               AND s.progress_percent=@progressPercent
              ORDER BY CreatedAt DESC NULLS LAST, Version DESC;
-            """, new { jobId });
+            """, new { jobId, progressPercent });
         return rows.ToList();
+    }
+
+    public async Task<IReadOnlyList<TimelapseHistoryItem>> ListSceneVideoHistoryAsync(Guid jobId, int clipIndex, CancellationToken ct = default)
+    {
+        return await ListHistoryInternalAsync(jobId, clipIndex, ct);
     }
 
     public async Task<TimelapseWorkflowState> SelectHistoryAsync(Guid jobId, string kind, Guid entityId, int version, CurrentUserSession currentUser, CancellationToken ct = default)
@@ -87,21 +92,53 @@ public sealed class TimelapseWorkflowService : ITimelapseWorkflowService
         {
             "image" => """
                 UPDATE timelapse.timelapse_image_stages s SET active_attempt=v.attempt, status='COMPLETED', result_media_id=v.result_media_id, object_key=v.object_key, public_url=v.public_url, error_code=NULL, error_message=NULL, completed_at=COALESCE(v.completed_at, now()), updated_at=now()
-                  FROM timelapse.timelapse_image_stage_versions v WHERE s.id=@entityId AND v.image_stage_id=s.id AND v.attempt=@version AND v.status='COMPLETED';
+                  FROM timelapse.timelapse_image_stage_versions v WHERE s.id=@entityId AND s.job_id=@jobId AND v.job_id=@jobId AND v.image_stage_id=s.id AND v.attempt=@version AND v.status='COMPLETED';
                 """,
             "video" => """
                 UPDATE timelapse.timelapse_video_clips c SET active_attempt=v.attempt, status='COMPLETED', result_media_id=v.result_media_id, object_key=v.object_key, public_url=v.public_url, error_code=NULL, error_message=NULL, completed_at=COALESCE(v.completed_at, now()), updated_at=now()
-                  FROM timelapse.timelapse_video_clip_versions v WHERE c.id=@entityId AND v.video_clip_id=c.id AND v.attempt=@version AND v.status='COMPLETED';
+                  FROM timelapse.timelapse_video_clip_versions v WHERE c.id=@entityId AND c.job_id=@jobId AND v.job_id=@jobId AND v.video_clip_id=c.id AND v.attempt=@version AND v.status='COMPLETED';
                 """,
             "final" => """
                 UPDATE render.render_jobs j SET output_json=jsonb_build_object('mediaId', f.result_media_id, 'objectKey', f.object_key, 'publicUrl', f.public_url), updated_at=now()
-                  FROM timelapse.timelapse_final_outputs f WHERE j.id=f.job_id AND f.id=@entityId AND f.version=@version AND f.status='COMPLETED';
+                  FROM timelapse.timelapse_final_outputs f WHERE j.id=f.job_id AND f.job_id=@jobId AND f.id=@entityId AND f.version=@version AND f.status='COMPLETED';
                 """,
             _ => throw new InvalidOperationException("TIMELAPSE_HISTORY_KIND_INVALID")
         };
-        await conn.ExecuteAsync(sql, new { entityId, version }, tx);
+        if (await conn.ExecuteAsync(sql, new { jobId, entityId, version }, tx) != 1)
+        {
+            throw new InvalidOperationException("TIMELAPSE_HISTORY_SELECTION_INVALID");
+        }
         tx.Commit();
         return await GetStateAsync(jobId, ct);
+    }
+
+    private async Task<IReadOnlyList<TimelapseHistoryItem>> ListHistoryInternalAsync(Guid jobId, int? clipIndex, CancellationToken ct)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        var rows = await conn.QueryAsync<TimelapseHistoryItem>("""
+            SELECT 'image' AS Kind, v.image_stage_id AS EntityId, v.attempt AS Version, v.status AS Status,
+                   v.public_url AS PublicUrl, v.error_message AS ErrorMessage, v.provider_code AS ProviderCode,
+                   v.provider_model AS ProviderModel, COALESCE(v.completed_at, v.started_at) AS CreatedAt,
+                   'Ảnh ' || s.progress_percent || '%' AS Label, (s.active_attempt=v.attempt) AS IsSelected
+              FROM timelapse.timelapse_image_stage_versions v JOIN timelapse.timelapse_image_stages s ON s.id=v.image_stage_id
+             WHERE v.job_id=@jobId
+            UNION ALL
+            SELECT 'video', v.video_clip_id, v.attempt, v.status, v.public_url, v.error_message,
+                   v.provider_code, v.provider_model, COALESCE(v.completed_at, v.started_at),
+                   'Clip ' || c.clip_index, (c.active_attempt=v.attempt)
+              FROM timelapse.timelapse_video_clip_versions v JOIN timelapse.timelapse_video_clips c ON c.id=v.video_clip_id
+             WHERE v.job_id=@jobId
+               AND (@clipIndex IS NULL OR c.clip_index=@clipIndex)
+            UNION ALL
+            SELECT 'final', f.id, f.version, f.status, f.public_url, f.error_message, NULL, NULL, f.completed_at,
+                   'Video hoàn chỉnh', f.version=(SELECT max(version) FROM timelapse.timelapse_final_outputs WHERE job_id=@jobId)
+              FROM timelapse.timelapse_final_outputs f WHERE f.job_id=@jobId
+             ORDER BY CreatedAt DESC NULLS LAST, Version DESC;
+            """, new { jobId, clipIndex });
+        return clipIndex.HasValue
+            ? rows.Where(row => row.Kind == "video").ToList()
+            : rows.ToList();
     }
 
     public async Task<TimelapseWorkflowState> StartOrResumeAsync(Guid jobId, TimelapseJobSnapshot snapshot, CurrentUserSession currentUser, CancellationToken ct = default)

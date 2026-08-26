@@ -259,6 +259,7 @@ public sealed class DanceSellRenderHandlerTests
             return Task.FromResult(true);
         }
         public Task UpdateCallbackAsync(string providerTaskId, string callbackJson, string providerStatus, string? resultVideoUrl, string? errorCode, string? errorMessage, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<bool> SelectHistoricalRenderResultAsync(Guid jobId, Guid operationId, string resultVideoUrl, CancellationToken ct = default) => throw new NotImplementedException();
     }
 
     private sealed class FakeOperationRepository : IDanceSellOperationRepository

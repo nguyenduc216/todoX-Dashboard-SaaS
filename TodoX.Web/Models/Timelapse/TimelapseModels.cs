@@ -304,6 +304,8 @@ public sealed class TimelapseHistoryItem
     public string Status { get; set; } = string.Empty;
     public string? PublicUrl { get; set; }
     public string? ErrorMessage { get; set; }
+    public string? ProviderCode { get; set; }
+    public string? ProviderModel { get; set; }
     public DateTime? CreatedAt { get; set; }
     public string Label { get; set; } = string.Empty;
     public bool IsSelected { get; set; }

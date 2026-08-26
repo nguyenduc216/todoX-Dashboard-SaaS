@@ -21,6 +21,8 @@ public interface ITimelapseJobService
 
     Task<TimelapseJobView?> GetOwnedAsync(Guid jobId, CurrentUserSession currentUser, CancellationToken ct = default);
     Task<IReadOnlyList<TimelapseHistoryItem>> ListHistoryAsync(Guid jobId, CurrentUserSession currentUser, CancellationToken ct = default);
+    Task<IReadOnlyList<TimelapseHistoryItem>> ListSceneImageHistoryAsync(Guid jobId, int progressPercent, CurrentUserSession currentUser, CancellationToken ct = default);
+    Task<IReadOnlyList<TimelapseHistoryItem>> ListSceneVideoHistoryAsync(Guid jobId, int clipIndex, CurrentUserSession currentUser, CancellationToken ct = default);
     Task<TimelapseJobView> SelectHistoryAsync(Guid jobId, TimelapseHistoryItem item, CurrentUserSession currentUser, CancellationToken ct = default);
     Task<IReadOnlyList<TimelapseJobView>> ListOwnedAsync(CurrentUserSession currentUser, CancellationToken ct = default);
     Task<TimelapseJobView> UpdateDraftAsync(
@@ -271,6 +273,18 @@ public sealed class TimelapseJobService : ITimelapseJobService
     {
         _ = await RequireOwnedAsync(jobId, currentUser, ct);
         return await _workflow.ListHistoryAsync(jobId, ct);
+    }
+
+    public async Task<IReadOnlyList<TimelapseHistoryItem>> ListSceneImageHistoryAsync(Guid jobId, int progressPercent, CurrentUserSession currentUser, CancellationToken ct = default)
+    {
+        _ = await RequireOwnedAsync(jobId, currentUser, ct);
+        return await _workflow.ListSceneImageHistoryAsync(jobId, progressPercent, ct);
+    }
+
+    public async Task<IReadOnlyList<TimelapseHistoryItem>> ListSceneVideoHistoryAsync(Guid jobId, int clipIndex, CurrentUserSession currentUser, CancellationToken ct = default)
+    {
+        _ = await RequireOwnedAsync(jobId, currentUser, ct);
+        return await _workflow.ListSceneVideoHistoryAsync(jobId, clipIndex, ct);
     }
 
     public async Task<TimelapseJobView> SelectHistoryAsync(Guid jobId, TimelapseHistoryItem item, CurrentUserSession currentUser, CancellationToken ct = default)

@@ -46,6 +46,22 @@ public sealed class MediaHistorySelectionRegressionTests
         Assert.Contains("UPDATE render.render_jobs", service);
     }
 
+    [Fact]
+    public void TimelapseSceneVideoHistoryUsesClipScopedHistoryAndSharedDialog()
+    {
+        var page = ReadRepoFile("Components", "Pages", "TimelapseJobDetail.razor");
+        var service = ReadRepoFile("Services", "Timelapse", "TimelapseWorkflowService.cs");
+        var jobService = ReadRepoFile("Services", "Timelapse", "TimelapseJobService.cs");
+
+        Assert.Contains("OpenSceneVideoHistoryAsync(TimelapseVideoClip clip)", page);
+        Assert.Contains("ListSceneVideoHistoryAsync(JobId, clip.ClipIndex", page);
+        Assert.Contains("StartIcon=\"@Icons.Material.Filled.History\"", page);
+        Assert.Contains("VersionLabel = $\"Lần {item.Version}\"", page);
+        Assert.Contains("ListSceneVideoHistoryAsync(Guid jobId, int clipIndex", service);
+        Assert.Contains("AND (@clipIndex IS NULL OR c.clip_index=@clipIndex)", service);
+        Assert.Contains("ListSceneVideoHistoryAsync(Guid jobId, int clipIndex, CurrentUserSession currentUser", jobService);
+    }
+
     private static string ReadRepoFile(params string[] parts)
         => File.ReadAllText(Path.Combine(new[] { AppContext.BaseDirectory, "..", "..", "..", ".." }.Concat(parts).ToArray()));
 }
