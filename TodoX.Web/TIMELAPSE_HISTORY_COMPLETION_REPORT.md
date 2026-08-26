@@ -3,8 +3,8 @@
 ## Git
 Branch: integration/rdance-on-construction-video-core
 Base commit: 30bc9630ec22d680e140ee30cd5036f9685bb59b
-Final commit: f7cc224
-Push status: Pending
+Final commit: 5ea9dea
+Push status: Passed
 
 ## Scope compliance
 RDance changed: NO
@@ -127,4 +127,4 @@ External provider lookup: NOT PERFORMED
 - [x] Targeted tests passed
 - [ ] Repository-wide format passed
 - [x] Publish passed
-- [ ] Code pushed to Git
+- [x] Code pushed to Git
