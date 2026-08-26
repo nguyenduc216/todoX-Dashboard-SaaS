@@ -55,6 +55,12 @@
                 <MudText Typo="Typo.body1" Class="todox-page-subtitle">@_job.Snapshot.ServiceCode · @_job.Workflow.CurrentStep</MudText>
             </div>
             <MudSpacer />
+            <MudButton Variant="Variant.Outlined"
+                       StartIcon="@Icons.Material.Filled.History"
+                       Disabled="@_busy"
+                       OnClick="OpenHistoryAsync">
+                LỊCH SỬ
+            </MudButton>
             @if (CanCancelJob)
             {
                 <MudButton Variant="Variant.Outlined"
@@ -995,6 +1001,35 @@
         var options = new DialogOptions { CloseButton = true, FullWidth = true, MaxWidth = MaxWidth.Large };
         _ = DialogService.ShowAsync<Components.Dialogs.LandingIndustryVideoPreviewDialog>(title, parameters, options);
         return Task.CompletedTask;
+    }
+
+    private async Task OpenHistoryAsync()
+    {
+        if (_job is null || AuthState.CurrentUser is null) return;
+        var history = await Jobs.ListHistoryAsync(JobId, AuthState.CurrentUser);
+        var items = history.Select(item => new MediaHistoryItem
+        {
+            Key = $"{item.Kind}:{item.EntityId:N}:{item.Version}", VersionLabel = $"v{item.Version}", Title = item.Label,
+            Status = item.Status, StatusColor = item.Status == TimelapseOperationStatuses.Completed ? Color.Success : item.Status == TimelapseOperationStatuses.Failed ? Color.Error : Color.Warning,
+            CreatedAt = item.CreatedAt.HasValue ? new DateTimeOffset(DateTime.SpecifyKind(item.CreatedAt.Value, DateTimeKind.Utc)) : DateTimeOffset.UtcNow,
+            IsSelected = item.IsSelected, CanSelect = item.Status == TimelapseOperationStatuses.Completed && !item.IsSelected,
+            IsVideo = item.Kind is "video" or "final", MediaUrl = item.PublicUrl, Error = item.ErrorMessage
+        }).ToList();
+        var dialog = await DialogService.ShowAsync<MediaHistoryDialog>("Lịch sử Timelapse", new DialogParameters<MediaHistoryDialog>
+        {
+            { x => x.Title, "Lịch sử Timelapse" }, { x => x.Items, items }
+        }, new DialogOptions { CloseButton = true, FullWidth = true, MaxWidth = MaxWidth.Medium });
+        var result = await dialog.Result;
+        if (result?.Canceled != false || result.Data is not string key) return;
+        var parts = key.Split(':');
+        if (parts.Length != 3 || !Guid.TryParse(parts[1], out var entityId) || !int.TryParse(parts[2], out var version)) return;
+        var selected = history.FirstOrDefault(x => x.Kind == parts[0] && x.EntityId == entityId && x.Version == version);
+        if (selected is null) return;
+        await RunActionAsync(async () =>
+        {
+            _job = await Jobs.SelectHistoryAsync(JobId, selected, AuthState.CurrentUser);
+            Snackbar.Add("Đã chọn lại phiên bản Timelapse.", Severity.Success);
+        });
     }
 
     private async Task RetryImageAsync(TimelapseStageImage image)

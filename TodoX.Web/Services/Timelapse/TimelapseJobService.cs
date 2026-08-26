@@ -20,6 +20,8 @@ public interface ITimelapseJobService
         CancellationToken ct = default);
 
     Task<TimelapseJobView?> GetOwnedAsync(Guid jobId, CurrentUserSession currentUser, CancellationToken ct = default);
+    Task<IReadOnlyList<TimelapseHistoryItem>> ListHistoryAsync(Guid jobId, CurrentUserSession currentUser, CancellationToken ct = default);
+    Task<TimelapseJobView> SelectHistoryAsync(Guid jobId, TimelapseHistoryItem item, CurrentUserSession currentUser, CancellationToken ct = default);
     Task<IReadOnlyList<TimelapseJobView>> ListOwnedAsync(CurrentUserSession currentUser, CancellationToken ct = default);
     Task<TimelapseJobView> UpdateDraftAsync(
         Guid jobId,
@@ -261,6 +263,21 @@ public sealed class TimelapseJobService : ITimelapseJobService
 
         var view = ToView(row, currentUser);
         view.Workflow = await _workflow.GetStateAsync(jobId, ct);
+        HydrateImagePrompts(view);
+        return view;
+    }
+
+    public async Task<IReadOnlyList<TimelapseHistoryItem>> ListHistoryAsync(Guid jobId, CurrentUserSession currentUser, CancellationToken ct = default)
+    {
+        _ = await RequireOwnedAsync(jobId, currentUser, ct);
+        return await _workflow.ListHistoryAsync(jobId, ct);
+    }
+
+    public async Task<TimelapseJobView> SelectHistoryAsync(Guid jobId, TimelapseHistoryItem item, CurrentUserSession currentUser, CancellationToken ct = default)
+    {
+        var view = await RequireOwnedAsync(jobId, currentUser, ct);
+        view.Workflow = await _workflow.SelectHistoryAsync(jobId, item.Kind, item.EntityId, item.Version, currentUser, ct);
+        view.Status = view.Workflow.ParentStatus;
         HydrateImagePrompts(view);
         return view;
     }

@@ -1,0 +1,79 @@
+@namespace TodoX.Web.Components.Dialogs
+
+<MudDialog>
+    <TitleContent>
+        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+            <MudIcon Icon="@Icons.Material.Filled.History" Color="Color.Warning" />
+            <MudText Typo="Typo.h6">@Title</MudText>
+        </MudStack>
+    </TitleContent>
+    <DialogContent>
+        @if (Items.Count == 0)
+        {
+            <MudAlert Severity="Severity.Info" Dense="true">Chưa có phiên bản media.</MudAlert>
+        }
+        else
+        {
+            <MudStack Spacing="2">
+                @foreach (var item in Items)
+                {
+                    <MudPaper Outlined="true" Class="pa-3">
+                        <MudStack Spacing="1">
+                            <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-1">
+                                <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center" Class="flex-wrap gap-1">
+                                    <MudChip T="string" Size="Size.Small" Color="@item.StatusColor">@item.VersionLabel · @item.Status</MudChip>
+                                    @if (item.IsSelected)
+                                    {
+                                        <MudChip T="string" Size="Size.Small" Color="Color.Success">Đang dùng</MudChip>
+                                    }
+                                </MudStack>
+                                <MudText Typo="Typo.caption">@item.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</MudText>
+                            </MudStack>
+                            @if (item.IsVideo && !string.IsNullOrWhiteSpace(item.MediaUrl))
+                            {
+                                <video src="@item.MediaUrl" controls preload="metadata" style="width:100%;max-height:240px;border-radius:8px"></video>
+                            }
+                            else if (!item.IsVideo && !string.IsNullOrWhiteSpace(item.MediaUrl))
+                            {
+                                <img src="@item.MediaUrl" alt="@item.Title" style="width:100%;max-height:240px;object-fit:contain;border-radius:8px" />
+                            }
+                            <MudText Typo="Typo.body2">@item.Title</MudText>
+                            @if (!string.IsNullOrWhiteSpace(item.Metadata))
+                            {
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">@item.Metadata</MudText>
+                            }
+                            @if (!string.IsNullOrWhiteSpace(item.Prompt))
+                            {
+                                <MudText Typo="Typo.caption">Prompt: @item.Prompt</MudText>
+                            }
+                            @if (!string.IsNullOrWhiteSpace(item.Error))
+                            {
+                                <MudText Typo="Typo.caption" Color="Color.Error">Lỗi: @item.Error</MudText>
+                            }
+                            <MudStack Row="true" Spacing="1" Class="flex-wrap gap-1">
+                                @if (!string.IsNullOrWhiteSpace(item.MediaUrl))
+                                {
+                                    <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.OpenInNew" Href="@item.MediaUrl" Target="_blank">Xem</MudButton>
+                                    <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Download" Href="@item.MediaUrl" Target="_blank">Tải xuống</MudButton>
+                                }
+                                <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Success" Disabled="@(item.IsSelected || !item.CanSelect)" StartIcon="@Icons.Material.Filled.Check" OnClick="@(() => SelectAsync(item))">Dùng làm hiện tại</MudButton>
+                            </MudStack>
+                        </MudStack>
+                    </MudPaper>
+                }
+            </MudStack>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton Variant="Variant.Text" OnClick="Close">Đóng</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public string Title { get; set; } = "Lịch sử media";
+    [Parameter] public IReadOnlyList<MediaHistoryItem> Items { get; set; } = Array.Empty<MediaHistoryItem>();
+
+    private void Close() => MudDialog.Cancel();
+    private void SelectAsync(MediaHistoryItem item) => MudDialog.Close(DialogResult.Ok(item.Key));
+}

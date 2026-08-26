@@ -332,7 +332,7 @@ else
                                                 <MudMenuItem Icon="@Icons.Material.Filled.Save" Disabled="@_busy" OnClick="@(async () => await SaveSceneAsync(scene))">Lưu scene</MudMenuItem>
                                                 <MudMenuItem Icon="@Icons.Material.Filled.AddPhotoAlternate" Disabled="@IsSceneRendering(scene)" OnClick="@(() => RerenderSceneImageAsync(scene))">@(string.IsNullOrWhiteSpace(ResolveDraftImageUrl(scene, draft)) ? "Tạo ảnh" : "Render lại ảnh")</MudMenuItem>
                                                 <MudMenuItem Icon="@Icons.Material.Filled.Edit" OnClick="@(() => EditScenePromptsAsync(scene))">Chỉnh sửa prompt ảnh</MudMenuItem>
-                                                <MudMenuItem Icon="@Icons.Material.Filled.History" OnClick="@(() => ToggleImageHistoryAsync(scene))">Lịch sử ảnh</MudMenuItem>
+                                                <MudMenuItem Icon="@Icons.Material.Filled.History" OnClick="@(() => OpenImageHistoryAsync(scene))">Lịch sử ảnh</MudMenuItem>
                                                 <MudDivider />
                                                 <MudMenuItem Icon="@Icons.Material.Filled.KeyboardArrowUp" Disabled="@(_busy || scene.SceneIndex <= 1)" OnClick="@(() => MoveSceneUpAsync(scene))">Lên</MudMenuItem>
                                                 <MudMenuItem Icon="@Icons.Material.Filled.KeyboardArrowDown" Disabled="@(_busy || _project is null || scene.SceneIndex >= _project.Scenes.Count)" OnClick="@(() => MoveSceneDownAsync(scene))">Xuống</MudMenuItem>
@@ -361,7 +361,7 @@ else
                                                     <MudTooltip Text="Xem prompt ảnh"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Image" OnClick="@(() => OpenScenePrompt(scene, ScenePromptKind.Image))" aria-label="Xem prompt ảnh" /></MudTooltip>
                                                     <MudTooltip Text="Xem prompt video"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Movie" OnClick="@(() => OpenScenePrompt(scene, ScenePromptKind.Motion))" aria-label="Xem prompt video" /></MudTooltip>
                                                     <MudTooltip Text="Xem lời thoại"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.RecordVoiceOver" OnClick="@(() => OpenScenePrompt(scene, ScenePromptKind.Voice))" aria-label="Xem lời thoại" /></MudTooltip>
-                                                    <MudTooltip Text="Lịch sử ảnh"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.History" OnClick="@(() => ToggleImageHistoryAsync(scene))" aria-label="Lịch sử ảnh" /></MudTooltip>
+                                                    <MudTooltip Text="Lịch sử ảnh"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.History" OnClick="@(() => OpenImageHistoryAsync(scene))" aria-label="Lịch sử ảnh" /></MudTooltip>
                                                     <MudTooltip Text="Hướng dẫn giọng đọc"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Audiotrack" OnClick="@(() => OpenSceneVoiceInstruction(scene))" aria-label="Xem hướng dẫn giọng đọc" /></MudTooltip>
                                                 </MudStack>
                                                 </div>
@@ -400,7 +400,7 @@ else
                                                     }
                                                     <MudTooltip Text="Lịch sử video">
                                                         <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.History" Color="Color.Default"
-                                                                       OnClick="@(() => ToggleVideoHistoryAsync(scene))"
+                                                                       OnClick="@(() => OpenVideoHistoryAsync(scene))"
                                                                        aria-label="Lịch sử video scene" />
                                                     </MudTooltip>
                                                     <MudTooltip Text="Chỉnh prompt scene">
@@ -504,7 +504,7 @@ else
                             <MudStack Spacing="2">
                                 <MudStack Row="true" Spacing="1" Class="flex-wrap gap-1">
                                     <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="ReloadAsync">Refresh</MudButton>
-                                    <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="ToggleFinalHistoryAsync">Lịch sử video hoàn chỉnh</MudButton>
+                                    <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.History" OnClick="OpenFinalHistoryAsync">Lịch sử video hoàn chỉnh</MudButton>
                                     <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="ReloadJobsAsync">Refresh jobs</MudButton>
                                 </MudStack>
                                 @if (_showFinalHistory)
@@ -2710,6 +2710,30 @@ else
         Snackbar.Add($"Đã tải {_imageVersions[scene.Id].Count} phiên bản ảnh cho scene {scene.SceneIndex}.", Severity.Info);
     }
 
+    private async Task OpenImageHistoryAsync(VideoProjectSceneDto scene)
+    {
+        await LoadImageHistoryAsync(scene);
+        var versions = _imageVersions.TryGetValue(scene.Id, out var loaded) ? loaded : Array.Empty<TodoX.Web.Services.VideoRender.SceneImageVersionDto>();
+        var items = versions.Select(version => new MediaHistoryItem
+        {
+            Key = version.Id.ToString("N"), VersionLabel = $"v{version.VersionNumber}", Title = $"Ảnh scene {scene.SceneIndex}",
+            Status = version.Status, StatusColor = VersionStatusColor(version.Status), CreatedAt = version.CreatedAt,
+            IsSelected = version.IsSelected, CanSelect = CanSelectVersion(version.Status, version.IsSelected), MediaUrl = version.PublicUrl,
+            Metadata = $"{version.ProviderCode ?? "provider"} / {version.ModelName ?? "model"}",
+            Prompt = version.CompiledImagePromptSnapshot ?? version.ImagePromptSnapshot, Error = version.ErrorMessage
+        }).ToList();
+        var dialog = await DialogService.ShowAsync<MediaHistoryDialog>($"Lịch sử ảnh scene {scene.SceneIndex}", new DialogParameters<MediaHistoryDialog>
+        {
+            { x => x.Title, $"Lịch sử ảnh scene {scene.SceneIndex}" }, { x => x.Items, items }
+        }, new DialogOptions { CloseButton = true, FullWidth = true, MaxWidth = MaxWidth.Medium });
+        var result = await dialog.Result;
+        if (result?.Canceled == false && result.Data is string key && Guid.TryParseExact(key, "N", out var id))
+        {
+            var selected = versions.FirstOrDefault(x => x.Id == id);
+            if (selected is not null) await SelectImageVersionAsync(scene, selected);
+        }
+    }
+
     private async Task ToggleVideoHistoryAsync(VideoProjectSceneDto scene)
     {
         if (_videoHistorySceneId == scene.Id)
@@ -2727,6 +2751,30 @@ else
         if (AuthState.CurrentUser is null) return;
         _videoVersions[scene.Id] = await SceneVersions.ListSceneVideoVersionsAsync(scene.Id, AuthState.CurrentUser, 0, 20);
         Snackbar.Add($"Đã tải {_videoVersions[scene.Id].Count} phiên bản video cho scene {scene.SceneIndex}.", Severity.Info);
+    }
+
+    private async Task OpenVideoHistoryAsync(VideoProjectSceneDto scene)
+    {
+        await LoadVideoHistoryAsync(scene);
+        var versions = _videoVersions.TryGetValue(scene.Id, out var loaded) ? loaded : Array.Empty<TodoX.Web.Services.VideoRender.SceneVideoVersionDto>();
+        var items = versions.Select(version => new MediaHistoryItem
+        {
+            Key = version.Id.ToString("N"), VersionLabel = $"v{version.VersionNumber}", Title = $"Video scene {scene.SceneIndex}",
+            Status = version.Status, StatusColor = VersionStatusColor(version.Status), CreatedAt = version.CreatedAt,
+            IsSelected = version.IsSelected, CanSelect = CanSelectVersion(version.Status, version.IsSelected), IsVideo = true,
+            MediaUrl = version.PublicUrl, Metadata = $"{version.ProviderCode ?? "provider"} / {version.ModelName ?? "model"} · {version.DurationSeconds?.ToString("0.##") ?? "?"} giây",
+            Prompt = version.VideoPromptSnapshot, Error = version.ErrorMessage
+        }).ToList();
+        var dialog = await DialogService.ShowAsync<MediaHistoryDialog>($"Lịch sử video scene {scene.SceneIndex}", new DialogParameters<MediaHistoryDialog>
+        {
+            { x => x.Title, $"Lịch sử video scene {scene.SceneIndex}" }, { x => x.Items, items }
+        }, new DialogOptions { CloseButton = true, FullWidth = true, MaxWidth = MaxWidth.Medium });
+        var result = await dialog.Result;
+        if (result?.Canceled == false && result.Data is string key && Guid.TryParseExact(key, "N", out var id))
+        {
+            var selected = versions.FirstOrDefault(x => x.Id == id);
+            if (selected is not null) await SelectVideoVersionAsync(scene, selected);
+        }
     }
 
     private async Task LoadAudioHistoryAsync(VideoProjectSceneDto scene)
@@ -2876,6 +2924,28 @@ else
             _finalVersionItems[version.Id] = await SceneVersions.ListFinalVideoVersionItemsAsync(version.Id, AuthState.CurrentUser);
         }
         Snackbar.Add($"Đã tải {_finalVersions.Count} phiên bản video hoàn chỉnh.", Severity.Info);
+    }
+
+    private async Task OpenFinalHistoryAsync()
+    {
+        await LoadFinalHistoryAsync();
+        var items = _finalVersions.Select(version => new MediaHistoryItem
+        {
+            Key = version.Id.ToString("N"), VersionLabel = $"v{version.VersionNumber}", Title = "Video hoàn chỉnh",
+            Status = version.Status, StatusColor = VersionStatusColor(version.Status), CreatedAt = version.CreatedAt,
+            IsSelected = version.IsSelected, CanSelect = CanSelectVersion(version.Status, version.IsSelected), IsVideo = true,
+            MediaUrl = version.PublicUrl, Metadata = $"{version.DurationSeconds?.ToString("0.##") ?? "?"} giây", Error = version.ErrorMessage
+        }).ToList();
+        var dialog = await DialogService.ShowAsync<MediaHistoryDialog>("Lịch sử video hoàn chỉnh", new DialogParameters<MediaHistoryDialog>
+        {
+            { x => x.Title, "Lịch sử video hoàn chỉnh" }, { x => x.Items, items }
+        }, new DialogOptions { CloseButton = true, FullWidth = true, MaxWidth = MaxWidth.Medium });
+        var result = await dialog.Result;
+        if (result?.Canceled == false && result.Data is string key && Guid.TryParseExact(key, "N", out var id))
+        {
+            var selected = _finalVersions.FirstOrDefault(x => x.Id == id);
+            if (selected is not null) await SelectFinalVersionAsync(selected);
+        }
     }
 
     private async Task SelectFinalVersionAsync(TodoX.Web.Services.VideoRender.FinalVideoVersionDto version)

@@ -908,7 +908,8 @@ public sealed class DanceSellOperationRepository : IDanceSellOperationRepository
                        o.created_at AS CreatedAt, o.started_at AS StartedAt, o.submitted_at AS SubmittedAt,
                        o.completed_at AS CompletedAt, o.failed_at AS FailedAt, o.updated_at AS UpdatedAt,
                        j.title AS Title, j.customer_id AS CustomerId, j.user_id AS UserId,
-                       j.current_stage AS CurrentStage, j.result_video_url AS ResultUrl,
+                       j.current_stage AS CurrentStage,
+                       COALESCE(output_asset.public_url, o.response_json->>'resultUrl', j.result_video_url) AS ResultUrl,
                        COALESCE(a.asset_count, 0) AS AssetCount
                   {where.Sql}
                  ORDER BY o.created_at DESC
@@ -1027,6 +1028,15 @@ public sealed class DanceSellOperationRepository : IDanceSellOperationRepository
                       FROM public.todox_ai_operation_assets
                      GROUP BY operation_id
               ) a ON a.operation_id = o.id
+              LEFT JOIN LATERAL (
+                    SELECT public_url
+                      FROM public.todox_ai_operation_assets
+                     WHERE operation_id=o.id
+                       AND asset_role='video_output'
+                       AND public_url IS NOT NULL
+                     ORDER BY created_at DESC
+                     LIMIT 1
+              ) output_asset ON true
              WHERE {string.Join(" AND ", clauses)}
             """;
         return (sql, args);

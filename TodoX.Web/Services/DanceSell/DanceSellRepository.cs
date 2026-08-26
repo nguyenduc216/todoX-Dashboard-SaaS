@@ -35,6 +35,7 @@ public interface IDanceSellRepository
     Task UpdateSubmittedAsync(Guid id, string requestJson, string providerTaskId, string submitResponseJson, CancellationToken ct = default);
     Task UpdatePollingAsync(Guid id, string providerStatus, string pollResponseJson, int pollCount, DateTime nextPollAtUtc, CancellationToken ct = default);
     Task<bool> UpdateCompletedAsync(Guid id, string providerStatus, string pollResponseJson, string resultVideoUrl, CancellationToken ct = default);
+    Task<bool> SelectHistoricalRenderResultAsync(Guid jobId, Guid operationId, string resultVideoUrl, CancellationToken ct = default);
     Task<bool> UpdateFailedAsync(Guid id, string status, string? providerStatus, string? responseJson, string errorCode, string errorMessage, CancellationToken ct = default);
     Task UpdateCallbackAsync(string providerTaskId, string callbackJson, string providerStatus, string? resultVideoUrl, string? errorCode, string? errorMessage, CancellationToken ct = default);
     Task ResetMotionRenderStateAsync(Guid id, Guid renderJobId, CancellationToken ct = default);
@@ -613,6 +614,28 @@ public sealed class DanceSellRepository : IDanceSellRepository
              WHERE dance_sell_job_id = @danceSellJobId;
             """,
             new { danceSellJobId, versionId });
+        return changed > 0;
+    }
+
+    public async Task<bool> SelectHistoricalRenderResultAsync(Guid jobId, Guid operationId, string resultVideoUrl, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(resultVideoUrl)) return false;
+        using var conn = await _factory.OpenAsync(ct);
+        var changed = await conn.ExecuteAsync(
+            """
+            UPDATE dance_sell.dance_sell_jobs
+               SET result_video_url=@resultVideoUrl,
+                   updated_at=now()
+             WHERE id=@jobId
+               AND EXISTS (
+                   SELECT 1
+                     FROM dance_sell.dance_sell_provider_operations
+                    WHERE id=@operationId
+                      AND dance_sell_job_id=@jobId
+                      AND operation_type='motion_video'
+                      AND status='completed');
+            """,
+            new { jobId, operationId, resultVideoUrl = resultVideoUrl.Trim() });
         return changed > 0;
     }
 

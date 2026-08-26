@@ -10,6 +10,7 @@
 @inject IDanceSellReferenceImageService References
 @inject IDanceSellReferenceComparisonService ReferenceComparison
 @inject IDanceSellRepository DanceRepo
+@inject IDanceSellOperationRepository DanceOperations
 @inject IRenderJobService RenderJobs
 @inject IDanceSellCostEstimator Costs
 @inject IDanceSellProviderCatalog ProviderCatalog
@@ -116,8 +117,8 @@
                                             <MudIcon Icon="@Icons.Material.Filled.CloudUpload" Size="Size.Large" />
                                         }
                                     </span>
-                                    <span class="rdance-upload-title">Kéo thả video MP4 vào đây</span>
-                                    <span class="rdance-upload-subtitle">hoặc bấm để chọn video</span>
+                                    <span class="rdance-upload-title rdance-upload-button"><MudIcon Icon="@Icons.Material.Filled.CloudUpload" Size="Size.Small" /> Chọn video MP4</span>
+                                    <span class="rdance-upload-subtitle">hoặc kéo thả video vào đây</span>
                                     <span class="rdance-upload-limit">MP4 · tối đa @MaxMotionVideoLabel</span>
                                 </label>
                                 @if (!string.IsNullOrWhiteSpace(_motionUploadError))
@@ -196,7 +197,7 @@
                                         <MudIcon Icon="@Icons.Material.Filled.CloudUpload" Size="Size.Large" />
                                     }
                                 </span>
-                                <span class="rdance-upload-title">@(!string.IsNullOrWhiteSpace(_job?.CharacterImageUrl) ? "Thay ảnh" : "Kéo thả ảnh vào đây")</span>
+                                <span class="rdance-upload-title rdance-upload-button"><MudIcon Icon="@Icons.Material.Filled.CloudUpload" Size="Size.Small" /> @(!string.IsNullOrWhiteSpace(_job?.CharacterImageUrl) ? "Thay ảnh" : "Tải ảnh người mẫu")</span>
                                 @if (string.IsNullOrWhiteSpace(_job?.CharacterImageUrl))
                                 {
                                     <span class="rdance-upload-subtitle">hoặc bấm để chọn ảnh</span>
@@ -239,7 +240,7 @@
                                         <MudIcon Icon="@Icons.Material.Filled.CloudUpload" Size="Size.Large" />
                                     }
                                 </span>
-                                <span class="rdance-upload-title">@(!string.IsNullOrWhiteSpace(_job?.ProductImageUrl) ? "Thay ảnh" : "Kéo thả ảnh vào đây")</span>
+                                <span class="rdance-upload-title rdance-upload-button"><MudIcon Icon="@Icons.Material.Filled.CloudUpload" Size="Size.Small" /> @(!string.IsNullOrWhiteSpace(_job?.ProductImageUrl) ? "Thay ảnh" : "Tải ảnh sản phẩm")</span>
                                 @if (string.IsNullOrWhiteSpace(_job?.ProductImageUrl))
                                 {
                                     <span class="rdance-upload-subtitle">hoặc bấm để chọn ảnh</span>
@@ -264,31 +265,27 @@
                                 }
                             </div>
                             <MudChip T="string" Color="@ReferenceColor" Size="Size.Small">@ReferenceLabel</MudChip>
-                            @if (_job?.CharacterMediaId is not null)
-                            {
-                                <MudTooltip Text="Xem / chỉnh prompt">
-                                    <MudIconButton Icon="@Icons.Material.Filled.EditNote"
-                                                   Color="Color.Primary"
-                                                   Size="Size.Small"
-                                                   Disabled="@_busy"
-                                                   OnClick="OpenReferencePromptAsync" />
-                                </MudTooltip>
-                            }
-                            @if (_job?.PreparedReferenceStatus == DanceSellReferenceStatuses.Approved)
-                            {
-                                <MudChip T="string" Color="Color.Success" Size="Size.Small">Đã duyệt</MudChip>
-                                <MudButton Variant="Variant.Outlined" Color="Color.Warning" Size="Size.Small" Disabled="@_busy" OnClick="UnapproveReferenceAsync">Gỡ duyệt</MudButton>
-                            }
-                            else if (_latestReference?.Status == DanceSellReferenceStatuses.Ready)
-                            {
-                                <MudButton Variant="Variant.Outlined" Color="Color.Warning" Disabled="@_busy" OnClick="ApproveLatestReferenceAsync">Duyệt ảnh</MudButton>
-                            }
-                            @if (_job?.ProductMediaId is not null
-                                && (_job?.PreparedReferenceStatus is DanceSellReferenceStatuses.Ready or DanceSellReferenceStatuses.Approved or DanceSellReferenceStatuses.Failed
-                                    || _latestReference?.Status == DanceSellReferenceStatuses.Failed))
-                            {
-                                <MudButton Variant="Variant.Filled" Color="Color.Warning" Disabled="@(_busy || _job?.CharacterMediaId is null)" OnClick="RegenerateReferenceAsync">Tạo lại ảnh</MudButton>
-                            }
+                            <MudStack Row="true" Spacing="1" Class="rdance-reference-actions flex-wrap gap-1">
+                                @if (_job?.CharacterMediaId is not null)
+                                {
+                                    <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.EditNote" Disabled="@_busy" OnClick="OpenReferencePromptAsync">Xem / sửa prompt</MudButton>
+                                }
+                                @if (_job?.PreparedReferenceStatus == DanceSellReferenceStatuses.Approved)
+                                {
+                                    <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.RemoveCircleOutline" Disabled="@_busy" OnClick="UnapproveReferenceAsync">Gỡ duyệt</MudButton>
+                                }
+                                else if (_latestReference?.Status == DanceSellReferenceStatuses.Ready)
+                                {
+                                    <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Success" StartIcon="@Icons.Material.Filled.Check" Disabled="@_busy" OnClick="ApproveLatestReferenceAsync">Duyệt ảnh</MudButton>
+                                }
+                                @if (_job?.ProductMediaId is not null
+                                    && (_job?.PreparedReferenceStatus is DanceSellReferenceStatuses.Ready or DanceSellReferenceStatuses.Approved or DanceSellReferenceStatuses.Failed
+                                        || _latestReference?.Status == DanceSellReferenceStatuses.Failed))
+                                {
+                                    <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Refresh" Disabled="@(_busy || _job?.CharacterMediaId is null)" OnClick="RegenerateReferenceAsync">Tạo lại ảnh</MudButton>
+                                }
+                                <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.History" Disabled="@_busy" OnClick="OpenReferenceHistoryAsync">Lịch sử</MudButton>
+                            </MudStack>
                         </MudPaper>
                     </MudItem>
                 </MudGrid>
@@ -375,6 +372,7 @@
                                 <MudButton FullWidth="true" Variant="Variant.Outlined" Color="Color.Warning" Href="@ReferenceDownloadUrl" StartIcon="@Icons.Material.Filled.Download">
                                     Tải xuống
                                 </MudButton>
+                                <MudButton FullWidth="true" Variant="Variant.Outlined" Color="Color.Default" StartIcon="@Icons.Material.Filled.History" OnClick="OpenReferenceHistoryAsync">Lịch sử ảnh</MudButton>
                             }
                         </MudPaper>
                     </MudItem>
@@ -456,8 +454,9 @@
                             <video src="@_job.ResultVideoUrl" controls playsinline class="rdance-result-player"></video>
                             <MudStack Row="true" Class="flex-wrap gap-2 mt-3">
                                 <MudButton Variant="Variant.Filled" Color="Color.Warning" OnClick="@(() => JS.InvokeVoidAsync("open", _job.ResultVideoUrl))">Xem video</MudButton>
-                                <MudButton Variant="Variant.Outlined" Color="Color.Warning" Href="@DownloadUrl">Tải video</MudButton>
-                                <MudButton Variant="Variant.Outlined" Color="Color.Warning" OnClick="RetryAsync">Render lại video</MudButton>
+                                <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Download" Href="@DownloadUrl">Tải video</MudButton>
+                                <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Refresh" OnClick="RetryAsync">Render lại video</MudButton>
+                                <MudButton Variant="Variant.Outlined" Color="Color.Default" StartIcon="@Icons.Material.Filled.History" OnClick="OpenVideoHistoryAsync">Lịch sử render</MudButton>
                                 <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="@(() => Navigation.NavigateTo("/jobs/rdance/new"))">Tạo video mới</MudButton>
                             </MudStack>
                         </MudPaper>
@@ -1075,6 +1074,104 @@
                 await GenerateReferenceAsync();
             }
         });
+    }
+
+    private async Task OpenReferenceHistoryAsync()
+    {
+        if (_job is null) return;
+        var items = _referenceVersions
+            .Where(x => !IsComparisonVersion(x))
+            .Select(x => new MediaHistoryItem
+            {
+                Key = x.Id.ToString("N"),
+                VersionLabel = $"v{x.VersionNo}",
+                Title = "Ảnh dùng để tạo video",
+                Status = x.Status,
+                StatusColor = x.Status switch
+                {
+                    DanceSellReferenceStatuses.Ready => Color.Success,
+                    DanceSellReferenceStatuses.Approved => Color.Success,
+                    DanceSellReferenceStatuses.Generating => Color.Warning,
+                    DanceSellReferenceStatuses.Failed => Color.Error,
+                    _ => Color.Default
+                },
+                CreatedAt = new DateTimeOffset(DateTime.SpecifyKind(x.CreatedAt, DateTimeKind.Utc)),
+                IsSelected = x.IsSelected,
+                CanSelect = x.Status is DanceSellReferenceStatuses.Ready or DanceSellReferenceStatuses.Approved,
+                MediaUrl = x.PublicUrl,
+                Metadata = $"{x.ProviderCode ?? "provider"} / {x.ProviderModel ?? "model"}",
+                Prompt = x.Prompt,
+                Error = x.ErrorJson
+            })
+            .ToList();
+        var parameters = new DialogParameters<MediaHistoryDialog>
+        {
+            { x => x.Title, "Lịch sử ảnh reference" },
+            { x => x.Items, items }
+        };
+        var dialog = await DialogService.ShowAsync<MediaHistoryDialog>("Lịch sử ảnh reference", parameters,
+            new DialogOptions { CloseButton = true, FullWidth = true, MaxWidth = MaxWidth.Medium });
+        var result = await dialog.Result;
+        if (result?.Canceled == false && result.Data is string key && Guid.TryParseExact(key, "N", out var versionId))
+        {
+            await RunAsync(async () =>
+            {
+                _job = await References.ApproveAsync(_job.Id, versionId, AuthState.CurrentUser!);
+                await ReloadAsync();
+                Snackbar.Add("Đã chọn lại ảnh reference.", Severity.Success);
+            });
+        }
+    }
+
+    private async Task OpenVideoHistoryAsync()
+    {
+        if (_job is null) return;
+        var result = await DanceOperations.SearchLogsAsync(new DanceSellOperationLogFilter
+        {
+            DanceSellJobId = _job.Id,
+            OperationType = DanceSellOperationTypes.MotionVideo,
+            Page = 1,
+            PageSize = 50
+        });
+        var items = result.Items.Select(x => new MediaHistoryItem
+        {
+            Key = x.Id.ToString("N"),
+            VersionLabel = $"Lần {x.AttemptNo}",
+            Title = "Video render RDance",
+            Status = x.Status,
+            StatusColor = x.Status == DanceSellOperationStatuses.Completed ? Color.Success : x.Status == DanceSellOperationStatuses.Failed ? Color.Error : Color.Warning,
+            CreatedAt = new DateTimeOffset(DateTime.SpecifyKind(x.CreatedAt, DateTimeKind.Utc)),
+            IsSelected = string.Equals(x.ResultUrl, _job.ResultVideoUrl, StringComparison.OrdinalIgnoreCase),
+            CanSelect = x.Status == DanceSellOperationStatuses.Completed && !string.IsNullOrWhiteSpace(x.ResultUrl),
+            IsVideo = true,
+            MediaUrl = x.ResultUrl,
+            Metadata = $"{x.ProviderCode} / {x.ProviderModel}",
+            Error = x.ErrorMessage
+        }).ToList();
+        var parameters = new DialogParameters<MediaHistoryDialog>
+        {
+            { x => x.Title, "Lịch sử video render" },
+            { x => x.Items, items }
+        };
+        var dialog = await DialogService.ShowAsync<MediaHistoryDialog>("Lịch sử video render", parameters,
+            new DialogOptions { CloseButton = true, FullWidth = true, MaxWidth = MaxWidth.Medium });
+        var dialogResult = await dialog.Result;
+        if (dialogResult?.Canceled == false && dialogResult.Data is string key && Guid.TryParseExact(key, "N", out var operationId))
+        {
+            var selected = result.Items.FirstOrDefault(x => x.Id == operationId);
+            if (selected is not null && !string.IsNullOrWhiteSpace(selected.ResultUrl))
+            {
+                await RunAsync(async () =>
+                {
+                    if (!await DanceRepo.SelectHistoricalRenderResultAsync(_job.Id, selected.Id, selected.ResultUrl))
+                    {
+                        throw new InvalidOperationException("Không thể chọn video render cũ.");
+                    }
+                    await ReloadAsync();
+                    Snackbar.Add("Đã chọn lại video render.", Severity.Success);
+                });
+            }
+        }
     }
 
     private async Task SaveReferencePromptAsync(string prompt, bool reload = true)

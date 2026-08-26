@@ -11,6 +11,8 @@ namespace TodoX.Web.Services.Timelapse;
 public interface ITimelapseWorkflowService
 {
     Task<TimelapseWorkflowState> GetStateAsync(Guid jobId, CancellationToken ct = default);
+    Task<IReadOnlyList<TimelapseHistoryItem>> ListHistoryAsync(Guid jobId, CancellationToken ct = default);
+    Task<TimelapseWorkflowState> SelectHistoryAsync(Guid jobId, string kind, Guid entityId, int version, CurrentUserSession currentUser, CancellationToken ct = default);
     Task<TimelapseWorkflowState> StartOrResumeAsync(Guid jobId, TimelapseJobSnapshot snapshot, CurrentUserSession currentUser, CancellationToken ct = default);
     Task<TimelapseWorkflowState> RetryImageAsync(Guid jobId, int progressPercent, TimelapseJobSnapshot snapshot, CurrentUserSession currentUser, CancellationToken ct = default);
     Task<TimelapseWorkflowState> UpdateImagePromptAsync(Guid jobId, Guid imageStageId, string prompt, bool rerender, TimelapseJobSnapshot snapshot, CurrentUserSession currentUser, CancellationToken ct = default);
@@ -48,6 +50,58 @@ public sealed class TimelapseWorkflowService : ITimelapseWorkflowService
         await _tenant.EnsureLoadedAsync(ct);
         using var conn = await _factory.OpenAsync(ct);
         return await ReadStateAsync(conn, jobId);
+    }
+
+    public async Task<IReadOnlyList<TimelapseHistoryItem>> ListHistoryAsync(Guid jobId, CancellationToken ct = default)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        var rows = await conn.QueryAsync<TimelapseHistoryItem>("""
+            SELECT 'image' AS Kind, v.image_stage_id AS EntityId, v.attempt AS Version, v.status AS Status,
+                   v.public_url AS PublicUrl, v.error_message AS ErrorMessage, COALESCE(v.completed_at, v.started_at) AS CreatedAt,
+                   'Ảnh ' || s.progress_percent || '%' AS Label, (s.active_attempt=v.attempt) AS IsSelected
+              FROM timelapse.timelapse_image_stage_versions v JOIN timelapse.timelapse_image_stages s ON s.id=v.image_stage_id
+             WHERE v.job_id=@jobId
+            UNION ALL
+            SELECT 'video', v.video_clip_id, v.attempt, v.status, v.public_url, v.error_message,
+                   COALESCE(v.completed_at, v.started_at), 'Clip ' || c.clip_index, (c.active_attempt=v.attempt)
+              FROM timelapse.timelapse_video_clip_versions v JOIN timelapse.timelapse_video_clips c ON c.id=v.video_clip_id
+             WHERE v.job_id=@jobId
+            UNION ALL
+            SELECT 'final', f.id, f.version, f.status, f.public_url, f.error_message, f.completed_at,
+                   'Video hoàn chỉnh', f.version=(SELECT max(version) FROM timelapse.timelapse_final_outputs WHERE job_id=@jobId)
+              FROM timelapse.timelapse_final_outputs f WHERE f.job_id=@jobId
+             ORDER BY CreatedAt DESC NULLS LAST, Version DESC;
+            """, new { jobId });
+        return rows.ToList();
+    }
+
+    public async Task<TimelapseWorkflowState> SelectHistoryAsync(Guid jobId, string kind, Guid entityId, int version, CurrentUserSession currentUser, CancellationToken ct = default)
+    {
+        EnsureCustomer(currentUser);
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        using var tx = conn.BeginTransaction();
+        await LockJobAsync(conn, tx, jobId);
+        var sql = kind switch
+        {
+            "image" => """
+                UPDATE timelapse.timelapse_image_stages s SET active_attempt=v.attempt, status='COMPLETED', result_media_id=v.result_media_id, object_key=v.object_key, public_url=v.public_url, error_code=NULL, error_message=NULL, completed_at=COALESCE(v.completed_at, now()), updated_at=now()
+                  FROM timelapse.timelapse_image_stage_versions v WHERE s.id=@entityId AND v.image_stage_id=s.id AND v.attempt=@version AND v.status='COMPLETED';
+                """,
+            "video" => """
+                UPDATE timelapse.timelapse_video_clips c SET active_attempt=v.attempt, status='COMPLETED', result_media_id=v.result_media_id, object_key=v.object_key, public_url=v.public_url, error_code=NULL, error_message=NULL, completed_at=COALESCE(v.completed_at, now()), updated_at=now()
+                  FROM timelapse.timelapse_video_clip_versions v WHERE c.id=@entityId AND v.video_clip_id=c.id AND v.attempt=@version AND v.status='COMPLETED';
+                """,
+            "final" => """
+                UPDATE render.render_jobs j SET output_json=jsonb_build_object('mediaId', f.result_media_id, 'objectKey', f.object_key, 'publicUrl', f.public_url), updated_at=now()
+                  FROM timelapse.timelapse_final_outputs f WHERE j.id=f.job_id AND f.id=@entityId AND f.version=@version AND f.status='COMPLETED';
+                """,
+            _ => throw new InvalidOperationException("TIMELAPSE_HISTORY_KIND_INVALID")
+        };
+        await conn.ExecuteAsync(sql, new { entityId, version }, tx);
+        tx.Commit();
+        return await GetStateAsync(jobId, ct);
     }
 
     public async Task<TimelapseWorkflowState> StartOrResumeAsync(Guid jobId, TimelapseJobSnapshot snapshot, CurrentUserSession currentUser, CancellationToken ct = default)
