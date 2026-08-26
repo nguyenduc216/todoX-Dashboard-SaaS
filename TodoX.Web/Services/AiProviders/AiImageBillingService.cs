@@ -91,10 +91,11 @@ public sealed record AiImageBillingReservation(
     decimal ChargedPoints,
     Guid? BillingRecordId,
     Guid? WalletTransactionId,
-    string? ErrorMessage)
+    string? ErrorMessage,
+    decimal? AvailablePoints = null)
 {
     public static AiImageBillingReservation Failed(string logicalRequestId, string status, string message)
-        => new(false, false, string.Empty, status, logicalRequestId, 0, null, null, message);
+        => new(false, false, string.Empty, status, logicalRequestId, 0, null, null, message, null);
 }
 
 public sealed record AiImageBillingCompletion(
@@ -203,8 +204,11 @@ public sealed class AiImageBillingService : IAiImageBillingService
         {
             var recordId = await InsertRecordAsync(conn, tx, request, payer, wallet.Id, "insufficient", walletTransactionId: null);
             tx.Commit();
+            var subject = string.Equals(request.FeatureCode, "render_job_scene_video", StringComparison.OrdinalIgnoreCase)
+                ? "points for video generation"
+                : "image points";
             return new AiImageBillingReservation(false, false, payer.PayerType, "insufficient", request.LogicalRequestId, chargePoints,
-                recordId, null, $"Insufficient TodoX image points. Required {chargePoints:0.####}, available {available:0.####}.");
+                recordId, null, $"Insufficient TodoX {subject}. Required {chargePoints:0.####}, available {available:0.####}.", available);
         }
 
         await conn.ExecuteAsync(

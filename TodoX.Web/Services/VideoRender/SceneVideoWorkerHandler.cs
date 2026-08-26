@@ -57,6 +57,8 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
     private readonly IMediaFileService _media;
     private readonly IVideoPromptValidator _promptValidator;
     private readonly IRenderJobService _jobs;
+    private readonly IRVideoTrustedPayerContextService _payers;
+    private readonly IRVideoJobService _rvideoJobs;
     private readonly TenantContext _tenant;
     private readonly IConfiguration _config;
     private readonly IRVideoSceneMediaFinalizerService _finalizer;
@@ -74,6 +76,8 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         IMediaFileService media,
         IVideoPromptValidator promptValidator,
         IRenderJobService jobs,
+        IRVideoTrustedPayerContextService payers,
+        IRVideoJobService rvideoJobs,
         TenantContext tenant,
         IConfiguration config,
         IRVideoSceneMediaFinalizerService finalizer,
@@ -88,6 +92,8 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         _media = media;
         _promptValidator = promptValidator;
         _jobs = jobs;
+        _payers = payers;
+        _rvideoJobs = rvideoJobs;
         _tenant = tenant;
         _config = config;
         _finalizer = finalizer;
@@ -108,6 +114,68 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
             ?? throw new InvalidOperationException("Video project not found.");
         var scene = project.Scenes.FirstOrDefault(x => x.Id == input.SceneId)
             ?? throw new InvalidOperationException("Video scene not found.");
+
+        await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_BILLING_PAYER_RESOLVE_BEGIN", "info",
+            "Scene-video billing payer resolution started.",
+            new
+            {
+                coreJobId = project.CoreJobId,
+                projectId = input.ProjectId,
+                sceneId = input.SceneId,
+                input.SceneIndex,
+                renderJobId = job.Id,
+                customerId = input.CustomerId,
+                payerSource = input.TrustedPayerContext?.Source,
+                input.ProviderCode,
+                modelName = input.ModelName,
+                capabilityCode = input.CapabilityCode
+            }, ct);
+        try
+        {
+            input.TrustedPayerContext = await _payers.ValidateAndBuildRVideoTrustedPayerContextAsync(
+                input.ProjectId, input.SceneId, input.CustomerId, input.UserId, input.TrustedPayerContext, ct);
+            await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_BILLING_PAYER_RESOLVED", "info",
+                "Scene-video billing payer resolved from persisted ownership.",
+                new
+                {
+                    coreJobId = project.CoreJobId,
+                    projectId = input.ProjectId,
+                    sceneId = input.SceneId,
+                    input.SceneIndex,
+                    renderJobId = job.Id,
+                    customerId = input.TrustedPayerContext.PayerCustomerId,
+                    payerSource = input.TrustedPayerContext.Source,
+                    input.ProviderCode,
+                    modelName = input.ModelName,
+                    capabilityCode = input.CapabilityCode
+                }, ct);
+        }
+        catch (InvalidOperationException ex)
+        {
+            await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_BILLING_PAYER_FAILED", "error",
+                "Scene-video billing payer could not be resolved.",
+                new
+                {
+                    coreJobId = project.CoreJobId,
+                    projectId = input.ProjectId,
+                    sceneId = input.SceneId,
+                    input.SceneIndex,
+                    renderJobId = job.Id,
+                    customerId = input.CustomerId,
+                    payerSource = input.TrustedPayerContext?.Source,
+                    input.ProviderCode,
+                    modelName = input.ModelName,
+                    capabilityCode = input.CapabilityCode,
+                    errorCode = "rvideo_video_payer_context_mismatch"
+                }, ct);
+            await FailAsync(project.Id, scene, Guid.Empty, "rvideo_video_payer_context_mismatch", ex.Message, ct);
+            await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_PAYER_CONTEXT_INVALID", "error",
+                "Scene-video worker rejected an invalid trusted payer context before billing.",
+                new { jobId = job.Id, input.ProjectId, input.SceneId, input.SceneIndex, errorCode = "rvideo_video_payer_context_mismatch" }, ct);
+            throw new RenderJobTerminalFailureException(ex.Message);
+        }
+
+        await _rvideoJobs.SyncLifecycleAsync(project.Id, RVideoStages.Video, VideoProjectStatuses.Rendering, ct);
 
         await HandleProviderVideoAsync(job, input, project, scene, ct);
     }
@@ -214,6 +282,22 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
             if (string.IsNullOrWhiteSpace(taskId))
             {
                 var billingCost = _billing.BuildConfiguredCost(input.EstimatedPoints, 1);
+                await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_BILLING_RESERVE_BEGIN", "info",
+                    "Scene-video billing reservation started.",
+                    new
+                    {
+                        coreJobId = project.CoreJobId,
+                        projectId = input.ProjectId,
+                        sceneId = input.SceneId,
+                        input.SceneIndex,
+                        renderJobId = job.Id,
+                        customerId = input.TrustedPayerContext?.PayerCustomerId,
+                        payerSource = input.TrustedPayerContext?.Source,
+                        input.ProviderCode,
+                        modelName = input.ModelName,
+                        capabilityCode = input.CapabilityCode,
+                        requiredPoints = billingCost.CustomerChargedPoints
+                    }, ct);
                 reservation = await _billing.ReserveAsync(new AiImageBillingReserveRequest
                 {
                     LogicalRequestId = attemptLogicalRequestId,
@@ -259,9 +343,30 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
 
             if (!reservation.Ok)
             {
+                await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_BILLING_RESERVE_FAILED", "warning",
+                    "Scene-video billing reservation failed before provider submission.",
+                    new
+                    {
+                        coreJobId = project.CoreJobId,
+                        projectId = input.ProjectId,
+                        sceneId = input.SceneId,
+                        input.SceneIndex,
+                        renderJobId = job.Id,
+                        customerId = input.TrustedPayerContext?.PayerCustomerId,
+                        payerSource = input.TrustedPayerContext?.Source,
+                        input.ProviderCode,
+                        modelName = input.ModelName,
+                        capabilityCode = input.CapabilityCode,
+                        requiredPoints = input.EstimatedPoints,
+                        availablePoints = reservation.AvailablePoints,
+                        errorCode = reservation.Status
+                    }, ct);
                 await FailAsync(project.Id, scene, version.Id, reservation.Status, reservation.ErrorMessage ?? "Unable to reserve billing.", ct);
                 throw new RenderJobTerminalFailureException(reservation.ErrorMessage ?? "Unable to reserve billing.");
             }
+            await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_BILLING_RESERVED", "info",
+                "Scene-video billing reservation succeeded.",
+                new { jobId = job.Id, input.ProjectId, input.SceneId, input.SceneIndex, input.CustomerId, input.ProviderCode, input.ModelName, input.CapabilityCode, requiredPoints = reservation.ChargedPoints }, ct);
 
             if (!reservation.ShouldSubmitProvider && string.IsNullOrWhiteSpace(taskId))
             {
@@ -278,7 +383,19 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                 try
                 {
                     var sourceMedia = await ResolveSourceImageMediaAsync(sourceVersion, ct);
+                    await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_PROVIDER_RESOLVE_BEGIN", "info",
+                        "Scene-video provider resolution started.",
+                        new { jobId = job.Id, input.ProjectId, input.SceneId, input.SceneIndex, input.ProviderCode, input.ModelName, input.CapabilityCode }, ct);
                     var adapter = _providerAdapters.Resolve(input.ProviderCode, input.CapabilityCode);
+                    await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_PROVIDER_RESOLVED", "info",
+                        "Scene-video provider resolved.",
+                        new { jobId = job.Id, input.ProjectId, input.SceneId, input.SceneIndex, input.ProviderCode, input.ModelName, input.CapabilityCode }, ct);
+                    await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_SOURCE_UPLOAD_BEGIN", "info",
+                        "Scene-video source image handoff started.",
+                        new { jobId = job.Id, input.ProjectId, input.SceneId, input.SceneIndex, sourceImageVersionId = sourceVersion.Id }, ct);
+                    await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_SUBMIT_BEGIN", "info",
+                        "Scene-video provider submit started.",
+                        new { jobId = job.Id, input.ProjectId, input.SceneId, input.SceneIndex, input.ProviderCode, model = policy.Model, input.CapabilityCode }, ct);
                     var submit = await adapter.SubmitAsync(new VideoProviderSubmitRequest(
                         input.ProviderId,
                         input.ProviderCapabilityId,
@@ -302,17 +419,36 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                         throw new InvalidOperationException("Video provider submit response is missing task_id.");
                     }
 
+                    await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_SOURCE_UPLOAD_SUCCESS", "info",
+                        "Scene-video source image handoff completed.",
+                        new { jobId = job.Id, input.ProjectId, input.SceneId, input.SceneIndex, sourceImageVersionId = sourceVersion.Id }, ct);
                     await _versions.MarkSceneVideoVersionSubmittedAsync(version.Id, input.ProviderCode, policy.Model, input.ProviderCapabilityId, taskId, ct);
+                    await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_SUBMITTED", "info",
+                        "Scene-video provider submit completed.",
+                        new { jobId = job.Id, input.ProjectId, input.SceneId, input.SceneIndex, taskId, input.ProviderCode, model = policy.Model, input.CapabilityCode }, ct);
                     await _repo.AddProjectEventAsync(project.Id, "SCENE_VIDEO_PROVIDER_SUBMITTED", "info",
                         $"Scene {input.SceneIndex} submitted to its configured video provider.",
                         new { jobId = job.Id, input.SceneId, input.SceneIndex, taskId, model = policy.Model, input.ProviderCode, attemptIndex }, ct);
                 }
                 catch (VideoProviderTransientException ex)
                 {
+                    await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_SUBMIT_FAILED", "warning",
+                        "Scene-video provider submit did not complete.",
+                        new { jobId = job.Id, input.ProjectId, input.SceneId, input.SceneIndex, errorCode = ex.ErrorCode }, CancellationToken.None);
                     await MarkPendingReconciliationAsync(input, version.Id, attemptLogicalRequestId, tariffSnapshot, ex.ErrorCode ?? "submit_transient", ex.Message, CancellationToken.None, null);
                     await DeferPollAsync(job, attemptLogicalRequestId, TimeSpan.FromSeconds(Math.Max(1, _options.PollIntervalSeconds)),
                         "SCENE_VIDEO_POLL_SCHEDULED", "Video provider submit transient; retry will reuse the same task flow.", CancellationToken.None);
                     return;
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_SOURCE_UPLOAD_FAILED", "error",
+                        "Scene-video source image handoff or provider submit failed.",
+                        new { jobId = job.Id, input.ProjectId, input.SceneId, input.SceneIndex, errorCode = ex.GetType().Name }, CancellationToken.None);
+                    await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_SUBMIT_FAILED", "error",
+                        "Scene-video provider submit failed.",
+                        new { jobId = job.Id, input.ProjectId, input.SceneId, input.SceneIndex, errorCode = ex.GetType().Name }, CancellationToken.None);
+                    throw;
                 }
             }
 
@@ -336,6 +472,9 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                     input.ProviderCode,
                     input.CapabilityCode,
                     taskId!), ct);
+                await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_POLL_RESPONSE", "info",
+                    "Scene-video provider poll response received.",
+                    new { jobId = job.Id, input.ProjectId, input.SceneId, input.SceneIndex, taskId, provider = input.ProviderCode, normalizedStatus = status.Status }, ct);
                 if (status.Status is VideoProviderTaskStatus.Queued or VideoProviderTaskStatus.Processing)
                 {
                     await _repo.AddProjectEventAsync(project.Id, "SCENE_VIDEO_PROVIDER_PROCESSING", "info",
@@ -358,6 +497,9 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                 if (status.Status != VideoProviderTaskStatus.Success)
                 {
                     var failure = status.ErrorMessage ?? $"Video provider task failed with status {status.Status}.";
+                    await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_FAILED", "error",
+                        "Scene-video provider reported a terminal failure.",
+                        new { jobId = job.Id, input.ProjectId, input.SceneId, input.SceneIndex, taskId, errorCode = status.ErrorCode }, ct);
                     if (reservation.BillingRecordId is not null)
                     {
                         await _billing.CompleteAsync(new AiImageBillingCompleteRequest
@@ -462,6 +604,9 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                     await _repo.AddProjectEventAsync(project.Id, "SCENE_VIDEO_READY", "info",
                         $"Scene {input.SceneIndex} rendered successfully.",
                         new { jobId = job.Id, input.SceneId, input.SceneIndex, taskId, videoUrl = saved.PublicUrl ?? saved.FileUrl }, ct);
+                    await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_COMPLETED", "info",
+                        "Scene-video provider output was persisted.",
+                        new { jobId = job.Id, input.ProjectId, input.SceneId, input.SceneIndex, taskId }, ct);
                     await _finalizer.TryFinalizeSceneMediaAsync(project.Id, scene.Id, "SCENE_VIDEO_READY", ct);
                     return;
                 }

@@ -15,6 +15,7 @@ public sealed class SceneImageRenderWorkItemHandler : IRenderJobHandler
     private readonly ISceneMediaVersioningService _versions;
     private readonly IRenderJobService _jobs;
     private readonly IRVideoSceneVideoAutoChainService _autoChain;
+    private readonly IRVideoJobService _rvideoJobs;
     private readonly ILogger<SceneImageRenderWorkItemHandler> _logger;
 
     public SceneImageRenderWorkItemHandler(
@@ -23,6 +24,7 @@ public sealed class SceneImageRenderWorkItemHandler : IRenderJobHandler
         ISceneMediaVersioningService versions,
         IRenderJobService jobs,
         IRVideoSceneVideoAutoChainService autoChain,
+        IRVideoJobService rvideoJobs,
         ILogger<SceneImageRenderWorkItemHandler> logger)
     {
         _repo = repo;
@@ -30,6 +32,7 @@ public sealed class SceneImageRenderWorkItemHandler : IRenderJobHandler
         _versions = versions;
         _jobs = jobs;
         _autoChain = autoChain;
+        _rvideoJobs = rvideoJobs;
         _logger = logger;
     }
 
@@ -46,6 +49,7 @@ public sealed class SceneImageRenderWorkItemHandler : IRenderJobHandler
         var version = (await _versions.ListImageVersionsAsync(input.SceneId, 0, 100, ct))
             .FirstOrDefault(x => x.Id == input.ImageVersionId)
             ?? throw new InvalidOperationException("Scene image version not found.");
+        await _rvideoJobs.SyncLifecycleAsync(input.ProjectId, RVideoStages.Image, VideoProjectStatuses.Rendering, ct);
         var taskId = await _versions.GetSceneImageProviderTaskIdAsync(version.Id, ct);
         if (!string.IsNullOrWhiteSpace(input.RequestedModel))
         {

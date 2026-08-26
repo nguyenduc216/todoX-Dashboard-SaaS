@@ -313,6 +313,82 @@ public sealed class RVideoProviderPollingRegressionTests
         Assert.Contains("SCENE_VIDEO_AUTO_ENQUEUE_SKIPPED", source);
         Assert.Contains("SCENE_VIDEO_AUTO_ENQUEUE_REQUESTED", source);
         Assert.Contains("SCENE_VIDEO_AUTO_ENQUEUED", source);
+        Assert.Contains("BuildRVideoTrustedPayerContextAsync(projectId, sceneId", source);
+        Assert.Contains("TrustedPayerContext = payerContext", source);
+    }
+
+    [Fact]
+    public void ManualAndRetryVideoEnqueuesUseTheCanonicalPersistedPayerBuilder()
+    {
+        var source = ReadRepoFile("Components", "Pages", "RenderVideoJobs.razor");
+
+        Assert.Contains("@inject TodoX.Web.Services.VideoRender.IRVideoTrustedPayerContextService RVideoPayerContexts", source);
+        Assert.Contains("BuildRVideoTrustedPayerContextAsync(_project.Id, sceneIds[0])", source);
+        Assert.Contains("BuildRVideoTrustedPayerContextAsync(_project.Id, scene.Id)", source);
+    }
+
+    [Fact]
+    public void SceneVideoBatchValidatesAndCopiesTrustedPayerContextToEachChild()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "SceneVideoRenderHandler.cs");
+
+        Assert.Contains("RVIDEO_VIDEO_PAYER_CONTEXT_MISSING", source);
+        Assert.Contains("ValidateAndBuildRVideoTrustedPayerContextAsync", source);
+        Assert.Contains("TrustedPayerContext = input.TrustedPayerContext", source);
+    }
+
+    [Fact]
+    public void SceneVideoWorkerValidatesPersistedPayerBeforeBillingAndProviderSubmit()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "SceneVideoWorkerHandler.cs");
+        var validationIndex = source.IndexOf("ValidateAndBuildRVideoTrustedPayerContextAsync", StringComparison.Ordinal);
+        var reserveIndex = source.IndexOf("ReserveAsync", StringComparison.Ordinal);
+        var submitIndex = source.IndexOf("SubmitAsync", StringComparison.Ordinal);
+
+        Assert.True(validationIndex >= 0);
+        Assert.True(reserveIndex > validationIndex);
+        Assert.True(submitIndex > reserveIndex);
+        Assert.Contains("RVIDEO_VIDEO_PAYER_CONTEXT_INVALID", source);
+        Assert.Contains("RVIDEO_VIDEO_BILLING_RESERVE_FAILED", source);
+        Assert.Contains("RVIDEO_VIDEO_SUBMIT_BEGIN", source);
+        Assert.Contains("RVIDEO_VIDEO_POLL_RESPONSE", source);
+    }
+
+    [Fact]
+    public void VideoBillingUsesVideoSpecificInsufficientPointsMessage()
+    {
+        var source = ReadRepoFile("Services", "AiProviders", "AiImageBillingService.cs");
+
+        Assert.Contains("\"render_job_scene_video\"", source);
+        Assert.Contains("\"points for video generation\"", source);
+        Assert.Contains("Insufficient TodoX {subject}", source);
+    }
+
+    [Fact]
+    public void VideoPayerResolutionUsesOperationAwareMessageAndDiagnosticEvents()
+    {
+        var resolver = ReadRepoFile("Services", "AiProviders", "AiBillingPayerResolver.cs");
+        var worker = ReadRepoFile("Services", "VideoRender", "SceneVideoWorkerHandler.cs");
+
+        Assert.Contains("Cannot resolve billing payer for ", resolver);
+        Assert.Contains("RVIDEO scene video", resolver);
+        Assert.Contains("RVIDEO_VIDEO_BILLING_PAYER_RESOLVE_BEGIN", worker);
+        Assert.Contains("RVIDEO_VIDEO_BILLING_PAYER_RESOLVED", worker);
+        Assert.Contains("RVIDEO_VIDEO_BILLING_PAYER_FAILED", worker);
+        Assert.Contains("RVIDEO_VIDEO_BILLING_RESERVE_BEGIN", worker);
+        Assert.Contains("RVIDEO_VIDEO_BILLING_RESERVED", worker);
+        Assert.Contains("RVIDEO_VIDEO_BILLING_RESERVE_FAILED", worker);
+        Assert.Contains("availablePoints = reservation.AvailablePoints", worker);
+    }
+
+    [Fact]
+    public void RVideoLifecycleSyncsWhenImageAndVideoRenderingBegin()
+    {
+        var image = ReadRepoFile("Services", "Render", "SceneImageRenderWorkItemHandler.cs");
+        var video = ReadRepoFile("Services", "VideoRender", "SceneVideoWorkerHandler.cs");
+
+        Assert.Contains("SyncLifecycleAsync(input.ProjectId, RVideoStages.Image", image);
+        Assert.Contains("SyncLifecycleAsync(project.Id, RVideoStages.Video", video);
     }
 
     [Fact]

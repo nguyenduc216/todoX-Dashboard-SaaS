@@ -1,4 +1,5 @@
 using TodoX.Web.Models;
+using TodoX.Web.Services.AiProviders;
 using TodoX.Web.Services.Render;
 
 namespace TodoX.Web.Services.VideoRender;
@@ -13,17 +14,20 @@ public sealed class RVideoSceneVideoAutoChainService : IRVideoSceneVideoAutoChai
     private readonly VideoRenderRepository _repo;
     private readonly IVideoRenderEligibilityService _eligibility;
     private readonly IRenderJobService _jobs;
+    private readonly IRVideoTrustedPayerContextService _payers;
     private readonly ILogger<RVideoSceneVideoAutoChainService> _logger;
 
     public RVideoSceneVideoAutoChainService(
         VideoRenderRepository repo,
         IVideoRenderEligibilityService eligibility,
         IRenderJobService jobs,
+        IRVideoTrustedPayerContextService payers,
         ILogger<RVideoSceneVideoAutoChainService> logger)
     {
         _repo = repo;
         _eligibility = eligibility;
         _jobs = jobs;
+        _payers = payers;
         _logger = logger;
     }
 
@@ -83,6 +87,19 @@ public sealed class RVideoSceneVideoAutoChainService : IRVideoSceneVideoAutoChai
                 logicalRequestKey
             }, ct);
 
+        AiBillingTrustedPayerContext payerContext;
+        try
+        {
+            payerContext = await _payers.BuildRVideoTrustedPayerContextAsync(projectId, sceneId, ct);
+        }
+        catch (InvalidOperationException ex)
+        {
+            await _repo.AddProjectEventAsync(projectId, "SCENE_VIDEO_AUTO_ENQUEUE_FAILED", "error",
+                "Scene video auto enqueue was blocked because its trusted payer context could not be verified.",
+                new { projectId, sceneId, scene.SceneIndex, triggerSource, errorCode = "rvideo_video_payer_context_mismatch", error = ex.Message }, ct);
+            return false;
+        }
+
         var enqueueInput = new SceneVideoRenderInput
         {
             ProjectId = projectId,
@@ -91,6 +108,7 @@ public sealed class RVideoSceneVideoAutoChainService : IRVideoSceneVideoAutoChai
             Resolution = renderSettings.Resolution,
             UserId = project.UserId,
             CustomerId = project.CustomerId,
+            TrustedPayerContext = payerContext,
         };
 
         var model = new RenderJobCreateModel

@@ -133,6 +133,28 @@ public sealed class RVideoVideoHotfixTests
     }
 
     [Fact]
+    public void TrustedBackgroundCustomerPayerResolvesWithoutHttpSession()
+    {
+        var customerId = Guid.NewGuid();
+        var payer = AiBillingPayerResolver.ResolveCore(null, new AiBillingPayerResolveRequest(
+            customerId,
+            UserId: null,
+            FeatureCode: "render_job_scene_video",
+            CapabilityCode: RVideoVideoModelPolicy.CapabilityCode,
+            Metadata: null,
+            TrustedContext: new AiBillingTrustedPayerContext(
+                AiBillingPayerTypes.Customer,
+                customerId,
+                UserId: null,
+                SystemWalletCode: null,
+                Source: "background_job")));
+
+        Assert.Equal(AiBillingPayerTypes.Customer, payer.PayerType);
+        Assert.Equal(customerId, payer.PayerCustomerId);
+        Assert.Equal("background_job", payer.ResolutionSource);
+    }
+
+    [Fact]
     public async Task RVideoUploadImageRenderSubmitsReferenceWithoutCharacterId()
     {
         var client = new CapturingAi79TaskClient();

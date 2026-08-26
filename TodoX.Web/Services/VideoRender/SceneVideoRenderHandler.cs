@@ -40,6 +40,7 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
     private readonly IVideoRenderPricingResolver _pricing;
     private readonly IVideoRenderEligibilityService _eligibility;
     private readonly IVideoPromptValidator _promptValidator;
+    private readonly IRVideoTrustedPayerContextService _payers;
     private readonly ILogger<SceneVideoRenderHandler> _logger;
 
     public string JobType => JobTypeName;
@@ -52,6 +53,7 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
         IVideoRenderPricingResolver pricing,
         IVideoRenderEligibilityService eligibility,
         IVideoPromptValidator promptValidator,
+        IRVideoTrustedPayerContextService payers,
         ILogger<SceneVideoRenderHandler> logger)
     {
         _repo = repo;
@@ -61,6 +63,7 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
         _pricing = pricing;
         _eligibility = eligibility;
         _promptValidator = promptValidator;
+        _payers = payers;
         _logger = logger;
     }
 
@@ -97,6 +100,15 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
         {
             return;
         }
+        if (input.TrustedPayerContext is null)
+        {
+            await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_PAYER_CONTEXT_MISSING", "error",
+                "Scene-video batch was blocked because trusted payer context is missing.",
+                new { batchJobId = job.Id, input.ProjectId, errorCode = "rvideo_video_payer_context_mismatch" }, ct);
+            throw new RenderJobTerminalFailureException("rvideo_video_payer_context_mismatch: trusted payer context is required.");
+        }
+        input.TrustedPayerContext = await _payers.ValidateAndBuildRVideoTrustedPayerContextAsync(
+            input.ProjectId, scenes[0].Id, input.CustomerId, input.UserId, input.TrustedPayerContext, ct);
 
         await _repo.AddProjectEventAsync(project.Id, "SCENE_VIDEO_BATCH_STARTED", "info",
             $"Batch render video started for {scenes.Count} scenes.",

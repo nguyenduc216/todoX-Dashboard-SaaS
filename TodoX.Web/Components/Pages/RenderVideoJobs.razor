@@ -20,6 +20,7 @@
 @inject TodoX.Web.Services.VideoRender.ISceneMediaVersioningService SceneVersions
 @inject TodoX.Web.Services.VideoRender.RVideoJobSettingsRepository RVideoSettings
 @inject TodoX.Web.Services.VideoRender.IRVideoJobService RVideoJobs
+@inject TodoX.Web.Services.VideoRender.IRVideoTrustedPayerContextService RVideoPayerContexts
 @inject TodoX.Web.Services.Platform.ICoreServiceCatalogService CoreCatalog
 @inject IOptionsMonitor<TodoX.Web.Services.VideoRender.VideoRenderOptions> VideoOptions
 @inject IDialogService DialogService
@@ -3491,16 +3492,27 @@ else
             }
         }
 
-        var input = new TodoX.Web.Services.VideoRender.SceneVideoRenderInput
+        TodoX.Web.Services.VideoRender.SceneVideoRenderInput input;
+        try
         {
-            ProjectId = _project.Id,
-            SceneIds = sceneIds,
-            AspectRatio = _aspectRatio,
-            Resolution = _resolution,
-            UserId = AuthState.CurrentUser.UserId,
-            CustomerId = AuthState.CurrentUser.CustomerId,
-            TrustedPayerContext = TodoX.Web.Services.AiProviders.AiBillingPayerResolver.CreateTrustedBackgroundContext(AuthState.CurrentUser)
-        };
+            input = new TodoX.Web.Services.VideoRender.SceneVideoRenderInput
+            {
+                ProjectId = _project.Id,
+                SceneIds = sceneIds,
+                AspectRatio = _aspectRatio,
+                Resolution = _resolution,
+                UserId = AuthState.CurrentUser.UserId,
+                CustomerId = AuthState.CurrentUser.CustomerId,
+                TrustedPayerContext = await RVideoPayerContexts.BuildRVideoTrustedPayerContextAsync(_project.Id, sceneIds[0])
+            };
+        }
+        catch (Exception ex)
+        {
+            await LogProjectEvent("SCENE_VIDEO_BATCH_ENQUEUE_FAILED", "error", "Không thể tạo trusted payer context cho batch render scene video.",
+                new { projectId = _project.Id, sceneIds, error = ex.Message });
+            Snackbar.Add(ex.Message, Severity.Error);
+            return;
+        }
 
         var (job, alreadyActive) = await RenderJobs.EnqueueForProjectIfNoneActiveAsync(new RenderJobCreateModel
         {
@@ -3617,7 +3629,7 @@ else
                 Resolution = _resolution,
                 UserId = AuthState.CurrentUser.UserId,
                 CustomerId = AuthState.CurrentUser.CustomerId,
-                TrustedPayerContext = TodoX.Web.Services.AiProviders.AiBillingPayerResolver.CreateTrustedBackgroundContext(AuthState.CurrentUser)
+                TrustedPayerContext = await RVideoPayerContexts.BuildRVideoTrustedPayerContextAsync(_project.Id, scene.Id)
             };
 
             var job = await RenderJobs.EnqueueAsync(new RenderJobCreateModel
@@ -3629,7 +3641,7 @@ else
                 Prompt = new { projectId = _project.Id, sceneId = scene.Id },
                 LogCode = BuildLogCode(),
                 ProviderCode = TodoX.Web.Services.VideoRender.RVideoVideoModelPolicy.ProviderCode,
-                ModelCode = _defaultImageToVideoProvider.ModelName ?? TodoX.Web.Services.VideoRender.RVideoVideoModelPolicy.GetInitial().Model,
+                ModelCode = _defaultImageToVideoProvider?.ModelName ?? TodoX.Web.Services.VideoRender.RVideoVideoModelPolicy.GetInitial().Model,
                 MaxAttempts = 1,
                 PointCostEstimate = 0,
                 PointStatus = RenderPointStatuses.Pending
