@@ -22,20 +22,20 @@ INSERT INTO public.todox_ai_feature_provider_route
 SELECT 'dance_sell',
        'reference_image',
        '79ai',
-       'imagegen_2_0',
+       'google_image_gen_banana_2',
        'image',
        10,
        true,
        true,
        ARRAY[]::text[],
-       '{"capability":"reference_image_generation","displayName":"79AI GPT Image 2 Fashion Reference","submit_path":"/generateImage","poll_path":"/image","subject_schema":"form_subject_url_fields","domain":"79ai.net","project_id":"default","action_type":"create","sync":"false","ratio":"16:9","category":"FASHION","mode":"low","resolution":"1k","num_outputs":"1","language":"VI"}'::jsonb
+       '{"capability":"reference_image_generation","displayName":"Banana 2K Fashion Reference","submit_path":"/generateImage","poll_path":"/image","subject_schema":"form_subject_url_fields","domain":"79ai.net","project_id":"default","action_type":"create","sync":"false","ratio":"16:9","category":"FASHION","mode":"vip","resolution":"2k","num_outputs":"1","language":"VI"}'::jsonb
  WHERE NOT EXISTS (
      SELECT 1
        FROM public.todox_ai_feature_provider_route
       WHERE feature_code = 'dance_sell'
         AND operation_type = 'reference_image'
         AND provider_code = '79ai'
-        AND model_name = 'imagegen_2_0'
+        AND model_name = 'google_image_gen_banana_2'
  );
 
 UPDATE public.todox_ai_feature_provider_route
@@ -44,12 +44,12 @@ UPDATE public.todox_ai_feature_provider_route
        enabled = true,
        model_mode = 'image',
        fallback_on = ARRAY[]::text[],
-       config_json = COALESCE(config_json, '{}'::jsonb) || '{"capability":"reference_image_generation","displayName":"79AI GPT Image 2 Fashion Reference","submit_path":"/generateImage","poll_path":"/image","subject_schema":"form_subject_url_fields","domain":"79ai.net","project_id":"default","action_type":"create","sync":"false","ratio":"16:9","category":"FASHION","mode":"low","resolution":"1k","num_outputs":"1","language":"VI"}'::jsonb,
+       config_json = COALESCE(config_json, '{}'::jsonb) || '{"capability":"reference_image_generation","displayName":"Banana 2K Fashion Reference","submit_path":"/generateImage","poll_path":"/image","subject_schema":"form_subject_url_fields","domain":"79ai.net","project_id":"default","action_type":"create","sync":"false","ratio":"16:9","category":"FASHION","mode":"vip","resolution":"2k","num_outputs":"1","language":"VI"}'::jsonb,
        updated_at = now()
  WHERE feature_code = 'dance_sell'
    AND operation_type = 'reference_image'
    AND provider_code = '79ai'
-   AND model_name = 'imagegen_2_0';
+   AND model_name = 'google_image_gen_banana_2';
 
 UPDATE public.todox_ai_feature_provider_route
    SET is_default = false,
@@ -59,6 +59,17 @@ UPDATE public.todox_ai_feature_provider_route
    AND operation_type = 'reference_image'
    AND provider_code = '79ai'
    AND model_name = 'seedream_5_0';
+
+UPDATE public.todox_ai_feature_provider_route
+   SET route_priority = 100,
+       is_default = false,
+       enabled = true,
+       fallback_on = ARRAY['provider_error','timeout']::text[],
+       updated_at = now()
+ WHERE feature_code = 'dance_sell'
+   AND operation_type = 'reference_image'
+   AND provider_code = '79ai'
+   AND model_name = 'imagegen_2_0';
 
 UPDATE public.todox_ai_feature_provider_route
    SET is_default = false,
@@ -111,7 +122,7 @@ UPDATE public.todox_ai_feature_provider_route
    AND provider_code = 'kie'
    AND model_name = 'kling-2.6/motion-control';
 
--- Reference generation now uses the verified 79AI GPT Image 2 fashion route.
+-- Reference generation now uses the 79AI Banana 2K fashion route.
 SELECT feature_code, operation_type, provider_code, model_name, model_mode, route_priority, is_default, enabled, fallback_on
   FROM public.todox_ai_feature_provider_route
  WHERE feature_code = 'dance_sell'

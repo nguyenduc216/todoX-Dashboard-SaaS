@@ -14,7 +14,8 @@ public static class DanceSellConstants
     public const string KieMotionModel = "kling-2.6/motion-control";
     public const string ReferenceModel = "gpt-image-2-image-to-image";
     public const string Ai79GptImage2Model = "imagegen_2_0";
-    public const string Ai79ReferenceModel = "imagegen_2_0";
+    public const string Ai79Banana2KReferenceModel = "google_image_gen_banana_2";
+    public const string Ai79ReferenceModel = Ai79Banana2KReferenceModel;
     public const string ReferenceComparisonExperiment = "dance_sell_reference_ab_test";
     public const string BillingEnabledConfigKey = "dance_sell_billing_enabled";
     public const string AllowCodeProviderFallbackConfigKey = "dance_sell_allow_code_provider_fallback";

@@ -300,7 +300,7 @@ public sealed class RDanceFashionDemoPageTests
         var motionSql = ReadStrictUtf8(Path.Combine(root, "database", "manual", "dance-sell-motion", "03_switch_79ai_motion_to_upload_url_flow.sql"));
 
         Assert.Contains("'79ai'", sql, StringComparison.Ordinal);
-        Assert.Contains("'imagegen_2_0'", sql, StringComparison.Ordinal);
+        Assert.Contains("'google_image_gen_banana_2'", sql, StringComparison.Ordinal);
         Assert.Contains("'kling_video_motion'", sql, StringComparison.Ordinal);
         Assert.Contains("'kling-2.6/motion-control'", sql, StringComparison.Ordinal);
         Assert.Contains("provider_code = 'local_composite'", sql, StringComparison.Ordinal);
@@ -313,7 +313,10 @@ public sealed class RDanceFashionDemoPageTests
         Assert.Contains("\"domain\":\"79ai.net\"", sql, StringComparison.Ordinal);
         Assert.Contains("\"sync\":\"false\"", sql, StringComparison.Ordinal);
         Assert.Contains("\"category\":\"FASHION\"", sql, StringComparison.Ordinal);
-        Assert.Contains("\"resolution\":\"1k\"", sql, StringComparison.Ordinal);
+        Assert.Contains("\"mode\":\"vip\"", sql, StringComparison.Ordinal);
+        Assert.Contains("\"resolution\":\"2k\"", sql, StringComparison.Ordinal);
+        Assert.Contains("model_name = 'imagegen_2_0'", sql, StringComparison.Ordinal);
+        Assert.Contains("fallback_on = ARRAY['provider_error','timeout']::text[]", sql, StringComparison.Ordinal);
         Assert.Contains("is_default = false", sql, StringComparison.Ordinal);
         Assert.Contains("model_mode", sql, StringComparison.Ordinal);
         Assert.Contains("route_priority", sql, StringComparison.Ordinal);
@@ -321,7 +324,7 @@ public sealed class RDanceFashionDemoPageTests
         Assert.DoesNotContain("provider_capability_id", sql, StringComparison.Ordinal);
         Assert.DoesNotContain("provider_account_id", sql, StringComparison.Ordinal);
         Assert.DoesNotContain("allow_user_select", sql, StringComparison.Ordinal);
-        Assert.Contains("Reference generation now uses the verified 79AI GPT Image 2 fashion route.", sql, StringComparison.Ordinal);
+        Assert.Contains("Reference generation now uses the 79AI Banana 2K fashion route.", sql, StringComparison.Ordinal);
         Assert.Contains("'kling_video_motion_3'", motionSql, StringComparison.Ordinal);
         Assert.Contains("'kling_video_motion'", motionSql, StringComparison.Ordinal);
         Assert.Contains("enabled = false", motionSql, StringComparison.Ordinal);

@@ -49,7 +49,7 @@ Photorealistic, product preview quality.
 
         var request = Assert.IsType<Ai79TaskSubmitRequest>(client.LastRequest);
         Assert.Equal("79ai.net", request.Domain);
-        Assert.Equal("imagegen_2_0", request.Model);
+        Assert.Equal("google_image_gen_banana_2", request.Model);
         Assert.Equal(ExpectedPrompt, request.Prompt);
         Assert.Empty(request.Images);
         Assert.Null(request.FirstImageField);
@@ -59,8 +59,8 @@ Photorealistic, product preview quality.
         Assert.Equal("default", request.Options["project_id"]);
         Assert.Equal("16:9", request.Options["ratio"]);
         Assert.Equal("FASHION", request.Options["category"]);
-        Assert.Equal("1k", request.Options["resolution"]);
-        Assert.Equal("low", request.Options["mode"]);
+        Assert.Equal("2k", request.Options["resolution"]);
+        Assert.Equal("vip", request.Options["mode"]);
         Assert.Equal("1", request.Options["num_outputs"]);
         Assert.Equal("VI", request.Options["language"]);
         Assert.Equal("https://cdn.example/model.png", request.Options["subjects[0][url]"]);
@@ -68,7 +68,7 @@ Photorealistic, product preview quality.
         Assert.DoesNotContain("base64Image", request.Options.Keys, StringComparer.Ordinal);
         Assert.DoesNotContain("image_2", request.Options.Keys, StringComparer.Ordinal);
 
-        Assert.Equal("imagegen_2_0", result.ModelName);
+        Assert.Equal("google_image_gen_banana_2", result.ModelName);
         Assert.Contains("\"prompt\":\"VIRTUAL TRY-ON", result.RequestJson, StringComparison.Ordinal);
         Assert.Contains("\"url\":\"https://cdn.example/model.png\"", result.RequestJson, StringComparison.Ordinal);
         Assert.Contains("\"url\":\"https://cdn.example/product.png\"", result.RequestJson, StringComparison.Ordinal);
@@ -88,11 +88,12 @@ Photorealistic, product preview quality.
 
         await provider.SubmitAsync(new DanceSellReferenceProviderRequest
         {
-            Route = new DanceSellProviderRouteDto { ProviderCode = "79ai", ModelName = "imagegen_2_0", ConfigJson = "{}" },
+            Route = new DanceSellProviderRouteDto { ProviderCode = "79ai", ModelName = "google_image_gen_banana_2", ConfigJson = "{}" },
             CharacterImageUrl = "https://cdn.example/model.png"
         }, CancellationToken.None);
 
         var request = Assert.IsType<Ai79TaskSubmitRequest>(client.LastRequest);
+        Assert.Equal("google_image_gen_banana_2", request.Model);
         Assert.Equal("https://cdn.example/model.png", request.Options["subjects[0][url]"]);
         Assert.DoesNotContain("subjects[1][url]", request.Options.Keys, StringComparer.Ordinal);
         Assert.Contains("PERSON ONLY REFERENCE IMAGE", request.Prompt, StringComparison.Ordinal);

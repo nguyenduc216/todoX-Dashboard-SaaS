@@ -162,7 +162,7 @@ public sealed class Ai79DanceSellReferenceProvider : IDanceSellReferenceProvider
         var runtime = await ResolveRuntimeAsync(request.Route, ct);
         runtime = runtime with
         {
-            Model = DanceSellConstants.Ai79GptImage2Model,
+            Model = DanceSellConstants.Ai79ReferenceModel,
             BaseUrl = "https://api.gommo.net/ai",
             Domain = "79ai.net",
             SubmitPath = "/generateImage",
@@ -173,8 +173,8 @@ public sealed class Ai79DanceSellReferenceProvider : IDanceSellReferenceProvider
         var productUrl = hasProduct ? KiePayloadBuilder.ValidatePublicHttpsUrl(request.ProductImageUrl!, "subjects[1][url]") : null;
         var ratio = "16:9";
         var category = "FASHION";
-        var resolution = "1k";
-        var mode = "low";
+        var resolution = "2k";
+        var mode = "vip";
         var projectId = "default";
         var sync = "false";
         var numOutputs = "1";

@@ -1,5 +1,5 @@
 -- Generated for manual review only. Do not execute automatically.
--- Switch DanceSell reference generation to the verified 79AI try-on payload.
+-- Switch DanceSell reference generation to the 79AI Banana 2K try-on payload.
 
 UPDATE public.todox_ai_feature_provider_route
    SET is_default = false,
@@ -11,6 +11,17 @@ UPDATE public.todox_ai_feature_provider_route
    AND model_name = 'seedream_5_0';
 
 UPDATE public.todox_ai_feature_provider_route
+   SET route_priority = 100,
+       is_default = false,
+       enabled = true,
+       fallback_on = ARRAY['provider_error','timeout']::text[],
+       updated_at = now()
+ WHERE feature_code = 'dance_sell'
+   AND operation_type = 'reference_image'
+   AND provider_code = '79ai'
+   AND model_name = 'imagegen_2_0';
+
+UPDATE public.todox_ai_feature_provider_route
    SET route_priority = 10,
        is_default = true,
        enabled = true,
@@ -18,7 +29,7 @@ UPDATE public.todox_ai_feature_provider_route
        fallback_on = ARRAY[]::text[],
        config_json = COALESCE(config_json, '{}'::jsonb) || jsonb_build_object(
            'capability', 'reference_image_generation',
-           'displayName', '79AI GPT Image 2 Reference',
+           'displayName', 'Banana 2K Fashion Reference',
            'submit_path', '/generateImage',
            'poll_path', '/image',
            'subject_schema', 'form_subject_url_fields',
@@ -28,8 +39,8 @@ UPDATE public.todox_ai_feature_provider_route
            'sync', 'false',
            'ratio', '16:9',
            'category', 'FASHION',
-           'mode', 'low',
-           'resolution', '1k',
+           'mode', 'vip',
+           'resolution', '2k',
            'num_outputs', '1',
            'language', 'VI'
        ),
@@ -37,7 +48,7 @@ UPDATE public.todox_ai_feature_provider_route
  WHERE feature_code = 'dance_sell'
    AND operation_type = 'reference_image'
    AND provider_code = '79ai'
-   AND model_name = 'imagegen_2_0';
+   AND model_name = 'google_image_gen_banana_2';
 
 INSERT INTO public.todox_ai_feature_provider_route
     (feature_code, operation_type, provider_code, model_name, model_mode,
@@ -45,7 +56,7 @@ INSERT INTO public.todox_ai_feature_provider_route
 SELECT 'dance_sell',
        'reference_image',
        '79ai',
-       'imagegen_2_0',
+       'google_image_gen_banana_2',
        'image',
        10,
        true,
@@ -53,7 +64,7 @@ SELECT 'dance_sell',
        ARRAY[]::text[],
        jsonb_build_object(
            'capability', 'reference_image_generation',
-           'displayName', '79AI GPT Image 2 Reference',
+           'displayName', 'Banana 2K Fashion Reference',
            'submit_path', '/generateImage',
            'poll_path', '/image',
            'subject_schema', 'form_subject_url_fields',
@@ -63,8 +74,8 @@ SELECT 'dance_sell',
            'sync', 'false',
            'ratio', '16:9',
            'category', 'FASHION',
-           'mode', 'low',
-           'resolution', '1k',
+           'mode', 'vip',
+           'resolution', '2k',
            'num_outputs', '1',
            'language', 'VI'
        )
@@ -74,7 +85,7 @@ SELECT 'dance_sell',
       WHERE feature_code = 'dance_sell'
         AND operation_type = 'reference_image'
         AND provider_code = '79ai'
-        AND model_name = 'imagegen_2_0'
+        AND model_name = 'google_image_gen_banana_2'
  );
 
 UPDATE public.todox_ai_feature_provider_route
@@ -84,7 +95,7 @@ UPDATE public.todox_ai_feature_provider_route
    AND operation_type = 'reference_image'
    AND NOT (
        provider_code = '79ai'
-       AND model_name = 'imagegen_2_0'
+       AND model_name = 'google_image_gen_banana_2'
    );
 
 SELECT feature_code, operation_type, provider_code, model_name, model_mode,

@@ -247,7 +247,7 @@ public sealed class DanceSellReferenceImageService : IDanceSellReferenceImageSer
 
             if (route.ProviderCode.Equals(DanceSellConstants.ProviderCode, StringComparison.OrdinalIgnoreCase))
             {
-                route.ModelName = DanceSellConstants.Ai79GptImage2Model;
+                route.ModelName = DanceSellConstants.Ai79ReferenceModel;
             }
 
             stage = "list_versions";
@@ -265,8 +265,8 @@ public sealed class DanceSellReferenceImageService : IDanceSellReferenceImageSer
                 project_id = "default",
                 ratio = "16:9",
                 category = "FASHION",
-                resolution = "1k",
-                mode = "low",
+                resolution = "2k",
+                mode = "vip",
                 num_outputs = 1,
                 language = "VI",
                 subjects = BuildSubjectUrls(job)
