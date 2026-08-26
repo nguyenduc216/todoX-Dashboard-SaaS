@@ -3,7 +3,7 @@
 ## Git
 Branch: integration/rdance-on-construction-video-core
 Base commit: 30bc9630ec22d680e140ee30cd5036f9685bb59b
-Final commit: 5ea9dea
+Final commit: HEAD of `integration/rdance-on-construction-video-core` (see `git log -1`)
 Push status: Passed
 
 ## Scope compliance
