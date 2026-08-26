@@ -69,6 +69,10 @@
                                     <MudSelectItem Value="@("outerwear")">Áo khoác</MudSelectItem>
                                     <MudSelectItem Value="@("other")">Khác</MudSelectItem>
                                 </MudSelect>
+                                <MudSelect T="string" Label="Tỷ lệ video" Variant="Variant.Outlined" @bind-Value="_ratio" Disabled="@(_busy || !CanEditAutoFinish)">
+                                    <MudSelectItem Value="@("9:16")">9:16</MudSelectItem>
+                                    <MudSelectItem Value="@("16:9")">16:9</MudSelectItem>
+                                </MudSelect>
                                 <MudSwitch T="bool"
                                            Color="Color.Warning"
                                            Value="@_autoFinish"
@@ -160,7 +164,7 @@
                             <MudText Typo="Typo.h6">Đầu ra</MudText>
                             <MudList T="string" Dense="true">
                                 <MudListItem T="string">Dịch vụ: Video nhảy quảng cáo thời trang</MudListItem>
-                                <MudListItem T="string">Tỷ lệ: 9:16</MudListItem>
+                                <MudListItem T="string">Tỷ lệ: @_ratio</MudListItem>
                                 <MudListItem T="string">Định dạng: MP4</MudListItem>
                             </MudList>
                             <MudButton FullWidth="true" Variant="Variant.Filled" Color="Color.Warning" Disabled="@(_job?.MotionVideoMediaId is null || _busy)" OnClick="@(() => _tabIndex = 1)">
@@ -340,7 +344,7 @@
                             {
                                 <RenderMediaFrame IsVideo="true"
                                                   State="@ResolveDanceMediaState(_job?.Status)"
-                                                  AspectRatio="9:16"
+                                                  AspectRatio="@_ratio"
                                                   EmptyText="Video chuyển động sẽ xuất hiện sau khi tải nguồn hoàn tất."
                                                   FailedText="Lỗi render video" />
                             }
@@ -365,7 +369,7 @@
                             <MudList T="string" Dense="true">
                                 <MudListItem T="string">Dịch vụ: Video nhảy quảng cáo thời trang</MudListItem>
                                 <MudListItem T="string">Trạng thái: @DisplayStatusLabel(_job!)</MudListItem>
-                                <MudListItem T="string">Tỷ lệ: 9:16</MudListItem>
+                                <MudListItem T="string">Tỷ lệ: @_ratio</MudListItem>
                                 <MudListItem T="string">Ước tính: @(_estimate?.EstimatedTodoxPoints?.ToString("0.##") ?? "chưa cấu hình") điểm</MudListItem>
                                 <MudListItem T="string">Tự động hoàn thành: @(_autoFinish ? "Bật" : "Tắt")</MudListItem>
                                 @if (_balance is not null)
@@ -408,7 +412,7 @@
                             <MudText Typo="Typo.h6">@_title</MudText>
                             <RenderMediaFrame IsVideo="true"
                                               State="@ResolveDanceMediaState(_job.Status)"
-                                              AspectRatio="9:16"
+                                              AspectRatio="@_ratio"
                                               EmptyText="Đang tạo video"
                                               LoadingLabel="@ResultProgressText"
                                               FailedText="Lỗi render video" />
@@ -421,7 +425,7 @@
                             <MudText Typo="Typo.h6">@_title</MudText>
                             <RenderMediaFrame IsVideo="true"
                                               State="@MediaRenderState.Failed"
-                                              AspectRatio="9:16"
+                                              AspectRatio="@_ratio"
                                               FailedText="Lỗi render video" />
                             <MudAlert Severity="@(_job.Status == DanceSellJobStatuses.Timeout ? Severity.Warning : Severity.Error)" Class="mt-3">
                                 @ResultErrorText
@@ -503,6 +507,7 @@
     private bool _busy;
     private bool _autoFinishing;
     private bool _autoFinish = true;
+    private string _ratio = "9:16";
     private string _title = "Video nhảy quảng cáo thời trang";
     private string _category = "shirt";
     private string _tiktokUrl = string.Empty;
@@ -711,6 +716,7 @@
         {
             _job = await DanceSell.GetAsync(JobId, AuthState.CurrentUser);
             _autoFinish = _job.AutoFinish;
+            _ratio = string.Equals(_job.Ratio, "16:9", StringComparison.Ordinal) ? "16:9" : "9:16";
             _renderJob = _job.RenderJobId is Guid renderJobId
                 ? await RenderJobs.GetAsync(renderJobId)
                 : null;
@@ -996,7 +1002,7 @@
         await RefreshEstimateAsync();
         var points = _estimate?.EstimatedTodoxPoints?.ToString("0.##") ?? "chưa cấu hình";
         var confirmed = await DialogService.ShowMessageBoxAsync("Xác nhận tạo video",
-            (MarkupString)$"Tạo video <b>{_title}</b>, tỷ lệ <b>9:16</b>, ước tính <b>{points} điểm</b>?",
+            (MarkupString)$"Tạo video <b>{_title}</b>, tỷ lệ <b>{_ratio}</b>, ước tính <b>{points} điểm</b>?",
             yesText: "Xác nhận tạo video", cancelText: "Quay lại chỉnh sửa");
         if (confirmed == true)
         {
@@ -1166,6 +1172,7 @@
             PlacementMode = DanceSellPlacementModes.WearProduct,
             ReferenceMode = DanceSellReferenceModes.GenerateReference,
             Mode = "720p",
+            Ratio = _ratio,
             CharacterOrientation = "image",
             ImagePrompt = prompt,
             AutoFinish = _autoFinish
@@ -1281,6 +1288,7 @@
             PlacementMode = DanceSellPlacementModes.WearProduct,
             ReferenceMode = DanceSellReferenceModes.GenerateReference,
             Mode = "720p",
+            Ratio = _ratio,
             CharacterOrientation = "image",
             ImagePrompt = _job?.ImagePrompt,
             AutoFinish = _autoFinish
@@ -1364,11 +1372,11 @@
         _ => Color.Default
     };
 
-    private static RenderFragment Preview(string? url, string alt) => @<RenderMediaFrame IsVideo="false"
+    private RenderFragment Preview(string? url, string alt) => @<RenderMediaFrame IsVideo="false"
                                                                                            MediaUrl="@url"
                                                                                            ThumbnailUrl="@url"
                                                                                            State="@(string.IsNullOrWhiteSpace(url) ? MediaRenderState.Empty : MediaRenderState.Ready)"
-                                                                                           AspectRatio="9:16"
+                                                                                           AspectRatio="@_ratio"
                                                                                            EmptyText="@alt"
                                                                                            FailedText="Lỗi tải ảnh" />;
 

@@ -751,7 +751,7 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
         var credential = await _credentials.ResolveAsync(route.ProviderCode, "access_token", ct);
         var account = await _credentialRepository.GetAccountByIdAsync(credential.ProviderAccountId, ct);
         var providerMode = DanceSellMotionProviderContract.ResolveProviderMode(route, job.Mode);
-        var providerRatio = DanceSellMotionProviderContract.ResolveProviderRatio(route);
+        var providerRatio = DanceSellMotionProviderContract.ResolveProviderRatio(route, job.Ratio);
         return new Ai79MotionRuntime(
             route.ProviderCode,
             route.ModelName,

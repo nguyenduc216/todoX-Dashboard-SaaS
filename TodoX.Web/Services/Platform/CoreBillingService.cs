@@ -3,6 +3,7 @@ using System.Text.Json;
 using Dapper;
 using TodoX.Web.Data;
 using TodoX.Web.Models.Catalog;
+using TodoX.Web.Services.AiProviders;
 using TodoX.Web.Services.Render;
 
 namespace TodoX.Web.Services.Platform;
@@ -230,7 +231,10 @@ public sealed class CoreBillingService : ICoreBillingService
 
         if (wallet.Balance < estimate.EstimatedPoints)
         {
-            var message = $"Insufficient TodoX points. Required {estimate.EstimatedPoints:0.####}, available {wallet.Balance:0.####}.";
+            var message = AiImageBillingMessageFormatter.FormatInsufficientPoints(
+                estimate.EstimatedPoints,
+                wallet.Balance,
+                "tạo video");
             await conn.ExecuteAsync(
                 """
                 UPDATE render.render_jobs

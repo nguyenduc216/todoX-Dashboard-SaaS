@@ -1023,7 +1023,6 @@ public sealed class TimelapseWorkflowService : ITimelapseWorkflowService
                AND (
                    COALESCE((j.input_json->>'requireVideoConfirmation')::boolean, false)=false
                    OR COALESCE((j.input_json->>'videoRenderConfirmed')::boolean, false)=true
-                   OR COALESCE((j.input_json->>'autoFinish')::boolean, false)=true
                )
              ORDER BY c.clip_index;
             """,

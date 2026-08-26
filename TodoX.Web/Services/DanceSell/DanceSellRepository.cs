@@ -71,12 +71,12 @@ public sealed class DanceSellRepository : IDanceSellRepository
                  '', '', @mode, @orientation,
                  @placementMode, @customInstruction, @referenceMode, @imagePrompt,
                  @referenceProviderCode, @referenceProviderModel, @motionProviderCode, @motionProviderModel,
-                 'draft', 'not_required', 'not_required', 'draft', jsonb_build_object('autoFinish', @autoFinish), @user, @user,
+                 'draft', 'not_required', 'not_required', 'draft', jsonb_build_object('autoFinish', @autoFinish, 'ratio', @ratio), @user, @user,
                  now(), now())
             RETURNING id AS Id, tenant_id AS TenantId, customer_id AS CustomerId, user_id AS UserId,
                       render_job_id AS RenderJobId, logical_request_id AS LogicalRequestId,
                       status AS Status, prompt AS Prompt, character_image_url AS CharacterImageUrl,
-                      motion_video_url AS MotionVideoUrl, mode AS Mode, character_orientation AS CharacterOrientation,
+                      motion_video_url AS MotionVideoUrl, mode AS Mode, COALESCE(NULLIF(request_json->>'ratio', ''), '9:16') AS Ratio, character_orientation AS CharacterOrientation,
                       provider_code AS ProviderCode, provider_model AS ProviderModel,
                       provider_task_id AS ProviderTaskId, provider_status AS ProviderStatus,
                       request_json::text AS RequestJson, submit_response_json::text AS SubmitResponseJson,
@@ -131,6 +131,7 @@ public sealed class DanceSellRepository : IDanceSellRepository
                 referenceProviderModel = NullIfBlank(request.ReferenceProviderModel),
                 motionProviderCode = NullIfBlank(request.MotionProviderCode),
                 motionProviderModel = NullIfBlank(request.MotionProviderModel),
+                ratio = string.IsNullOrWhiteSpace(request.Ratio) ? "9:16" : request.Ratio.Trim(),
                 autoFinish = request.AutoFinish
             });
     }
@@ -149,11 +150,11 @@ public sealed class DanceSellRepository : IDanceSellRepository
             VALUES
                 (@id, @tenant, @customer, @user, @renderJobId, @logicalRequestId, 'queued',
                  @prompt, @characterImageUrl, @motionVideoUrl, @mode, @orientation,
-                 @providerCode, @providerModel, '{}'::jsonb, now(), now())
+                 @providerCode, @providerModel, jsonb_build_object('ratio', @ratio), now(), now())
             RETURNING id AS Id, tenant_id AS TenantId, customer_id AS CustomerId, user_id AS UserId,
                       render_job_id AS RenderJobId, logical_request_id AS LogicalRequestId,
                       status AS Status, prompt AS Prompt, character_image_url AS CharacterImageUrl,
-                      motion_video_url AS MotionVideoUrl, mode AS Mode, character_orientation AS CharacterOrientation,
+                      motion_video_url AS MotionVideoUrl, mode AS Mode, COALESCE(NULLIF(request_json->>'ratio', ''), '9:16') AS Ratio, character_orientation AS CharacterOrientation,
                       provider_code AS ProviderCode, provider_model AS ProviderModel,
                       provider_task_id AS ProviderTaskId, provider_status AS ProviderStatus,
                       request_json::text AS RequestJson, submit_response_json::text AS SubmitResponseJson,
@@ -177,6 +178,7 @@ public sealed class DanceSellRepository : IDanceSellRepository
                 motionVideoUrl = request.MotionVideoUrl.Trim(),
                 mode = request.Mode.Trim(),
                 orientation = request.CharacterOrientation.Trim(),
+                ratio = string.IsNullOrWhiteSpace(request.Ratio) ? "9:16" : request.Ratio.Trim(),
                 providerCode = request.ProviderCode,
                 providerModel = request.ProviderModel
             });
@@ -319,7 +321,11 @@ public sealed class DanceSellRepository : IDanceSellRepository
                    motion_provider_model=@motionProviderModel,
                    mode=@mode,
                    orientation=@orientation,
-                   request_json=jsonb_set(COALESCE(request_json, '{}'::jsonb), '{autoFinish}', to_jsonb(CAST(@autoFinish AS boolean)), true),
+                   request_json=jsonb_set(
+                       jsonb_set(COALESCE(request_json, '{}'::jsonb), '{autoFinish}', to_jsonb(CAST(@autoFinish AS boolean)), true),
+                       '{ratio}',
+                       to_jsonb(@ratio),
+                       true),
                    updated_at=now()
              WHERE id=@id;
             """,
@@ -338,6 +344,7 @@ public sealed class DanceSellRepository : IDanceSellRepository
                 motionProviderModel = NullIfBlank(request.MotionProviderModel),
                 mode = request.Mode.Trim(),
                 orientation = request.CharacterOrientation.Trim(),
+                ratio = string.IsNullOrWhiteSpace(request.Ratio) ? "9:16" : request.Ratio.Trim(),
                 autoFinish = request.AutoFinish
             });
     }
@@ -852,6 +859,7 @@ public sealed class DanceSellRepository : IDanceSellRepository
                prepared_reference_approved_at AS PreparedReferenceApprovedAt, source_stage_status AS SourceStageStatus,
                source_stage_error AS SourceStageError,
                COALESCE((request_json->>'autoFinish')::boolean, false) AS AutoFinish,
+               COALESCE(NULLIF(request_json->>'ratio', ''), '9:16') AS Ratio,
                created_by AS CreatedBy, updated_by AS UpdatedBy
           FROM dance_sell.dance_sell_jobs
         """;

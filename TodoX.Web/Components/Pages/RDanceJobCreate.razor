@@ -50,6 +50,10 @@
                             <MudSelectItem Value="@("outerwear")">Áo khoác</MudSelectItem>
                             <MudSelectItem Value="@("other")">Khác</MudSelectItem>
                         </MudSelect>
+                        <MudSelect T="string" Label="Tỷ lệ video" Variant="Variant.Outlined" @bind-Value="_ratio" Disabled="@_busy">
+                            <MudSelectItem Value="@("9:16")">9:16</MudSelectItem>
+                            <MudSelectItem Value="@("16:9")">16:9</MudSelectItem>
+                        </MudSelect>
 
                         <MudText Typo="Typo.caption" Class="rdance-auto-finish-help">
                             @(_autoFinish
@@ -99,7 +103,7 @@
                         <MudText Typo="Typo.h6">Video nhảy quảng cáo thời trang</MudText>
                         <MudList T="string" Dense="true">
                             <MudListItem T="string">Dịch vụ: Video nhảy quảng cáo thời trang</MudListItem>
-                            <MudListItem T="string">Tỷ lệ: 9:16</MudListItem>
+                            <MudListItem T="string">Tỷ lệ: @_ratio</MudListItem>
                         </MudList>
                         <MudButton Variant="Variant.Filled"
                                    Color="Color.Warning"
@@ -127,6 +131,7 @@
     private bool _motionDragActive;
     private bool _busy;
     private bool _autoFinish = true;
+    private string _ratio = "9:16";
 
     private bool CanSubmitSource => string.IsNullOrWhiteSpace(_readinessError);
     private long MaxMotionVideoBytes => (long)Math.Max(1, DanceOptions.CurrentValue.MaxVideoMb) * 1024 * 1024;
@@ -210,6 +215,7 @@
             PlacementMode = DanceSellPlacementModes.WearProduct,
             ReferenceMode = DanceSellReferenceModes.GenerateReference,
             Mode = "720p",
+            Ratio = _ratio,
             CharacterOrientation = "image",
             AutoFinish = _autoFinish
         }, AuthState.CurrentUser!);

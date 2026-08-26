@@ -94,8 +94,25 @@ public sealed record AiImageBillingReservation(
     string? ErrorMessage,
     decimal? AvailablePoints = null)
 {
+    public decimal RequiredPoints => ChargedPoints;
+    public decimal MissingPoints => Math.Max(0, RequiredPoints - (AvailablePoints ?? 0));
+
     public static AiImageBillingReservation Failed(string logicalRequestId, string status, string message)
         => new(false, false, string.Empty, status, logicalRequestId, 0, null, null, message, null);
+}
+
+public static class AiImageBillingMessageFormatter
+{
+    public static string FormatInsufficientPoints(decimal requiredPoints, decimal availablePoints, string operationLabel)
+    {
+        var missingPoints = Math.Max(0, requiredPoints - availablePoints);
+        var label = string.IsNullOrWhiteSpace(operationLabel) ? "tạo nội dung" : operationLabel.Trim();
+        return
+            $"Không đủ điểm để {label}.\n\n" +
+            $"Cần: {requiredPoints:0.####} điểm\n" +
+            $"Hiện có: {availablePoints:0.####} điểm\n" +
+            $"Cần bổ sung thêm: {missingPoints:0.####} điểm";
+    }
 }
 
 public sealed record AiImageBillingCompletion(
@@ -204,11 +221,11 @@ public sealed class AiImageBillingService : IAiImageBillingService
         {
             var recordId = await InsertRecordAsync(conn, tx, request, payer, wallet.Id, "insufficient", walletTransactionId: null);
             tx.Commit();
-            var subject = string.Equals(request.FeatureCode, "render_job_scene_video", StringComparison.OrdinalIgnoreCase)
-                ? "points for video generation"
-                : "image points";
+            var operationLabel = string.Equals(request.FeatureCode, "render_job_scene_video", StringComparison.OrdinalIgnoreCase)
+                ? "tạo video"
+                : "tạo ảnh";
             return new AiImageBillingReservation(false, false, payer.PayerType, "insufficient", request.LogicalRequestId, chargePoints,
-                recordId, null, $"Insufficient TodoX {subject}. Required {chargePoints:0.####}, available {available:0.####}.", available);
+                recordId, null, AiImageBillingMessageFormatter.FormatInsufficientPoints(chargePoints, available, operationLabel), available);
         }
 
         await conn.ExecuteAsync(

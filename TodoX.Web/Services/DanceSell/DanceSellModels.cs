@@ -172,6 +172,7 @@ public sealed class DanceSellJobCreateRequest
     public string CharacterImageUrl { get; set; } = string.Empty;
     public string MotionVideoUrl { get; set; } = string.Empty;
     public string Mode { get; set; } = "720p";
+    public string Ratio { get; set; } = "9:16";
     public string CharacterOrientation { get; set; } = "image";
     public string ProviderCode { get; set; } = DanceSellConstants.ProviderCode;
     public string ProviderModel { get; set; } = DanceSellConstants.Model;
@@ -186,6 +187,7 @@ public sealed class DanceSellDraftCreateRequest
     public string ReferenceMode { get; set; } = DanceSellReferenceModes.GenerateReference;
     public string Prompt { get; set; } = string.Empty;
     public string Mode { get; set; } = "720p";
+    public string Ratio { get; set; } = "9:16";
     public string CharacterOrientation { get; set; } = "image";
     public string PlacementMode { get; set; } = DanceSellPlacementModes.HoldProduct;
     public string? CustomPlacementInstruction { get; set; }
@@ -210,6 +212,7 @@ public sealed class DanceSellJobDto
     public string CharacterImageUrl { get; set; } = string.Empty;
     public string MotionVideoUrl { get; set; } = string.Empty;
     public string Mode { get; set; } = "720p";
+    public string Ratio { get; set; } = "9:16";
     public string CharacterOrientation { get; set; } = "image";
     public string ProviderCode { get; set; } = DanceSellConstants.ProviderCode;
     public string ProviderModel { get; set; } = DanceSellConstants.Model;
@@ -333,8 +336,9 @@ public static class DanceSellMotionProviderContract
                MapBusinessMode(businessMode),
                DefaultProviderMode)!;
 
-    public static string ResolveProviderRatio(DanceSellProviderRouteDto route)
+    public static string ResolveProviderRatio(DanceSellProviderRouteDto route, string? selectedRatio = null)
         => FirstNonBlank(
+               selectedRatio,
                ReadConfigString(route.ConfigJson, "ratio"),
                ReadConfigString(route.ConfigJson, "provider_ratio"),
                DefaultProviderRatio)!;
@@ -409,6 +413,7 @@ public sealed class DanceSellCreateJobRequest
     public string PlacementMode { get; set; } = DanceSellPlacementModes.HoldProduct;
     public string? CustomPlacementInstruction { get; set; }
     public string Mode { get; set; } = "720p";
+    public string Ratio { get; set; } = "9:16";
     public string CharacterOrientation { get; set; } = "image";
     public string? ImagePrompt { get; set; }
     public string? ReferenceProviderCode { get; set; }
@@ -426,6 +431,7 @@ public sealed class DanceSellUpdateBusinessRequest
     public string PlacementMode { get; set; } = DanceSellPlacementModes.HoldProduct;
     public string? CustomPlacementInstruction { get; set; }
     public string Mode { get; set; } = "720p";
+    public string Ratio { get; set; } = "9:16";
     public string CharacterOrientation { get; set; } = "image";
     public string? ImagePrompt { get; set; }
     public string? ReferenceProviderCode { get; set; }
@@ -454,6 +460,7 @@ public sealed class DanceSellJsonBusinessRequest
     public string? CustomPlacementInstruction { get; set; }
     public string Prompt { get; set; } = string.Empty;
     public string Mode { get; set; } = "720p";
+    public string Ratio { get; set; } = "9:16";
     public string CharacterOrientation { get; set; } = "image";
     public string? ImagePrompt { get; set; }
     public string? ReferenceProviderCode { get; set; }
