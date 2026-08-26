@@ -105,22 +105,16 @@
                                 }
                                 <MudDivider />
                                 <MudText Typo="Typo.subtitle2">Hoặc tải video chuyển động MP4</MudText>
-                                <label class="@MotionUploadZoneClass" @ondragenter="OnMotionDragEnter" @ondragleave="OnMotionDragLeave" @ondragover:preventDefault="true" @ondrop:preventDefault="true" @ondrop="OnMotionDrop">
-                                    <InputFile class="rdance-hidden-file-input" OnChange="OnMotionSelected" accept="video/mp4" disabled="@_busy" />
-                                    <span class="rdance-upload-icon">
-                                        @if (_busy)
-                                        {
-                                            <MudProgressCircular Indeterminate="true" Size="Size.Small" Color="Color.Warning" />
-                                        }
-                                        else
-                                        {
-                                            <MudIcon Icon="@Icons.Material.Filled.CloudUpload" Size="Size.Large" />
-                                        }
-                                    </span>
-                                    <span class="rdance-upload-title rdance-upload-button"><MudIcon Icon="@Icons.Material.Filled.CloudUpload" Size="Size.Small" /> Chọn video MP4</span>
+                                <div class="@MotionUploadZoneClass" @ondragenter="OnMotionDragEnter" @ondragleave="OnMotionDragLeave" @ondragover:preventDefault="true" @ondrop:preventDefault="true" @ondrop="OnMotionDrop">
+                                    <label class="rdance-file-button-wrapper">
+                                        <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.CloudUpload" Size="Size.Small" Disabled="@_busy">
+                                            Chọn video MP4
+                                        </MudButton>
+                                        <InputFile class="rdance-hidden-file-input" OnChange="OnMotionSelected" accept="video/mp4" disabled="@_busy" />
+                                    </label>
                                     <span class="rdance-upload-subtitle">hoặc kéo thả video vào đây</span>
                                     <span class="rdance-upload-limit">MP4 · tối đa @MaxMotionVideoLabel</span>
-                                </label>
+                                </div>
                                 @if (!string.IsNullOrWhiteSpace(_motionUploadError))
                                 {
                                     <MudAlert Severity="Severity.Error" Dense="true">@_motionUploadError</MudAlert>
@@ -138,9 +132,10 @@
                                                 }
                                             </MudStack>
                                             <MudChip T="string" Color="Color.Success" Size="Size.Small">Video chuyển động đã sẵn sàng</MudChip>
-                                            <label class="rdance-replace-button">
-                                                <MudIcon Icon="@Icons.Material.Filled.Sync" Size="Size.Small" />
-                                                <span>Thay video</span>
+                                            <label class="rdance-file-button-wrapper">
+                                                <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Sync" Size="Size.Small" Disabled="@_busy">
+                                                    Thay video
+                                                </MudButton>
                                                 <InputFile class="rdance-hidden-file-input" OnChange="OnMotionSelected" accept="video/mp4" disabled="@_busy" />
                                             </label>
                                         </MudStack>
@@ -185,25 +180,19 @@
                             {
                                 @Preview(_job.CharacterImageUrl, "Ảnh người mẫu")
                             }
-                            <label class="@CharacterImageUploadZoneClass" @ondragenter="OnCharacterDragEnter" @ondragleave="OnCharacterDragLeave" @ondragover:preventDefault="true" @ondrop:preventDefault="true" @ondrop="OnCharacterDrop">
-                                <InputFile class="rdance-hidden-file-input" OnChange="OnCharacterSelected" accept="@AcceptedImageTypes" disabled="@_busy" />
-                                <span class="rdance-upload-icon">
-                                    @if (_busy)
-                                    {
-                                        <MudProgressCircular Indeterminate="true" Size="Size.Small" Color="Color.Warning" />
-                                    }
-                                    else
-                                    {
-                                        <MudIcon Icon="@Icons.Material.Filled.CloudUpload" Size="Size.Large" />
-                                    }
-                                </span>
-                                <span class="rdance-upload-title rdance-upload-button"><MudIcon Icon="@Icons.Material.Filled.CloudUpload" Size="Size.Small" /> @(!string.IsNullOrWhiteSpace(_job?.CharacterImageUrl) ? "Thay ảnh" : "Tải ảnh người mẫu")</span>
+                            <div class="@CharacterImageUploadZoneClass" @ondragenter="OnCharacterDragEnter" @ondragleave="OnCharacterDragLeave" @ondragover:preventDefault="true" @ondrop:preventDefault="true" @ondrop="OnCharacterDrop">
+                                <label class="rdance-file-button-wrapper">
+                                    <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.CloudUpload" Size="Size.Small" Disabled="@_busy">
+                                        @(!string.IsNullOrWhiteSpace(_job?.CharacterImageUrl) ? "Thay ảnh" : "Tải ảnh người mẫu")
+                                    </MudButton>
+                                    <InputFile class="rdance-hidden-file-input" OnChange="OnCharacterSelected" accept="@AcceptedImageTypes" disabled="@_busy" />
+                                </label>
                                 @if (string.IsNullOrWhiteSpace(_job?.CharacterImageUrl))
                                 {
                                     <span class="rdance-upload-subtitle">hoặc bấm để chọn ảnh</span>
                                 }
                                 <span class="rdance-upload-limit">PNG / JPG / JPEG / WEBP · tối đa @MaxImageLabel</span>
-                            </label>
+                            </div>
                         </MudPaper>
                     </MudItem>
                     <MudItem xs="12" md="4">
@@ -228,25 +217,19 @@
                                     </MudButton>
                                 </MudStack>
                             }
-                            <label class="@ProductImageUploadZoneClass" @ondragenter="OnProductDragEnter" @ondragleave="OnProductDragLeave" @ondragover:preventDefault="true" @ondrop:preventDefault="true" @ondrop="OnProductDrop">
-                                <InputFile class="rdance-hidden-file-input" OnChange="OnProductSelected" accept="@AcceptedImageTypes" disabled="@_busy" />
-                                <span class="rdance-upload-icon">
-                                    @if (_busy)
-                                    {
-                                        <MudProgressCircular Indeterminate="true" Size="Size.Small" Color="Color.Warning" />
-                                    }
-                                    else
-                                    {
-                                        <MudIcon Icon="@Icons.Material.Filled.CloudUpload" Size="Size.Large" />
-                                    }
-                                </span>
-                                <span class="rdance-upload-title rdance-upload-button"><MudIcon Icon="@Icons.Material.Filled.CloudUpload" Size="Size.Small" /> @(!string.IsNullOrWhiteSpace(_job?.ProductImageUrl) ? "Thay ảnh" : "Tải ảnh sản phẩm")</span>
+                            <div class="@ProductImageUploadZoneClass" @ondragenter="OnProductDragEnter" @ondragleave="OnProductDragLeave" @ondragover:preventDefault="true" @ondrop:preventDefault="true" @ondrop="OnProductDrop">
+                                <label class="rdance-file-button-wrapper">
+                                    <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.CloudUpload" Size="Size.Small" Disabled="@_busy">
+                                        @(!string.IsNullOrWhiteSpace(_job?.ProductImageUrl) ? "Thay ảnh" : "Tải ảnh sản phẩm")
+                                    </MudButton>
+                                    <InputFile class="rdance-hidden-file-input" OnChange="OnProductSelected" accept="@AcceptedImageTypes" disabled="@_busy" />
+                                </label>
                                 @if (string.IsNullOrWhiteSpace(_job?.ProductImageUrl))
                                 {
                                     <span class="rdance-upload-subtitle">hoặc bấm để chọn ảnh</span>
                                 }
                                 <span class="rdance-upload-limit">PNG / JPG / JPEG / WEBP · tối đa @MaxImageLabel</span>
-                            </label>
+                            </div>
                         </MudPaper>
                     </MudItem>
                     <MudItem xs="12" md="4">
@@ -1116,7 +1099,7 @@
         {
             await RunAsync(async () =>
             {
-                _job = await References.ApproveAsync(_job.Id, versionId, AuthState.CurrentUser!);
+                _job = await References.SelectReferenceVersionAsync(_job.Id, versionId, AuthState.CurrentUser!);
                 await ReloadAsync();
                 Snackbar.Add("Đã chọn lại ảnh reference.", Severity.Success);
             });
@@ -1467,9 +1450,10 @@
     .rdance-auto-finish-help { color: rgba(255,255,255,.68); }
     .rdance-source-divider { display: flex; align-items: center; gap: 12px; color: rgba(255,255,255,.55); font-size: .75rem; font-weight: 700; letter-spacing: 0; }
     .rdance-source-divider::before, .rdance-source-divider::after { content: ""; flex: 1; height: 1px; background: rgba(255,255,255,.12); }
-    .rdance-upload-zone { position: relative; display: grid; place-items: center; gap: 6px; min-height: 188px; padding: 24px 18px; overflow: hidden; border: 1px dashed rgba(245, 181, 64, .72); border-radius: 8px; background: linear-gradient(180deg, rgba(245,181,64,.12), rgba(255,255,255,.035)); color: rgba(255,255,255,.88); text-align: center; cursor: pointer; transition: border-color .18s ease, background .18s ease, box-shadow .18s ease, transform .18s ease; }
+    .rdance-upload-zone { position: relative; display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; min-height: 92px; padding: 14px 12px; overflow: hidden; border: 1px dashed rgba(245, 181, 64, .72); border-radius: 8px; background: rgba(245,181,64,.06); color: rgba(255,255,255,.88); text-align: center; transition: border-color .18s ease, background .18s ease, box-shadow .18s ease; }
     .rdance-upload-zone:hover, .rdance-upload-zone:focus-within, .rdance-upload-zone.is-dragging { border-color: #f5b540; background: linear-gradient(180deg, rgba(245,181,64,.2), rgba(42,194,177,.08)); box-shadow: 0 0 0 1px rgba(245,181,64,.24), 0 18px 44px rgba(0,0,0,.22); }
     .rdance-upload-zone.is-busy { cursor: progress; opacity: .82; }
+    .rdance-file-button-wrapper { position: relative; display: inline-flex; }
     .rdance-hidden-file-input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
     .rdance-hidden-file-input:disabled { cursor: not-allowed; }
     .rdance-upload-icon { display: grid; place-items: center; width: 48px; height: 48px; color: #f5b540; border-radius: 999px; background: rgba(245,181,64,.14); }
@@ -1500,7 +1484,6 @@
     .rdance-motion-file { border-color: rgba(245,181,64,.28) !important; background: rgba(255,255,255,.035); }
     .rdance-motion-file-copy { min-width: 0; }
     .rdance-source-url { overflow-wrap: anywhere; color: rgba(255,255,255,.68); }
-    .rdance-replace-button { position: relative; display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 0 12px; overflow: hidden; border: 1px solid rgba(245,181,64,.55); border-radius: 8px; color: #f5b540; font-size: .8125rem; font-weight: 700; text-transform: uppercase; cursor: pointer; }
     .rdance-media-preview { aspect-ratio: 9 / 12; display: grid; place-items: center; overflow: hidden; border-radius: 8px; background: rgba(255,255,255,.05); margin: 12px 0; }
     .rdance-media-preview img { width: 100%; height: 100%; object-fit: contain; }
     .rdance-result-frame { position: relative; aspect-ratio: 16 / 9; display: grid; place-items: center; overflow: hidden; width: min(100%, 720px); border-radius: 8px; background: #090d12; color: rgba(255,255,255,.42); }

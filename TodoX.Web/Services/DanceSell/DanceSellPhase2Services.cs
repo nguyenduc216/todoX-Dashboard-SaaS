@@ -171,6 +171,7 @@ public interface IDanceSellReferenceImageService
     Task<DanceSellJobDto> AutoPrepareAsync(Guid jobId, CurrentUserSession user, CancellationToken ct = default);
     Task<DanceSellJobDto> ApproveCharacterAsync(Guid jobId, CurrentUserSession user, CancellationToken ct = default);
     Task<DanceSellJobDto> ApproveAsync(Guid jobId, Guid versionId, CurrentUserSession user, CancellationToken ct = default);
+    Task<DanceSellJobDto> SelectReferenceVersionAsync(Guid jobId, Guid versionId, CurrentUserSession user, CancellationToken ct = default);
     Task<DanceSellJobDto> UnapproveAsync(Guid jobId, CurrentUserSession user, CancellationToken ct = default);
 }
 
@@ -727,6 +728,24 @@ Photorealistic, product preview quality.
         var version = await _repo.GetReferenceVersionAsync(versionId, ct)
             ?? throw new InvalidOperationException("DANCE_SELL_REFERENCE_NOT_READY");
         if (version.DanceSellJobId != job.Id || version.Status != DanceSellReferenceStatuses.Ready || string.IsNullOrWhiteSpace(version.PublicUrl))
+        {
+            throw new InvalidOperationException("DANCE_SELL_REFERENCE_NOT_READY");
+        }
+
+        await _repo.SelectReferenceVersionAsync(job.Id, version.Id, ct);
+        await _repo.UpdateReferenceStatusAsync(job.Id, DanceSellReferenceStatuses.Approved, null, version.MediaId, version.ObjectKey, version.PublicUrl, DateTime.UtcNow, ct);
+        return await _repo.GetByIdAsync(job.Id, ct) ?? job;
+    }
+
+    public async Task<DanceSellJobDto> SelectReferenceVersionAsync(Guid jobId, Guid versionId, CurrentUserSession user, CancellationToken ct = default)
+    {
+        var job = await RequireOwnedJobAsync(jobId, user, ct);
+        var version = await _repo.GetReferenceVersionAsync(versionId, ct)
+            ?? throw new InvalidOperationException("DANCE_SELL_REFERENCE_NOT_READY");
+        if (version.DanceSellJobId != job.Id
+            || version.Status is not (DanceSellReferenceStatuses.Ready or DanceSellReferenceStatuses.Approved)
+            || version.MediaId is null
+            || string.IsNullOrWhiteSpace(version.PublicUrl))
         {
             throw new InvalidOperationException("DANCE_SELL_REFERENCE_NOT_READY");
         }
