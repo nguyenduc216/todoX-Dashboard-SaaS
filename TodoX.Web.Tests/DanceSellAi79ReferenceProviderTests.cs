@@ -76,6 +76,28 @@ Photorealistic, product preview quality.
         Assert.Equal("""{"imageInfo":{"id_base":"try-on-001"}}""", result.ResponseJson);
     }
 
+
+    [Fact]
+    public async Task SubmitAsync_PersonOnlyOmitsProductReference()
+    {
+        var client = new CapturingAi79TaskClient();
+        var provider = new Ai79DanceSellReferenceProvider(
+            client,
+            new StaticCredentialResolver(),
+            NullLogger<Ai79DanceSellReferenceProvider>.Instance);
+
+        await provider.SubmitAsync(new DanceSellReferenceProviderRequest
+        {
+            Route = new DanceSellProviderRouteDto { ProviderCode = "79ai", ModelName = "imagegen_2_0", ConfigJson = "{}" },
+            CharacterImageUrl = "https://cdn.example/model.png"
+        }, CancellationToken.None);
+
+        var request = Assert.IsType<Ai79TaskSubmitRequest>(client.LastRequest);
+        Assert.Equal("https://cdn.example/model.png", request.Options["subjects[0][url]"]);
+        Assert.DoesNotContain("subjects[1][url]", request.Options.Keys, StringComparer.Ordinal);
+        Assert.Contains("PERSON ONLY REFERENCE IMAGE", request.Prompt, StringComparison.Ordinal);
+        Assert.DoesNotContain("IMAGE 2", request.Prompt, StringComparison.Ordinal);
+    }
     private sealed class CapturingAi79TaskClient : IAi79TaskClient
     {
         public Ai79TaskSubmitRequest? LastRequest { get; private set; }

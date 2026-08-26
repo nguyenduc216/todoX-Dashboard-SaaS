@@ -227,7 +227,7 @@ public sealed class DanceSellReferenceImageService : IDanceSellReferenceImageSer
         }
 
         if (job.CharacterMediaId is null || string.IsNullOrWhiteSpace(job.CharacterImageUrl)) throw new InvalidOperationException("DANCE_SELL_INVALID_CHARACTER");
-        if (job.ProductMediaId is null || string.IsNullOrWhiteSpace(job.ProductImageUrl)) throw new InvalidOperationException("DANCE_SELL_INVALID_PRODUCT");
+        // Product input is optional; Person Only uses the character image as its reference.
 
         await _repo.UpdateReferenceStatusAsync(job.Id, DanceSellReferenceStatuses.Generating, ct: ct);
         var stage = "resolve_route";
@@ -269,11 +269,7 @@ public sealed class DanceSellReferenceImageService : IDanceSellReferenceImageSer
                 mode = "low",
                 num_outputs = 1,
                 language = "VI",
-                subjects = new[]
-                {
-                    new { url = job.CharacterImageUrl },
-                    new { url = job.ProductImageUrl }
-                }
+                subjects = BuildSubjectUrls(job)
             });
 
             stage = "estimate_cost";
@@ -292,7 +288,7 @@ public sealed class DanceSellReferenceImageService : IDanceSellReferenceImageSer
                 ProductMediaId = job.ProductMediaId,
                 Prompt = referencePrompt,
                 CharacterImageUrl = job.CharacterImageUrl,
-                ProductImageUrl = job.ProductImageUrl!,
+                ProductImageUrl = job.ProductImageUrl,
                 AspectRatio = ReadConfigString(route.ConfigJson, "aspect_ratio")
             }, ct);
 
@@ -667,7 +663,17 @@ public sealed class DanceSellReferenceImageService : IDanceSellReferenceImageSer
     }
 
     internal static string BuildReferencePrompt(DanceSellJobDto job)
-        => """
+        => job.ProductMediaId is null || string.IsNullOrWhiteSpace(job.ProductImageUrl)
+            ? """
+PERSON ONLY REFERENCE IMAGE
+
+Use the supplied person image as the sole visual reference.
+- Preserve exact identity, face, body, pose, anatomy, camera angle and lighting
+- Do not add, infer or mention any product, clothing reference or additional subject
+
+Photorealistic, clean image suitable for video generation.
+"""
+            : """
 VIRTUAL TRY-ON – PREVIEW ONLY
 
 Use IMAGE 1 as FIXED BASE BODY.
@@ -684,6 +690,11 @@ If conflict occurs between clothing and pose:
 
 Photorealistic, product preview quality.
 """;
+
+    private static string[] BuildSubjectUrls(DanceSellJobDto job)
+        => string.IsNullOrWhiteSpace(job.ProductImageUrl)
+            ? new[] { job.CharacterImageUrl }
+            : new[] { job.CharacterImageUrl, job.ProductImageUrl };
 
     public async Task<DanceSellJobDto> ApproveAsync(Guid jobId, Guid versionId, CurrentUserSession user, CancellationToken ct = default)
     {
@@ -1265,6 +1276,7 @@ public interface IDanceSellPhase2Service
     Task<DanceSellJobDto> UpdateBusinessAsync(Guid id, DanceSellUpdateBusinessRequest request, CurrentUserSession user, CancellationToken ct = default);
     Task<DanceSellJobDto> UploadCharacterAsync(Guid id, byte[] content, string fileName, string contentType, CurrentUserSession user, CancellationToken ct = default);
     Task<DanceSellJobDto> UploadProductAsync(Guid id, byte[] content, string fileName, string contentType, CurrentUserSession user, CancellationToken ct = default);
+    Task<DanceSellJobDto> RemoveProductAsync(Guid id, CurrentUserSession user, CancellationToken ct = default);
     Task<DanceSellJobDto> UploadDirectReferenceAsync(Guid id, byte[] content, string fileName, string contentType, CurrentUserSession user, CancellationToken ct = default);
     Task<DanceSellJobDto> UploadMotionAsync(Guid id, byte[] content, string fileName, string contentType, CurrentUserSession user, CancellationToken ct = default);
     Task<DanceSellJobDto> StageTikTokAsync(Guid id, string sourceUrl, CurrentUserSession user, CancellationToken ct = default);
@@ -1419,6 +1431,19 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
         await _tenant.EnsureLoadedAsync(ct);
         var media = await _media.SaveAsync(content, fileName, contentType, "dance_sell_product", user.UserId, user.CustomerId, _tenant.TenantId, ct);
         await _repo.UpdateProductAsync(job.Id, media.Id, media.ObjectKey ?? string.Empty, _motion.ToProviderUrl(media.PublicUrl ?? media.FileUrl), ct);
+        await _repo.ResetReferenceAsync(job.Id, ct: ct);
+        return await _repo.GetByIdAsync(job.Id, ct) ?? job;
+    }
+
+    public async Task<DanceSellJobDto> RemoveProductAsync(Guid id, CurrentUserSession user, CancellationToken ct = default)
+    {
+        var job = await RequireOwnedJobAsync(id, user, ct);
+        if (job.ReferenceMode == DanceSellReferenceModes.DirectReference)
+        {
+            throw new InvalidOperationException("DANCE_SELL_DIRECT_REFERENCE_ONLY");
+        }
+
+        await _repo.ClearProductAsync(job.Id, ct);
         await _repo.ResetReferenceAsync(job.Id, ct: ct);
         return await _repo.GetByIdAsync(job.Id, ct) ?? job;
     }

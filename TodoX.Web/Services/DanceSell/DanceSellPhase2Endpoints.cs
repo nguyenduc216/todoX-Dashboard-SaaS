@@ -23,6 +23,7 @@ public static class DanceSellPhase2Endpoints
         group.MapPut("/jobs/{id:guid}", UpdateBusinessAsync).DisableAntiforgery();
         group.MapPost("/jobs/{id:guid}/character", UploadCharacterAsync).DisableAntiforgery();
         group.MapPost("/jobs/{id:guid}/product", UploadProductAsync).DisableAntiforgery();
+        group.MapDelete("/jobs/{id:guid}/product", RemoveProductAsync).DisableAntiforgery();
         group.MapPost("/jobs/{id:guid}/direct-reference", UploadDirectReferenceAsync).DisableAntiforgery();
         group.MapPost("/jobs/{id:guid}/motion/upload", UploadMotionAsync).DisableAntiforgery();
         group.MapPost("/jobs/{id:guid}/motion/tiktok", StageTikTokAsync).DisableAntiforgery();
@@ -142,6 +143,9 @@ public static class DanceSellPhase2Endpoints
 
     private static async Task<IResult> UploadProductAsync(Guid id, HttpRequest request, AuthStateService auth, IDanceSellPhase2Service service, CancellationToken ct)
         => await ExecuteFileAsync(request, auth, (user, file, bytes) => service.UploadProductAsync(id, bytes, file.FileName, file.ContentType, user, ct), ct);
+
+    private static async Task<IResult> RemoveProductAsync(Guid id, AuthStateService auth, IDanceSellPhase2Service service, CancellationToken ct)
+        => await ExecuteAsync(auth, user => service.RemoveProductAsync(id, user, ct));
 
     private static async Task<IResult> UploadDirectReferenceAsync(Guid id, HttpRequest request, AuthStateService auth, IDanceSellPhase2Service service, CancellationToken ct)
         => await ExecuteFileAsync(request, auth, (user, file, bytes) => service.UploadDirectReferenceAsync(id, bytes, file.FileName, file.ContentType, user, ct), ct);

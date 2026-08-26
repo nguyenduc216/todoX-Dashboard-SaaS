@@ -209,7 +209,17 @@
                             <MudText Typo="Typo.h6">Ảnh sản phẩm (tuỳ chọn)</MudText>
                             @if (!string.IsNullOrWhiteSpace(_job?.ProductImageUrl))
                             {
-                                @Preview(_job.ProductImageUrl, "Ảnh sản phẩm")
+                                <div class="rdance-product-preview">
+                                    @Preview(_job.ProductImageUrl, "Ảnh sản phẩm")
+                                    <MudTooltip Text="Gỡ ảnh sản phẩm">
+                                        <MudIconButton Icon="@Icons.Material.Filled.Close"
+                                                       Color="Color.Error"
+                                                       Size="Size.Small"
+                                                       Class="rdance-remove-product"
+                                                       Disabled="@_busy"
+                                                       OnClick="RemoveProductAsync" />
+                                    </MudTooltip>
+                                </div>
                             }
                             <label class="@ProductImageUploadZoneClass" @ondragenter="OnProductDragEnter" @ondragleave="OnProductDragLeave" @ondragover:preventDefault="true" @ondrop:preventDefault="true" @ondrop="OnProductDrop">
                                 <InputFile class="rdance-hidden-file-input" OnChange="OnProductSelected" accept="@AcceptedImageTypes" disabled="@_busy" />
@@ -839,6 +849,14 @@
         }
     }
 
+    private async Task RemoveProductAsync() => await RunAsync(async () =>
+    {
+        await EnsureEditableAsync();
+        _job = await DanceSell.RemoveProductAsync(_job!.Id, AuthState.CurrentUser!);
+        await ReloadAsync();
+        Snackbar.Add("Đã gỡ ảnh sản phẩm.", Severity.Success);
+    });
+
     private async Task<bool> UploadAsync(InputFileChangeEventArgs args, long maxBytes, Func<byte[], IBrowserFile, Task<DanceSellJobDto>> save)
     {
         var saved = false;
@@ -1282,6 +1300,8 @@
     .rdance-upload-title { font-weight: 700; }
     .rdance-upload-subtitle, .rdance-upload-limit { color: rgba(255,255,255,.62); font-size: .875rem; }
     .rdance-image-upload-zone { min-height: 154px; margin-top: 12px; }
+    .rdance-product-preview { position: relative; }
+    .rdance-remove-product { position: absolute; top: 16px; right: 8px; z-index: 2; background: rgba(7,10,14,.78); }
     .rdance-reference-help { margin: 8px 0 4px; color: rgba(255,255,255,.68); }
     .rdance-reference-frame { position: relative; overflow: hidden; border-radius: 8px; }
     .rdance-processing-overlay { position: absolute; inset: 12px 0; display: grid; place-items: center; overflow: hidden; border: 1px solid rgba(245,181,64,.72); border-radius: 8px; background: rgba(7,10,14,.56); box-shadow: inset 0 0 0 1px rgba(42,194,177,.16), 0 0 28px rgba(245,181,64,.18); animation: rdance-processing-pulse 1.8s ease-in-out infinite; pointer-events: none; }

@@ -39,7 +39,7 @@ public sealed class DanceSellReferenceProviderRequest
     public Guid? ProductMediaId { get; set; }
     public string Prompt { get; set; } = string.Empty;
     public string CharacterImageUrl { get; set; } = string.Empty;
-    public string ProductImageUrl { get; set; } = string.Empty;
+    public string? ProductImageUrl { get; set; }
     public string? AspectRatio { get; set; }
     public string? CallbackUrl { get; set; }
 }
@@ -102,7 +102,11 @@ public sealed class KieDanceSellReferenceProvider : IDanceSellReferenceProvider
         }
 
         var characterUrl = KiePayloadBuilder.ValidatePublicHttpsUrl(request.CharacterImageUrl, "input_urls[0]");
-        var productUrl = KiePayloadBuilder.ValidatePublicHttpsUrl(request.ProductImageUrl, "input_urls[1]");
+        var inputUrls = new List<string> { characterUrl };
+        if (!string.IsNullOrWhiteSpace(request.ProductImageUrl))
+        {
+            inputUrls.Add(KiePayloadBuilder.ValidatePublicHttpsUrl(request.ProductImageUrl, "input_urls[1]"));
+        }
         var callback = string.IsNullOrWhiteSpace(request.CallbackUrl)
             ? _options.CurrentValue.GetCallbackUriOrNull()?.ToString()
             : request.CallbackUrl;
@@ -114,7 +118,7 @@ public sealed class KieDanceSellReferenceProvider : IDanceSellReferenceProvider
             Input = new KieImageToImageInput
             {
                 Prompt = prompt,
-                InputUrls = new List<string> { characterUrl, productUrl },
+                InputUrls = inputUrls,
                 AspectRatio = string.IsNullOrWhiteSpace(request.AspectRatio) ? null : request.AspectRatio.Trim()
             }
         };
@@ -165,7 +169,8 @@ public sealed class Ai79DanceSellReferenceProvider : IDanceSellReferenceProvider
             PollPath = "/image"
         };
         var characterUrl = KiePayloadBuilder.ValidatePublicHttpsUrl(request.CharacterImageUrl, "subjects[0][url]");
-        var productUrl = KiePayloadBuilder.ValidatePublicHttpsUrl(request.ProductImageUrl, "subjects[1][url]");
+        var hasProduct = !string.IsNullOrWhiteSpace(request.ProductImageUrl);
+        var productUrl = hasProduct ? KiePayloadBuilder.ValidatePublicHttpsUrl(request.ProductImageUrl!, "subjects[1][url]") : null;
         var ratio = "16:9";
         var category = "FASHION";
         var resolution = "1k";
@@ -180,7 +185,6 @@ public sealed class Ai79DanceSellReferenceProvider : IDanceSellReferenceProvider
             ["sync"] = sync,
             ["project_id"] = projectId,
             ["subjects[0][url]"] = characterUrl,
-            ["subjects[1][url]"] = productUrl,
             ["ratio"] = ratio,
             ["resolution"] = resolution,
             ["category"] = category,
@@ -188,13 +192,17 @@ public sealed class Ai79DanceSellReferenceProvider : IDanceSellReferenceProvider
             ["num_outputs"] = numOutputs,
             ["language"] = language
         };
+        if (hasProduct)
+        {
+            options["subjects[1][url]"] = productUrl;
+        }
         var submit = new Ai79TaskSubmitRequest(
             runtime.BaseUrl,
             runtime.SubmitPath,
             runtime.Credential.Secret,
             runtime.Domain,
             runtime.Model,
-            BuildReferencePrompt(),
+            BuildReferencePrompt(hasProduct),
             [],
             options,
             Ai79TaskOperation.Image);
@@ -205,7 +213,7 @@ public sealed class Ai79DanceSellReferenceProvider : IDanceSellReferenceProvider
             model = runtime.Model,
             endpointPath = runtime.SubmitPath,
             domain = runtime.Domain,
-            prompt = BuildReferencePrompt(),
+            prompt = BuildReferencePrompt(hasProduct),
             action_type = "create",
             sync = false,
             project_id = projectId,
@@ -215,22 +223,12 @@ public sealed class Ai79DanceSellReferenceProvider : IDanceSellReferenceProvider
             category,
             num_outputs = 1,
             language,
-            subjects = new[]
-            {
-                new
-                {
-                    url = characterUrl
-                },
-                new
-                {
-                    url = productUrl
-                }
-            },
-            subjectOrder = new[]
-            {
-                characterUrl,
-                productUrl
-            }
+            subjects = hasProduct
+                ? new[] { new { url = characterUrl }, new { url = productUrl! } }
+                : new[] { new { url = characterUrl } },
+            subjectOrder = hasProduct
+                ? new[] { characterUrl, productUrl! }
+                : new[] { characterUrl }
         }, KieJson.Options);
 
         _logger.LogInformation("DANCE_SELL_79AI_REFERENCE_OUTBOUND_FORM payload={PayloadJson} formFields={FormFields}",
@@ -312,8 +310,8 @@ public sealed class Ai79DanceSellReferenceProvider : IDanceSellReferenceProvider
         }
     }
 
-    private static string BuildReferencePrompt()
-        => """
+    private static string BuildReferencePrompt(bool hasProduct)
+        => hasProduct ? """
 VIRTUAL TRY-ON – PREVIEW ONLY
 
 Use IMAGE 1 as FIXED BASE BODY.
@@ -329,6 +327,14 @@ If conflict occurs between clothing and pose:
 → Prioritize BODY POSE from IMAGE 1 over clothing realism
 
 Photorealistic, product preview quality.
+""" : """
+PERSON ONLY REFERENCE IMAGE
+
+Use the supplied person image as the sole visual reference.
+- Preserve exact identity, face, body, pose, anatomy, camera angle and lighting
+- Do not add, infer or mention any product, clothing reference or additional subject
+
+Photorealistic, clean image suitable for video generation.
 """;
 
     private static string[] BuildGenerateImageFieldNames(IReadOnlyDictionary<string, string?> options)

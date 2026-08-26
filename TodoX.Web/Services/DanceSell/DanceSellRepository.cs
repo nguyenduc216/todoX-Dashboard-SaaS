@@ -17,6 +17,7 @@ public interface IDanceSellRepository
     Task UpdateBusinessAsync(Guid id, DanceSellUpdateBusinessRequest request, CancellationToken ct = default);
     Task UpdateCharacterAsync(Guid id, Guid mediaId, string objectKey, string publicUrl, CancellationToken ct = default);
     Task UpdateProductAsync(Guid id, Guid mediaId, string objectKey, string publicUrl, CancellationToken ct = default);
+    Task ClearProductAsync(Guid id, CancellationToken ct = default);
     Task UpdateDirectReferenceAsync(Guid id, Guid mediaId, string objectKey, string publicUrl, CancellationToken ct = default);
     Task UpdateMotionUploadAsync(Guid id, Guid mediaId, string objectKey, string publicUrl, CancellationToken ct = default);
     Task UpdateMotionTikTokAsync(Guid id, string sourceUrl, Guid mediaId, string objectKey, string publicUrl, CancellationToken ct = default);
@@ -344,6 +345,21 @@ public sealed class DanceSellRepository : IDanceSellRepository
 
     public async Task UpdateProductAsync(Guid id, Guid mediaId, string objectKey, string publicUrl, CancellationToken ct = default)
         => await UpdateMediaAsync(id, "product_media_id", mediaId, "product_object_key", objectKey, "product_image_url", publicUrl, ct);
+
+    public async Task ClearProductAsync(Guid id, CancellationToken ct = default)
+    {
+        using var conn = await _factory.OpenAsync(ct);
+        await conn.ExecuteAsync(
+            """
+            UPDATE dance_sell.dance_sell_jobs
+               SET product_media_id=NULL,
+                   product_object_key=NULL,
+                   product_image_url=NULL,
+                   updated_at=now()
+             WHERE id=@id;
+            """,
+            new { id });
+    }
 
     public async Task UpdateDirectReferenceAsync(Guid id, Guid mediaId, string objectKey, string publicUrl, CancellationToken ct = default)
     {

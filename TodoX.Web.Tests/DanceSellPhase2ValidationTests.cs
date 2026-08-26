@@ -192,7 +192,7 @@ public sealed class DanceSellPhase2ValidationTests
         var switchSql = File.ReadAllText(Path.Combine(root, "database/manual/rdance-fashion/02_switch_reference_route_to_gpt_image_2.sql"));
 
         Assert.Contains("[\"subjects[0][url]\"] = characterUrl", operations, StringComparison.Ordinal);
-        Assert.Contains("[\"subjects[1][url]\"] = productUrl", operations, StringComparison.Ordinal);
+        Assert.Contains("var hasProduct = !string.IsNullOrWhiteSpace(request.ProductImageUrl)", operations, StringComparison.Ordinal);
         Assert.Contains("Model = DanceSellConstants.Ai79GptImage2Model", operations, StringComparison.Ordinal);
         Assert.Contains("BaseUrl = \"https://api.gommo.net/ai\"", operations, StringComparison.Ordinal);
         Assert.Contains("Domain = \"79ai.net\"", operations, StringComparison.Ordinal);
@@ -201,7 +201,7 @@ public sealed class DanceSellPhase2ValidationTests
         Assert.Contains("var category = \"FASHION\"", operations, StringComparison.Ordinal);
         Assert.Contains("var resolution = \"1k\"", operations, StringComparison.Ordinal);
         Assert.Contains("var mode = \"low\"", operations, StringComparison.Ordinal);
-        Assert.Contains("BuildReferencePrompt()", operations, StringComparison.Ordinal);
+        Assert.Contains("BuildReferencePrompt(hasProduct)", operations, StringComparison.Ordinal);
         Assert.Contains("formFields", operations, StringComparison.Ordinal);
         Assert.DoesNotContain("secondImageField", operations, StringComparison.Ordinal);
         Assert.DoesNotContain("image_2", operations, StringComparison.Ordinal);
