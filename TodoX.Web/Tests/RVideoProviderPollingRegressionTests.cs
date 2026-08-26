@@ -360,8 +360,50 @@ public sealed class RVideoProviderPollingRegressionTests
         var source = ReadRepoFile("Services", "AiProviders", "AiImageBillingService.cs");
 
         Assert.Contains("\"render_job_scene_video\"", source);
-        Assert.Contains("\"points for video generation\"", source);
-        Assert.Contains("Insufficient TodoX {subject}", source);
+        Assert.Contains("tạo video", source);
+        Assert.Contains("FormatInsufficientPoints", source);
+    }
+
+    [Fact]
+    public void SceneVideoStorageKeyUsesVersionScopedImmutablePath()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "SceneMediaVersioningService.cs");
+
+        Assert.Contains("rvideo/project-{projectId}/scene-{sceneId}/video/{videoVersionId:N}.mp4", source);
+        Assert.DoesNotContain("scenes/{sceneId}/videos/{videoVersionId:N}/output/scene-video.mp4", source);
+    }
+
+    [Fact]
+    public void SceneVideoRecoveryCanLocateVersionByLogicalRequestId()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "SceneMediaVersioningService.cs");
+
+        Assert.Contains("GetSceneVideoVersionByLogicalRequestIdAsync", source);
+        Assert.Contains("GetRecoverableSceneVideoVersionAsync", source);
+        Assert.Contains("pending_reconciliation", source);
+        Assert.Contains("RVIDEO_VIDEO_PERSIST_FAILED", source);
+    }
+
+    [Fact]
+    public void _79AiReconciliationUses79AiVideoServiceAndNotYescalePoll()
+    {
+        var source = ReadRepoFile("Services", "AiProviders", "AiImageBillingReconciliationWorker.cs");
+        var start = source.IndexOf("private async Task Reconcile79AiVideoAsync", StringComparison.Ordinal);
+        var end = source.IndexOf("private static string ResolvePhysicalPath", start, StringComparison.Ordinal);
+
+        Assert.True(start >= 0);
+        Assert.True(end > start);
+
+        var method = source[start..end];
+
+        Assert.Contains("IRVideo79AiVideoService", source);
+        Assert.Contains("string.Equals(item.ProviderCode, \"79ai\"", source);
+        Assert.Contains("string.Equals(item.CapabilityCode, \"rvideo_scene_video_generation\"", source);
+        Assert.Contains("Ai79TaskStatusNormalizer.Running", method);
+        Assert.Contains("Ai79TaskStatusNormalizer.Failed", method);
+        Assert.Contains("ResolveRuntimeAsync(item.ProviderId, item.ProviderCapabilityId, item.ProviderCode!", method);
+        Assert.Contains("PollAsync(runtime, item.ProviderTaskId!", method);
+        Assert.DoesNotContain("GetStatusAsync(", method);
     }
 
     [Fact]

@@ -151,7 +151,7 @@ public sealed class AiImageRenderRouter : IAiImageRenderRouter
             TrustedPayerContext = request.TrustedPayerContext,
             TariffSnapshotJson = tariffSnapshotJson,
             Metadata = request.Metadata,
-            CreatedBy = request.CreatedBy
+            CreatedBy = ParseGuidOrNull(request.CreatedBy)
         }, cancellationToken);
 
         if (!reservation.Ok || (!reservation.ShouldSubmitProvider && string.IsNullOrWhiteSpace(request.ProviderTaskId)))
@@ -591,4 +591,7 @@ public sealed class AiImageRenderRouter : IAiImageRenderRouter
     {
         return response.ExecutionState == AiProviderExecutionState.Pending;
     }
+
+    private static Guid? ParseGuidOrNull(string? value)
+        => Guid.TryParse(value, out var parsed) ? parsed : null;
 }

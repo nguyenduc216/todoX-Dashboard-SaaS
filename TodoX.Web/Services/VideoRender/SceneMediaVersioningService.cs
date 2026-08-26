@@ -313,6 +313,8 @@ public interface ISceneMediaVersioningService
     Task CompleteSceneVideoVersionAsync(Guid versionId, SceneVideoVersionCompleteRequest request, CancellationToken ct = default);
     Task FailSceneVideoVersionAsync(Guid versionId, string? errorCode, string? errorMessage, CancellationToken ct = default);
     Task<IReadOnlyList<SceneVideoVersionDto>> ListSceneVideoVersionsAsync(long sceneId, int skip = 0, int take = 20, CancellationToken ct = default);
+    Task<SceneVideoVersionDto?> GetSceneVideoVersionByLogicalRequestIdAsync(string logicalRequestId, CancellationToken ct = default);
+    Task<SceneVideoVersionDto?> GetRecoverableSceneVideoVersionAsync(long sceneId, string logicalRequestId, CancellationToken ct = default);
     Task<IReadOnlyList<SceneVideoVersionDto>> ListSceneVideoVersionsAsync(long sceneId, CurrentUserSession user, int skip = 0, int take = 20, CancellationToken ct = default);
     Task SelectSceneVideoVersionAsync(long sceneId, Guid versionId, Guid? selectedBy, CancellationToken ct = default);
     Task SelectSceneVideoVersionAsync(long sceneId, Guid versionId, CurrentUserSession user, CancellationToken ct = default);
@@ -1364,6 +1366,55 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
         return rows.ToList();
     }
 
+    public async Task<SceneVideoVersionDto?> GetSceneVideoVersionByLogicalRequestIdAsync(string logicalRequestId, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(logicalRequestId))
+        {
+            return null;
+        }
+
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        return await conn.QuerySingleOrDefaultAsync<SceneVideoVersionDto>(
+            SelectSceneVideoVersionSql +
+            """
+             WHERE logical_request_id=@logicalRequestId
+               AND tenant_id=@tenant
+             ORDER BY CASE WHEN lower(status)='pending_reconciliation' THEN 0 ELSE 1 END,
+                      version_number DESC
+             LIMIT 1;
+            """,
+            new { logicalRequestId, tenant = _tenant.TenantId });
+    }
+
+    public async Task<SceneVideoVersionDto?> GetRecoverableSceneVideoVersionAsync(long sceneId, string logicalRequestId, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(logicalRequestId))
+        {
+            return null;
+        }
+
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        return await conn.QuerySingleOrDefaultAsync<SceneVideoVersionDto>(
+            SelectSceneVideoVersionSql +
+            """
+             WHERE scene_id=@sceneId
+               AND tenant_id=@tenant
+               AND logical_request_id=@logicalRequestId
+               AND provider_task_id IS NOT NULL
+               AND btrim(provider_task_id) <> ''
+               AND (
+                    lower(status) IN ('queued','submitted','pending','processing','pending_reconciliation','video_rendering','rendering')
+                    OR (lower(status) IN ('failed','failure','error') AND error_code IN ('RVIDEO_VIDEO_PERSIST_FAILED','rvideo_video_persist_failed','PROVIDER_SUCCESS_RECONCILIATION_FAILED','MEDIA_STORAGE_FAILED'))
+               )
+             ORDER BY CASE WHEN lower(status)='pending_reconciliation' THEN 0 ELSE 1 END,
+                      version_number DESC
+             LIMIT 1;
+            """,
+            new { sceneId, tenant = _tenant.TenantId, logicalRequestId });
+    }
+
     public async Task<IReadOnlyList<SceneAudioVersionDto>> ListSceneAudioVersionsAsync(long sceneId, CurrentUserSession user, int skip = 0, int take = 20, CancellationToken ct = default)
     {
         await EnsureSceneAccessAsync(sceneId, user, ct);
@@ -2288,7 +2339,7 @@ public static class SceneMediaStorageKeys
         => $"render-projects/{tenantId:N}/{projectId}/scenes/{sceneId}/images/{imageVersionId:N}/output/scene-image.{NormalizeExtension(extension)}";
 
     public static string SceneVideoOutput(Guid tenantId, long projectId, long sceneId, Guid videoVersionId)
-        => $"render-projects/{tenantId:N}/{projectId}/scenes/{sceneId}/videos/{videoVersionId:N}/output/scene-video.mp4";
+        => $"rvideo/project-{projectId}/scene-{sceneId}/video/{videoVersionId:N}.mp4";
 
     public static string SceneAudioOutput(Guid tenantId, long projectId, long sceneId, Guid audioVersionId)
         => $"render-projects/{tenantId:N}/{projectId}/scenes/{sceneId}/audio/{audioVersionId:N}/output/scene-audio.mp3";

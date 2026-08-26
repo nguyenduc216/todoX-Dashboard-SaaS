@@ -57,7 +57,7 @@ public sealed class AiImageBillingReserveRequest
     public AiBillingTrustedPayerContext? TrustedPayerContext { get; set; }
     public string? TariffSnapshotJson { get; set; }
     public object? Metadata { get; set; }
-    public string? CreatedBy { get; set; }
+    public Guid? CreatedBy { get; set; }
 }
 
 public sealed class AiImageBillingCompleteRequest
@@ -129,6 +129,10 @@ public sealed class AiImageBillingReconciliationItem
     public string? RequestedModel { get; init; }
     public string? ActualModel { get; init; }
     public string? ProviderTaskId { get; init; }
+    public string? ProviderCode { get; init; }
+    public string? CapabilityCode { get; init; }
+    public long ProviderId { get; init; }
+    public long ProviderCapabilityId { get; init; }
     public int ReconciliationAttemptCount { get; init; }
     public string? TariffSnapshotJson { get; init; }
 }
@@ -469,6 +473,10 @@ public sealed class AiImageBillingService : IAiImageBillingService
                        r.requested_model AS RequestedModel,
                        r.actual_model AS ActualModel,
                        r.provider_task_id AS ProviderTaskId,
+                       r.provider_code AS ProviderCode,
+                       r.capability_code AS CapabilityCode,
+                       r.provider_id AS ProviderId,
+                       r.provider_capability_id AS ProviderCapabilityId,
                        COALESCE(r.reconciliation_attempt_count, 0) AS ReconciliationAttemptCount,
                        r.tariff_snapshot_json::text AS TariffSnapshotJson;
             """,
@@ -873,7 +881,7 @@ public sealed class AiImageBillingService : IAiImageBillingService
         public decimal SystemChargedPoints { get; init; }
         public decimal ReservedPoints => CustomerChargedPoints + SystemChargedPoints;
         public string Status { get; init; } = string.Empty;
-        public string? CreatedBy { get; init; }
+        public Guid? CreatedBy { get; init; }
     }
 }
 

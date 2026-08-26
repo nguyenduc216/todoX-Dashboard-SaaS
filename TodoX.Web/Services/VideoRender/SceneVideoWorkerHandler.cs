@@ -228,38 +228,58 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
             var policy = GetAttemptPolicy(input, attemptIndex)
                 ?? throw new InvalidOperationException("SCENE_VIDEO_PROVIDER_POLICY_MISSING");
             var attemptLogicalRequestId = BuildAttemptLogicalRequestId(input.LogicalRequestId, attemptIndex);
-            var version = await _versions.CreateQueuedSceneVideoVersionAsync(new SceneVideoVersionCreateRequest(
-                input.ProjectId,
-                input.SceneId,
-                sourceVersion.Id,
-                input.UserId,
-                input.CustomerId,
-                job.Id,
+            var version = await _versions.GetRecoverableSceneVideoVersionAsync(
+                scene.Id,
                 attemptLogicalRequestId,
-                input.ImagePrompt,
-                input.VideoPrompt,
-                SceneSnapshot: new
-                {
-                    scene.Id,
-                    scene.ProjectId,
-                    input.SceneIndex,
-                    scene.Title,
-                    input.DurationSeconds,
-                    input.SourceImageUrl,
-                    input.SourceImageObjectKey,
-                    sourceVersion.PublicUrl,
-                    sourceVersion.StorageKey,
-                    attemptIndex
-                },
-                RenderConfigSnapshot: new
-                {
-                    input,
-                    attemptIndex,
-                    policy.Model,
-                    policy.Mode,
-                    provider = input.ProviderCode,
-                    capability = input.CapabilityCode
-                }), ct);
+                ct)
+                ?? await _versions.CreateQueuedSceneVideoVersionAsync(new SceneVideoVersionCreateRequest(
+                    input.ProjectId,
+                    input.SceneId,
+                    sourceVersion.Id,
+                    input.UserId,
+                    input.CustomerId,
+                    job.Id,
+                    attemptLogicalRequestId,
+                    input.ImagePrompt,
+                    input.VideoPrompt,
+                    SceneSnapshot: new
+                    {
+                        scene.Id,
+                        scene.ProjectId,
+                        input.SceneIndex,
+                        scene.Title,
+                        input.DurationSeconds,
+                        input.SourceImageUrl,
+                        input.SourceImageObjectKey,
+                        sourceVersion.PublicUrl,
+                        sourceVersion.StorageKey,
+                        attemptIndex
+                    },
+                    RenderConfigSnapshot: new
+                    {
+                        input,
+                        attemptIndex,
+                        policy.Model,
+                        policy.Mode,
+                        provider = input.ProviderCode,
+                        capability = input.CapabilityCode
+                    }), ct);
+
+            if (!string.IsNullOrWhiteSpace(version.ProviderTaskId))
+            {
+                await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_PROVIDER_REUSED", "info",
+                    "Recovered the existing provider task for the same scene-video version.",
+                    new
+                    {
+                        jobId = job.Id,
+                        input.ProjectId,
+                        input.SceneId,
+                        sceneVideoVersionId = version.Id,
+                        providerTaskId = version.ProviderTaskId,
+                        providerCode = input.ProviderCode,
+                        model = policy.Model
+                    }, ct);
+            }
 
             var tariffSnapshot = string.IsNullOrWhiteSpace(input.TariffSnapshotJson)
                 ? JsonSerializer.Serialize(new
@@ -587,6 +607,13 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                         AspectRatio: input.AspectRatio,
                         ResultMediaId: saved.Id), ct);
 
+                    await _repo.AddProjectEventAsync(project.Id, "SCENE_VIDEO_READY", "info",
+                        $"Scene {input.SceneIndex} rendered successfully.",
+                        new { jobId = job.Id, input.SceneId, input.SceneIndex, taskId, videoUrl = saved.PublicUrl ?? saved.FileUrl }, ct);
+                    await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_COMPLETED", "info",
+                        "Scene-video provider output was persisted.",
+                        new { jobId = job.Id, input.ProjectId, input.SceneId, input.SceneIndex, taskId }, ct);
+                    await _finalizer.TryFinalizeSceneMediaAsync(project.Id, scene.Id, "SCENE_VIDEO_READY", ct);
                     if (reservation.BillingRecordId is not null)
                     {
                         await _billing.CompleteAsync(new AiImageBillingCompleteRequest
@@ -600,14 +627,6 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                         }, ct);
                     }
                     await LogUsageAsync(input, job, attemptLogicalRequestId, reservation.ChargedPoints, status.SanitizedResponseJson, true, null, taskId, ct);
-
-                    await _repo.AddProjectEventAsync(project.Id, "SCENE_VIDEO_READY", "info",
-                        $"Scene {input.SceneIndex} rendered successfully.",
-                        new { jobId = job.Id, input.SceneId, input.SceneIndex, taskId, videoUrl = saved.PublicUrl ?? saved.FileUrl }, ct);
-                    await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_COMPLETED", "info",
-                        "Scene-video provider output was persisted.",
-                        new { jobId = job.Id, input.ProjectId, input.SceneId, input.SceneIndex, taskId }, ct);
-                    await _finalizer.TryFinalizeSceneMediaAsync(project.Id, scene.Id, "SCENE_VIDEO_READY", ct);
                     return;
                 }
                 catch (VideoReconciliationException ex)
@@ -672,9 +691,9 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
             throw new RenderJobDeferredException(errorMessage);
         }
 
-        var finalCode = errorCode is "PROVIDER_OUTPUT_URL_MISSING" or "MEDIA_STORAGE_FAILED"
+        var finalCode = errorCode is "PROVIDER_OUTPUT_URL_MISSING"
             ? errorCode
-            : "PROVIDER_SUCCESS_RECONCILIATION_FAILED";
+            : "RVIDEO_VIDEO_PERSIST_FAILED";
         await _versions.FailSceneVideoVersionAsync(versionId, finalCode, errorMessage, ct);
         await _repo.UpdateSceneAsync(scene.Id, VideoSceneStatuses.Failed,
             errorMessage: errorMessage, title: scene.Title, scenePrompt: scene.ScenePrompt,

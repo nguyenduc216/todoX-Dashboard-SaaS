@@ -212,6 +212,13 @@ public sealed class MediaFileService : IMediaFileService
             await File.WriteAllBytesAsync(tempPath, content, ct);
             if (File.Exists(absPath))
             {
+                TryDeleteFile(tempPath);
+                var existing = await GetByObjectKeyAsync(objectKey, ct);
+                if (existing is not null)
+                {
+                    return existing;
+                }
+
                 throw new InvalidOperationException("Storage key cá»§a phiÃªn báº£n Ä‘Ã£ tá»“n táº¡i, khÃ´ng ghi Ä‘Ã¨.");
             }
             File.Move(tempPath, absPath);
