@@ -272,7 +272,7 @@ else
                                         </MudExpansionPanel>
                                     </MudExpansionPanels>
                                     <MudStack Row="true" Spacing="2" Class="flex-wrap gap-2">
-                                        <MudButton Color="Color.Warning" Variant="Variant.Filled" OnClick="CreateProjectAsync" Disabled="@(_busy || _projectId is null)">Tạo / phân tách scene</MudButton>
+                                        <MudButton Color="Color.Warning" Variant="Variant.Filled" OnClick="CreateProjectAsync" Disabled="@(_busy || !CanCreateOrSplitScenes)">Tạo / phân tách scene</MudButton>
                                         <MudButton Color="Color.Primary" Variant="Variant.Outlined" OnClick="ReloadAsync" Disabled="@(_projectId is null || _busy)">Refresh</MudButton>
                                     </MudStack>
                                 </MudStack>
@@ -313,7 +313,7 @@ else
                         </div>
 
                         <div class="scene-list-scroll" tabindex="0">
-                        <MudStack Spacing="3">
+                        <div class="scene-card-grid">
                         @foreach (var scene in _project.Scenes.OrderBy(x => x.SceneIndex))
                         {
                             var draft = GetSceneDraft(scene);
@@ -377,7 +377,8 @@ else
                                                                   EmptyText="Chưa render video"
                                                                   FailedText="Lỗi render video"
                                                                   RetryDisabled="@_sceneVideoRetrying.Contains(scene.Id)"
-                                                                  OnRetry="@(() => EnqueueSceneVideoAsync(scene))" />
+                                                                  OnRetry="@(() => EnqueueSceneVideoAsync(scene))"
+                                                                  OnClick="@(() => OpenSceneVideoPreview(scene))" />
                                                 <div class="scene-media-actions">
                                                 <MudStack Row="true" Spacing="1" Class="flex-wrap gap-1">
                                                     <MudTooltip Text="Tạo video scene">
@@ -419,7 +420,7 @@ else
                                 </MudStack>
                             </MudPaper>
                         }
-                        </MudStack>
+                        </div>
                         </div>
                     }
                 </div>
@@ -624,6 +625,8 @@ else
     private bool _showFinalHistory;
     // Polling guard: prevents overlapping ReloadAsync calls.
     private readonly SemaphoreSlim _reloadLock = new(1, 1);
+    // Serializes implicit and manual draft persistence so a double click cannot create two drafts.
+    private readonly SemaphoreSlim _draftSaveGate = new(1, 1);
     // True while a background scene image batch job for this project is queued/rendering.
     private bool _batchActive;
     private IReadOnlyList<TodoX.Web.Services.Platform.CoreServiceView> _coreServices = Array.Empty<TodoX.Web.Services.Platform.CoreServiceView>();
@@ -854,107 +857,75 @@ else
         _pollCts?.Dispose();
         _pollTimer?.Dispose();
         _reloadLock.Dispose();
+        _draftSaveGate.Dispose();
     }
+
+    private bool CanCreateOrSplitScenes
+        => AuthState.CurrentUser is not null
+           && ServiceId is Guid serviceId
+           && serviceId != Guid.Empty
+           && !string.IsNullOrWhiteSpace(ServiceCode)
+           && !string.IsNullOrWhiteSpace(_prompt)
+           && HasProjectAspectRatio
+           && HasProjectResolution
+           && _promptParseResult.IsJsonValid;
 
     private async Task CreateProjectAsync()
     {
         if (AuthState.CurrentUser is null) return;
-        if (_projectId is not null)
-        {
-            if (!EnsureAspectRatioSelected())
-            {
-                return;
-            }
-
-            _busy = true;
-            try
-            {
-                if (!_promptParseResult.IsJsonValid)
-                {
-                    _promptParseResult = PromptParser.Parse(_prompt);
-                }
-
-                _prompt = PersistPromptVideoSettings(_prompt, _aspectRatio, _resolution, _autoFinish);
-                var scenes = BuildSceneRequests().Select(x => new VideoProjectSceneDto
-                {
-                    SceneIndex = x.SceneIndex,
-                    Title = x.Title,
-                    DurationSeconds = x.DurationSeconds,
-                    ScenePrompt = x.ScenePrompt,
-                    ImagePrompt = x.ImagePrompt,
-                    VideoPrompt = x.VideoPrompt,
-                    Status = VideoSceneStatuses.Draft
-                }).ToList();
-                await VideoRepo.ReplaceScenesAsync(_projectId.Value, scenes);
-                await VideoRepo.AddProjectEventAsync(_projectId.Value, "SCENES_CREATED", "info", "RVIDEO scenes created from the saved Core Job.", new { jobId = _jobId, projectId = _projectId });
-                await ReloadAsync();
-                _tabIndex = 1;
-                Snackbar.Add("Đã tạo và phân tách scene.", Severity.Success);
-            }
-            catch (Exception ex)
-            {
-                Logger.LogError(ex, "VIDEO_RENDER_CREATE_SCENES_FAILED jobId={JobId} projectId={ProjectId}", _jobId, _projectId);
-                Snackbar.Add(ex.Message, Severity.Error);
-            }
-            finally
-            {
-                _busy = false;
-            }
-            return;
-        }
-
         if (!EnsureAspectRatioSelected())
         {
             return;
         }
+        if (!EnsureResolutionSelected())
+        {
+            return;
+        }
+        if (!_promptParseResult.IsJsonValid)
+        {
+            _promptParseResult = PromptParser.Parse(_prompt);
+        }
+        if (!_promptParseResult.IsJsonValid)
+        {
+            Snackbar.Add(_promptParseResult.ErrorMessage ?? "Prompt JSON không hợp lệ.", Severity.Warning);
+            return;
+        }
+
         _busy = true;
         try
         {
-            if (!_promptParseResult.IsJsonValid)
+            await AddDebugAsync("rvideo_scene_split_begin", "Bắt đầu tạo / phân tách scene", "STARTED", "Đã xác thực cấu hình và chuẩn bị lưu draft.");
+            if (!await EnsureDraftSavedAsync())
             {
-                _promptParseResult = PromptParser.Parse(_prompt);
+                return;
             }
-            await AddDebugAsync("ui_started", "Bắt đầu xử lý", "STARTED", "Người dùng bấm nút Tạo / phân tách scene.");
-            await AddDebugAsync("ui_auth", "Kiểm tra đăng nhập", "INFO", $"User={MaskGuid(AuthState.CurrentUser.UserId)}, Customer={MaskGuid(AuthState.CurrentUser.CustomerId)}");
-            var inputDebug = BuildInputDebugMessage();
-            await AddDebugAsync("ui_input", "Kiểm tra prompt", "INFO", inputDebug);
-            _prompt = PersistPromptVideoSettings(_prompt, _aspectRatio, _resolution, _autoFinish);
 
-            var storageRoot = VideoOptions.CurrentValue.StorageRoot;
-            var publicBase = VideoOptions.CurrentValue.PublicBase;
-            var jobFolder = DateTime.UtcNow.ToString("yyyyMMdd-HHmmss");
-            await AddDebugAsync("repo_call", "Gọi repository", "INFO", $"storageRoot={storageRoot}, publicBase={publicBase}, jobFolder={jobFolder}");
-            var result = await VideoRepo.CreateProjectAsync(new VideoProjectCreateRequest
+            var scenes = BuildSceneRequests().Select(x => new VideoProjectSceneDto
             {
-                Prompt = _prompt,
-                AspectRatio = _aspectRatio,
-                CharacterId = _selectedCharacter?.Id,
-                TotalSeconds = _totalSeconds,
-                SceneSeconds = Math.Max(1, _sceneSeconds),
-                ThinkScenes = _thinkScenes,
-                Title = _promptParseResult.Model.VideoTitle ?? "Render video job",
-                CreateEmptyProject = false,
-                Scenes = BuildSceneRequests()
-            }, AuthState.CurrentUser.UserId, AuthState.CurrentUser.CustomerId, storageRoot, publicBase, jobFolder);
-            _projectId = result.Id;
-            await RVideoSettings.SaveAsync(result.Id, BuildRVideoSettingsRequest());
-            await ProjectCreated.InvokeAsync(result.Id);
-            Logger.LogInformation("VIDEO_RENDER_CREATE_PROJECT_OK projectId={ProjectId} sceneCount={SceneCount} status={Status}", result.Id, result.SceneCount, result.Status);
+                SceneIndex = x.SceneIndex,
+                Title = x.Title,
+                DurationSeconds = x.DurationSeconds,
+                ScenePrompt = x.ScenePrompt,
+                ImagePrompt = x.ImagePrompt,
+                VideoPrompt = x.VideoPrompt,
+                Status = VideoSceneStatuses.Draft
+            }).ToList();
+            await VideoRepo.ReplaceScenesAsync(_projectId!.Value, scenes);
+            await VideoRepo.AddProjectEventAsync(_projectId.Value, "SCENES_CREATED", "info", "RVIDEO scenes created from the saved Core Job.", new { jobId = _jobId, projectId = _projectId });
             await ReloadAsync();
             if (_executionMode == RVideoExecutionModes.Auto)
             {
                 await EnqueueBulkSceneImageRenderAsync(onlyMissingOrFailed: true);
             }
-            Snackbar.Add("Đã tạo project và chuyển sang tab Scene / Hình ảnh.", Severity.Success);
+            Snackbar.Add("Đã tạo và phân tách scene.", Severity.Success);
             _tabIndex = 1;
-            await LogProjectEvent("PROJECT_CREATED", "info", "Đã tạo project và sinh scene plan mock.", new { result.Id, result.SceneCount, result.Status });
-            await AddDebugAsync("ui_done", "Hoàn tất", "SUCCESS", $"Tạo project thành công: {result.Id}", $"SceneCount={result.SceneCount}, Status={result.Status}");
+            await AddDebugAsync("rvideo_scene_split_done", "Hoàn tất", "SUCCESS", $"Đã tạo {scenes.Count} scene.");
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "VIDEO_RENDER_CREATE_PROJECT_FAILED");
+            Logger.LogError(ex, "VIDEO_RENDER_CREATE_SCENES_FAILED jobId={JobId} projectId={ProjectId}", _jobId, _projectId);
             Snackbar.Add(ex.Message, Severity.Error);
-            await AddDebugAsync("ui_failed", "Thất bại", "FAILED", ex.Message, ex.ToString());
+            await AddDebugAsync("rvideo_scene_split_failed", "Tạo / phân tách scene thất bại", "FAILED", ex.Message, ex.ToString());
         }
         finally { _busy = false; }
     }
@@ -1731,6 +1702,24 @@ else
         return Task.CompletedTask;
     }
 
+    private Task OpenSceneVideoPreview(VideoProjectSceneDto scene)
+    {
+        var videoUrl = ResolveDraftVideoUrl(scene, GetSceneDraft(scene));
+        if (string.IsNullOrWhiteSpace(videoUrl)) return Task.CompletedTask;
+
+        var title = scene.Title ?? $"Scene {scene.SceneIndex}";
+        var parameters = new DialogParameters
+        {
+            [nameof(Components.Dialogs.LandingIndustryVideoPreviewDialog.Title)] = title,
+            [nameof(Components.Dialogs.LandingIndustryVideoPreviewDialog.VideoUrl)] = videoUrl,
+            [nameof(Components.Dialogs.LandingIndustryVideoPreviewDialog.AspectRatio)] = ProjectAspectRatio,
+            [nameof(Components.Dialogs.LandingIndustryVideoPreviewDialog.AutoPlay)] = true
+        };
+        var options = new DialogOptions { CloseButton = true, FullWidth = true, MaxWidth = MaxWidth.Large };
+        _ = DialogService.ShowAsync<Components.Dialogs.LandingIndustryVideoPreviewDialog>(title, parameters, options);
+        return Task.CompletedTask;
+    }
+
     private Severity PromptValidationSeverity
         => !_promptParseResult.IsJsonValid
             ? Severity.Warning
@@ -2224,18 +2213,59 @@ else
         _busy = true;
         try
         {
-            if (_project is null && _jobId is null)
-            {
-                if (ServiceId is not Guid serviceId || string.IsNullOrWhiteSpace(ServiceCode))
-                {
-                    throw new InvalidOperationException("Thiếu thông tin dịch vụ RVIDEO.");
-                }
+            await PersistCurrentJobAsync(showSuccessMessage: true, navigateAfterCreate: true);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "VIDEO_RENDER_SAVE_JOB_FAILED projectId={ProjectId}", _projectId);
+            Snackbar.Add(ex.Message, Severity.Error);
+            await AddDebugAsync("job_save_failed", "Lưu job thất bại", "FAILED", ex.Message, ex.ToString());
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
 
-                if (!_promptParseResult.IsJsonValid)
-                {
-                    _promptParseResult = PromptParser.Parse(_prompt);
-                }
-                _prompt = PersistPromptVideoSettings(_prompt, _aspectRatio, _resolution, _autoFinish);
+    private async Task<bool> EnsureDraftSavedAsync()
+    {
+        try
+        {
+            return await PersistCurrentJobAsync(showSuccessMessage: false, navigateAfterCreate: false);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "RVIDEO_DRAFT_SAVE_FAILED jobId={JobId} projectId={ProjectId}", _jobId, _projectId);
+            Snackbar.Add($"Không thể lưu draft RVIDEO: {ex.Message}", Severity.Error);
+            await AddDebugAsync("rvideo_draft_save_failed", "Lưu draft thất bại", "FAILED", ex.Message, ex.ToString());
+            return false;
+        }
+    }
+
+    private async Task<bool> PersistCurrentJobAsync(bool showSuccessMessage, bool navigateAfterCreate)
+    {
+        if (AuthState.CurrentUser is null) return false;
+        await _draftSaveGate.WaitAsync();
+        try
+        {
+            if (!_promptParseResult.IsJsonValid)
+            {
+                _promptParseResult = PromptParser.Parse(_prompt);
+            }
+            if (!_promptParseResult.IsJsonValid)
+            {
+                throw new InvalidOperationException(_promptParseResult.ErrorMessage ?? "Prompt JSON không hợp lệ.");
+            }
+            if (ServiceId is not Guid serviceId || serviceId == Guid.Empty || string.IsNullOrWhiteSpace(ServiceCode))
+            {
+                throw new InvalidOperationException("Thiếu thông tin dịch vụ RVIDEO.");
+            }
+
+            _prompt = PersistPromptVideoSettings(_prompt, _aspectRatio, _resolution, _autoFinish);
+            await AddDebugAsync("rvideo_draft_save_begin", "Lưu draft RVIDEO", "STARTED", $"Job={_jobId?.ToString() ?? "new"}, Project={_projectId?.ToString() ?? "new"}");
+
+            if (_jobId is null && _projectId is null)
+            {
                 var created = await RVideoJobs.CreateDraftAsync(new RVideoJobCreateRequest
                 {
                     ServiceId = serviceId,
@@ -2251,18 +2281,28 @@ else
                 }, AuthState.CurrentUser, VideoOptions.CurrentValue.StorageRoot, VideoOptions.CurrentValue.PublicBase, DateTime.UtcNow.ToString("yyyyMMdd-HHmmss"));
                 _jobId = created.JobId;
                 _projectId = created.ProjectId;
-                Snackbar.Add("Đã lưu RVIDEO job.", Severity.Success);
-                Navigation.NavigateTo(created.Route, replace: true);
-                return;
+                await AddDebugAsync("rvideo_draft_created", "Đã tạo draft RVIDEO", "SUCCESS", $"Job={created.JobId}, Project={created.ProjectId}");
+                await ProjectCreated.InvokeAsync(created.ProjectId);
+                await ReloadAsync();
+                if (showSuccessMessage) Snackbar.Add("Đã lưu RVIDEO job.", Severity.Success);
+                if (navigateAfterCreate) Navigation.NavigateTo(created.Route, replace: true);
+                return true;
             }
-            if (_project is null) return;
+
+            if (_project is null && _projectId is long existingProjectId)
+            {
+                await ReloadAsync();
+            }
+            if (_project is null)
+            {
+                throw new InvalidOperationException("Không tìm thấy project RVIDEO hiện tại.");
+            }
 
             foreach (var scene in _project.Scenes)
             {
                 NormalizeScenePrompts(scene);
             }
 
-            _prompt = PersistPromptVideoSettings(_prompt, _aspectRatio, _resolution);
             var snapshot = BuildJobSnapshot();
             await VideoRepo.UpdateProjectDraftAsync(_project.Id, new VideoProjectUpdateRequest
             {
@@ -2280,7 +2320,7 @@ else
             {
                 await RVideoJobs.UpdateAsync(jobId, new RVideoJobUpdateRequest
                 {
-                    Title = _project.Title,
+                    Title = _project.Title ?? _promptParseResult.Model.VideoTitle ?? "RVIDEO",
                     Prompt = _prompt,
                     AspectRatio = _aspectRatio,
                     Resolution = _resolution,
@@ -2291,19 +2331,15 @@ else
                 }, AuthState.CurrentUser);
             }
             await LogProjectEvent("JOB_SAVED", "info", "Lưu video project render-job.", snapshot);
-            Snackbar.Add("Đã lưu job.", Severity.Success);
+            await AddDebugAsync("rvideo_draft_updated", "Đã cập nhật draft RVIDEO", "SUCCESS", $"Job={_jobId?.ToString() ?? "unknown"}, Project={_project.Id}");
+            if (showSuccessMessage) Snackbar.Add("Đã lưu job.", Severity.Success);
             await ReloadAsync();
             await ProjectSaved.InvokeAsync();
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "VIDEO_RENDER_SAVE_JOB_FAILED projectId={ProjectId}", _project.Id);
-            Snackbar.Add(ex.Message, Severity.Error);
-            await AddDebugAsync("job_save_failed", "Lưu job thất bại", "FAILED", ex.Message, ex.ToString());
+            return true;
         }
         finally
         {
-            _busy = false;
+            _draftSaveGate.Release();
         }
     }
 

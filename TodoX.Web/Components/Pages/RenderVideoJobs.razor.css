@@ -277,6 +277,19 @@
     background: #10161d;
 }
 
+.scene-card-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    align-items: start;
+    width: 100%;
+}
+
+.scene-card-grid > .scene-card {
+    min-width: 0;
+    width: 100%;
+}
+
 .render-project-dialog-footer {
     flex: 0 0 auto;
     display: flex;
@@ -299,6 +312,10 @@
     .scene-video-grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
+
+    .scene-card-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
 }
 
 @media (max-width: 700px) {
@@ -308,7 +325,8 @@
 
     .scene-workflow,
     .scene-voice-row,
-    .scene-video-grid {
+    .scene-video-grid,
+    .scene-card-grid {
         grid-template-columns: minmax(0, 1fr);
     }
 }

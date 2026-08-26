@@ -11,7 +11,7 @@
     <DialogContent>
         @if (!string.IsNullOrWhiteSpace(VideoUrl))
         {
-            <video src="@VideoUrl" controls playsinline preload="metadata" style="@VideoStyle"></video>
+            <video @ref="_videoElement" src="@VideoUrl" controls playsinline preload="metadata" autoplay="@AutoPlay" style="@VideoStyle"></video>
         }
         else
         {
@@ -24,14 +24,37 @@
 </MudDialog>
 
 @code {
+    [Inject] private IJSRuntime JS { get; set; } = default!;
     [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
     [Parameter] public string? Title { get; set; }
     [Parameter] public string? VideoUrl { get; set; }
     [Parameter] public string AspectRatio { get; set; } = "9:16";
+    [Parameter] public bool AutoPlay { get; set; }
+
+    private ElementReference _videoElement;
 
     private string VideoStyle => AspectRatio == "16:9"
         ? "width:100%;max-height:68vh;background:#000;border-radius:12px;object-fit:contain;"
         : "display:block;width:min(420px,100%);max-height:72vh;margin:0 auto;background:#000;border-radius:12px;object-fit:contain;";
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || !AutoPlay || string.IsNullOrWhiteSpace(VideoUrl))
+        {
+            return;
+        }
+
+        try
+        {
+            await JS.InvokeVoidAsync("todoXVideoPreview.play", _videoElement);
+        }
+        catch (JSException)
+        {
+        }
+        catch (InvalidOperationException)
+        {
+        }
+    }
 
     private void Close() => MudDialog.Close();
 }
