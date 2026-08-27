@@ -234,7 +234,6 @@ public sealed class DanceSellRepository : IDanceSellRepository
                SET status='queued',
                    render_job_id=@renderJobId,
                    logical_request_id=@logicalRequestId,
-                   character_image_url=@preparedReferenceUrl,
                    motion_video_url=@motionVideoUrl,
                    motion_provider_code=@motionProviderCode,
                    motion_provider_model=@motionProviderModel,
