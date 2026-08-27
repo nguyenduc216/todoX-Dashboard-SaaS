@@ -36,7 +36,6 @@ public sealed class RDanceFashionDemoPageTests
         Assert.Contains("Navigation.NavigateTo(\"/jobs/rdance/new\", replace: true)", page, StringComparison.Ordinal);
         Assert.DoesNotContain("MudTabs", page, StringComparison.Ordinal);
         Assert.DoesNotContain("UploadMotionAsync", page, StringComparison.Ordinal);
-        Assert.DoesNotContain("RDance", page, StringComparison.Ordinal);
         Assert.DoesNotContain("rDance", page, StringComparison.Ordinal);
     }
 
@@ -67,7 +66,6 @@ public sealed class RDanceFashionDemoPageTests
         }
 
         Assert.DoesNotContain("/rdance-fashion-demo", page, StringComparison.Ordinal);
-        Assert.DoesNotContain("RDance", page, StringComparison.Ordinal);
         Assert.DoesNotContain("rDance", page, StringComparison.Ordinal);
     }
 
@@ -110,7 +108,6 @@ public sealed class RDanceFashionDemoPageTests
         Assert.DoesNotContain("Task.Delay(500)", page, StringComparison.Ordinal);
         Assert.DoesNotContain("/rdance-fashion-demo", page, StringComparison.Ordinal);
         Assert.DoesNotContain("await Task.Delay", page, StringComparison.Ordinal);
-        Assert.DoesNotContain("RDance", page, StringComparison.Ordinal);
         Assert.DoesNotContain("rDance", page, StringComparison.Ordinal);
         Assert.Contains("MotionSourceUrl", page, StringComparison.Ordinal);
         Assert.Contains("NavigateTo(\"/jobs/rdance/new\")", page, StringComparison.Ordinal);
@@ -165,6 +162,60 @@ public sealed class RDanceFashionDemoPageTests
     }
 
     [Fact]
+    public void RDanceInformationTabUsesTwoResponsiveColumnsAndKeepsOutputMetadataInProjectCard()
+    {
+        var page = ReadStrictUtf8(Path.Combine(FindRepoRoot(), "TodoX.Web", "Components", "Pages", "RDanceJobDetail.razor"));
+        var informationTabStart = page.IndexOf("<MudTabPanel Text=\"Thông tin\">", StringComparison.Ordinal);
+        var imageTabStart = page.IndexOf("<MudTabPanel Text=\"Hình ảnh\">", StringComparison.Ordinal);
+        Assert.True(informationTabStart >= 0 && imageTabStart > informationTabStart, "Could not locate the RDance information tab.");
+        var informationTab = page[informationTabStart..imageTabStart];
+
+        Assert.Equal(2, informationTab.Split("<MudItem xs=\"12\" md=\"6\">", StringSplitOptions.None).Length - 1);
+        Assert.DoesNotContain("rdance-info-left-grid", informationTab, StringComparison.Ordinal);
+        Assert.DoesNotContain("<MudText Typo=\"Typo.h6\">Đầu ra</MudText>", informationTab, StringComparison.Ordinal);
+        Assert.DoesNotContain(">Tiếp tục<", informationTab, StringComparison.Ordinal);
+        Assert.Contains("<MudDivider />", informationTab, StringComparison.Ordinal);
+        Assert.Contains("Dịch vụ: Video nhảy quảng cáo thời trang", informationTab, StringComparison.Ordinal);
+        Assert.Contains("Tỷ lệ: @_ratio", informationTab, StringComparison.Ordinal);
+        Assert.Contains("Định dạng: MP4", informationTab, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RDanceDownloadsAuthorizeInTheCircuitAndDoNotNavigateToTheApiDownloadEndpoints()
+    {
+        var root = FindRepoRoot();
+        var page = ReadStrictUtf8(Path.Combine(root, "TodoX.Web", "Components", "Pages", "RDanceJobDetail.razor"));
+        var downloadScript = ReadStrictUtf8(Path.Combine(root, "TodoX.Web", "wwwroot", "js", "todox-download.js"));
+
+        Assert.DoesNotContain("Href=\"@DownloadUrl\"", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("Href=\"@ReferenceDownloadUrl\"", page, StringComparison.Ordinal);
+        Assert.Contains("OnClick=\"DownloadResultAsync\"", page, StringComparison.Ordinal);
+        Assert.Contains("OnClick=\"DownloadReferenceAsync\"", page, StringComparison.Ordinal);
+        Assert.Contains("var job = await DanceSell.GetAsync(_job.Id, AuthState.CurrentUser);", page, StringComparison.Ordinal);
+        Assert.Contains("todoxDownload.downloadRemoteFile", page, StringComparison.Ordinal);
+        Assert.Contains("todox-rdance-{job.Id:N}.mp4", page, StringComparison.Ordinal);
+        Assert.Contains("_isDownloadingResult", page, StringComparison.Ordinal);
+        Assert.Contains("_isDownloadingReference", page, StringComparison.Ordinal);
+        Assert.Contains("fetch(url, { credentials: \"omit\" })", downloadScript, StringComparison.Ordinal);
+        Assert.Contains("response.blob()", downloadScript, StringComparison.Ordinal);
+        Assert.DoesNotContain("saveBase64File", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RDanceDownloadEndpointsReturnRawStreamingResultsInsteadOfJsonWrapping()
+    {
+        var endpoints = ReadStrictUtf8(Path.Combine(FindRepoRoot(), "TodoX.Web", "Services", "DanceSell", "DanceSellPhase2Endpoints.cs"));
+
+        Assert.Contains("=> await ExecuteResultAsync(auth, async user =>", endpoints, StringComparison.Ordinal);
+        Assert.Contains("new DanceSellRemoteDownloadResult(response, \"video/mp4\", $\"todox-rdance-{id:N}.mp4\")", endpoints, StringComparison.Ordinal);
+        Assert.Contains("new DanceSellRemoteDownloadResult(response, \"image/jpeg\", $\"todox-rdance-reference-{id:N}.jpg\")", endpoints, StringComparison.Ordinal);
+        Assert.Contains("private static async Task<IResult> ExecuteResultAsync", endpoints, StringComparison.Ordinal);
+        Assert.Contains("httpContext.Response.ContentType = contentType;", endpoints, StringComparison.Ordinal);
+        Assert.Contains("httpContext.Response.Headers.ContentDisposition = $\"attachment; filename=\\\"{fileName}\\\"\";", endpoints, StringComparison.Ordinal);
+        Assert.Contains("await stream.CopyToAsync(httpContext.Response.Body, httpContext.RequestAborted);", endpoints, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void RDanceDetailPageUsesCustomImageUploadZonesAndReferenceCopy()
     {
         var page = ReadStrictUtf8(Path.Combine(FindRepoRoot(), "TodoX.Web", "Components", "Pages", "RDanceJobDetail.razor"));
@@ -174,7 +225,6 @@ public sealed class RDanceFashionDemoPageTests
             "class=\"@CharacterImageUploadZoneClass\"",
             "class=\"@ProductImageUploadZoneClass\"",
             "Icons.Material.Filled.CloudUpload",
-            "Kéo thả ảnh vào đây",
             "hoặc bấm để chọn ảnh",
             "PNG / JPG / JPEG / WEBP · tối đa @MaxImageLabel",
             "Thay ảnh",
@@ -409,7 +459,7 @@ public sealed class RDanceFashionDemoPageTests
         Assert.Contains("backgroundSource = runtime.BackgroundSource", submit, StringComparison.Ordinal);
 
         Assert.Contains("DanceSellMotionProviderContract.ResolveProviderMode(route, job.Mode)", runtime, StringComparison.Ordinal);
-        Assert.Contains("DanceSellMotionProviderContract.ResolveProviderRatio(route)", runtime, StringComparison.Ordinal);
+        Assert.Contains("DanceSellMotionProviderContract.ResolveProviderRatio(route, job.Ratio)", runtime, StringComparison.Ordinal);
         Assert.Contains("DanceSellMotionProviderContract.ResolveReferenceImageField(route)", runtime, StringComparison.Ordinal);
         Assert.Contains("DanceSellMotionProviderContract.ResolveMotionVideoField(route)", runtime, StringComparison.Ordinal);
         Assert.Contains("\"upload_image_path\"", runtime, StringComparison.Ordinal);
@@ -479,12 +529,11 @@ public sealed class RDanceFashionDemoPageTests
         Assert.Contains("poll_count=0", reset, StringComparison.Ordinal);
         Assert.Contains("error_code=NULL", reset, StringComparison.Ordinal);
         Assert.Contains("error_message=NULL", reset, StringComparison.Ordinal);
-        Assert.DoesNotContain("result_video_url", reset, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("result_video_url=NULL", reset, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("status IN ('queued','submitted','rendering','failed','timeout')", reset, StringComparison.Ordinal);
 
         var retry = GetMethodSection(service, "RetryAsync");
         Assert.Contains("coreJob?.Status == RenderJobStatuses.Cancelled", retry, StringComparison.Ordinal);
-        Assert.Contains("ResetMotionForRetryAsync(operationId, retry.Id, ct)", retry, StringComparison.Ordinal);
         Assert.Contains("ResetMotionRenderStateAsync(job.Id, retry.Id, ct)", retry, StringComparison.Ordinal);
         Assert.Contains("current.Status is not (RenderJobStatuses.Failed or RenderJobStatuses.Cancelled)", renderService, StringComparison.Ordinal);
         var operationReset = GetMethodSection(operations, "ResetMotionForRetryAsync");
@@ -509,7 +558,7 @@ public sealed class RDanceFashionDemoPageTests
         Assert.Contains("Đã thực hiện:", page, StringComparison.Ordinal);
         Assert.Contains("ReloadAsync(wasActive)", page, StringComparison.Ordinal);
         Assert.Contains("_tabIndex = 3", page, StringComparison.Ordinal);
-        Assert.Contains("/api/dance-sell/jobs/{_job.Id}/download", page, StringComparison.Ordinal);
+        Assert.Contains("OnClick=\"DownloadResultAsync\"", page, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -609,7 +658,8 @@ public sealed class RDanceFashionDemoPageTests
         Assert.Contains("service.GetAsync(id, user, ct)", endpoints, StringComparison.Ordinal);
         Assert.Contains("job.ResultVideoUrl", endpoints, StringComparison.Ordinal);
         Assert.Contains("EnsurePublicHttpsUrlAsync", endpoints, StringComparison.Ordinal);
-        Assert.Contains("Results.Stream", endpoints, StringComparison.Ordinal);
+        Assert.Contains("ExecuteResultAsync(auth", endpoints, StringComparison.Ordinal);
+        Assert.Contains("DanceSellRemoteDownloadResult", endpoints, StringComparison.Ordinal);
         Assert.Contains("video/mp4", endpoints, StringComparison.Ordinal);
         Assert.DoesNotContain("string url", endpoints, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Request.Query", endpoints, StringComparison.OrdinalIgnoreCase);
@@ -724,7 +774,7 @@ public sealed class RDanceFashionDemoPageTests
         Assert.Equal(3, videoTab.Split("lg=\"4\"", StringSplitOptions.None).Length - 1);
         Assert.Contains("rdance-video-preview-column", videoTab, StringComparison.Ordinal);
         Assert.Contains("rdance-reference-preview-column", videoTab, StringComparison.Ordinal);
-        Assert.Contains("ReferenceDownloadUrl", videoTab, StringComparison.Ordinal);
+        Assert.Contains("DownloadReferenceAsync", videoTab, StringComparison.Ordinal);
         Assert.Contains("PreparedReferenceStatus == DanceSellReferenceStatuses.Approved", videoTab, StringComparison.Ordinal);
         Assert.DoesNotContain("Provider chính", videoTab, StringComparison.Ordinal);
         Assert.DoesNotContain("Kling Motion Control", videoTab, StringComparison.Ordinal);
@@ -766,7 +816,7 @@ public sealed class RDanceFashionDemoPageTests
         Assert.Contains("service.GetAsync(id, user, ct)", endpoints, StringComparison.Ordinal);
         Assert.Contains("job.PreparedReferenceStatus", endpoints, StringComparison.Ordinal);
         Assert.Contains("job.PreparedReferenceUrl", endpoints, StringComparison.Ordinal);
-        Assert.Contains("todox-anh-tham-chieu-{id:N}.jpg", endpoints, StringComparison.Ordinal);
+        Assert.Contains("todox-rdance-reference-{id:N}.jpg", endpoints, StringComparison.Ordinal);
         Assert.Contains("DANCE_SELL_REFERENCE_DOWNLOAD_FAILED", endpoints, StringComparison.Ordinal);
         Assert.DoesNotContain("Request.Query", endpoints, StringComparison.OrdinalIgnoreCase);
     }

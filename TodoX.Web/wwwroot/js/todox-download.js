@@ -16,5 +16,20 @@ window.todoxDownload = {
     link.click();
     link.remove();
     URL.revokeObjectURL(link.href);
+  },
+  downloadRemoteFile: async function (url, fileName) {
+    const response = await fetch(url, { credentials: "omit" });
+    if (!response.ok) {
+      throw new Error("DOWNLOAD_FAILED");
+    }
+
+    const blob = await response.blob();
+    const link = document.createElement("a");
+    link.download = fileName;
+    link.href = URL.createObjectURL(blob);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(link.href);
   }
 };

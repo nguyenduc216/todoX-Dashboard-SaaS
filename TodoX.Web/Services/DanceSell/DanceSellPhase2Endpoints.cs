@@ -69,7 +69,7 @@ public static class DanceSellPhase2Endpoints
         IDanceSellPhase2Service service,
         IHttpClientFactory httpClients,
         CancellationToken ct)
-        => await ExecuteAsync(auth, async user =>
+        => await ExecuteResultAsync(auth, async user =>
         {
             var job = await service.GetAsync(id, user, ct);
             if (!string.Equals(job.Status, DanceSellJobStatuses.Completed, StringComparison.OrdinalIgnoreCase)
@@ -93,12 +93,7 @@ public static class DanceSellPhase2Endpoints
                 throw new InvalidOperationException("DANCE_SELL_RESULT_DOWNLOAD_FAILED");
             }
 
-            var stream = await response.Content.ReadAsStreamAsync(ct);
-            return Results.Stream(
-                stream,
-                "video/mp4",
-                $"todox-video-thoi-trang-{id:N}.mp4",
-                enableRangeProcessing: true);
+            return new DanceSellRemoteDownloadResult(response, "video/mp4", $"todox-rdance-{id:N}.mp4");
         });
 
     private static async Task<IResult> DownloadReferenceAsync(
@@ -107,7 +102,7 @@ public static class DanceSellPhase2Endpoints
         IDanceSellPhase2Service service,
         IHttpClientFactory httpClients,
         CancellationToken ct)
-        => await ExecuteAsync(auth, async user =>
+        => await ExecuteResultAsync(auth, async user =>
         {
             var job = await service.GetAsync(id, user, ct);
             if (!string.Equals(job.PreparedReferenceStatus, DanceSellReferenceStatuses.Approved, StringComparison.OrdinalIgnoreCase)
@@ -131,8 +126,7 @@ public static class DanceSellPhase2Endpoints
                 throw new InvalidOperationException("DANCE_SELL_REFERENCE_DOWNLOAD_FAILED");
             }
 
-            var stream = await response.Content.ReadAsStreamAsync(ct);
-            return Results.Stream(stream, "image/jpeg", $"todox-anh-tham-chieu-{id:N}.jpg");
+            return new DanceSellRemoteDownloadResult(response, "image/jpeg", $"todox-rdance-reference-{id:N}.jpg");
         });
 
     private static async Task<IResult> UpdateBusinessAsync(Guid id, DanceSellUpdateBusinessRequest request, AuthStateService auth, IDanceSellPhase2Service service, CancellationToken ct)
@@ -291,6 +285,36 @@ public static class DanceSellPhase2Endpoints
         }
     }
 
+    private static async Task<IResult> ExecuteResultAsync(AuthStateService auth, Func<CurrentUserSession, Task<IResult>> action)
+    {
+        var user = auth.CurrentUser;
+        if (user?.IsAuthenticated != true)
+        {
+            return Results.Json(new { success = false, errorCode = "DANCE_SELL_UNAUTHORIZED", message = "Authentication required." }, statusCode: StatusCodes.Status401Unauthorized);
+        }
+
+        try
+        {
+            return await action(user);
+        }
+        catch (InvalidOperationException ex)
+        {
+            var status = ex.Message switch
+            {
+                "DANCE_SELL_UNAUTHORIZED" => StatusCodes.Status403Forbidden,
+                "DANCE_SELL_NOT_FOUND" => StatusCodes.Status404NotFound,
+                "DANCE_SELL_RESULT_NOT_READY" => StatusCodes.Status409Conflict,
+                "DANCE_SELL_RESULT_URL_INVALID" => StatusCodes.Status400BadRequest,
+                "DANCE_SELL_RESULT_DOWNLOAD_FAILED" => StatusCodes.Status502BadGateway,
+                "DANCE_SELL_REFERENCE_NOT_READY" => StatusCodes.Status409Conflict,
+                "DANCE_SELL_REFERENCE_URL_INVALID" => StatusCodes.Status400BadRequest,
+                "DANCE_SELL_REFERENCE_DOWNLOAD_FAILED" => StatusCodes.Status502BadGateway,
+                _ => StatusCodes.Status400BadRequest
+            };
+            return Results.Json(new { success = false, errorCode = ex.Message, message = ex.Message }, statusCode: status);
+        }
+    }
+
     private static async Task EnsurePublicHttpsUrlAsync(Uri uri, CancellationToken ct)
     {
         if (uri.Scheme != Uri.UriSchemeHttps
@@ -344,6 +368,20 @@ public static class DanceSellPhase2Endpoints
         }
 
         return false;
+    }
+
+    private sealed class DanceSellRemoteDownloadResult(HttpResponseMessage response, string contentType, string fileName) : IResult
+    {
+        public async Task ExecuteAsync(HttpContext httpContext)
+        {
+            using (response)
+            {
+                httpContext.Response.ContentType = contentType;
+                httpContext.Response.Headers.ContentDisposition = $"attachment; filename=\"{fileName}\"";
+                await using var stream = await response.Content.ReadAsStreamAsync(httpContext.RequestAborted);
+                await stream.CopyToAsync(httpContext.Response.Body, httpContext.RequestAborted);
+            }
+        }
     }
 }
 

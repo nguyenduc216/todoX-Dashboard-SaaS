@@ -54,9 +54,7 @@
         <MudTabs Rounded="true" Elevation="0" @bind-ActivePanelIndex="_tabIndex">
             <MudTabPanel Text="Thông tin">
                 <MudGrid Class="mt-4">
-                    <MudItem xs="12" md="8">
-                        <MudGrid Class="rdance-info-left-grid">
-                            <MudItem xs="12" lg="6">
+                    <MudItem xs="12" md="6">
                         <MudPaper Class="todox-panel pa-4">
                             <MudStack Spacing="3">
                                 <MudText Typo="Typo.h6">Thông tin dự án</MudText>
@@ -81,10 +79,16 @@
                                     Tự động hoàn thành
                                 </MudSwitch>
                                 <MudText Typo="Typo.caption" Class="rdance-auto-finish-help">@AutoFinishHelpText</MudText>
+                                <MudDivider />
+                                <MudStack Spacing="1">
+                                    <MudText Typo="Typo.body2">Dịch vụ: Video nhảy quảng cáo thời trang</MudText>
+                                    <MudText Typo="Typo.body2">Tỷ lệ: @_ratio</MudText>
+                                    <MudText Typo="Typo.body2">Định dạng: MP4</MudText>
+                                </MudStack>
                             </MudStack>
                         </MudPaper>
                     </MudItem>
-                    <MudItem xs="12" lg="6">
+                    <MudItem xs="12" md="6">
                         <MudPaper Class="todox-panel pa-4">
                             <MudStack Spacing="3">
                                 <MudText Typo="Typo.h6">Video chuyển động</MudText>
@@ -155,21 +159,6 @@
                                     <MudAlert Severity="Severity.Info">Cần staging TikTok hoặc tải MP4 trước khi tiếp tục.</MudAlert>
                                 }
                             </MudStack>
-                        </MudPaper>
-                    </MudItem>
-                        </MudGrid>
-                    </MudItem>
-                    <MudItem xs="12" md="4">
-                        <MudPaper Class="todox-panel pa-4">
-                            <MudText Typo="Typo.h6">Đầu ra</MudText>
-                            <MudList T="string" Dense="true">
-                                <MudListItem T="string">Dịch vụ: Video nhảy quảng cáo thời trang</MudListItem>
-                                <MudListItem T="string">Tỷ lệ: @_ratio</MudListItem>
-                                <MudListItem T="string">Định dạng: MP4</MudListItem>
-                            </MudList>
-                            <MudButton FullWidth="true" Variant="Variant.Filled" Color="Color.Warning" Disabled="@(_job?.MotionVideoMediaId is null || _busy)" OnClick="@(() => _tabIndex = 1)">
-                                Tiếp tục
-                            </MudButton>
                         </MudPaper>
                     </MudItem>
                 </MudGrid>
@@ -356,8 +345,8 @@
                             @Preview(_job?.PreparedReferenceUrl, "Ảnh dùng để tạo video")
                             @if (_job?.PreparedReferenceStatus == DanceSellReferenceStatuses.Approved)
                             {
-                                <MudButton FullWidth="true" Variant="Variant.Outlined" Color="Color.Warning" Href="@ReferenceDownloadUrl" StartIcon="@Icons.Material.Filled.Download">
-                                    Tải xuống
+                                <MudButton FullWidth="true" Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Download" Disabled="@(_busy || _isDownloadingReference)" OnClick="DownloadReferenceAsync">
+                                    @(_isDownloadingReference ? "Đang chuẩn bị..." : "Tải xuống")
                                 </MudButton>
                                 <MudButton FullWidth="true" Variant="Variant.Outlined" Color="Color.Default" StartIcon="@Icons.Material.Filled.History" OnClick="OpenReferenceHistoryAsync">Lịch sử ảnh</MudButton>
                             }
@@ -441,7 +430,9 @@
                             <video src="@_job.ResultVideoUrl" controls playsinline class="rdance-result-player"></video>
                             <MudStack Row="true" Class="flex-wrap gap-2 mt-3">
                                 <MudButton Variant="Variant.Filled" Color="Color.Warning" OnClick="@(() => JS.InvokeVoidAsync("open", _job.ResultVideoUrl))">Xem video</MudButton>
-                                <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Download" Href="@DownloadUrl">Tải video</MudButton>
+                                <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Download" Disabled="@(_busy || _isDownloadingResult)" OnClick="DownloadResultAsync">
+                                    @(_isDownloadingResult ? "Đang chuẩn bị..." : "Tải video")
+                                </MudButton>
                                 <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Refresh" OnClick="RetryAsync">Render lại video</MudButton>
                                 <MudButton Variant="Variant.Outlined" Color="Color.Default" StartIcon="@Icons.Material.Filled.History" OnClick="OpenVideoHistoryAsync">Lịch sử render</MudButton>
                                 <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="@(() => Navigation.NavigateTo("/jobs/rdance/new"))">Tạo video mới</MudButton>
@@ -505,6 +496,8 @@
 
     private int _tabIndex;
     private bool _busy;
+    private bool _isDownloadingReference;
+    private bool _isDownloadingResult;
     private bool _autoFinishing;
     private bool _autoFinish = true;
     private string _ratio = "9:16";
@@ -581,8 +574,6 @@
     private string ResultErrorText => _job?.Status == DanceSellJobStatuses.Timeout
         ? "Video mất nhiều thời gian hơn dự kiến. Vui lòng thử lại."
         : DanceSellCustomerErrorPolicy.Message(_job?.ErrorCode);
-    private string? DownloadUrl => _job is null ? null : $"/api/dance-sell/jobs/{_job.Id}/download";
-    private string? ReferenceDownloadUrl => _job is null ? null : $"/api/dance-sell/jobs/{_job.Id}/reference/download";
     private bool IsAdmin => AuthState.CurrentUser is not null && DanceSellSecurity.IsAdmin(AuthState.CurrentUser);
     private bool CanEditAutoFinish => _job?.Status == DanceSellJobStatuses.Draft && _renderJob?.Status is null or RenderJobStatuses.Draft;
     private string AutoFinishHelpText => _autoFinish
@@ -1273,6 +1264,69 @@
         _tabIndex = 3;
         await ReloadAsync();
     });
+
+    private async Task DownloadResultAsync()
+    {
+        if (_job is null || AuthState.CurrentUser is null || _isDownloadingResult)
+        {
+            return;
+        }
+
+        _isDownloadingResult = true;
+        try
+        {
+            var job = await DanceSell.GetAsync(_job.Id, AuthState.CurrentUser);
+            if (job.Status != DanceSellJobStatuses.Completed || string.IsNullOrWhiteSpace(job.ResultVideoUrl))
+            {
+                throw new InvalidOperationException("DANCE_SELL_RESULT_NOT_READY");
+            }
+
+            await JS.InvokeVoidAsync("todoxDownload.downloadRemoteFile", job.ResultVideoUrl, $"todox-rdance-{job.Id:N}.mp4");
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message.Contains("DANCE_SELL_UNAUTHORIZED", StringComparison.OrdinalIgnoreCase)
+                ? "Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại."
+                : "Không thể tải video. Vui lòng thử lại.", Severity.Error);
+        }
+        finally
+        {
+            _isDownloadingResult = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task DownloadReferenceAsync()
+    {
+        if (_job is null || AuthState.CurrentUser is null || _isDownloadingReference)
+        {
+            return;
+        }
+
+        _isDownloadingReference = true;
+        try
+        {
+            var job = await DanceSell.GetAsync(_job.Id, AuthState.CurrentUser);
+            if (job.PreparedReferenceStatus != DanceSellReferenceStatuses.Approved
+                || string.IsNullOrWhiteSpace(job.PreparedReferenceUrl))
+            {
+                throw new InvalidOperationException("DANCE_SELL_REFERENCE_NOT_READY");
+            }
+
+            await JS.InvokeVoidAsync("todoxDownload.downloadRemoteFile", job.PreparedReferenceUrl, $"todox-rdance-reference-{job.Id:N}.jpg");
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message.Contains("DANCE_SELL_UNAUTHORIZED", StringComparison.OrdinalIgnoreCase)
+                ? "Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại."
+                : "Không thể tải ảnh tham chiếu. Vui lòng thử lại.", Severity.Error);
+        }
+        finally
+        {
+            _isDownloadingReference = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
 
     private Task OpenAsync(Guid id)
     {
