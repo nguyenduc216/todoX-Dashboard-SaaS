@@ -198,10 +198,25 @@ public class SceneImageBatchRenderHandlerTests
             "render-projects/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/12/scenes/34/images/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/output/scene-image.png",
             SceneMediaStorageKeys.SceneImageOutput(tenantId, 12, 34, imageVersionId, "png"));
         Assert.Equal(
-            "render-projects/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/12/scenes/34/videos/cccccccccccccccccccccccccccccccc/output/scene-video.mp4",
+            "rvideo/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/project-12/scene-34/video/cccccccccccccccccccccccccccccccc.mp4",
             SceneMediaStorageKeys.SceneVideoOutput(tenantId, 12, 34, videoVersionId));
         Assert.Equal(
             "render-projects/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/12/final-videos/dddddddddddddddddddddddddddddddd/output/final-video.mp4",
             SceneMediaStorageKeys.FinalVideoOutput(tenantId, 12, finalVersionId));
+    }
+
+    [Fact]
+    public void SceneVideoStorageKeys_AreTenantScopedAndVersionIdempotent()
+    {
+        var tenantA = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+        var tenantB = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+        var versionA = Guid.Parse("cccccccc-cccc-cccc-cccc-cccccccccccc");
+        var versionB = Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd");
+
+        var first = SceneMediaStorageKeys.SceneVideoOutput(tenantA, 12, 34, versionA);
+
+        Assert.Equal(first, SceneMediaStorageKeys.SceneVideoOutput(tenantA, 12, 34, versionA));
+        Assert.NotEqual(first, SceneMediaStorageKeys.SceneVideoOutput(tenantB, 12, 34, versionA));
+        Assert.NotEqual(first, SceneMediaStorageKeys.SceneVideoOutput(tenantA, 12, 34, versionB));
     }
 }

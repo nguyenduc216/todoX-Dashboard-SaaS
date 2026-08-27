@@ -184,6 +184,7 @@ builder.Services.AddHttpClient<TodoX.Web.Services.VideoRender.IVbeeVoiceClient, 
     });
 builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IRVideoSceneAudioAutoChainService, TodoX.Web.Services.VideoRender.RVideoSceneAudioAutoChainService>();
 builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IRVideoSceneMediaFinalizerService, TodoX.Web.Services.VideoRender.RVideoSceneMediaFinalizerService>();
+builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IRVideoSceneVideoCompletionService, TodoX.Web.Services.VideoRender.RVideoSceneVideoCompletionService>();
 builder.Services.AddSingleton<TodoX.Web.Services.VideoRender.ITodoXVideoPromptParser, TodoX.Web.Services.VideoRender.TodoXVideoPromptParser>();
 builder.Services.AddSingleton<TodoX.Web.Services.VideoRender.IVideoPromptValidator, TodoX.Web.Services.VideoRender.VideoPromptValidator>();
 builder.Services.AddScoped<TodoX.Web.Services.VideoRender.VideoRenderRepository>();

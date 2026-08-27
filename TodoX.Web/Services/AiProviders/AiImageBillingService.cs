@@ -133,6 +133,9 @@ public sealed class AiImageBillingReconciliationItem
     public string? CapabilityCode { get; init; }
     public long ProviderId { get; init; }
     public long ProviderCapabilityId { get; init; }
+    public string? PayerType { get; init; }
+    public decimal CustomerChargedPoints { get; init; }
+    public decimal SystemChargedPoints { get; init; }
     public int ReconciliationAttemptCount { get; init; }
     public string? TariffSnapshotJson { get; init; }
 }
@@ -477,6 +480,9 @@ public sealed class AiImageBillingService : IAiImageBillingService
                        r.capability_code AS CapabilityCode,
                        r.provider_id AS ProviderId,
                        r.provider_capability_id AS ProviderCapabilityId,
+                       r.payer_type AS PayerType,
+                       r.customer_charged_points AS CustomerChargedPoints,
+                       r.system_charged_points AS SystemChargedPoints,
                        COALESCE(r.reconciliation_attempt_count, 0) AS ReconciliationAttemptCount,
                        r.tariff_snapshot_json::text AS TariffSnapshotJson;
             """,

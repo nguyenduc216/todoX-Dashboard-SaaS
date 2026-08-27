@@ -34,6 +34,7 @@ public interface IRenderJobService
     Task MarkStatusAsync(Guid jobId, string status, object? output = null, string? errorCode = null, string? errorMessage = null, CancellationToken ct = default);
     Task ScheduleRetryAsync(Guid jobId, TimeSpan delay, string errorCode, string errorMessage, CancellationToken ct = default);
     Task<bool> ScheduleProviderPollAsync(Guid jobId, TimeSpan delay, string reasonCode, string reasonMessage, CancellationToken ct = default);
+    Task<bool> MarkRecoveredCompletedAsync(Guid jobId, long projectId, long sceneId, Guid sceneVideoVersionId, string logicalRequestId, CancellationToken ct = default);
 }
 
 public sealed class RenderJobService : IRenderJobService
@@ -692,6 +693,74 @@ public sealed class RenderJobService : IRenderJobService
             "Provider poll scheduled without consuming the application retry budget.",
             new { retryAfterSeconds = delaySeconds, reasonCode, reasonMessage }, "info", ct);
         return true;
+    }
+
+    public async Task<bool> MarkRecoveredCompletedAsync(
+        Guid jobId,
+        long projectId,
+        long sceneId,
+        Guid sceneVideoVersionId,
+        string logicalRequestId,
+        CancellationToken ct = default)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        var changed = await conn.ExecuteAsync(
+            """
+            UPDATE render.render_jobs j
+               SET status='completed',
+                   completed_at=now(),
+                   lock_owner=NULL,
+                   lock_until=NULL,
+                   updated_at=now()
+             WHERE j.id=@jobId
+               AND j.tenant_id=@tenant
+               AND j.job_type='render_scene_video'
+               AND j.status IN ('failed','pending_reconciliation')
+               AND (
+                    j.status='pending_reconciliation'
+                    OR j.error_code IN (
+                        'RVIDEO_VIDEO_PERSIST_FAILED',
+                        'PROVIDER_SUCCESS_RECONCILIATION_FAILED',
+                        'MEDIA_STORAGE_FAILED'
+                    )
+               )
+               AND (j.input_json->>'projectId')=@projectId
+               AND (j.input_json->>'sceneId')=@sceneId
+               AND (j.input_json->>'logicalRequestId')=@logicalRequestId
+               AND EXISTS (
+                   SELECT 1
+                     FROM video_render.scene_video_versions v
+                    WHERE v.id=@sceneVideoVersionId
+                      AND v.tenant_id=@tenant
+                      AND v.render_job_id=j.id
+                      AND v.project_id=@projectId::bigint
+                      AND v.scene_id=@sceneId::bigint
+                      AND v.logical_request_id=@logicalRequestId
+                      AND v.status='completed'
+               );
+            """,
+            new
+            {
+                jobId,
+                tenant = _tenant.TenantId,
+                projectId = projectId.ToString(),
+                sceneId = sceneId.ToString(),
+                sceneVideoVersionId,
+                logicalRequestId
+            });
+
+        if (changed > 0)
+        {
+            await AddEventAsync(
+                jobId,
+                "RVIDEO_VIDEO_RECOVERY_COMPLETED",
+                "Recovered a previously failed scene-video job after local persistence succeeded.",
+                new { projectId, sceneId, sceneVideoVersionId, logicalRequestId },
+                ct: ct);
+        }
+
+        return changed > 0;
     }
 
     public async Task<int> GetProviderReconciliationAttemptCountAsync(Guid jobId, CancellationToken ct = default)

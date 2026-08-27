@@ -63,7 +63,7 @@ public sealed class AiImageBillingReconciliationWorker : BackgroundService
         var tasks = scope.ServiceProvider.GetRequiredService<IYEScaleTaskClient>();
         var videoService = scope.ServiceProvider.GetRequiredService<IRVideo79AiVideoService>();
         var versions = scope.ServiceProvider.GetRequiredService<ISceneMediaVersioningService>();
-        var media = scope.ServiceProvider.GetRequiredService<IMediaFileService>();
+        var completion = scope.ServiceProvider.GetRequiredService<IRVideoSceneVideoCompletionService>();
         var tenant = scope.ServiceProvider.GetRequiredService<TenantContext>();
 
         var batchSize = Math.Clamp(_config.GetValue("AiImageBilling:ReconciliationBatchSize", 10), 1, 100);
@@ -79,7 +79,7 @@ public sealed class AiImageBillingReconciliationWorker : BackgroundService
 
         foreach (var item in claimed)
         {
-            await ReconcileItemAsync(billing, tasks, versions, media, videoService, tenant, item, maxAttempts, ct);
+            await ReconcileItemAsync(billing, tasks, versions, completion, videoService, tenant, item, maxAttempts, ct);
         }
     }
 
@@ -87,7 +87,7 @@ public sealed class AiImageBillingReconciliationWorker : BackgroundService
         IAiImageBillingService billing,
         IYEScaleTaskClient tasks,
         ISceneMediaVersioningService versions,
-        IMediaFileService media,
+        IRVideoSceneVideoCompletionService completion,
         IRVideo79AiVideoService videoService,
         TenantContext tenant,
         AiImageBillingReconciliationItem item,
@@ -107,7 +107,7 @@ public sealed class AiImageBillingReconciliationWorker : BackgroundService
         if (string.Equals(item.ProviderCode, "79ai", StringComparison.OrdinalIgnoreCase)
             && string.Equals(item.CapabilityCode, "rvideo_scene_video_generation", StringComparison.OrdinalIgnoreCase))
         {
-            await Reconcile79AiVideoAsync(billing, versions, media, videoService, tenant, item, ct);
+            await Reconcile79AiVideoAsync(billing, versions, completion, videoService, tenant, item, ct);
             return;
         }
 
@@ -182,7 +182,7 @@ public sealed class AiImageBillingReconciliationWorker : BackgroundService
     private async Task Reconcile79AiVideoAsync(
         IAiImageBillingService billing,
         ISceneMediaVersioningService versions,
-        IMediaFileService media,
+        IRVideoSceneVideoCompletionService completion,
         IRVideo79AiVideoService videoService,
         TenantContext tenant,
         AiImageBillingReconciliationItem item,
@@ -230,39 +230,32 @@ public sealed class AiImageBillingReconciliationWorker : BackgroundService
             return;
         }
 
-        await tenant.EnsureLoadedAsync(ct);
-        var objectKey = version.StorageKey ?? SceneMediaStorageKeys.SceneVideoOutput(tenant.TenantId, version.ProjectId, version.SceneId, version.Id);
-        var saved = await media.DownloadAndSaveBinaryAtObjectKeyAsync(outputUrl, objectKey, "video_scene_video", "video/mp4", null, null, tenant.TenantId, ct);
-        await versions.CompleteSceneVideoVersionAsync(version.Id, new SceneVideoVersionCompleteRequest(
-            saved.PublicUrl ?? saved.FileUrl,
-            ResolvePhysicalPath(saved.ObjectKey),
-            PosterUrl: version.PosterUrl,
-            DurationSeconds: version.DurationSeconds,
-            MimeType: "video/mp4",
-            ProviderCode: item.ProviderCode,
-            ModelName: item.ActualModel ?? item.RequestedModel,
-            ProviderTaskId: item.ProviderTaskId,
-            BillingLogicalRequestId: item.LogicalRequestId,
-            ChargedPoints: 0,
-            RefundedPoints: 0,
-            ResultMediaId: saved.Id), ct);
-
-        await billing.CompleteAsync(new AiImageBillingCompleteRequest
-        {
-            LogicalRequestId = item.LogicalRequestId,
-            Success = true,
-            ActualModel = item.ActualModel ?? item.RequestedModel,
-            ProviderTaskId = item.ProviderTaskId,
-            ProviderUsageJson = poll.SanitizedResponseJson,
-            TariffSnapshotJson = item.TariffSnapshotJson
-        }, ct);
+        await completion.CompleteProviderVideoAsync(new RVideoSceneVideoCompletionRequest(
+            version.ProjectId,
+            version.SceneId,
+            SceneIndex: 0,
+            version.Id,
+            version.RenderJobId,
+            version.StorageKey,
+            item.LogicalRequestId,
+            item.ProviderTaskId!,
+            outputUrl,
+            item.ProviderCode,
+            item.ActualModel ?? item.RequestedModel,
+            item.ProviderCapabilityId,
+            poll.SanitizedResponseJson,
+            item.TariffSnapshotJson,
+            item.CustomerChargedPoints,
+            version.EstimatedUsd,
+            version.CostSource,
+            version.AspectRatio,
+            version.PosterUrl,
+            version.DurationSeconds,
+            UserId: null,
+            CustomerId: null,
+            IsRecovery: true), ct);
         _logger.LogInformation("AI_IMAGE_RECONCILIATION_COMPLETED logicalRequestId={LogicalRequestId} taskId={TaskId}", item.LogicalRequestId, item.ProviderTaskId);
     }
-
-    private static string ResolvePhysicalPath(string? objectKey)
-        => string.IsNullOrWhiteSpace(objectKey)
-            ? string.Empty
-            : Path.Combine(AppContext.BaseDirectory, "wwwroot/uploads", objectKey.Replace('/', Path.DirectorySeparatorChar));
 
     private static bool IsMissingBillingTable(Exception ex)
     {

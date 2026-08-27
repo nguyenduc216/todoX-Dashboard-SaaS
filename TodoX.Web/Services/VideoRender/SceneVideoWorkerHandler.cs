@@ -62,6 +62,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
     private readonly TenantContext _tenant;
     private readonly IConfiguration _config;
     private readonly IRVideoSceneMediaFinalizerService _finalizer;
+    private readonly IRVideoSceneVideoCompletionService _completion;
     private readonly ILogger<SceneVideoWorkerHandler> _logger;
     private readonly VideoRenderOptions _options;
 
@@ -81,6 +82,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         TenantContext tenant,
         IConfiguration config,
         IRVideoSceneMediaFinalizerService finalizer,
+        IRVideoSceneVideoCompletionService completion,
         IOptionsMonitor<VideoRenderOptions> options,
         ILogger<SceneVideoWorkerHandler> logger)
     {
@@ -97,6 +99,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         _tenant = tenant;
         _config = config;
         _finalizer = finalizer;
+        _completion = completion;
         _logger = logger;
         _options = options.CurrentValue;
     }
@@ -557,75 +560,30 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                             $"79AI returned SUCCESS without a usable output video URL. task_id={taskId}");
                     }
 
-                    await _repo.AddProjectEventAsync(project.Id, "SCENE_VIDEO_RESULT_DOWNLOADING", "info",
-                        $"Scene {input.SceneIndex} provider result is being imported into TodoX.",
-                        new
-                        {
-                            jobId = job.Id,
-                            sceneId = input.SceneId,
-                            sceneIndex = input.SceneIndex,
-                            providerTaskId = taskId,
-                            outputUrl
-                        }, ct);
-
-                    await _tenant.EnsureLoadedAsync(ct);
-                    var objectKey = version.StorageKey ?? SceneMediaStorageKeys.SceneVideoOutput(_tenant.TenantId, project.Id, scene.Id, version.Id);
-                    var saved = await _media.DownloadAndSaveBinaryAtObjectKeyAsync(
+                    var saved = await _completion.CompleteProviderVideoAsync(new RVideoSceneVideoCompletionRequest(
+                        project.Id,
+                        scene.Id,
+                        input.SceneIndex,
+                        version.Id,
+                        job.Id,
+                        version.StorageKey,
+                        attemptLogicalRequestId,
+                        taskId!,
                         outputUrl,
-                        objectKey,
-                        "video_scene_video",
-                        "video/mp4",
+                        input.ProviderCode,
+                        status.ActualModel ?? policy.Model,
+                        input.ProviderCapabilityId,
+                        status.SanitizedResponseJson,
+                        tariffSnapshot,
+                        reservation.ChargedPoints,
+                        input.EstimatedUsd,
+                        input.CostSource,
+                        input.AspectRatio,
+                        sourceVersion.PublicUrl ?? input.SourceImageUrl,
+                        input.DurationSeconds,
                         input.UserId,
                         input.CustomerId,
-                        _tenant.TenantId,
-                        ct);
-
-                    if (saved is null || saved.Id == Guid.Empty
-                        || string.IsNullOrWhiteSpace(saved.PublicUrl ?? saved.FileUrl))
-                    {
-                        throw new VideoReconciliationException(
-                            "MEDIA_STORAGE_FAILED",
-                            $"TodoX did not persist a usable video result for task_id={taskId}.");
-                    }
-
-                    await _versions.CompleteSceneVideoVersionAsync(version.Id, new SceneVideoVersionCompleteRequest(
-                        saved.PublicUrl ?? saved.FileUrl,
-                        ResolvePhysicalPath(saved.ObjectKey),
-                        PosterUrl: sourceVersion.PublicUrl ?? input.SourceImageUrl,
-                        DurationSeconds: input.DurationSeconds,
-                        MimeType: "video/mp4",
-                        ProviderCode: input.ProviderCode,
-                        ModelName: status.ActualModel ?? policy.Model,
-                        ProviderCapabilityId: input.ProviderCapabilityId,
-                        ProviderTaskId: taskId,
-                        BillingLogicalRequestId: attemptLogicalRequestId,
-                        EstimatedUsd: input.EstimatedUsd,
-                        ActualUsd: null,
-                        ChargedPoints: reservation.ChargedPoints,
-                        RefundedPoints: 0,
-                        CostSource: input.CostSource ?? "configured_tariff",
-                        AspectRatio: input.AspectRatio,
-                        ResultMediaId: saved.Id), ct);
-
-                    await _repo.AddProjectEventAsync(project.Id, "SCENE_VIDEO_READY", "info",
-                        $"Scene {input.SceneIndex} rendered successfully.",
-                        new { jobId = job.Id, input.SceneId, input.SceneIndex, taskId, videoUrl = saved.PublicUrl ?? saved.FileUrl }, ct);
-                    await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_COMPLETED", "info",
-                        "Scene-video provider output was persisted.",
-                        new { jobId = job.Id, input.ProjectId, input.SceneId, input.SceneIndex, taskId }, ct);
-                    await _finalizer.TryFinalizeSceneMediaAsync(project.Id, scene.Id, "SCENE_VIDEO_READY", ct);
-                    if (reservation.BillingRecordId is not null)
-                    {
-                        await _billing.CompleteAsync(new AiImageBillingCompleteRequest
-                        {
-                            LogicalRequestId = attemptLogicalRequestId,
-                            Success = true,
-                            ActualModel = status.ActualModel ?? policy.Model,
-                            ProviderTaskId = taskId,
-                            ProviderUsageJson = status.SanitizedResponseJson,
-                            TariffSnapshotJson = tariffSnapshot
-                        }, ct);
-                    }
+                        IsRecovery: !string.IsNullOrWhiteSpace(existingTaskId)), ct);
                     await LogUsageAsync(input, job, attemptLogicalRequestId, reservation.ChargedPoints, status.SanitizedResponseJson, true, null, taskId, ct);
                     return;
                 }
@@ -698,6 +656,10 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         await _repo.UpdateSceneAsync(scene.Id, VideoSceneStatuses.Failed,
             errorMessage: errorMessage, title: scene.Title, scenePrompt: scene.ScenePrompt,
             imagePrompt: scene.ImagePrompt, videoPrompt: scene.VideoPrompt, ct: ct);
+        await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_PERSIST_FAILED", "error",
+            "Provider video succeeded but local persistence did not complete.",
+            new { jobId = job.Id, input.SceneId, input.SceneIndex, versionId, providerTaskId, errorCode = finalCode },
+            ct);
         await _repo.AddProjectEventAsync(project.Id, "SCENE_VIDEO_FAILED", "error",
             $"Scene {input.SceneIndex} result reconciliation failed.",
             new
@@ -714,7 +676,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         throw new RenderJobTerminalFailureException(errorMessage);
     }
 
-    #if false
+#if false
     private async Task LegacyProviderPathDisabledAsync(
         RenderJobDto job,
         SceneVideoRenderWorkItemInput input,
@@ -961,7 +923,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                 "SCENE_VIDEO_POLL_TRANSIENT", "Temporary provider poll failure; the same task ID will be retried.", CancellationToken.None);
         }
     }
-    #endif
+#endif
 
     private async Task<SceneImageVersionDto?> ResolveSourceImageVersionAsync(long sceneId, Guid? selectedVersionId, CancellationToken ct)
     {
@@ -1258,7 +1220,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
             new { sceneId = scene.Id, scene.SceneIndex, errorCode, error = errorMessage }, ct);
     }
 
-    #if false
+#if false
     private static string? ExtractVideoUrl(object response, string? sourceImageUrl)
     {
         if (response.Extra is null)
@@ -1344,7 +1306,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
 
         return "Provider video task failed.";
     }
-    #endif
+#endif
 
     private string ResolvePhysicalPath(string? objectKey)
     {

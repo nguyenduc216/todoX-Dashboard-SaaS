@@ -37,6 +37,7 @@ public interface IMediaFileService
     Task<MediaFileDto?> GetAsync(Guid id, CancellationToken ct = default);
 
     Task<MediaFileDto?> GetByObjectKeyAsync(string objectKey, CancellationToken ct = default);
+    Task<MediaFileDto?> GetByObjectKeyAsync(Guid tenantId, string objectKey, CancellationToken ct = default);
 
     Task<MediaFileDto?> GetByPublicUrlAsync(string publicUrl, CancellationToken ct = default);
 
@@ -184,6 +185,12 @@ public sealed class MediaFileService : IMediaFileService
         if (!IsPersistableMime(mimeType)) throw new InvalidOperationException("Chá»‰ cháº¥p nháº­n media há»£p lá»‡.");
 
         objectKey = NormalizeObjectKey(objectKey);
+        var existingMedia = await TryGetExistingImmutableMediaAsync(objectKey, tenantId, mimeType, fileCategory, ct);
+        if (existingMedia is not null)
+        {
+            return existingMedia;
+        }
+
         var ext = ContentTypeToExtension(mimeType);
         var safeName = Path.GetFileName(objectKey);
         if (string.IsNullOrWhiteSpace(safeName))
@@ -206,23 +213,22 @@ public sealed class MediaFileService : IMediaFileService
         var publicUrl = $"{publicBase.TrimEnd('/')}/{objectKey}";
         var id = Guid.NewGuid();
         var storageProvider = NormalizeDbText(_config["Storage:Provider"] ?? "local", "local");
-        var movedToFinal = false;
         try
         {
             await File.WriteAllBytesAsync(tempPath, content, ct);
             if (File.Exists(absPath))
             {
                 TryDeleteFile(tempPath);
-                var existing = await GetByObjectKeyAsync(objectKey, ct);
+                var existing = await GetByObjectKeyAsync(tenantId, objectKey, ct);
                 if (existing is not null)
                 {
+                    EnsureExistingMediaMatches(existing, mimeType, fileCategory);
                     return existing;
                 }
 
-                throw new InvalidOperationException("Storage key cá»§a phiÃªn báº£n Ä‘Ã£ tá»“n táº¡i, khÃ´ng ghi Ä‘Ã¨.");
+                throw new InvalidOperationException("RVIDEO_MEDIA_FILE_WITHOUT_DB_RECORD: physical media exists without a tenant media row.");
             }
             File.Move(tempPath, absPath);
-            movedToFinal = true;
 
             using var conn = await _factory.OpenAsync(ct);
             await conn.ExecuteAsync(
@@ -253,10 +259,6 @@ public sealed class MediaFileService : IMediaFileService
         catch
         {
             TryDeleteFile(tempPath);
-            if (movedToFinal)
-            {
-                TryDeleteFile(absPath);
-            }
             throw;
         }
 
@@ -306,6 +308,24 @@ public sealed class MediaFileService : IMediaFileService
              ORDER BY created_at DESC
              LIMIT 1;
             """, new { objectKey });
+    }
+
+    public async Task<MediaFileDto?> GetByObjectKeyAsync(Guid tenantId, string objectKey, CancellationToken ct = default)
+    {
+        objectKey = NormalizeObjectKey(objectKey);
+        using var conn = await _factory.OpenAsync(ct);
+        return await conn.QuerySingleOrDefaultAsync<MediaFileDto>(
+            """
+            SELECT id AS Id, user_id AS UserId, customer_id AS CustomerId, file_category AS FileCategory,
+                   file_name AS FileName, mime_type AS MimeType, file_size_bytes AS FileSizeBytes,
+                   storage_provider AS StorageProvider, object_key AS ObjectKey, file_url AS FileUrl,
+                   public_url AS PublicUrl, is_active AS IsActive, created_at AS CreatedAt
+              FROM media.media_files
+             WHERE tenant_id=@tenantId
+               AND object_key=@objectKey
+             ORDER BY created_at DESC
+             LIMIT 1;
+            """, new { tenantId, objectKey });
     }
 
     public async Task<MediaFileDto?> GetByPublicUrlAsync(string publicUrl, CancellationToken ct = default)
@@ -469,6 +489,19 @@ public sealed class MediaFileService : IMediaFileService
     public async Task<MediaFileDto> DownloadAndSaveBinaryAtObjectKeyAsync(string fileUrl, string objectKey, string fileCategory, string expectedMimeType,
         Guid? userId, Guid? customerId, Guid tenantId, CancellationToken ct = default)
     {
+        objectKey = NormalizeObjectKey(objectKey);
+        var expectedCategory = NormalizeDbText(fileCategory, "media");
+        var expectedMedia = await TryGetExistingImmutableMediaAsync(
+            objectKey,
+            tenantId,
+            NormalizeMimeType(expectedMimeType, objectKey),
+            expectedCategory,
+            ct);
+        if (expectedMedia is not null)
+        {
+            return expectedMedia;
+        }
+
         var saved = await DownloadBinaryToObjectKeyAsync(fileUrl, objectKey, fileCategory, expectedMimeType,
             userId, customerId, tenantId, ct);
         _logger.LogInformation("MEDIA_BINARY_URL_DOWNLOAD_SUCCESS url={Url} mediaId={MediaId} mime={MimeType} size={Size}",
@@ -611,7 +644,6 @@ public sealed class MediaFileService : IMediaFileService
         var ext = ContentTypeToExtension(mimeType);
         var storageProvider = NormalizeDbText(_config["Storage:Provider"] ?? "local", "local");
         var id = Guid.NewGuid();
-        var movedToFinal = false;
         long totalBytes = 0;
         var sniff = new byte[32];
         var sniffCount = 0;
@@ -653,11 +685,17 @@ public sealed class MediaFileService : IMediaFileService
 
             if (File.Exists(absPath))
             {
-                throw new InvalidOperationException("Storage key cá»§a phiÃªn báº£n Ä‘Ã£ tá»“n táº¡i, khÃ´ng ghi Ä‘Ã¨.");
+                var existing = await GetByObjectKeyAsync(tenantId, objectKey, ct);
+                if (existing is not null)
+                {
+                    EnsureExistingMediaMatches(existing, mimeType, fileCategory);
+                    return existing;
+                }
+
+                throw new InvalidOperationException("RVIDEO_MEDIA_FILE_WITHOUT_DB_RECORD: physical media appeared without a tenant media row.");
             }
 
             File.Move(tempPath, absPath);
-            movedToFinal = true;
 
             using var conn = await _factory.OpenAsync(ct);
             await conn.ExecuteAsync(
@@ -688,10 +726,6 @@ public sealed class MediaFileService : IMediaFileService
         catch
         {
             TryDeleteFile(tempPath);
-            if (movedToFinal)
-            {
-                TryDeleteFile(absPath);
-            }
             throw;
         }
 
@@ -768,6 +802,38 @@ public sealed class MediaFileService : IMediaFileService
 
     private static bool IsAudioMime(string mimeType)
         => mimeType is "audio/mpeg" or "audio/wav" or "audio/x-wav" or "audio/mp4" or "audio/m4a";
+
+    private static void EnsureExistingMediaMatches(MediaFileDto existing, string mimeType, string fileCategory)
+    {
+        if (!existing.IsActive
+            || !string.Equals(existing.MimeType, mimeType, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(existing.FileCategory, fileCategory, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("RVIDEO_MEDIA_OBJECT_KEY_METADATA_MISMATCH: existing tenant media metadata does not match the expected immutable media.");
+        }
+    }
+
+    private async Task<MediaFileDto?> TryGetExistingImmutableMediaAsync(
+        string objectKey,
+        Guid tenantId,
+        string mimeType,
+        string fileCategory,
+        CancellationToken ct)
+    {
+        if (!File.Exists(ResolveLocalPath(objectKey)))
+        {
+            return null;
+        }
+
+        var existing = await GetByObjectKeyAsync(tenantId, objectKey, ct);
+        if (existing is null)
+        {
+            throw new InvalidOperationException("RVIDEO_MEDIA_FILE_WITHOUT_DB_RECORD: physical media exists without a tenant media row.");
+        }
+
+        EnsureExistingMediaMatches(existing, mimeType, fileCategory);
+        return existing;
+    }
 
     private static string ResolveDownloadedBinaryMime(string expectedMimeType, string responseMime, string originalFileName)
     {

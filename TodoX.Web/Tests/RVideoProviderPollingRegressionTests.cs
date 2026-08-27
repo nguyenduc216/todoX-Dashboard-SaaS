@@ -1,5 +1,6 @@
 using System.Reflection;
 using Xunit;
+using TodoX.Web.Services.VideoRender;
 
 namespace TodoX.Web.Tests;
 
@@ -132,10 +133,12 @@ public sealed class RVideoProviderPollingRegressionTests
     public void ProviderSuccessReconciliationIsBoundedAndEndsInFailedState()
     {
         var source = ReadRepoFile("Services", "VideoRender", "SceneVideoWorkerHandler.cs");
+        var completion = ReadRepoFile("Services", "VideoRender", "RVideoSceneVideoCompletionService.cs");
 
         Assert.Contains("MaxReconciliationRetries", source);
         Assert.Contains("PROVIDER_OUTPUT_URL_MISSING", source);
-        Assert.Contains("MEDIA_STORAGE_FAILED", source);
+        Assert.Contains("MEDIA_STORAGE_FAILED", completion);
+        Assert.Contains("RVIDEO_VIDEO_PERSIST_FAILED", source);
         Assert.Contains("PROVIDER_SUCCESS_RECONCILIATION_FAILED", source);
         Assert.Contains("await _versions.FailSceneVideoVersionAsync", source);
         Assert.Contains("VideoSceneStatuses.Failed", source);
@@ -367,10 +370,15 @@ public sealed class RVideoProviderPollingRegressionTests
     [Fact]
     public void SceneVideoStorageKeyUsesVersionScopedImmutablePath()
     {
-        var source = ReadRepoFile("Services", "VideoRender", "SceneMediaVersioningService.cs");
+        var tenantA = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+        var tenantB = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+        var versionA = Guid.Parse("cccccccc-cccc-cccc-cccc-cccccccccccc");
+        var versionB = Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd");
+        var first = SceneMediaStorageKeys.SceneVideoOutput(tenantA, 42, 7, versionA);
 
-        Assert.Contains("rvideo/project-{projectId}/scene-{sceneId}/video/{videoVersionId:N}.mp4", source);
-        Assert.DoesNotContain("scenes/{sceneId}/videos/{videoVersionId:N}/output/scene-video.mp4", source);
+        Assert.Equal(first, SceneMediaStorageKeys.SceneVideoOutput(tenantA, 42, 7, versionA));
+        Assert.NotEqual(first, SceneMediaStorageKeys.SceneVideoOutput(tenantB, 42, 7, versionA));
+        Assert.NotEqual(first, SceneMediaStorageKeys.SceneVideoOutput(tenantA, 42, 7, versionB));
     }
 
     [Fact]
@@ -389,7 +397,7 @@ public sealed class RVideoProviderPollingRegressionTests
     {
         var source = ReadRepoFile("Services", "AiProviders", "AiImageBillingReconciliationWorker.cs");
         var start = source.IndexOf("private async Task Reconcile79AiVideoAsync", StringComparison.Ordinal);
-        var end = source.IndexOf("private static string ResolvePhysicalPath", start, StringComparison.Ordinal);
+        var end = source.IndexOf("private static bool IsMissingBillingTable", start, StringComparison.Ordinal);
 
         Assert.True(start >= 0);
         Assert.True(end > start);

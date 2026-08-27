@@ -173,6 +173,7 @@ public sealed class SceneVideoVersionDto
     public string? PublicUrl { get; set; }
     public string? SourceFilePath { get; set; }
     public Guid? ResultMediaId { get; set; }
+    public Guid? RenderJobId { get; set; }
     public string? ImagePromptSnapshot { get; set; }
     public string? VideoPromptSnapshot { get; set; }
     public string? ProviderCode { get; set; }
@@ -2165,7 +2166,8 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
         SELECT id AS Id, project_id AS ProjectId, scene_id AS SceneId, source_image_version_id AS SourceImageVersionId,
                version_number AS VersionNumber, logical_request_id AS LogicalRequestId, status AS Status,
                is_selected AS IsSelected, storage_key AS StorageKey, public_url AS PublicUrl, source_file_path AS SourceFilePath,
-               result_media_id AS ResultMediaId, image_prompt_snapshot AS ImagePromptSnapshot, video_prompt_snapshot AS VideoPromptSnapshot,
+               result_media_id AS ResultMediaId, render_job_id AS RenderJobId,
+               image_prompt_snapshot AS ImagePromptSnapshot, video_prompt_snapshot AS VideoPromptSnapshot,
                provider_code AS ProviderCode, actual_model AS ModelName, provider_capability_id AS ProviderCapabilityId,
                provider_task_id AS ProviderTaskId, duration_seconds AS DurationSeconds, aspect_ratio AS AspectRatio,
                billing_logical_request_id AS BillingLogicalRequestId, estimated_usd AS EstimatedUsd, actual_usd AS ActualUsd,
@@ -2339,7 +2341,7 @@ public static class SceneMediaStorageKeys
         => $"render-projects/{tenantId:N}/{projectId}/scenes/{sceneId}/images/{imageVersionId:N}/output/scene-image.{NormalizeExtension(extension)}";
 
     public static string SceneVideoOutput(Guid tenantId, long projectId, long sceneId, Guid videoVersionId)
-        => $"rvideo/project-{projectId}/scene-{sceneId}/video/{videoVersionId:N}.mp4";
+        => $"rvideo/{tenantId:N}/project-{projectId}/scene-{sceneId}/video/{videoVersionId:N}.mp4";
 
     public static string SceneAudioOutput(Guid tenantId, long projectId, long sceneId, Guid audioVersionId)
         => $"render-projects/{tenantId:N}/{projectId}/scenes/{sceneId}/audio/{audioVersionId:N}/output/scene-audio.mp3";
