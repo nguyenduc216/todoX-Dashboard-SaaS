@@ -46,6 +46,7 @@ public sealed class RVideoSceneVideoCompletionService : IRVideoSceneVideoComplet
     private readonly VideoRenderRepository _projects;
     private readonly TenantContext _tenant;
     private readonly IConfiguration _config;
+    private readonly ILogger<RVideoSceneVideoCompletionService> _logger;
 
     public RVideoSceneVideoCompletionService(
         IMediaFileService media,
@@ -56,7 +57,8 @@ public sealed class RVideoSceneVideoCompletionService : IRVideoSceneVideoComplet
         IRenderJobService jobs,
         VideoRenderRepository projects,
         TenantContext tenant,
-        IConfiguration config)
+        IConfiguration config,
+        ILogger<RVideoSceneVideoCompletionService> logger)
     {
         _media = media;
         _versions = versions;
@@ -67,6 +69,7 @@ public sealed class RVideoSceneVideoCompletionService : IRVideoSceneVideoComplet
         _projects = projects;
         _tenant = tenant;
         _config = config;
+        _logger = logger;
     }
 
     public async Task<MediaFileDto> CompleteProviderVideoAsync(RVideoSceneVideoCompletionRequest request, CancellationToken ct = default)
@@ -149,12 +152,6 @@ public sealed class RVideoSceneVideoCompletionService : IRVideoSceneVideoComplet
             $"Scene {request.SceneIndex} rendered successfully.",
             new { request.SceneId, request.SceneIndex, request.ProviderTaskId, videoUrl = saved.PublicUrl ?? saved.FileUrl },
             ct);
-        await _finalizer.TryFinalizeSceneMediaAsync(
-            request.ProjectId,
-            request.SceneId,
-            request.IsRecovery ? "RVIDEO_VIDEO_RECOVERED" : "SCENE_VIDEO_READY",
-            ct);
-        await _rvideoJobs.SyncLifecycleAsync(request.ProjectId, RVideoStages.Video, VideoProjectStatuses.Rendering, ct);
 
         await _billing.CompleteAsync(new AiImageBillingCompleteRequest
         {
@@ -173,15 +170,71 @@ public sealed class RVideoSceneVideoCompletionService : IRVideoSceneVideoComplet
             new { request.SceneId, request.SceneIndex, request.SceneVideoVersionId, request.ProviderTaskId, request.ChargedPoints },
             ct);
 
-        if (request.IsRecovery && request.RenderJobId is Guid renderJobId)
+        try
         {
-            await _jobs.MarkRecoveredCompletedAsync(
-                renderJobId,
+            await _finalizer.TryFinalizeSceneMediaAsync(
                 request.ProjectId,
                 request.SceneId,
-                request.SceneVideoVersionId,
-                request.LogicalRequestId,
+                request.IsRecovery ? "RVIDEO_VIDEO_RECOVERED" : "SCENE_VIDEO_READY",
                 ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            await RecordPostCompletionFailureAsync(
+                request,
+                "RVIDEO_VIDEO_FINALIZER_FAILED",
+                "Scene-video finalization failed after billing completion.",
+                ex,
+                ct);
+        }
+
+        try
+        {
+            await _rvideoJobs.SyncLifecycleAsync(request.ProjectId, RVideoStages.Video, VideoProjectStatuses.Rendering, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            await RecordPostCompletionFailureAsync(
+                request,
+                "RVIDEO_VIDEO_LIFECYCLE_SYNC_FAILED",
+                "RVIDEO lifecycle synchronization failed after billing completion.",
+                ex,
+                ct);
+        }
+
+        if (request.IsRecovery && request.RenderJobId is Guid renderJobId)
+        {
+            try
+            {
+                await _jobs.MarkRecoveredCompletedAsync(
+                    renderJobId,
+                    request.ProjectId,
+                    request.SceneId,
+                    request.SceneVideoVersionId,
+                    request.LogicalRequestId,
+                    ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                await RecordPostCompletionFailureAsync(
+                    request,
+                    "RVIDEO_VIDEO_RENDER_JOB_RECOVERY_MARK_FAILED",
+                    "Recovered scene-video render-job bookkeeping failed after billing completion.",
+                    ex,
+                    ct);
+            }
         }
 
         if (request.IsRecovery)
@@ -196,6 +249,74 @@ public sealed class RVideoSceneVideoCompletionService : IRVideoSceneVideoComplet
         }
 
         return saved;
+    }
+
+    private async Task RecordPostCompletionFailureAsync(
+        RVideoSceneVideoCompletionRequest request,
+        string eventType,
+        string message,
+        Exception exception,
+        CancellationToken ct)
+    {
+        var safeErrorMessage = ToSafeErrorMessage(exception);
+        _logger.LogError(
+            exception,
+            "{EventType} projectId={ProjectId} sceneId={SceneId} sceneIndex={SceneIndex} sceneVideoVersionId={SceneVideoVersionId} providerTaskId={ProviderTaskId} errorType={ErrorType} safeErrorMessage={SafeErrorMessage}",
+            eventType,
+            request.ProjectId,
+            request.SceneId,
+            request.SceneIndex,
+            request.SceneVideoVersionId,
+            request.ProviderTaskId,
+            exception.GetType().Name,
+            safeErrorMessage);
+
+        try
+        {
+            await _projects.AddProjectEventAsync(
+                request.ProjectId,
+                eventType,
+                "error",
+                message,
+                new
+                {
+                    request.ProjectId,
+                    request.SceneId,
+                    request.SceneIndex,
+                    request.SceneVideoVersionId,
+                    request.ProviderTaskId,
+                    errorType = exception.GetType().Name,
+                    safeErrorMessage
+                },
+                ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception eventException)
+        {
+            var safeEventErrorMessage = ToSafeErrorMessage(eventException);
+            _logger.LogError(
+                eventException,
+                "RVIDEO_VIDEO_POST_COMPLETION_DIAGNOSTIC_EVENT_FAILED projectId={ProjectId} sceneId={SceneId} eventType={EventType} errorType={ErrorType} safeErrorMessage={SafeErrorMessage}",
+                request.ProjectId,
+                request.SceneId,
+                eventType,
+                eventException.GetType().Name,
+                safeEventErrorMessage);
+        }
+    }
+
+    private static string ToSafeErrorMessage(Exception ex)
+    {
+        var message = ex.Message.ReplaceLineEndings(" ").Trim();
+        if (message.Length > 500)
+        {
+            message = message[..500];
+        }
+
+        return message;
     }
 
     private string ResolvePhysicalPath(string? objectKey)

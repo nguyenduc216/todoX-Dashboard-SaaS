@@ -895,6 +895,8 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
                    is_selected=true,
                    selected_at=now(),
                    selected_by=created_by,
+                   error_code=NULL,
+                   error_message=NULL,
                    completed_at=now(),
                    updated_at=now()
              WHERE id=@versionId AND tenant_id=@tenant;

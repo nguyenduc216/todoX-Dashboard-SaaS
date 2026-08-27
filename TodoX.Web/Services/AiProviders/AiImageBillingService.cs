@@ -386,6 +386,10 @@ public sealed class AiImageBillingService : IAiImageBillingService
                    provider_actual_cost_usd = @actualUsd,
                    provider_cost_source = CASE WHEN @actualUsd IS NULL THEN provider_cost_source ELSE 'provider_actual' END,
                    wallet_transaction_id = @txId,
+                   error_message = NULL,
+                   pending_reconciliation_at = NULL,
+                   reconciliation_lock_owner = NULL,
+                   reconciliation_lock_until = NULL,
                    completed_at = now(),
                    updated_at = now()
              WHERE id = @id;
@@ -739,6 +743,10 @@ public sealed class AiImageBillingService : IAiImageBillingService
                    provider_task_id = @taskId,
                    provider_actual_cost_usd = @actualUsd,
                    provider_cost_source = CASE WHEN @actualUsd IS NULL THEN provider_cost_source ELSE 'provider_actual' END,
+                   error_message = NULL,
+                   pending_reconciliation_at = NULL,
+                   reconciliation_lock_owner = NULL,
+                   reconciliation_lock_until = NULL,
                    completed_at = now(),
                    updated_at = now()
              WHERE id = @id;

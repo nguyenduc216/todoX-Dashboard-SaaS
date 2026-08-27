@@ -64,6 +64,7 @@ public sealed class AiImageBillingReconciliationWorker : BackgroundService
         var videoService = scope.ServiceProvider.GetRequiredService<IRVideo79AiVideoService>();
         var versions = scope.ServiceProvider.GetRequiredService<ISceneMediaVersioningService>();
         var completion = scope.ServiceProvider.GetRequiredService<IRVideoSceneVideoCompletionService>();
+        var projects = scope.ServiceProvider.GetRequiredService<VideoRenderRepository>();
         var tenant = scope.ServiceProvider.GetRequiredService<TenantContext>();
 
         var batchSize = Math.Clamp(_config.GetValue("AiImageBilling:ReconciliationBatchSize", 10), 1, 100);
@@ -79,7 +80,55 @@ public sealed class AiImageBillingReconciliationWorker : BackgroundService
 
         foreach (var item in claimed)
         {
-            await ReconcileItemAsync(billing, tasks, versions, completion, videoService, tenant, item, maxAttempts, ct);
+            try
+            {
+                await ReconcileItemAsync(billing, tasks, versions, completion, videoService, projects, tenant, item, maxAttempts, ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                var safeErrorMessage = ToSafeErrorMessage(ex);
+                _logger.LogError(
+                    ex,
+                    "AI_IMAGE_RECONCILIATION_ITEM_FAILED logicalRequestId={LogicalRequestId} providerCode={ProviderCode} providerTaskId={ProviderTaskId} capabilityCode={CapabilityCode} attemptCount={AttemptCount} exceptionType={ExceptionType} safeErrorMessage={SafeErrorMessage}",
+                    item.LogicalRequestId,
+                    item.ProviderCode,
+                    item.ProviderTaskId,
+                    item.CapabilityCode,
+                    item.ReconciliationAttemptCount,
+                    ex.GetType().Name,
+                    safeErrorMessage);
+
+                try
+                {
+                    await billing.RescheduleReconciliationAsync(
+                        item.LogicalRequestId,
+                        $"Reconciliation failed: {ex.GetType().Name}: {safeErrorMessage}",
+                        TimeSpan.FromMinutes(Math.Min(30, Math.Max(1, item.ReconciliationAttemptCount * 2))),
+                        ct);
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception rescheduleException)
+                {
+                    var safeRescheduleErrorMessage = ToSafeErrorMessage(rescheduleException);
+                    _logger.LogError(
+                        rescheduleException,
+                        "AI_IMAGE_RECONCILIATION_ITEM_RESCHEDULE_FAILED logicalRequestId={LogicalRequestId} providerCode={ProviderCode} providerTaskId={ProviderTaskId} capabilityCode={CapabilityCode} attemptCount={AttemptCount} exceptionType={ExceptionType} safeErrorMessage={SafeErrorMessage}",
+                        item.LogicalRequestId,
+                        item.ProviderCode,
+                        item.ProviderTaskId,
+                        item.CapabilityCode,
+                        item.ReconciliationAttemptCount,
+                        rescheduleException.GetType().Name,
+                        safeRescheduleErrorMessage);
+                }
+            }
         }
     }
 
@@ -89,6 +138,7 @@ public sealed class AiImageBillingReconciliationWorker : BackgroundService
         ISceneMediaVersioningService versions,
         IRVideoSceneVideoCompletionService completion,
         IRVideo79AiVideoService videoService,
+        VideoRenderRepository projects,
         TenantContext tenant,
         AiImageBillingReconciliationItem item,
         int maxAttempts,
@@ -107,7 +157,7 @@ public sealed class AiImageBillingReconciliationWorker : BackgroundService
         if (string.Equals(item.ProviderCode, "79ai", StringComparison.OrdinalIgnoreCase)
             && string.Equals(item.CapabilityCode, "rvideo_scene_video_generation", StringComparison.OrdinalIgnoreCase))
         {
-            await Reconcile79AiVideoAsync(billing, versions, completion, videoService, tenant, item, ct);
+            await Reconcile79AiVideoAsync(billing, versions, completion, videoService, projects, tenant, item, ct);
             return;
         }
 
@@ -184,6 +234,7 @@ public sealed class AiImageBillingReconciliationWorker : BackgroundService
         ISceneMediaVersioningService versions,
         IRVideoSceneVideoCompletionService completion,
         IRVideo79AiVideoService videoService,
+        VideoRenderRepository projects,
         TenantContext tenant,
         AiImageBillingReconciliationItem item,
         CancellationToken ct)
@@ -192,6 +243,13 @@ public sealed class AiImageBillingReconciliationWorker : BackgroundService
         if (version is null)
         {
             await billing.MarkManualReviewAsync(item.LogicalRequestId, "79AI video reconciliation could not locate a recoverable scene video version.", ct);
+            return;
+        }
+
+        var scene = await projects.GetSceneAsync(version.SceneId, ct);
+        if (scene is null)
+        {
+            await billing.MarkManualReviewAsync(item.LogicalRequestId, "79AI video reconciliation could not locate the scene for the recoverable scene video version.", ct);
             return;
         }
 
@@ -233,7 +291,7 @@ public sealed class AiImageBillingReconciliationWorker : BackgroundService
         await completion.CompleteProviderVideoAsync(new RVideoSceneVideoCompletionRequest(
             version.ProjectId,
             version.SceneId,
-            SceneIndex: 0,
+            scene.SceneIndex,
             version.Id,
             version.RenderJobId,
             version.StorageKey,
@@ -269,5 +327,16 @@ public sealed class AiImageBillingReconciliationWorker : BackgroundService
         }
 
         return false;
+    }
+
+    private static string ToSafeErrorMessage(Exception ex)
+    {
+        var message = ex.Message.ReplaceLineEndings(" ").Trim();
+        if (message.Length > 500)
+        {
+            message = message[..500];
+        }
+
+        return message;
     }
 }

@@ -13,7 +13,8 @@ SELECT b.id,
        b.reconciliation_lock_until
   FROM billing.ai_image_billing_records b
   JOIN video_render.scene_video_versions v
-    ON v.billing_logical_request_id = b.logical_request_id
+    ON v.logical_request_id = b.logical_request_id
+   AND v.provider_task_id = b.provider_task_id
  WHERE v.project_id = 11
    AND v.scene_id BETWEEN 48 AND 54
    AND v.provider_task_id IS NOT NULL
@@ -32,7 +33,8 @@ UPDATE billing.ai_image_billing_records b
      SELECT b2.id
        FROM billing.ai_image_billing_records b2
        JOIN video_render.scene_video_versions v
-         ON v.billing_logical_request_id = b2.logical_request_id
+         ON v.logical_request_id = b2.logical_request_id
+        AND v.provider_task_id = b2.provider_task_id
       WHERE v.project_id = 11
         AND v.scene_id BETWEEN 48 AND 54
         AND v.provider_task_id IS NOT NULL
@@ -55,7 +57,8 @@ SELECT b.id,
        b.pending_reconciliation_at
   FROM billing.ai_image_billing_records b
   JOIN video_render.scene_video_versions v
-    ON v.billing_logical_request_id = b.logical_request_id
+    ON v.logical_request_id = b.logical_request_id
+   AND v.provider_task_id = b.provider_task_id
  WHERE v.project_id = 11
    AND v.scene_id BETWEEN 48 AND 54
    AND v.provider_task_id IS NOT NULL

@@ -209,6 +209,80 @@ public sealed class RVideoRuntimeSqlTests
         Assert.True(billingIndex > persistIndex);
     }
 
+    [Fact]
+    public void SceneVideoCompletionBillsBeforeNonCriticalPostPersistenceEffects()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "RVideoSceneVideoCompletionService.cs");
+
+        var versionIndex = source.IndexOf("CompleteSceneVideoVersionAsync", StringComparison.Ordinal);
+        var readyIndex = source.IndexOf("\"SCENE_VIDEO_READY\"", StringComparison.Ordinal);
+        var billingIndex = source.IndexOf("_billing.CompleteAsync", StringComparison.Ordinal);
+        var finalizerIndex = source.IndexOf("_finalizer.TryFinalizeSceneMediaAsync", StringComparison.Ordinal);
+        var lifecycleIndex = source.IndexOf("_rvideoJobs.SyncLifecycleAsync", StringComparison.Ordinal);
+
+        Assert.True(versionIndex >= 0);
+        Assert.True(readyIndex > versionIndex);
+        Assert.True(billingIndex > readyIndex);
+        Assert.True(finalizerIndex > billingIndex);
+        Assert.True(lifecycleIndex > finalizerIndex);
+    }
+
+    [Fact]
+    public void SceneVideoPostCompletionFailuresAreDiagnosedAndIsolated()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "RVideoSceneVideoCompletionService.cs");
+
+        Assert.Contains("RVIDEO_VIDEO_FINALIZER_FAILED", source);
+        Assert.Contains("RVIDEO_VIDEO_LIFECYCLE_SYNC_FAILED", source);
+        Assert.Contains("RVIDEO_VIDEO_RENDER_JOB_RECOVERY_MARK_FAILED", source);
+        Assert.Contains("RecordPostCompletionFailureAsync", source);
+        Assert.Contains("safeErrorMessage", source);
+    }
+
+    [Fact]
+    public void ReconciliationIsolatesItemsAndReschedulesUnexpectedFailures()
+    {
+        var source = ReadRepoFile("Services", "AiProviders", "AiImageBillingReconciliationWorker.cs");
+
+        Assert.Contains("foreach (var item in claimed)", source);
+        Assert.Contains("AI_IMAGE_RECONCILIATION_ITEM_FAILED", source);
+        Assert.Contains("await billing.RescheduleReconciliationAsync", source);
+        Assert.Contains("catch (OperationCanceledException) when (ct.IsCancellationRequested)", source);
+        Assert.Contains("exceptionType", source);
+        Assert.Contains("safeErrorMessage", source);
+    }
+
+    [Fact]
+    public void RecoveryResolvesActualSceneIndexAndRearmUsesCanonicalIdentity()
+    {
+        var worker = ReadRepoFile("Services", "AiProviders", "AiImageBillingReconciliationWorker.cs");
+        var rearm = File.ReadAllText(
+            Path.Combine(RepoRoot, "database", "manual", "rvideo-project-11-video-reconciliation-rearm.sql"),
+            Encoding.UTF8);
+
+        Assert.Contains("var scene = await projects.GetSceneAsync(version.SceneId, ct);", worker);
+        Assert.Contains("scene.SceneIndex", worker);
+        Assert.DoesNotContain("SceneIndex: 0", worker);
+        Assert.Contains("ON v.logical_request_id = b.logical_request_id", rearm);
+        Assert.Contains("AND v.provider_task_id = b.provider_task_id", rearm);
+        Assert.DoesNotContain("v.billing_logical_request_id = b.logical_request_id", rearm);
+    }
+
+    [Fact]
+    public void SuccessfulSceneVideoCompletionClearsStaleFailureFields()
+    {
+        var versioning = ReadRepoFile("Services", "VideoRender", "SceneMediaVersioningService.cs");
+        var billing = ReadRepoFile("Services", "AiProviders", "AiImageBillingService.cs");
+
+        var versionCompletion = ExtractMethodBlock(versioning, "public async Task CompleteSceneVideoVersionAsync");
+        var billingCompletion = ExtractMethodBlock(billing, "public async Task<AiImageBillingCompletion> CompleteAsync");
+
+        Assert.Contains("error_code=NULL", versionCompletion);
+        Assert.Contains("error_message=NULL", versionCompletion);
+        Assert.Contains("error_message = NULL", billingCompletion);
+        Assert.Contains("pending_reconciliation_at = NULL", billingCompletion);
+    }
+
     private static string RepoRoot => Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
 
     private static string ReadRepoFile(params string[] parts)
