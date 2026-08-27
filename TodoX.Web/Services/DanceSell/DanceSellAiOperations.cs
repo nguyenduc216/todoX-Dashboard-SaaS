@@ -509,6 +509,7 @@ public interface IDanceSellOperationRepository
 {
     Task<DanceSellProviderOperationDto?> UpsertOperationAsync(DanceSellProviderOperationDto operation, CancellationToken ct = default);
     Task<int> GetNextAttemptNoAsync(Guid danceSellJobId, string operationType, CancellationToken ct = default);
+    Task<DanceSellProviderOperationDto?> GetLatestOperationAsync(Guid danceSellJobId, string operationType, CancellationToken ct = default);
     Task<DanceSellProviderOperationDto?> GetLatestActiveOperationAsync(Guid danceSellJobId, string operationType, CancellationToken ct = default);
     Task<bool> HasActiveOperationAsync(Guid danceSellJobId, string operationType, CancellationToken ct = default);
     Task MarkSubmittedAsync(Guid operationId, string providerTaskId, string responseJson, CancellationToken ct = default);
@@ -613,6 +614,46 @@ public sealed class DanceSellOperationRepository : IDanceSellOperationRepository
                   FROM dance_sell.dance_sell_provider_operations
                  WHERE dance_sell_job_id = @danceSellJobId
                    AND operation_type = @operationType;
+                """,
+                new { danceSellJobId, operationType });
+        }
+        catch (PostgresException ex) when (IsSchemaMissing(ex))
+        {
+            throw SchemaNotReady(ex);
+        }
+    }
+
+    public async Task<DanceSellProviderOperationDto?> GetLatestOperationAsync(Guid danceSellJobId, string operationType, CancellationToken ct = default)
+    {
+        try
+        {
+            using var conn = await _factory.OpenAsync(ct);
+            return await conn.QuerySingleOrDefaultAsync<DanceSellProviderOperationDto>(
+                """
+                SELECT id AS Id, dance_sell_job_id AS DanceSellJobId, render_job_id AS RenderJobId,
+                       parent_operation_id AS ParentOperationId, operation_type AS OperationType, attempt_no AS AttemptNo,
+                       reference_mode AS ReferenceMode, provider_code AS ProviderCode,
+                       provider_capability_id AS ProviderCapabilityId, provider_account_id AS ProviderAccountId,
+                       provider_model AS ProviderModel, provider_task_id AS ProviderTaskId, status AS Status,
+                       provider_status AS ProviderStatus, billing_status AS BillingStatus, refund_status AS RefundStatus,
+                       request_json::text AS RequestJson, response_json::text AS ResponseJson,
+                       callback_json::text AS CallbackJson, error_json::text AS ErrorJson,
+                       provider_usage_json::text AS ProviderUsageJson, pricing_snapshot_json::text AS PricingSnapshotJson,
+                       usage_quantity AS UsageQuantity, usage_unit AS UsageUnit, credits_estimated AS CreditsEstimated,
+                       credits_consumed AS CreditsConsumed, provider_cost AS ProviderCost,
+                       provider_currency AS ProviderCurrency, provider_cost_vnd AS ProviderCostVnd,
+                       exchange_rate AS ExchangeRate, todox_points_estimated AS TodoxPointsEstimated,
+                       todox_points_reserved AS TodoxPointsReserved, todox_points_charged AS TodoxPointsCharged,
+                       todox_points_refunded AS TodoxPointsRefunded, balance_before AS BalanceBefore,
+                       balance_after AS BalanceAfter, cost_source AS CostSource, error_code AS ErrorCode,
+                       error_message AS ErrorMessage, created_at AS CreatedAt, started_at AS StartedAt,
+                       submitted_at AS SubmittedAt, completed_at AS CompletedAt, failed_at AS FailedAt,
+                       refunded_at AS RefundedAt, updated_at AS UpdatedAt
+                  FROM dance_sell.dance_sell_provider_operations
+                 WHERE dance_sell_job_id=@danceSellJobId
+                   AND operation_type=@operationType
+                 ORDER BY attempt_no DESC, created_at DESC
+                 LIMIT 1;
                 """,
                 new { danceSellJobId, operationType });
         }
@@ -813,6 +854,7 @@ public sealed class DanceSellOperationRepository : IDanceSellOperationRepository
                    AND o.operation_type = @operationType
                    AND a.asset_role = @assetRole
                    AND COALESCE(a.provider_url, '') <> ''
+                   AND COALESCE(a.metadata_json->>'verificationMatched', 'false') = 'true'
                    AND (@mediaId IS NULL OR a.media_id = @mediaId)
                    AND (@objectKey IS NULL OR a.object_key = @objectKey)
                  ORDER BY a.created_at DESC

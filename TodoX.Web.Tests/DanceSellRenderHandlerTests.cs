@@ -272,6 +272,8 @@ public sealed class DanceSellRenderHandlerTests
 
         public Task<DanceSellProviderOperationDto?> GetLatestActiveOperationAsync(Guid danceSellJobId, string operationType, CancellationToken ct = default)
             => Task.FromResult<DanceSellProviderOperationDto?>(null);
+        public Task<DanceSellProviderOperationDto?> GetLatestOperationAsync(Guid danceSellJobId, string operationType, CancellationToken ct = default)
+            => Task.FromResult<DanceSellProviderOperationDto?>(null);
 
         public Task<bool> HasActiveOperationAsync(Guid danceSellJobId, string operationType, CancellationToken ct = default)
             => Task.FromResult(false);

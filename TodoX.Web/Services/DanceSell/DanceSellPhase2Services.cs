@@ -1370,6 +1370,7 @@ public interface IDanceSellPhase2Service
 
 public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
 {
+    private static readonly ConcurrentDictionary<Guid, SemaphoreSlim> RetryLocks = new();
     private readonly IDanceSellRepository _repo;
     private readonly IMediaFileService _media;
     private readonly IDanceSellMotionSourceService _motion;
@@ -1640,33 +1641,103 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
 
     public async Task<DanceSellJobDto> RetryAsync(Guid id, CurrentUserSession user, CancellationToken ct = default)
     {
-        var job = await RequireOwnedJobAsync(id, user, ct);
-        var coreJob = job.RenderJobId is Guid renderJobId
-            ? await _renderJobs.GetAsync(renderJobId, ct)
-            : null;
-        var coreCancelled = coreJob?.Status == RenderJobStatuses.Cancelled;
-        var danceJobRetryable = job.Status is DanceSellJobStatuses.Queued
-            or DanceSellJobStatuses.Submitted
-            or DanceSellJobStatuses.Rendering
-            or DanceSellJobStatuses.Failed
-            or DanceSellJobStatuses.Timeout;
-        if (job.RenderJobId is null
-            || !danceJobRetryable
-            || (!coreCancelled && job.Status is not (DanceSellJobStatuses.Failed or DanceSellJobStatuses.Timeout)))
+        var gate = RetryLocks.GetOrAdd(id, _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(ct);
+        try
         {
-            throw new InvalidOperationException("DANCE_SELL_RETRY_NOT_ALLOWED");
-        }
+            var job = await RequireOwnedJobAsync(id, user, ct);
+            var coreJob = job.RenderJobId is Guid renderJobId
+                ? await _renderJobs.GetAsync(renderJobId, ct)
+                : null;
+            var coreCancelled = coreJob?.Status == RenderJobStatuses.Cancelled;
+            var danceJobRetryable = job.Status is DanceSellJobStatuses.Queued
+                or DanceSellJobStatuses.Submitted
+                or DanceSellJobStatuses.Rendering
+                or DanceSellJobStatuses.Failed
+                or DanceSellJobStatuses.Timeout;
+            if (job.RenderJobId is null
+                || !danceJobRetryable
+                || (!coreCancelled && job.Status is not (DanceSellJobStatuses.Failed or DanceSellJobStatuses.Timeout)))
+            {
+                throw new InvalidOperationException("DANCE_SELL_RETRY_NOT_ALLOWED");
+            }
 
-        var retry = await _renderJobs.RetryAsync(job.RenderJobId.Value, user.UserId, ct)
-            ?? throw new InvalidOperationException("DANCE_SELL_RENDER_ENQUEUE_FAILED");
-        if (coreCancelled
-            && coreJob is not null
-            && JsonSerializer.Deserialize<DanceSellRenderInput>(coreJob.InputJson, KieJson.Options)?.OperationId is Guid operationId)
-        {
-            await _operations.ResetMotionForRetryAsync(operationId, retry.Id, ct);
+            if (await _operations.GetLatestActiveOperationAsync(job.Id, DanceSellOperationTypes.MotionVideo, ct) is not null)
+            {
+                return await _repo.GetByIdAsync(job.Id, ct) ?? job;
+            }
+
+            var previousOperation = await _operations.GetLatestOperationAsync(job.Id, DanceSellOperationTypes.MotionVideo, ct);
+            var motionRoute = await _catalog.ResolveAsync(DanceSellOperationTypes.MotionVideo, job.MotionProviderCode, job.MotionProviderModel, ct);
+            var providerMode = DanceSellMotionProviderContract.ResolveProviderMode(motionRoute, job.Mode);
+            var estimate = await _costs.EstimateAsync(motionRoute, providerMode, null, ct);
+            var attemptNo = await _operations.GetNextAttemptNoAsync(job.Id, DanceSellOperationTypes.MotionVideo, ct);
+            var logicalRequestId = string.IsNullOrWhiteSpace(job.LogicalRequestId)
+                ? $"dance-sell-{Guid.NewGuid():N}"
+                : job.LogicalRequestId;
+            var operation = await _operations.UpsertOperationAsync(new DanceSellProviderOperationDto
+            {
+                Id = Guid.NewGuid(),
+                DanceSellJobId = job.Id,
+                OperationType = DanceSellOperationTypes.MotionVideo,
+                AttemptNo = attemptNo,
+                ParentOperationId = previousOperation?.Id,
+                ReferenceMode = job.ReferenceMode,
+                ProviderCode = motionRoute.ProviderCode,
+                ProviderCapabilityId = motionRoute.ProviderCapabilityId,
+                ProviderAccountId = motionRoute.ProviderAccountId,
+                ProviderModel = motionRoute.ModelName,
+                Status = DanceSellOperationStatuses.Queued,
+                BillingStatus = estimate.EstimatedTodoxPoints is null ? DanceSellBillingStatuses.Reconciliation : DanceSellBillingStatuses.Estimated,
+                RefundStatus = DanceSellRefundStatuses.NotCharged,
+                RequestJson = DanceSellRepository.ToJson(new { job.Id, job.PreparedReferenceUrl, job.MotionVideoUrl, job.Prompt, businessMode = job.Mode, providerMode, job.CharacterOrientation, job.Ratio }),
+                UsageUnit = estimate.UsageUnit,
+                CreditsEstimated = estimate.EstimatedUsage,
+                ProviderCost = estimate.EstimatedProviderCost,
+                ProviderCurrency = estimate.Currency,
+                ProviderCostVnd = estimate.ProviderCostVnd,
+                TodoxPointsEstimated = estimate.EstimatedTodoxPoints,
+                CostSource = estimate.PricingSource,
+                PricingSnapshotJson = DanceSellRepository.ToJson(estimate),
+                CreatedAt = DateTime.UtcNow,
+                StartedAt = DateTime.UtcNow
+            }, ct) ?? throw new InvalidOperationException("DANCE_SELL_MOTION_OPERATION_REQUIRED");
+
+            var retry = await _renderJobs.EnqueueAsync(new RenderJobCreateModel
+            {
+                UserId = coreJob?.UserId ?? user.UserId,
+                CustomerId = coreJob?.CustomerId ?? user.CustomerId,
+                JobType = coreJob?.JobType ?? RenderJobTypes.DanceSell,
+                Priority = coreJob?.Priority ?? 50,
+                Input = new DanceSellRenderInput
+                {
+                    DanceSellJobId = job.Id,
+                    LogicalRequestId = logicalRequestId,
+                    OperationId = operation.Id
+                },
+                Prompt = JsonSerializer.Deserialize<object>(coreJob?.PromptJson ?? "{}"),
+                References = JsonSerializer.Deserialize<object>(coreJob?.ReferenceJson ?? "[]"),
+                LogCode = coreJob?.LogCode,
+                PointCostEstimate = coreJob?.PointCostEstimate ?? estimate.EstimatedTodoxPoints ?? 0,
+                PointStatus = (coreJob?.PointCostEstimate ?? estimate.EstimatedTodoxPoints ?? 0) > 0
+                    ? RenderPointStatuses.Pending
+                    : RenderPointStatuses.NotRequired,
+                ProviderCode = motionRoute.ProviderCode,
+                ModelCode = motionRoute.ModelName,
+                MaxAttempts = coreJob?.MaxAttempts ?? Math.Max(3, _kie.CurrentValue.MaxPollCount + _kie.CurrentValue.SubmitMaxRetry + 5)
+            }, ct);
+            if (job.RenderJobId is Guid sourceRenderJobId)
+            {
+                await _renderJobs.AddEventAsync(retry.Id, "JOB_RETRY_OF", "Job created as retry of failed job.", new { sourceJobId = sourceRenderJobId, userId = user.UserId }, ct: ct);
+                await _renderJobs.AddEventAsync(sourceRenderJobId, "JOB_RETRY_CREATED", "Retry job created.", new { retryJobId = retry.Id, userId = user.UserId }, ct: ct);
+            }
+            await _repo.ResetMotionRenderStateAsync(job.Id, retry.Id, ct);
+            return await _repo.GetByIdAsync(job.Id, ct) ?? job;
         }
-        await _repo.ResetMotionRenderStateAsync(job.Id, retry.Id, ct);
-        return await _repo.GetByIdAsync(job.Id, ct) ?? job;
+        finally
+        {
+            gate.Release();
+        }
     }
 
     public async Task<DanceSellJobDto> CancelAsync(Guid id, string reason, CurrentUserSession user, CancellationToken ct = default)

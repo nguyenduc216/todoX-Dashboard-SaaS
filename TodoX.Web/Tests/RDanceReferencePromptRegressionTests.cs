@@ -83,6 +83,33 @@ public sealed class RDanceReferencePromptRegressionTests
     }
 
     [Fact]
+    public void ManualRetryCreatesFreshMotionAttemptAndRebindsRenderInput()
+    {
+        var service = ReadRepoFile("Services", "DanceSell", "DanceSellPhase2Services.cs");
+        var render = ReadRepoFile("Services", "Render", "RenderJobService.cs");
+
+        Assert.Contains("GetLatestOperationAsync(job.Id, DanceSellOperationTypes.MotionVideo", service);
+        Assert.Contains("ParentOperationId = previousOperation?.Id", service);
+        Assert.Contains("AttemptNo = attemptNo", service);
+        Assert.Contains("OperationId = operation.Id", service);
+        Assert.Contains("inputOverride ?? JsonSerializer.Deserialize<object>(current.InputJson)", render);
+        Assert.Contains("await _operations.BeginMotionSubmitAttemptAsync(motionOperationId, requestJson, ct)", ReadRepoFile("Services", "DanceSell", "DanceSellRenderHandler.cs"));
+    }
+
+    [Fact]
+    public void ManualRetryReusesOnlyVerifiedAssetsWithCurrentMediaIdentity()
+    {
+        var repository = ReadRepoFile("Services", "DanceSell", "DanceSellAiOperations.cs");
+        var handler = ReadRepoFile("Services", "DanceSell", "DanceSellRenderHandler.cs");
+
+        Assert.Contains("verificationMatched', 'true'", repository);
+        Assert.Contains("await _operations.GetLatestAssetAsync(", handler);
+        Assert.Contains("CloneProviderAsset", handler);
+        Assert.Contains("danceJob.PreparedReferenceMediaId", handler);
+        Assert.Contains("danceJob.MotionVideoMediaId", handler);
+    }
+
+    [Fact]
     public void NonKlingMotionKeepsSelectedProjectRatio()
     {
         var route = new DanceSellProviderRouteDto { ModelName = "other_motion_model" };

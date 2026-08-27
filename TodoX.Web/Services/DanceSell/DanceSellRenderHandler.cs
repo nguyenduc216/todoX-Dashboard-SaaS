@@ -184,8 +184,9 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
         var submitAttempt = 0;
         try
         {
-            var currentReferenceAsset = await _operations.GetLatestAssetForRenderJobAsync(
-                renderJob.Id,
+            var currentReferenceAsset = await _operations.GetLatestAssetAsync(
+                danceJob.Id,
+                DanceSellOperationTypes.MotionVideo,
                 DanceSellAssetRoles.MotionReferenceProviderUpload,
                 danceJob.PreparedReferenceMediaId,
                 danceJob.PreparedReferenceObjectKey,
@@ -196,6 +197,7 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
                 await _renderJobs.AddEventAsync(renderJob.Id, "AI_PROVIDER_REFERENCE_UPLOAD_REUSED_CURRENT_ATTEMPT",
                     "Verified reference upload reused for the same render attempt.",
                     new { danceSellJobId = danceJob.Id, renderJobId = renderJob.Id, canonicalUploadUrl = referenceUrlUsed, idBase = currentReferenceIdBase }, ct: ct);
+                await _operations.UpsertAssetAsync(CloneProviderAsset(currentReferenceAsset!, motionOperationId, renderJob.Id), ct);
             }
             else
             {
@@ -290,8 +292,9 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
                     }, ct: ct);
             }
 
-            reusableMotionUpload = await _operations.GetLatestAssetForRenderJobAsync(
-                renderJob.Id,
+            reusableMotionUpload = await _operations.GetLatestAssetAsync(
+                danceJob.Id,
+                DanceSellOperationTypes.MotionVideo,
                 DanceSellAssetRoles.MotionProviderUpload,
                 danceJob.MotionVideoMediaId,
                 danceJob.MotionVideoObjectKey,
@@ -312,6 +315,7 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
                         canonicalUploadUrl = motionProviderUrl,
                         previousUploadAt = reusableMotionUpload.CreatedAt
                     }, ct: ct);
+                await _operations.UpsertAssetAsync(CloneProviderAsset(reusableMotionUpload, motionOperationId, renderJob.Id), ct);
             }
             else
             {
@@ -868,6 +872,25 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
         => ReadConfigString(asset.MetadataJson, "uploadUrl")
            ?? asset.ProviderUrl
            ?? throw new InvalidOperationException("DANCE_SELL_PROVIDER_MEDIA_URL_REQUIRED");
+
+    private static AiOperationAssetDto CloneProviderAsset(AiOperationAssetDto asset, Guid operationId, Guid renderJobId)
+    {
+        var metadata = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(asset.MetadataJson, KieJson.Options)
+                       ?? new Dictionary<string, JsonElement>();
+        metadata["reusedForRenderJobId"] = JsonSerializer.SerializeToElement(renderJobId);
+        metadata["reusedForOperationId"] = JsonSerializer.SerializeToElement(operationId);
+        return new AiOperationAssetDto
+        {
+            OperationId = operationId,
+            AssetRole = asset.AssetRole,
+            MediaId = asset.MediaId,
+            ObjectKey = asset.ObjectKey,
+            PublicUrl = asset.PublicUrl,
+            ProviderUrl = asset.ProviderUrl,
+            MimeType = asset.MimeType,
+            MetadataJson = JsonSerializer.Serialize(metadata, KieJson.Options)
+        };
+    }
 
     private async Task<Ai79ProviderMediaItem> VerifyProviderImageAsync(
         RenderJobDto renderJob,

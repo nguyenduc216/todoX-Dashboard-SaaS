@@ -362,7 +362,7 @@ public sealed class RDanceFashionDemoPageTests
         Assert.Contains("UploadMediaAsync(new Ai79MediaUploadRequest", submit, StringComparison.Ordinal);
         Assert.Contains("runtime.UploadVideoPath", submit, StringComparison.Ordinal);
         Assert.Contains("DanceSellAssetRoles.MotionProviderUpload", submit, StringComparison.Ordinal);
-        Assert.Contains("GetLatestAssetForRenderJobAsync", submit, StringComparison.Ordinal);
+        Assert.Contains("GetLatestAssetAsync", submit, StringComparison.Ordinal);
         Assert.Contains("AI79_MOTION_SOURCE_UPLOAD_REUSED", submit, StringComparison.Ordinal);
         Assert.Contains("AI_PROVIDER_MOTION_UPLOAD_COMPLETED", submit, StringComparison.Ordinal);
         Assert.Contains("motionProviderUrl", submit, StringComparison.Ordinal);
@@ -525,8 +525,9 @@ public sealed class RDanceFashionDemoPageTests
         Assert.Contains("var coreJob = job.RenderJobId is Guid renderJobId", retry, StringComparison.Ordinal);
         Assert.Contains("var coreCancelled = coreJob?.Status == RenderJobStatuses.Cancelled", retry, StringComparison.Ordinal);
         Assert.DoesNotContain("DANCE_SELL_RETRY_NOT_ALLOWED", retry[..retry.IndexOf("if (job.RenderJobId is null", StringComparison.Ordinal)], StringComparison.Ordinal);
-        Assert.Contains("_renderJobs.RetryAsync(job.RenderJobId.Value, user.UserId, ct)", retry, StringComparison.Ordinal);
-        Assert.Contains("ResetMotionForRetryAsync(operationId, retry.Id, ct)", retry, StringComparison.Ordinal);
+        Assert.Contains("GetLatestOperationAsync(job.Id, DanceSellOperationTypes.MotionVideo", retry, StringComparison.Ordinal);
+        Assert.Contains("ParentOperationId = previousOperation?.Id", retry, StringComparison.Ordinal);
+        Assert.Contains("OperationId = operation.Id", retry, StringComparison.Ordinal);
 
         Assert.Contains("RenderJobStatuses.Failed or RenderJobStatuses.Cancelled", renderService, StringComparison.Ordinal);
         Assert.Contains("retry_of_job_id=@source", renderService, StringComparison.Ordinal);
@@ -687,7 +688,7 @@ public sealed class RDanceFashionDemoPageTests
         Assert.DoesNotContain("SubmitMultipartAsync(request, ct)", submit, StringComparison.Ordinal);
         Assert.Contains("UploadMediaAsync(new Ai79MediaUploadRequest", submit, StringComparison.Ordinal);
         Assert.Contains("SubmitMotionControlAsync(request, ct)", submit, StringComparison.Ordinal);
-        Assert.Contains("GetLatestAssetForRenderJobAsync", submit, StringComparison.Ordinal);
+        Assert.Contains("GetLatestAssetAsync", submit, StringComparison.Ordinal);
         Assert.Contains("DanceSellAssetRoles.MotionProviderUpload", submit, StringComparison.Ordinal);
         Assert.Contains("AI79_MOTION_SOURCE_UPLOAD_REUSED", submit, StringComparison.Ordinal);
         Assert.Contains("AI79_MOTION_SUBMIT_STARTED", submit, StringComparison.Ordinal);
