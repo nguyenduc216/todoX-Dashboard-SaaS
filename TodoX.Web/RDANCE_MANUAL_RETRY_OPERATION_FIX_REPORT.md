@@ -3,7 +3,7 @@
 ## Git
 Branch: integration/rdance-on-construction-video-core
 Base SHA: a49c4b5f89ccb3d3bbfa2712e42b3c7177306809
-Final SHA: 84dbf85efdfcda47a333bce1ffbadce732817357
+Final SHA: af83613b0ee4cf7308645447009ab66ed93dcc91 (implementation commit; report metadata follow-up is separate)
 Push: pushed to origin/integration/rdance-on-construction-video-core
 
 ## Root cause
@@ -63,9 +63,20 @@ Other provider changes: NO
 ## Validation
 Build: `dotnet build TodoX.Dashboard.sln -c Release --no-restore /p:UseSharedCompilation=false /m:1` passed
 Tests: `dotnet test TodoX.Web.Tests\\TodoX.Web.Tests.csproj -c Release --no-restore --filter "FullyQualifiedName~RDanceReferencePromptRegressionTests|FullyQualifiedName~DanceSellRenderHandlerTests" /p:UseSharedCompilation=false /m:1` passed
+Tests result: 6 passed, 0 failed
+Broader RDance snapshot filter: 4 pre-existing stale-source assertion failures were not changed by this fix: `RDanceDetailPageUsesJobRouteAndKeepsWorkflowTabs`, `DanceSell79AiMotionSubmitUsesRouteFieldsAndProviderMode`, `RDanceDetailPageUsesCustomImageUploadZonesAndReferenceCopy`, and `RDanceRetryAndResultUiUseFreshMotionStateAndSharedLoadingAnimation`.
 git diff --check: passed
 format: `dotnet format TodoX.Dashboard.sln --verify-no-changes --no-restore --include TodoX.Web\\Services\\Render\\RenderJobService.cs TodoX.Web\\Services\\DanceSell\\DanceSellAiOperations.cs TodoX.Web\\Services\\DanceSell\\DanceSellPhase2Services.cs TodoX.Web\\Services\\DanceSell\\DanceSellRenderHandler.cs TodoX.Web\\Tests\\RDanceReferencePromptRegressionTests.cs` passed
 publish: `dotnet publish TodoX.Web\\TodoX.Web.csproj -c Release --no-restore -o artifacts\\publish\\todox-dashboard /p:UseSharedCompilation=false /m:1` passed
+
+## Changed files
+- `TodoX.Web/Services/DanceSell/DanceSellAiOperations.cs`
+- `TodoX.Web/Services/DanceSell/DanceSellPhase2Services.cs`
+- `TodoX.Web/Services/DanceSell/DanceSellRenderHandler.cs`
+- `TodoX.Web/Tests/RDanceReferencePromptRegressionTests.cs`
+- `TodoX.Web.Tests/DanceSellRenderHandlerTests.cs`
+- `TodoX.Web.Tests/RDanceFashionDemoPageTests.cs`
+- `TodoX.Web/RDANCE_MANUAL_RETRY_OPERATION_FIX_REPORT.md`
 
 ## Acceptance
 - [x] Manual retry creates new motion operation
