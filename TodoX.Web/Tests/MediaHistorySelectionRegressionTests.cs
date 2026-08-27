@@ -95,6 +95,37 @@ public sealed class MediaHistorySelectionRegressionTests
         Assert.Contains("f.error_message AS ErrorMessage", workflow);
     }
 
+    [Fact]
+    public void TimelapseFinalStateQueryQualifiesFinalOutputColumnsAfterRenderJobJoin()
+    {
+        var workflow = ReadRepoFile("Services", "Timelapse", "TimelapseWorkflowService.cs");
+        var readState = Between(
+            workflow,
+            "private async Task<TimelapseWorkflowState> ReadStateAsync",
+            "var hasActive =");
+
+        Assert.Contains("SELECT f.status AS Status,", readState);
+        Assert.DoesNotContain("SELECT status AS Status,", readState);
+        Assert.Contains("f.version AS Version,", readState);
+        Assert.Contains("f.result_media_id AS MediaId,", readState);
+        Assert.Contains("f.public_url AS PublicUrl,", readState);
+        Assert.Contains("f.object_key AS ObjectKey,", readState);
+        Assert.Contains("f.error_message AS ErrorMessage,", readState);
+        Assert.Contains("f.completed_at AS CompletedAt", readState);
+        Assert.Contains("JOIN render.render_jobs j ON j.id=f.job_id AND j.tenant_id=@tenant", readState);
+        Assert.Contains("j.output_json->>'mediaId'", readState);
+    }
+
     private static string ReadRepoFile(params string[] parts)
         => File.ReadAllText(Path.Combine(new[] { AppContext.BaseDirectory, "..", "..", "..", ".." }.Concat(parts).ToArray()));
+
+    private static string Between(string source, string startMarker, string endMarker)
+    {
+        var start = source.IndexOf(startMarker, StringComparison.Ordinal);
+        Assert.True(start >= 0, $"Missing start marker: {startMarker}");
+
+        var end = source.IndexOf(endMarker, start, StringComparison.Ordinal);
+        Assert.True(end >= 0, $"Missing end marker: {endMarker}");
+        return source[start..end];
+    }
 }

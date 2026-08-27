@@ -1303,13 +1303,13 @@ public sealed class TimelapseWorkflowService : ITimelapseWorkflowService
             new { jobId }, tx)).ToList();
         var final = await conn.QuerySingleOrDefaultAsync<TimelapseFinalOutput>(
             """
-            SELECT status AS Status,
-                   version AS Version,
-                   result_media_id AS MediaId,
-                   public_url AS PublicUrl,
-                   object_key AS ObjectKey,
-                   error_message AS ErrorMessage,
-                   completed_at AS CompletedAt
+            SELECT f.status AS Status,
+                   f.version AS Version,
+                   f.result_media_id AS MediaId,
+                   f.public_url AS PublicUrl,
+                   f.object_key AS ObjectKey,
+                   f.error_message AS ErrorMessage,
+                   f.completed_at AS CompletedAt
               FROM timelapse.timelapse_final_outputs f
               JOIN render.render_jobs j ON j.id=f.job_id AND j.tenant_id=@tenant
              WHERE f.tenant_id=@tenant
