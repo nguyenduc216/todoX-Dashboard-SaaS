@@ -156,3 +156,37 @@ The unrelated full-suite failures listed above remain outside this RVIDEO recove
 4. Verify tenant-safe media persists or is reused, the matching `SceneVideoVersion` becomes completed, finalization/lifecycle run, billing completes, and `locked_balance` settles.
 5. Verify the legacy render job changes from `failed` to `completed` and receives `RVIDEO_VIDEO_RECOVERY_COMPLETED`, while its original failure event remains in the audit trail.
 6. Verify unrelated generic `RenderJobTerminalFailureException` jobs, jobs with only `Storage key` text, mismatched tenant/project/scene/logical-request/version rows, incomplete versions, or missing/nonmatching billing evidence remain failed.
+
+## Legacy billing render_job_id compatibility
+
+- Starting HEAD: `7a0a3ebdcb9c7d4426abcb467d1dc9fd9346b6e4`.
+- Final implementation commit SHA: `bf03e568467665011cb1cc858c5b1ae86693680f` (`fix(rvideo): normalize legacy billing render job id match`).
+- Previous incorrect predicate: `b.render_job_id=j.id`.
+- New normalized predicate: `replace(b.render_job_id, '-', '') = replace(j.id::text, '-', '')`.
+- Historical RVIDEO scene-video billing stores `RenderJobId = job.Id.ToString("N")`, so production rows can contain 32-character UUID text such as `1e64c8d0935c4018b28c5f0d0f6b81be` while `render.render_jobs.id::text` is hyphenated.
+- The normalized text comparison supports both compact and hyphenated billing UUID text. A different UUID still does not match, and arbitrary non-UUID text does not match.
+- No billing `render_job_id` text is cast to `uuid`; compatibility is handled by text normalization only, so non-UUID historical text cannot cause a UUID-cast failure.
+- The existing strict recovery guards were preserved: tenant, `render_scene_video`, failed/pending reconciliation statuses, project, scene, logical request, completed matching `SceneVideoVersion`, same render job version link, billing logical request, RVIDEO scene-video feature/capability, present provider task ID, permitted billing statuses, and the known legacy storage-collision message guard.
+- Focused test limitation: the available regression coverage is source/service-level. A DB-backed integration test was not practical in this workspace because the current Phase1B tests do not provide a live PostgreSQL recovery harness for `MarkRecoveredCompletedAsync`.
+
+### Validation
+
+- `git fetch origin integration/rdance-on-construction-video-core`: passed; remote and local starting HEAD were both `7a0a3ebdcb9c7d4426abcb467d1dc9fd9346b6e4`.
+- `git pull --ff-only origin integration/rdance-on-construction-video-core`: passed; already up to date.
+- `dotnet format ..\TodoX.Dashboard.sln whitespace --verify-no-changes --no-restore --include Services\Render\RenderJobService.cs Tests\RVideoProviderPollingRegressionTests.cs`: passed.
+- `git diff --check`: passed; only Git LF-to-CRLF working-copy notices were emitted.
+- `dotnet restore ..\TodoX.Dashboard.sln`: passed; all projects were up to date.
+- `dotnet build ..\TodoX.Dashboard.sln -c Release --no-restore`: passed with 0 warnings and 0 errors.
+- Focused regression tests:
+  `dotnet test .\Tests\TodoX.Web.Phase1B.Tests.csproj -c Release --filter "FullyQualifiedName~RVideoProviderPollingRegressionTests" --logger "console;verbosity=minimal"`
+  passed, 54/54. These include the legacy storage collision guard, strict recovery source guards, normalized billing render-job predicate, compact UUID billing text, hyphenated UUID billing text, different UUID rejection, and arbitrary non-UUID text rejection.
+- Full solution tests:
+  `dotnet test ..\TodoX.Dashboard.sln -c Release --no-build --logger "console;verbosity=minimal"`
+  completed 769/775. The six unrelated failures were four `RDanceFashionDemoPageTests`, `DanceSellPhase2ValidationTests.ReferencePrompt_MatchesTheVerified79AiTryOnPromptExactly`, and `DanceSellAi79ReferenceProviderTests.SubmitAsync_UsesVerifiedFashionTryOnFormPayload`.
+- Full Phase1B tests:
+  `dotnet test .\Tests\TodoX.Web.Phase1B.Tests.csproj -c Release --no-build --logger "console;verbosity=minimal"`
+  completed 162/169. The seven unrelated failures were missing SQL fixtures in two `RVideoRuntimeSqlTests`, `TimelapseWorkerClaimRegressionTests.CustomerUiDistinguishesWorkerWaitFromProviderSubmission`, and four `TodoXVideoPromptParserTests.ScenePromptMetadata_NormalizesVoiceAliases` cases.
+- Publish:
+  `dotnet publish .\TodoX.Web.csproj -c Release --no-restore -o ..\artifacts\publish\todox-dashboard`
+  passed. Output: `D:\todoX\Dashboard-web\TodoXPortal\todoX-Dashboard-SaaS\artifacts\publish\todox-dashboard`.
+- Branch push result: pending until push; this report commit follows the implementation commit.
