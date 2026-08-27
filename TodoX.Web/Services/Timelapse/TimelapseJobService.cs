@@ -127,6 +127,10 @@ public sealed class TimelapseJobService : ITimelapseJobService
             throw new InvalidOperationException("Dịch vụ đã chọn không khớp với mã dịch vụ.");
         }
 
+        var serviceDefinition = TimelapseServiceCatalog.TryGet(service.ServiceCode, out var definition)
+            ? definition
+            : null;
+
         var qualityTier = TimelapseSellPricing.QualityTierForMode(request.VideoMode);
         var sellPrice = await _sellPrices.ResolveVideoScenePriceAsync(
             service.Id,
@@ -140,10 +144,12 @@ public sealed class TimelapseJobService : ITimelapseJobService
 
         var videoSubtotal = TimelapseSellPricing.EstimateVideoSubtotal(sellPrice.Price.SellPoints, request.SceneCount);
 
-        var profile = await _profiles.GetEnabledProfileAsync(request.ProfileCode, ct);
+        var profile = serviceDefinition is null
+            ? await _profiles.GetEnabledProfileAsync(request.ProfileCode, ct)
+            : await _profiles.GetEnabledProfileByCategoryAsync(request.ProfileCode, serviceDefinition.Category, ct);
         if (profile is null)
         {
-            throw new InvalidOperationException("Loại công trình không hợp lệ hoặc đã bị tắt.");
+            throw new InvalidOperationException("TIMELAPSE_PROFILE_SERVICE_MISMATCH: Cấu hình Timelapse không phù hợp với loại dịch vụ đã chọn.");
         }
 
         await _tenant.EnsureLoadedAsync(ct);
@@ -161,6 +167,8 @@ public sealed class TimelapseJobService : ITimelapseJobService
         {
             ServiceId = service.Id,
             ServiceCode = service.ServiceCode,
+            ServiceName = service.DisplayName,
+            ServiceCategory = serviceDefinition?.Category ?? profile.Category,
             ProfileCode = profile.ProfileCode,
             ProfileName = profile.ProfileName,
             SceneCount = request.SceneCount,
@@ -381,8 +389,17 @@ public sealed class TimelapseJobService : ITimelapseJobService
             throw new InvalidOperationException("Dịch vụ đã chọn không khớp với mã dịch vụ.");
         }
 
-        var profile = await _profiles.GetEnabledProfileAsync(request.ProfileCode, ct)
-            ?? throw new InvalidOperationException("Loại công trình không hợp lệ hoặc đã bị tắt.");
+        var serviceDefinition = TimelapseServiceCatalog.TryGet(service.ServiceCode, out var definition)
+            ? definition
+            : null;
+
+        var profile = serviceDefinition is null
+            ? await _profiles.GetEnabledProfileAsync(request.ProfileCode, ct)
+            : await _profiles.GetEnabledProfileByCategoryAsync(request.ProfileCode, serviceDefinition.Category, ct);
+        if (profile is null)
+        {
+            throw new InvalidOperationException("TIMELAPSE_PROFILE_SERVICE_MISMATCH: Cấu hình Timelapse không phù hợp với loại dịch vụ đã chọn.");
+        }
         var qualityTier = TimelapseSellPricing.QualityTierForMode(request.VideoMode);
         var sellPrice = await _sellPrices.ResolveVideoScenePriceAsync(
             service.Id,
@@ -420,6 +437,8 @@ public sealed class TimelapseJobService : ITimelapseJobService
         {
             ServiceId = service.Id,
             ServiceCode = service.ServiceCode,
+            ServiceName = service.DisplayName,
+            ServiceCategory = serviceDefinition?.Category ?? profile.Category,
             ProfileCode = profile.ProfileCode,
             ProfileName = profile.ProfileName,
             SceneCount = request.SceneCount,

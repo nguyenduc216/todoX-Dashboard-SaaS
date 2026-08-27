@@ -35,8 +35,7 @@
 
 .timelapse-stage-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(260px, 320px));
-    justify-content: start;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 12px;
     min-width: 0;
     max-width: 100%;
@@ -60,6 +59,7 @@
     min-width: 0;
     max-width: 100%;
     overflow: hidden;
+    box-sizing: border-box;
 }
 
 .stage-card-header {
@@ -71,7 +71,9 @@
 }
 
 .stage-card-header strong {
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
+    word-break: normal;
+    white-space: normal;
 }
 
 .stage-preview {
@@ -87,6 +89,13 @@
     overflow: hidden;
     isolation: isolate;
     background: linear-gradient(135deg, #151a20, #242a31 58%, #171b21);
+}
+
+.stage-preview ::deep .scene-image-loading,
+.stage-preview ::deep .scene-image-placeholder {
+    position: absolute;
+    inset: 0;
+    min-width: 0;
 }
 
 .video-preview {
@@ -105,6 +114,17 @@
 
 .timelapse-action-row {
     flex-wrap: wrap;
+}
+
+.timelapse-floating-create {
+    position: fixed;
+    z-index: 10;
+    top: 50%;
+    right: 18px;
+    transform: translateY(-50%);
+    min-width: 0;
+    padding-inline: 14px;
+    box-shadow: 0 8px 24px rgba(255, 179, 0, 0.24);
 }
 
 .timelapse-action-row ::deep .mud-button-root {
@@ -230,7 +250,9 @@
 }
 
 .tl-video-card-footer ::deep .mud-typography {
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
+    word-break: normal;
+    white-space: normal;
 }
 
 .tl-image-meta-row {
@@ -248,7 +270,9 @@
 }
 
 .tl-image-meta-copy ::deep .mud-typography {
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
+    word-break: normal;
+    white-space: normal;
 }
 
 .timelapse-stage-card.is-waiting {
@@ -361,7 +385,7 @@
 
 @media (max-width: 1050px) {
     .timelapse-stage-grid {
-        grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+        grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 }
 

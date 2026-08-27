@@ -765,7 +765,7 @@ public class TimelapsePhase2CTests
         Assert.DoesNotContain("clip-input-placeholder", razor, StringComparison.Ordinal);
 
         Assert.Contains(".timelapse-stage-grid > *", css, StringComparison.Ordinal);
-        Assert.Contains("repeat(auto-fill, minmax(260px, 320px))", css, StringComparison.Ordinal);
+        Assert.Contains("grid-template-columns: repeat(3, minmax(0, 1fr));", css, StringComparison.Ordinal);
         Assert.Contains("min-width: 0;", css, StringComparison.Ordinal);
         Assert.Contains("max-width: 100%;", css, StringComparison.Ordinal);
         Assert.Contains("overflow: hidden;", css, StringComparison.Ordinal);

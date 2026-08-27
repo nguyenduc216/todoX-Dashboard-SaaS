@@ -57,6 +57,20 @@
                         <MudStack Spacing="3">
                             <MudTextField T="string" Label="Tên job" @bind-Value="_request.Title" @bind-Value:after="ScheduleAutoSave" Variant="Variant.Outlined" />
 
+                            @if (_serviceDefinition is not null)
+                            {
+                                <MudGrid>
+                                    <MudItem xs="12" md="6">
+                                        <MudText Typo="Typo.subtitle2">Dịch vụ</MudText>
+                                        <MudText>@_serviceDefinition.DisplayName</MudText>
+                                    </MudItem>
+                                    <MudItem xs="12" md="6">
+                                        <MudText Typo="Typo.subtitle2">Loại công trình</MudText>
+                                        <MudText>@_serviceDefinition.CategoryLabel</MudText>
+                                    </MudItem>
+                                </MudGrid>
+                            }
+
                             <MudStack Spacing="1">
                                 <MudText Typo="Typo.subtitle2">Ảnh thành phẩm / ảnh tham chiếu</MudText>
                                 <label class="timelapse-upload-card @(_selectedFile is not null ? "has-file" : string.Empty)">
@@ -84,12 +98,22 @@
                                 }
                             </MudStack>
 
-                            <MudSelect T="string" Label="Loại công trình" @bind-Value="_request.ProfileCode" @bind-Value:after="ScheduleAutoSave" Variant="Variant.Outlined" Required="true">
-                                @foreach (var profile in _profiles)
-                                {
-                                    <MudSelectItem T="string" Value="@profile.ProfileCode">@profile.ProfileName</MudSelectItem>
-                                }
-                            </MudSelect>
+                            @if (_profiles.Count == 1)
+                            {
+                                <MudStack Spacing="1">
+                                    <MudText Typo="Typo.subtitle2">Cấu hình dựng</MudText>
+                                    <MudText>@_profiles[0].ProfileName</MudText>
+                                </MudStack>
+                            }
+                            else
+                            {
+                                <MudSelect T="string" Label="Cấu hình dựng" @bind-Value="_request.ProfileCode" @bind-Value:after="ScheduleAutoSave" Variant="Variant.Outlined" Required="true">
+                                    @foreach (var profile in _profiles)
+                                    {
+                                        <MudSelectItem T="string" Value="@profile.ProfileCode">@profile.ProfileName</MudSelectItem>
+                                    }
+                                </MudSelect>
+                            }
 
                             <MudStack Spacing="1">
                                 <MudText Typo="Typo.subtitle2">Số scene</MudText>
@@ -204,6 +228,7 @@
     private TimelapseCreateRequest _request = new();
     private IReadOnlyList<TimelapseProfileDto> _profiles = Array.Empty<TimelapseProfileDto>();
     private CatalogServiceView? _selectedService;
+    private TimelapseServiceDefinition? _serviceDefinition;
     private ServiceSellPriceEstimate? _priceEstimate;
     private IBrowserFile? _selectedFile;
     private string? _previewDataUrl;
@@ -260,6 +285,7 @@
     {
         _serviceWarning = null;
         _selectedService = null;
+        _serviceDefinition = null;
         _priceEstimate = null;
         _priceError = null;
         _loadingService = true;
@@ -300,6 +326,14 @@
 
         _request.ServiceCode = service.ServiceCode;
         _selectedService = service;
+        if (!TimelapseServiceCatalog.TryGet(service.ServiceCode, out var definition))
+        {
+            _serviceWarning = "Dịch vụ Timelapse đã chọn chưa được cấu hình loại công trình.";
+            return;
+        }
+
+        _serviceDefinition = definition;
+        _request.ServiceCategory = definition.Category;
 
         if (!service.Enabled)
         {
@@ -323,8 +357,17 @@
 
         try
         {
-            _profiles = await Profiles.GetEnabledProfilesAsync();
+            if (_serviceDefinition is null)
+            {
+                return;
+            }
+
+            _profiles = await Profiles.GetEnabledProfilesByCategoryAsync(_serviceDefinition.Category);
             if (string.IsNullOrWhiteSpace(_request.ProfileCode))
+            {
+                _request.ProfileCode = _profiles.FirstOrDefault()?.ProfileCode ?? string.Empty;
+            }
+            else if (!_profiles.Any(x => string.Equals(x.ProfileCode, _request.ProfileCode, StringComparison.OrdinalIgnoreCase)))
             {
                 _request.ProfileCode = _profiles.FirstOrDefault()?.ProfileCode ?? string.Empty;
             }

@@ -127,7 +127,7 @@
                                         }
                                     </MudStack>
 
-                                    <MudSelect T="string" Label="Loại công trình" Value="@_editRequest.ProfileCode" ValueChanged="SetEditProfile" Variant="Variant.Outlined" Required="true">
+                                    <MudSelect T="string" Label="Cấu hình dựng" Value="@_editRequest.ProfileCode" ValueChanged="SetEditProfile" Variant="Variant.Outlined" Required="true">
                                         @foreach (var profile in _profiles)
                                         {
                                             <MudSelectItem T="string" Value="@profile.ProfileCode">@profile.ProfileName</MudSelectItem>
@@ -292,6 +292,16 @@
 
             <MudTabPanel Text="SCENE">
                 <MudStack Spacing="3" Class="mt-3">
+                    @if (ShowFloatingCreateVideoButton)
+                    {
+                        <MudButton Class="timelapse-floating-create todox-primary-btn"
+                                   Variant="Variant.Filled"
+                                   StartIcon="@Icons.Material.Filled.PlayArrow"
+                                   Disabled="@_busy"
+                                   OnClick="StartOrResumeAsync">
+                            TẠO VIDEO
+                        </MudButton>
+                    }
                     <MudPaper Class="todox-card pa-4" rounded="true">
                         <MudStack Spacing="2">
                             <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
@@ -324,7 +334,7 @@
                                                               MediaUrl="@image.PublicUrl"
                                                               ThumbnailUrl="@image.PublicUrl"
                                                               AspectRatio="@FormatRatio(_job.Snapshot.Ratio)"
-                                                              State="@ResolveTimelapseMediaState(image.Status)"
+                                                              State="@ResolveImageMediaState(image)"
                                                               LoadingLabel="@ImageLoadingTitle(image)"
                                                               EmptyText="@ImagePlaceholderText(image)"
                                                               FailedText="Lỗi render ảnh"
@@ -368,12 +378,15 @@
                                                     }
                                                     else
                                                     {
-                                                        <MudText Typo="Typo.caption" Color="Color.Secondary">@FormatStartedAt(image)</MudText>
-                                                        @if (image.CompletedAt.HasValue)
+                                                        @if (!IsRenderNotStarted)
+                                                        {
+                                                            <MudText Typo="Typo.caption" Color="Color.Secondary">@FormatStartedAt(image)</MudText>
+                                                        }
+                                                        @if (!IsRenderNotStarted && image.CompletedAt.HasValue)
                                                         {
                                                             <MudText Typo="Typo.caption" Color="Color.Secondary">@FormatCompletedAt(image.CompletedAt.Value)</MudText>
                                                         }
-                                                        @if (image.Attempt > 0)
+                                                        @if (!IsRenderNotStarted && image.Attempt > 0)
                                                         {
                                                             <MudText Typo="Typo.caption" Color="Color.Secondary">Lần render @image.Attempt</MudText>
                                                         }
@@ -381,11 +394,11 @@
                                                 </div>
                                             </div>
                                         </div>
-                                        @if (!image.IsOriginal && image.DependsOnProgressPercent.HasValue && image.Status == TimelapseOperationStatuses.Waiting)
+                                        @if (!IsRenderNotStarted && !image.IsOriginal && image.DependsOnProgressPercent.HasValue && image.Status == TimelapseOperationStatuses.Waiting)
                                         {
                                             <MudText Typo="Typo.caption" Color="Color.Secondary">Đang chờ ảnh @image.DependsOnProgressPercent% hoàn thành</MudText>
                                         }
-                                        @if (!image.IsOriginal && TimelapseImageExecutionPhase.IsWaitingForWorker(image))
+                                        @if (!IsRenderNotStarted && !image.IsOriginal && TimelapseImageExecutionPhase.IsWaitingForWorker(image))
                                         {
                                             <MudText Typo="Typo.caption" Color="Color.Secondary">
                                                 @(TimelapseImageExecutionPhase.IsStuckWaitingForWorker(image, DateTime.UtcNow, TimeSpan.FromMinutes(2))
@@ -397,7 +410,7 @@
                                         {
                                             <MudAlert Severity="Severity.Error" Dense="true">@FriendlyOperationError(image.ErrorMessage, image.ProgressPercent, "ảnh")</MudAlert>
                                         }
-                                        @if (!image.IsOriginal && CanRetryImage(image.Status))
+                                        @if (!IsRenderNotStarted && !image.IsOriginal && CanRetryImage(image.Status))
                                         {
                                             <MudButton Size="Size.Small"
                                                        Variant="Variant.Outlined"
@@ -407,7 +420,7 @@
                                                 @(image.Status == TimelapseOperationStatuses.Cancelled ? "TẠO LẠI" : "Render lại")
                                             </MudButton>
                                         }
-                                        @if (!image.IsOriginal && CanCancelOperation(image.Status))
+                                        @if (!IsRenderNotStarted && !image.IsOriginal && CanCancelOperation(image.Status))
                                         {
                                             <MudButton Size="Size.Small"
                                                        Variant="Variant.Text"
@@ -625,6 +638,33 @@
         => EnsureVideoCards();
     private int ImageFailureCount => ImageCards.Count(x => x.Status == TimelapseOperationStatuses.Failed);
     private int VideoFailureCount => VideoCards.Count(x => x.Status == TimelapseOperationStatuses.Failed);
+    private bool IsRenderNotStarted
+        => _job is not null
+           && string.Equals(_job.Workflow.ParentStatus, TimelapseParentStatuses.Draft, StringComparison.OrdinalIgnoreCase)
+           && !_job.Workflow.HasActiveOperations
+           && _job.Workflow.Images.All(x => x.IsOriginal || x.Attempt == 0)
+           && _job.Workflow.Videos.All(x => x.Attempt == 0)
+           && _job.Workflow.FinalOutput is null;
+    private bool IsRenderActive => _job?.Workflow.HasActiveOperations == true;
+    private bool ShowFloatingCreateVideoButton
+        => IsRenderNotStarted
+           && _job?.Workflow.CanStartRender == true
+           && !IsRenderActive
+           && !_busy
+           && !_editingRequest;
+    private string DisplayServiceName
+        => !string.IsNullOrWhiteSpace(_job?.Snapshot.ServiceName)
+            ? _job.Snapshot.ServiceName
+            : TimelapseServiceCatalog.TryGet(_job?.Snapshot.ServiceCode, out var service)
+                ? service.DisplayName
+                : _job?.Snapshot.ServiceCode ?? "Timelapse";
+    private string DisplayServiceCategory
+        => TimelapseServiceCatalog.TryGet(_job?.Snapshot.ServiceCode, out var service)
+            ? service.CategoryLabel
+            : _profiles.FirstOrDefault(x => string.Equals(x.ProfileCode, _job?.Snapshot.ProfileCode, StringComparison.OrdinalIgnoreCase))?.Category
+              ?? _job?.Snapshot.ServiceCategory
+              ?? _job?.Snapshot.ProfileName
+              ?? "Timelapse";
     private bool CanCancelJob
         => _job?.Workflow.HasActiveOperations == true
            || _job?.Workflow.ParentStatus is TimelapseParentStatuses.GeneratingImages
@@ -766,7 +806,9 @@
 
         try
         {
-            _profiles = await Profiles.GetEnabledProfilesAsync();
+            _profiles = string.IsNullOrWhiteSpace(_job.Snapshot.ServiceCategory)
+                ? await Profiles.GetEnabledProfilesAsync()
+                : await Profiles.GetEnabledProfilesByCategoryAsync(_job.Snapshot.ServiceCategory);
         }
         catch (Exception ex)
         {
@@ -778,6 +820,7 @@
         {
             ServiceId = _job.Snapshot.ServiceId,
             ServiceCode = _job.Snapshot.ServiceCode,
+            ServiceCategory = _job.Snapshot.ServiceCategory,
             Title = _job.Snapshot.Title,
             ProfileCode = _job.Snapshot.ProfileCode,
             SceneCount = _job.Snapshot.SceneCount,
@@ -1398,12 +1441,16 @@
             .ToList();
     }
 
-    private static string ImagePlaceholderText(TimelapseStageImage image)
-        => image.Status == TimelapseOperationStatuses.Failed
+    private string ImagePlaceholderText(TimelapseStageImage image)
+        => image.IsOriginal
+            ? "Ảnh gốc / thành phẩm"
+            : IsRenderNotStarted
+                ? "Chờ tạo video"
+            : image.Status == TimelapseOperationStatuses.Failed
             ? "Lỗi render ảnh"
             : image.DependsOnProgressPercent.HasValue
                 ? $"Đang chờ ảnh {image.DependsOnProgressPercent}% hoàn thành"
-                : "Đang chờ render...";
+                : "Chờ tạo video";
 
     private static string VideoPlaceholderText(TimelapseVideoClip clip)
         => clip.Status == TimelapseOperationStatuses.Failed
@@ -1439,6 +1486,11 @@
             TimelapseOperationStatuses.Failed => MediaRenderState.Failed,
             _ => MediaRenderState.Empty
         };
+
+    private MediaRenderState ResolveImageMediaState(TimelapseStageImage image)
+        => IsRenderNotStarted && !image.IsOriginal
+            ? MediaRenderState.Empty
+            : ResolveTimelapseMediaState(image.Status);
 
     private static bool CanCancelOperation(string? status)
         => status is TimelapseOperationStatuses.Waiting or TimelapseOperationStatuses.Rendering;

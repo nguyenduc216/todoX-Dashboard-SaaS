@@ -192,8 +192,8 @@ public sealed class TimelapseWorkflowService : ITimelapseWorkflowService
         EnsureCustomer(currentUser);
         await _tenant.EnsureLoadedAsync(ct);
 
-        var profile = await _profiles.GetRenderProfileAsync(snapshot.ProfileCode, ct)
-            ?? throw new InvalidOperationException("Không tải được profile Timelapse để render.");
+        var profile = await ResolveRenderProfileAsync(snapshot, ct)
+            ?? throw new InvalidOperationException("TIMELAPSE_PROFILE_SERVICE_MISMATCH: Cấu hình Timelapse không phù hợp với loại dịch vụ đã chọn.");
 
         using var conn = await _factory.OpenAsync(ct);
         using var tx = conn.BeginTransaction();
@@ -229,6 +229,17 @@ public sealed class TimelapseWorkflowService : ITimelapseWorkflowService
             }, ct: ct);
 
         return await GetStateAsync(jobId, ct);
+    }
+
+    private async Task<TimelapseRenderProfileDto?> ResolveRenderProfileAsync(TimelapseJobSnapshot snapshot, CancellationToken ct)
+    {
+        if (!string.IsNullOrWhiteSpace(snapshot.ServiceCategory))
+        {
+            return await _profiles.GetRenderProfileByCategoryAsync(snapshot.ProfileCode, snapshot.ServiceCategory, ct);
+        }
+
+        // Legacy snapshots predate explicit service/category ownership.
+        return await _profiles.GetRenderProfileAsync(snapshot.ProfileCode, ct);
     }
 
     public async Task<TimelapseWorkflowState> ConfirmVideoRenderAsync(

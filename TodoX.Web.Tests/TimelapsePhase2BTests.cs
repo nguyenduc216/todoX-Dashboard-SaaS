@@ -212,9 +212,9 @@ public class TimelapsePhase2BTests
 
         var normalizedCss = css.ReplaceLineEndings("\n");
         Assert.Contains(".video-preview {\n    aspect-ratio: 16 / 9;", normalizedCss, StringComparison.Ordinal);
-        Assert.Contains("repeat(auto-fill, minmax(260px, 320px))", css, StringComparison.Ordinal);
+        Assert.Contains("grid-template-columns: repeat(3, minmax(0, 1fr));", css, StringComparison.Ordinal);
         Assert.Contains("object-fit: contain;", mediaCss, StringComparison.Ordinal);
-        Assert.Contains("overflow-wrap: anywhere;", css, StringComparison.Ordinal);
+        Assert.Contains("overflow-wrap: break-word;", css, StringComparison.Ordinal);
         Assert.Contains("@media (max-width: 700px)", css, StringComparison.Ordinal);
         Assert.DoesNotContain(".clip-input-thumbnails", css, StringComparison.Ordinal);
         Assert.DoesNotContain(".clip-thumbs img", css, StringComparison.Ordinal);
@@ -271,8 +271,8 @@ public class TimelapsePhase2BTests
         Assert.Contains("ImageProgress.Percent", detail, StringComparison.Ordinal);
         Assert.Contains("private int CompletedVideos => VideoCards.Count", detail, StringComparison.Ordinal);
         Assert.Contains("private int TotalVideos => VideoCards.Count", detail, StringComparison.Ordinal);
-        Assert.Contains("Đang chờ render", detail, StringComparison.Ordinal);
-        Assert.Contains("Đang chờ ảnh", detail, StringComparison.Ordinal);
+        Assert.Contains("ImagePlaceholderText", detail, StringComparison.Ordinal);
+        Assert.Contains("VideoPlaceholderText", detail, StringComparison.Ordinal);
         Assert.Contains("hoàn thành", detail, StringComparison.Ordinal);
         Assert.Contains("ImageFailureCount", detail, StringComparison.Ordinal);
         Assert.Contains("VideoFailureCount", detail, StringComparison.Ordinal);

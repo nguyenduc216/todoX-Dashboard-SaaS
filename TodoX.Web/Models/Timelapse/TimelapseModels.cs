@@ -52,11 +52,47 @@ public static class CustomerServiceRouting
     }
 }
 
+public sealed record TimelapseServiceDefinition(
+    string ServiceCode,
+    string DisplayName,
+    string Category,
+    string CategoryLabel,
+    int SortOrder);
+
+public static class TimelapseServiceCatalog
+{
+    public const string ConstructionCategory = "construction";
+    public const string LivingRoomCategory = "living_room";
+    public const string BedroomCategory = "bedroom";
+    public const string KitchenCategory = "kitchen";
+    public const string PoolCategory = "pool";
+    public const string InfrastructureCategory = "infrastructure";
+    public const string LandscapeCategory = "landscape";
+
+    public static IReadOnlyList<TimelapseServiceDefinition> Services { get; } =
+    [
+        new("TIMELAPSE_CONSTRUCTION", "Timelapse Xây dựng công trình", ConstructionCategory, "Xây dựng công trình", 11),
+        new("TIMELAPSE_LIVING_ROOM", "Timelapse Phòng khách", LivingRoomCategory, "Phòng khách", 12),
+        new("TIMELAPSE_BEDROOM", "Timelapse Phòng ngủ", BedroomCategory, "Phòng ngủ", 13),
+        new("TIMELAPSE_KITCHEN", "Timelapse Nhà bếp", KitchenCategory, "Nhà bếp", 14),
+        new("TIMELAPSE_POOL", "Timelapse Hồ bơi", PoolCategory, "Hồ bơi", 15),
+        new("TIMELAPSE_INFRASTRUCTURE", "Timelapse Cầu đường / Hạ tầng", InfrastructureCategory, "Cầu đường / Hạ tầng", 16),
+        new("TIMELAPSE_LANDSCAPE", "Timelapse Cảnh quan / Sân vườn / Cây xanh", LandscapeCategory, "Cảnh quan / Sân vườn / Cây xanh", 17)
+    ];
+
+    public static bool TryGet(string? serviceCode, out TimelapseServiceDefinition definition)
+    {
+        definition = Services.FirstOrDefault(x => string.Equals(x.ServiceCode, serviceCode, StringComparison.OrdinalIgnoreCase))!;
+        return definition is not null;
+    }
+}
+
 public sealed class TimelapseProfileDto
 {
     public string ProfileCode { get; set; } = string.Empty;
     public string ProfileName { get; set; } = string.Empty;
     public bool Enabled { get; set; }
+    public string Category { get; set; } = string.Empty;
 }
 
 public sealed class TimelapseRenderProfileDto
@@ -65,12 +101,14 @@ public sealed class TimelapseRenderProfileDto
     public string ProfileName { get; set; } = string.Empty;
     public bool Enabled { get; set; }
     public string ProfileJson { get; set; } = "{}";
+    public string Category { get; set; } = string.Empty;
 }
 
 public sealed class TimelapseCreateRequest
 {
     public Guid? ServiceId { get; set; }
     public string? ServiceCode { get; set; }
+    public string? ServiceCategory { get; set; }
     public string? Title { get; set; } = "Video Timelapse";
     public string ProfileCode { get; set; } = string.Empty;
     public int SceneCount { get; set; } = 3;
@@ -95,6 +133,8 @@ public sealed class TimelapseJobSnapshot
     public Guid? CoreJobId { get; set; }
     public Guid ServiceId { get; set; }
     public string ServiceCode { get; set; } = string.Empty;
+    public string ServiceName { get; set; } = string.Empty;
+    public string ServiceCategory { get; set; } = string.Empty;
     public string ProfileCode { get; set; } = string.Empty;
     public string ProfileName { get; set; } = string.Empty;
     public int SceneCount { get; set; }

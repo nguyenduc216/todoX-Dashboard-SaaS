@@ -109,9 +109,12 @@ public sealed class ConstructionTimelapseExecutionBridge : IConstructionTimelaps
                 "Construction Timelapse requires a resolved customer identity.");
         }
 
-        var profile = await _profiles.GetEnabledProfileAsync(request.ProfileCode, ct)
+        var profile = await _profiles.GetEnabledProfileByCategoryAsync(
+            request.ProfileCode,
+            TimelapseServiceCatalog.ConstructionCategory,
+            ct)
             ?? throw new InvalidOperationException(
-                "Construction Timelapse profile is invalid or disabled.");
+                "TIMELAPSE_PROFILE_SERVICE_MISMATCH: Construction Timelapse profile is invalid, disabled, or outside the construction category.");
 
         await _tenant.EnsureLoadedAsync(ct);
         using var conn = await _factory.OpenAsync(ct);
@@ -322,6 +325,8 @@ public sealed class ConstructionTimelapseExecutionBridge : IConstructionTimelaps
             CoreJobId = context.CoreJobId,
             ServiceId = context.ServiceId,
             ServiceCode = ConstructionTimelapseAdapter.ConstructionServiceCode,
+            ServiceName = "Xây dựng & Công trình",
+            ServiceCategory = TimelapseServiceCatalog.ConstructionCategory,
             ProfileCode = profile.ProfileCode,
             ProfileName = profile.ProfileName,
             SceneCount = request.SceneCount,
