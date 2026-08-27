@@ -1,5 +1,6 @@
 using System.Reflection;
 using Xunit;
+using TodoX.Web.Services.AiProviders;
 using TodoX.Web.Services.VideoRender;
 
 namespace TodoX.Web.Tests;
@@ -367,6 +368,45 @@ public sealed class RVideoProviderPollingRegressionTests
         Assert.Contains("FormatInsufficientPoints", source);
     }
 
+    [Theory]
+    [InlineData("dae8e8b8-842a-43cd-b68d-c0a634cc15bc", "dae8e8b8-842a-43cd-b68d-c0a634cc15bc")]
+    [InlineData(null, null)]
+    [InlineData("", null)]
+    [InlineData("   ", null)]
+    [InlineData("n8n", null)]
+    [InlineData("legacy-user", null)]
+    public void BillingCreatedByTextIsNormalizedWithoutThrowing(string? value, string? expected)
+    {
+        var normalized = AiImageBillingCreatedByParser.Normalize(value);
+
+        Assert.Equal(expected is null ? null : Guid.Parse(expected), normalized);
+    }
+
+    [Fact]
+    public void BillingRecordHydrationUsesStringCreatedByNormalizationForAllPaths()
+    {
+        var source = ReadRepoFile("Services", "AiProviders", "AiImageBillingService.cs");
+
+        Assert.Equal(2, CountOccurrences(source, "QuerySingleOrDefaultAsync<BillingRecordRow>"));
+        Assert.Equal(2, CountOccurrences(source, ".ToBillingRecord()"));
+        Assert.Contains("public string? CreatedBy", source);
+        Assert.Contains("AiImageBillingCreatedByParser.Normalize(CreatedBy)", source);
+        Assert.DoesNotContain("QuerySingleOrDefaultAsync<BillingRecord>(", source);
+        Assert.DoesNotContain("created_by::uuid", source, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ExistingSceneImageTaskIsPolledWithoutASecondSubmission()
+    {
+        var source = ReadRepoFile("Services", "Render", "SceneImageRenderWorkItemHandler.cs");
+        var render = ReadRepoFile("Services", "Render", "SceneImageRenderService.cs");
+
+        Assert.Contains("GetSceneImageProviderTaskIdAsync", source);
+        Assert.Contains("ProviderTaskId = taskId", source);
+        Assert.Contains("ProviderTaskId = context.ProviderTaskId", render);
+        Assert.Contains("ProviderTaskId = request.ProviderTaskId", ReadRepoFile("Services", "AiProviders", "AiImageRenderRouter.cs"));
+    }
+
     [Fact]
     public void SceneVideoStorageKeyUsesVersionScopedImmutablePath()
     {
@@ -634,4 +674,17 @@ public sealed class RVideoProviderPollingRegressionTests
 
     private static string NormalizeRenderJobIdText(string value)
         => value.Replace("-", string.Empty, StringComparison.Ordinal);
+
+    private static int CountOccurrences(string source, string value)
+    {
+        var count = 0;
+        var index = 0;
+        while ((index = source.IndexOf(value, index, StringComparison.Ordinal)) >= 0)
+        {
+            count++;
+            index += value.Length;
+        }
+
+        return count;
+    }
 }

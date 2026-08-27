@@ -121,6 +121,12 @@ public sealed record AiImageBillingCompletion(
     Guid? WalletTransactionId,
     string? ErrorMessage);
 
+public static class AiImageBillingCreatedByParser
+{
+    public static Guid? Normalize(string? value)
+        => Guid.TryParse(value?.Trim(), out var parsed) ? parsed : null;
+}
+
 public sealed class AiImageBillingReconciliationItem
 {
     public Guid Id { get; init; }
@@ -260,7 +266,7 @@ public sealed class AiImageBillingService : IAiImageBillingService
 
         await _tenant.EnsureLoadedAsync(ct);
         using var conn = await _factory.OpenAsync(ct);
-        var existing = await conn.QuerySingleOrDefaultAsync<BillingRecord>(
+        var existing = await conn.QuerySingleOrDefaultAsync<BillingRecordRow>(
             """
             SELECT id AS Id,
                    logical_request_id AS LogicalRequestId,
@@ -276,7 +282,7 @@ public sealed class AiImageBillingService : IAiImageBillingService
             """,
             new { logicalRequestId });
 
-        return existing is null ? null : HandleExistingReservation(existing);
+        return existing is null ? null : HandleExistingReservation(existing.ToBillingRecord());
     }
 
     public async Task<AiImageBillingCompletion> CompleteAsync(AiImageBillingCompleteRequest request, CancellationToken ct = default)
@@ -706,7 +712,7 @@ public sealed class AiImageBillingService : IAiImageBillingService
     }
 
     private static async Task<BillingRecord?> GetRecordForUpdateAsync(IDbConnection conn, IDbTransaction tx, string logicalRequestId)
-        => await conn.QuerySingleOrDefaultAsync<BillingRecord>(
+        => (await conn.QuerySingleOrDefaultAsync<BillingRecordRow>(
             """
             SELECT id AS Id,
                    logical_request_id AS LogicalRequestId,
@@ -721,7 +727,7 @@ public sealed class AiImageBillingService : IAiImageBillingService
              WHERE logical_request_id = @logicalRequestId
              FOR UPDATE;
             """,
-            new { logicalRequestId }, tx);
+            new { logicalRequestId }, tx))?.ToBillingRecord();
 
     private static async Task CompleteRecordWithoutDebitAsync(IDbConnection conn, IDbTransaction tx, BillingRecord record, AiImageBillingCompleteRequest request)
     {
@@ -874,6 +880,33 @@ public sealed class AiImageBillingService : IAiImageBillingService
         public decimal Balance { get; init; }
         public decimal LockedBalance { get; init; }
         public decimal OverdraftLimit { get; init; }
+    }
+
+    private sealed class BillingRecordRow
+    {
+        public Guid Id { get; init; }
+        public string LogicalRequestId { get; init; } = string.Empty;
+        public string PayerType { get; init; } = AiBillingPayerTypes.Customer;
+        public Guid? PayerWalletId { get; init; }
+        public Guid? WalletTransactionId { get; init; }
+        public decimal CustomerChargedPoints { get; init; }
+        public decimal SystemChargedPoints { get; init; }
+        public string Status { get; init; } = string.Empty;
+        public string? CreatedBy { get; init; }
+
+        public BillingRecord ToBillingRecord()
+            => new()
+            {
+                Id = Id,
+                LogicalRequestId = LogicalRequestId,
+                PayerType = PayerType,
+                PayerWalletId = PayerWalletId,
+                WalletTransactionId = WalletTransactionId,
+                CustomerChargedPoints = CustomerChargedPoints,
+                SystemChargedPoints = SystemChargedPoints,
+                Status = Status,
+                CreatedBy = AiImageBillingCreatedByParser.Normalize(CreatedBy)
+            };
     }
 
     private sealed class BillingRecord
