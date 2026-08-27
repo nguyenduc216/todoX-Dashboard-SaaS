@@ -60,14 +60,60 @@ public sealed class RVideoRuntimeSqlTests
         var source = ReadRepoFile("Services", "VideoRender", "SceneMediaVersioningService.cs");
         var select = ExtractConstBlock(source, "SelectSceneVideoVersionSql");
         var complete = ExtractMethodBlock(source, "public async Task CompleteSceneVideoVersionAsync");
+        var updateSql = ExtractSceneVideoCompletionUpdateSql(complete);
 
         Assert.Contains("voice_audio_version_id AS VoiceAudioVersionId", select);
         Assert.Contains("voice_audio_version_id=COALESCE(@voiceAudioVersionId, voice_audio_version_id)", complete);
-        var sqlIdentifiersOnly = (select + complete)
+        var sqlIdentifiersOnly = (select + updateSql)
             .Replace("VoiceAudioVersionId", string.Empty, StringComparison.Ordinal)
             .Replace("@voiceAudioVersionId", string.Empty, StringComparison.Ordinal);
         Assert.DoesNotContain("voiceaudioversionid", sqlIdentifiersOnly, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("\n               VoiceAudioVersionId", select);
+    }
+
+    [Fact]
+    public void SceneVideoCompletionBindsEveryVoiceAudioSqlParameter()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "SceneMediaVersioningService.cs");
+        var method = ExtractMethodBlock(source, "public async Task CompleteSceneVideoVersionAsync");
+        var parameterObject = ExtractSceneVideoCompletionUpdateParameterObject(method);
+        var sqlParameterIndex = method.IndexOf("@voiceAudioVersionId", StringComparison.Ordinal);
+        var executeParameterIndex = parameterObject.IndexOf("voiceAudioVersionId = request.VoiceAudioVersionId", StringComparison.Ordinal);
+
+        Assert.True(sqlParameterIndex >= 0);
+        Assert.True(executeParameterIndex >= 0);
+        Assert.Contains("voiceAudioVersionId = request.VoiceAudioVersionId,", parameterObject);
+    }
+
+    [Theory]
+    [InlineData("@voiceAudioVersionId", "voiceAudioVersionId = request.VoiceAudioVersionId")]
+    [InlineData("@providerCode", "request.ProviderCode")]
+    [InlineData("@providerCapabilityId", "request.ProviderCapabilityId")]
+    [InlineData("@modelName", "modelName = request.ModelName")]
+    [InlineData("@providerTaskId", "request.ProviderTaskId")]
+    [InlineData("@resultMediaId", "request.ResultMediaId")]
+    [InlineData("@videoUrl", "request.VideoUrl")]
+    [InlineData("@videoPath", "request.VideoPath")]
+    [InlineData("@posterUrl", "request.PosterUrl")]
+    [InlineData("@durationSeconds", "request.DurationSeconds")]
+    [InlineData("@aspectRatio", "request.AspectRatio")]
+    [InlineData("@mimeType", "request.MimeType")]
+    [InlineData("@billingLogicalRequestId", "request.BillingLogicalRequestId")]
+    [InlineData("@estimatedUsd", "request.EstimatedUsd")]
+    [InlineData("@actualUsd", "request.ActualUsd")]
+    [InlineData("@chargedPoints", "request.ChargedPoints")]
+    [InlineData("@refundedPoints", "request.RefundedPoints")]
+    [InlineData("@costSource", "request.CostSource")]
+    [InlineData("@versionId", "versionId")]
+    [InlineData("@tenant", "tenant = _tenant.TenantId")]
+    public void SceneVideoCompletionSqlParametersHaveDapperBindings(string sqlParameter, string binding)
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "SceneMediaVersioningService.cs");
+        var method = ExtractMethodBlock(source, "public async Task CompleteSceneVideoVersionAsync");
+        var parameterObject = ExtractSceneVideoCompletionUpdateParameterObject(method);
+
+        Assert.Contains(sqlParameter, method);
+        Assert.Contains(binding, parameterObject);
     }
 
     [Fact]
@@ -184,6 +230,36 @@ public sealed class RVideoRuntimeSqlTests
         var nextMethod = source.IndexOf("\n    public async Task", start + signature.Length, StringComparison.Ordinal);
         Assert.True(nextMethod > start, $"Could not find end of {signature}.");
         return source[start..nextMethod];
+    }
+
+    private static string ExtractSceneVideoCompletionUpdateParameterObject(string method)
+    {
+        var sqlStart = method.IndexOf("voice_audio_version_id=COALESCE(@voiceAudioVersionId, voice_audio_version_id)", StringComparison.Ordinal);
+        Assert.True(sqlStart >= 0, "Could not find scene-video completion update SQL.");
+        var objectStart = method.IndexOf("new\r\n            {", sqlStart, StringComparison.Ordinal);
+        if (objectStart < 0)
+        {
+            objectStart = method.IndexOf("new\n            {", sqlStart, StringComparison.Ordinal);
+        }
+
+        Assert.True(objectStart > sqlStart, "Could not find scene-video completion Dapper parameter object.");
+        var objectEnd = method.IndexOf("            }, tx);", objectStart, StringComparison.Ordinal);
+        Assert.True(objectEnd > objectStart, "Could not find end of scene-video completion Dapper parameter object.");
+        return method[objectStart..objectEnd];
+    }
+
+    private static string ExtractSceneVideoCompletionUpdateSql(string method)
+    {
+        var sqlStart = method.IndexOf("UPDATE video_render.scene_video_versions", StringComparison.Ordinal);
+        Assert.True(sqlStart >= 0, "Could not find scene-video completion update SQL.");
+        var objectStart = method.IndexOf("new\r\n            {", sqlStart, StringComparison.Ordinal);
+        if (objectStart < 0)
+        {
+            objectStart = method.IndexOf("new\n            {", sqlStart, StringComparison.Ordinal);
+        }
+
+        Assert.True(objectStart > sqlStart, "Could not find scene-video completion Dapper parameter object.");
+        return method[sqlStart..objectStart];
     }
 
 }

@@ -908,6 +908,7 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
                 request.ProviderCapabilityId,
                 request.ProviderTaskId,
                 request.ResultMediaId,
+                voiceAudioVersionId = request.VoiceAudioVersionId,
                 request.VideoUrl,
                 request.VideoPath,
                 request.PosterUrl,
