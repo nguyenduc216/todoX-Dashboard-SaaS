@@ -117,3 +117,42 @@ YEScale provider implementation, 79AI endpoint contract, model fallback order, p
 ## Remaining Known Issues
 
 The unrelated full-suite failures listed above remain outside this RVIDEO recovery change. Publish succeeded; deployment and the production checklist are still required in the target environment.
+
+## Legacy production render-job recovery
+
+- Starting HEAD: `914605072d07da9c15b3ea091fc292206ff57258`.
+- Implementation commit: `f4c7117f1b12e8e03a3412ab623bfbf6c13ecb17` (`fix(rvideo): recover legacy storage collision jobs`).
+- `RenderJobService.MarkRecoveredCompletedAsync` retains the existing tenant, `render_scene_video`, project, scene, logical-request, render-job/version, and completed-`SceneVideoVersion` guards. It additionally accepts failed `RenderJobTerminalFailureException` rows only when `error_message` contains `Storage key` and a known historical no-overwrite ending.
+- Supported legacy messages include the correctly decoded Vietnamese ending `không ghi đè`, the historical single-mojibake ending `khÃ´ng ghi Ä‘Ã¨` (including `Storage key cá»§a phiÃªn báº£n Ä‘Ã£ tá»“n táº¡i, khÃ´ng ghi Ä‘Ã¨.`), and the observed production double-mojibake ending `khÃƒÂ´ng ghi Ã„â€˜ÃƒÂ¨` (including `Storage key cÃƒÂ¡Â»Â§a phiÃƒÂªn bÃƒÂ£n Ã„â€˜ÃƒÂ£ tÃ¡Â»â€œn tÃ¡ÂºÂ¡i, khÃƒÂ´ng ghi Ã„â€˜ÃƒÂ¨.`).
+- Arbitrary `RenderJobTerminalFailureException` rows remain rejected: a generic exception message, and a message that merely contains `Storage key`, cannot satisfy the guarded update.
+- Added billing evidence guard: `billing.ai_image_billing_records` must match the same tenant, `logical_request_id`, and `render_job_id`; must be the RVIDEO scene-video feature/capability; must have a provider task ID; and may be either `pending_reconciliation` or `completed`. This preserves the existing completion order where billing can complete immediately before the render job is recovered.
+- The existing `RVIDEO_VIDEO_RECOVERY_COMPLETED` event remains unchanged, preserving historical failure and event history. Provider submission, reserve behavior, storage key format, pricing, provider routing, and completion order were not changed. No migration, direct database change, or manual production SQL is required.
+
+### Validation
+
+- `git fetch origin integration/rdance-on-construction-video-core`: passed; remote and local starting HEAD were both `914605072d07da9c15b3ea091fc292206ff57258`.
+- `git diff --check`: passed; only Git CRLF normalization notices were emitted.
+- `dotnet restore ..\TodoX.Dashboard.sln`: passed.
+- `dotnet build ..\TodoX.Dashboard.sln -c Release --no-restore`: passed with 45 pre-existing generated Razor `CS8669` warnings and no errors.
+- `dotnet format ..\TodoX.Dashboard.sln whitespace --verify-no-changes --no-restore --include Services\Render\RenderJobService.cs Tests\RVideoProviderPollingRegressionTests.cs`: passed.
+- Focused regression tests:
+  `dotnet test .\Tests\TodoX.Web.Phase1B.Tests.csproj -c Release --filter "FullyQualifiedName~RVideoProviderPollingRegressionTests"`
+  passed, 50/50. They cover current recoverable failure behavior, the single- and double-mojibake legacy collisions, generic exception rejection, storage-key-only rejection, and source-level retention of the version/billing guards.
+- Full solution tests:
+  `dotnet test ..\TodoX.Dashboard.sln -c Release --no-build`
+  completed 769/775. The six unrelated failures were four `RDanceFashionDemoPageTests`, `DanceSellPhase2ValidationTests.ReferencePrompt_MatchesTheVerified79AiTryOnPromptExactly`, and `DanceSellAi79ReferenceProviderTests.SubmitAsync_UsesVerifiedFashionTryOnFormPayload`.
+- Full Phase1B tests:
+  `dotnet test .\Tests\TodoX.Web.Phase1B.Tests.csproj -c Release`
+  completed 158/165. The seven unrelated failures were missing SQL fixtures in two `RVideoRuntimeSqlTests`, `TimelapseWorkerClaimRegressionTests.CustomerUiDistinguishesWorkerWaitFromProviderSubmission`, and four `TodoXVideoPromptParserTests.ScenePromptMetadata_NormalizesVoiceAliases` cases.
+- Publish:
+  `dotnet publish .\TodoX.Web.csproj -c Release --no-restore -o ..\artifacts\publish\todox-dashboard`
+  passed. Output: `D:\todoX\Dashboard-web\TodoXPortal\todoX-Dashboard-SaaS\artifacts\publish\todox-dashboard`.
+
+### Production Verification
+
+1. Deploy the published dashboard without running migrations or manual SQL.
+2. Select a known legacy failed RVIDEO render job with `error_code = RenderJobTerminalFailureException` and one of the supported immutable-storage collision messages.
+3. Verify recovery reuses/polls its existing 79AI `provider_task_id`; no `/create-video`, `/image-upload`, or new `ReserveAsync` occurs.
+4. Verify tenant-safe media persists or is reused, the matching `SceneVideoVersion` becomes completed, finalization/lifecycle run, billing completes, and `locked_balance` settles.
+5. Verify the legacy render job changes from `failed` to `completed` and receives `RVIDEO_VIDEO_RECOVERY_COMPLETED`, while its original failure event remains in the audit trail.
+6. Verify unrelated generic `RenderJobTerminalFailureException` jobs, jobs with only `Storage key` text, mismatched tenant/project/scene/logical-request/version rows, incomplete versions, or missing/nonmatching billing evidence remain failed.
