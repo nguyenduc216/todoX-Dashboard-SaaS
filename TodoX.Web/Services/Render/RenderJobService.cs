@@ -754,7 +754,7 @@ public sealed class RenderJobService : IRenderJobService
                      FROM billing.ai_image_billing_records b
                     WHERE b.tenant_id=@tenant
                       AND b.logical_request_id=@logicalRequestId
-                      AND b.render_job_id=j.id
+                      AND replace(b.render_job_id, '-', '') = replace(j.id::text, '-', '')
                       AND b.feature_code='render_job_scene_video'
                       AND b.capability_code='rvideo_scene_video_generation'
                       AND b.provider_task_id IS NOT NULL

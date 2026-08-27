@@ -480,11 +480,30 @@ public sealed class RVideoProviderPollingRegressionTests
         var method = source[start..end];
         Assert.Contains("j.error_code = 'RenderJobTerminalFailureException'", method);
         Assert.Contains("j.error_message ILIKE '%Storage key%'", method);
-        Assert.Contains("b.render_job_id=j.id", method);
+        Assert.Contains("replace(b.render_job_id, '-', '') = replace(j.id::text, '-', '')", method);
+        Assert.DoesNotContain("b.render_job_id=j.id", method);
+        Assert.DoesNotContain("b.render_job_id::uuid", method);
         Assert.Contains("b.feature_code='render_job_scene_video'", method);
         Assert.Contains("b.capability_code='rvideo_scene_video_generation'", method);
         Assert.Contains("b.status IN ('pending_reconciliation', 'completed')", method);
         Assert.Contains("v.status='completed'", method);
+    }
+
+    [Theory]
+    [InlineData("1e64c8d0935c4018b28c5f0d0f6b81be", true)]
+    [InlineData("1e64c8d0-935c-4018-b28c-5f0d0f6b81be", true)]
+    [InlineData("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", false)]
+    [InlineData("not-a-uuid", false)]
+    public void NormalizedBillingRenderJobIdComparisonSupportsHistoricalTextFormats(
+        string billingRenderJobId,
+        bool expectedMatch)
+    {
+        const string renderJobId = "1e64c8d0-935c-4018-b28c-5f0d0f6b81be";
+
+        var matches = NormalizeRenderJobIdText(billingRenderJobId)
+            == NormalizeRenderJobIdText(renderJobId);
+
+        Assert.Equal(expectedMatch, matches);
     }
 
     [Fact]
@@ -612,4 +631,7 @@ public sealed class RVideoProviderPollingRegressionTests
 
     private static string ReadRepoFile(params string[] parts)
         => File.ReadAllText(Path.Combine(new[] { AppContext.BaseDirectory, "..", "..", "..", ".." }.Concat(parts).ToArray()));
+
+    private static string NormalizeRenderJobIdText(string value)
+        => value.Replace("-", string.Empty, StringComparison.Ordinal);
 }
