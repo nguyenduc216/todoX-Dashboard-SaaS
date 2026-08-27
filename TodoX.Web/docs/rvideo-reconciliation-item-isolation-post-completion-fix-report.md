@@ -87,6 +87,6 @@ Commands and results:
 
 ## Git
 
-- Commit SHA: pending.
+- Implementation commit SHA: `0b859e29f25b4fee806f531bf98f2d314f00990c`.
 - Branch: `integration/rdance-on-construction-video-core`.
-- Push result: pending.
+- Push result: implementation commit pushed successfully; this report correction is pushed in the follow-up documentation commit.
