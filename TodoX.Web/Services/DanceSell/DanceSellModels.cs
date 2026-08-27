@@ -337,11 +337,13 @@ public static class DanceSellMotionProviderContract
                DefaultProviderMode)!;
 
     public static string ResolveProviderRatio(DanceSellProviderRouteDto route, string? selectedRatio = null)
-        => FirstNonBlank(
-               selectedRatio,
-               ReadConfigString(route.ConfigJson, "ratio"),
-               ReadConfigString(route.ConfigJson, "provider_ratio"),
-               DefaultProviderRatio)!;
+        => string.Equals(route.ModelName, DanceSellConstants.Model, StringComparison.OrdinalIgnoreCase)
+            ? DefaultProviderRatio
+            : FirstNonBlank(
+                   selectedRatio,
+                   ReadConfigString(route.ConfigJson, "ratio"),
+                   ReadConfigString(route.ConfigJson, "provider_ratio"),
+                   DefaultProviderRatio)!;
 
     public static string ResolveReferenceImageField(DanceSellProviderRouteDto route)
         => FirstNonBlank(ReadConfigString(route.ConfigJson, "reference_image_field"), DefaultReferenceImageField)!;
@@ -384,6 +386,14 @@ public static class DanceSellMotionProviderContract
 
     private static string? FirstNonBlank(params string?[] values)
         => values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim();
+}
+
+public static class DanceSellRatioNormalizer
+{
+    public static string NormalizeDanceSellRatio(string? ratio)
+        => string.Equals(ratio?.Trim(), "16:9", StringComparison.OrdinalIgnoreCase)
+            ? "16:9"
+            : "9:16";
 }
 
 public sealed class DanceSellReferenceComparisonResultDto

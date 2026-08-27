@@ -131,7 +131,7 @@ public sealed class DanceSellRepository : IDanceSellRepository
                 referenceProviderModel = NullIfBlank(request.ReferenceProviderModel),
                 motionProviderCode = NullIfBlank(request.MotionProviderCode),
                 motionProviderModel = NullIfBlank(request.MotionProviderModel),
-                ratio = string.IsNullOrWhiteSpace(request.Ratio) ? "9:16" : request.Ratio.Trim(),
+                ratio = DanceSellRatioNormalizer.NormalizeDanceSellRatio(request.Ratio),
                 autoFinish = request.AutoFinish
             });
     }
@@ -178,7 +178,7 @@ public sealed class DanceSellRepository : IDanceSellRepository
                 motionVideoUrl = request.MotionVideoUrl.Trim(),
                 mode = request.Mode.Trim(),
                 orientation = request.CharacterOrientation.Trim(),
-                ratio = string.IsNullOrWhiteSpace(request.Ratio) ? "9:16" : request.Ratio.Trim(),
+                ratio = DanceSellRatioNormalizer.NormalizeDanceSellRatio(request.Ratio),
                 providerCode = request.ProviderCode,
                 providerModel = request.ProviderModel
             });
@@ -343,7 +343,7 @@ public sealed class DanceSellRepository : IDanceSellRepository
                 motionProviderModel = NullIfBlank(request.MotionProviderModel),
                 mode = request.Mode.Trim(),
                 orientation = request.CharacterOrientation.Trim(),
-                ratio = string.IsNullOrWhiteSpace(request.Ratio) ? "9:16" : request.Ratio.Trim(),
+                ratio = DanceSellRatioNormalizer.NormalizeDanceSellRatio(request.Ratio),
                 autoFinish = request.AutoFinish
             });
     }

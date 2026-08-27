@@ -171,10 +171,11 @@ public sealed class Ai79DanceSellReferenceProvider : IDanceSellReferenceProvider
         var characterUrl = KiePayloadBuilder.ValidatePublicHttpsUrl(request.CharacterImageUrl, "subjects[0][url]");
         var hasProduct = !string.IsNullOrWhiteSpace(request.ProductImageUrl);
         var productUrl = hasProduct ? KiePayloadBuilder.ValidatePublicHttpsUrl(request.ProductImageUrl!, "subjects[1][url]") : null;
+        var ratio = DanceSellRatioNormalizer.NormalizeDanceSellRatio(request.AspectRatio);
         var prompt = string.IsNullOrWhiteSpace(request.Prompt)
             ? BuildReferencePrompt(hasProduct)
             : request.Prompt.Trim();
-        var ratio = "16:9";
+        prompt = $"{prompt}\n\n{BuildOrientationInstruction(ratio)}";
         var category = "FASHION";
         var resolution = "2k";
         var mode = "vip";
@@ -362,6 +363,11 @@ OUTPUT REQUIREMENT:
 
 Photorealistic, clean image suitable for video generation.
 """;
+
+    private static string BuildOrientationInstruction(string ratio)
+        => ratio == "9:16"
+            ? "Compose the final image as a single full-frame portrait 9:16 image. Keep the full person naturally centered. Do not create borders, collage, split frames or duplicate subjects."
+            : "Compose the final image as a single full-frame landscape 16:9 image. Keep the person or product naturally framed. Do not create borders, collage, split frames or duplicate subjects.";
 
     private static string[] BuildGenerateImageFieldNames(IReadOnlyDictionary<string, string?> options)
         => new[] { "access_token", "domain", "model", "prompt" }

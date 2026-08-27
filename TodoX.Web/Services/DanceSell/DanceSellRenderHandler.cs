@@ -534,7 +534,7 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
                 },
                 level: "error",
                 ct: ct);
-            await FailAsync(renderJob, danceJob, errorCode, GetCustomerSafeProviderMessage(providerStage), ex.SanitizedResponseJson, permanent: true, ct, operationId: motionOperationId);
+            await FailAsync(renderJob, danceJob, errorCode, GetCustomerSafeProviderMessage(providerStage, ex.ErrorMessage), ex.SanitizedResponseJson, permanent: true, ct, operationId: motionOperationId);
             throw new RenderJobTerminalFailureException(ex.Message, ex);
         }
         catch (HttpRequestException ex) when (providerStage is "reference_upload" or "reference_verify" or "motion_upload" or "motion_verify")
@@ -1425,10 +1425,44 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
         }, ct);
     }
 
-    private static string GetCustomerSafeProviderMessage(string stage)
-        => stage is "reference_upload" or "reference_verify"
+    private static string GetCustomerSafeProviderMessage(string stage, string? providerError = null)
+    {
+        if (stage == "submit")
+        {
+            var detail = SanitizeProviderErrorDetail(providerError);
+            return string.IsNullOrWhiteSpace(detail)
+                ? "Không thể gửi yêu cầu tạo video tới 79AI. Vui lòng thử lại."
+                : $"Không thể gửi yêu cầu tạo video tới 79AI. Chi tiết: {detail}";
+        }
+
+        return stage is "reference_upload" or "reference_verify"
             ? "Không thể chuẩn bị ảnh tham chiếu để tạo video. Vui lòng thử lại."
             : "Không thể chuẩn bị video nguồn để tạo video. Vui lòng thử lại.";
+    }
+
+    private static string? SanitizeProviderErrorDetail(string? providerError)
+    {
+        if (string.IsNullOrWhiteSpace(providerError))
+        {
+            return null;
+        }
+
+        var detail = providerError
+            .Replace("\r", " ", StringComparison.Ordinal)
+            .Replace("\n", " ", StringComparison.Ordinal)
+            .Replace("\t", " ", StringComparison.Ordinal)
+            .Trim();
+        var lowered = detail.ToLowerInvariant();
+        if (lowered.Contains("access_token", StringComparison.Ordinal)
+            || lowered.Contains("bearer ", StringComparison.Ordinal)
+            || lowered.Contains("credential", StringComparison.Ordinal)
+            || lowered.Contains("secret", StringComparison.Ordinal))
+        {
+            return "Lỗi từ nhà cung cấp đã được ẩn thông tin nhạy cảm.";
+        }
+
+        return detail.Length <= 500 ? detail : detail[..500];
+    }
 
     private async Task LogUsageAsync(DanceSellJobDto danceJob, RenderJobDto renderJob, string status, string? taskId, string? providerStatus, int? resultUrlCount, string? errorMessage, CancellationToken ct)
     {

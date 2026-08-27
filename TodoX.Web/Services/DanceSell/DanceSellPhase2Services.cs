@@ -255,6 +255,7 @@ public sealed class DanceSellReferenceImageService : IDanceSellReferenceImageSer
             var versions = await _repo.ListReferenceVersionsAsync(job.Id, ct);
             versionNo = versions.Count == 0 ? 1 : versions.Max(x => x.VersionNo) + 1;
             var referencePrompt = BuildReferencePrompt(job);
+            var targetRatio = DanceSellRatioNormalizer.NormalizeDanceSellRatio(job.Ratio);
 
             requestJson = DanceSellRepository.ToJson(new
             {
@@ -264,7 +265,7 @@ public sealed class DanceSellReferenceImageService : IDanceSellReferenceImageSer
                 prompt = referencePrompt,
                 sync = false,
                 project_id = "default",
-                ratio = "16:9",
+                ratio = targetRatio,
                 category = "FASHION",
                 resolution = "2k",
                 mode = "vip",
@@ -290,7 +291,7 @@ public sealed class DanceSellReferenceImageService : IDanceSellReferenceImageSer
                 Prompt = referencePrompt,
                 CharacterImageUrl = job.CharacterImageUrl,
                 ProductImageUrl = job.ProductImageUrl,
-                AspectRatio = ReadConfigString(route.ConfigJson, "aspect_ratio")
+                AspectRatio = targetRatio
             }, ct);
 
             if (operation is not null)
@@ -731,6 +732,7 @@ Photorealistic, product preview quality.
         {
             throw new InvalidOperationException("DANCE_SELL_REFERENCE_NOT_READY");
         }
+        EnsureReferenceVersionRatioMatchesJob(version, job);
 
         await _repo.SelectReferenceVersionAsync(job.Id, version.Id, ct);
         await _repo.UpdateReferenceStatusAsync(job.Id, DanceSellReferenceStatuses.Approved, null, version.MediaId, version.ObjectKey, version.PublicUrl, DateTime.UtcNow, ct);
@@ -749,6 +751,7 @@ Photorealistic, product preview quality.
         {
             throw new InvalidOperationException("DANCE_SELL_REFERENCE_NOT_READY");
         }
+        EnsureReferenceVersionRatioMatchesJob(version, job);
 
         await _repo.SelectReferenceVersionAsync(job.Id, version.Id, ct);
         await _repo.UpdateReferenceStatusAsync(job.Id, DanceSellReferenceStatuses.Approved, null, version.MediaId, version.ObjectKey, version.PublicUrl, DateTime.UtcNow, ct);
@@ -856,7 +859,40 @@ Photorealistic, product preview quality.
 
     private static bool ReferenceVersionMatches(DanceSellReferenceVersionDto version, DanceSellJobDto job)
         => version.CharacterMediaId == job.CharacterMediaId
-           && version.ProductMediaId == job.ProductMediaId;
+           && version.ProductMediaId == job.ProductMediaId
+           && string.Equals(ReadRequestRatio(version.RequestJson), DanceSellRatioNormalizer.NormalizeDanceSellRatio(job.Ratio), StringComparison.Ordinal);
+
+    private static void EnsureReferenceVersionRatioMatchesJob(DanceSellReferenceVersionDto version, DanceSellJobDto job)
+    {
+        var versionRatio = ReadRequestRatio(version.RequestJson);
+        var jobRatio = DanceSellRatioNormalizer.NormalizeDanceSellRatio(job.Ratio);
+        if (string.Equals(versionRatio, jobRatio, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        throw new InvalidOperationException($"DANCE_SELL_REFERENCE_RATIO_MISMATCH:{versionRatio ?? "unknown"}:{jobRatio}");
+    }
+
+    private static string? ReadRequestRatio(string? requestJson)
+    {
+        if (string.IsNullOrWhiteSpace(requestJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(requestJson);
+            return doc.RootElement.TryGetProperty("ratio", out var value) && value.ValueKind == JsonValueKind.String
+                ? value.GetString()
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
 
     private async Task<DanceSellJobDto> RequireOwnedJobAsync(Guid id, CurrentUserSession user, CancellationToken ct)
     {
@@ -959,7 +995,8 @@ public sealed class DanceSellReferenceComparisonService : IDanceSellReferenceCom
             try
             {
                 var route = BuildCandidateRoute(candidate);
-                var requestJson = BuildComparisonRequestJson(job, candidate, prompt, route, started);
+                var targetRatio = DanceSellRatioNormalizer.NormalizeDanceSellRatio(job.Ratio);
+                var requestJson = BuildComparisonRequestJson(job, candidate, prompt, route, started, targetRatio);
                 var estimate = await _costs.EstimateAsync(route, job.Mode, null, ct);
                 operation = await _operations.UpsertOperationAsync(new DanceSellProviderOperationDto
                 {
@@ -994,7 +1031,7 @@ public sealed class DanceSellReferenceComparisonService : IDanceSellReferenceCom
                     Prompt = prompt,
                     CharacterImageUrl = job.CharacterImageUrl,
                     ProductImageUrl = job.ProductImageUrl!,
-                    AspectRatio = ReadConfigString(route.ConfigJson, "aspect_ratio")
+                    AspectRatio = targetRatio
                 }, ct);
 
                 if (operation is not null)
@@ -1197,7 +1234,7 @@ public sealed class DanceSellReferenceComparisonService : IDanceSellReferenceCom
                 Prompt = prompt,
                 ProviderCode = candidate.ProviderCode,
                 ProviderModel = candidate.ModelName,
-                RequestJson = BuildComparisonRequestJson(job, candidate, prompt, BuildCandidateRoute(candidate), started),
+                RequestJson = BuildComparisonRequestJson(job, candidate, prompt, BuildCandidateRoute(candidate), started, DanceSellRatioNormalizer.NormalizeDanceSellRatio(job.Ratio)),
                 ErrorJson = DanceSellRepository.ToJson(new { experiment = DanceSellConstants.ReferenceComparisonExperiment, error = ex.Message }),
                 Status = DanceSellReferenceStatuses.Failed,
                 IsSelected = false,
@@ -1245,7 +1282,7 @@ public sealed class DanceSellReferenceComparisonService : IDanceSellReferenceCom
             })
         };
 
-    private static string BuildComparisonRequestJson(DanceSellJobDto job, DanceSellReferenceComparisonCandidate candidate, string prompt, DanceSellProviderRouteDto route, DateTime started)
+    private static string BuildComparisonRequestJson(DanceSellJobDto job, DanceSellReferenceComparisonCandidate candidate, string prompt, DanceSellProviderRouteDto route, DateTime started, string targetRatio)
         => DanceSellRepository.ToJson(new
         {
             experiment = DanceSellConstants.ReferenceComparisonExperiment,
@@ -1256,7 +1293,7 @@ public sealed class DanceSellReferenceComparisonService : IDanceSellReferenceCom
             model = candidate.ModelName,
             candidate.DisplayName,
             prompt,
-            ratio = ReadConfigString(route.ConfigJson, "ratio"),
+            ratio = targetRatio,
             resolution = ReadConfigString(route.ConfigJson, "resolution"),
             mode = ReadConfigString(route.ConfigJson, "mode"),
             action_type = "create",
@@ -1441,8 +1478,12 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
 
         var referenceModeChanged =
             !string.Equals(job.ReferenceMode, request.ReferenceMode.Trim(), StringComparison.Ordinal);
+        var ratioChanged =
+            !string.Equals(DanceSellRatioNormalizer.NormalizeDanceSellRatio(job.Ratio),
+                DanceSellRatioNormalizer.NormalizeDanceSellRatio(request.Ratio),
+                StringComparison.Ordinal);
         await _repo.UpdateBusinessAsync(job.Id, request, ct);
-        if (referenceModeChanged)
+        if (referenceModeChanged || ratioChanged)
         {
             await _repo.ResetReferenceAsync(job.Id, ct: ct);
         }
