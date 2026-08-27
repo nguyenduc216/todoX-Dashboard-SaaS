@@ -451,6 +451,42 @@ public sealed class RVideoProviderPollingRegressionTests
         Assert.Contains("log_code = @logCode", source);
     }
 
+    [Theory]
+    [InlineData("RVIDEO_VIDEO_PERSIST_FAILED", "Storage key collision", false)]
+    [InlineData("RenderJobTerminalFailureException", "Storage key c\u00e1\u00bb\u00a7a phi\u00c3\u00aan b\u00e1\u00ba\u00a3n \u00c4\u2018\u00c3\u00a3 t\u00e1\u00bb\u201con t\u00e1\u00ba\u00a1i, kh\u00c3\u00b4ng ghi \u00c4\u2018\u00c3\u00a8.", true)]
+    [InlineData("RenderJobTerminalFailureException", "Storage key c\u00c3\u0192\u00c2\u00a1\u00c2\u00bb\u00c2\u00a7a phi\u00c3\u0192\u00c2\u00aa\u00c2\u00aan b\u00c3\u0192\u00c2\u00a3n \u00c3\u201e\u00e2\u20ac\u02dc\u00c3\u0192\u00c2\u00a3 t\u00c3\u00a1\u00c2\u00bb\u00e2\u20ac\u0153n t\u00c3\u00a1\u00c2\u00ba\u00c2\u00a1i, kh\u00c3\u0192\u00c2\u00b4ng ghi \u00c3\u201e\u00e2\u20ac\u02dc\u00c3\u0192\u00c2\u00a8.", true)]
+    [InlineData("RenderJobTerminalFailureException", "Storage key exists, overwrite was blocked.", false)]
+    [InlineData("RenderJobTerminalFailureException", "Provider failed before storage key was created.", false)]
+    public void LegacyStorageCollisionGuardOnlyAcceptsKnownMessage(
+        string errorCode,
+        string errorMessage,
+        bool expected)
+    {
+        var method = typeof(Services.Render.RenderJobService)
+            .GetMethod("IsLegacyStorageCollision", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+        Assert.Equal(expected, method!.Invoke(null, new object?[] { errorCode, errorMessage }));
+    }
+
+    [Fact]
+    public void RecoveredRenderJobUpdateKeepsStrictVersionAndBillingGuards()
+    {
+        var source = ReadRepoFile("Services", "Render", "RenderJobService.cs");
+        var start = source.IndexOf("public async Task<bool> MarkRecoveredCompletedAsync", StringComparison.Ordinal);
+        var end = source.IndexOf("private static bool IsLegacyStorageCollision", start, StringComparison.Ordinal);
+        Assert.True(start >= 0);
+        Assert.True(end > start);
+
+        var method = source[start..end];
+        Assert.Contains("j.error_code = 'RenderJobTerminalFailureException'", method);
+        Assert.Contains("j.error_message ILIKE '%Storage key%'", method);
+        Assert.Contains("b.render_job_id=j.id", method);
+        Assert.Contains("b.feature_code='render_job_scene_video'", method);
+        Assert.Contains("b.capability_code='rvideo_scene_video_generation'", method);
+        Assert.Contains("b.status IN ('pending_reconciliation', 'completed')", method);
+        Assert.Contains("v.status='completed'", method);
+    }
+
     [Fact]
     public void SharedMediaStateRendererIsUsedByRVideoTimelapseAndRDance()
     {

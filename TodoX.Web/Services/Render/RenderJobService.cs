@@ -40,6 +40,7 @@ public interface IRenderJobService
 public sealed class RenderJobService : IRenderJobService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private const string LegacyStorageCollisionErrorCode = "RenderJobTerminalFailureException";
 
     private readonly TodoXConnectionFactory _factory;
     private readonly TenantContext _tenant;
@@ -724,6 +725,15 @@ public sealed class RenderJobService : IRenderJobService
                         'PROVIDER_SUCCESS_RECONCILIATION_FAILED',
                         'MEDIA_STORAGE_FAILED'
                     )
+                    OR (
+                        j.error_code = 'RenderJobTerminalFailureException'
+                        AND j.error_message ILIKE '%Storage key%'
+                        AND (
+                            j.error_message ILIKE U&'%kh\00f4ng ghi \0111\00e8%'
+                            OR j.error_message ILIKE U&'%kh\00c3\00b4ng ghi \00c4\2018\00c3\00a8%'
+                            OR j.error_message ILIKE U&'%kh\00c3\0192\00c2\00b4ng ghi \00c3\201e\00e2\20ac\02dc\00c3\0192\00c2\00a8%'
+                        )
+                    )
                )
                AND (j.input_json->>'projectId')=@projectId
                AND (j.input_json->>'sceneId')=@sceneId
@@ -738,6 +748,18 @@ public sealed class RenderJobService : IRenderJobService
                       AND v.scene_id=@sceneId::bigint
                       AND v.logical_request_id=@logicalRequestId
                       AND v.status='completed'
+               )
+               AND EXISTS (
+                   SELECT 1
+                     FROM billing.ai_image_billing_records b
+                    WHERE b.tenant_id=@tenant
+                      AND b.logical_request_id=@logicalRequestId
+                      AND b.render_job_id=j.id
+                      AND b.feature_code='render_job_scene_video'
+                      AND b.capability_code='rvideo_scene_video_generation'
+                      AND b.provider_task_id IS NOT NULL
+                      AND btrim(b.provider_task_id) <> ''
+                      AND b.status IN ('pending_reconciliation', 'completed')
                );
             """,
             new
@@ -761,6 +783,20 @@ public sealed class RenderJobService : IRenderJobService
         }
 
         return changed > 0;
+    }
+
+    private static bool IsLegacyStorageCollision(string? errorCode, string? errorMessage)
+    {
+        if (!string.Equals(errorCode, LegacyStorageCollisionErrorCode, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        return !string.IsNullOrWhiteSpace(errorMessage)
+            && errorMessage.Contains("Storage key", StringComparison.OrdinalIgnoreCase)
+            && (errorMessage.Contains("kh\u00f4ng ghi \u0111\u00e8", StringComparison.OrdinalIgnoreCase)
+                || errorMessage.Contains("kh\u00c3\u00b4ng ghi \u00c4\u2018\u00c3\u00a8", StringComparison.OrdinalIgnoreCase)
+                || errorMessage.Contains("\u00c3\u0192\u00c2\u00b4ng ghi \u00c3\u201e\u00e2\u20ac\u02dc\u00c3\u0192\u00c2\u00a8", StringComparison.OrdinalIgnoreCase));
     }
 
     public async Task<int> GetProviderReconciliationAttemptCountAsync(Guid jobId, CancellationToken ct = default)
