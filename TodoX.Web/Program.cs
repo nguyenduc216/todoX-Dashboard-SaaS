@@ -201,6 +201,7 @@ builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IVideoRenderPricingRes
 builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IVideoRenderEligibilityService, TodoX.Web.Services.VideoRender.VideoRenderEligibilityService>();
 builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IYEScaleVideoPricingResolver, TodoX.Web.Services.VideoRender.YEScaleVideoPricingResolver>();
 builder.Services.AddScoped<IDanceSellRepository, DanceSellRepository>();
+builder.Services.AddScoped<IRDanceDownloadTicketService, RDanceDownloadTicketService>();
 builder.Services.AddScoped<IDanceSellCompletionService, DanceSellCompletionService>();
 builder.Services.AddScoped<IDanceSellMotionSourceService, DanceSellMotionSourceService>();
 builder.Services.AddScoped<IDanceSellReferenceImageService, DanceSellReferenceImageService>();

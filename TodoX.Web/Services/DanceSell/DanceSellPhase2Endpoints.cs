@@ -18,8 +18,9 @@ public static class DanceSellPhase2Endpoints
         group.MapGet("/jobs", ListJobsAsync);
         group.MapPost("/jobs", CreateJobAsync).DisableAntiforgery();
         group.MapGet("/jobs/{id:guid}", GetJobAsync);
-        group.MapGet("/jobs/{id:guid}/download", DownloadAsync);
-        group.MapGet("/jobs/{id:guid}/reference/download", DownloadReferenceAsync);
+        group.MapGet("/jobs/{id:guid}/download-ticket", GetDownloadTicketAsync);
+        group.MapGet("/jobs/{id:guid}/download", DownloadAsync).DisableAntiforgery();
+        group.MapGet("/jobs/{id:guid}/reference/download", DownloadReferenceAsync).DisableAntiforgery();
         group.MapPut("/jobs/{id:guid}", UpdateBusinessAsync).DisableAntiforgery();
         group.MapPost("/jobs/{id:guid}/character", UploadCharacterAsync).DisableAntiforgery();
         group.MapPost("/jobs/{id:guid}/product", UploadProductAsync).DisableAntiforgery();
@@ -63,71 +64,111 @@ public static class DanceSellPhase2Endpoints
     private static async Task<IResult> GetJobAsync(Guid id, AuthStateService auth, IDanceSellPhase2Service service, CancellationToken ct)
         => await ExecuteAsync(auth, user => service.GetAsync(id, user, ct));
 
-    private static async Task<IResult> DownloadAsync(
+    private static async Task<IResult> GetDownloadTicketAsync(
         Guid id,
+        string type,
         AuthStateService auth,
         IDanceSellPhase2Service service,
+        CancellationToken ct)
+        => await ExecuteAsync(auth, user => service.GetDownloadTicketAsync(id, type, user, ct));
+
+    private static async Task<IResult> DownloadAsync(
+        Guid id,
+        string? t,
+        IRDanceDownloadTicketService tickets,
+        IDanceSellRepository repository,
         IHttpClientFactory httpClients,
         CancellationToken ct)
-        => await ExecuteResultAsync(auth, async user =>
-        {
-            var job = await service.GetAsync(id, user, ct);
-            if (!string.Equals(job.Status, DanceSellJobStatuses.Completed, StringComparison.OrdinalIgnoreCase)
-                || string.IsNullOrWhiteSpace(job.ResultVideoUrl))
-            {
-                throw new InvalidOperationException("DANCE_SELL_RESULT_NOT_READY");
-            }
-
-            if (!Uri.TryCreate(job.ResultVideoUrl, UriKind.Absolute, out var resultUri))
-            {
-                throw new InvalidOperationException("DANCE_SELL_RESULT_URL_INVALID");
-            }
-
-            await EnsurePublicHttpsUrlAsync(resultUri, ct);
-            var client = httpClients.CreateClient("DanceSellDownload");
-            using var request = new HttpRequestMessage(HttpMethod.Get, resultUri);
-            var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
-            if (!response.IsSuccessStatusCode)
-            {
-                response.Dispose();
-                throw new InvalidOperationException("DANCE_SELL_RESULT_DOWNLOAD_FAILED");
-            }
-
-            return new DanceSellRemoteDownloadResult(response, "video/mp4", $"todox-rdance-{id:N}.mp4");
-        });
+        => await ExecuteDownloadAsync(id, t, RDanceDownloadTypes.Result, tickets, repository, httpClients, ct);
 
     private static async Task<IResult> DownloadReferenceAsync(
         Guid id,
-        AuthStateService auth,
-        IDanceSellPhase2Service service,
+        string? t,
+        IRDanceDownloadTicketService tickets,
+        IDanceSellRepository repository,
         IHttpClientFactory httpClients,
         CancellationToken ct)
-        => await ExecuteResultAsync(auth, async user =>
+        => await ExecuteDownloadAsync(id, t, RDanceDownloadTypes.Reference, tickets, repository, httpClients, ct);
+
+    private static async Task<IResult> ExecuteDownloadAsync(
+        Guid id,
+        string? token,
+        string expectedType,
+        IRDanceDownloadTicketService tickets,
+        IDanceSellRepository repository,
+        IHttpClientFactory httpClients,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(token))
         {
-            var job = await service.GetAsync(id, user, ct);
-            if (!string.Equals(job.PreparedReferenceStatus, DanceSellReferenceStatuses.Approved, StringComparison.OrdinalIgnoreCase)
-                || string.IsNullOrWhiteSpace(job.PreparedReferenceUrl))
-            {
-                throw new InvalidOperationException("DANCE_SELL_REFERENCE_NOT_READY");
-            }
+            return Results.StatusCode(StatusCodes.Status401Unauthorized);
+        }
 
-            if (!Uri.TryCreate(job.PreparedReferenceUrl, UriKind.Absolute, out var referenceUri))
-            {
-                throw new InvalidOperationException("DANCE_SELL_REFERENCE_URL_INVALID");
-            }
+        RDanceDownloadTicket ticket;
+        try
+        {
+            ticket = tickets.ValidateTicket(token);
+        }
+        catch (InvalidOperationException)
+        {
+            return Results.StatusCode(StatusCodes.Status401Unauthorized);
+        }
 
-            await EnsurePublicHttpsUrlAsync(referenceUri, ct);
-            var client = httpClients.CreateClient("DanceSellDownload");
-            using var request = new HttpRequestMessage(HttpMethod.Get, referenceUri);
-            var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
-            if (!response.IsSuccessStatusCode)
-            {
-                response.Dispose();
-                throw new InvalidOperationException("DANCE_SELL_REFERENCE_DOWNLOAD_FAILED");
-            }
+        if (ticket.JobId != id
+            || !string.Equals(ticket.Type, expectedType, StringComparison.Ordinal))
+        {
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
 
-            return new DanceSellRemoteDownloadResult(response, "image/jpeg", $"todox-rdance-reference-{id:N}.jpg");
-        });
+        var job = await repository.GetByIdAsync(id, ct);
+        if (job is null)
+        {
+            return Results.NotFound();
+        }
+
+        var remoteUrl = expectedType == RDanceDownloadTypes.Result
+            ? job.ResultVideoUrl
+            : job.PreparedReferenceUrl;
+        if (string.IsNullOrWhiteSpace(remoteUrl)
+            || (expectedType == RDanceDownloadTypes.Result
+                && !string.Equals(job.Status, DanceSellJobStatuses.Completed, StringComparison.OrdinalIgnoreCase))
+            || (expectedType == RDanceDownloadTypes.Reference
+                && !string.Equals(job.PreparedReferenceStatus, DanceSellReferenceStatuses.Approved, StringComparison.OrdinalIgnoreCase)))
+        {
+            return Results.StatusCode(StatusCodes.Status409Conflict);
+        }
+
+        if (!Uri.TryCreate(remoteUrl, UriKind.Absolute, out var remoteUri))
+        {
+            return Results.StatusCode(StatusCodes.Status400BadRequest);
+        }
+
+        try
+        {
+            await EnsurePublicHttpsUrlAsync(remoteUri, ct);
+        }
+        catch (InvalidOperationException)
+        {
+            return Results.StatusCode(StatusCodes.Status400BadRequest);
+        }
+
+        var client = httpClients.CreateClient("DanceSellDownload");
+        using var request = new HttpRequestMessage(HttpMethod.Get, remoteUri);
+        var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            response.Dispose();
+            return Results.StatusCode(StatusCodes.Status502BadGateway);
+        }
+
+        var contentType = expectedType == RDanceDownloadTypes.Result
+            ? "video/mp4"
+            : (response.Content.Headers.ContentType?.MediaType ?? "image/jpeg");
+        var fileName = expectedType == RDanceDownloadTypes.Result
+            ? $"todox-rdance-{id:N}.mp4"
+            : $"todox-rdance-reference-{id:N}.jpg";
+        return new DanceSellRemoteDownloadResult(response, contentType, fileName);
+    }
 
     private static async Task<IResult> UpdateBusinessAsync(Guid id, DanceSellUpdateBusinessRequest request, AuthStateService auth, IDanceSellPhase2Service service, CancellationToken ct)
         => await ExecuteAsync(auth, user => service.UpdateBusinessAsync(id, request, user, ct));
@@ -250,6 +291,8 @@ public static class DanceSellPhase2Endpoints
                 "DANCE_SELL_RESULT_NOT_READY" => StatusCodes.Status409Conflict,
                 "DANCE_SELL_RESULT_URL_INVALID" => StatusCodes.Status400BadRequest,
                 "DANCE_SELL_RESULT_DOWNLOAD_FAILED" => StatusCodes.Status502BadGateway,
+                "DANCE_SELL_DOWNLOAD_TICKET_INVALID" => StatusCodes.Status401Unauthorized,
+                "DANCE_SELL_DOWNLOAD_TYPE_INVALID" => StatusCodes.Status400BadRequest,
                 "DANCE_SELL_REFERENCE_NOT_READY" => StatusCodes.Status409Conflict,
                 "DANCE_SELL_REFERENCE_URL_INVALID" => StatusCodes.Status400BadRequest,
                 "DANCE_SELL_REFERENCE_DOWNLOAD_FAILED" => StatusCodes.Status502BadGateway,

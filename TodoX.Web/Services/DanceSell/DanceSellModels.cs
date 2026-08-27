@@ -51,6 +51,14 @@ public static class DanceSellOperationTypes
     public static IReadOnlyList<string> All { get; } = new[] { ReferenceImage, MotionVideo, OutputStage };
 }
 
+public static class RDanceDownloadTypes
+{
+    public const string Result = "result";
+    public const string Reference = "reference";
+
+    public static IReadOnlyList<string> All { get; } = new[] { Result, Reference };
+}
+
 public static class DanceSellOperationStatuses
 {
     public const string Draft = "draft";

@@ -17,6 +17,13 @@ window.todoxDownload = {
     link.remove();
     URL.revokeObjectURL(link.href);
   },
+  startBrowserDownload: function (url) {
+    const iframe = document.createElement("iframe");
+    iframe.style.display = "none";
+    iframe.src = url;
+    document.body.appendChild(iframe);
+    setTimeout(() => iframe.remove(), 60000);
+  },
   downloadRemoteFile: async function (url, fileName) {
     const response = await fetch(url, { credentials: "omit" });
     if (!response.ok) {

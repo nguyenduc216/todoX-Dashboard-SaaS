@@ -1365,6 +1365,7 @@ public interface IDanceSellPhase2Service
     Task<DanceSellJobDto> RetryAsync(Guid id, CurrentUserSession user, CancellationToken ct = default);
     Task<DanceSellJobDto> CancelAsync(Guid id, string reason, CurrentUserSession user, CancellationToken ct = default);
     Task<DanceSellJobDto> GetAsync(Guid id, CurrentUserSession user, CancellationToken ct = default);
+    Task<string> GetDownloadTicketAsync(Guid id, string type, CurrentUserSession user, CancellationToken ct = default);
     Task<IReadOnlyList<DanceSellJobDto>> ListAsync(CurrentUserSession user, int limit = 20, int offset = 0, CancellationToken ct = default);
 }
 
@@ -1378,6 +1379,7 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
     private readonly IDanceSellProviderCatalog _catalog;
     private readonly IDanceSellOperationRepository _operations;
     private readonly IDanceSellCostEstimator _costs;
+    private readonly IRDanceDownloadTicketService _downloadTickets;
     private readonly IOptionsMonitor<KieOptions> _kie;
     private readonly IOptionsMonitor<DanceSellPhase2Options> _options;
     private readonly TenantContext _tenant;
@@ -1390,6 +1392,7 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
         IDanceSellProviderCatalog catalog,
         IDanceSellOperationRepository operations,
         IDanceSellCostEstimator costs,
+        IRDanceDownloadTicketService downloadTickets,
         IOptionsMonitor<KieOptions> kie,
         IOptionsMonitor<DanceSellPhase2Options> options,
         TenantContext tenant)
@@ -1401,6 +1404,7 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
         _catalog = catalog;
         _operations = operations;
         _costs = costs;
+        _downloadTickets = downloadTickets;
         _kie = kie;
         _options = options;
         _tenant = tenant;
@@ -1773,6 +1777,32 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
 
     public async Task<DanceSellJobDto> GetAsync(Guid id, CurrentUserSession user, CancellationToken ct = default)
         => await RequireOwnedJobAsync(id, user, ct);
+
+    public async Task<string> GetDownloadTicketAsync(Guid id, string type, CurrentUserSession user, CancellationToken ct = default)
+    {
+        var job = await RequireOwnedJobAsync(id, user, ct);
+        var normalizedType = type.Trim().ToLowerInvariant();
+        if (!RDanceDownloadTypes.All.Contains(normalizedType, StringComparer.Ordinal))
+        {
+            throw new InvalidOperationException("DANCE_SELL_DOWNLOAD_TYPE_INVALID");
+        }
+
+        if (normalizedType == RDanceDownloadTypes.Result)
+        {
+            if (!string.Equals(job.Status, DanceSellJobStatuses.Completed, StringComparison.OrdinalIgnoreCase)
+                || string.IsNullOrWhiteSpace(job.ResultVideoUrl))
+            {
+                throw new InvalidOperationException("DANCE_SELL_RESULT_NOT_READY");
+            }
+        }
+        else if (!string.Equals(job.PreparedReferenceStatus, DanceSellReferenceStatuses.Approved, StringComparison.OrdinalIgnoreCase)
+                 || string.IsNullOrWhiteSpace(job.PreparedReferenceUrl))
+        {
+            throw new InvalidOperationException("DANCE_SELL_REFERENCE_NOT_READY");
+        }
+
+        return _downloadTickets.CreateTicket(job.Id, job.CustomerId, user.UserId, normalizedType, TimeSpan.FromMinutes(3));
+    }
 
     public async Task<IReadOnlyList<DanceSellJobDto>> ListAsync(CurrentUserSession user, int limit = 20, int offset = 0, CancellationToken ct = default)
     {

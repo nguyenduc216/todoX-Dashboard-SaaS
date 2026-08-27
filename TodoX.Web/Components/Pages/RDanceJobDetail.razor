@@ -1281,7 +1281,8 @@
                 throw new InvalidOperationException("DANCE_SELL_RESULT_NOT_READY");
             }
 
-            await JS.InvokeVoidAsync("todoxDownload.downloadRemoteFile", job.ResultVideoUrl, $"todox-rdance-{job.Id:N}.mp4");
+            var ticket = await DanceSell.GetDownloadTicketAsync(job.Id, RDanceDownloadTypes.Result, AuthState.CurrentUser);
+            await JS.InvokeVoidAsync("todoxDownload.startBrowserDownload", $"/api/dance-sell/jobs/{job.Id}/download?t={Uri.EscapeDataString(ticket)}");
         }
         catch (Exception ex)
         {
@@ -1313,7 +1314,8 @@
                 throw new InvalidOperationException("DANCE_SELL_REFERENCE_NOT_READY");
             }
 
-            await JS.InvokeVoidAsync("todoxDownload.downloadRemoteFile", job.PreparedReferenceUrl, $"todox-rdance-reference-{job.Id:N}.jpg");
+            var ticket = await DanceSell.GetDownloadTicketAsync(job.Id, RDanceDownloadTypes.Reference, AuthState.CurrentUser);
+            await JS.InvokeVoidAsync("todoxDownload.startBrowserDownload", $"/api/dance-sell/jobs/{job.Id}/reference/download?t={Uri.EscapeDataString(ticket)}");
         }
         catch (Exception ex)
         {
