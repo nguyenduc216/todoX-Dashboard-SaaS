@@ -14,13 +14,16 @@ The broken flow discarded scene voice metadata, passed null voice fields into sc
 - `NATIVE` composes the scene visual prompt with native speech, delivery, and lip-sync instructions. The scene voice text and instruction are also carried in the child work item.
 - `NATIVE` does not enqueue Vbee audio or FFmpeg mux work.
 - `LIBRARY` resolves dialogue from the scene's own voice metadata and creates one logical audio request per scene.
+- AUTO lifecycle now hydrates legacy scene voice metadata before voice gating, audio chaining, and merge readiness checks.
+- Hydration persists `voice_enabled`, `speaker_key`, `voice_text`, and `voice_instruction` only when recoverable data is missing, and it keeps user-edited values intact.
 - Audio completion persists the local media first. Audio completion no longer marks the raw selected video as muxed.
-- Mux completion is the only path that writes `voice_audio_version_id` onto the selected scene video.
+- Scene mux completion now registers the muxed media separately and writes its media id onto the completed scene-video version.
 - Mux input ownership is checked against the target scene and project.
 - Existing voice text/instructions are preserved during draft saves when the incoming prompt does not contain replacements.
 - Scene create, load, add, save, update, and replace SQL surfaces include the voice metadata columns.
 - AUTO lifecycle evaluates selected scene versions using voice-aware final-ready rules and enqueues one merge job with `rvideo-auto-merge:{projectId}`.
 - Existing completed scene video versions remain eligible for continuation; the lifecycle does not regenerate them.
+- Final merge now retries with a normalized transcode path when fast concat copy fails.
 
 ## N8N Behaviors Adopted
 
@@ -32,34 +35,33 @@ For a legacy `LIBRARY` project whose successful scene videos are already selecte
 
 ## Changed Files
 
-- `TodoX.Web/Models/RVideoModels.cs`
-- `TodoX.Web/Models/VideoRenderModels.cs`
-- `TodoX.Web/Services/VideoRender/VideoRenderRepository.cs`
-- `TodoX.Web/Services/VideoRender/SceneVideoRenderHandler.cs`
-- `TodoX.Web/Services/VideoRender/RVideoSceneAudioAutoChainService.cs`
-- `TodoX.Web/Services/VideoRender/RVideoSceneMediaFinalizerService.cs`
-- `TodoX.Web/Services/VideoRender/SceneAudioMuxHandler.cs`
-- `TodoX.Web/Services/VideoRender/SceneMediaVersioningService.cs`
+- `TodoX.Web/Components/Pages/RenderVideoJobs.razor`
 - `TodoX.Web/Services/VideoRender/RVideoLifecycleWorker.cs`
-- `TodoX.Web.Tests/VbeeSceneRuntimeTests.cs`
+- `TodoX.Web/Services/VideoRender/SceneAudioMuxHandler.cs`
+- `TodoX.Web/Services/VideoRender/VideoRenderMergeHandler.cs`
+- `TodoX.Web/Services/VideoRender/VideoRenderRepository.cs`
 - `TodoX.Web.Tests/RVideoVoiceRuntimeTests.cs`
+- `TodoX.Web.Tests/RenderVideoJobsLayoutTests.cs`
+- `TodoX.Web.Tests/VbeeSceneRuntimeTests.cs`
+- `TodoX.Web/Tests/RVideoRuntimeSqlTests.cs`
 
 No database migration was created or executed.
 
 ## Validation
 
 - `dotnet restore TodoX.Dashboard.sln`: passed.
-- `dotnet build TodoX.Dashboard.sln -c Release --no-restore --disable-build-servers`: passed, 0 errors. Existing generated Razor nullable warnings were reported in the initial build.
+- `dotnet build TodoX.Dashboard.sln -c Release --no-restore --disable-build-servers`: passed after shutting down the build server, 0 errors.
 - Focused tests:
-  `dotnet test TodoX.Web.Tests\TodoX.Web.Tests.csproj -c Release --no-restore --disable-build-servers --filter "FullyQualifiedName~RVideoVoiceRuntimeTests|FullyQualifiedName~VbeeSceneRuntimeTests|FullyQualifiedName~TodoXVideoPromptParserTests|FullyQualifiedName~RVideoRuntimeSqlTests"`: 16 passed.
-- Full `TodoX.Web.Tests`: 777 passed, 7 unrelated pre-existing failures.
-- Full `TodoX.Web.Phase1B.Tests`: 231 passed, 8 unrelated pre-existing failures.
+  `dotnet test TodoX.Web.Tests\TodoX.Web.Tests.csproj -c Release --no-restore --disable-build-servers --filter "FullyQualifiedName~RVideoVoiceRuntimeTests|FullyQualifiedName~VbeeSceneRuntimeTests|FullyQualifiedName~RenderVideoJobsLayoutTests"`: 28 passed.
+  `dotnet test TodoX.Web\Tests\TodoX.Web.Phase1B.Tests.csproj -c Release --no-restore --disable-build-servers --filter "FullyQualifiedName~RVideoRuntimeSqlTests|FullyQualifiedName~RVideoProviderPollingRegressionTests"`: 100 passed, 1 unrelated pre-existing failure.
+- Full `TodoX.Web.Tests`: 784 passed, 7 unrelated pre-existing failures.
+- Full `TodoX.Web.Phase1B.Tests`: 233 passed, 8 unrelated pre-existing failures.
 - `git diff --check`: passed.
-- `dotnet format TodoX.Dashboard.sln --verify-no-changes --no-restore --verbosity minimal`: not clean because the repository already contains many unrelated whitespace diagnostics across existing files; no bulk formatting was applied.
+- `dotnet format TodoX.Dashboard.sln --verify-no-changes --no-restore --verbosity minimal --include ...`: passed for the touched files.
 - Publish:
   `dotnet publish TodoX.Web\TodoX.Web.csproj -c Release --no-restore --disable-build-servers -o artifacts\publish\todox-dashboard`: passed.
 
 ## Git
 
-Commit SHA: `e922ac6f1b5fc5d361b93b515e087bb2fe950243`
+Implementation commit SHA: `4108e8aefc54df53412d9379445dd3d88fd640d1`
 Pushed branch: `integration/rdance-on-construction-video-core`
