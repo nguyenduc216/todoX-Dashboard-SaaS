@@ -17,14 +17,16 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
     private readonly VideoRenderRepository _repo;
     private readonly IWebHostEnvironment _env;
     private readonly ISceneMediaVersioningService _versions;
+    private readonly IRVideoJobService _rvideoJobs;
 
-    public VideoRenderMergeHandler(ILogger<VideoRenderMergeHandler> logger, IOptionsMonitor<VideoRenderOptions> options, VideoRenderRepository repo, IWebHostEnvironment env, ISceneMediaVersioningService versions)
+    public VideoRenderMergeHandler(ILogger<VideoRenderMergeHandler> logger, IOptionsMonitor<VideoRenderOptions> options, VideoRenderRepository repo, IWebHostEnvironment env, ISceneMediaVersioningService versions, IRVideoJobService rvideoJobs)
     {
         _logger = logger;
         _options = options;
         _repo = repo;
         _env = env;
         _versions = versions;
+        _rvideoJobs = rvideoJobs;
     }
 
     public async Task HandleAsync(RenderJobDto job, CancellationToken ct)
@@ -133,6 +135,7 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
             }
 
             await _repo.UpdateProjectAsync(project.Id, VideoProjectStatuses.Completed, url, finalPath, null, ct);
+            await _rvideoJobs.SyncLifecycleAsync(project.Id, RVideoStages.Result, VideoProjectStatuses.Completed, ct);
             var finalDurationSeconds = RVideoRules.CalculateMergedDuration(mergeableScenes);
             await _repo.AddProjectEventAsync(project.Id, "PROJECT_MERGED", "info", "Final video merged.", new
             {
@@ -152,6 +155,7 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
             }
 
             await _repo.UpdateProjectAsync(project.Id, VideoProjectStatuses.Failed, errorMessage: ex.Message, ct: ct);
+            await _rvideoJobs.SyncLifecycleAsync(project.Id, RVideoStages.Result, VideoProjectStatuses.Failed, ct);
             await _repo.AddProjectEventAsync(project.Id, "PROJECT_MERGE_FAILED", "error", "Final video merge failed.", new { versionId = version?.Id, error = ex.Message }, ct);
             throw;
         }

@@ -326,6 +326,150 @@ public sealed class RVideoRuntimeSqlTests
     }
 
     [Fact]
+    public void ManualNativeReadyProjectEnqueuesSingleFfmpegCopyConcatFinalMerge()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "RVideoProjectFinalizationService.cs");
+        var method = ExtractMethodBlock(source, "public async Task<RVideoProjectFinalizationResult> TryEnqueueFinalMergeAsync");
+
+        Assert.Contains("BuildMergeLogicalRequestKey(projectId)", method);
+        Assert.Contains("=> $\"rvideo-final-merge:{projectId}\"", source);
+        Assert.Contains("foreach (var scene in project.Scenes)", method);
+        Assert.Contains("GetSelectedVideoVersionAsync(scene.Id, ct)", method);
+        Assert.Contains("GetSelectedAudioVersionAsync(scene.Id, ct)", method);
+        Assert.Contains("!RVideoRules.IsSceneFinalReady(scene, settings, selectedVideo, selectedAudio)", method);
+        Assert.Contains("return NotEnqueued(\"not_ready\", logicalRequestId)", method);
+        Assert.Contains("EnqueueForLogCodeIfNoneActiveAsync", method);
+        Assert.Contains("JobType = RenderJobTypes.MergeProjectVideo", method);
+        Assert.Contains("LogCode = logicalRequestId", method);
+        Assert.Contains("ProviderCode = \"ffmpeg\"", method);
+        Assert.Contains("ModelCode = \"copy_concat\"", method);
+        Assert.DoesNotContain("RenderJobTypes.RenderSceneVideo", method);
+        Assert.DoesNotContain("RenderJobTypes.RenderSceneAudio", method);
+        Assert.DoesNotContain("CreateQueuedSceneAudioVersionAsync", method);
+    }
+
+    [Fact]
+    public void FinalMergeEnqueueIsIdempotentByLogicalRequestId()
+    {
+        var finalization = ReadRepoFile("Services", "VideoRender", "RVideoProjectFinalizationService.cs");
+        var renderJobs = ReadRepoFile("Services", "Render", "RenderJobService.cs");
+        var method = ExtractMethodBlock(finalization, "public async Task<RVideoProjectFinalizationResult> TryEnqueueFinalMergeAsync");
+        var enqueue = ExtractMethodBlock(renderJobs, "public async Task<(RenderJobDto Job, bool AlreadyActive)> EnqueueForLogCodeIfNoneActiveAsync");
+
+        Assert.Contains("var logicalRequestId = BuildMergeLogicalRequestKey(projectId)", method);
+        Assert.Contains("EnqueueForLogCodeIfNoneActiveAsync", method);
+        Assert.Contains("BuildLogCodeJobLockName(jobType, uniqueLogCode)", enqueue);
+        Assert.Contains("log_code = @logCode", enqueue);
+        Assert.Contains("status IN ('queued', 'preparing', 'rendering', 'post_processing', 'pending_reconciliation')", enqueue);
+        Assert.Contains("return (active, true)", enqueue);
+        Assert.Contains("already_active", method);
+    }
+
+    [Fact]
+    public void IncompleteProjectDoesNotEnqueueFinalMerge()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "RVideoProjectFinalizationService.cs");
+        var method = ExtractMethodBlock(source, "public async Task<RVideoProjectFinalizationResult> TryEnqueueFinalMergeAsync");
+
+        Assert.Contains("foreach (var scene in project.Scenes)", method);
+        Assert.Contains("GetSelectedVideoVersionAsync(scene.Id, ct)", method);
+        Assert.Contains("!RVideoRules.IsSceneFinalReady(scene, settings, selectedVideo, selectedAudio)", method);
+        Assert.True(
+            method.IndexOf("return NotEnqueued(\"not_ready\", logicalRequestId)", StringComparison.Ordinal)
+            < method.IndexOf("EnqueueForLogCodeIfNoneActiveAsync", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void LibraryVoiceProjectRequiresSelectedCompletedAudioMuxBeforeFinalMerge()
+    {
+        var settings = new TodoX.Web.Models.RVideoJobSettingsDto
+        {
+            VoiceMode = TodoX.Web.Models.RVideoVoiceModes.Library
+        };
+        var audioId = Guid.NewGuid();
+        var scene = new TodoX.Web.Models.VideoProjectSceneDto
+        {
+            Id = 55,
+            VoiceText = "Xin chao",
+            SelectedAudioVersionId = audioId
+        };
+        var completedVideoWithoutMuxAudio = new TodoX.Web.Services.VideoRender.SceneVideoVersionDto
+        {
+            Status = "completed",
+            VoiceAudioVersionId = null
+        };
+        var completedAudio = new TodoX.Web.Services.VideoRender.SceneAudioVersionDto
+        {
+            Id = audioId,
+            Status = "completed"
+        };
+
+        Assert.False(TodoX.Web.Models.RVideoRules.IsSceneFinalReady(scene, settings, completedVideoWithoutMuxAudio, completedAudio));
+        var completedVideoWithMuxAudio = new TodoX.Web.Services.VideoRender.SceneVideoVersionDto
+        {
+            Status = "completed",
+            VoiceAudioVersionId = audioId
+        };
+        Assert.True(TodoX.Web.Models.RVideoRules.IsSceneFinalReady(
+            scene,
+            settings,
+            completedVideoWithMuxAudio,
+            completedAudio));
+    }
+
+    [Fact]
+    public void FinalMergeSuccessSynchronizesCoreRVideoJobAfterProjectCompletion()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "VideoRenderMergeHandler.cs");
+
+        var projectCompletedIndex = source.IndexOf("UpdateProjectAsync(project.Id, VideoProjectStatuses.Completed", StringComparison.Ordinal);
+        var syncCompletedIndex = source.IndexOf("_rvideoJobs.SyncLifecycleAsync(project.Id, RVideoStages.Result, VideoProjectStatuses.Completed", StringComparison.Ordinal);
+        var mergedEventIndex = source.IndexOf("PROJECT_MERGED", StringComparison.Ordinal);
+        var state = TodoX.Web.Services.VideoRender.RVideoJobService.ResolveCoreLifecycleState(
+            TodoX.Web.Models.RVideoStages.Result,
+            TodoX.Web.Models.VideoProjectStatuses.Completed);
+
+        Assert.True(projectCompletedIndex >= 0);
+        Assert.True(syncCompletedIndex > projectCompletedIndex);
+        Assert.True(mergedEventIndex > syncCompletedIndex);
+        Assert.Equal(TodoX.Web.Services.Render.RenderJobStatuses.Completed, state.Status);
+        Assert.Equal(100, state.ProgressPercent);
+    }
+
+    [Fact]
+    public void FinalMergeFailureSynchronizesCoreRVideoJobAndRethrows()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "VideoRenderMergeHandler.cs");
+        var catchBlock = source[source.IndexOf("catch (Exception ex) when", StringComparison.Ordinal)..];
+
+        var projectFailedIndex = catchBlock.IndexOf("UpdateProjectAsync(project.Id, VideoProjectStatuses.Failed", StringComparison.Ordinal);
+        var syncFailedIndex = catchBlock.IndexOf("_rvideoJobs.SyncLifecycleAsync(project.Id, RVideoStages.Result, VideoProjectStatuses.Failed", StringComparison.Ordinal);
+        var failedEventIndex = catchBlock.IndexOf("PROJECT_MERGE_FAILED", StringComparison.Ordinal);
+        var rethrowIndex = catchBlock.IndexOf("throw;", StringComparison.Ordinal);
+        var state = TodoX.Web.Services.VideoRender.RVideoJobService.ResolveCoreLifecycleState(
+            TodoX.Web.Models.RVideoStages.Result,
+            TodoX.Web.Models.VideoProjectStatuses.Failed);
+
+        Assert.True(projectFailedIndex >= 0);
+        Assert.True(syncFailedIndex > projectFailedIndex);
+        Assert.True(failedEventIndex > syncFailedIndex);
+        Assert.True(rethrowIndex > failedEventIndex);
+        Assert.Equal(TodoX.Web.Services.Render.RenderJobStatuses.Failed, state.Status);
+        Assert.Equal(100, state.ProgressPercent);
+    }
+
+    [Fact]
+    public void LifecycleSyncIsSafeForProjectsWithoutCoreJob()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "RVideoJobService.cs");
+        var method = ExtractMethodBlock(source, "public async Task SyncLifecycleAsync");
+
+        Assert.Contains("SELECT core_job_id FROM video_render.video_projects", method);
+        Assert.Contains("if (jobId is null) return;", method);
+        Assert.Contains("status NOT IN ('completed','failed','cancelled')", method);
+    }
+
+    [Fact]
     public void SharedFinalizationServiceUsesStableLogicalMergeKeyAndSingleEnqueuePath()
     {
         var source = ReadRepoFile("Services", "VideoRender", "RVideoProjectFinalizationService.cs");
@@ -473,9 +617,27 @@ public sealed class RVideoRuntimeSqlTests
     {
         var start = source.IndexOf(signature, StringComparison.Ordinal);
         Assert.True(start >= 0, $"Could not find {signature}.");
-        var nextMethod = source.IndexOf("\n    public async Task", start + signature.Length, StringComparison.Ordinal);
-        Assert.True(nextMethod > start, $"Could not find end of {signature}.");
-        return source[start..nextMethod];
+        var openBrace = source.IndexOf('{', start);
+        Assert.True(openBrace > start, $"Could not find opening brace for {signature}.");
+
+        var depth = 0;
+        for (var i = openBrace; i < source.Length; i++)
+        {
+            if (source[i] == '{')
+            {
+                depth++;
+            }
+            else if (source[i] == '}')
+            {
+                depth--;
+                if (depth == 0)
+                {
+                    return source[start..(i + 1)];
+                }
+            }
+        }
+
+        throw new Xunit.Sdk.XunitException($"Could not find end of {signature}.");
     }
 
     private static string ExtractSceneVideoCompletionUpdateParameterObject(string method)

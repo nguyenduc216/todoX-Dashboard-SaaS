@@ -238,12 +238,7 @@ public sealed class RVideoJobService : IRVideoJobService
             "SELECT core_job_id FROM video_render.video_projects WHERE id=@projectId AND tenant_id=@tenant;",
             new { projectId, tenant = _tenant.TenantId });
         if (jobId is null) return;
-        var (status, progress) = projectStatus switch
-        {
-            VideoProjectStatuses.Completed => (RenderJobStatuses.Completed, 100),
-            VideoProjectStatuses.Failed => (RenderJobStatuses.Failed, 100),
-            _ => (RenderJobStatuses.Rendering, stage == RVideoStages.Result ? 90 : stage == RVideoStages.Video ? 60 : stage == RVideoStages.Image ? 25 : 5)
-        };
+        var (status, progress) = ResolveCoreLifecycleState(stage, projectStatus);
         await conn.ExecuteAsync("""
             UPDATE render.render_jobs
                SET status=@status,current_step=@stage,progress_percent=GREATEST(progress_percent,@progress),updated_at=now()
@@ -251,6 +246,14 @@ public sealed class RVideoJobService : IRVideoJobService
                AND status NOT IN ('completed','failed','cancelled');
             """, new { jobId, tenant = _tenant.TenantId, jobType = RenderJobTypes.CoreService, status, stage, progress });
     }
+
+    internal static (string Status, int ProgressPercent) ResolveCoreLifecycleState(string stage, string projectStatus)
+        => projectStatus switch
+        {
+            VideoProjectStatuses.Completed => (RenderJobStatuses.Completed, 100),
+            VideoProjectStatuses.Failed => (RenderJobStatuses.Failed, 100),
+            _ => (RenderJobStatuses.Rendering, stage == RVideoStages.Result ? 90 : stage == RVideoStages.Video ? 60 : stage == RVideoStages.Image ? 25 : 5)
+        };
 
     private static void EnsureCustomer(CurrentUserSession user)
     { if (user is not { IsAuthenticated: true, IsCustomer: true } || user.CustomerId is null) throw new UnauthorizedAccessException("Customer authentication is required."); }
