@@ -1054,7 +1054,9 @@ public sealed class VideoRenderRepository
                     """
                     INSERT INTO video_render.video_project_scenes
                         (project_id, tenant_id, scene_index, title, duration_seconds, scene_prompt, image_prompt, video_prompt,
-                         static_image_path, static_image_url, scene_video_path, scene_video_url, status, error_message, created_at, updated_at)
+                         static_image_path, static_image_url, scene_video_path, scene_video_url,
+                         voice_enabled, speaker_key, voice_text, voice_instruction,
+                         status, error_message, created_at, updated_at)
                     VALUES
                         (@projectId, @tenant, @sceneIndex, @title, @duration, @scenePrompt, @imagePrompt, @videoPrompt,
                      @staticImagePath, @staticImageUrl, @sceneVideoPath, @sceneVideoUrl,

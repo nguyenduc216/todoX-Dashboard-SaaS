@@ -65,3 +65,20 @@ No database migration was created or executed.
 
 Implementation commit SHA: `4108e8aefc54df53412d9379445dd3d88fd640d1`
 Pushed branch: `integration/rdance-on-construction-video-core`
+
+## ReplaceScenes SQL contract fix
+
+`VideoRenderRepository.ReplaceScenesAsync()` was still inserting `voice_enabled`, `speaker_key`, `voice_text`, and `voice_instruction` values without listing those columns in the target column list, which would fail on PostgreSQL with `INSERT has more expressions than target columns`.
+
+The earlier tests only checked for voice-related substrings and did not verify the target-column contract against the VALUES expression list, so the mismatch survived review.
+
+The INSERT column list now includes the four voice columns in order, aligned with the existing parameter derivation. The regression test now extracts the full INSERT block, counts target columns against VALUES expressions, and asserts the exact column-to-parameter mapping.
+
+Muxed scene-video storage was left with the current repository contract: `storage_key` remains provider-provenance data from version creation, while mux completion continues to update the canonical selected output fields (`result_media_id`, `public_url`, and `source_file_path`). I verified the current completion contract and did not widen it to mutate `storage_key` without a schema-backed invariant change.
+
+Changed files and methods:
+
+- `TodoX.Web/Services/VideoRender/VideoRenderRepository.cs`
+- `TodoX.Web.Tests/RVideoRuntimeSqlTests.cs`
+
+Focused validation, full validation, build, publish, and git results will be filled in after the final command run.

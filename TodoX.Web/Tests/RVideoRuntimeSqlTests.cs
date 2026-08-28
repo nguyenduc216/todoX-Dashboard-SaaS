@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.RegularExpressions;
 using Xunit;
 
 namespace TodoX.Web.Tests;
@@ -210,6 +211,87 @@ public sealed class RVideoRuntimeSqlTests
     }
 
     [Fact]
+    public void ReplaceScenesInsertKeepsVoiceAndStatusColumnContractAligned()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "VideoRenderRepository.cs");
+        var method = ExtractMethodBlock(source, "public async Task<List<VideoProjectSceneDto>> ReplaceScenesAsync");
+        var insertSql = ExtractInsertSql(method);
+        var columns = ExtractInsertTargetColumns(insertSql);
+        var values = ExtractValuesExpressions(insertSql);
+
+        Assert.Equal(columns.Count, values.Count);
+        Assert.Equal(new[]
+        {
+            "project_id",
+            "tenant_id",
+            "scene_index",
+            "title",
+            "duration_seconds",
+            "scene_prompt",
+            "image_prompt",
+            "video_prompt",
+            "static_image_path",
+            "static_image_url",
+            "scene_video_path",
+            "scene_video_url",
+            "voice_enabled",
+            "speaker_key",
+            "voice_text",
+            "voice_instruction",
+            "status",
+            "error_message",
+            "created_at",
+            "updated_at"
+        }, columns);
+        Assert.Equal(new[]
+        {
+            "@projectId",
+            "@tenant",
+            "@sceneIndex",
+            "@title",
+            "@duration",
+            "@scenePrompt",
+            "@imagePrompt",
+            "@videoPrompt",
+            "@staticImagePath",
+            "@staticImageUrl",
+            "@sceneVideoPath",
+            "@sceneVideoUrl",
+            "@voiceEnabled",
+            "@speakerKey",
+            "@voiceText",
+            "@voiceInstruction",
+            "@status",
+            "@errorMessage",
+            "now()",
+            "now()"
+        }, values);
+
+        Assert.Contains("voice_enabled", columns);
+        Assert.Contains("speaker_key", columns);
+        Assert.Contains("voice_text", columns);
+        Assert.Contains("voice_instruction", columns);
+        Assert.Contains("voice_enabled, speaker_key, voice_text, voice_instruction", NormalizeSql(insertSql));
+        Assert.Contains("voice_enabled => @voiceEnabled", NormalizeMappings(columns, values));
+        Assert.Contains("speaker_key => @speakerKey", NormalizeMappings(columns, values));
+        Assert.Contains("voice_text => @voiceText", NormalizeMappings(columns, values));
+        Assert.Contains("voice_instruction => @voiceInstruction", NormalizeMappings(columns, values));
+        Assert.Contains("status => @status", NormalizeMappings(columns, values));
+        Assert.Contains("error_message => @errorMessage", NormalizeMappings(columns, values));
+    }
+
+    [Fact]
+    public void SceneVideoMuxCompletionKeepsStorageKeyAsRawProvenanceContract()
+    {
+        var versioning = ReadRepoFile("Services", "VideoRender", "SceneMediaVersioningService.cs");
+        var method = ExtractMethodBlock(versioning, "public async Task CompleteSceneVideoVersionAsync");
+
+        Assert.DoesNotContain("storage_key=COALESCE(@storageKey, storage_key)", method);
+        Assert.DoesNotContain("@storageKey", method);
+        Assert.DoesNotContain("StorageKey", method);
+    }
+
+    [Fact]
     public void LegacyVoiceHydrationIsIdempotentAndPreservesExistingValues()
     {
         var source = ReadRepoFile("Services", "VideoRender", "VideoRenderRepository.cs");
@@ -369,5 +451,52 @@ public sealed class RVideoRuntimeSqlTests
         Assert.True(objectStart > sqlStart, "Could not find scene-video completion Dapper parameter object.");
         return method[sqlStart..objectStart];
     }
+
+    private static string ExtractInsertSql(string method)
+    {
+        var match = Regex.Match(
+            method,
+            @"INSERT INTO video_render\.video_project_scenes\s*\((?<columns>.*?)\)\s*VALUES\s*\((?<values>.*?)\)\s*;",
+            RegexOptions.Singleline);
+
+        Assert.True(match.Success, "Could not find scene replacement INSERT SQL.");
+        return match.Value;
+    }
+
+    private static IReadOnlyList<string> ExtractInsertTargetColumns(string insertSql)
+    {
+        var match = Regex.Match(
+            insertSql,
+            @"INSERT INTO video_render\.video_project_scenes\s*\((?<columns>.*?)\)\s*VALUES",
+            RegexOptions.Singleline);
+
+        Assert.True(match.Success, "Could not isolate INSERT target columns.");
+        return SplitSqlItems(match.Groups["columns"].Value);
+    }
+
+    private static IReadOnlyList<string> ExtractValuesExpressions(string insertSql)
+    {
+        var match = Regex.Match(
+            insertSql,
+            @"VALUES\s*\((?<values>.*?)\)\s*;",
+            RegexOptions.Singleline);
+
+        Assert.True(match.Success, "Could not isolate INSERT VALUES expressions.");
+        return SplitSqlItems(match.Groups["values"].Value);
+    }
+
+    private static IReadOnlyList<string> SplitSqlItems(string block)
+        => block
+            .Replace("\r", string.Empty, StringComparison.Ordinal)
+            .Replace("\n", string.Empty, StringComparison.Ordinal)
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+    private static string NormalizeSql(string sql)
+        => sql.Replace("\r", string.Empty, StringComparison.Ordinal)
+            .Replace("\n", " ", StringComparison.Ordinal)
+            .Replace("  ", " ", StringComparison.Ordinal);
+
+    private static string NormalizeMappings(IReadOnlyList<string> columns, IReadOnlyList<string> values)
+        => string.Join(", ", columns.Zip(values, (column, value) => $"{column} => {value}"));
 
 }
