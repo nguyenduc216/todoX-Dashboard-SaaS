@@ -61,12 +61,12 @@ public sealed record TimelapseServiceDefinition(
 
 public static class TimelapseServiceCatalog
 {
-    public const string ConstructionCategory = "construction";
-    public const string LivingRoomCategory = "living_room";
-    public const string BedroomCategory = "bedroom";
-    public const string KitchenCategory = "kitchen";
-    public const string PoolCategory = "pool";
-    public const string InfrastructureCategory = "infrastructure";
+    public const string ConstructionCategory = "construction_exterior";
+    public const string LivingRoomCategory = "interior_livingroom";
+    public const string BedroomCategory = "interior_bedroom";
+    public const string KitchenCategory = "interior_kitchen";
+    public const string PoolCategory = "pool_construction";
+    public const string InfrastructureCategory = "road_bridge_construction";
     public const string LandscapeCategory = "landscape";
 
     public static IReadOnlyList<TimelapseServiceDefinition> Services { get; } =

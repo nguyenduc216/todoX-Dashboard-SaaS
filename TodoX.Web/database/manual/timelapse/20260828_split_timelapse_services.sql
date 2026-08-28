@@ -52,33 +52,40 @@ WITH service_ids AS (
         'TIMELAPSE_INFRASTRUCTURE',
         'TIMELAPSE_LANDSCAPE')
 ),
-price_seed AS (
-    SELECT *
-      FROM (VALUES
-        ('video_scene', 'standard', 6::numeric, 10::numeric, '10 điểm / scene 6 giây', 40),
-        ('video_scene', 'premium', 6::numeric, 15::numeric, '15 điểm / scene 6 giây', 70)
-      ) AS p(asset_type, quality_tier, duration_seconds, sell_points, display_label, sort_order)
+legacy_prices AS (
+    SELECT p.asset_type,
+           p.quality_tier,
+           p.duration_seconds,
+           p.sell_points,
+           p.display_label,
+           p.sort_order
+      FROM catalog.service_sell_prices p
+      JOIN catalog.services legacy
+        ON legacy.id = p.service_id
+     WHERE lower(legacy.service_code) = 'construction_video'
+       AND p.is_active = true
 )
 INSERT INTO catalog.service_sell_prices (
     service_id, asset_type, quality_tier, duration_seconds, sell_points, display_label,
     is_active, sort_order, created_at, updated_at)
 SELECT
     service_ids.id,
-    price_seed.asset_type,
-    price_seed.quality_tier,
-    price_seed.duration_seconds,
-    price_seed.sell_points,
-    price_seed.display_label,
+    legacy_prices.asset_type,
+    legacy_prices.quality_tier,
+    legacy_prices.duration_seconds,
+    legacy_prices.sell_points,
+    legacy_prices.display_label,
     true,
-    price_seed.sort_order,
+    legacy_prices.sort_order,
     now(),
     now()
 FROM service_ids
-CROSS JOIN price_seed
+CROSS JOIN legacy_prices
 ON CONFLICT (service_id, asset_type, quality_tier, (COALESCE(duration_seconds, 0)))
 DO UPDATE SET
+    sell_points = EXCLUDED.sell_points,
     display_label = EXCLUDED.display_label,
-    is_active = true,
+    is_active = EXCLUDED.is_active,
     sort_order = EXCLUDED.sort_order,
     updated_at = now();
 
