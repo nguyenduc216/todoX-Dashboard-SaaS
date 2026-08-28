@@ -191,6 +191,7 @@ builder.Services.AddScoped<TodoX.Web.Services.VideoRender.VideoRenderRepository>
 builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IRVideoTrustedPayerContextService, TodoX.Web.Services.VideoRender.RVideoTrustedPayerContextService>();
 builder.Services.AddScoped<TodoX.Web.Services.VideoRender.RVideoJobSettingsRepository>();
 builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IRVideoJobService, TodoX.Web.Services.VideoRender.RVideoJobService>();
+builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IRVideoProjectFinalizationService, TodoX.Web.Services.VideoRender.RVideoProjectFinalizationService>();
 builder.Services.AddSingleton<TodoX.Web.Services.VideoRender.RVideoSceneJsonService>();
 builder.Services.AddScoped<TodoX.Web.Services.VideoRender.ISceneMediaVersioningService, TodoX.Web.Services.VideoRender.SceneMediaVersioningService>();
 builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IRVideo79AiVideoService, TodoX.Web.Services.VideoRender.RVideo79AiVideoService>();

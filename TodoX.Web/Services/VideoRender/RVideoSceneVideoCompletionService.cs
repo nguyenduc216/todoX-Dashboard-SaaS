@@ -41,6 +41,7 @@ public sealed class RVideoSceneVideoCompletionService : IRVideoSceneVideoComplet
     private readonly ISceneMediaVersioningService _versions;
     private readonly IRVideoSceneMediaFinalizerService _finalizer;
     private readonly IRVideoJobService _rvideoJobs;
+    private readonly IRVideoProjectFinalizationService _finalization;
     private readonly IAiImageBillingService _billing;
     private readonly IRenderJobService _jobs;
     private readonly VideoRenderRepository _projects;
@@ -53,6 +54,7 @@ public sealed class RVideoSceneVideoCompletionService : IRVideoSceneVideoComplet
         ISceneMediaVersioningService versions,
         IRVideoSceneMediaFinalizerService finalizer,
         IRVideoJobService rvideoJobs,
+        IRVideoProjectFinalizationService finalization,
         IAiImageBillingService billing,
         IRenderJobService jobs,
         VideoRenderRepository projects,
@@ -64,6 +66,7 @@ public sealed class RVideoSceneVideoCompletionService : IRVideoSceneVideoComplet
         _versions = versions;
         _finalizer = finalizer;
         _rvideoJobs = rvideoJobs;
+        _finalization = finalization;
         _billing = billing;
         _jobs = jobs;
         _projects = projects;
@@ -206,6 +209,27 @@ public sealed class RVideoSceneVideoCompletionService : IRVideoSceneVideoComplet
                 request,
                 "RVIDEO_VIDEO_LIFECYCLE_SYNC_FAILED",
                 "RVIDEO lifecycle synchronization failed after billing completion.",
+                ex,
+                ct);
+        }
+
+        try
+        {
+            await _finalization.TryEnqueueFinalMergeAsync(
+                request.ProjectId,
+                request.IsRecovery ? RVideoProjectFinalizationContracts.TriggerVideoRecovered : RVideoProjectFinalizationContracts.TriggerSceneVideoReady,
+                ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            await RecordPostCompletionFailureAsync(
+                request,
+                "RVIDEO_VIDEO_FINAL_MERGE_TRIGGER_FAILED",
+                "RVIDEO final merge trigger failed after scene-video completion.",
                 ex,
                 ct);
         }

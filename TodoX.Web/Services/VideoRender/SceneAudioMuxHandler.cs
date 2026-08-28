@@ -20,6 +20,7 @@ public sealed class SceneAudioMuxHandler : IRenderJobHandler
     private readonly IMediaFileService _media;
     private readonly TenantContext _tenant;
     private readonly IConfiguration _configuration;
+    private readonly IRVideoProjectFinalizationService _finalization;
 
     public SceneAudioMuxHandler(
         ILogger<SceneAudioMuxHandler> logger,
@@ -29,7 +30,8 @@ public sealed class SceneAudioMuxHandler : IRenderJobHandler
         ISceneMediaVersioningService versions,
         IMediaFileService media,
         TenantContext tenant,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        IRVideoProjectFinalizationService finalization)
     {
         _logger = logger;
         _options = options;
@@ -39,6 +41,7 @@ public sealed class SceneAudioMuxHandler : IRenderJobHandler
         _media = media;
         _tenant = tenant;
         _configuration = configuration;
+        _finalization = finalization;
     }
 
     public async Task HandleAsync(RenderJobDto job, CancellationToken ct)
@@ -194,6 +197,8 @@ public sealed class SceneAudioMuxHandler : IRenderJobHandler
                 finalPath = muxedPath,
                 url = muxedUrl
             }, ct);
+
+        await _finalization.TryEnqueueFinalMergeAsync(project.Id, RVideoProjectFinalizationContracts.TriggerSceneAudioReady, ct);
     }
 
     private string ResolveLocalPath(string? objectKey)

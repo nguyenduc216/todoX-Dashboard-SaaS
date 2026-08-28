@@ -326,6 +326,62 @@ public sealed class RVideoRuntimeSqlTests
     }
 
     [Fact]
+    public void SharedFinalizationServiceUsesStableLogicalMergeKeyAndSingleEnqueuePath()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "RVideoProjectFinalizationService.cs");
+        var worker = ReadRepoFile("Services", "VideoRender", "RVideoLifecycleWorker.cs");
+        var completion = ReadRepoFile("Services", "VideoRender", "RVideoSceneVideoCompletionService.cs");
+        var mux = ReadRepoFile("Services", "VideoRender", "SceneAudioMuxHandler.cs");
+        var page = ReadRepoFile("Components", "Pages", "RenderVideoJobs.razor");
+
+        Assert.Contains("IRVideoProjectFinalizationService", source);
+        Assert.Contains("rvideo-final-merge:", source);
+        Assert.Contains("TryEnqueueFinalMergeAsync", source);
+        Assert.Contains("RVideoProjectFinalizationContracts.TriggerAuto", worker);
+        Assert.DoesNotContain("TryEnqueueProjectMergeAsync", worker);
+        Assert.Contains("_finalization.TryEnqueueFinalMergeAsync", completion);
+        Assert.Contains("_finalization.TryEnqueueFinalMergeAsync", mux);
+        Assert.Contains("RVideoFinalization.TryEnqueueFinalMergeAsync", page);
+        Assert.DoesNotContain("ProviderCode = \"internal_merge\"", page);
+        Assert.DoesNotContain("ModelCode = \"ffmpeg_concat\"", page);
+    }
+
+    [Fact]
+    public void SceneVideoCompletionTriggersSharedFinalMergeAfterLifecycleSync()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "RVideoSceneVideoCompletionService.cs");
+
+        var syncIndex = source.IndexOf("_rvideoJobs.SyncLifecycleAsync", StringComparison.Ordinal);
+        var finalMergeIndex = source.IndexOf("_finalization.TryEnqueueFinalMergeAsync", StringComparison.Ordinal);
+
+        Assert.True(syncIndex >= 0);
+        Assert.True(finalMergeIndex > syncIndex);
+        Assert.Contains("RVIDEO_VIDEO_FINAL_MERGE_TRIGGER_FAILED", source);
+        Assert.Contains("RVideoProjectFinalizationContracts.TriggerSceneVideoReady", source);
+    }
+
+    [Fact]
+    public void SceneAudioMuxCompletionAlsoTriggersSharedFinalMerge()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "SceneAudioMuxHandler.cs");
+
+        Assert.Contains("_finalization.TryEnqueueFinalMergeAsync", source);
+        Assert.Contains("RVideoProjectFinalizationContracts.TriggerSceneAudioReady", source);
+    }
+
+    [Fact]
+    public void ReplaceScenesSynchronizesSceneCountAndTotalSecondsInSameTransaction()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "VideoRenderRepository.cs");
+        var method = ExtractMethodBlock(source, "public async Task<List<VideoProjectSceneDto>> ReplaceScenesAsync");
+
+        Assert.Contains("DELETE FROM video_render.video_project_scenes", method);
+        Assert.Contains("UPDATE video_render.video_projects", method);
+        Assert.Contains("scene_count=(SELECT count(*)::int FROM video_render.video_project_scenes", method);
+        Assert.Contains("total_seconds=(SELECT COALESCE(sum(duration_seconds), 0)::int FROM video_render.video_project_scenes", method);
+    }
+
+    [Fact]
     public void SceneVideoCompletionBillsBeforeNonCriticalPostPersistenceEffects()
     {
         var source = ReadRepoFile("Services", "VideoRender", "RVideoSceneVideoCompletionService.cs");

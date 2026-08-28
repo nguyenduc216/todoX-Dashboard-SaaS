@@ -1086,6 +1086,16 @@ public sealed class VideoRenderRepository
                     }, tx);
             }
 
+            await conn.ExecuteAsync(
+                """
+                UPDATE video_render.video_projects
+                   SET scene_count=(SELECT count(*)::int FROM video_render.video_project_scenes WHERE project_id=@projectId AND tenant_id=@tenant),
+                       total_seconds=(SELECT COALESCE(sum(duration_seconds), 0)::int FROM video_render.video_project_scenes WHERE project_id=@projectId AND tenant_id=@tenant),
+                       updated_at=now()
+                 WHERE id=@projectId AND tenant_id=@tenant;
+                """,
+                new { projectId, tenant = _tenant.TenantId }, tx);
+
             tx.Commit();
             return list;
         }

@@ -20,6 +20,7 @@
 @inject TodoX.Web.Services.VideoRender.ISceneMediaVersioningService SceneVersions
 @inject TodoX.Web.Services.VideoRender.RVideoJobSettingsRepository RVideoSettings
 @inject TodoX.Web.Services.VideoRender.IRVideoJobService RVideoJobs
+@inject TodoX.Web.Services.VideoRender.IRVideoProjectFinalizationService RVideoFinalization
 @inject TodoX.Web.Services.VideoRender.IRVideoTrustedPayerContextService RVideoPayerContexts
 @inject TodoX.Web.Services.Platform.ICoreServiceCatalogService CoreCatalog
 @inject IOptionsMonitor<TodoX.Web.Services.VideoRender.VideoRenderOptions> VideoOptions
@@ -3567,28 +3568,19 @@ else
             return;
         }
 
-        var (job, alreadyActive) = await RenderJobs.EnqueueForProjectIfNoneActiveAsync(new RenderJobCreateModel
-        {
-            JobType = TodoX.Web.Services.VideoRender.VideoRenderMergeHandler.JobTypeName,
-            UserId = AuthState.CurrentUser.UserId,
-            CustomerId = AuthState.CurrentUser.CustomerId,
-            Input = new { projectId = _project.Id },
-            Prompt = new { projectId = _project.Id },
-            LogCode = BuildLogCode(),
-            ProviderCode = "internal_merge",
-            ModelCode = "ffmpeg_concat",
-            MaxAttempts = 1,
-            PointCostEstimate = 0,
-            PointStatus = RenderPointStatuses.NotRequired
-        }, _project.Id);
+        var result = await RVideoFinalization.TryEnqueueFinalMergeAsync(_project.Id, TodoX.Web.Services.VideoRender.RVideoProjectFinalizationContracts.TriggerManual);
 
-        if (alreadyActive)
+        if (result.AlreadyActive)
         {
             Snackbar.Add("Project này đang có job ghép video.", Severity.Info);
         }
+        else if (!result.Enqueued)
+        {
+            Snackbar.Add("Chưa đủ điều kiện ghép final video.", Severity.Warning);
+        }
         else
         {
-            await LogProjectEvent("FINAL_VIDEO_MERGE_ENQUEUED", "info", "Đã enqueue ghép final video.", new { job.Id, projectId = _project.Id });
+            await LogProjectEvent("FINAL_VIDEO_MERGE_ENQUEUED", "info", "Đã enqueue ghép final video.", new { id = result.RenderJobId, projectId = _project.Id, result.LogicalRequestId });
             Snackbar.Add("Đã enqueue ghép final video.", Severity.Success);
         }
 
