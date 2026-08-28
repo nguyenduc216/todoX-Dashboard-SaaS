@@ -239,6 +239,92 @@ public sealed class VideoRenderRepository
         return null;
     }
 
+    public async Task<bool> HydrateSceneVoiceMetadataAsync(
+        VideoProjectDto project,
+        RVideoJobSettingsDto settings,
+        CancellationToken ct = default)
+    {
+        var voiceMode = RVideoRules.ResolveVoiceMode(settings);
+        if (voiceMode == RVideoVoiceModes.None)
+        {
+            return false;
+        }
+
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        using var tx = conn.BeginTransaction();
+        var changed = false;
+        foreach (var scene in project.Scenes)
+        {
+            var metadata = ScenePromptMetadata.FromScene(scene);
+            var derivedText = metadata.Voice?.Trim();
+            var derivedInstruction = metadata.VoiceInstruction?.Trim();
+            var speakerKey = voiceMode == RVideoVoiceModes.Library ? settings.VoiceCatalogCode?.Trim() : null;
+            var voiceEnabled = scene.VoiceEnabled || !string.IsNullOrWhiteSpace(scene.VoiceText) || !string.IsNullOrWhiteSpace(derivedText);
+            var rows = await conn.ExecuteAsync(
+                """
+                UPDATE video_render.video_project_scenes
+                   SET voice_enabled=@voiceEnabled,
+                       speaker_key=COALESCE(NULLIF(speaker_key, ''), NULLIF(@speakerKey, '')),
+                       voice_text=COALESCE(NULLIF(voice_text, ''), NULLIF(@voiceText, '')),
+                       voice_instruction=COALESCE(NULLIF(voice_instruction, ''), NULLIF(@voiceInstruction, '')),
+                       updated_at=CASE WHEN voice_enabled IS DISTINCT FROM @voiceEnabled
+                                            OR (NULLIF(speaker_key, '') IS NULL AND NULLIF(@speakerKey, '') IS NOT NULL)
+                                            OR (NULLIF(voice_text, '') IS NULL AND NULLIF(@voiceText, '') IS NOT NULL)
+                                            OR (NULLIF(voice_instruction, '') IS NULL AND NULLIF(@voiceInstruction, '') IS NOT NULL)
+                                       THEN now() ELSE updated_at END
+                 WHERE id=@sceneId AND project_id=@projectId AND tenant_id=@tenant
+                   AND (voice_enabled IS DISTINCT FROM @voiceEnabled
+                        OR (NULLIF(speaker_key, '') IS NULL AND NULLIF(@speakerKey, '') IS NOT NULL)
+                        OR (NULLIF(voice_text, '') IS NULL AND NULLIF(@voiceText, '') IS NOT NULL)
+                        OR (NULLIF(voice_instruction, '') IS NULL AND NULLIF(@voiceInstruction, '') IS NOT NULL));
+                """,
+                new
+                {
+                    sceneId = scene.Id,
+                    projectId = project.Id,
+                    tenant = _tenant.TenantId,
+                    voiceEnabled,
+                    speakerKey,
+                    voiceText = derivedText,
+                    voiceInstruction = derivedInstruction
+                }, tx);
+
+            var existingText = !string.IsNullOrWhiteSpace(scene.VoiceText);
+            var hasDerived = !string.IsNullOrWhiteSpace(derivedText) || !string.IsNullOrWhiteSpace(derivedInstruction);
+            if (rows > 0 && (hasDerived || !string.IsNullOrWhiteSpace(speakerKey) || (scene.VoiceEnabled != voiceEnabled)))
+            {
+                changed = true;
+                await conn.ExecuteAsync(
+                    """
+                    INSERT INTO video_render.video_project_events
+                        (project_id, tenant_id, event_type, level, message, data_json, created_at)
+                    VALUES
+                        (@projectId, @tenant, 'RVIDEO_VOICE_METADATA_READY', 'info', 'Legacy scene voice metadata hydrated.', CAST(@data AS jsonb), now());
+                    """,
+                    new
+                    {
+                        projectId = project.Id,
+                        tenant = _tenant.TenantId,
+                        data = JsonSerializer.Serialize(new
+                        {
+                            projectId = project.Id,
+                            sceneId = scene.Id,
+                            sceneIndex = scene.SceneIndex,
+                            voiceMode,
+                            voiceEnabled,
+                            hadExistingVoiceText = existingText,
+                            derivedVoiceText = !string.IsNullOrWhiteSpace(derivedText),
+                            derivedVoiceInstruction = !string.IsNullOrWhiteSpace(derivedInstruction)
+                        }, JsonOptions)
+                    }, tx);
+            }
+        }
+
+        tx.Commit();
+        return changed;
+    }
+
     public async Task<IReadOnlyList<VideoProjectListItemDto>> ListProjectsAsync(CurrentUserSession user, int skip = 0, int take = 30, CancellationToken ct = default)
     {
         try

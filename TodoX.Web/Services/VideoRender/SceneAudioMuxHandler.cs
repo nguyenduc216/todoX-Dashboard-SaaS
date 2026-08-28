@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
+using TodoX.Web.Services.Media;
 using TodoX.Web.Services.Render;
 
 namespace TodoX.Web.Services.VideoRender;
@@ -16,19 +17,28 @@ public sealed class SceneAudioMuxHandler : IRenderJobHandler
     private readonly VideoRenderRepository _repo;
     private readonly IWebHostEnvironment _env;
     private readonly ISceneMediaVersioningService _versions;
+    private readonly IMediaFileService _media;
+    private readonly TenantContext _tenant;
+    private readonly IConfiguration _configuration;
 
     public SceneAudioMuxHandler(
         ILogger<SceneAudioMuxHandler> logger,
         IOptionsMonitor<VideoRenderOptions> options,
         VideoRenderRepository repo,
         IWebHostEnvironment env,
-        ISceneMediaVersioningService versions)
+        ISceneMediaVersioningService versions,
+        IMediaFileService media,
+        TenantContext tenant,
+        IConfiguration configuration)
     {
         _logger = logger;
         _options = options;
         _repo = repo;
         _env = env;
         _versions = versions;
+        _media = media;
+        _tenant = tenant;
+        _configuration = configuration;
     }
 
     public async Task HandleAsync(RenderJobDto job, CancellationToken ct)
@@ -135,7 +145,21 @@ public sealed class SceneAudioMuxHandler : IRenderJobHandler
 
         var relative = Path.GetRelativePath(root, finalPath).Replace(Path.DirectorySeparatorChar, '/');
         var url = $"{_options.CurrentValue.PublicBase.TrimEnd('/')}/{relative}";
-        var completion = BuildCompletionRequest(sceneVideo, input.AudioVersionId, url, finalPath, scene.DurationSeconds);
+        await _tenant.EnsureLoadedAsync(ct);
+        var mediaObjectKey = BuildMuxMediaObjectKey(relative);
+        var muxedMedia = await _media.SaveBinaryAtObjectKeyAsync(
+            await File.ReadAllBytesAsync(finalPath, ct),
+            mediaObjectKey,
+            Path.GetFileName(finalPath),
+            "video/mp4",
+            "video_scene_mux",
+            project.UserId,
+            project.CustomerId,
+            _tenant.TenantId,
+            ct);
+        var muxedUrl = muxedMedia.PublicUrl ?? muxedMedia.FileUrl ?? url;
+        var muxedPath = ResolveMediaPhysicalPath(muxedMedia.ObjectKey) ?? finalPath;
+        var completion = BuildCompletionRequest(sceneVideo, input.AudioVersionId, muxedUrl, muxedPath, scene.DurationSeconds, muxedMedia.Id);
         await _versions.CompleteSceneVideoVersionAsync(sceneVideo.Id, completion, ct);
 
         await _repo.AddProjectEventAsync(project.Id, "SCENE_AUDIO_MUX_COMPLETED", "info",
@@ -145,12 +169,15 @@ public sealed class SceneAudioMuxHandler : IRenderJobHandler
                 projectId = project.Id,
                 sceneId = scene.Id,
                 scene.SceneIndex,
-                input.SceneVideoVersionId,
-                input.AudioVersionId,
+                rawSceneVideoVersionId = input.SceneVideoVersionId,
+                muxedSceneVideoVersionId = sceneVideo.Id,
+                rawMediaId = sceneVideo.ResultMediaId,
+                muxedMediaId = muxedMedia.Id,
+                audioVersionId = input.AudioVersionId,
                 input.LogicalRequestId,
                 sourceVideoPath,
-                finalPath,
-                url
+                finalPath = muxedPath,
+                finalUrl = muxedUrl
             }, ct);
 
         await _repo.AddProjectEventAsync(project.Id, "SCENE_VIDEO_READY", "info",
@@ -164,8 +191,8 @@ public sealed class SceneAudioMuxHandler : IRenderJobHandler
                 input.AudioVersionId,
                 input.LogicalRequestId,
                 sourceVideoPath,
-                finalPath,
-                url
+                finalPath = muxedPath,
+                url = muxedUrl
             }, ct);
     }
 
@@ -188,6 +215,20 @@ public sealed class SceneAudioMuxHandler : IRenderJobHandler
     private string ResolveRoot(string? path)
         => Path.IsPathRooted(path) ? path! : Path.Combine(_env.ContentRootPath, path ?? string.Empty);
 
+    private static string BuildMuxMediaObjectKey(string videoRenderRelativePath)
+        => $"video-render/registered/{videoRenderRelativePath.TrimStart('/')}";
+
+    private string? ResolveMediaPhysicalPath(string? objectKey)
+    {
+        if (string.IsNullOrWhiteSpace(objectKey))
+        {
+            return null;
+        }
+
+        var uploadRoot = _configuration["Storage:LocalUploadRoot"] ?? "wwwroot/uploads";
+        return Path.Combine(_env.ContentRootPath, uploadRoot, objectKey.Replace('/', Path.DirectorySeparatorChar));
+    }
+
     internal static void ValidateSceneOwnership(long sceneId, SceneVideoVersionDto sceneVideo, SceneAudioVersionDto sceneAudio)
     {
         if (sceneVideo.SceneId != sceneId || sceneAudio.SceneId != sceneId || sceneVideo.ProjectId != sceneAudio.ProjectId)
@@ -201,7 +242,8 @@ public sealed class SceneAudioMuxHandler : IRenderJobHandler
         Guid voiceAudioVersionId,
         string finalUrl,
         string finalPath,
-        int sceneDurationSeconds)
+        int sceneDurationSeconds,
+        Guid? resultMediaId = null)
         => new(
             finalUrl,
             finalPath,
@@ -220,5 +262,5 @@ public sealed class SceneAudioMuxHandler : IRenderJobHandler
             RefundedPoints: sceneVideo.RefundedPoints,
             CostSource: sceneVideo.CostSource,
             AspectRatio: sceneVideo.AspectRatio,
-            ResultMediaId: sceneVideo.ResultMediaId);
+            ResultMediaId: resultMediaId);
 }

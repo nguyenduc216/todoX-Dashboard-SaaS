@@ -55,6 +55,25 @@ public sealed class VbeeSceneRuntimeTests
     }
 
     [Fact]
+    public void MuxCompletion_UsesMuxedMediaIdInsteadOfRawMediaId()
+    {
+        var rawMediaId = Guid.NewGuid();
+        var muxedMediaId = Guid.NewGuid();
+        var sceneVideo = new SceneVideoVersionDto { ResultMediaId = rawMediaId };
+
+        var request = SceneAudioMuxHandler.BuildCompletionRequest(
+            sceneVideo,
+            Guid.NewGuid(),
+            "/uploads/video-render/final.mp4",
+            @"D:\uploads\final.mp4",
+            8,
+            muxedMediaId);
+
+        Assert.Equal(muxedMediaId, request.ResultMediaId);
+        Assert.NotEqual(rawMediaId, request.ResultMediaId);
+    }
+
+    [Fact]
     public void Finalizer_SkipsWhenFinalMuxAlreadyExists()
     {
         var tempRoot = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));

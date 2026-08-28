@@ -78,4 +78,36 @@ public sealed class RVideoVoiceRuntimeTests
             video,
             audio));
     }
+
+    [Fact]
+    public void HydrationRulesDeriveOnlyCanonicalSceneVoiceAndPreserveUserText()
+    {
+        var scene = new VideoProjectSceneDto
+        {
+            VoiceText = "User-edited dialogue",
+            ScenePrompt = new ScenePromptMetadata
+            {
+                Voice = "Canonical dialogue",
+                VoiceInstruction = "Warm delivery"
+            }.Serialize()
+        };
+
+        Assert.Equal("User-edited dialogue", RVideoRules.ResolveSceneVoiceText(scene));
+        Assert.Equal("Warm delivery", RVideoRules.ResolveSceneVoiceInstruction(scene));
+    }
+
+    [Fact]
+    public void NoCanonicalSceneVoiceDoesNotBecomeExternalAudioWork()
+    {
+        var scene = new VideoProjectSceneDto
+        {
+            Title = "Scene title",
+            ScenePrompt = new ScenePromptMetadata { ScenePurpose = "Visual only" }.Serialize()
+        };
+
+        Assert.False(RVideoRules.HasSceneVoice(scene));
+        Assert.False(RVideoRules.RequiresExternalVoice(
+            scene,
+            new RVideoJobSettingsDto { VoiceMode = RVideoVoiceModes.Library }));
+    }
 }

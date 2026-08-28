@@ -210,6 +210,40 @@ public sealed class RVideoRuntimeSqlTests
     }
 
     [Fact]
+    public void LegacyVoiceHydrationIsIdempotentAndPreservesExistingValues()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "VideoRenderRepository.cs");
+        var method = ExtractMethodBlock(source, "public async Task<bool> HydrateSceneVoiceMetadataAsync");
+
+        Assert.Contains("RVIDEO_VOICE_METADATA_READY", method);
+        Assert.Contains("ScenePromptMetadata.FromScene(scene)", method);
+        Assert.Contains("voice_text=COALESCE(NULLIF(voice_text, ''), NULLIF(@voiceText, ''))", method);
+        Assert.Contains("voice_instruction=COALESCE(NULLIF(voice_instruction, ''), NULLIF(@voiceInstruction, ''))", method);
+        Assert.Contains("speaker_key=COALESCE(NULLIF(speaker_key, ''), NULLIF(@speakerKey, ''))", method);
+        Assert.Contains("voiceMode == RVideoVoiceModes.None", method);
+        Assert.Contains("AND (voice_enabled IS DISTINCT FROM @voiceEnabled", method);
+    }
+
+    [Fact]
+    public void FinalMergeHasFastCopyAndNormalizedTranscodeFallbackCommands()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "VideoRenderMergeHandler.cs");
+
+        Assert.Contains("PROJECT_MERGE_COPY_FAILED", source);
+        Assert.Contains("PROJECT_MERGE_TRANSCODE_FALLBACK_STARTED", source);
+        Assert.Contains("PROJECT_MERGE_TRANSCODE_FALLBACK_COMPLETED", source);
+        Assert.Contains("ffmpeg-copy.log", source);
+        Assert.Contains("ffmpeg-fallback.log", source);
+        Assert.Contains("\"-c\", \"copy\"", source);
+        Assert.Contains("\"-c:v\", \"libx264\"", source);
+        Assert.Contains("\"-pix_fmt\", \"yuv420p\"", source);
+        Assert.Contains("\"-c:a\", \"aac\"", source);
+        Assert.Contains("\"-ar\", \"48000\"", source);
+        Assert.Contains("\"-ac\", \"2\"", source);
+        Assert.Contains("\"-movflags\", \"+faststart\"", source);
+    }
+
+    [Fact]
     public void SceneVideoCompletionBillsBeforeNonCriticalPostPersistenceEffects()
     {
         var source = ReadRepoFile("Services", "VideoRender", "RVideoSceneVideoCompletionService.cs");

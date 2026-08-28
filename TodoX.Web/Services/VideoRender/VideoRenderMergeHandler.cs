@@ -89,37 +89,35 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
             await WriteCompositionManifestAsync(finalDir, version, mergeItems, ct);
 
             var ffmpegPath = _options.CurrentValue.FfmpegPath;
-            var psi = new ProcessStartInfo
+            var timeout = TimeSpan.FromMinutes(Math.Max(1, _options.CurrentValue.MergeTimeoutMinutes));
+            var copyResult = await RunFfmpegAsync(ffmpegPath, finalDir, BuildCopyConcatArguments(concat, finalPath), timeout, ct);
+            await File.WriteAllTextAsync(Path.Combine(finalDir, "ffmpeg-copy.log"), copyResult.ToLogText(), ct);
+            if (copyResult.ExitCode != 0)
             {
-                FileName = ffmpegPath,
-                WorkingDirectory = finalDir,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            };
-            psi.ArgumentList.Add("-y");
-            psi.ArgumentList.Add("-f");
-            psi.ArgumentList.Add("concat");
-            psi.ArgumentList.Add("-safe");
-            psi.ArgumentList.Add("0");
-            psi.ArgumentList.Add("-i");
-            psi.ArgumentList.Add(concat);
-            psi.ArgumentList.Add("-c");
-            psi.ArgumentList.Add("copy");
-            psi.ArgumentList.Add(finalPath);
+                await _repo.AddProjectEventAsync(project.Id, "PROJECT_MERGE_COPY_FAILED", "warning",
+                    "Fast copy concat failed; attempting normalized transcode fallback.",
+                    new
+                    {
+                        projectId = project.Id,
+                        finalVideoVersionId = version?.Id,
+                        exitCode = copyResult.ExitCode,
+                        stderrTail = SafeTail(copyResult.Stderr),
+                        inputs = mergeItems.Select(x => new { x.SceneId, x.SceneVideoVersionId }).ToArray()
+                    }, ct);
 
-            using var process = Process.Start(psi) ?? throw new InvalidOperationException("Khong khoi dong duoc FFmpeg.");
-            var stdout = await process.StandardOutput.ReadToEndAsync(ct);
-            var stderr = await process.StandardError.ReadToEndAsync(ct);
-            using var mergeTimeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            mergeTimeout.CancelAfter(TimeSpan.FromMinutes(Math.Max(1, _options.CurrentValue.MergeTimeoutMinutes)));
-            await process.WaitForExitAsync(mergeTimeout.Token);
-            await File.WriteAllTextAsync(Path.Combine(finalDir, "ffmpeg.log"), stdout + Environment.NewLine + stderr, ct);
+                await _repo.AddProjectEventAsync(project.Id, "PROJECT_MERGE_TRANSCODE_FALLBACK_STARTED", "info",
+                    "Normalized final merge transcode fallback started.",
+                    new { projectId = project.Id, finalVideoVersionId = version?.Id, inputCount = mergeItems.Count }, ct);
+                var fallbackResult = await RunFfmpegAsync(ffmpegPath, finalDir, BuildTranscodeConcatArguments(concat, finalPath), timeout, ct);
+                await File.WriteAllTextAsync(Path.Combine(finalDir, "ffmpeg-fallback.log"), fallbackResult.ToLogText(), ct);
+                if (fallbackResult.ExitCode != 0)
+                {
+                    throw new InvalidOperationException($"FFmpeg merge fallback failed. ExitCode={fallbackResult.ExitCode}. {SafeTail(fallbackResult.Stderr)}");
+                }
 
-            if (process.ExitCode != 0)
-            {
-                throw new InvalidOperationException($"FFmpeg merge failed. ExitCode={process.ExitCode}");
+                await _repo.AddProjectEventAsync(project.Id, "PROJECT_MERGE_TRANSCODE_FALLBACK_COMPLETED", "info",
+                    "Normalized final merge transcode fallback completed.",
+                    new { projectId = project.Id, finalVideoVersionId = version?.Id, inputCount = mergeItems.Count }, ct);
             }
 
             var relative = Path.GetRelativePath(root, finalPath).Replace(Path.DirectorySeparatorChar, '/');
@@ -188,7 +186,81 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
         return File.WriteAllTextAsync(manifestPath, json, ct);
     }
 
+    internal static string[] BuildCopyConcatArguments(string concatPath, string outputPath)
+        =>
+        [
+            "-y",
+            "-f", "concat",
+            "-safe", "0",
+            "-i", concatPath,
+            "-c", "copy",
+            outputPath
+        ];
+
+    internal static string[] BuildTranscodeConcatArguments(string concatPath, string outputPath)
+        =>
+        [
+            "-y",
+            "-f", "concat",
+            "-safe", "0",
+            "-i", concatPath,
+            "-c:v", "libx264",
+            "-pix_fmt", "yuv420p",
+            "-c:a", "aac",
+            "-ar", "48000",
+            "-ac", "2",
+            "-movflags", "+faststart",
+            outputPath
+        ];
+
+    private static async Task<FfmpegResult> RunFfmpegAsync(
+        string ffmpegPath,
+        string workingDirectory,
+        IReadOnlyList<string> arguments,
+        TimeSpan timeout,
+        CancellationToken ct)
+    {
+        var psi = new ProcessStartInfo
+        {
+            FileName = ffmpegPath,
+            WorkingDirectory = workingDirectory,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+        foreach (var argument in arguments)
+        {
+            psi.ArgumentList.Add(argument);
+        }
+
+        using var process = Process.Start(psi) ?? throw new InvalidOperationException("Khong khoi dong duoc FFmpeg.");
+        var stdoutTask = process.StandardOutput.ReadToEndAsync(ct);
+        var stderrTask = process.StandardError.ReadToEndAsync(ct);
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeoutCts.CancelAfter(timeout);
+        await process.WaitForExitAsync(timeoutCts.Token);
+        return new FfmpegResult(process.ExitCode, await stdoutTask, await stderrTask);
+    }
+
+    internal static string SafeTail(string? value, int maxChars = 2000)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var normalized = value.ReplaceLineEndings(" ").Trim();
+        return normalized.Length <= maxChars ? normalized : normalized[^maxChars..];
+    }
+
     private sealed record MergeInput(long SceneId, int ItemOrder, Guid? SceneVideoVersionId, string? VideoPath);
+
+    private sealed record FfmpegResult(int ExitCode, string Stdout, string Stderr)
+    {
+        public string ToLogText()
+            => Stdout + Environment.NewLine + Stderr;
+    }
 
     private string ResolveRoot(string? path)
         => Path.IsPathRooted(path) ? path! : Path.Combine(_env.ContentRootPath, path ?? string.Empty);

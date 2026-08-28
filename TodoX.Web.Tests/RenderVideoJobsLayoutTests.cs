@@ -105,6 +105,18 @@ public class RenderVideoJobsLayoutTests
     }
 
     [Fact]
+    public void VoiceModeSelector_IsModeAwareAndUsesPersistedSceneVoiceFallback()
+    {
+        var razor = File.ReadAllText(RazorPath);
+
+        Assert.Contains("if (_voiceMode == RVideoVoiceModes.Library)", razor);
+        Assert.Contains("if (_voiceMode == RVideoVoiceModes.Native)", razor);
+        Assert.Contains("VoiceCatalogCode = _voiceMode == RVideoVoiceModes.Library ? _voiceCatalogCode : null", razor);
+        Assert.Contains("VoiceSnapshot = _voiceMode == RVideoVoiceModes.Library", razor);
+        Assert.Contains("RVideoRules.ResolveSceneVoiceText(scene)", razor);
+    }
+
+    [Fact]
     public void VideoCards_ShowOmniFlashPromptCounterAndBlockInvalidPrompt()
     {
         var razor = File.ReadAllText(RazorPath);

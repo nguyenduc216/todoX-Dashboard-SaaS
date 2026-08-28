@@ -85,6 +85,10 @@ public sealed class RVideoLifecycleWorker : BackgroundService
             return;
         }
 
+        await repo.HydrateSceneVoiceMetadataAsync(project, setting, ct);
+        project = await repo.GetProjectAsync(setting.ProjectId, ct);
+        if (project is null || project.Scenes.Count == 0) return;
+
         var renderSettings = RVideoRules.ResolveRenderSettings(project.OriginalPrompt);
         var activeSceneIds = await LoadActiveSceneIdsAsync(factory, tenant, project.Id, ct);
         var sceneStates = project.Scenes

@@ -193,6 +193,10 @@ else
                                             <MudRadio T="string" Value="@RVideoVoiceModes.Native">AI Native Voice + Lip-sync</MudRadio>
                                             <MudRadio T="string" Value="@RVideoVoiceModes.Library">Giọng đọc từ Voice Library</MudRadio>
                                         </MudRadioGroup>
+                                        @if (_voiceMode == RVideoVoiceModes.Native)
+                                        {
+                                            <MudText Typo="Typo.caption">Veo sẽ tạo giọng nói trực tiếp trong video và đồng bộ khẩu hình.</MudText>
+                                        }
                                         @if (_voiceMode == RVideoVoiceModes.Library)
                                         {
                                             <MudSelect T="string" Label="Voice" @bind-Value="_voiceCatalogCode" Dense="true" Variant="Variant.Outlined">
@@ -2875,7 +2879,7 @@ else
 
     private bool RequiresExternalVoice(VideoProjectSceneDto scene)
         => string.Equals(_voiceMode, RVideoVoiceModes.Library, StringComparison.OrdinalIgnoreCase)
-           && !string.IsNullOrWhiteSpace(TodoX.Web.Services.VideoRender.ScenePromptMetadata.FromScene(scene).Voice);
+           && !string.IsNullOrWhiteSpace(RVideoRules.ResolveSceneVoiceText(scene));
 
     private async Task SelectImageVersionAsync(VideoProjectSceneDto scene, TodoX.Web.Services.VideoRender.SceneImageVersionDto version)
     {
