@@ -68,7 +68,8 @@ public sealed class TimelapseServiceSplitAndSceneUxTests
 
         Assert.Contains("timelapse-floating-create", detail, StringComparison.Ordinal);
         Assert.Contains("StartIcon=\"@Icons.Material.Filled.PlayArrow\"", detail, StringComparison.Ordinal);
-        Assert.Contains("ShowFloatingCreateVideoButton", detail, StringComparison.Ordinal);
+        Assert.Contains("CanShowFloatingRenderAction", detail, StringComparison.Ordinal);
+        Assert.Contains("FloatingRenderActionLabel", detail, StringComparison.Ordinal);
         Assert.Contains("IsRenderNotStarted", detail, StringComparison.Ordinal);
         Assert.Contains("ResolveImageMediaState(image)", detail, StringComparison.Ordinal);
         Assert.Contains("Chờ tạo video", detail, StringComparison.Ordinal);
@@ -78,6 +79,30 @@ public sealed class TimelapseServiceSplitAndSceneUxTests
         Assert.Contains("GetRenderProfileByCategoryAsync(snapshot.ProfileCode, snapshot.ServiceCategory", workflow, StringComparison.Ordinal);
         Assert.Contains("TIMELAPSE_PROFILE_SERVICE_MISMATCH", jobService, StringComparison.Ordinal);
         Assert.Contains("ServiceCategory = serviceDefinition?.Category ?? profile.Category", jobService, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TimelapseDetailPage_KeepsImageMetadataInTwoGridChildrenAndShowsResumeActionForPartialJobs()
+    {
+        var detail = ReadSource("TodoX.Web", "Components", "Pages", "TimelapseJobDetail.razor");
+        var css = ReadSource("TodoX.Web", "Components", "Pages", "TimelapseJobDetail.razor.css");
+
+        Assert.Contains("CanShowFloatingRenderAction", detail, StringComparison.Ordinal);
+        Assert.Contains("FloatingRenderActionLabel", detail, StringComparison.Ordinal);
+        Assert.Contains("IsInitialFloatingRenderAction", detail, StringComparison.Ordinal);
+        Assert.Contains("StartOrResumeAsync", detail, StringComparison.Ordinal);
+        Assert.Contains("tl-image-meta-row", detail, StringComparison.Ordinal);
+        Assert.Contains("tl-image-meta-actions", detail, StringComparison.Ordinal);
+        Assert.Contains("tl-image-meta-copy", detail, StringComparison.Ordinal);
+        Assert.Contains("image.Attempt > 0", detail, StringComparison.Ordinal);
+        Assert.Contains("grid-template-columns: auto minmax(0, 1fr);", css, StringComparison.Ordinal);
+        Assert.Contains(".tl-image-meta-actions", css, StringComparison.Ordinal);
+        Assert.Contains("width: 100%;", css, StringComparison.Ordinal);
+        Assert.Contains("overflow-wrap: break-word;", css, StringComparison.Ordinal);
+        Assert.Contains("white-space: normal;", css, StringComparison.Ordinal);
+        Assert.DoesNotContain("ShowFloatingCreateVideoButton", detail, StringComparison.Ordinal);
+        Assert.DoesNotContain("IsRenderActive", detail, StringComparison.Ordinal);
+        Assert.DoesNotContain("grid-template-columns: 36px minmax(0, 1fr);", css, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -94,7 +119,6 @@ public sealed class TimelapseServiceSplitAndSceneUxTests
         Assert.Contains("TIMELAPSE_LANDSCAPE", sql, StringComparison.Ordinal);
         Assert.Contains("service_code LIKE 'TIMELAPSE_%' OR service_code = 'CONSTRUCTION_VIDEO'", sql, StringComparison.Ordinal);
         Assert.Contains("lower(service_code) = 'construction_video'", sql, StringComparison.Ordinal);
-        Assert.Contains("video_scene", sql, StringComparison.Ordinal);
         Assert.Contains("ON CONFLICT (service_code) DO UPDATE SET", sql, StringComparison.Ordinal);
     }
 

@@ -257,15 +257,26 @@
 
 .tl-image-meta-row {
     display: grid;
-    grid-template-columns: 36px minmax(0, 1fr);
+    grid-template-columns: auto minmax(0, 1fr);
     align-items: start;
     gap: 8px;
+    width: 100%;
+    min-width: 0;
     padding-top: 8px;
+}
+
+.tl-image-meta-actions {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    flex-wrap: nowrap;
+    min-width: 0;
 }
 
 .tl-image-meta-copy {
     display: grid;
     min-width: 0;
+    width: 100%;
     gap: 1px;
 }
 

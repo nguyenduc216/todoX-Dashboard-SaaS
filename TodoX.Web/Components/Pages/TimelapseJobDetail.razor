@@ -292,14 +292,14 @@
 
             <MudTabPanel Text="SCENE">
                 <MudStack Spacing="3" Class="mt-3">
-                    @if (ShowFloatingCreateVideoButton)
+                    @if (CanShowFloatingRenderAction)
                     {
                         <MudButton Class="timelapse-floating-create todox-primary-btn"
                                    Variant="Variant.Filled"
                                    StartIcon="@Icons.Material.Filled.PlayArrow"
                                    Disabled="@_busy"
                                    OnClick="StartOrResumeAsync">
-                            TẠO VIDEO
+                            @FloatingRenderActionLabel
                         </MudButton>
                     }
                     <MudPaper Class="todox-card pa-4" rounded="true">
@@ -346,29 +346,33 @@
                                             <div class="tl-image-meta-row">
                                                 @if (!image.IsOriginal)
                                                 {
-                                                    <MudTooltip Text="Xem / chỉnh sửa prompt">
-                                                        <MudIconButton Icon="@Icons.Material.Filled.EditNote"
-                                                                       Size="Size.Small"
-                                                                       Color="Color.Warning"
-                                                                       Disabled="@(!CanOpenPrompt(image) || _busy)"
-                                                                       OnClick="@(() => OpenImagePromptAsync(image))"
-                                                                       aria-label="@($"Xem hoặc chỉnh sửa prompt ảnh {image.ProgressPercent}%")" />
-                                                    </MudTooltip>
-                                                    @if (image.Attempt > 0)
-                                                    {
-                                                        <MudTooltip Text="Xem các lần render ảnh trước">
-                                                            <MudIconButton Icon="@Icons.Material.Filled.History"
+                                                    <div class="tl-image-meta-actions">
+                                                        <MudTooltip Text="Xem / chỉnh sửa prompt">
+                                                            <MudIconButton Icon="@Icons.Material.Filled.EditNote"
                                                                            Size="Size.Small"
                                                                            Color="Color.Warning"
-                                                                           Disabled="@_busy"
-                                                                           OnClick="@(() => OpenSceneImageHistoryAsync(image))"
-                                                                           aria-label="@($"Xem lịch sử ảnh {image.ProgressPercent}%")" />
+                                                                           Disabled="@(!CanOpenPrompt(image) || _busy)"
+                                                                           OnClick="@(() => OpenImagePromptAsync(image))"
+                                                                           aria-label="@($"Xem hoặc chỉnh sửa prompt ảnh {image.ProgressPercent}%")" />
                                                         </MudTooltip>
-                                                    }
+                                                        @if (image.Attempt > 0)
+                                                        {
+                                                            <MudTooltip Text="Xem các lần render ảnh trước">
+                                                                <MudIconButton Icon="@Icons.Material.Filled.History"
+                                                                               Size="Size.Small"
+                                                                               Color="Color.Warning"
+                                                                               Disabled="@_busy"
+                                                                               OnClick="@(() => OpenSceneImageHistoryAsync(image))"
+                                                                               aria-label="@($"Xem lịch sử ảnh {image.ProgressPercent}%")" />
+                                                            </MudTooltip>
+                                                        }
+                                                    </div>
                                                 }
                                                 else
                                                 {
-                                                    <MudIcon Icon="@Icons.Material.Filled.Image" Size="Size.Small" Color="Color.Warning" />
+                                                    <div class="tl-image-meta-actions">
+                                                        <MudIcon Icon="@Icons.Material.Filled.Image" Size="Size.Small" Color="Color.Warning" />
+                                                    </div>
                                                 }
                                                 <div class="tl-image-meta-copy">
                                                     <MudText Typo="Typo.body2">@(image.IsOriginal ? "Ảnh gốc / thành phẩm" : $"Ảnh AI {image.ProgressPercent}%")</MudText>
@@ -645,13 +649,21 @@
            && _job.Workflow.Images.All(x => x.IsOriginal || x.Attempt == 0)
            && _job.Workflow.Videos.All(x => x.Attempt == 0)
            && _job.Workflow.FinalOutput is null;
-    private bool IsRenderActive => _job?.Workflow.HasActiveOperations == true;
-    private bool ShowFloatingCreateVideoButton
-        => IsRenderNotStarted
-           && _job?.Workflow.CanStartRender == true
-           && !IsRenderActive
+    private bool CanShowFloatingRenderAction
+        => _job is not null
+           && _job.Workflow.CanStartRender
+           && !_job.Workflow.HasActiveOperations
            && !_busy
-           && !_editingRequest;
+           && !_editingRequest
+           && !string.Equals(_job.Workflow.ParentStatus, TimelapseParentStatuses.Completed, StringComparison.OrdinalIgnoreCase);
+    private bool IsInitialFloatingRenderAction
+        => _job is not null
+           && string.Equals(_job.Workflow.ParentStatus, TimelapseParentStatuses.Draft, StringComparison.OrdinalIgnoreCase)
+           && _job.Workflow.Images.All(x => x.IsOriginal || x.Attempt == 0)
+           && _job.Workflow.Videos.All(x => x.Attempt == 0)
+           && _job.Workflow.FinalOutput is null;
+    private string FloatingRenderActionLabel
+        => IsInitialFloatingRenderAction ? "TẠO VIDEO" : "TIẾP TỤC TẠO VIDEO";
     private string DisplayServiceName
         => !string.IsNullOrWhiteSpace(_job?.Snapshot.ServiceName)
             ? _job.Snapshot.ServiceName
