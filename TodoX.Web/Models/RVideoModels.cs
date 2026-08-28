@@ -228,6 +228,72 @@ public static class RVideoRules
             _ => RVideoVoiceModes.None
         };
 
+    public static string ResolveVoiceMode(RVideoJobSettingsDto? settings)
+        => NormalizeVoiceMode(settings?.VoiceMode);
+
+    public static bool HasSceneVoice(VideoProjectSceneDto scene)
+        => !string.IsNullOrWhiteSpace(ResolveSceneVoiceText(scene));
+
+    public static string? ResolveSceneVoiceText(VideoProjectSceneDto scene)
+        => FirstNonBlank(scene.VoiceText, ScenePromptMetadata.FromScene(scene).Voice);
+
+    public static string? ResolveSceneVoiceInstruction(VideoProjectSceneDto scene)
+        => FirstNonBlank(scene.VoiceInstruction, ScenePromptMetadata.FromScene(scene).VoiceInstruction);
+
+    public static string ComposeNativeVoicePrompt(string? visualPrompt, string? voiceText, string? voiceInstruction)
+    {
+        var visual = visualPrompt?.Trim() ?? string.Empty;
+        var text = voiceText?.Trim();
+        var instruction = voiceInstruction?.Trim();
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return visual;
+        }
+
+        if (visual.Contains(text, StringComparison.OrdinalIgnoreCase))
+        {
+            return visual;
+        }
+
+        var builder = new System.Text.StringBuilder(visual);
+        if (builder.Length > 0) builder.AppendLine().AppendLine();
+        builder.AppendLine("[NATIVE SPEECH]");
+        builder.Append("The on-screen character speaks naturally in Vietnamese: \"")
+            .Append(text)
+            .AppendLine("\"");
+        if (!string.IsNullOrWhiteSpace(instruction))
+        {
+            builder.AppendLine().AppendLine("[VOICE / DELIVERY]").AppendLine(instruction);
+        }
+        builder.AppendLine().AppendLine("[LIP SYNC]")
+            .AppendLine("Natural mouth movement must match the spoken Vietnamese dialogue.")
+            .AppendLine("Speech must be generated natively as part of the video audio.")
+            .AppendLine("Do not add subtitles unless explicitly requested.");
+        return builder.ToString().Trim();
+    }
+
+    public static bool IsSceneFinalReady(
+        VideoProjectSceneDto scene,
+        RVideoJobSettingsDto settings,
+        SceneVideoVersionDto? video,
+        SceneAudioVersionDto? audio)
+    {
+        if (video is null || !string.Equals(video.Status, "completed", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return ResolveVoiceMode(settings) switch
+        {
+            RVideoVoiceModes.Library when HasSceneVoice(scene)
+                => audio is not null
+                   && string.Equals(audio.Status, "completed", StringComparison.OrdinalIgnoreCase)
+                   && scene.SelectedAudioVersionId == audio.Id
+                   && video.VoiceAudioVersionId == audio.Id,
+            _ => true
+        };
+    }
+
     public static string NormalizeCharacterMode(string? value)
         => value?.Trim().ToUpperInvariant() switch
         {
@@ -322,13 +388,12 @@ public static class RVideoRules
 
     public static bool RequiresExternalVoice(VideoProjectSceneDto scene, RVideoJobSettingsDto? settings)
     {
-        if (settings is null || !string.Equals(settings.VoiceMode, RVideoVoiceModes.Library, StringComparison.OrdinalIgnoreCase))
+        if (settings is null || ResolveVoiceMode(settings) != RVideoVoiceModes.Library)
         {
             return false;
         }
 
-        var metadata = ScenePromptMetadata.FromScene(scene);
-        return !string.IsNullOrWhiteSpace(metadata.Voice);
+        return HasSceneVoice(scene);
     }
 
     public static bool NeedsImageWork(string sceneStatus)
@@ -430,6 +495,9 @@ public static class RVideoRules
 
     private static object? ParseSnapshot(string? json)
         => string.IsNullOrWhiteSpace(json) ? null : JsonNode.Parse(json) ?? new JsonObject();
+
+    private static string? FirstNonBlank(params string?[] values)
+        => values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim();
 
     public static void ValidateScene(RVideoSceneEditorItem scene)
     {

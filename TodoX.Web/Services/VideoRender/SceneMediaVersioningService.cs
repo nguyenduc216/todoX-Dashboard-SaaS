@@ -1217,14 +1217,6 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
              WHERE id=@sceneId AND tenant_id=@tenant;
             """,
             new { versionId, sceneId = version.SceneId, tenant = _tenant.TenantId }, tx);
-        await conn.ExecuteAsync(
-            """
-            UPDATE video_render.scene_video_versions
-               SET voice_audio_version_id=@versionId,
-                   updated_at=now()
-             WHERE scene_id=@sceneId AND tenant_id=@tenant AND is_selected=true;
-            """,
-            new { versionId, sceneId = version.SceneId, tenant = _tenant.TenantId }, tx);
         tx.Commit();
     }
 
@@ -1449,10 +1441,6 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
                SET selected_audio_version_id=@versionId,
                    updated_at=now()
              WHERE id=@sceneId AND tenant_id=@tenant;
-            UPDATE video_render.scene_video_versions
-               SET voice_audio_version_id=@versionId,
-                   updated_at=now()
-             WHERE scene_id=@sceneId AND tenant_id=@tenant AND is_selected=true;
             """,
             new { versionId, sceneId, tenant = _tenant.TenantId, selectedBy }, tx);
         tx.Commit();

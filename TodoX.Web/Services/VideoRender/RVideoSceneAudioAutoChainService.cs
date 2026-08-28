@@ -61,7 +61,9 @@ public sealed class RVideoSceneAudioAutoChainService : IRVideoSceneAudioAutoChai
         }
 
         var metadata = ScenePromptMetadata.FromScene(scene);
-        if (string.IsNullOrWhiteSpace(metadata.Voice))
+        var voiceText = RVideoRules.ResolveSceneVoiceText(scene);
+        var voiceInstruction = RVideoRules.ResolveSceneVoiceInstruction(scene);
+        if (string.IsNullOrWhiteSpace(voiceText))
         {
             return false;
         }
@@ -103,8 +105,8 @@ public sealed class RVideoSceneAudioAutoChainService : IRVideoSceneAudioAutoChai
             logicalRequestId,
             settings?.VoiceCatalogCode,
             JsonSerializer.Serialize(voice, new JsonSerializerOptions(JsonSerializerDefaults.Web)),
-            metadata.Voice,
-            metadata.VoiceInstruction,
+            voiceText,
+            voiceInstruction,
             ttsRate,
             scene.DurationSeconds,
             SceneSnapshot: new
@@ -115,8 +117,8 @@ public sealed class RVideoSceneAudioAutoChainService : IRVideoSceneAudioAutoChai
                 scene.Title,
                 scene.DurationSeconds,
                 scene.ScenePrompt,
-                metadata.Voice,
-                metadata.VoiceInstruction,
+                voiceText,
+                voiceInstruction,
                 metadata.TtsRate
             },
             RenderConfigSnapshot: new
@@ -170,8 +172,8 @@ public sealed class RVideoSceneAudioAutoChainService : IRVideoSceneAudioAutoChai
                 VoiceCatalogCode = settings?.VoiceCatalogCode ?? string.Empty,
                 VoiceCode = voice.ProviderVoiceId ?? voice.Code,
                 VoiceName = voice.Name,
-                NarrationText = metadata.Voice ?? string.Empty,
-                VoiceInstruction = metadata.VoiceInstruction,
+                NarrationText = voiceText,
+                VoiceInstruction = voiceInstruction,
                 TtsRate = ttsRate,
                 DefaultTtsRate = settings?.DefaultTtsRate,
                 SampleRate = _options.CurrentValue.ResolveSampleRate(voice.ProviderVoiceId ?? voice.Code),
@@ -269,7 +271,7 @@ public sealed class RVideoSceneAudioAutoChainService : IRVideoSceneAudioAutoChai
     }
 
     public static string BuildLogicalRequestKey(long projectId, long sceneId)
-        => $"rvideo-auto-audio:{projectId}:{sceneId}";
+        => $"rvideo-scene-audio:{projectId}:{sceneId}";
 }
 
 public sealed class SceneAudioRenderWorkItemInput

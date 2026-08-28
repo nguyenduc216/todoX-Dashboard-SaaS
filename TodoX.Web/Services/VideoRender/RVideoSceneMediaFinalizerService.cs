@@ -140,6 +140,7 @@ public sealed class RVideoSceneMediaFinalizerService : IRVideoSceneMediaFinalize
 
     internal static bool ShouldSkipMux(SceneVideoVersionDto selectedVideo, SceneAudioVersionDto selectedAudio, string contentRootPath, string storageRoot)
         => selectedVideo.VoiceAudioVersionId == selectedAudio.Id
+           && IsMuxOutputPath(selectedVideo.SourceFilePath)
            && !string.IsNullOrWhiteSpace(selectedVideo.PublicUrl)
            && !string.IsNullOrWhiteSpace(selectedVideo.SourceFilePath)
            && File.Exists(ResolveLocalPath(selectedVideo.SourceFilePath, contentRootPath, storageRoot));
@@ -147,7 +148,12 @@ public sealed class RVideoSceneMediaFinalizerService : IRVideoSceneMediaFinalize
     private bool FinalMuxMediaExists(SceneVideoVersionDto selectedVideo)
         => !string.IsNullOrWhiteSpace(selectedVideo.PublicUrl)
            && !string.IsNullOrWhiteSpace(selectedVideo.SourceFilePath)
+           && IsMuxOutputPath(selectedVideo.SourceFilePath)
            && File.Exists(ResolveLocalPath(selectedVideo.SourceFilePath));
+
+    private static bool IsMuxOutputPath(string? path)
+        => !string.IsNullOrWhiteSpace(path)
+           && path.Replace('\\', '/').Contains("/final-scenes/", StringComparison.OrdinalIgnoreCase);
 
     private string ResolveLocalPath(string objectKeyOrPath)
     {

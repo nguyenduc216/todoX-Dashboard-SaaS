@@ -57,7 +57,10 @@ public sealed class VbeeSceneRuntimeTests
     [Fact]
     public void Finalizer_SkipsWhenFinalMuxAlreadyExists()
     {
-        var tempFile = Path.GetTempFileName();
+        var tempRoot = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var tempFile = Path.Combine(tempRoot, "project-1", "final-scenes", "01", "final.mp4");
+        Directory.CreateDirectory(Path.GetDirectoryName(tempFile)!);
+        File.WriteAllText(tempFile, "muxed");
         try
         {
             var video = new SceneVideoVersionDto
@@ -75,8 +78,42 @@ public sealed class VbeeSceneRuntimeTests
         }
         finally
         {
+            Directory.Delete(tempRoot, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Finalizer_DoesNotSkipRawVideoStampedWithAudio()
+    {
+        var tempFile = Path.GetTempFileName();
+        try
+        {
+            var audioId = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+            var video = new SceneVideoVersionDto
+            {
+                VoiceAudioVersionId = audioId,
+                PublicUrl = "https://cdn.example.com/raw.mp4",
+                SourceFilePath = tempFile
+            };
+            var audio = new SceneAudioVersionDto { Id = audioId };
+
+            Assert.False(RVideoSceneMediaFinalizerService.ShouldSkipMux(video, audio, AppContext.BaseDirectory, string.Empty));
+        }
+        finally
+        {
             File.Delete(tempFile);
         }
+    }
+
+    [Fact]
+    public void MuxCompletion_RejectsCrossSceneAudio()
+    {
+        var sceneVideo = new SceneVideoVersionDto { ProjectId = 11, SceneId = 101 };
+        var sceneAudio = new SceneAudioVersionDto { ProjectId = 11, SceneId = 202 };
+
+        var ex = Assert.Throws<InvalidOperationException>(() => SceneAudioMuxHandler.ValidateSceneOwnership(101, sceneVideo, sceneAudio));
+
+        Assert.Equal("SCENE_AUDIO_MUX_SCENE_ID_MISMATCH", ex.Message);
     }
 
     [Fact]

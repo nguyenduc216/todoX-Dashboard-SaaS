@@ -71,6 +71,10 @@ public sealed class VideoProjectSceneDto
     public string? StaticImageUrl { get; set; }
     public string? SceneVideoPath { get; set; }
     public string? SceneVideoUrl { get; set; }
+    public bool VoiceEnabled { get; set; }
+    public string? SpeakerKey { get; set; }
+    public string? VoiceText { get; set; }
+    public string? VoiceInstruction { get; set; }
     public Guid? SelectedAudioVersionId { get; set; }
     public string Status { get; set; } = VideoSceneStatuses.Draft;
     public string? ErrorMessage { get; set; }
@@ -131,6 +135,10 @@ public sealed class VideoProjectSceneCreateRequest
     public string ScenePrompt { get; set; } = string.Empty;
     public string? ImagePrompt { get; set; }
     public string? VideoPrompt { get; set; }
+    public bool VoiceEnabled { get; set; }
+    public string? SpeakerKey { get; set; }
+    public string? VoiceText { get; set; }
+    public string? VoiceInstruction { get; set; }
 }
 
 public sealed class VideoProjectAddSceneRequest

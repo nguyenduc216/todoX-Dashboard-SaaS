@@ -81,15 +81,21 @@ public sealed class VideoRenderRepository
                         : sceneSeconds;
                 var aspectRatio = NormalizeAspectRatio(request.AspectRatio);
                 var scenePrompt = sceneData?.ScenePrompt ?? BuildScenePrompt(request.Prompt, index, sceneCount, duration, request.ThinkScenes, aspectRatio);
+                var sceneVoiceText = FirstNonBlank(sceneData?.VoiceText, ScenePromptMetadata.Parse(scenePrompt).Voice);
+                var sceneVoiceInstruction = FirstNonBlank(sceneData?.VoiceInstruction, ScenePromptMetadata.Parse(scenePrompt).VoiceInstruction);
 
                 await conn.ExecuteAsync(
                     """
                     INSERT INTO video_render.video_project_scenes
                         (project_id, tenant_id, scene_index, title, duration_seconds, scene_prompt, image_prompt, video_prompt,
-                         static_image_path, static_image_url, scene_video_path, scene_video_url, status, error_message, created_at, updated_at)
+                         static_image_path, static_image_url, scene_video_path, scene_video_url,
+                         voice_enabled, speaker_key, voice_text, voice_instruction,
+                         status, error_message, created_at, updated_at)
                     VALUES
                         (@projectId, @tenant, @sceneIndex, @title, @duration, @scenePrompt, @imagePrompt, @videoPrompt,
-                         NULL, NULL, NULL, NULL, @status, NULL, now(), now());
+                         NULL, NULL, NULL, NULL,
+                         @voiceEnabled, @speakerKey, @voiceText, @voiceInstruction,
+                         @status, NULL, now(), now());
                     """,
                     new
                     {
@@ -101,6 +107,10 @@ public sealed class VideoRenderRepository
                         scenePrompt,
                         imagePrompt = sceneData?.ImagePrompt ?? $"Static preview for scene {index}. {scenePrompt}",
                         videoPrompt = sceneData?.VideoPrompt ?? $"{AspectRatioLabel(aspectRatio)} video, {duration} seconds. {scenePrompt}",
+                        voiceEnabled = sceneData?.VoiceEnabled == true || !string.IsNullOrWhiteSpace(sceneVoiceText),
+                        speakerKey = sceneData?.SpeakerKey,
+                        voiceText = sceneVoiceText,
+                        voiceInstruction = sceneVoiceInstruction,
                         status = VideoSceneStatuses.Draft
                     }, tx);
             }
@@ -155,6 +165,8 @@ public sealed class VideoRenderRepository
                        title AS Title, duration_seconds AS DurationSeconds, scene_prompt AS ScenePrompt,
                        image_prompt AS ImagePrompt, video_prompt AS VideoPrompt, static_image_path AS StaticImagePath,
                        static_image_url AS StaticImageUrl, scene_video_path AS SceneVideoPath, scene_video_url AS SceneVideoUrl,
+                       voice_enabled AS VoiceEnabled, speaker_key AS SpeakerKey, voice_text AS VoiceText,
+                       voice_instruction AS VoiceInstruction,
                        selected_audio_version_id AS SelectedAudioVersionId,
                        status AS Status, error_message AS ErrorMessage, created_at AS CreatedAt, updated_at AS UpdatedAt
                   FROM video_render.video_project_scenes
@@ -351,6 +363,10 @@ public sealed class VideoRenderRepository
                            scene_prompt=@scenePrompt,
                            image_prompt=@imagePrompt,
                            video_prompt=@videoPrompt,
+                           voice_enabled=@voiceEnabled,
+                           speaker_key=@speakerKey,
+                           voice_text=@voiceText,
+                           voice_instruction=@voiceInstruction,
                            status=@status,
                            error_message=@errorMessage,
                            updated_at=now()
@@ -369,6 +385,10 @@ public sealed class VideoRenderRepository
                         scenePrompt = scene.ScenePrompt,
                         imagePrompt = scene.ImagePrompt,
                         videoPrompt = scene.VideoPrompt,
+                        voiceEnabled = ResolveVoiceEnabled(scene),
+                        speakerKey = scene.SpeakerKey,
+                        voiceText = ResolveVoiceText(scene),
+                        voiceInstruction = ResolveVoiceInstruction(scene),
                         status = string.IsNullOrWhiteSpace(scene.Status) ? VideoSceneStatuses.Draft : scene.Status,
                         errorMessage = scene.ErrorMessage
                     }, tx);
@@ -416,6 +436,8 @@ public sealed class VideoRenderRepository
                        title AS Title, duration_seconds AS DurationSeconds, scene_prompt AS ScenePrompt,
                        image_prompt AS ImagePrompt, video_prompt AS VideoPrompt, static_image_path AS StaticImagePath,
                        static_image_url AS StaticImageUrl, scene_video_path AS SceneVideoPath, scene_video_url AS SceneVideoUrl,
+                       voice_enabled AS VoiceEnabled, speaker_key AS SpeakerKey, voice_text AS VoiceText,
+                       voice_instruction AS VoiceInstruction,
                        selected_audio_version_id AS SelectedAudioVersionId,
                        status AS Status, error_message AS ErrorMessage, created_at AS CreatedAt, updated_at AS UpdatedAt
                   FROM video_render.video_project_scenes
@@ -574,6 +596,10 @@ public sealed class VideoRenderRepository
                        scene_prompt=@scenePrompt,
                        image_prompt=@imagePrompt,
                        video_prompt=@videoPrompt,
+                       voice_enabled=voice_enabled OR @voiceEnabled,
+                       speaker_key=COALESCE(NULLIF(@speakerKey, ''), speaker_key),
+                       voice_text=COALESCE(NULLIF(@voiceText, ''), voice_text),
+                       voice_instruction=COALESCE(NULLIF(@voiceInstruction, ''), voice_instruction),
                        static_image_url=COALESCE(@imageUrl, static_image_url),
                        static_image_path=COALESCE(@imagePath, static_image_path),
                        scene_video_url=COALESCE(@videoUrl, scene_video_url),
@@ -593,6 +619,10 @@ public sealed class VideoRenderRepository
                     scenePrompt = request.ScenePrompt,
                     imagePrompt = request.ImagePrompt,
                     videoPrompt = request.VideoPrompt,
+                    speakerKey = (string?)null,
+                    voiceText = ScenePromptMetadata.Parse(request.ScenePrompt).Voice,
+                    voiceInstruction = ScenePromptMetadata.Parse(request.ScenePrompt).VoiceInstruction,
+                    voiceEnabled = !string.IsNullOrWhiteSpace(ScenePromptMetadata.Parse(request.ScenePrompt).Voice),
                     imageUrl = request.ImageUrl,
                     imagePath = request.ImagePath,
                     videoUrl = request.VideoUrl,
@@ -683,14 +713,20 @@ public sealed class VideoRenderRepository
                 """
                 INSERT INTO video_render.video_project_scenes
                     (project_id, tenant_id, scene_index, title, duration_seconds, scene_prompt, image_prompt, video_prompt,
-                     static_image_path, static_image_url, scene_video_path, scene_video_url, status, error_message, created_at, updated_at)
+                     static_image_path, static_image_url, scene_video_path, scene_video_url,
+                     voice_enabled, speaker_key, voice_text, voice_instruction,
+                     status, error_message, created_at, updated_at)
                 VALUES
                     (@projectId, @tenant, @sceneIndex, @title, @duration, @scenePrompt, @imagePrompt, @videoPrompt,
-                     NULL, NULL, NULL, NULL, @status, NULL, now(), now())
+                     NULL, NULL, NULL, NULL,
+                     @voiceEnabled, @speakerKey, @voiceText, @voiceInstruction,
+                     @status, NULL, now(), now())
                 RETURNING id AS Id, project_id AS ProjectId, tenant_id AS TenantId, scene_index AS SceneIndex,
                           title AS Title, duration_seconds AS DurationSeconds, scene_prompt AS ScenePrompt,
                           image_prompt AS ImagePrompt, video_prompt AS VideoPrompt, static_image_path AS StaticImagePath,
                           static_image_url AS StaticImageUrl, scene_video_path AS SceneVideoPath, scene_video_url AS SceneVideoUrl,
+                          voice_enabled AS VoiceEnabled, speaker_key AS SpeakerKey, voice_text AS VoiceText,
+                          voice_instruction AS VoiceInstruction,
                           selected_audio_version_id AS SelectedAudioVersionId,
                           status AS Status, error_message AS ErrorMessage, created_at AS CreatedAt, updated_at AS UpdatedAt;
                 """,
@@ -704,6 +740,10 @@ public sealed class VideoRenderRepository
                     scenePrompt = metadata.Serialize(),
                     imagePrompt = request.ImagePrompt,
                     videoPrompt = request.VideoPrompt,
+                    voiceEnabled = !string.IsNullOrWhiteSpace(request.Voice),
+                    speakerKey = (string?)null,
+                    voiceText = request.Voice,
+                    voiceInstruction = request.VoiceInstruction,
                     status = VideoSceneStatuses.Draft
                 }, tx);
 
@@ -931,7 +971,9 @@ public sealed class VideoRenderRepository
                          static_image_path, static_image_url, scene_video_path, scene_video_url, status, error_message, created_at, updated_at)
                     VALUES
                         (@projectId, @tenant, @sceneIndex, @title, @duration, @scenePrompt, @imagePrompt, @videoPrompt,
-                         @staticImagePath, @staticImageUrl, @sceneVideoPath, @sceneVideoUrl, @status, @errorMessage, now(), now());
+                     @staticImagePath, @staticImageUrl, @sceneVideoPath, @sceneVideoUrl,
+                     @voiceEnabled, @speakerKey, @voiceText, @voiceInstruction,
+                     @status, @errorMessage, now(), now());
                     """,
                     new
                     {
@@ -947,6 +989,10 @@ public sealed class VideoRenderRepository
                         staticImageUrl = scene.StaticImageUrl,
                         sceneVideoPath = scene.SceneVideoPath,
                         sceneVideoUrl = scene.SceneVideoUrl,
+                        voiceEnabled = scene.VoiceEnabled,
+                        speakerKey = scene.SpeakerKey,
+                        voiceText = FirstNonBlank(scene.VoiceText, ScenePromptMetadata.FromScene(scene).Voice),
+                        voiceInstruction = FirstNonBlank(scene.VoiceInstruction, ScenePromptMetadata.FromScene(scene).VoiceInstruction),
                         status = string.IsNullOrWhiteSpace(scene.Status) ? VideoSceneStatuses.Draft : scene.Status,
                         errorMessage = scene.ErrorMessage
                     }, tx);
@@ -988,6 +1034,18 @@ public sealed class VideoRenderRepository
            || user.Can("video.render.manage")
            || user.Can("render.video.manage")
            || user.Can("ai.video.version.manage");
+
+    private static bool ResolveVoiceEnabled(VideoProjectSceneDto scene)
+        => scene.VoiceEnabled || !string.IsNullOrWhiteSpace(ResolveVoiceText(scene));
+
+    private static string? ResolveVoiceText(VideoProjectSceneDto scene)
+        => FirstNonBlank(scene.VoiceText, ScenePromptMetadata.FromScene(scene).Voice);
+
+    private static string? ResolveVoiceInstruction(VideoProjectSceneDto scene)
+        => FirstNonBlank(scene.VoiceInstruction, ScenePromptMetadata.FromScene(scene).VoiceInstruction);
+
+    private static string? FirstNonBlank(params string?[] values)
+        => values.FirstOrDefault(x => !string.IsNullOrWhiteSpace(x))?.Trim();
 
     public sealed class SceneVersionProjection
     {

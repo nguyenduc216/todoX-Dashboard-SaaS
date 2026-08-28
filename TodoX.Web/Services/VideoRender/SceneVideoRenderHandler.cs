@@ -35,6 +35,7 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
 
     private readonly VideoRenderRepository _repo;
     private readonly ISceneMediaVersioningService _versions;
+    private readonly RVideoJobSettingsRepository _settings;
     private readonly IVideoProviderRoutingService _routing;
     private readonly IRenderJobService _jobs;
     private readonly IVideoRenderPricingResolver _pricing;
@@ -48,6 +49,7 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
     public SceneVideoRenderHandler(
         VideoRenderRepository repo,
         ISceneMediaVersioningService versions,
+        RVideoJobSettingsRepository settings,
         IVideoProviderRoutingService routing,
         IRenderJobService jobs,
         IVideoRenderPricingResolver pricing,
@@ -58,6 +60,7 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
     {
         _repo = repo;
         _versions = versions;
+        _settings = settings;
         _routing = routing;
         _jobs = jobs;
         _pricing = pricing;
@@ -193,7 +196,13 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
             return false;
         }
 
-        var validation = _promptValidator.Validate(scene.VideoPrompt, route.ModelName, route.CapabilityConfigJson, scene.SceneIndex);
+        var voiceMode = await ResolveVoiceModeAsync(project.Id, ct);
+        var voiceText = RVideoRules.ResolveSceneVoiceText(scene);
+        var voiceInstruction = RVideoRules.ResolveSceneVoiceInstruction(scene);
+        var finalPrompt = voiceMode == RVideoVoiceModes.Native
+            ? RVideoRules.ComposeNativeVoicePrompt(scene.VideoPrompt, voiceText, voiceInstruction)
+            : scene.VideoPrompt;
+        var validation = _promptValidator.Validate(finalPrompt, route.ModelName, route.CapabilityConfigJson, scene.SceneIndex);
         if (!validation.IsValid)
         {
             await MarkSceneValidationFailedAsync(project.Id, scene, validation, ct);
@@ -269,8 +278,8 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
             SourceImageObjectKey = selectedImage.StorageKey,
             ImagePrompt = scene.ImagePrompt,
             VideoPrompt = validation.TrimmedPrompt,
-            Voice = null,
-            VoiceInstruction = null,
+            Voice = voiceMode == RVideoVoiceModes.Native ? voiceText : null,
+            VoiceInstruction = voiceMode == RVideoVoiceModes.Native ? voiceInstruction : null,
             ProviderId = route.ProviderId,
             ProviderCode = route.ProviderCode,
             ProviderConfigJson = input.ProviderConfigJson,
@@ -324,6 +333,12 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
             }, ct);
 
         return true;
+    }
+
+    private async Task<string> ResolveVoiceModeAsync(long projectId, CancellationToken ct)
+    {
+        var settings = await _settings.GetAsync(projectId, ct);
+        return RVideoRules.ResolveVoiceMode(settings);
     }
 
     private async Task MarkSceneValidationFailedAsync(

@@ -50,6 +50,7 @@ public sealed class SceneAudioMuxHandler : IRenderJobHandler
         var sceneAudio = (await _versions.ListSceneAudioVersionsAsync(scene.Id, 0, 100, ct))
             .FirstOrDefault(x => x.Id == input.AudioVersionId)
             ?? throw new InvalidOperationException("Scene audio version not found.");
+        ValidateSceneOwnership(scene.Id, sceneVideo, sceneAudio);
 
         if (!string.Equals(sceneVideo.Status, "completed", StringComparison.OrdinalIgnoreCase)
             || !string.Equals(sceneAudio.Status, "completed", StringComparison.OrdinalIgnoreCase))
@@ -137,7 +138,7 @@ public sealed class SceneAudioMuxHandler : IRenderJobHandler
         var completion = BuildCompletionRequest(sceneVideo, input.AudioVersionId, url, finalPath, scene.DurationSeconds);
         await _versions.CompleteSceneVideoVersionAsync(sceneVideo.Id, completion, ct);
 
-        await _repo.AddProjectEventAsync(project.Id, "SCENE_AUDIO_MUX_READY", "info",
+        await _repo.AddProjectEventAsync(project.Id, "SCENE_AUDIO_MUX_COMPLETED", "info",
             $"Scene {scene.SceneIndex} external voice mux completed.",
             new
             {
@@ -186,6 +187,14 @@ public sealed class SceneAudioMuxHandler : IRenderJobHandler
 
     private string ResolveRoot(string? path)
         => Path.IsPathRooted(path) ? path! : Path.Combine(_env.ContentRootPath, path ?? string.Empty);
+
+    internal static void ValidateSceneOwnership(long sceneId, SceneVideoVersionDto sceneVideo, SceneAudioVersionDto sceneAudio)
+    {
+        if (sceneVideo.SceneId != sceneId || sceneAudio.SceneId != sceneId || sceneVideo.ProjectId != sceneAudio.ProjectId)
+        {
+            throw new InvalidOperationException("SCENE_AUDIO_MUX_SCENE_ID_MISMATCH");
+        }
+    }
 
     internal static SceneVideoVersionCompleteRequest BuildCompletionRequest(
         SceneVideoVersionDto sceneVideo,

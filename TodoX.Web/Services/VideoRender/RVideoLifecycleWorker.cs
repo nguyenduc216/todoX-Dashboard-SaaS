@@ -42,11 +42,13 @@ public sealed class RVideoLifecycleWorker : BackgroundService
                 var rvideoJobs = scope.ServiceProvider.GetRequiredService<IRVideoJobService>();
                 var jobs = scope.ServiceProvider.GetRequiredService<IRenderJobService>();
                 var audioAutoChain = scope.ServiceProvider.GetRequiredService<IRVideoSceneAudioAutoChainService>();
+                var finalizer = scope.ServiceProvider.GetRequiredService<IRVideoSceneMediaFinalizerService>();
                 var autoChain = scope.ServiceProvider.GetRequiredService<IRVideoSceneVideoAutoChainService>();
                 var catalog = scope.ServiceProvider.GetRequiredService<IAiStudioCatalogService>();
+                var versions = scope.ServiceProvider.GetRequiredService<ISceneMediaVersioningService>();
                 foreach (var setting in settings)
                 {
-                    await EvaluateProjectAsync(setting, repository, rvideoJobs, jobs, audioAutoChain, autoChain, factory, tenant, catalog, stoppingToken);
+                    await EvaluateProjectAsync(setting, repository, rvideoJobs, jobs, audioAutoChain, finalizer, autoChain, versions, factory, tenant, catalog, stoppingToken);
                 }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -62,7 +64,7 @@ public sealed class RVideoLifecycleWorker : BackgroundService
         }
     }
 
-    private async Task EvaluateProjectAsync(RVideoJobSettingsDto setting, VideoRenderRepository repo, IRVideoJobService rvideoJobs, IRenderJobService jobs, IRVideoSceneAudioAutoChainService audioAutoChain, IRVideoSceneVideoAutoChainService autoChain, TodoXConnectionFactory factory, TenantContext tenant, IAiStudioCatalogService catalog, CancellationToken ct)
+    private async Task EvaluateProjectAsync(RVideoJobSettingsDto setting, VideoRenderRepository repo, IRVideoJobService rvideoJobs, IRenderJobService jobs, IRVideoSceneAudioAutoChainService audioAutoChain, IRVideoSceneMediaFinalizerService finalizer, IRVideoSceneVideoAutoChainService autoChain, ISceneMediaVersioningService versions, TodoXConnectionFactory factory, TenantContext tenant, IAiStudioCatalogService catalog, CancellationToken ct)
     {
         var project = await repo.GetProjectAsync(setting.ProjectId, ct);
         if (project is null || project.Scenes.Count == 0) return;
@@ -162,11 +164,14 @@ public sealed class RVideoLifecycleWorker : BackgroundService
                      .Select(scene => scene.Id))
         {
             await audioAutoChain.TryEnqueueSceneAudioAsync(project.Id, sceneId, "RVIDEO_LIFECYCLE", ct);
+            await finalizer.TryFinalizeSceneMediaAsync(project.Id, sceneId, "RVIDEO_LIFECYCLE", ct);
         }
         foreach (var sceneId in readyScenes)
         {
             await autoChain.TryEnqueueSceneVideoAsync(project.Id, sceneId, "RVIDEO_LIFECYCLE", ct);
         }
+
+        await TryEnqueueProjectMergeAsync(project, setting, jobs, versions, repo, ct);
 
         if (imageSceneIds.Length == 0 && readyScenes.Length == 0)
         {
@@ -175,6 +180,59 @@ public sealed class RVideoLifecycleWorker : BackgroundService
                 project.Id, sceneStates.Count(x => x.IsImageReady), decision.ShouldQueueVideo);
         }
     }
+
+    private static async Task<bool> TryEnqueueProjectMergeAsync(
+        VideoProjectDto project,
+        RVideoJobSettingsDto settings,
+        IRenderJobService jobs,
+        ISceneMediaVersioningService versions,
+        VideoRenderRepository repo,
+        CancellationToken ct)
+    {
+        if (project.Scenes.Count == 0 || !string.IsNullOrWhiteSpace(project.FinalVideoUrl))
+        {
+            return false;
+        }
+
+        foreach (var scene in project.Scenes)
+        {
+            var selectedVideo = await versions.GetSelectedVideoVersionAsync(scene.Id, ct);
+            var selectedAudio = await versions.GetSelectedAudioVersionAsync(scene.Id, ct);
+            if (!RVideoRules.IsSceneFinalReady(scene, settings, selectedVideo, selectedAudio))
+            {
+                return false;
+            }
+        }
+
+        var logicalRequestId = BuildMergeLogicalRequestKey(project.Id);
+        var (job, alreadyActive) = await jobs.EnqueueForLogCodeIfNoneActiveAsync(new RenderJobCreateModel
+        {
+            JobType = RenderJobTypes.MergeProjectVideo,
+            UserId = project.UserId,
+            CustomerId = project.CustomerId,
+            Input = new { projectId = project.Id, logicalRequestId, source = "rvideo_auto_lifecycle" },
+            Prompt = new { projectId = project.Id, source = "rvideo_auto_lifecycle", stage = "merge", voiceMode = RVideoRules.ResolveVoiceMode(settings) },
+            References = Array.Empty<object>(),
+            LogCode = logicalRequestId,
+            ProviderCode = "ffmpeg",
+            ModelCode = "copy_concat",
+            MaxAttempts = 3,
+            PointCostEstimate = 0,
+            PointStatus = RenderPointStatuses.NotRequired
+        }, logicalRequestId, ct);
+        if (alreadyActive)
+        {
+            return false;
+        }
+
+        await repo.AddProjectEventAsync(project.Id, "PROJECT_MERGE_AUTO_ENQUEUED", "info",
+            "Project final merge auto-enqueued.",
+            new { projectId = project.Id, renderJobId = job.Id, logicalRequestId, voiceMode = RVideoRules.ResolveVoiceMode(settings) }, ct);
+        return true;
+    }
+
+    public static string BuildMergeLogicalRequestKey(long projectId)
+        => $"rvideo-auto-merge:{projectId}";
 
     private static async Task<(HashSet<long> ImageSceneIds, HashSet<long> VideoSceneIds)> LoadActiveSceneIdsAsync(
         TodoXConnectionFactory factory,
