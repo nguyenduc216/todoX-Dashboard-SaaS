@@ -4,7 +4,6 @@
 Branch: integration/rdance-on-construction-video-core
 Base SHA: d6484bbe459233f60602df9b0bda200eb33313c9
 Final SHA: verified after push in final terminal summary
-Final SHA: 2478d04b7263d61e63f694e594f41ac4bffa5aa1
 Push: completed
 
 ## Runtime Bug Evidence
