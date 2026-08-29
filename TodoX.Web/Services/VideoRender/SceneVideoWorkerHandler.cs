@@ -19,6 +19,7 @@ public sealed class SceneVideoRenderWorkItemInput
     public Guid? SelectedSourceImageVersionId { get; set; }
     public string? SourceImageUrl { get; set; }
     public string? SourceImageObjectKey { get; set; }
+    public bool UseSharedReferenceImage { get; set; }
     public string? ImagePrompt { get; set; }
     public string? VideoPrompt { get; set; }
     public string? Voice { get; set; }
@@ -190,7 +191,13 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         VideoProjectSceneDto scene,
         CancellationToken ct)
     {
-        var sourceVersion = await ResolveSourceImageVersionAsync(scene.Id, input.SelectedSourceImageVersionId, ct)
+        var sourceVersion = await ResolveSourceImageVersionAsync(
+                scene.Id,
+                input.SelectedSourceImageVersionId,
+                input.UseSharedReferenceImage,
+                input.SourceImageUrl,
+                input.SourceImageObjectKey,
+                ct)
             ?? throw new InvalidOperationException("SCENE_VIDEO_SOURCE_IMAGE_UNAVAILABLE");
 
         var validation = _promptValidator.Validate(
@@ -925,8 +932,31 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
     }
 #endif
 
-    private async Task<SceneImageVersionDto?> ResolveSourceImageVersionAsync(long sceneId, Guid? selectedVersionId, CancellationToken ct)
+    private async Task<SceneImageVersionDto?> ResolveSourceImageVersionAsync(
+        long sceneId,
+        Guid? selectedVersionId,
+        bool useSharedReferenceImage,
+        string? sourceImageUrl,
+        string? sourceImageObjectKey,
+        CancellationToken ct)
     {
+        if (useSharedReferenceImage)
+        {
+            if (string.IsNullOrWhiteSpace(sourceImageUrl) && string.IsNullOrWhiteSpace(sourceImageObjectKey))
+            {
+                return null;
+            }
+
+            return new SceneImageVersionDto
+            {
+                Id = Guid.Empty,
+                PublicUrl = sourceImageUrl,
+                StorageKey = sourceImageObjectKey,
+                Status = "completed",
+                IsSelected = true
+            };
+        }
+
         if (selectedVersionId is null || selectedVersionId == Guid.Empty)
         {
             return await _versions.GetSelectedImageVersionAsync(sceneId, ct);

@@ -71,6 +71,16 @@ public class RenderVideoJobsLayoutTests
         Assert.Contains("Tạo giọng đọc thất bại", source);
     }
 
+    [Fact]
+    public void ResultTab_RendersManualFinalMergeAction()
+    {
+        var source = File.ReadAllText(RazorPath);
+
+        Assert.Contains("Hoàn tất video", source);
+        Assert.Contains("Đang hoàn tất...", source);
+        Assert.Contains("IsFinalMergeActive", source);
+    }
+
     private static string Between(string source, string startText, string endText)
     {
         var start = source.IndexOf(startText, StringComparison.Ordinal);

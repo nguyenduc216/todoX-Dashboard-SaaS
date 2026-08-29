@@ -55,6 +55,7 @@ public sealed class VideoRenderEligibilityService : IVideoRenderEligibilityServi
     };
 
     private readonly VideoRenderRepository _repo;
+    private readonly RVideoJobSettingsRepository _settings;
     private readonly ISceneMediaVersioningService _versions;
     private readonly IVideoPromptValidator _validator;
     private readonly TodoXConnectionFactory _factory;
@@ -62,12 +63,14 @@ public sealed class VideoRenderEligibilityService : IVideoRenderEligibilityServi
 
     public VideoRenderEligibilityService(
         VideoRenderRepository repo,
+        RVideoJobSettingsRepository settings,
         ISceneMediaVersioningService versions,
         IVideoPromptValidator validator,
         TodoXConnectionFactory factory,
         TenantContext tenant)
     {
         _repo = repo;
+        _settings = settings;
         _versions = versions;
         _validator = validator;
         _factory = factory;
@@ -90,10 +93,26 @@ public sealed class VideoRenderEligibilityService : IVideoRenderEligibilityServi
         var requested = requestedSceneIds.ToHashSet();
         var eligible = new List<VideoRenderEligibilityResult>();
         var activeJobIds = await LoadActiveRenderJobIdsAsync(projectId, requested, ct);
+        var settings = await _settings.GetAsync(projectId, ct);
+        var usesSharedReferenceImage = settings?.UseReferenceImageForAllScenes ?? false;
+        RVideoSceneImageReferenceSelection? sharedReference = null;
+        if (usesSharedReferenceImage && settings is not null)
+        {
+            try
+            {
+                sharedReference = RVideoSceneImageReferenceSelection.Resolve(settings);
+            }
+            catch (InvalidOperationException)
+            {
+                sharedReference = null;
+            }
+        }
 
         foreach (var scene in project.Scenes.Where(x => requested.Contains(x.Id)).OrderBy(x => x.SceneIndex))
         {
-            var imageVersion = await _versions.GetSelectedImageVersionAsync(scene.Id, ct);
+            var imageVersion = usesSharedReferenceImage
+                ? ResolveSharedReferenceImageVersion(sharedReference)
+                : await _versions.GetSelectedImageVersionAsync(scene.Id, ct);
             if (imageVersion is null || imageVersion.Id == Guid.Empty || string.IsNullOrWhiteSpace(imageVersion.PublicUrl))
             {
                 eligible.Add(new VideoRenderEligibilityResult(
@@ -172,6 +191,28 @@ public sealed class VideoRenderEligibilityService : IVideoRenderEligibilityServi
         }
 
         return new VideoRenderEligibilityReport(projectId, eligible);
+    }
+
+    private static SceneImageVersionDto? ResolveSharedReferenceImageVersion(RVideoSceneImageReferenceSelection? sharedReference)
+    {
+        if (sharedReference is null || !sharedReference.ReferenceRequested)
+        {
+            return null;
+        }
+
+        if (string.IsNullOrWhiteSpace(sharedReference.Url) && string.IsNullOrWhiteSpace(sharedReference.ObjectKey))
+        {
+            return null;
+        }
+
+        return new SceneImageVersionDto
+        {
+            Id = Guid.Empty,
+            PublicUrl = sharedReference.Url,
+            StorageKey = sharedReference.ObjectKey,
+            Status = "completed",
+            IsSelected = true
+        };
     }
 
     private async Task<HashSet<long>> LoadActiveRenderJobIdsAsync(long projectId, IReadOnlyCollection<long> requestedSceneIds, CancellationToken ct)

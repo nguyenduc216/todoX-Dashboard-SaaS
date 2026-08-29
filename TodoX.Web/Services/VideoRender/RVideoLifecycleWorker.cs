@@ -37,7 +37,7 @@ public sealed class RVideoLifecycleWorker : BackgroundService
                 var tenant = scope.ServiceProvider.GetRequiredService<TenantContext>();
                 await tenant.EnsureLoadedAsync(stoppingToken);
                 var factory = scope.ServiceProvider.GetRequiredService<TodoXConnectionFactory>();
-                var settings = await ListAutoSettingsAsync(factory, tenant, stoppingToken);
+        var settings = await ListAutoSettingsAsync(factory, tenant, stoppingToken);
                 var repository = scope.ServiceProvider.GetRequiredService<VideoRenderRepository>();
                 var rvideoJobs = scope.ServiceProvider.GetRequiredService<IRVideoJobService>();
                 var jobs = scope.ServiceProvider.GetRequiredService<IRenderJobService>();
@@ -92,12 +92,14 @@ public sealed class RVideoLifecycleWorker : BackgroundService
 
         var renderSettings = RVideoRules.ResolveRenderSettings(project.OriginalPrompt);
         var activeSceneIds = await LoadActiveSceneIdsAsync(factory, tenant, project.Id, ct);
+        var usesSharedReferenceImage = setting.UseReferenceImageForAllScenes;
         var sceneStates = project.Scenes
             .Select(scene => RVideoSceneLifecycleClassifier.Classify(
                 scene,
                 project.Events,
                 activeSceneIds.ImageSceneIds.Contains(scene.Id),
-                activeSceneIds.VideoSceneIds.Contains(scene.Id)))
+                activeSceneIds.VideoSceneIds.Contains(scene.Id),
+                usesSharedReferenceImage: usesSharedReferenceImage))
             .ToList();
         var decision = RVideoRules.Evaluate(setting.ExecutionMode, sceneStates, !string.IsNullOrWhiteSpace(project.FinalVideoUrl));
         var settingsRepo = new RVideoJobSettingsRepository(factory, tenant, catalog);
@@ -108,10 +110,12 @@ public sealed class RVideoLifecycleWorker : BackgroundService
         await rvideoJobs.SyncLifecycleAsync(project.Id, decision.Stage, project.Status, ct);
 
         var userId = project.UserId ?? Guid.Empty;
-        var imageSceneIds = sceneStates
-            .Where(RVideoRules.NeedsImageWork)
-            .Select(x => x.SceneId)
-            .ToArray();
+        var imageSceneIds = usesSharedReferenceImage
+            ? Array.Empty<long>()
+            : sceneStates
+                .Where(RVideoRules.NeedsImageWork)
+                .Select(x => x.SceneId)
+                .ToArray();
         if (!sceneStates.Any(x => x.ImageFailedTerminal && !x.ImageRetryRequested)
             && imageSceneIds.Length > 0)
         {
@@ -305,7 +309,7 @@ public sealed class RVideoLifecycleWorker : BackgroundService
         var rows = await conn.QueryAsync<RVideoJobSettingsDto>(
             """
             SELECT project_id AS ProjectId, execution_mode AS ExecutionMode, current_stage AS CurrentStage,
-                   skip_character AS SkipCharacter, character_mode AS CharacterMode, selected_character_id AS SelectedCharacterId,
+                   skip_character AS SkipCharacter, use_reference_image_for_all_scenes AS UseReferenceImageForAllScenes, character_mode AS CharacterMode, selected_character_id AS SelectedCharacterId,
                    character_snapshot_json::text AS CharacterSnapshotJson, voice_mode AS VoiceMode,
                    voice_catalog_code AS VoiceCatalogCode, voice_snapshot_json::text AS VoiceSnapshotJson,
                    default_tts_rate AS DefaultTtsRate, music_catalog_code AS MusicCatalogCode,

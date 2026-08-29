@@ -119,10 +119,11 @@ public sealed class RVideoJobService : IRVideoJobService
         await conn.ExecuteAsync("UPDATE render.render_jobs SET input_json=jsonb_set(input_json,'{projectId}',to_jsonb(@projectId::text),true),updated_at=now() WHERE id=@jobId;", new { projectId, jobId }, tx);
         await conn.ExecuteAsync("""
             INSERT INTO video_render.rvideo_job_settings
-                (project_id,tenant_id,execution_mode,current_stage,skip_character,character_mode,selected_character_id,
+                (project_id,tenant_id,execution_mode,current_stage,skip_character,use_reference_image_for_all_scenes,character_mode,selected_character_id,
                  character_snapshot_json,voice_mode,voice_catalog_code,voice_snapshot_json,default_tts_rate,music_catalog_code,music_snapshot_json,music_volume,created_at,updated_at)
-            VALUES (@projectId,@tenant,@executionMode,'INFO',@skip,@characterMode,@selected,CAST(@character AS jsonb),@voice,@voiceCode,CAST(@voiceSnapshot AS jsonb),@rate,@musicCode,CAST(@musicSnapshot AS jsonb),@volume,now(),now());
+            VALUES (@projectId,@tenant,@executionMode,'INFO',@skip,@useReferenceImageForAllScenes,@characterMode,@selected,CAST(@character AS jsonb),@voice,@voiceCode,CAST(@voiceSnapshot AS jsonb),@rate,@musicCode,CAST(@musicSnapshot AS jsonb),@volume,now(),now());
             """, new { projectId, tenant = _tenant.TenantId, executionMode = request.Settings.ExecutionMode, skip = request.Settings.SkipCharacter,
+                useReferenceImageForAllScenes = request.Settings.UseReferenceImageForAllScenes,
                 characterMode = request.Settings.CharacterMode, selected = request.Settings.SelectedCharacterId,
                 character = JsonSerializer.Serialize(request.Settings.CharacterSnapshot ?? new { }, JsonOptions), voice = request.Settings.VoiceMode,
                 voiceCode = request.Settings.VoiceCatalogCode, voiceSnapshot = JsonSerializer.Serialize(request.Settings.VoiceSnapshot ?? new { }, JsonOptions),

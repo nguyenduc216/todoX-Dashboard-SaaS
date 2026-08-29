@@ -11,6 +11,9 @@ public sealed class SceneVideoRenderInput
     public long[] SceneIds { get; set; } = Array.Empty<long>();
     public string AspectRatio { get; set; } = "9:16";
     public string Resolution { get; set; } = "720P";
+    public bool UseSharedReferenceImage { get; set; }
+    public string? SharedReferenceImageUrl { get; set; }
+    public string? SharedReferenceImageObjectKey { get; set; }
     public Guid? UserId { get; set; }
     public Guid? CustomerId { get; set; }
     public AiBillingTrustedPayerContext? TrustedPayerContext { get; set; }
@@ -182,8 +185,22 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
             return false;
         }
 
-        var selectedImage = await _versions.GetSelectedImageVersionAsync(scene.Id, ct);
-        if (selectedImage is null || selectedImage.Id == Guid.Empty)
+        var settings = await _settings.GetAsync(project.Id, ct);
+        if (settings is null)
+        {
+            return false;
+        }
+
+        var selectedImage = input.UseSharedReferenceImage
+            ? null
+            : await _versions.GetSelectedImageVersionAsync(scene.Id, ct);
+        var reference = input.UseSharedReferenceImage
+            ? RVideoSceneImageReferenceSelection.Resolve(settings)
+            : null;
+        var sourceImageUrl = input.UseSharedReferenceImage ? reference?.Url : selectedImage?.PublicUrl;
+        var sourceImageObjectKey = input.UseSharedReferenceImage ? reference?.ObjectKey : selectedImage?.StorageKey;
+        var sourceImageVersionId = input.UseSharedReferenceImage ? null : selectedImage?.Id;
+        if (string.IsNullOrWhiteSpace(sourceImageUrl) && string.IsNullOrWhiteSpace(sourceImageObjectKey))
         {
             await MarkSceneValidationFailedAsync(project.Id, scene, new VideoPromptValidationResult(
                 false,
@@ -192,7 +209,9 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
                 VideoPromptValidator.CountUnicodeScalars(scene.VideoPrompt?.Trim() ?? string.Empty),
                 VideoPromptValidator.ResolveMaxPromptCharacters(route.ModelName, route.CapabilityConfigJson),
                 "scene_source_image_required",
-                $"Scene {scene.SceneIndex:00}: cần ảnh nguồn đã chọn trước khi render video."), ct);
+                input.UseSharedReferenceImage
+                    ? RVideoEffectiveSceneImageSourceResolver.MissingSharedReferenceMessage
+                    : $"Scene {scene.SceneIndex:00}: cần ảnh nguồn đã chọn trước khi render video."), ct);
             return false;
         }
 
@@ -209,20 +228,6 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
             return false;
         }
 
-        var sourceImageUrl = selectedImage.PublicUrl;
-        if (string.IsNullOrWhiteSpace(sourceImageUrl))
-        {
-            var imageValidation = new VideoPromptValidationResult(
-                false,
-                validation.ModelName,
-                validation.TrimmedPrompt,
-                validation.ActualCharacterCount,
-                validation.MaxCharacterCount,
-                "scene_source_image_required",
-                $"Scene {scene.SceneIndex:00}: cần ảnh nguồn đã chọn trước khi render video.");
-            await MarkSceneValidationFailedAsync(project.Id, scene, imageValidation, ct);
-            return false;
-        }
         var resolvedPrice = _pricing.Resolve(
             new ProviderOptionDto
             {
@@ -273,9 +278,10 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
             UserId = input.UserId,
             CustomerId = input.CustomerId,
             TrustedPayerContext = input.TrustedPayerContext,
-            SelectedSourceImageVersionId = selectedImage.Id,
+            UseSharedReferenceImage = input.UseSharedReferenceImage,
+            SelectedSourceImageVersionId = sourceImageVersionId,
             SourceImageUrl = sourceImageUrl,
-            SourceImageObjectKey = selectedImage.StorageKey,
+            SourceImageObjectKey = sourceImageObjectKey,
             ImagePrompt = scene.ImagePrompt,
             VideoPrompt = validation.TrimmedPrompt,
             Voice = voiceMode == RVideoVoiceModes.Native ? voiceText : null,
@@ -329,7 +335,8 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
                 input.Resolution,
                 route.ProviderCode,
                 route.ModelName,
-                sourceImageVersionId = selectedImage?.Id
+                sourceImageVersionId,
+                useSharedReferenceImage = input.UseSharedReferenceImage
             }, ct);
 
         return true;

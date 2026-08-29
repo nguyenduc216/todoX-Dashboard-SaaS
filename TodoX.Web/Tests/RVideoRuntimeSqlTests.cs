@@ -599,6 +599,18 @@ public sealed class RVideoRuntimeSqlTests
         Assert.Contains("pending_reconciliation_at = NULL", billingCompletion);
     }
 
+    [Fact]
+    public void ManualRVideoReferenceImageSqlAddsDurableBooleanSettingColumn()
+    {
+        var sql = File.ReadAllText(
+            Path.Combine(RepoRoot, "database", "manual", "rvideo", "20260829_add_rvideo_reference_image_setting.sql"),
+            Encoding.UTF8);
+
+        Assert.Contains("ADD COLUMN IF NOT EXISTS use_reference_image_for_all_scenes boolean NOT NULL DEFAULT false", sql);
+        Assert.DoesNotContain("DROP TABLE", sql, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("DELETE FROM", sql, StringComparison.OrdinalIgnoreCase);
+    }
+
     private static string RepoRoot => Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
 
     private static string ReadRepoFile(params string[] parts)

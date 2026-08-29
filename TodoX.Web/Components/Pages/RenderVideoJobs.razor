@@ -240,6 +240,7 @@ else
                                                 <MudItem xs="12" sm="4"><MudNumericField T="decimal" Label="Tốc độ nói mặc định" @bind-Value="_defaultTtsRate" Min="0.1m" Max="4m" Step="0.05m" Variant="Variant.Outlined" /></MudItem>
                                                 <MudItem xs="12" sm="6"><MudNumericField T="decimal" Label="Âm lượng nhạc" @bind-Value="_musicVolume" Min="0m" Max="1m" Step="0.05m" Variant="Variant.Outlined" /></MudItem>
                                                 <MudItem xs="12" sm="6"><MudCheckBox @bind-Value="_thinkScenes" Label="Suy nghĩ kịch bản" /></MudItem>
+                                                <MudItem xs="12" sm="6"><MudCheckBox @bind-Value="_useReferenceImageForAllScenes" Label="Giữ nguyên hình ảnh tham khảo cho mọi scene" /></MudItem>
                                             </MudGrid>
                                             <MudDivider Class="my-3" />
                                             <MudText Typo="Typo.subtitle2">Chế độ xử lý</MudText>
@@ -305,7 +306,7 @@ else
                                 <MudChip T="string" Color="Color.Warning" Icon="@Icons.Material.Filled.HourglassBottom">Đang tạo ảnh</MudChip>
                             }
                             <MudTooltip Text="Tạo ảnh tĩnh cho các scene còn thiếu hoặc lỗi">
-                                <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.AddPhotoAlternate" OnClick="RenderMissingSceneImagesAsync" Disabled="@_batchActive">Tạo ảnh còn thiếu</MudButton>
+                                <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.AddPhotoAlternate" OnClick="RenderMissingSceneImagesAsync" Disabled="@(_batchActive || _useReferenceImageForAllScenes)">Tạo ảnh còn thiếu</MudButton>
                             </MudTooltip>
                             <MudTooltip Text="Thêm scene thủ công">
                                 <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="AddSceneAsync" Disabled="@_busy">Thêm scene</MudButton>
@@ -336,7 +337,7 @@ else
                                             @RenderSceneStatusBadge(scene, "image")
                                             <MudMenu Dense="true" Icon="@Icons.Material.Filled.MoreVert">
                                                 <MudMenuItem Icon="@Icons.Material.Filled.Save" Disabled="@_busy" OnClick="@(async () => await SaveSceneAsync(scene))">Lưu scene</MudMenuItem>
-                                                <MudMenuItem Icon="@Icons.Material.Filled.AddPhotoAlternate" Disabled="@IsSceneRendering(scene)" OnClick="@(() => RerenderSceneImageAsync(scene))">@(string.IsNullOrWhiteSpace(ResolveDraftImageUrl(scene, draft)) ? "Tạo ảnh" : "Render lại ảnh")</MudMenuItem>
+                                                <MudMenuItem Icon="@Icons.Material.Filled.AddPhotoAlternate" Disabled="@(_useReferenceImageForAllScenes || IsSceneRendering(scene))" OnClick="@(() => RerenderSceneImageAsync(scene))">@(string.IsNullOrWhiteSpace(ResolveDraftImageUrl(scene, draft)) ? "Tạo ảnh" : "Render lại ảnh")</MudMenuItem>
                                                 <MudMenuItem Icon="@Icons.Material.Filled.Edit" OnClick="@(() => EditScenePromptsAsync(scene))">Chỉnh sửa prompt ảnh</MudMenuItem>
                                                 <MudMenuItem Icon="@Icons.Material.Filled.History" OnClick="@(() => OpenImageHistoryAsync(scene))">Lịch sử ảnh</MudMenuItem>
                                                 <MudDivider />
@@ -362,6 +363,10 @@ else
                                                                   OnRetry="@(() => RerenderSceneImageAsync(scene))"
                                                                   OnClick="@(() => OpenScenePreview(scene))" />
                                                 <MudText Typo="Typo.caption" Color="Color.Secondary">@ProjectAspectRatio · @ProjectResolution</MudText>
+                                                @if (_useReferenceImageForAllScenes)
+                                                {
+                                                    <MudText Typo="Typo.caption" Color="Color.Info">Ảnh tham khảo dùng chung</MudText>
+                                                }
                                                 <div class="scene-media-actions">
                                                 <MudStack Row="true" Spacing="1" Class="flex-wrap gap-1">
                                                     <MudTooltip Text="Xem prompt ảnh"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Image" OnClick="@(() => OpenScenePrompt(scene, ScenePromptKind.Image))" aria-label="Xem prompt ảnh" /></MudTooltip>
@@ -469,6 +474,7 @@ else
                                     <MudText Typo="Typo.body2">Music: @(_musicMode == RVideoMusicModes.None ? "Không dùng" : _musicMode)</MudText>
                                     <MudStack Row="true" Spacing="1" Class="flex-wrap gap-1 pt-2">
                                         <MudButton Size="Size.Small" Color="Color.Primary" Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.Download" Disabled="@string.IsNullOrWhiteSpace(_project.FinalVideoUrl)" OnClick="@(() => OpenUrl(_project.FinalVideoUrl!))">Tải video</MudButton>
+                                        <MudButton Size="Size.Small" Color="Color.Success" Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.PlayArrow" Disabled="@(!CanMerge || _busy || IsFinalMergeActive)" OnClick="EnqueueMergeAsync">@(IsFinalMergeActive ? "Đang hoàn tất..." : "Hoàn tất video")</MudButton>
                                         <MudButton Size="Size.Small" Color="Color.Info" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.ViewCarousel" OnClick="@(() => _tabIndex = 1)">Xem lại scene</MudButton>
                                         <MudButton Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add" OnClick="NewProjectAsync">Tạo project mới</MudButton>
                                         <MudButton Size="Size.Small" Color="Color.Default" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.ContentCopy" OnClick="@(() => CopyJobIdAsync())">Sao chép Job ID</MudButton>
@@ -597,6 +603,9 @@ else
     private string _musicMode = RVideoMusicModes.None;
     private string? _musicCatalogCode;
     private decimal _musicVolume = 0.8m;
+    private bool _useReferenceImageForAllScenes;
+    private string? _sharedReferenceImageUrl;
+    private string? _sharedReferenceImageObjectKey;
     private string _prompt = string.Empty;
     private string _characterPrompt = string.Empty;
     private TodoXVideoPromptParseResult _promptParseResult = new();
@@ -662,6 +671,13 @@ else
     private const string Resolution4K = "4K";
 
     private bool CanMerge => _project is not null && _project.Scenes.Count > 0 && _project.Scenes.All(x => ResolveVideoSceneStatus(x) == VideoSceneStatuses.VideoReady);
+    private bool HasSharedReferenceImage => _useReferenceImageForAllScenes && (!string.IsNullOrWhiteSpace(_sharedReferenceImageUrl) || !string.IsNullOrWhiteSpace(_sharedReferenceImageObjectKey));
+    private bool IsFinalMergeActive
+        => _project is not null
+           && _jobs.Any(job =>
+               string.Equals(job.JobType, TodoX.Web.Services.Render.RenderJobTypes.MergeProjectVideo, StringComparison.OrdinalIgnoreCase)
+               && string.Equals(job.LogCode, TodoX.Web.Services.VideoRender.RVideoProjectFinalizationService.BuildMergeLogicalRequestKey(_project.Id), StringComparison.OrdinalIgnoreCase)
+               && job.Status is RenderJobStatuses.Queued or RenderJobStatuses.Preparing or RenderJobStatuses.Rendering or RenderJobStatuses.PostProcessing);
 
     private string BuildLogCode() => _projectId is null ? string.Empty : $"video-{_projectId.Value}";
 
@@ -1421,6 +1437,11 @@ else
 
     private string? ResolveDraftImageUrl(VideoProjectSceneDto scene, SceneEditorState draft)
     {
+        if (_useReferenceImageForAllScenes && !string.IsNullOrWhiteSpace(_sharedReferenceImageUrl))
+        {
+            return _sharedReferenceImageUrl;
+        }
+
         if (draft.SelectedImageVersionId is Guid imageVersionId
             && _imageVersions.TryGetValue(scene.Id, out var versions)
             && versions.FirstOrDefault(x => x.Id == imageVersionId) is { } version)
@@ -1433,6 +1454,11 @@ else
 
     private string? ResolveDraftImagePath(VideoProjectSceneDto scene, SceneEditorState draft)
     {
+        if (_useReferenceImageForAllScenes && !string.IsNullOrWhiteSpace(_sharedReferenceImageObjectKey))
+        {
+            return _sharedReferenceImageObjectKey;
+        }
+
         if (draft.SelectedImageVersionId is Guid imageVersionId
             && _imageVersions.TryGetValue(scene.Id, out var versions)
             && versions.FirstOrDefault(x => x.Id == imageVersionId) is { } version)
@@ -1607,7 +1633,7 @@ else
         };
 
     private bool CanCreateSceneVideo(VideoProjectSceneDto scene, SceneEditorState draft)
-        => !string.IsNullOrWhiteSpace(ResolveDraftImageUrl(scene, draft))
+        => (!string.IsNullOrWhiteSpace(ResolveDraftImageUrl(scene, draft)) || (_useReferenceImageForAllScenes && HasSharedReferenceImage))
            && !string.IsNullOrWhiteSpace(draft.MotionPrompt)
            && HasProjectAspectRatio
            && HasProjectResolution
@@ -1617,7 +1643,7 @@ else
            && IsSceneVideoPromptValid(scene, draft);
 
     private string SceneVideoDisabledReason(VideoProjectSceneDto scene, SceneEditorState draft)
-        => string.IsNullOrWhiteSpace(ResolveDraftImageUrl(scene, draft))
+        => string.IsNullOrWhiteSpace(ResolveDraftImageUrl(scene, draft)) && !(_useReferenceImageForAllScenes && HasSharedReferenceImage)
             ? "Cần chọn/render ảnh trước"
             : string.IsNullOrWhiteSpace(draft.MotionPrompt)
                 ? "Cần nhập prompt video"
@@ -2047,7 +2073,18 @@ else
 
         try
         {
-            _jobs = (await RenderJobs.ListByLogCodeAsync(logCode)).ToList();
+            var jobs = new List<RenderJobDto>(await RenderJobs.ListByLogCodeAsync(logCode));
+            if (_project is not null)
+            {
+                var mergeKey = TodoX.Web.Services.VideoRender.RVideoProjectFinalizationService.BuildMergeLogicalRequestKey(_project.Id);
+                jobs.AddRange(await RenderJobs.ListByLogCodeAsync(mergeKey));
+            }
+
+            _jobs = jobs
+                .GroupBy(job => job.Id)
+                .Select(group => group.First())
+                .OrderByDescending(job => job.CreatedAt)
+                .ToList();
             // Recover batch-active state after a refresh/navigation: the server job keeps running even
             // if this circuit was recreated, so re-derive the shimmer state from the live job list.
             _batchActive = _jobs.Any(j =>
@@ -2354,6 +2391,7 @@ else
         {
             ExecutionMode = _executionMode,
             SkipCharacter = _skipCharacter,
+            UseReferenceImageForAllScenes = _useReferenceImageForAllScenes,
             CharacterMode = _skipCharacter ? RVideoCharacterModes.None : _characterMode,
             SelectedCharacterId = _skipCharacter ? null : _selectedCharacterId,
             CharacterSnapshot = _skipCharacter
@@ -2388,6 +2426,26 @@ else
             var settings = await RVideoSettings.GetAsync(projectId);
             _executionMode = RVideoRules.NormalizeExecutionMode(settings?.ExecutionMode);
             _skipCharacter = settings?.SkipCharacter ?? true;
+            _useReferenceImageForAllScenes = settings?.UseReferenceImageForAllScenes ?? false;
+            if (_useReferenceImageForAllScenes && settings is not null)
+            {
+                try
+                {
+                    var reference = TodoX.Web.Services.Render.RVideoSceneImageReferenceSelection.Resolve(settings);
+                    _sharedReferenceImageUrl = reference.Url;
+                    _sharedReferenceImageObjectKey = reference.ObjectKey;
+                }
+                catch
+                {
+                    _sharedReferenceImageUrl = null;
+                    _sharedReferenceImageObjectKey = null;
+                }
+            }
+            else
+            {
+                _sharedReferenceImageUrl = null;
+                _sharedReferenceImageObjectKey = null;
+            }
             _characterMode = _skipCharacter ? RVideoCharacterModes.None : RVideoRules.NormalizeCharacterMode(settings?.CharacterMode);
             _selectedCharacterId = _skipCharacter ? null : settings?.SelectedCharacterId;
             _uploadedCharacter = null;
@@ -3182,6 +3240,11 @@ else
         if (_sceneRerendering.Contains(scene.Id))
         {
             return RenderSceneImageVisualState.Rendering;
+        }
+
+        if (_useReferenceImageForAllScenes && !string.IsNullOrWhiteSpace(_sharedReferenceImageUrl))
+        {
+            return RenderSceneImageVisualState.Ready;
         }
 
         // A scene that already has a valid image is Ready regardless of stale events.

@@ -255,6 +255,18 @@ public sealed class RVideoFoundationTests
     }
 
     [Fact]
+    public void SharedReferenceImageCountsAsImageReady()
+    {
+        var state = RVideoSceneLifecycleClassifier.Classify(
+            new VideoProjectSceneDto { Id = 99, SceneIndex = 1, Status = VideoSceneStatuses.Draft },
+            usesSharedReferenceImage: true);
+
+        Assert.True(state.HasImage);
+        Assert.True(state.UsesSharedReferenceImage);
+        Assert.False(RVideoRules.NeedsImageWork(state));
+    }
+
+    [Fact]
     public void StageAwareManualLifecycleDoesNotQueueVideoOrFinalize()
     {
         var decision = RVideoRules.Evaluate(RVideoExecutionModes.Manual,
@@ -294,6 +306,51 @@ public sealed class RVideoFoundationTests
         Assert.Equal(RVideoExecutionModes.Manual, settings.ExecutionMode);
         Assert.Equal(RVideoVoiceModes.None, settings.VoiceMode);
         Assert.Equal(1.0m, settings.DefaultTtsRate);
+        Assert.False(settings.UseReferenceImageForAllScenes);
+    }
+
+    [Fact]
+    public void ToRequestCarriesSharedReferenceImageSetting()
+    {
+        var request = RVideoRules.ToRequest(new RVideoJobSettingsDto
+        {
+            UseReferenceImageForAllScenes = true
+        });
+
+        Assert.True(request.UseReferenceImageForAllScenes);
+    }
+
+    [Fact]
+    public void SharedReferenceImageResolverPrefersSharedReferenceSource()
+    {
+        var settings = new RVideoJobSettingsDto
+        {
+            UseReferenceImageForAllScenes = true,
+            SkipCharacter = false,
+            CharacterMode = RVideoCharacterModes.Library,
+            SelectedCharacterId = 42,
+            CharacterSnapshotJson = """
+                {
+                  "source": "LIBRARY",
+                  "id": 42,
+                  "masterImageUrl": "https://example.invalid/reference.jpg",
+                  "storageKey": "ref-key",
+                  "normalizedPrompt": "consistent reference"
+                }
+                """
+        };
+
+        var source = RVideoEffectiveSceneImageSourceResolver.Resolve(
+            new VideoProjectSceneDto { Id = 1, SceneIndex = 1, Status = VideoSceneStatuses.Draft },
+            settings,
+            selectedImageVersion: null);
+
+        Assert.True(source.UsesSharedReferenceImage);
+        Assert.Equal("https://example.invalid/reference.jpg", source.SourceImageUrl);
+        Assert.Equal("ref-key", source.SourceImageObjectKey);
+        Assert.Null(source.SelectedImageVersionId);
+        Assert.True(source.HasUsableInput);
+        Assert.Equal("Ảnh tham khảo dùng chung", source.SourceLabel);
     }
 
     [Fact]
@@ -623,8 +680,9 @@ public sealed class RVideoFoundationTests
             (int)sceneId,
             8,
             hasImage,
+            false,
             hasVideo,
-            ImageAttemptActive: false,
+            false,
             imageFailed,
             videoAttemptActive,
             videoFailed,

@@ -54,18 +54,19 @@ public sealed class RVideoJobSettingsRepository
         var upsertedProjectId = await conn.QuerySingleOrDefaultAsync<long?>(
             """
             INSERT INTO video_render.rvideo_job_settings
-                (project_id, tenant_id, execution_mode, current_stage, skip_character, character_mode,
+                (project_id, tenant_id, execution_mode, current_stage, skip_character, use_reference_image_for_all_scenes, character_mode,
                  selected_character_id, character_snapshot_json, voice_mode, voice_catalog_code,
                  voice_snapshot_json, default_tts_rate, music_catalog_code, music_snapshot_json, music_volume,
                  created_at, updated_at)
             VALUES
-                (@projectId, @tenant, @executionMode, 'INFO', @skipCharacter, @characterMode,
+                (@projectId, @tenant, @executionMode, 'INFO', @skipCharacter, @useReferenceImageForAllScenes, @characterMode,
                  @selectedCharacterId, CAST(@characterSnapshot AS jsonb), @voiceMode, @voiceCatalogCode,
                  CAST(@voiceSnapshot AS jsonb), @defaultTtsRate, @musicCatalogCode, CAST(@musicSnapshot AS jsonb), @musicVolume,
                  now(), now())
             ON CONFLICT (project_id) DO UPDATE SET
                 execution_mode=EXCLUDED.execution_mode,
                 skip_character=EXCLUDED.skip_character,
+                use_reference_image_for_all_scenes=EXCLUDED.use_reference_image_for_all_scenes,
                 character_mode=EXCLUDED.character_mode,
                 selected_character_id=EXCLUDED.selected_character_id,
                 character_snapshot_json=EXCLUDED.character_snapshot_json,
@@ -86,6 +87,7 @@ public sealed class RVideoJobSettingsRepository
                 tenant = _tenant.TenantId,
                 request.ExecutionMode,
                 request.SkipCharacter,
+                request.UseReferenceImageForAllScenes,
                 request.CharacterMode,
                 request.SelectedCharacterId,
                 characterSnapshot = JsonSerializer.Serialize(request.CharacterSnapshot ?? new { }, JsonOptions),
@@ -117,7 +119,8 @@ public sealed class RVideoJobSettingsRepository
 
     private const string SelectSql = """
         SELECT project_id AS ProjectId, execution_mode AS ExecutionMode, current_stage AS CurrentStage,
-               skip_character AS SkipCharacter, character_mode AS CharacterMode, selected_character_id AS SelectedCharacterId,
+               skip_character AS SkipCharacter, use_reference_image_for_all_scenes AS UseReferenceImageForAllScenes,
+               character_mode AS CharacterMode, selected_character_id AS SelectedCharacterId,
                character_snapshot_json::text AS CharacterSnapshotJson, voice_mode AS VoiceMode,
                voice_catalog_code AS VoiceCatalogCode, voice_snapshot_json::text AS VoiceSnapshotJson,
                default_tts_rate AS DefaultTtsRate, music_catalog_code AS MusicCatalogCode,

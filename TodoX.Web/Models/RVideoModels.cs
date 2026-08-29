@@ -45,6 +45,7 @@ public sealed class RVideoJobSettingsDto
     public string ExecutionMode { get; set; } = RVideoExecutionModes.Manual;
     public string CurrentStage { get; set; } = RVideoStages.Info;
     public bool SkipCharacter { get; set; }
+    public bool UseReferenceImageForAllScenes { get; set; }
     public string CharacterMode { get; set; } = "NONE";
     public long? SelectedCharacterId { get; set; }
     public string? CharacterSnapshotJson { get; set; }
@@ -63,6 +64,7 @@ public sealed class RVideoJobSettingsRequest
 {
     public string ExecutionMode { get; set; } = RVideoExecutionModes.Manual;
     public bool SkipCharacter { get; set; }
+    public bool UseReferenceImageForAllScenes { get; set; }
     public string CharacterMode { get; set; } = "NONE";
     public long? SelectedCharacterId { get; set; }
     public object? CharacterSnapshot { get; set; }
@@ -115,6 +117,7 @@ public sealed record RVideoSceneLifecycleState(
     int SceneIndex,
     int DurationSeconds,
     bool HasImage,
+    bool UsesSharedReferenceImage,
     bool HasVideo,
     bool ImageAttemptActive,
     bool ImageFailedTerminal,
@@ -136,14 +139,16 @@ public static class RVideoSceneLifecycleClassifier
         IReadOnlyCollection<VideoProjectEventDto>? events = null,
         bool imageAttemptActive = false,
         bool videoAttemptActive = false,
-        bool imageRetryRequested = false)
+        bool imageRetryRequested = false,
+        bool usesSharedReferenceImage = false)
     {
         var status = scene.Status?.Trim().ToLowerInvariant();
         var latestFailure = FindLatestFailure(scene.Id, events);
         var hasVideo = !string.IsNullOrWhiteSpace(scene.SceneVideoUrl)
                        || !string.IsNullOrWhiteSpace(scene.SceneVideoPath)
                        || status == VideoSceneStatuses.VideoReady;
-        var hasImage = !string.IsNullOrWhiteSpace(scene.StaticImageUrl)
+        var hasImage = usesSharedReferenceImage
+                       || !string.IsNullOrWhiteSpace(scene.StaticImageUrl)
                        || !string.IsNullOrWhiteSpace(scene.StaticImagePath)
                        || status is VideoSceneStatuses.ImageReady
                            or VideoSceneStatuses.VideoQueued
@@ -164,6 +169,7 @@ public static class RVideoSceneLifecycleClassifier
             scene.SceneIndex,
             scene.DurationSeconds,
             hasImage,
+            usesSharedReferenceImage,
             hasVideo,
             imageAttemptActive,
             imageFailed,
@@ -400,7 +406,8 @@ public static class RVideoRules
         => string.Equals(sceneStatus, VideoSceneStatuses.Draft, StringComparison.OrdinalIgnoreCase);
 
     public static bool NeedsImageWork(RVideoSceneLifecycleState scene)
-        => !scene.HasImage
+        => !scene.UsesSharedReferenceImage
+           && !scene.HasImage
            && !scene.HasVideo
            && !scene.ImageAttemptActive
            && !scene.VideoAttemptActive
@@ -438,6 +445,7 @@ public static class RVideoRules
             ExecutionMode = settings.ExecutionMode,
             SkipCharacter = settings.SkipCharacter,
             CharacterMode = settings.CharacterMode,
+            UseReferenceImageForAllScenes = settings.UseReferenceImageForAllScenes,
             SelectedCharacterId = settings.SelectedCharacterId,
             CharacterSnapshot = ParseSnapshot(settings.CharacterSnapshotJson),
             VoiceMode = settings.VoiceMode,
