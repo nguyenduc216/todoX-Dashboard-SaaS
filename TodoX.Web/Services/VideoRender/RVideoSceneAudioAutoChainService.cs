@@ -68,17 +68,28 @@ public sealed class RVideoSceneAudioAutoChainService : IRVideoSceneAudioAutoChai
             return false;
         }
 
-        if (await _versions.HasActiveAudioVersionAsync(sceneId, ct))
+        var selectedVideo = await _versions.GetSelectedVideoVersionAsync(sceneId, ct);
+        if (selectedVideo is null || !string.Equals(selectedVideo.Status, "completed", StringComparison.OrdinalIgnoreCase))
         {
             await _repo.AddProjectEventAsync(projectId, "SCENE_AUDIO_AUTO_ENQUEUE_SKIPPED", "info",
-                $"Scene {scene.SceneIndex} voice auto enqueue skipped because an audio attempt is already active.",
-                new { projectId, sceneId, scene.SceneIndex, triggerSource }, ct);
+                $"Scene {scene.SceneIndex} voice auto enqueue skipped because the selected scene video is not completed.",
+                new { projectId, sceneId, scene.SceneIndex, triggerSource, reason = "selected_video_not_completed" }, ct);
             return false;
         }
 
         var selected = await _versions.GetSelectedAudioVersionAsync(sceneId, ct);
         if (selected is not null && string.Equals(selected.Status, "completed", StringComparison.OrdinalIgnoreCase))
         {
+            return false;
+        }
+
+        var logicalRequestId = BuildLogicalRequestKey(projectId, sceneId);
+        var existing = await _versions.GetSceneAudioVersionByLogicalRequestIdAsync(logicalRequestId, ct);
+        if (existing is null && await _versions.HasActiveAudioVersionAsync(sceneId, ct))
+        {
+            await _repo.AddProjectEventAsync(projectId, "SCENE_AUDIO_AUTO_ENQUEUE_SKIPPED", "info",
+                $"Scene {scene.SceneIndex} voice auto enqueue skipped because another audio attempt is already active.",
+                new { projectId, sceneId, scene.SceneIndex, triggerSource, logicalRequestId }, ct);
             return false;
         }
 
@@ -94,9 +105,8 @@ public sealed class RVideoSceneAudioAutoChainService : IRVideoSceneAudioAutoChai
         var ttsRate = ResolveTtsRate(metadata, settings);
         ValidateTtsRate(voice, ttsRate);
 
-        var logicalRequestId = BuildLogicalRequestKey(projectId, sceneId);
-        var operationId = Guid.NewGuid();
-        var version = await _versions.CreateQueuedSceneAudioVersionAsync(new SceneAudioVersionCreateRequest(
+        var operationId = existing?.RenderJobId ?? Guid.NewGuid();
+        var version = existing ?? await _versions.CreateQueuedSceneAudioVersionAsync(new SceneAudioVersionCreateRequest(
             project.Id,
             scene.Id,
             project.UserId,

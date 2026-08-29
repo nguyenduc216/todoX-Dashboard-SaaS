@@ -72,14 +72,26 @@ public sealed class RVideoProjectFinalizationService : IRVideoProjectFinalizatio
             return NotEnqueued("already_final", logicalRequestId);
         }
 
+        var readiness = new List<RVideoSceneReadiness>(project.Scenes.Count);
         foreach (var scene in project.Scenes)
         {
             var selectedVideo = await _versions.GetSelectedVideoVersionAsync(scene.Id, ct);
             var selectedAudio = await _versions.GetSelectedAudioVersionAsync(scene.Id, ct);
-            if (!RVideoRules.IsSceneFinalReady(scene, settings, selectedVideo, selectedAudio))
-            {
-                return NotEnqueued("not_ready", logicalRequestId);
-            }
+            readiness.Add(RVideoRules.GetSceneReadiness(scene, settings, selectedVideo, selectedAudio));
+        }
+        var missing = readiness.Where(x => !x.VideoReady || (x.AudioRequired && (!x.AudioReady || !x.MuxReady))).ToList();
+        if (missing.Count > 0)
+        {
+            await _repo.AddProjectEventAsync(project.Id, "PROJECT_FINAL_MERGE_NOT_READY", "info",
+                "Final merge is waiting for scene readiness.",
+                new
+                {
+                    projectId = project.Id,
+                    voiceMode = RVideoRules.ResolveVoiceMode(settings),
+                    missingSceneIds = missing.Select(x => x.SceneId).ToArray(),
+                    reasons = missing
+                }, ct);
+            return NotEnqueued("not_ready", logicalRequestId);
         }
 
         var (job, alreadyActive) = await _jobs.EnqueueForLogCodeIfNoneActiveAsync(new RenderJobCreateModel

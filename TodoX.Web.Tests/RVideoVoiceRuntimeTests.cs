@@ -80,6 +80,38 @@ public sealed class RVideoVoiceRuntimeTests
     }
 
     [Fact]
+    public void SceneReadinessReportsAudioAndMuxGatesForLibraryVoice()
+    {
+        var audio = new SceneAudioVersionDto
+        {
+            Id = Guid.NewGuid(),
+            Status = "completed"
+        };
+        var video = new SceneVideoVersionDto
+        {
+            Id = Guid.NewGuid(),
+            Status = "completed"
+        };
+        var scene = new VideoProjectSceneDto
+        {
+            SceneIndex = 12,
+            SelectedAudioVersionId = audio.Id,
+            VoiceText = "Per-scene narration."
+        };
+        var readiness = RVideoRules.GetSceneReadiness(
+            scene,
+            new RVideoJobSettingsDto { VoiceMode = RVideoVoiceModes.Library },
+            video,
+            audio);
+
+        Assert.True(readiness.VideoReady);
+        Assert.True(readiness.AudioRequired);
+        Assert.True(readiness.AudioReady);
+        Assert.False(readiness.MuxReady);
+        Assert.Equal("scene video/audio mux linkage is missing", readiness.Reason);
+    }
+
+    [Fact]
     public void HydrationRulesDeriveOnlyCanonicalSceneVoiceAndPreserveUserText()
     {
         var scene = new VideoProjectSceneDto

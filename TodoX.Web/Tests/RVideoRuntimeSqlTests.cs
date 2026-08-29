@@ -336,7 +336,8 @@ public sealed class RVideoRuntimeSqlTests
         Assert.Contains("foreach (var scene in project.Scenes)", method);
         Assert.Contains("GetSelectedVideoVersionAsync(scene.Id, ct)", method);
         Assert.Contains("GetSelectedAudioVersionAsync(scene.Id, ct)", method);
-        Assert.Contains("!RVideoRules.IsSceneFinalReady(scene, settings, selectedVideo, selectedAudio)", method);
+        Assert.Contains("RVideoRules.GetSceneReadiness(scene, settings, selectedVideo, selectedAudio)", method);
+        Assert.Contains("missing.Count > 0", method);
         Assert.Contains("return NotEnqueued(\"not_ready\", logicalRequestId)", method);
         Assert.Contains("EnqueueForLogCodeIfNoneActiveAsync", method);
         Assert.Contains("JobType = RenderJobTypes.MergeProjectVideo", method);
@@ -373,7 +374,7 @@ public sealed class RVideoRuntimeSqlTests
 
         Assert.Contains("foreach (var scene in project.Scenes)", method);
         Assert.Contains("GetSelectedVideoVersionAsync(scene.Id, ct)", method);
-        Assert.Contains("!RVideoRules.IsSceneFinalReady(scene, settings, selectedVideo, selectedAudio)", method);
+        Assert.Contains("RVideoRules.GetSceneReadiness(scene, settings, selectedVideo, selectedAudio)", method);
         Assert.True(
             method.IndexOf("return NotEnqueued(\"not_ready\", logicalRequestId)", StringComparison.Ordinal)
             < method.IndexOf("EnqueueForLogCodeIfNoneActiveAsync", StringComparison.Ordinal));
@@ -442,20 +443,53 @@ public sealed class RVideoRuntimeSqlTests
         var source = ReadRepoFile("Services", "VideoRender", "VideoRenderMergeHandler.cs");
         var catchBlock = source[source.IndexOf("catch (Exception ex) when", StringComparison.Ordinal)..];
 
+        var retryGateIndex = catchBlock.IndexOf("if (job.AttemptCount < job.MaxAttempts)", StringComparison.Ordinal);
+        var retryProjectIndex = catchBlock.IndexOf("UpdateProjectAsync(project.Id, VideoProjectStatuses.Merging", StringComparison.Ordinal);
+        var retrySyncIndex = catchBlock.IndexOf("_rvideoJobs.SyncLifecycleAsync(project.Id, RVideoStages.Result, VideoProjectStatuses.Merging", StringComparison.Ordinal);
+        var retryEventIndex = catchBlock.IndexOf("PROJECT_MERGE_RETRYABLE_FAILED", StringComparison.Ordinal);
         var projectFailedIndex = catchBlock.IndexOf("UpdateProjectAsync(project.Id, VideoProjectStatuses.Failed", StringComparison.Ordinal);
         var syncFailedIndex = catchBlock.IndexOf("_rvideoJobs.SyncLifecycleAsync(project.Id, RVideoStages.Result, VideoProjectStatuses.Failed", StringComparison.Ordinal);
         var failedEventIndex = catchBlock.IndexOf("PROJECT_MERGE_FAILED", StringComparison.Ordinal);
-        var rethrowIndex = catchBlock.IndexOf("throw;", StringComparison.Ordinal);
+        var rethrowIndex = catchBlock.LastIndexOf("throw;", StringComparison.Ordinal);
         var state = TodoX.Web.Services.VideoRender.RVideoJobService.ResolveCoreLifecycleState(
             TodoX.Web.Models.RVideoStages.Result,
             TodoX.Web.Models.VideoProjectStatuses.Failed);
 
+        Assert.True(retryGateIndex >= 0);
+        Assert.True(retryProjectIndex > retryGateIndex);
+        Assert.True(retrySyncIndex > retryProjectIndex);
+        Assert.True(retryEventIndex > retrySyncIndex);
         Assert.True(projectFailedIndex >= 0);
         Assert.True(syncFailedIndex > projectFailedIndex);
         Assert.True(failedEventIndex > syncFailedIndex);
         Assert.True(rethrowIndex > failedEventIndex);
         Assert.Equal(TodoX.Web.Services.Render.RenderJobStatuses.Failed, state.Status);
         Assert.Equal(100, state.ProgressPercent);
+    }
+
+    [Fact]
+    public void SceneAudioAutoChainRequiresSelectedCompletedVideoAndLogicalRequestReuse()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "RVideoSceneAudioAutoChainService.cs");
+
+        Assert.Contains("GetSelectedVideoVersionAsync(sceneId, ct)", source);
+        Assert.Contains("selected_video_not_completed", source);
+        Assert.Contains("GetSceneAudioVersionByLogicalRequestIdAsync", source);
+        Assert.Contains("BuildLogicalRequestKey(projectId, sceneId)", source);
+        Assert.Contains("same request is already active", source);
+    }
+
+    [Fact]
+    public void SystemVersionEndpointSurfacesBuildStampAndWorkerState()
+    {
+        var program = ReadRepoFile("Program.cs");
+        var project = File.ReadAllText(Path.Combine(RepoRoot, "TodoX.Web", "TodoX.Web.csproj"), Encoding.UTF8);
+
+        Assert.Contains("app.MapGet(\"/system/version\"", program);
+        Assert.Contains("AssemblyInformationalVersionAttribute", program);
+        Assert.Contains("AssemblyMetadataAttribute", program);
+        Assert.Contains("BuildBranch", project);
+        Assert.Contains("BuildTimeUtc", project);
     }
 
     [Fact]

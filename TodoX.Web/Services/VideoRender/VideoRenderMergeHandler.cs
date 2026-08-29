@@ -154,6 +154,16 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
                 await _versions.FailFinalVideoVersionAsync(version.Id, ex.GetType().Name, ex.Message, ct);
             }
 
+            if (job.AttemptCount < job.MaxAttempts)
+            {
+                await _repo.UpdateProjectAsync(project.Id, VideoProjectStatuses.Merging, errorMessage: ex.Message, ct: ct);
+                await _rvideoJobs.SyncLifecycleAsync(project.Id, RVideoStages.Result, VideoProjectStatuses.Merging, ct);
+                await _repo.AddProjectEventAsync(project.Id, "PROJECT_MERGE_RETRYABLE_FAILED", "warning",
+                    "Final merge failed and will be retried without making the project terminal.",
+                    new { job.Id, job.AttemptCount, job.MaxAttempts, error = ex.Message }, ct);
+                throw;
+            }
+
             await _repo.UpdateProjectAsync(project.Id, VideoProjectStatuses.Failed, errorMessage: ex.Message, ct: ct);
             await _rvideoJobs.SyncLifecycleAsync(project.Id, RVideoStages.Result, VideoProjectStatuses.Failed, ct);
             await _repo.AddProjectEventAsync(project.Id, "PROJECT_MERGE_FAILED", "error", "Final video merge failed.", new { versionId = version?.Id, error = ex.Message }, ct);

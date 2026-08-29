@@ -37,7 +37,7 @@ public sealed class RVideoLifecycleWorker : BackgroundService
                 var tenant = scope.ServiceProvider.GetRequiredService<TenantContext>();
                 await tenant.EnsureLoadedAsync(stoppingToken);
                 var factory = scope.ServiceProvider.GetRequiredService<TodoXConnectionFactory>();
-        var settings = await ListAutoSettingsAsync(factory, tenant, stoppingToken);
+                var settings = await ListAutoSettingsAsync(factory, tenant, stoppingToken);
                 var repository = scope.ServiceProvider.GetRequiredService<VideoRenderRepository>();
                 var rvideoJobs = scope.ServiceProvider.GetRequiredService<IRVideoJobService>();
                 var jobs = scope.ServiceProvider.GetRequiredService<IRenderJobService>();
@@ -83,6 +83,9 @@ public sealed class RVideoLifecycleWorker : BackgroundService
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "RVVIDEO_AUTO_VALIDATION_FAILED projectId={ProjectId}", setting.ProjectId);
+            await repo.AddProjectEventAsync(setting.ProjectId, "RVIDEO_AUTO_VALIDATION_FAILED", "error",
+                "RVIDEO AUTO validation failed; automatic rendering is paused until configuration is corrected.",
+                new { projectId = setting.ProjectId, error = ex.Message, setting.VoiceCatalogCode, setting.MusicCatalogCode }, ct);
             return;
         }
 
@@ -101,13 +104,30 @@ public sealed class RVideoLifecycleWorker : BackgroundService
                 activeSceneIds.VideoSceneIds.Contains(scene.Id),
                 usesSharedReferenceImage: usesSharedReferenceImage))
             .ToList();
-        var decision = RVideoRules.Evaluate(setting.ExecutionMode, sceneStates, !string.IsNullOrWhiteSpace(project.FinalVideoUrl));
+        var libraryAudioPending = false;
+        if (RVideoRules.ResolveVoiceMode(setting) == RVideoVoiceModes.Library)
+        {
+            foreach (var scene in project.Scenes.Where(scene => RVideoRules.RequiresExternalVoice(scene, setting)))
+            {
+                var selectedVideo = await versions.GetSelectedVideoVersionAsync(scene.Id, ct);
+                var selectedAudio = await versions.GetSelectedAudioVersionAsync(scene.Id, ct);
+                if (!RVideoRules.IsSceneFinalReady(scene, setting, selectedVideo, selectedAudio))
+                {
+                    libraryAudioPending = true;
+                    break;
+                }
+            }
+        }
+        var decision = RVideoRules.Evaluate(setting.ExecutionMode, sceneStates, !string.IsNullOrWhiteSpace(project.FinalVideoUrl), libraryAudioPending);
         var settingsRepo = new RVideoJobSettingsRepository(factory, tenant, catalog);
         if (!string.Equals(setting.CurrentStage, decision.Stage, StringComparison.OrdinalIgnoreCase))
         {
             await settingsRepo.SetStageAsync(setting.ProjectId, decision.Stage, ct);
         }
-        await rvideoJobs.SyncLifecycleAsync(project.Id, decision.Stage, project.Status, ct);
+        await rvideoJobs.SyncLifecycleAsync(project.Id, decision.Stage,
+            decision.Stage == RVideoStages.Video && libraryAudioPending && project.Status == VideoProjectStatuses.Draft
+                ? VideoProjectStatuses.Rendering
+                : project.Status, ct);
 
         var userId = project.UserId ?? Guid.Empty;
         var imageSceneIds = usesSharedReferenceImage

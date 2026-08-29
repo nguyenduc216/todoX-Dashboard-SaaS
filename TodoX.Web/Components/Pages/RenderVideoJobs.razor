@@ -477,6 +477,10 @@ else
                                         @if (string.IsNullOrWhiteSpace(_project.FinalVideoUrl))
                                         {
                                             <MudButton Size="Size.Small" Color="Color.Success" Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.PlayArrow" Disabled="@(!CanMerge || _busy || IsFinalMergeActive)" OnClick="EnqueueMergeAsync">@(IsFinalMergeActive ? "Đang hoàn tất..." : "Hoàn tất video")</MudButton>
+                                            @if (!CanMerge)
+                                            {
+                                                <MudText Typo="Typo.caption" Color="Color.Warning">@FinalMergeReadinessText</MudText>
+                                            }
                                         }
                                         <MudButton Size="Size.Small" Color="Color.Info" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.ViewCarousel" OnClick="@(() => _tabIndex = 1)">Xem lại scene</MudButton>
                                         <MudButton Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add" OnClick="NewProjectAsync">Tạo project mới</MudButton>
@@ -673,7 +677,39 @@ else
     private const string Resolution1080p = "1080p";
     private const string Resolution4K = "4K";
 
-    private bool CanMerge => _project is not null && _project.Scenes.Count > 0 && _project.Scenes.All(x => ResolveVideoSceneStatus(x) == VideoSceneStatuses.VideoReady);
+    private bool CanMerge => _project is not null && _project.Scenes.Count > 0 && GetFinalMergeReadiness().CanMerge;
+    private string FinalMergeReadinessText => GetFinalMergeReadiness().Message;
+
+    private (bool CanMerge, string Message) GetFinalMergeReadiness()
+    {
+        if (_project is null || _project.Scenes.Count == 0)
+            return (false, "Chưa có scene để ghép.");
+
+        var settings = new RVideoJobSettingsDto { VoiceMode = _voiceMode };
+        var readiness = _project.Scenes.Select(scene =>
+        {
+            var video = _videoVersions.TryGetValue(scene.Id, out var videos)
+                ? videos.FirstOrDefault(version => version.IsSelected)
+                : null;
+            var audio = _audioVersions.TryGetValue(scene.Id, out var audios)
+                ? audios.FirstOrDefault(version => version.IsSelected)
+                : null;
+            return RVideoRules.GetSceneReadiness(scene, settings, video, audio);
+        }).ToArray();
+
+        var missingVideo = readiness.Where(x => !x.VideoReady).Select(x => x.SceneIndex).ToArray();
+        if (missingVideo.Length > 0)
+            return (false, $"Đang chờ video hoàn tất cho scene {string.Join(", ", missingVideo)}.");
+
+        var waitingAudio = readiness.Where(x => x.AudioRequired && !x.AudioReady).Select(x => x.SceneIndex).ToArray();
+        if (waitingAudio.Length > 0)
+            return (false, $"Đang chờ tạo giọng đọc cho scene {string.Join(", ", waitingAudio)}.");
+
+        var waitingMux = readiness.Where(x => x.AudioRequired && x.AudioReady && !x.MuxReady).Select(x => x.SceneIndex).ToArray();
+        return waitingMux.Length == 0
+            ? (true, string.Empty)
+            : (false, $"Đang chờ ghép giọng cho scene {string.Join(", ", waitingMux)}.");
+    }
     private bool HasSharedReferenceImage => _useReferenceImageForAllScenes && (!string.IsNullOrWhiteSpace(_sharedReferenceImageUrl) || !string.IsNullOrWhiteSpace(_sharedReferenceImageObjectKey));
     private bool IsFinalMergeActive
         => _project is not null
@@ -3671,7 +3707,7 @@ else
         if (_project is null || AuthState.CurrentUser is null) return;
         if (!CanMerge)
         {
-            Snackbar.Add("Cần tất cả scene có video sẵn sàng trước khi ghép.", Severity.Warning);
+            Snackbar.Add(FinalMergeReadinessText, Severity.Warning);
             return;
         }
 
@@ -3683,7 +3719,7 @@ else
         }
         else if (!result.Enqueued)
         {
-            Snackbar.Add("Chưa đủ điều kiện ghép final video.", Severity.Warning);
+            Snackbar.Add(result.Reason == "already_final" ? "Final video đã sẵn sàng." : FinalMergeReadinessText, Severity.Warning);
         }
         else
         {

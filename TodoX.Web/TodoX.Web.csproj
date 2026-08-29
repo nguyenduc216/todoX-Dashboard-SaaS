@@ -4,6 +4,8 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <BuildBranch Condition="'$(BuildBranch)' == ''">local</BuildBranch>
+    <BuildTimeUtc Condition="'$(BuildTimeUtc)' == ''">$([System.DateTime]::UtcNow.ToString("o"))</BuildTimeUtc>
     <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
     <DefaultItemExcludes>$(DefaultItemExcludes);artifacts/**;bin/**;bin2/**;obj/**;publish/**;Tests/**;.codex_bin/**;.codex_obj/**</DefaultItemExcludes>
   </PropertyGroup>
@@ -15,6 +17,17 @@
     <PackageReference Include="BCrypt.Net-Next" Version="4.0.3" />
     <PackageReference Include="SixLabors.ImageSharp" Version="3.1.11" />
     <PackageReference Include="SixLabors.ImageSharp.Drawing" Version="2.1.7" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>BuildBranch</_Parameter1>
+      <_Parameter2>$(BuildBranch)</_Parameter2>
+    </AssemblyAttribute>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>BuildTimeUtc</_Parameter1>
+      <_Parameter2>$(BuildTimeUtc)</_Parameter2>
+    </AssemblyAttribute>
   </ItemGroup>
 
   <!-- Stale published output lives under ./publish and must not be scanned by the build -->

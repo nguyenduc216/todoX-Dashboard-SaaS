@@ -112,6 +112,15 @@ public sealed record RVideoSceneEditorItem(
 
 public sealed record RVideoLifecycleDecision(string Stage, bool ShouldQueueVideo, bool ShouldFinalize, bool TerminalFailure);
 
+public sealed record RVideoSceneReadiness(
+    long SceneId,
+    int SceneIndex,
+    bool VideoReady,
+    bool AudioRequired,
+    bool AudioReady,
+    bool MuxReady,
+    string Reason);
+
 public sealed record RVideoSceneLifecycleState(
     long SceneId,
     int SceneIndex,
@@ -298,6 +307,26 @@ public static class RVideoRules
                    && video.VoiceAudioVersionId == audio.Id,
             _ => true
         };
+    }
+
+    public static RVideoSceneReadiness GetSceneReadiness(
+        VideoProjectSceneDto scene,
+        RVideoJobSettingsDto settings,
+        SceneVideoVersionDto? video,
+        SceneAudioVersionDto? audio)
+    {
+        var videoReady = video is not null && string.Equals(video.Status, "completed", StringComparison.OrdinalIgnoreCase);
+        var audioRequired = ResolveVoiceMode(settings) == RVideoVoiceModes.Library && HasSceneVoice(scene);
+        var audioReady = audio is not null
+                         && string.Equals(audio.Status, "completed", StringComparison.OrdinalIgnoreCase)
+                         && scene.SelectedAudioVersionId == audio.Id;
+        var muxReady = !audioRequired || (audioReady && video?.VoiceAudioVersionId == audio?.Id);
+        var reason = !videoReady ? "selected scene video is not completed"
+            : !audioRequired ? string.Empty
+            : !audioReady ? "selected external audio is not completed"
+            : !muxReady ? "scene video/audio mux linkage is missing"
+            : string.Empty;
+        return new(scene.Id, scene.SceneIndex, videoReady, audioRequired, audioReady, muxReady, reason);
     }
 
     public static string NormalizeCharacterMode(string? value)
@@ -547,7 +576,8 @@ public static class RVideoRules
     public static RVideoLifecycleDecision Evaluate(
         string executionMode,
         IReadOnlyCollection<RVideoSceneLifecycleState> scenes,
-        bool hasFinalVideo)
+        bool hasFinalVideo,
+        bool finalizationPending = false)
     {
         if (hasFinalVideo) return new(RVideoStages.Result, false, false, false);
         if (scenes.Count == 0) return new(RVideoStages.Scene, false, false, false);
@@ -569,6 +599,8 @@ public static class RVideoRules
             return new(RVideoStages.Video, false, false, false);
         if (allVideoTerminal)
         {
+            if (finalizationPending)
+                return new(RVideoStages.Video, false, false, false);
             return anyVideoReady
                 ? new(RVideoStages.Result, false, true, false)
                 : new(RVideoStages.Video, false, false, true);

@@ -207,6 +207,7 @@ public sealed class SceneAudioVersionDto
     public string? PublicUrl { get; set; }
     public string? SourceFilePath { get; set; }
     public Guid? ResultMediaId { get; set; }
+    public Guid? RenderJobId { get; set; }
     public string? VoiceCatalogCode { get; set; }
     public string? VoiceSnapshotJson { get; set; }
     public string? NarrationTextSnapshot { get; set; }
@@ -329,6 +330,7 @@ public interface ISceneMediaVersioningService
     Task UpdateSceneAudioVersionRenderConfigAsync(Guid versionId, string renderConfigJson, CancellationToken ct = default);
     Task<string?> GetSceneAudioProviderTaskIdAsync(Guid versionId, CancellationToken ct = default);
     Task<SceneAudioVersionDto?> GetSceneAudioVersionByProviderTaskIdAsync(string providerTaskId, CancellationToken ct = default);
+    Task<SceneAudioVersionDto?> GetSceneAudioVersionByLogicalRequestIdAsync(string logicalRequestId, CancellationToken ct = default);
     Task MarkSceneAudioPendingReconciliationAsync(Guid versionId, string? errorCode, string? errorMessage, CancellationToken ct = default);
     Task<bool> HasActiveAudioVersionAsync(long sceneId, CancellationToken ct = default);
     Task<SceneAudioVersionDto?> GetSelectedAudioVersionAsync(long sceneId, CancellationToken ct = default);
@@ -1287,6 +1289,15 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
             new { providerTaskId, tenant = _tenant.TenantId });
     }
 
+    public async Task<SceneAudioVersionDto?> GetSceneAudioVersionByLogicalRequestIdAsync(string logicalRequestId, CancellationToken ct = default)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        return await conn.QuerySingleOrDefaultAsync<SceneAudioVersionDto>(
+            SelectSceneAudioVersionSql + " WHERE logical_request_id=@logicalRequestId AND tenant_id=@tenant;",
+            new { logicalRequestId, tenant = _tenant.TenantId });
+    }
+
     public async Task MarkSceneAudioPendingReconciliationAsync(Guid versionId, string? errorCode, string? errorMessage, CancellationToken ct = default)
     {
         await _tenant.EnsureLoadedAsync(ct);
@@ -2173,7 +2184,8 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
         SELECT id AS Id, project_id AS ProjectId, scene_id AS SceneId,
                version_number AS VersionNumber, logical_request_id AS LogicalRequestId, status AS Status,
                is_selected AS IsSelected, storage_key AS StorageKey, public_url AS PublicUrl, source_file_path AS SourceFilePath,
-               result_media_id AS ResultMediaId, voice_catalog_code AS VoiceCatalogCode, voice_snapshot_json::text AS VoiceSnapshotJson,
+               result_media_id AS ResultMediaId, render_job_id AS RenderJobId,
+               voice_catalog_code AS VoiceCatalogCode, voice_snapshot_json::text AS VoiceSnapshotJson,
                narration_text_snapshot AS NarrationTextSnapshot, voice_instruction_snapshot AS VoiceInstructionSnapshot,
                tts_rate AS TtsRate, duration_seconds AS DurationSeconds, render_config_json::text AS RenderConfigJson, provider_code AS ProviderCode,
                actual_model AS ModelName, provider_capability_id AS ProviderCapabilityId,

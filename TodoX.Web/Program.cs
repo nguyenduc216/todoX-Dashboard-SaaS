@@ -15,8 +15,10 @@ using TodoX.Web.Services.VideoRender;
 using MudBlazor.Services;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Options;
+using System.Reflection;
 
 var builder = WebApplication.CreateBuilder(args);
+var instanceStartedUtc = DateTimeOffset.UtcNow;
 
 // Add services to the container.
 builder.Services.AddRazorComponents()
@@ -488,6 +490,34 @@ app.MapDanceSellPhase2Endpoints();
 app.MapAiStudioCatalogEndpoints();
 app.MapRVideoEndpoints();
 app.MapSceneAudioEndpoints();
+
+app.MapGet("/system/version", (IConfiguration configuration) =>
+{
+    var assembly = typeof(Program).Assembly;
+    var informationalVersion = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown";
+    var plus = informationalVersion.IndexOf('+');
+    var version = plus >= 0 ? informationalVersion[..plus] : informationalVersion;
+    var commit = plus >= 0 ? informationalVersion[(plus + 1)..] : "unknown";
+    var metadata = assembly.GetCustomAttributes<AssemblyMetadataAttribute>()
+        .GroupBy(x => x.Key, StringComparer.OrdinalIgnoreCase)
+        .ToDictionary(x => x.Key, x => x.Last().Value, StringComparer.OrdinalIgnoreCase);
+
+    return Results.Json(new
+    {
+        application = "todoX Dashboard SaaS",
+        environment = app.Environment.EnvironmentName,
+        version,
+        commit,
+        branch = metadata.GetValueOrDefault("BuildBranch", "unknown"),
+        buildTimeUtc = metadata.GetValueOrDefault("BuildTimeUtc", "unknown"),
+        instanceStartedUtc,
+        features = new
+        {
+            renderQueueEnabled = configuration.GetValue("RenderQueue:Enabled", false),
+            rvideoLifecycleRegistered = app.Services.GetServices<IHostedService>().OfType<RVideoLifecycleWorker>().Any()
+        }
+    });
+});
 
 app.MapPost("/api/ai/cost/estimate", async (
     TodoX.Web.Services.AiProviders.IAiPricingService pricing,

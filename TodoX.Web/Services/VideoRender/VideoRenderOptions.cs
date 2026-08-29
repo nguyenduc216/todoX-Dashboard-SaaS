@@ -16,6 +16,6 @@ public sealed class VideoRenderOptions
     public int MaxConcurrentMergeJobs { get; set; } = 1;
     public int MergeTimeoutMinutes { get; set; } = 30;
     public bool AutoMergeWhenAllScenesReady { get; set; } = false;
-    public bool MockMode { get; set; } = true;
+    public bool MockMode { get; set; }
     public string[] SupportedResolutions { get; set; } = ["720p", "1080p"];
 }
