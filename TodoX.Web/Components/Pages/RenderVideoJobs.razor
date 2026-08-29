@@ -474,7 +474,10 @@ else
                                     <MudText Typo="Typo.body2">Music: @(_musicMode == RVideoMusicModes.None ? "Không dùng" : _musicMode)</MudText>
                                     <MudStack Row="true" Spacing="1" Class="flex-wrap gap-1 pt-2">
                                         <MudButton Size="Size.Small" Color="Color.Primary" Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.Download" Disabled="@string.IsNullOrWhiteSpace(_project.FinalVideoUrl)" OnClick="@(() => OpenUrl(_project.FinalVideoUrl!))">Tải video</MudButton>
-                                        <MudButton Size="Size.Small" Color="Color.Success" Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.PlayArrow" Disabled="@(!CanMerge || _busy || IsFinalMergeActive)" OnClick="EnqueueMergeAsync">@(IsFinalMergeActive ? "Đang hoàn tất..." : "Hoàn tất video")</MudButton>
+                                        @if (string.IsNullOrWhiteSpace(_project.FinalVideoUrl))
+                                        {
+                                            <MudButton Size="Size.Small" Color="Color.Success" Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.PlayArrow" Disabled="@(!CanMerge || _busy || IsFinalMergeActive)" OnClick="EnqueueMergeAsync">@(IsFinalMergeActive ? "Đang hoàn tất..." : "Hoàn tất video")</MudButton>
+                                        }
                                         <MudButton Size="Size.Small" Color="Color.Info" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.ViewCarousel" OnClick="@(() => _tabIndex = 1)">Xem lại scene</MudButton>
                                         <MudButton Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add" OnClick="NewProjectAsync">Tạo project mới</MudButton>
                                         <MudButton Size="Size.Small" Color="Color.Default" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.ContentCopy" OnClick="@(() => CopyJobIdAsync())">Sao chép Job ID</MudButton>
@@ -677,9 +680,51 @@ else
            && _jobs.Any(job =>
                string.Equals(job.JobType, TodoX.Web.Services.Render.RenderJobTypes.MergeProjectVideo, StringComparison.OrdinalIgnoreCase)
                && string.Equals(job.LogCode, TodoX.Web.Services.VideoRender.RVideoProjectFinalizationService.BuildMergeLogicalRequestKey(_project.Id), StringComparison.OrdinalIgnoreCase)
-               && job.Status is RenderJobStatuses.Queued or RenderJobStatuses.Preparing or RenderJobStatuses.Rendering or RenderJobStatuses.PostProcessing);
+               && job.Status is RenderJobStatuses.Queued or RenderJobStatuses.Preparing or RenderJobStatuses.Rendering or RenderJobStatuses.PostProcessing or RenderJobStatuses.PendingReconciliation);
 
     private string BuildLogCode() => _projectId is null ? string.Empty : $"video-{_projectId.Value}";
+
+    private bool TryApplySharedReferenceImage(TodoX.Web.Services.VideoRender.SceneVideoRenderInput input)
+    {
+        if (!_useReferenceImageForAllScenes)
+        {
+            return true;
+        }
+
+        if (!HasSharedReferenceImage)
+        {
+            return false;
+        }
+
+        input.ApplySharedReferenceImage(_sharedReferenceImageUrl, _sharedReferenceImageObjectKey);
+        return true;
+    }
+
+    private bool TryBuildSceneVideoRenderInput(
+        long[] sceneIds,
+        TodoX.Web.Services.AiProviders.AiBillingTrustedPayerContext trustedPayerContext,
+        out TodoX.Web.Services.VideoRender.SceneVideoRenderInput input,
+        out string? validationError)
+    {
+        input = new TodoX.Web.Services.VideoRender.SceneVideoRenderInput
+        {
+            ProjectId = _project!.Id,
+            SceneIds = sceneIds,
+            AspectRatio = _aspectRatio,
+            Resolution = _resolution,
+            UserId = AuthState.CurrentUser?.UserId,
+            CustomerId = AuthState.CurrentUser?.CustomerId,
+            TrustedPayerContext = trustedPayerContext
+        };
+        validationError = null;
+        if (!TryApplySharedReferenceImage(input))
+        {
+            validationError = "Không thể enqueue video vì chưa có ảnh tham chiếu dùng chung.";
+            return false;
+        }
+
+        return true;
+    }
 
     private string ProjectAspectRatio => HasProjectAspectRatio ? _aspectRatio : "Chưa chọn";
 
@@ -3560,25 +3605,24 @@ else
             }
         }
 
-        TodoX.Web.Services.VideoRender.SceneVideoRenderInput input;
+        TodoX.Web.Services.AiProviders.AiBillingTrustedPayerContext trustedPayerContext;
         try
         {
-            input = new TodoX.Web.Services.VideoRender.SceneVideoRenderInput
-            {
-                ProjectId = _project.Id,
-                SceneIds = sceneIds,
-                AspectRatio = _aspectRatio,
-                Resolution = _resolution,
-                UserId = AuthState.CurrentUser.UserId,
-                CustomerId = AuthState.CurrentUser.CustomerId,
-                TrustedPayerContext = await RVideoPayerContexts.BuildRVideoTrustedPayerContextAsync(_project.Id, sceneIds[0])
-            };
+            trustedPayerContext = await RVideoPayerContexts.BuildRVideoTrustedPayerContextAsync(_project.Id, sceneIds[0]);
         }
         catch (Exception ex)
         {
             await LogProjectEvent("SCENE_VIDEO_BATCH_ENQUEUE_FAILED", "error", "Không thể tạo trusted payer context cho batch render scene video.",
-                new { projectId = _project.Id, sceneIds, error = ex.Message });
+            new { projectId = _project.Id, sceneIds, error = ex.Message });
             Snackbar.Add(ex.Message, Severity.Error);
+            return;
+        }
+
+        if (!TryBuildSceneVideoRenderInput(sceneIds, trustedPayerContext, out var input, out var validationError))
+        {
+            await LogProjectEvent("SCENE_VIDEO_SHARED_REFERENCE_VALIDATION_FAILED", "error", "Không thể enqueue video vì chưa có ảnh tham chiếu dùng chung.",
+                new { projectId = _project.Id, sceneIds, errorCode = "RVIDEO_SHARED_REFERENCE_IMAGE_REQUIRED" });
+            Snackbar.Add(validationError ?? "Không thể enqueue video vì chưa có ảnh tham chiếu dùng chung.", Severity.Warning);
             return;
         }
 
@@ -3680,16 +3724,14 @@ else
                 draft = GetSceneDraft(scene);
             }
 
-            var input = new TodoX.Web.Services.VideoRender.SceneVideoRenderInput
+            var trustedPayerContext = await RVideoPayerContexts.BuildRVideoTrustedPayerContextAsync(_project.Id, scene.Id);
+            if (!TryBuildSceneVideoRenderInput(new[] { scene.Id }, trustedPayerContext, out var input, out var validationError))
             {
-                ProjectId = _project.Id,
-                SceneIds = new[] { scene.Id },
-                AspectRatio = _aspectRatio,
-                Resolution = _resolution,
-                UserId = AuthState.CurrentUser.UserId,
-                CustomerId = AuthState.CurrentUser.CustomerId,
-                TrustedPayerContext = await RVideoPayerContexts.BuildRVideoTrustedPayerContextAsync(_project.Id, scene.Id)
-            };
+                await LogProjectEvent("SCENE_VIDEO_SHARED_REFERENCE_VALIDATION_FAILED", "error", "Không thể enqueue video vì chưa có ảnh tham chiếu dùng chung.",
+                    new { projectId = _project.Id, sceneId = scene.Id, scene.SceneIndex, errorCode = "RVIDEO_SHARED_REFERENCE_IMAGE_REQUIRED" });
+                Snackbar.Add(validationError ?? "Không thể enqueue video vì chưa có ảnh tham chiếu dùng chung.", Severity.Warning);
+                return;
+            }
 
             var job = await RenderJobs.EnqueueAsync(new RenderJobCreateModel
             {

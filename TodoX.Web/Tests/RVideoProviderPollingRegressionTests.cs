@@ -599,6 +599,64 @@ public sealed class RVideoProviderPollingRegressionTests
     }
 
     [Fact]
+    public void RVideoAutoSharedReferenceSkipsImageWorkAndCarriesVideoInputReference()
+    {
+        var lifecycle = ReadRepoFile("Services", "VideoRender", "RVideoLifecycleWorker.cs");
+        var autoChain = ReadRepoFile("Services", "VideoRender", "RVideoSceneVideoAutoChainService.cs");
+        var eligibility = ReadRepoFile("Services", "VideoRender", "VideoRenderEligibilityService.cs");
+        var handler = ReadRepoFile("Services", "VideoRender", "SceneVideoRenderHandler.cs");
+
+        Assert.Contains("var imageSceneIds = usesSharedReferenceImage", lifecycle);
+        Assert.Contains("? Array.Empty<long>()", lifecycle);
+        Assert.Contains("rvideoSettings?.UseReferenceImageForAllScenes == true", autoChain);
+        Assert.Contains("RVideoSceneImageReferenceSelection.Resolve(rvideoSettings)", autoChain);
+        Assert.Contains("enqueueInput.ApplySharedReferenceImage(sharedReference)", autoChain);
+        Assert.Contains("SCENE_VIDEO_SHARED_REFERENCE_VALIDATION_FAILED", autoChain);
+        Assert.Contains("var imageVersion = usesSharedReferenceImage", eligibility);
+        Assert.Contains("? null", eligibility);
+        Assert.Contains("!string.IsNullOrWhiteSpace(sharedReference.ObjectKey)", eligibility);
+        Assert.DoesNotContain("ResolveSharedReferenceImageVersion", eligibility);
+        Assert.Contains("input.SharedReferenceImageUrl", handler);
+        Assert.Contains("input.SharedReferenceImageObjectKey", handler);
+        Assert.Contains("SelectedSourceImageVersionId = sourceImageVersionId", handler);
+        Assert.Contains("var sourceImageVersionId = input.UseSharedReferenceImage ? null", handler);
+        Assert.DoesNotContain("CreateImageVersion", autoChain);
+        Assert.DoesNotContain("scene_image_versions", autoChain);
+    }
+
+    [Fact]
+    public void RVideoManualSceneVideoPathsCarrySharedReferenceInput()
+    {
+        var page = ReadRepoFile("Components", "Pages", "RenderVideoJobs.razor");
+        var renderAll = page[
+            page.IndexOf("private async Task EnqueueRenderAllScenesAsync()", StringComparison.Ordinal)..page.IndexOf("private async Task EnqueueMergeAsync()", StringComparison.Ordinal)];
+        var renderOne = page[
+            page.IndexOf("private async Task EnqueueSceneVideoAsync(VideoProjectSceneDto scene)", StringComparison.Ordinal)..page.IndexOf("private void OpenUrl", StringComparison.Ordinal)];
+        var inputHelper = page[
+            page.IndexOf("private bool TryApplySharedReferenceImage", StringComparison.Ordinal)..page.IndexOf("private string ProjectAspectRatio", StringComparison.Ordinal)];
+
+        Assert.Contains("TryBuildSceneVideoRenderInput(sceneIds", renderAll);
+        Assert.Contains("TryBuildSceneVideoRenderInput(new[] { scene.Id }", renderOne);
+        Assert.Contains("_useReferenceImageForAllScenes", inputHelper);
+        Assert.Contains("input.ApplySharedReferenceImage(_sharedReferenceImageUrl, _sharedReferenceImageObjectKey)", inputHelper);
+        Assert.Contains("UseSharedReferenceImage = true;", ReadRepoFile("Services", "VideoRender", "SceneVideoRenderHandler.cs"));
+        Assert.DoesNotContain("scene_image_versions", renderAll);
+        Assert.DoesNotContain("scene_image_versions", renderOne);
+    }
+
+    [Fact]
+    public void RVideoResultTabHidesFinalizeAfterFinalVideoAndTreatsReconciliationAsActive()
+    {
+        var source = ReadRepoFile("Components", "Pages", "RenderVideoJobs.razor");
+        var guardIndex = source.IndexOf("@if (string.IsNullOrWhiteSpace(_project.FinalVideoUrl))", StringComparison.Ordinal);
+        var buttonIndex = source.IndexOf("<MudButton Size=\"Size.Small\" Color=\"Color.Success\" Variant=\"Variant.Filled\" StartIcon=\"@Icons.Material.Filled.PlayArrow\"", StringComparison.Ordinal);
+
+        Assert.True(guardIndex >= 0);
+        Assert.True(buttonIndex > guardIndex);
+        Assert.Contains("RenderJobStatuses.PendingReconciliation", source);
+    }
+
+    [Fact]
     public void RVideoRetryUiDisablesTheRetryButtonAndFlipsSceneToQueuedImmediately()
     {
         var frame = ReadRepoFile("Components", "Shared", "RenderMediaFrame.razor");

@@ -111,9 +111,15 @@ public sealed class VideoRenderEligibilityService : IVideoRenderEligibilityServi
         foreach (var scene in project.Scenes.Where(x => requested.Contains(x.Id)).OrderBy(x => x.SceneIndex))
         {
             var imageVersion = usesSharedReferenceImage
-                ? ResolveSharedReferenceImageVersion(sharedReference)
+                ? null
                 : await _versions.GetSelectedImageVersionAsync(scene.Id, ct);
-            if (imageVersion is null || imageVersion.Id == Guid.Empty || string.IsNullOrWhiteSpace(imageVersion.PublicUrl))
+            var hasSourceImage = usesSharedReferenceImage
+                ? sharedReference is not null
+                  && (!string.IsNullOrWhiteSpace(sharedReference.Url) || !string.IsNullOrWhiteSpace(sharedReference.ObjectKey))
+                : imageVersion is not null
+                  && imageVersion.Id != Guid.Empty
+                  && !string.IsNullOrWhiteSpace(imageVersion.PublicUrl);
+            if (!hasSourceImage)
             {
                 eligible.Add(new VideoRenderEligibilityResult(
                     scene.Id,
@@ -133,7 +139,7 @@ public sealed class VideoRenderEligibilityService : IVideoRenderEligibilityServi
                     VideoRenderEligibilityStatus.InvalidPrompt,
                     "RVIDEO_VIDEO_PROMPT_REQUIRED",
                     $"Scene {scene.SceneIndex:00}: prompt video không được để trống.",
-                    imageVersion.Id));
+                    imageVersion?.Id));
                 continue;
             }
 
@@ -146,7 +152,7 @@ public sealed class VideoRenderEligibilityService : IVideoRenderEligibilityServi
                     VideoRenderEligibilityStatus.InvalidPrompt,
                     promptValidation.ErrorCode ?? "RVIDEO_VIDEO_PROMPT_INVALID",
                     promptValidation.Message ?? $"Scene {scene.SceneIndex:00}: prompt video không hợp lệ.",
-                    imageVersion.Id));
+                    imageVersion?.Id));
                 continue;
             }
 
@@ -160,7 +166,7 @@ public sealed class VideoRenderEligibilityService : IVideoRenderEligibilityServi
                     VideoRenderEligibilityStatus.AlreadyCompleted,
                     "RVIDEO_VIDEO_ALREADY_COMPLETED",
                     $"Scene {scene.SceneIndex:00} đã có video hoàn tất.",
-                    imageVersion.Id,
+                    imageVersion?.Id,
                     selectedCompleted.Id));
                 continue;
             }
@@ -174,7 +180,7 @@ public sealed class VideoRenderEligibilityService : IVideoRenderEligibilityServi
                     VideoRenderEligibilityStatus.AlreadyActive,
                     "RVIDEO_VIDEO_ALREADY_ACTIVE",
                     $"Scene {scene.SceneIndex:00} đang render video.",
-                    imageVersion.Id,
+                    imageVersion?.Id,
                     activeVersion?.Id,
                     activeVersion?.Id,
                     null));
@@ -187,32 +193,10 @@ public sealed class VideoRenderEligibilityService : IVideoRenderEligibilityServi
                 VideoRenderEligibilityStatus.Eligible,
                 string.Empty,
                 string.Empty,
-                imageVersion.Id));
+                imageVersion?.Id));
         }
 
         return new VideoRenderEligibilityReport(projectId, eligible);
-    }
-
-    private static SceneImageVersionDto? ResolveSharedReferenceImageVersion(RVideoSceneImageReferenceSelection? sharedReference)
-    {
-        if (sharedReference is null || !sharedReference.ReferenceRequested)
-        {
-            return null;
-        }
-
-        if (string.IsNullOrWhiteSpace(sharedReference.Url) && string.IsNullOrWhiteSpace(sharedReference.ObjectKey))
-        {
-            return null;
-        }
-
-        return new SceneImageVersionDto
-        {
-            Id = Guid.Empty,
-            PublicUrl = sharedReference.Url,
-            StorageKey = sharedReference.ObjectKey,
-            Status = "completed",
-            IsSelected = true
-        };
     }
 
     private async Task<HashSet<long>> LoadActiveRenderJobIdsAsync(long projectId, IReadOnlyCollection<long> requestedSceneIds, CancellationToken ct)

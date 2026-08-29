@@ -354,6 +354,42 @@ public sealed class RVideoFoundationTests
     }
 
     [Fact]
+    public void SceneVideoRenderInputCarriesSharedReferenceImageSelection()
+    {
+        var reference = new RVideoSceneImageReferenceSelection(
+            true,
+            CharacterId: 42,
+            ObjectKey: "references/shared.png",
+            Url: "https://example.invalid/shared.png",
+            CharacterPrompt: "consistent character",
+            Source: RVideoSceneImageReferenceSelection.LibrarySource);
+
+        var input = new SceneVideoRenderInput
+        {
+            ProjectId = 100,
+            SceneIds = new[] { 200L },
+            AspectRatio = "9:16",
+            Resolution = "720p"
+        };
+
+        input.ApplySharedReferenceImage(reference);
+
+        Assert.True(input.UseSharedReferenceImage);
+        Assert.Equal("https://example.invalid/shared.png", input.SharedReferenceImageUrl);
+        Assert.Equal("references/shared.png", input.SharedReferenceImageObjectKey);
+    }
+
+    [Fact]
+    public void SceneVideoRenderInputRejectsMissingSharedReferenceImage()
+    {
+        var input = new SceneVideoRenderInput();
+
+        var ex = Assert.Throws<InvalidOperationException>(() => input.ApplySharedReferenceImage(null, null));
+
+        Assert.Equal("RVIDEO_SHARED_REFERENCE_IMAGE_REQUIRED", ex.Message);
+    }
+
+    [Fact]
     public void TimelapseAndRDanceRoutesRemainUnchanged()
     {
         Assert.StartsWith("/jobs/timelapse/new?", CustomerServiceRouting.Resolve(TodoXServiceEngineTypes.Timelapse, Guid.NewGuid(), "CONSTRUCTION_VIDEO").Route);

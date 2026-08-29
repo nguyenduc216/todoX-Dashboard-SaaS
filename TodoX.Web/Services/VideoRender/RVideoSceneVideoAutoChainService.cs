@@ -15,6 +15,7 @@ public sealed class RVideoSceneVideoAutoChainService : IRVideoSceneVideoAutoChai
     private readonly IVideoRenderEligibilityService _eligibility;
     private readonly IRenderJobService _jobs;
     private readonly IRVideoTrustedPayerContextService _payers;
+    private readonly RVideoJobSettingsRepository _settings;
     private readonly ILogger<RVideoSceneVideoAutoChainService> _logger;
 
     public RVideoSceneVideoAutoChainService(
@@ -22,12 +23,14 @@ public sealed class RVideoSceneVideoAutoChainService : IRVideoSceneVideoAutoChai
         IVideoRenderEligibilityService eligibility,
         IRenderJobService jobs,
         IRVideoTrustedPayerContextService payers,
+        RVideoJobSettingsRepository settings,
         ILogger<RVideoSceneVideoAutoChainService> logger)
     {
         _repo = repo;
         _eligibility = eligibility;
         _jobs = jobs;
         _payers = payers;
+        _settings = settings;
         _logger = logger;
     }
 
@@ -73,6 +76,38 @@ public sealed class RVideoSceneVideoAutoChainService : IRVideoSceneVideoAutoChai
 
         var renderSettings = RVideoRules.ResolveRenderSettings(project.OriginalPrompt);
         var logicalRequestKey = BuildLogicalRequestKey(projectId, sceneId);
+        var rvideoSettings = await _settings.GetAsync(projectId, ct);
+        RVideoSceneImageReferenceSelection? sharedReference = null;
+        if (rvideoSettings?.UseReferenceImageForAllScenes == true)
+        {
+            try
+            {
+                sharedReference = RVideoSceneImageReferenceSelection.Resolve(rvideoSettings);
+                if (!sharedReference.ReferenceRequested
+                    || (string.IsNullOrWhiteSpace(sharedReference.Url) && string.IsNullOrWhiteSpace(sharedReference.ObjectKey)))
+                {
+                    throw new InvalidOperationException("RVIDEO_SHARED_REFERENCE_IMAGE_REQUIRED");
+                }
+            }
+            catch (Exception ex) when (ex is InvalidOperationException)
+            {
+                _logger.LogWarning(ex, "RVIDEO_AUTO_CHAIN_SHARED_REFERENCE_VALIDATION_FAILED projectId={ProjectId} sceneId={SceneId}", projectId, sceneId);
+                await _repo.AddProjectEventAsync(projectId, "SCENE_VIDEO_SHARED_REFERENCE_VALIDATION_FAILED", "error",
+                    "Scene video auto enqueue was blocked because the shared reference image is unavailable.",
+                    new
+                    {
+                        projectId,
+                        sceneId,
+                        scene.SceneIndex,
+                        triggerSource,
+                        errorCode = ex.Message,
+                        rvideoSettings.CharacterMode,
+                        rvideoSettings.SkipCharacter,
+                        rvideoSettings.UseReferenceImageForAllScenes
+                    }, ct);
+                return false;
+            }
+        }
 
         await _repo.AddProjectEventAsync(projectId, "SCENE_VIDEO_AUTO_ENQUEUE_REQUESTED", "info",
             $"Scene {scene.SceneIndex} video auto enqueue requested.",
@@ -110,6 +145,10 @@ public sealed class RVideoSceneVideoAutoChainService : IRVideoSceneVideoAutoChai
             CustomerId = project.CustomerId,
             TrustedPayerContext = payerContext,
         };
+        if (sharedReference is not null)
+        {
+            enqueueInput.ApplySharedReferenceImage(sharedReference);
+        }
 
         var model = new RenderJobCreateModel
         {

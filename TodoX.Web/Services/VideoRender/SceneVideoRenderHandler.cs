@@ -19,6 +19,31 @@ public sealed class SceneVideoRenderInput
     public AiBillingTrustedPayerContext? TrustedPayerContext { get; set; }
     public string? ProviderConfigJson { get; set; }
     public string? CapabilityConfigJson { get; set; }
+
+    public void ApplySharedReferenceImage(RVideoSceneImageReferenceSelection reference)
+    {
+        if (!reference.ReferenceRequested
+            || (string.IsNullOrWhiteSpace(reference.Url) && string.IsNullOrWhiteSpace(reference.ObjectKey)))
+        {
+            throw new InvalidOperationException("RVIDEO_SHARED_REFERENCE_IMAGE_REQUIRED");
+        }
+
+        UseSharedReferenceImage = true;
+        SharedReferenceImageUrl = reference.Url;
+        SharedReferenceImageObjectKey = reference.ObjectKey;
+    }
+
+    public void ApplySharedReferenceImage(string? url, string? objectKey)
+    {
+        if (string.IsNullOrWhiteSpace(url) && string.IsNullOrWhiteSpace(objectKey))
+        {
+            throw new InvalidOperationException("RVIDEO_SHARED_REFERENCE_IMAGE_REQUIRED");
+        }
+
+        UseSharedReferenceImage = true;
+        SharedReferenceImageUrl = url;
+        SharedReferenceImageObjectKey = objectKey;
+    }
 }
 
 public sealed class SceneVideoRenderSourceSnapshot
@@ -194,11 +219,14 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
         var selectedImage = input.UseSharedReferenceImage
             ? null
             : await _versions.GetSelectedImageVersionAsync(scene.Id, ct);
-        var reference = input.UseSharedReferenceImage
-            ? RVideoSceneImageReferenceSelection.Resolve(settings)
-            : null;
-        var sourceImageUrl = input.UseSharedReferenceImage ? reference?.Url : selectedImage?.PublicUrl;
-        var sourceImageObjectKey = input.UseSharedReferenceImage ? reference?.ObjectKey : selectedImage?.StorageKey;
+        if (input.UseSharedReferenceImage
+            && string.IsNullOrWhiteSpace(input.SharedReferenceImageUrl)
+            && string.IsNullOrWhiteSpace(input.SharedReferenceImageObjectKey))
+        {
+            input.ApplySharedReferenceImage(RVideoSceneImageReferenceSelection.Resolve(settings));
+        }
+        var sourceImageUrl = input.UseSharedReferenceImage ? input.SharedReferenceImageUrl : selectedImage?.PublicUrl;
+        var sourceImageObjectKey = input.UseSharedReferenceImage ? input.SharedReferenceImageObjectKey : selectedImage?.StorageKey;
         var sourceImageVersionId = input.UseSharedReferenceImage ? null : selectedImage?.Id;
         if (string.IsNullOrWhiteSpace(sourceImageUrl) && string.IsNullOrWhiteSpace(sourceImageObjectKey))
         {
