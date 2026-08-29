@@ -161,7 +161,7 @@ public sealed class Ai79TaskClientTests
     }
 
     [Fact]
-    public async Task VideoSubmit_UsesVerifiedCreateVideoContractWithStartAndEndImageDescriptors()
+    public async Task VideoSubmit_UsesVerifiedCreateVideoContractWithExplicitStartAndEndFields()
     {
         var handler = new RecordingJsonHandler("""{"data":{"request_id":"video-task-001"}}""");
         var client = new Ai79TaskClient(new HttpClient(handler));
@@ -174,7 +174,7 @@ public sealed class Ai79TaskClientTests
             "79ai.net",
             "seedance_20_pro",
             "transition prompt",
-            [],
+            ["https://cdn.example/start.png", "https://cdn.example/end.png"],
             new Dictionary<string, string?>
             {
                 ["privacy"] = "PRIVATE",
@@ -186,12 +186,16 @@ public sealed class Ai79TaskClientTests
                 ["resolution"] = "720p",
                 ["images"] = imagesJson
             },
-            Ai79TaskOperation.Video));
+            Ai79TaskOperation.Video,
+            "image",
+            "image_2"));
 
         Assert.Equal("video-task-001", result.TaskId);
         var request = Assert.Single(handler.Requests);
         Assert.Equal("https://api.gommo.net/ai/create-video", request.Uri);
         Assert.Contains("images=", request.Body, StringComparison.Ordinal);
+        Assert.Contains("image=https%3A%2F%2Fcdn.example%2Fstart.png", request.Body, StringComparison.Ordinal);
+        Assert.Contains("image_2=https%3A%2F%2Fcdn.example%2Fend.png", request.Body, StringComparison.Ordinal);
         Assert.Contains("id_base", Uri.UnescapeDataString(request.Body), StringComparison.Ordinal);
         Assert.Contains("start-id", Uri.UnescapeDataString(request.Body), StringComparison.Ordinal);
         Assert.Contains("end-id", Uri.UnescapeDataString(request.Body), StringComparison.Ordinal);
@@ -202,8 +206,6 @@ public sealed class Ai79TaskClientTests
         Assert.Contains("duration=6", request.Body, StringComparison.Ordinal);
         Assert.Contains("ratio=16%3A9", request.Body, StringComparison.Ordinal);
         Assert.Contains("resolution=720p", request.Body, StringComparison.Ordinal);
-        Assert.DoesNotContain("image=https", request.Body, StringComparison.Ordinal);
-        Assert.DoesNotContain("image_2=", request.Body, StringComparison.Ordinal);
     }
 
     [Fact]

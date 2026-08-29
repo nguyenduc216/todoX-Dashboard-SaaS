@@ -224,7 +224,8 @@ public sealed class TimelapseWorkflowService : ITimelapseWorkflowService
             {
                 snapshot.ProfileCode,
                 snapshot.SceneCount,
-                generatedImageCount = TimelapseStageGraphBuilder.Build(snapshot.SceneCount).GeneratedImageOrder.Count,
+                generatedImageCount = TimelapseStageGraphBuilder.Build(snapshot.SceneCount, snapshot.HasStartImage).GeneratedImageOrder.Count,
+                hasStartAnchor = snapshot.HasStartImage,
                 promptProfileFields = "to_jsonb(public.todox_timelapse_prompt_profiles)"
             }, ct: ct);
 
@@ -882,19 +883,27 @@ public sealed class TimelapseWorkflowService : ITimelapseWorkflowService
 
     private async Task EnsureGraphAsync(System.Data.IDbConnection conn, System.Data.IDbTransaction tx, Guid jobId, TimelapseJobSnapshot snapshot, TimelapseRenderProfileDto profile)
     {
-        var graph = TimelapseStageGraphBuilder.Build(snapshot.SceneCount);
+        var graph = TimelapseStageGraphBuilder.Build(snapshot.SceneCount, snapshot.HasStartImage);
         var profileSnapshot = JsonSerializer.Serialize(new
         {
             profile.ProfileCode,
             profile.ProfileName,
             profile.ProfileJson,
+            promptMode = snapshot.HasStartImage ? "START_AND_FINAL_ANCHORED" : "FINAL_ONLY_REVERSE_INFERENCE",
+            hasStartAnchor = snapshot.HasStartImage,
+            startAnchorMediaId = snapshot.StartImage?.MediaId,
+            startAnchorUrl = snapshot.StartImage?.PublicUrl,
+            finalAnchorMediaId = snapshot.OriginalImage.MediaId,
+            finalAnchorUrl = snapshot.OriginalImage.PublicUrl,
             capturedAtUtc = DateTimeOffset.UtcNow
         }, JsonOptions);
 
         foreach (var item in graph.ImageProgressions.Select((progress, index) => new { progress, index }))
         {
-            var isOriginal = item.progress == 100;
+            var isStartAnchor = snapshot.HasStartImage && item.progress == 0;
+            var isOriginal = item.progress == 100 || isStartAnchor;
             var dependsOn = isOriginal ? (int?)null : graph.ImageProgressions.Where(x => x > item.progress).OrderBy(x => x).First();
+            var anchor = item.progress == 100 ? snapshot.OriginalImage : isStartAnchor ? snapshot.StartImage : null;
             await conn.ExecuteAsync(
                 """
                 INSERT INTO timelapse.timelapse_image_stages
@@ -916,9 +925,9 @@ public sealed class TimelapseWorkflowService : ITimelapseWorkflowService
                     dependsOn,
                     status = isOriginal ? TimelapseOperationStatuses.Completed : TimelapseOperationStatuses.Waiting,
                     activeAttempt = isOriginal ? 1 : 0,
-                    mediaId = isOriginal ? snapshot.OriginalImage.MediaId : (Guid?)null,
-                    objectKey = isOriginal ? snapshot.OriginalImage.ObjectKey : null,
-                    publicUrl = isOriginal ? snapshot.OriginalImage.PublicUrl : null,
+                    mediaId = anchor?.MediaId,
+                    objectKey = anchor?.ObjectKey,
+                    publicUrl = anchor?.PublicUrl,
                     promptSnapshot = profileSnapshot
                 }, tx);
         }

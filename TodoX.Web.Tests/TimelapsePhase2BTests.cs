@@ -1,4 +1,5 @@
 using TodoX.Web.Models.Timelapse;
+using System.Text.Json;
 using Xunit;
 
 namespace TodoX.Web.Tests;
@@ -31,6 +32,29 @@ public class TimelapsePhase2BTests
         Assert.Equal(7, graph.VideoClips.Count);
         Assert.Equal((0, 25), (graph.VideoClips[0].StartProgressPercent, graph.VideoClips[0].EndProgressPercent));
         Assert.Equal((90, 100), (graph.VideoClips[^1].StartProgressPercent, graph.VideoClips[^1].EndProgressPercent));
+    }
+
+    [Fact]
+    public void StageGraph_WithStartAnchorSkipsAiGenerationForZeroPercent()
+    {
+        var graph = TimelapseStageGraphBuilder.Build(3, hasStartAnchor: true);
+
+        Assert.Equal(new[] { 0, 35, 70, 100 }, graph.ImageProgressions);
+        Assert.Equal(new[] { 70, 35 }, graph.GeneratedImageOrder);
+        Assert.Equal(new[] { "0->35", "35->70", "70->100" }, graph.VideoClips.Select(x => $"{x.StartProgressPercent}->{x.EndProgressPercent}"));
+    }
+
+    [Fact]
+    public void LegacySnapshotWithoutStartImageDeserializesAsFinalOnlyMode()
+    {
+        var snapshot = JsonSerializer.Deserialize<TimelapseJobSnapshot>(
+            """{"schemaVersion":1,"engine":"Timelapse","originalImage":{"mediaId":"11111111-1111-1111-1111-111111111111","publicUrl":"https://cdn.example/final.png"}}""",
+            new JsonSerializerOptions(JsonSerializerDefaults.Web));
+
+        Assert.NotNull(snapshot);
+        Assert.Null(snapshot!.StartImage);
+        Assert.False(snapshot.HasStartImage);
+        Assert.Equal(Guid.Parse("11111111-1111-1111-1111-111111111111"), snapshot.OriginalImage.MediaId);
     }
 
     [Fact]

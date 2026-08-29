@@ -105,8 +105,39 @@
                                 <MudStack Spacing="3" Class="timelapse-edit-form">
                                     <MudTextField T="string" Label="Tên job" Value="@_editRequest.Title" ValueChanged="SetEditTitle" Variant="Variant.Outlined" />
 
+                                    <MudGrid>
+                                    <MudItem xs="12" md="6">
                                     <MudStack Spacing="1">
-                                        <MudText Typo="Typo.subtitle2">Ảnh thành phẩm / ảnh tham chiếu</MudText>
+                                        <MudText Typo="Typo.subtitle2">Ảnh ban đầu / 0% - Không bắt buộc</MudText>
+                                        <label class="timelapse-upload-card @(_editStartImageFile is not null ? "has-file" : string.Empty)">
+                                            <InputFile OnChange="OnEditStartImageSelected" accept="image/png,image/jpeg,image/webp" disabled="@_busy" />
+                                            @if (!string.IsNullOrWhiteSpace(_editStartPreviewUrl))
+                                            {
+                                                <img src="@_editStartPreviewUrl" alt="Ảnh ban đầu 0%" />
+                                            }
+                                            else
+                                            {
+                                                <MudIcon Icon="@Icons.Material.Filled.CloudUpload" Size="Size.Large" />
+                                            }
+                                            <span class="upload-primary">Chọn ảnh ban đầu</span>
+                                            <span class="upload-secondary">Không bắt buộc</span>
+                                            <span class="upload-helper">Làm mốc khởi đầu thật của tiến trình.</span>
+                                        </label>
+                                        @if (_editStartImageFile is not null)
+                                        {
+                                            <MudText Typo="Typo.caption" Color="Color.Success">@_editStartImageFile.Name</MudText>
+                                        }
+                                        else if (_job.Snapshot.StartImage is not null)
+                                        {
+                                            <MudButton Variant="Variant.Text" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" OnClick="RemoveEditStartImage">
+                                                Xóa ảnh ban đầu
+                                            </MudButton>
+                                        }
+                                    </MudStack>
+                                    </MudItem>
+                                    <MudItem xs="12" md="6">
+                                    <MudStack Spacing="1">
+                                        <MudText Typo="Typo.subtitle2">Ảnh thành phẩm / 100% - Bắt buộc</MudText>
                                         <label class="timelapse-upload-card @(_editImageFile is not null ? "has-file" : string.Empty)">
                                             <InputFile OnChange="OnEditImageSelected" accept="image/png,image/jpeg,image/webp" disabled="@_busy" />
                                             @if (!string.IsNullOrWhiteSpace(_editPreviewUrl))
@@ -126,6 +157,8 @@
                                             <MudText Typo="Typo.caption" Color="Color.Success">@_editImageFile.Name</MudText>
                                         }
                                     </MudStack>
+                                    </MudItem>
+                                    </MudGrid>
 
                                     <MudSelect T="string" Label="Cấu hình dựng" Value="@_editRequest.ProfileCode" ValueChanged="SetEditProfile" Variant="Variant.Outlined" Required="true">
                                         @foreach (var profile in _profiles)
@@ -203,19 +236,43 @@
                             <MudStack Spacing="3">
                                 <MudTextField T="string" Label="Tên job" Value="@_job.Snapshot.Title" Variant="Variant.Outlined" Disabled="true" />
 
-                                <MudStack Spacing="1">
-                                    <MudText Typo="Typo.subtitle2">Ảnh thành phẩm / ảnh tham chiếu</MudText>
-                                    <div class="timelapse-detail-image">
-                                        @if (!string.IsNullOrWhiteSpace(_job.Snapshot.OriginalImage.PublicUrl))
-                                        {
-                                            <img src="@_job.Snapshot.OriginalImage.PublicUrl" alt="Ảnh tham chiếu Timelapse" />
-                                        }
-                                        else
-                                        {
-                                            <MudIcon Icon="@Icons.Material.Filled.Image" Size="Size.Large" />
-                                        }
-                                    </div>
-                                </MudStack>
+                                <MudGrid>
+                                    @if (_job.Snapshot.HasStartImage)
+                                    {
+                                        <MudItem xs="12" md="6">
+                                            <MudStack Spacing="1">
+                                                <MudText Typo="Typo.subtitle2">Ảnh ban đầu / 0%</MudText>
+                                                <MudText Typo="Typo.caption" Color="Color.Secondary">Ảnh nguồn do khách hàng tải lên</MudText>
+                                                <div class="timelapse-detail-image">
+                                                    @if (!string.IsNullOrWhiteSpace(_job.Snapshot.StartImage?.PublicUrl))
+                                                    {
+                                                        <img src="@_job.Snapshot.StartImage.PublicUrl" alt="Ảnh ban đầu Timelapse 0%" />
+                                                    }
+                                                    else
+                                                    {
+                                                        <MudIcon Icon="@Icons.Material.Filled.Image" Size="Size.Large" />
+                                                    }
+                                                </div>
+                                            </MudStack>
+                                        </MudItem>
+                                    }
+                                    <MudItem xs="12" md="@(_job.Snapshot.HasStartImage ? 6 : 12)">
+                                        <MudStack Spacing="1">
+                                            <MudText Typo="Typo.subtitle2">Ảnh thành phẩm / 100%</MudText>
+                                            <MudText Typo="Typo.caption" Color="Color.Secondary">Ảnh nguồn do khách hàng tải lên</MudText>
+                                            <div class="timelapse-detail-image">
+                                                @if (!string.IsNullOrWhiteSpace(_job.Snapshot.OriginalImage.PublicUrl))
+                                                {
+                                                    <img src="@_job.Snapshot.OriginalImage.PublicUrl" alt="Ảnh thành phẩm Timelapse 100%" />
+                                                }
+                                                else
+                                                {
+                                                    <MudIcon Icon="@Icons.Material.Filled.Image" Size="Size.Large" />
+                                                }
+                                            </div>
+                                        </MudStack>
+                                    </MudItem>
+                                </MudGrid>
 
                                 <MudGrid>
                                     <MudItem xs="12" md="6">
@@ -624,6 +681,9 @@
     private IReadOnlyList<TimelapseProfileDto> _profiles = Array.Empty<TimelapseProfileDto>();
     private IBrowserFile? _editImageFile;
     private string? _editPreviewUrl;
+    private IBrowserFile? _editStartImageFile;
+    private string? _editStartPreviewUrl;
+    private bool _removeEditStartImage;
     private bool _initialLoading = true;
     private bool _busy;
     private bool _refreshing;
@@ -843,6 +903,9 @@
         };
         _editImageFile = null;
         _editPreviewUrl = _job.Snapshot.OriginalImage.PublicUrl;
+        _editStartImageFile = null;
+        _editStartPreviewUrl = _job.Snapshot.StartImage?.PublicUrl;
+        _removeEditStartImage = false;
         _requestDirty = false;
         _editingRequest = true;
         _activeTabIndex = 0;
@@ -864,14 +927,35 @@
         _requestDirty = true;
     }
 
-    private bool ValidateEditImage(bool showSnackbar)
+    private async Task OnEditStartImageSelected(InputFileChangeEventArgs args)
     {
-        if (_editImageFile is null)
+        _editStartImageFile = args.File;
+        _editStartPreviewUrl = null;
+        _removeEditStartImage = false;
+        if (!ValidateEditImage(_editStartImageFile, showSnackbar: true))
+        {
+            _editStartImageFile = null;
+            return;
+        }
+
+        await using var stream = _editStartImageFile.OpenReadStream(MaxImageBytes);
+        await using var buffer = new MemoryStream();
+        await stream.CopyToAsync(buffer);
+        _editStartPreviewUrl = $"data:{_editStartImageFile.ContentType};base64,{Convert.ToBase64String(buffer.ToArray())}";
+        _requestDirty = true;
+    }
+
+    private bool ValidateEditImage(bool showSnackbar)
+        => ValidateEditImage(_editImageFile, showSnackbar);
+
+    private bool ValidateEditImage(IBrowserFile? file, bool showSnackbar)
+    {
+        if (file is null)
         {
             return false;
         }
 
-        if (_editImageFile.Size <= 0 || _editImageFile.Size > MaxImageBytes)
+        if (file.Size <= 0 || file.Size > MaxImageBytes)
         {
             if (showSnackbar)
             {
@@ -880,7 +964,7 @@
             return false;
         }
 
-        if (!AllowedImageContentTypes.Contains(_editImageFile.ContentType))
+        if (!AllowedImageContentTypes.Contains(file.ContentType))
         {
             if (showSnackbar)
             {
@@ -927,6 +1011,14 @@
                 await stream.CopyToAsync(buffer);
                 imageBytes = buffer.ToArray();
             }
+            byte[]? startImageBytes = null;
+            if (_editStartImageFile is not null)
+            {
+                await using var startStream = _editStartImageFile.OpenReadStream(MaxImageBytes);
+                await using var startBuffer = new MemoryStream();
+                await startStream.CopyToAsync(startBuffer);
+                startImageBytes = startBuffer.ToArray();
+            }
 
             _job = await Jobs.UpdateDraftAsync(
                 JobId,
@@ -934,11 +1026,18 @@
                 imageBytes,
                 _editImageFile?.Name,
                 _editImageFile?.ContentType,
-                AuthState.CurrentUser);
+                AuthState.CurrentUser,
+                startImageBytes,
+                _editStartImageFile?.Name,
+                _editStartImageFile?.ContentType,
+                _removeEditStartImage);
             _editingRequest = false;
             _requestDirty = false;
             _editImageFile = null;
+            _editStartImageFile = null;
+            _removeEditStartImage = false;
             _editPreviewUrl = _job.Snapshot.OriginalImage.PublicUrl;
+            _editStartPreviewUrl = _job.Snapshot.StartImage?.PublicUrl;
             _activeTabIndex = 0;
             Snackbar.Add("Đã cập nhật yêu cầu Timelapse.", Severity.Success);
         });
@@ -962,7 +1061,18 @@
         _editingRequest = false;
         _requestDirty = false;
         _editImageFile = null;
+        _editStartImageFile = null;
+        _removeEditStartImage = false;
         _editPreviewUrl = null;
+        _editStartPreviewUrl = null;
+    }
+
+    private void RemoveEditStartImage()
+    {
+        _editStartImageFile = null;
+        _editStartPreviewUrl = null;
+        _removeEditStartImage = true;
+        _requestDirty = true;
     }
 
     private void SetEditTitle(string? title)
@@ -1412,7 +1522,7 @@
                     return image;
                 }
 
-                var isOriginal = progress == 100;
+                var isOriginal = progress == 100 || (_job.Snapshot.HasStartImage && progress == 0);
                 var dependency = isOriginal
                     ? (int?)null
                     : _job.Snapshot.ProgressMapping.Where(x => x > progress).OrderBy(x => x).FirstOrDefault();
@@ -1424,8 +1534,12 @@
                     IsOriginal = isOriginal,
                     DependsOnProgressPercent = dependency,
                     Status = isOriginal ? TimelapseOperationStatuses.Completed : TimelapseOperationStatuses.Waiting,
-                    PublicUrl = isOriginal ? _job.Snapshot.OriginalImage.PublicUrl : null,
-                    MediaId = isOriginal ? _job.Snapshot.OriginalImage.MediaId : null
+                    PublicUrl = progress == 100
+                        ? _job.Snapshot.OriginalImage.PublicUrl
+                        : isOriginal ? _job.Snapshot.StartImage?.PublicUrl : null,
+                    MediaId = progress == 100
+                        ? _job.Snapshot.OriginalImage.MediaId
+                        : isOriginal ? _job.Snapshot.StartImage?.MediaId : null
                 };
             })
             .ToList();
@@ -1455,7 +1569,9 @@
 
     private string ImagePlaceholderText(TimelapseStageImage image)
         => image.IsOriginal
-            ? "Ảnh gốc / thành phẩm"
+            ? image.ProgressPercent == 0 && _job?.Snapshot.HasStartImage == true
+                ? "Ảnh khách hàng / mốc ban đầu 0%"
+                : "Ảnh khách hàng / thành phẩm 100%"
             : IsRenderNotStarted
                 ? "Chờ tạo video"
             : image.Status == TimelapseOperationStatuses.Failed

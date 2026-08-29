@@ -17,6 +17,9 @@ public interface ITimelapseJobService
         string originalImageFileName,
         string originalImageContentType,
         CurrentUserSession currentUser,
+        byte[]? startImageContent = null,
+        string? startImageFileName = null,
+        string? startImageContentType = null,
         CancellationToken ct = default);
 
     Task<TimelapseJobView?> GetOwnedAsync(Guid jobId, CurrentUserSession currentUser, CancellationToken ct = default);
@@ -33,6 +36,10 @@ public interface ITimelapseJobService
         string? originalImageFileName,
         string? originalImageContentType,
         CurrentUserSession currentUser,
+        byte[]? startImageContent = null,
+        string? startImageFileName = null,
+        string? startImageContentType = null,
+        bool removeStartImage = false,
         CancellationToken ct = default);
     Task<TimelapseJobView> StartOrResumeAsync(Guid jobId, CurrentUserSession currentUser, CancellationToken ct = default);
     Task<TimelapseJobView> RetryImageAsync(Guid jobId, int progressPercent, CurrentUserSession currentUser, CancellationToken ct = default);
@@ -90,6 +97,9 @@ public sealed class TimelapseJobService : ITimelapseJobService
         string originalImageFileName,
         string originalImageContentType,
         CurrentUserSession currentUser,
+        byte[]? startImageContent = null,
+        string? startImageFileName = null,
+        string? startImageContentType = null,
         CancellationToken ct = default)
     {
         EnsureCustomer(currentUser);
@@ -162,6 +172,16 @@ public sealed class TimelapseJobService : ITimelapseJobService
             currentUser.CustomerId,
             _tenant.TenantId,
             ct);
+        var startImage = await SaveOptionalStartImageAsync(
+            startImageContent,
+            startImageFileName,
+            startImageContentType,
+            currentUser,
+            ct);
+        if (startImage is not null && startImage.MediaId == media.Id)
+        {
+            throw new InvalidOperationException("Ảnh ban đầu / 0% phải khác ảnh thành phẩm / 100%.");
+        }
 
         var snapshot = new TimelapseJobSnapshot
         {
@@ -193,7 +213,8 @@ public sealed class TimelapseJobService : ITimelapseJobService
                 ObjectKey = media.ObjectKey,
                 PublicUrl = media.PublicUrl ?? media.FileUrl,
                 MimeType = media.MimeType
-            }
+            },
+            StartImage = startImage
         };
 
         var job = await _renderJobs.EnqueueAsync(
@@ -204,17 +225,7 @@ public sealed class TimelapseJobService : ITimelapseJobService
                 JobType = RenderJobTypes.Timelapse,
                 InitialStatus = RenderJobStatuses.Draft,
                 Input = snapshot,
-                References = new[]
-                {
-                    new
-                    {
-                        role = "original_image",
-                        mediaId = media.Id,
-                        media.ObjectKey,
-                        url = media.PublicUrl ?? media.FileUrl,
-                        media.MimeType
-                    }
-                },
+                References = BuildReferenceJson(snapshot),
                 PointStatus = RenderPointStatuses.NotRequired,
                 MaxAttempts = 1
             },
@@ -224,7 +235,7 @@ public sealed class TimelapseJobService : ITimelapseJobService
             job.Id,
             "TIMELAPSE_DRAFT_CREATED",
             "Timelapse draft saved. Rendering has not started.",
-            new { snapshot.ProfileCode, snapshot.SceneCount, snapshot.VideoMode, snapshot.Ratio },
+            new { snapshot.ProfileCode, snapshot.SceneCount, snapshot.VideoMode, snapshot.Ratio, hasStartAnchor = snapshot.HasStartImage },
             ct: ct);
 
         return new TimelapseJobView
@@ -339,6 +350,10 @@ public sealed class TimelapseJobService : ITimelapseJobService
         string? originalImageFileName,
         string? originalImageContentType,
         CurrentUserSession currentUser,
+        byte[]? startImageContent = null,
+        string? startImageFileName = null,
+        string? startImageContentType = null,
+        bool removeStartImage = false,
         CancellationToken ct = default)
     {
         var current = await RequireOwnedAsync(jobId, currentUser, ct);
@@ -431,6 +446,21 @@ public sealed class TimelapseJobService : ITimelapseJobService
                 MimeType = media.MimeType
             };
         }
+        var startImage = removeStartImage ? null : current.Snapshot.StartImage;
+        if (startImageContent is { Length: > 0 })
+        {
+            startImage = await SaveOptionalStartImageAsync(
+                startImageContent,
+                startImageFileName,
+                startImageContentType,
+                currentUser,
+                ct);
+        }
+
+        if (startImage is not null && startImage.MediaId == original.MediaId)
+        {
+            throw new InvalidOperationException("Ảnh ban đầu / 0% phải khác ảnh thành phẩm / 100%.");
+        }
 
         var videoSubtotal = TimelapseSellPricing.EstimateVideoSubtotal(sellPrice.Price.SellPoints, request.SceneCount);
         var snapshot = new TimelapseJobSnapshot
@@ -458,7 +488,8 @@ public sealed class TimelapseJobService : ITimelapseJobService
                 VideoSubtotal = videoSubtotal,
                 TotalPoints = videoSubtotal
             },
-            OriginalImage = original
+            OriginalImage = original,
+            StartImage = startImage
         };
 
         var updatedRows = await conn.ExecuteAsync(
@@ -477,17 +508,7 @@ public sealed class TimelapseJobService : ITimelapseJobService
                 tenant = _tenant.TenantId,
                 status = RenderJobStatuses.Draft,
                 inputJson = JsonSerializer.Serialize(snapshot, JsonOptions),
-                referenceJson = JsonSerializer.Serialize(new[]
-                {
-                    new
-                    {
-                        role = "original_image",
-                        mediaId = original.MediaId,
-                        original.ObjectKey,
-                        url = original.PublicUrl,
-                        original.MimeType
-                    }
-                }, JsonOptions)
+                referenceJson = JsonSerializer.Serialize(BuildReferenceJson(snapshot), JsonOptions)
             }, tx);
         if (updatedRows != 1)
         {
@@ -506,7 +527,10 @@ public sealed class TimelapseJobService : ITimelapseJobService
                 snapshot.SceneCount,
                 snapshot.VideoMode,
                 snapshot.Ratio,
-                replacedOriginalImage = hasReplacementImage
+                replacedOriginalImage = hasReplacementImage,
+                replacedStartImage = startImageContent is { Length: > 0 },
+                removedStartImage = removeStartImage,
+                hasStartAnchor = snapshot.HasStartImage
             },
             ct: ct);
 
@@ -647,6 +671,64 @@ public sealed class TimelapseJobService : ITimelapseJobService
 
     private static string NormalizeTitle(string? title)
         => string.IsNullOrWhiteSpace(title) ? "Video Timelapse" : title.Trim();
+
+    private async Task<TimelapseOriginalImageSnapshot?> SaveOptionalStartImageAsync(
+        byte[]? content,
+        string? fileName,
+        string? contentType,
+        CurrentUserSession currentUser,
+        CancellationToken ct)
+    {
+        if (content is not { Length: > 0 })
+        {
+            return null;
+        }
+
+        var media = await _media.SaveAsync(
+            content,
+            string.IsNullOrWhiteSpace(fileName) ? "timelapse-start.png" : fileName,
+            string.IsNullOrWhiteSpace(contentType) ? "image/png" : contentType,
+            "timelapse_start_image",
+            currentUser.UserId,
+            currentUser.CustomerId,
+            _tenant.TenantId,
+            ct);
+
+        return new TimelapseOriginalImageSnapshot
+        {
+            MediaId = media.Id,
+            ObjectKey = media.ObjectKey,
+            PublicUrl = media.PublicUrl ?? media.FileUrl,
+            MimeType = media.MimeType
+        };
+    }
+
+    private static object[] BuildReferenceJson(TimelapseJobSnapshot snapshot)
+    {
+        var references = new List<object>();
+        if (snapshot.StartImage is not null)
+        {
+            references.Add(new
+            {
+                role = "start_image_0_percent",
+                mediaId = snapshot.StartImage.MediaId,
+                snapshot.StartImage.ObjectKey,
+                url = snapshot.StartImage.PublicUrl,
+                snapshot.StartImage.MimeType
+            });
+        }
+
+        references.Add(new
+        {
+            role = "original_image",
+            semanticRole = "final_image_100_percent",
+            mediaId = snapshot.OriginalImage.MediaId,
+            snapshot.OriginalImage.ObjectKey,
+            url = snapshot.OriginalImage.PublicUrl,
+            snapshot.OriginalImage.MimeType
+        });
+        return references.ToArray();
+    }
 
     private static void HydrateImagePrompts(TimelapseJobView view)
     {

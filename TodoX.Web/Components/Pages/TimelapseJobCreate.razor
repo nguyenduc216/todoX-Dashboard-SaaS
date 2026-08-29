@@ -71,10 +71,40 @@
                                 </MudGrid>
                             }
 
+                            <MudGrid>
+                                <MudItem xs="12" md="6">
                             <MudStack Spacing="1">
-                                <MudText Typo="Typo.subtitle2">Ảnh thành phẩm / ảnh tham chiếu</MudText>
+                                <MudText Typo="Typo.subtitle2">Ảnh ban đầu / 0% - Không bắt buộc</MudText>
+                                <label class="timelapse-upload-card @(_selectedStartFile is not null ? "has-file" : string.Empty)">
+                                    <InputFile OnChange="OnStartImageSelected" accept="image/png,image/jpeg,image/webp" disabled="@_busy" />
+                                    @if (!string.IsNullOrWhiteSpace(_startPreviewDataUrl))
+                                    {
+                                        <img src="@_startPreviewDataUrl" alt="Ảnh ban đầu đã chọn" />
+                                    }
+                                    else
+                                    {
+                                        <MudIcon Icon="@Icons.Material.Filled.CloudUpload" Size="Size.Large" />
+                                    }
+                                    <span class="upload-primary">Chọn ảnh ban đầu</span>
+                                    <span class="upload-secondary">Không bắt buộc</span>
+                                    <span class="upload-helper">Nếu có ảnh ban đầu, todoX sẽ giữ trạng thái này làm mốc khởi đầu và tạo quá trình tiến triển tới ảnh thành phẩm.</span>
+                                </label>
+                                @if (_selectedStartFile is not null)
+                                {
+                                    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
+                                        <MudText Typo="Typo.caption" Color="Color.Success">@_selectedStartFile.Name</MudText>
+                                        <MudButton Variant="Variant.Text" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" OnClick="RemoveStartImage">
+                                            Xóa ảnh
+                                        </MudButton>
+                                    </MudStack>
+                                }
+                            </MudStack>
+                                </MudItem>
+                                <MudItem xs="12" md="6">
+                            <MudStack Spacing="1">
+                                <MudText Typo="Typo.subtitle2">Ảnh thành phẩm / 100% - Bắt buộc</MudText>
                                 <label class="timelapse-upload-card @(_selectedFile is not null ? "has-file" : string.Empty)">
-                                    <InputFile OnChange="OnImageSelected" accept="image/png,image/jpeg,image/webp" disabled="@_busy" />
+                                    <InputFile OnChange="OnFinalImageSelected" accept="image/png,image/jpeg,image/webp" disabled="@_busy" />
                                     @if (!string.IsNullOrWhiteSpace(_previewDataUrl))
                                     {
                                         <img src="@_previewDataUrl" alt="Ảnh đã chọn" />
@@ -85,7 +115,7 @@
                                     }
                                     <span class="upload-primary">Chọn ảnh thành phẩm</span>
                                     <span class="upload-secondary">Bấm để tải ảnh lên</span>
-                                    <span class="upload-helper">JPG, PNG hoặc WebP · tối đa 10MB</span>
+                                    <span class="upload-helper">JPG, PNG hoặc WebP · tối đa 10MB. Ảnh thành phẩm là mốc kết thúc bắt buộc của video Timelapse.</span>
                                 </label>
                                 @if (_selectedFile is not null)
                                 {
@@ -97,6 +127,8 @@
                                     </MudStack>
                                 }
                             </MudStack>
+                                </MudItem>
+                            </MudGrid>
 
                             @if (_profiles.Count == 1)
                             {
@@ -231,7 +263,10 @@
     private TimelapseServiceDefinition? _serviceDefinition;
     private ServiceSellPriceEstimate? _priceEstimate;
     private IBrowserFile? _selectedFile;
+    private IBrowserFile? _selectedStartFile;
     private string? _previewDataUrl;
+    private string? _startPreviewDataUrl;
+    private bool _removeStartImage;
     private string? _serviceWarning;
     private string? _priceError;
     private bool _busy;
@@ -378,7 +413,7 @@
         }
     }
 
-    private async Task OnImageSelected(InputFileChangeEventArgs args)
+    private async Task OnFinalImageSelected(InputFileChangeEventArgs args)
     {
         _selectedFile = args.File;
         _previewDataUrl = null;
@@ -393,6 +428,25 @@
         await using var buffer = new MemoryStream();
         await stream.CopyToAsync(buffer);
         _previewDataUrl = $"data:{_selectedFile.ContentType};base64,{Convert.ToBase64String(buffer.ToArray())}";
+        ScheduleAutoSave();
+    }
+
+    private async Task OnStartImageSelected(InputFileChangeEventArgs args)
+    {
+        _selectedStartFile = args.File;
+        _startPreviewDataUrl = null;
+        _removeStartImage = false;
+
+        if (!ValidateSelectedStartImage(showSnackbar: true))
+        {
+            _selectedStartFile = null;
+            return;
+        }
+
+        await using var stream = _selectedStartFile!.OpenReadStream(MaxImageBytes);
+        await using var buffer = new MemoryStream();
+        await stream.CopyToAsync(buffer);
+        _startPreviewDataUrl = $"data:{_selectedStartFile.ContentType};base64,{Convert.ToBase64String(buffer.ToArray())}";
         ScheduleAutoSave();
     }
 
@@ -424,10 +478,46 @@
         return true;
     }
 
+    private bool ValidateSelectedStartImage(bool showSnackbar)
+    {
+        if (_selectedStartFile is null)
+        {
+            return true;
+        }
+
+        if (_selectedStartFile.Size <= 0 || _selectedStartFile.Size > MaxImageBytes)
+        {
+            if (showSnackbar)
+            {
+                Snackbar.Add("Ảnh phải có dung lượng tối đa 10MB.", Severity.Warning);
+            }
+            return false;
+        }
+
+        if (!AllowedImageContentTypes.Contains(_selectedStartFile.ContentType))
+        {
+            if (showSnackbar)
+            {
+                Snackbar.Add("Chỉ hỗ trợ JPG, PNG hoặc WebP.", Severity.Warning);
+            }
+            return false;
+        }
+
+        return true;
+    }
+
     private void RemoveImage()
     {
         _selectedFile = null;
         _previewDataUrl = null;
+        ScheduleAutoSave();
+    }
+
+    private void RemoveStartImage()
+    {
+        _selectedStartFile = null;
+        _startPreviewDataUrl = null;
+        _removeStartImage = true;
         ScheduleAutoSave();
     }
 
@@ -602,6 +692,14 @@
             await using var stream = _selectedFile.OpenReadStream(MaxImageBytes);
             await using var buffer = new MemoryStream();
             await stream.CopyToAsync(buffer, ct);
+            byte[]? startBytes = null;
+            if (_selectedStartFile is not null)
+            {
+                await using var startStream = _selectedStartFile.OpenReadStream(MaxImageBytes);
+                await using var startBuffer = new MemoryStream();
+                await startStream.CopyToAsync(startBuffer, ct);
+                startBytes = startBuffer.ToArray();
+            }
 
             TimelapseJobView job;
             if (_draftJobId is Guid draftId)
@@ -613,6 +711,10 @@
                     _selectedFile.Name,
                     _selectedFile.ContentType,
                     user,
+                    startBytes,
+                    _selectedStartFile?.Name,
+                    _selectedStartFile?.ContentType,
+                    removeStartImage: _removeStartImage,
                     ct);
             }
             else
@@ -623,6 +725,9 @@
                     _selectedFile.Name,
                     _selectedFile.ContentType,
                     user,
+                    startBytes,
+                    _selectedStartFile?.Name,
+                    _selectedStartFile?.ContentType,
                     ct);
                 _draftJobId = job.Id;
             }

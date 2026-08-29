@@ -417,7 +417,7 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
                 "Timelapse image provider resolved.",
                 new { stageId = item.Id, item.Attempt, providerCode = provider.ProviderCode, model = provider.Model, capabilityCode = _options.ImageCapabilityCode, providerAccountId = provider.Credential.ProviderAccountId },
                 ct);
-            var reference = await ResolveImageReferenceAsync(item, ct);
+            var references = await ResolveImageReferencesAsync(item, ct);
             var continuityProfile = TimelapsePromptResolver.ResolveLandscapeContinuityProfile(item.PromptSnapshotJson);
             var continuityAnchor = continuityProfile is null
                 ? null
@@ -492,7 +492,7 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
                 }
             }
             var ratio = NormalizeImageRatio(item.Snapshot.Ratio);
-            request = BuildImageSubmitRequest(provider, prompt, reference, ratio);
+            request = BuildImageSubmitRequest(provider, prompt, references, ratio, item.ProgressPercent, item.Snapshot);
             await TryAddSubmitEventAsync(
                 item.JobId,
                 "TIMELAPSE_IMAGE_SUBMIT_BEGIN",
@@ -511,7 +511,11 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
                     resolution = provider.ImageResolution,
                     editImage = true,
                     hasReference,
-                    referenceMimeType = reference.MimeType,
+                    promptMode = references.PromptMode,
+                    referenceCount = references.All.Count,
+                    referenceMimeType = references.Primary.MimeType,
+                    startAnchorMediaId = references.StartAnchorMediaId,
+                    finalAnchorMediaId = references.FinalAnchorMediaId,
                     promptLength = prompt.Length
                 },
                 ct);
@@ -850,13 +854,18 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
                 endStageId = item.EndStageId,
                 startMediaId = item.StartMediaId,
                 endMediaId = item.EndMediaId,
-                startPublicUrl = startDescriptor.url,
-                endPublicUrl = endDescriptor.url,
+                resolvedStartImageUrl = startDescriptor.url,
+                resolvedEndImageUrl = endDescriptor.url,
+                actualProviderFirstImageUrl = startDescriptor.url,
+                actualProviderSecondImageUrl = endDescriptor.url,
+                providerFirstImageRole = "start",
+                providerSecondImageRole = "end",
+                providerCode = provider.ProviderCode,
                 providerModel = provider.Model,
                 direction = "forward"
             },
             ct);
-        var request = BuildSubmitRequest(provider, prompt.Prompt, [], new Dictionary<string, string?>
+        var request = BuildSubmitRequest(provider, prompt.Prompt, [startDescriptor.url, endDescriptor.url], new Dictionary<string, string?>
         {
             ["type"] = "video",
             ["duration"] = item.DurationSeconds.ToString(),
@@ -869,9 +878,26 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
             ["images"] = imagesJson,
             ["start_progress_percent"] = item.StartProgressPercent.ToString(),
             ["end_progress_percent"] = item.EndProgressPercent.ToString()
-        }, Ai79TaskOperation.Video, null, null, new
+        }, Ai79TaskOperation.Video, "image", "image_2", new
         {
             direction = "forward",
+            logical = new
+            {
+                start_progress = item.StartProgressPercent,
+                end_progress = item.EndProgressPercent,
+                start_stage_id = item.StartStageId,
+                end_stage_id = item.EndStageId,
+                start_media_id = item.StartMediaId,
+                end_media_id = item.EndMediaId
+            },
+            provider_payload = new
+            {
+                first_image_url = startDescriptor.url,
+                second_image_url = endDescriptor.url,
+                first_image_role = "start",
+                second_image_role = "end",
+                images_json = imagesJson
+            },
             prompt_length = prompt.Prompt.Length,
             profile_prompt_length = prompt.ProfilePromptLength,
             profile_prompt_truncated = prompt.ProfilePromptTruncated
@@ -1137,8 +1163,10 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
     private SubmitRequestEnvelope BuildImageSubmitRequest(
         Ai79RuntimeProvider provider,
         string prompt,
-        ImageReferencePayload reference,
-        string ratio)
+        ImageReferenceSet references,
+        string ratio,
+        int targetProgressPercent,
+        TimelapseJobSnapshot snapshot)
     {
         var mode = provider.ImageMode
             ?? throw new InvalidOperationException("Missing 79AI Timelapse image mode.");
@@ -1152,8 +1180,19 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
             ["subjects"] = "[]",
             ["ratio"] = ratio,
             ["resolution"] = resolution,
-            ["mode"] = mode
+            ["mode"] = mode,
+            ["prompt_mode"] = references.PromptMode,
+            ["target_progress_percent"] = targetProgressPercent.ToString(),
+            ["has_start_anchor"] = snapshot.HasStartImage ? "true" : "false"
         };
+        if (snapshot.HasStartImage && references.All.Count >= 2)
+        {
+            options["subjects[0][role]"] = "start_anchor_0_percent";
+            options["subjects[0][url]"] = references.All[0].ProviderUrl;
+            options["subjects[1][role]"] = "final_anchor_100_percent";
+            options["subjects[1][url]"] = references.All[1].ProviderUrl;
+        }
+
         var raw = new Ai79TaskSubmitRequest(
             provider.BaseUrl,
             provider.SubmitPath,
@@ -1161,7 +1200,7 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
             provider.Domain,
             provider.Model,
             prompt,
-            [reference.DataUri],
+            [references.Primary.DataUri],
             options,
             Ai79TaskOperation.Image,
             _options.DefaultImageReferenceField);
@@ -1176,13 +1215,22 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
             action_type = "create",
             editImage = true,
             project_id = _options.DefaultImageProjectId,
-            subjects = Array.Empty<string>(),
+            subjects = references.All.Select(x => new { x.Role, x.ProviderUrl, x.MimeType }).ToArray(),
             ratio,
             resolution,
             mode,
+            prompt_mode = references.PromptMode,
+            target_progress_percent = targetProgressPercent,
+            has_start_anchor = snapshot.HasStartImage,
+            start_anchor_media_id = references.StartAnchorMediaId,
+            start_anchor_url = references.StartAnchorUrl,
+            final_anchor_media_id = references.FinalAnchorMediaId,
+            final_anchor_url = references.FinalAnchorUrl,
+            reference_progress_percent = references.ReferenceProgressPercent,
+            references = references.All.Select(x => new { x.Role, x.MediaId, x.ProviderUrl, x.MimeType, x.Bytes }).ToArray(),
             base64ImagePresent = true,
-            base64ImageMime = reference.MimeType,
-            base64ImageBytes = reference.Bytes
+            base64ImageMime = references.Primary.MimeType,
+            base64ImageBytes = references.Primary.Bytes
         }, JsonOptions);
         return new SubmitRequestEnvelope(raw, sanitized);
     }
@@ -1227,7 +1275,52 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
         return new SubmitRequestEnvelope(raw, sanitized);
     }
 
-    private async Task<ImageReferencePayload> ResolveImageReferenceAsync(TimelapseImageWorkItem item, CancellationToken ct)
+    private async Task<ImageReferenceSet> ResolveImageReferencesAsync(TimelapseImageWorkItem item, CancellationToken ct)
+    {
+        if (item.Snapshot.HasStartImage)
+        {
+            var start = await ResolveImageReferencePayloadAsync(
+                item.Snapshot.StartImage!.MediaId,
+                item.Snapshot.StartImage.ObjectKey,
+                item.Snapshot.StartImage.PublicUrl,
+                item.Snapshot.StartImage.MimeType,
+                "start_anchor_0_percent",
+                ct);
+            var final = await ResolveImageReferencePayloadAsync(
+                item.Snapshot.OriginalImage.MediaId,
+                item.Snapshot.OriginalImage.ObjectKey,
+                item.Snapshot.OriginalImage.PublicUrl,
+                item.Snapshot.OriginalImage.MimeType,
+                "final_anchor_100_percent",
+                ct);
+
+            if (start.MediaId == final.MediaId)
+            {
+                throw new InvalidOperationException("Timelapse start image and final image must be different.");
+            }
+
+            return new ImageReferenceSet(
+                "START_AND_FINAL_ANCHORED",
+                [start, final],
+                item.Snapshot.StartImage.MediaId,
+                item.Snapshot.StartImage.PublicUrl,
+                item.Snapshot.OriginalImage.MediaId,
+                item.Snapshot.OriginalImage.PublicUrl,
+                null);
+        }
+
+        var legacy = await ResolveLegacyImageReferenceAsync(item, ct);
+        return new ImageReferenceSet(
+            "FINAL_ONLY_REVERSE_INFERENCE",
+            [legacy],
+            null,
+            null,
+            item.Snapshot.OriginalImage.MediaId,
+            item.Snapshot.OriginalImage.PublicUrl,
+            item.DependsOnProgressPercent);
+    }
+
+    private async Task<ImageReferencePayload> ResolveLegacyImageReferenceAsync(TimelapseImageWorkItem item, CancellationToken ct)
     {
         MediaFileDto? media = null;
         var mediaId = item.DependencyMediaId;
@@ -1267,7 +1360,51 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
         return new ImageReferencePayload(
             $"data:{mimeType};base64,{Convert.ToBase64String(bytes)}",
             mimeType,
-            bytes.Length);
+            bytes.Length,
+            "reverse_dependency_or_final_anchor",
+            media.Id,
+            ResolveProviderImageUrl(media.PublicUrl ?? media.FileUrl ?? dependencyUrl!));
+    }
+
+    private async Task<ImageReferencePayload> ResolveImageReferencePayloadAsync(
+        Guid mediaId,
+        string? objectKey,
+        string? publicUrl,
+        string? fallbackMimeType,
+        string role,
+        CancellationToken ct)
+    {
+        MediaFileDto? media = mediaId == Guid.Empty ? null : await _media.GetAsync(mediaId, ct);
+        if (media is null && !string.IsNullOrWhiteSpace(objectKey))
+        {
+            media = await _media.GetByObjectKeyAsync(objectKey, ct);
+        }
+
+        if (media is null && !string.IsNullOrWhiteSpace(publicUrl))
+        {
+            media = await _media.GetByPublicUrlAsync(publicUrl, ct);
+        }
+
+        if (media is null || !media.IsActive)
+        {
+            throw new InvalidOperationException($"Missing Timelapse {role} image in TodoX media storage.");
+        }
+
+        var bytes = await _media.ReadBytesAsync(media.Id, ct);
+        if (bytes is null || bytes.Length == 0)
+        {
+            throw new InvalidOperationException($"Timelapse {role} image content could not be read.");
+        }
+
+        var mimeType = NormalizeImageMime(media.MimeType ?? fallbackMimeType);
+        var resolvedUrl = ResolveProviderImageUrl(media.PublicUrl ?? media.FileUrl ?? publicUrl ?? string.Empty);
+        return new ImageReferencePayload(
+            $"data:{mimeType};base64,{Convert.ToBase64String(bytes)}",
+            mimeType,
+            bytes.Length,
+            role,
+            media.Id,
+            resolvedUrl);
     }
 
     private static (string SubmitPath, string PollPath) Resolve79AiPaths(
@@ -1911,7 +2048,25 @@ public sealed class TimelapseProviderRuntime : ITimelapseProviderRuntime
 
     private sealed record SubmitRequestEnvelope(Ai79TaskSubmitRequest Raw, string SanitizedJson);
 
-    private sealed record ImageReferencePayload(string DataUri, string MimeType, int Bytes);
+    private sealed record ImageReferenceSet(
+        string PromptMode,
+        IReadOnlyList<ImageReferencePayload> All,
+        Guid? StartAnchorMediaId,
+        string? StartAnchorUrl,
+        Guid? FinalAnchorMediaId,
+        string? FinalAnchorUrl,
+        int? ReferenceProgressPercent)
+    {
+        public ImageReferencePayload Primary => All.First();
+    }
+
+    private sealed record ImageReferencePayload(
+        string DataUri,
+        string MimeType,
+        int Bytes,
+        string Role,
+        Guid MediaId,
+        string ProviderUrl);
 
     internal sealed record TimelapseVideoImageDescriptor(
         string id_base,
@@ -1946,17 +2101,19 @@ public static class TimelapsePromptResolver
             return customerOverride;
         }
 
+        var hasStartAnchor = snapshot.HasStartImage;
         var continuityText = continuityProfile is not null
-            ? BuildLandscapeContinuityPrompt(continuityProfile, progressPercent)
+            ? BuildLandscapeContinuityPrompt(continuityProfile, progressPercent, hasStartAnchor)
             : string.Empty;
+        var modeText = hasStartAnchor
+            ? BuildStartAndFinalAnchoredPrompt(snapshot, progressPercent)
+            : BuildFinalOnlyReversePrompt(snapshot, progressPercent);
         return string.Join("\n", new[]
         {
             customerOverride,
             profileText,
             continuityText,
-            $"Timelapse construction progress: {progressPercent}%.",
-            $"Profile: {CleanText(snapshot.ProfileName) ?? "Timelapse"}.",
-            "Keep the same construction site, architecture, camera, perspective, and permanent elements while advancing only the requested construction phase."
+            modeText
         }.Where(x => !string.IsNullOrWhiteSpace(x)));
     }
 
@@ -2026,16 +2183,44 @@ public static class TimelapsePromptResolver
             dependencyMediaId,
             "current stage graph generates images in descending progress order from the completed 100% image");
 
-    private static string BuildLandscapeContinuityPrompt(LandscapeContinuityProfile profile, int progressPercent)
+    private static string BuildFinalOnlyReversePrompt(TimelapseJobSnapshot snapshot, int progressPercent)
+        => string.Join("\n", new[]
+        {
+            "Prompt mode: FINAL_ONLY_REVERSE_INFERENCE.",
+            "The customer-supplied 100% final image is the fixed completed anchor.",
+            $"Infer the same exact scene at {progressPercent}% progress as an earlier construction state before the final result.",
+            $"Profile: {CleanText(snapshot.ProfileName) ?? "Timelapse"}.",
+            "Keep the same construction site, architecture, camera, perspective, and permanent elements while changing only the requested construction phase."
+        });
+
+    private static string BuildStartAndFinalAnchoredPrompt(TimelapseJobSnapshot snapshot, int progressPercent)
+        => string.Join("\n", new[]
+        {
+            "Prompt mode: START_AND_FINAL_ANCHORED.",
+            "Reference image 1 is the real 0% starting state supplied by the customer.",
+            "Reference image 2 is the real 100% final state supplied by the customer.",
+            $"Generate the same exact location/project at approximately {progressPercent}% completion on a continuous forward timeline from 0% to 100%.",
+            "The generated image must be a plausible intermediate construction, installation, furnishing, landscaping, or growth state between those two anchors.",
+            "Do not return either endpoint unchanged. Do not jump beyond the target progress. Do not regress behind the 0% state.",
+            "Preserve the same location, camera position, lens/framing, viewing direction, architectural shell, room/building identity, doors, windows, walls, railings, permanent structures, and aspect ratio.",
+            "Change only what is logically part of the selected Timelapse profile's progress.",
+            $"Profile: {CleanText(snapshot.ProfileName) ?? "Timelapse"}."
+        });
+
+    private static string BuildLandscapeContinuityPrompt(LandscapeContinuityProfile profile, int progressPercent, bool hasStartAnchor)
         => string.Join("\n", new[]
         {
             $"Profile {ProfileLabel(profile.SelectNo)} is {profile.Intent}.",
-            "Treat the reference image as the immediately adjacent stage of the same real balcony/garden project.",
+            hasStartAnchor
+                ? "Treat the first reference as the true 0% anchor and the second reference as the true 100% anchor of the same real balcony/garden project."
+                : "Treat the reference image as the immediately adjacent stage of the same real balcony/garden project.",
             "Preserve architecture, camera, perspective, railing, walls, doors, windows, fixed structures, hardscape, and overall layout identity.",
             "Represent strict monotonic progress only: 0% < 20% < 40% < 60% < 80% < 100%.",
             $"At {progressPercent}%, change only the amount of progress needed for this phase while staying derived from the adjacent stage.",
             "Do not redesign, randomly relocate major objects, change the camera, or make established layout elements disappear.",
-            "Must not regress between adjacent stages; if generating an earlier stage, remove only logically necessary later completion while preserving scene identity.",
+            hasStartAnchor
+                ? "Must not regress from the customer 0% anchor and must not exceed the customer 100% final anchor."
+                : "Must not regress between adjacent stages; if generating an earlier stage, remove only logically necessary later completion while preserving scene identity.",
             ProfileSpecificContinuityRules(profile.SelectNo)
         });
 

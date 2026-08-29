@@ -122,6 +122,10 @@ public class TimelapsePhase2ATests
         Assert.Contains("Dịch vụ này đang tạm ngưng", page, StringComparison.Ordinal);
         Assert.Contains("Dịch vụ đã chọn không thuộc nhóm Timelapse", page, StringComparison.Ordinal);
         Assert.Contains("timelapse-upload-card", page, StringComparison.Ordinal);
+        Assert.Contains("private bool _removeStartImage;", page, StringComparison.Ordinal);
+        Assert.Contains("_removeStartImage = false;", page, StringComparison.Ordinal);
+        Assert.Contains("_removeStartImage = true;", page, StringComparison.Ordinal);
+        Assert.Contains("removeStartImage: _removeStartImage", page, StringComparison.Ordinal);
         Assert.Contains("Chọn ảnh thành phẩm", page, StringComparison.Ordinal);
         Assert.Contains("Bấm để tải ảnh lên", page, StringComparison.Ordinal);
         Assert.DoesNotContain("Kéo thả ảnh vào đây", page, StringComparison.Ordinal);

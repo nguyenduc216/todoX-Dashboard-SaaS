@@ -124,6 +124,10 @@ public sealed class TimelapseOriginalImageSnapshot
     public string? ObjectKey { get; set; }
     public string? PublicUrl { get; set; }
     public string? MimeType { get; set; }
+
+    public bool IsUsable()
+        => MediaId != Guid.Empty
+           && (!string.IsNullOrWhiteSpace(PublicUrl) || !string.IsNullOrWhiteSpace(ObjectKey));
 }
 
 public sealed class TimelapseJobSnapshot
@@ -147,6 +151,9 @@ public sealed class TimelapseJobSnapshot
     public bool VideoRenderConfirmed { get; set; }
     public TimelapseSellPriceSnapshot? SellPrice { get; set; }
     public TimelapseOriginalImageSnapshot OriginalImage { get; set; } = new();
+    public TimelapseOriginalImageSnapshot? StartImage { get; set; }
+
+    public bool HasStartImage => StartImage?.IsUsable() == true;
 }
 
 public sealed class TimelapseSellPriceSnapshot
@@ -547,6 +554,9 @@ public sealed record TimelapseImagePromptDialogResult(string Prompt, bool Rerend
 public static class TimelapseStageGraphBuilder
 {
     public static TimelapseStageGraph Build(int sceneCount)
+        => Build(sceneCount, hasStartAnchor: false);
+
+    public static TimelapseStageGraph Build(int sceneCount, bool hasStartAnchor)
     {
         var images = TimelapseRequestRules.GetProgressMapping(sceneCount).ToArray();
         var clips = images.Zip(images.Skip(1), (start, end) => new { start, end })
@@ -554,6 +564,7 @@ public static class TimelapseStageGraphBuilder
             .ToArray();
         var generatedOrder = images
             .Where(x => x < 100)
+            .Where(x => !hasStartAnchor || x > 0)
             .OrderByDescending(x => x)
             .ToArray();
 

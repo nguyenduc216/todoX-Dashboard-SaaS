@@ -122,6 +122,51 @@ public sealed class TimelapseVideoDirectionTests
     }
 
     [Fact]
+    public void StartAndFinalAnchoredImagePromptUsesBothAnchorsAndTargetProgress()
+    {
+        var prompt = TimelapsePromptResolver.ResolveImagePrompt(
+            new TimelapseJobSnapshot
+            {
+                ProfileCode = "landscape_balcony_install_v1",
+                ProfileName = "Landscape 7A",
+                StartImage = new TimelapseOriginalImageSnapshot
+                {
+                    MediaId = Guid.NewGuid(),
+                    PublicUrl = "https://cdn.example/start.png"
+                },
+                OriginalImage = new TimelapseOriginalImageSnapshot
+                {
+                    MediaId = Guid.NewGuid(),
+                    PublicUrl = "https://cdn.example/final.png"
+                }
+            },
+            35,
+            """{"profileJson":{"profile_code":"landscape_balcony_install_v1","select_no":71,"image_prompt":"keep profile rules"}}""");
+
+        Assert.Contains("START_AND_FINAL_ANCHORED", prompt);
+        Assert.Contains("real 0% starting state", prompt);
+        Assert.Contains("real 100% final state", prompt);
+        Assert.Contains("35% completion", prompt);
+        Assert.Contains("continuous forward timeline", prompt);
+        Assert.Contains("same location, camera position", prompt);
+        Assert.Contains("installation progression", prompt, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void FinalOnlyImagePromptKeepsReverseInferenceMode()
+    {
+        var prompt = TimelapsePromptResolver.ResolveImagePrompt(
+            new TimelapseJobSnapshot { ProfileName = "Townhouse" },
+            70,
+            """{"ProfileJson":"Use existing reverse profile semantics."}""");
+
+        Assert.Contains("FINAL_ONLY_REVERSE_INFERENCE", prompt);
+        Assert.Contains("100% final image", prompt);
+        Assert.Contains("earlier construction state", prompt);
+        Assert.DoesNotContain("START_AND_FINAL_ANCHORED", prompt);
+    }
+
+    [Fact]
     public void ReverseImageDependencyOrderRemainsDescendingWhileVideoEdgesStayForward()
     {
         var graph = TimelapseStageGraphBuilder.Build(5);
@@ -133,11 +178,14 @@ public sealed class TimelapseVideoDirectionTests
     }
 
     [Fact]
-    public void VideoRequestContractStillUsesImagesOptionAndExistingEndpoints()
+    public void VideoRequestContractUsesExplicitImageFieldsAndExistingEndpoints()
     {
         var source = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "TodoX.Web", "Services", "Timelapse", "TimelapseProviderRuntime.cs"));
 
         Assert.Contains("[\"images\"] = imagesJson", source);
+        Assert.Contains("Ai79TaskOperation.Video, \"image\", \"image_2\"", source);
+        Assert.Contains("providerFirstImageRole = \"start\"", source);
+        Assert.Contains("providerSecondImageRole = \"end\"", source);
         Assert.Contains("DefaultVideoSubmitPath", source);
         Assert.Contains("DefaultVideoPollPath", source);
         Assert.Contains("_taskClient.SubmitAsync(request.Raw, ct)", source);
