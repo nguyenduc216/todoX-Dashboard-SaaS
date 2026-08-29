@@ -488,8 +488,47 @@ public sealed class RVideoRuntimeSqlTests
         Assert.Contains("app.MapGet(\"/system/version\"", program);
         Assert.Contains("AssemblyInformationalVersionAttribute", program);
         Assert.Contains("AssemblyMetadataAttribute", program);
+        Assert.Contains("BuildCommit", program);
         Assert.Contains("BuildBranch", project);
         Assert.Contains("BuildTimeUtc", project);
+        Assert.Contains("<BuildCommit Condition=\"'$(BuildCommit)' == ''\">unknown</BuildCommit>", project);
+        Assert.Contains("<_Parameter1>BuildCommit</_Parameter1>", project);
+        Assert.DoesNotContain("informationalVersion[(plus + 1)..]", program);
+    }
+
+    [Fact]
+    public void SystemVersionMetadataFallsBackToUnknownAndDoesNotExposeConfiguration()
+    {
+        var program = ReadRepoFile("Program.cs");
+        var endpointStart = program.IndexOf("app.MapGet(\"/system/version\"", StringComparison.Ordinal);
+        var endpointEnd = program.IndexOf("app.MapPost(\"/api/ai/cost/estimate\"", endpointStart, StringComparison.Ordinal);
+        var endpoint = program[endpointStart..endpointEnd];
+
+        Assert.Contains("metadata.TryGetValue", endpoint);
+        Assert.Contains("? value", endpoint);
+        Assert.Contains(": \"unknown\"", endpoint);
+        Assert.DoesNotContain("configuration.AsEnumerable()", endpoint);
+        Assert.DoesNotContain("ConnectionStrings", endpoint, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("ApiKey", endpoint, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Token", endpoint, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("renderQueueEnabled = configuration.GetValue", endpoint);
+        Assert.Contains("rvideoLifecycleRegistered", endpoint);
+    }
+
+    [Fact]
+    public void LegacyAudioCostBackfillIsConditionalAndPreservesNewValues()
+    {
+        var sql = File.ReadAllText(
+            Path.Combine(RepoRoot, "database", "scene-media-versioning", "05_align_legacy_scene_audio_versions_with_runtime.sql"),
+            Encoding.UTF8);
+
+        Assert.Contains("column_name='estimated_provider_cost'", sql);
+        Assert.Contains("SET estimated_usd=COALESCE(estimated_usd, estimated_provider_cost)", sql);
+        Assert.Contains("column_name='actual_provider_cost'", sql);
+        Assert.Contains("SET actual_usd=COALESCE(actual_usd, actual_provider_cost)", sql);
+        Assert.Contains("WHERE estimated_usd IS NULL", sql);
+        Assert.Contains("WHERE actual_usd IS NULL", sql);
+        Assert.Contains("EXECUTE", sql);
     }
 
     [Fact]

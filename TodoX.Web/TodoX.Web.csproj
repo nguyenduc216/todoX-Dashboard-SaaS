@@ -4,6 +4,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <BuildCommit Condition="'$(BuildCommit)' == ''">unknown</BuildCommit>
     <BuildBranch Condition="'$(BuildBranch)' == ''">local</BuildBranch>
     <BuildTimeUtc Condition="'$(BuildTimeUtc)' == ''">$([System.DateTime]::UtcNow.ToString("o"))</BuildTimeUtc>
     <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
@@ -20,6 +21,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>BuildCommit</_Parameter1>
+      <_Parameter2>$(BuildCommit)</_Parameter2>
+    </AssemblyAttribute>
     <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
       <_Parameter1>BuildBranch</_Parameter1>
       <_Parameter2>$(BuildBranch)</_Parameter2>

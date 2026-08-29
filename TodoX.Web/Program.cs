@@ -497,19 +497,22 @@ app.MapGet("/system/version", (IConfiguration configuration) =>
     var informationalVersion = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown";
     var plus = informationalVersion.IndexOf('+');
     var version = plus >= 0 ? informationalVersion[..plus] : informationalVersion;
-    var commit = plus >= 0 ? informationalVersion[(plus + 1)..] : "unknown";
     var metadata = assembly.GetCustomAttributes<AssemblyMetadataAttribute>()
         .GroupBy(x => x.Key, StringComparer.OrdinalIgnoreCase)
         .ToDictionary(x => x.Key, x => x.Last().Value, StringComparer.OrdinalIgnoreCase);
+    var buildMetadata = (string key) =>
+        metadata.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value)
+            ? value
+            : "unknown";
 
     return Results.Json(new
     {
         application = "todoX Dashboard SaaS",
         environment = app.Environment.EnvironmentName,
         version,
-        commit,
-        branch = metadata.GetValueOrDefault("BuildBranch", "unknown"),
-        buildTimeUtc = metadata.GetValueOrDefault("BuildTimeUtc", "unknown"),
+        commit = buildMetadata("BuildCommit"),
+        branch = buildMetadata("BuildBranch"),
+        buildTimeUtc = buildMetadata("BuildTimeUtc"),
         instanceStartedUtc,
         features = new
         {

@@ -128,6 +128,20 @@ BEGIN
   ) THEN
     EXECUTE 'UPDATE video_render.scene_audio_versions SET render_config_json=COALESCE(render_config_json, audio_config_json, ''{}''::jsonb) WHERE render_config_json IS NULL OR render_config_json = ''{}''::jsonb';
   END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+     WHERE table_schema='video_render' AND table_name='scene_audio_versions' AND column_name='estimated_provider_cost'
+  ) THEN
+    EXECUTE 'UPDATE video_render.scene_audio_versions SET estimated_usd=COALESCE(estimated_usd, estimated_provider_cost) WHERE estimated_usd IS NULL';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+     WHERE table_schema='video_render' AND table_name='scene_audio_versions' AND column_name='actual_provider_cost'
+  ) THEN
+    EXECUTE 'UPDATE video_render.scene_audio_versions SET actual_usd=COALESCE(actual_usd, actual_provider_cost) WHERE actual_usd IS NULL';
+  END IF;
 END $$;
 
 CREATE UNIQUE INDEX IF NOT EXISTS ux_scene_audio_one_selected
