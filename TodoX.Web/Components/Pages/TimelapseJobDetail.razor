@@ -514,14 +514,17 @@
                                            StartIcon="@Icons.Material.Filled.MovieCreation"
                                            Disabled="@_busy"
                                            OnClick="ConfirmVideoRenderAsync">
-                                    Bắt đầu tạo video
+                                    DUYỆT ẢNH & TẠO VIDEO
                                 </MudButton>
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                    Toàn bộ ảnh đã hoàn thành. Hãy kiểm tra các ảnh trước khi bắt đầu tạo video.
+                                </MudText>
                             }
                             else if (_job.Workflow.RequiresVideoConfirmation && !_job.Snapshot.VideoRenderConfirmed)
                             {
-                                <MudText Typo="Typo.caption" Color="Color.Secondary">
-                                    Video sẽ chờ xác nhận khi có phân cảnh đủ ảnh đầu-cuối.
-                                </MudText>
+                                <MudAlert Severity="Severity.Info" Dense="true">
+                                    Đang chờ hoàn thành toàn bộ ảnh trước khi duyệt.
+                                </MudAlert>
                             }
                             <div class="timelapse-stage-grid">
                                 @foreach (var clip in VideoCards)
@@ -762,7 +765,9 @@
         ? "Đang xử lý..."
         : _job?.Workflow.ParentStatus is TimelapseParentStatuses.Paused or TimelapseParentStatuses.Failed
             ? "Tiếp tục tạo video"
-            : "Bắt đầu tạo video";
+            : _job?.Workflow.RequiresVideoConfirmation == true && !_job.Snapshot.VideoRenderConfirmed
+                ? "Duyệt ảnh & tạo video"
+                : "Bắt đầu tạo video";
 
     protected override void OnInitialized()
     {

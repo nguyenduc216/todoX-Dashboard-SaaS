@@ -317,6 +317,33 @@ public static class TimelapseProgress
     }
 }
 
+public static class TimelapseWorkflowReadiness
+{
+    public static bool HasAllImagesCompleted(IEnumerable<TimelapseStageImage> images)
+    {
+        var stageImages = images as IReadOnlyCollection<TimelapseStageImage> ?? images.ToArray();
+        return stageImages.Count > 0
+               && stageImages.All(x => TimelapseOperationStatuses.IsCurrentCompleted(x.Status));
+    }
+
+    public static bool HasActiveImageOperations(IEnumerable<TimelapseStageImage> images)
+        => images.Any(x => TimelapseOperationStatuses.IsActive(x.Status));
+
+    public static bool HasVideos(IEnumerable<TimelapseVideoClip> videos)
+        => videos.Any();
+
+    public static bool CanConfirmVideoRender(
+        IEnumerable<TimelapseStageImage> images,
+        IEnumerable<TimelapseVideoClip> videos,
+        bool requiresVideoConfirmation,
+        bool videoRenderConfirmed)
+        => requiresVideoConfirmation
+           && !videoRenderConfirmed
+           && HasVideos(videos)
+           && HasAllImagesCompleted(images)
+           && !HasActiveImageOperations(images);
+}
+
 public static class TimelapseVideoOrchestration
 {
     public static bool IsReady(

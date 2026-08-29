@@ -250,15 +250,23 @@ public sealed class TimelapseWorkflowService : ITimelapseWorkflowService
         CancellationToken ct = default)
     {
         EnsureCustomer(currentUser);
-        if (!snapshot.RequireVideoConfirmation)
-        {
-            return await GetStateAsync(jobId, ct);
-        }
 
         await _tenant.EnsureLoadedAsync(ct);
         using var conn = await _factory.OpenAsync(ct);
         using var tx = conn.BeginTransaction();
         await LockJobAsync(conn, tx, jobId);
+        var state = await ReadStateAsync(conn, jobId, tx);
+        if (!state.RequiresVideoConfirmation)
+        {
+            tx.Commit();
+            return state;
+        }
+
+        if (!state.CanConfirmVideoRender)
+        {
+            throw new InvalidOperationException("Chưa hoàn thành toàn bộ ảnh Timelapse nên chưa thể duyệt để tạo video.");
+        }
+
         await conn.ExecuteAsync(
             """
             UPDATE render.render_jobs
@@ -1394,12 +1402,12 @@ public sealed class TimelapseWorkflowService : ITimelapseWorkflowService
             CanStartRender = canStart,
             CanFinalize = videosReady && !hasActive && final?.Status != TimelapseOperationStatuses.Completed,
             RequiresVideoConfirmation = requiresVideoConfirmation,
-            CanConfirmVideoRender = requiresVideoConfirmation && !videoRenderConfirmed && readyVideoCount > 0,
+            CanConfirmVideoRender = TimelapseWorkflowReadiness.CanConfirmVideoRender(images, videos, requiresVideoConfirmation, videoRenderConfirmed),
             ReadyVideoCount = readyVideoCount,
             GeneratedImageCount = images.Count(x => !x.IsOriginal),
             CurrentStep = normalizedParent == TimelapseParentStatuses.Cancelled
                 ? "Đã dừng"
-                : BuildCurrentStep(images, videos, final, imageProgress)
+                : BuildCurrentStep(images, videos, final, imageProgress, requiresVideoConfirmation, videoRenderConfirmed)
         };
     }
 
@@ -1421,7 +1429,9 @@ public sealed class TimelapseWorkflowService : ITimelapseWorkflowService
         IReadOnlyList<TimelapseStageImage> images,
         IReadOnlyList<TimelapseVideoClip> videos,
         TimelapseFinalOutput? final,
-        TimelapseImageProgressSummary imageProgress)
+        TimelapseImageProgressSummary imageProgress,
+        bool requiresVideoConfirmation,
+        bool videoRenderConfirmed)
     {
         if (images.Any(x => x.Status == TimelapseOperationStatuses.Cancelled)
             || videos.Any(x => x.Status == TimelapseOperationStatuses.Cancelled)
@@ -1459,6 +1469,11 @@ public sealed class TimelapseWorkflowService : ITimelapseWorkflowService
             return images.Any(x => x.Status == TimelapseOperationStatuses.Failed)
                 ? $"Tiến độ ảnh: {imageProgress.Percent}% · Cần tạo lại ảnh lỗi"
                 : $"Tiến độ ảnh: {imageProgress.Percent}% · Đang chờ";
+        }
+
+        if (requiresVideoConfirmation && !videoRenderConfirmed)
+        {
+            return "Ảnh đã hoàn thành - chờ duyệt";
         }
 
         if (videos.Count > 0 && videos.All(x => TimelapseOperationStatuses.IsCurrentCompleted(x.Status)))
