@@ -216,12 +216,7 @@ public sealed class RVideoSceneAudioAutoChainService : IRVideoSceneAudioAutoChai
             PointStatus = RenderPointStatuses.NotRequired
         };
 
-        RenderJobDto? existingJob = null;
-        if (version.RenderJobId is Guid renderJobId)
-        {
-            existingJob = await _jobs.GetAsync(renderJobId, ct);
-        }
-        existingJob ??= await _jobs.GetByLogCodeAsync(logicalRequestId, ct);
+        var existingJob = await ResolveReusableRenderJobAsync(version.RenderJobId, logicalRequestId, ct);
 
         RenderJobDto job;
         try
@@ -235,7 +230,11 @@ public sealed class RVideoSceneAudioAutoChainService : IRVideoSceneAudioAutoChai
             return false;
         }
 
-        if (!await _versions.TryBindSceneAudioVersionRenderJobAsync(version.Id, job.Id, ct))
+        var previousJobId = version.RenderJobId;
+        var bound = previousJobId is Guid oldJobId && oldJobId != job.Id
+            ? await _versions.TryRebindSceneAudioVersionRenderJobAsync(version.Id, oldJobId, job.Id, ct)
+            : await _versions.TryBindSceneAudioVersionRenderJobAsync(version.Id, job.Id, ct);
+        if (!bound)
         {
             await RecordEnqueueFailureAsync(projectId, scene, settings, triggerSource,
                 "render_job_binding_conflict", "The audio version is already bound to another render job.", ct);
@@ -264,6 +263,33 @@ public sealed class RVideoSceneAudioAutoChainService : IRVideoSceneAudioAutoChai
 
         return true;
     }
+
+    private async Task<RenderJobDto?> ResolveReusableRenderJobAsync(Guid? renderJobId, string logicalRequestId, CancellationToken ct)
+    {
+        if (renderJobId is Guid jobId)
+        {
+            var current = await _jobs.GetAsync(jobId, ct);
+            if (IsReusableRenderJob(current))
+            {
+                return current;
+            }
+        }
+
+        var byLogCode = await _jobs.GetByLogCodeAsync(logicalRequestId, ct);
+        return IsReusableRenderJob(byLogCode) ? byLogCode : null;
+    }
+
+    private static bool IsReusableRenderJob(RenderJobDto? job)
+        => job is not null && IsReusableRenderJobStatus(job.Status);
+
+    private static bool IsReusableRenderJobStatus(string? status)
+        => status is not null && (
+            status.Equals(RenderJobStatuses.Queued, StringComparison.OrdinalIgnoreCase)
+            || status.Equals(RenderJobStatuses.Preparing, StringComparison.OrdinalIgnoreCase)
+            || status.Equals(RenderJobStatuses.Rendering, StringComparison.OrdinalIgnoreCase)
+            || status.Equals(RenderJobStatuses.PostProcessing, StringComparison.OrdinalIgnoreCase)
+            || status.Equals(RenderJobStatuses.PendingReconciliation, StringComparison.OrdinalIgnoreCase)
+            || status.Equals(RenderJobStatuses.Processing, StringComparison.OrdinalIgnoreCase));
 
     private async Task<AiStudioVoiceDto?> ResolveVoiceAsync(RVideoJobSettingsDto? settings, CancellationToken ct)
     {

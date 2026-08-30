@@ -476,10 +476,30 @@ public sealed class RVideoRuntimeSqlTests
         Assert.Contains("selected_video_not_completed", source);
         Assert.Contains("GetSceneAudioVersionByLogicalRequestIdAsync", source);
         Assert.Contains("BuildLogicalRequestKey(projectId, sceneId)", source);
+        Assert.Contains("ResolveReusableRenderJobAsync", source);
         Assert.Contains("TryBindSceneAudioVersionRenderJobAsync", source);
+        Assert.Contains("TryRebindSceneAudioVersionRenderJobAsync", source);
+        Assert.Contains("RenderJobStatuses.PendingReconciliation", source);
         Assert.Contains("VoiceCodeSnapshot", source);
         Assert.Contains("VoiceTextSnapshot: voiceText", source);
         Assert.Contains("voiceCode,", source);
+    }
+
+    [Fact]
+    public void SceneAudioAutoChainDoesNotReuseTerminalRenderJobs()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "RVideoSceneAudioAutoChainService.cs");
+
+        var reuseBlock = source[source.IndexOf("private static bool IsReusableRenderJobStatus", StringComparison.Ordinal)..];
+        Assert.Contains("RenderJobStatuses.Queued", reuseBlock);
+        Assert.Contains("RenderJobStatuses.Preparing", reuseBlock);
+        Assert.Contains("RenderJobStatuses.Rendering", reuseBlock);
+        Assert.Contains("RenderJobStatuses.PostProcessing", reuseBlock);
+        Assert.Contains("RenderJobStatuses.PendingReconciliation", reuseBlock);
+        Assert.Contains("RenderJobStatuses.Processing", reuseBlock);
+        Assert.DoesNotContain("RenderJobStatuses.Failed", reuseBlock);
+        Assert.DoesNotContain("RenderJobStatuses.Cancelled", reuseBlock);
+        Assert.DoesNotContain("RenderJobStatuses.Completed", reuseBlock);
     }
 
     [Fact]
@@ -522,6 +542,62 @@ public sealed class RVideoRuntimeSqlTests
         Assert.DoesNotContain("same request is already active", chain);
         Assert.Contains("render_job_id=@renderJobId", versioning);
         Assert.Contains("render_job_id IS NULL OR render_job_id=@renderJobId", versioning);
+    }
+
+    [Fact]
+    public void SceneAudioAutoChainRebindsOnlyAfterMatchingOldJobId()
+    {
+        var chain = ReadRepoFile("Services", "VideoRender", "RVideoSceneAudioAutoChainService.cs");
+        var versioning = ReadRepoFile("Services", "VideoRender", "SceneMediaVersioningService.cs");
+
+        Assert.Contains("previousJobId is Guid oldJobId && oldJobId != job.Id", chain);
+        Assert.Contains("TryRebindSceneAudioVersionRenderJobAsync(version.Id, oldJobId, job.Id", chain);
+        Assert.Contains("TryBindSceneAudioVersionRenderJobAsync(version.Id, job.Id", chain);
+        Assert.Contains("render_job_id=@expectedOldJobId", versioning);
+        Assert.Contains("AND render_job_id=@expectedOldJobId", versioning);
+    }
+
+    [Fact]
+    public void SceneAudioAutoChainRefusesTerminalJobReuseButAllowsRecoveredProviderTaskPolling()
+    {
+        var chain = ReadRepoFile("Services", "VideoRender", "RVideoSceneAudioAutoChainService.cs");
+        var handler = ReadRepoFile("Services", "VideoRender", "SceneAudioRenderHandler.cs");
+
+        Assert.Contains("existingJob ?? (await _jobs.EnqueueForLogCodeIfNoneActiveAsync(model, logicalRequestId, ct)).Job", chain);
+        Assert.Contains("version.ProviderTaskId", handler);
+        Assert.Contains("var requestId = string.IsNullOrWhiteSpace(version.ProviderTaskId) ? null : version.ProviderTaskId.Trim();", handler);
+        var submitGuardIndex = handler.IndexOf("if (string.IsNullOrWhiteSpace(requestId))", StringComparison.Ordinal);
+        Assert.True(submitGuardIndex >= 0);
+        Assert.DoesNotContain("SubmitAsync(submitRequest", handler[..submitGuardIndex]);
+    }
+
+    [Fact]
+    public void SceneAudioHandlerSubmitsOnlyWhenProviderTaskIdMissing()
+    {
+        var handler = ReadRepoFile("Services", "VideoRender", "SceneAudioRenderHandler.cs");
+        var submitIndex = handler.IndexOf("if (string.IsNullOrWhiteSpace(requestId))", StringComparison.Ordinal);
+        var pollIndex = handler.IndexOf("SCENE_AUDIO_PROVIDER_POLLING", StringComparison.Ordinal);
+
+        Assert.True(submitIndex >= 0);
+        Assert.True(pollIndex > submitIndex);
+
+        var submitBlock = handler[submitIndex..pollIndex];
+        Assert.Contains("await _vbee.SubmitAsync(submitRequest, options, ct);", submitBlock);
+        Assert.DoesNotContain("await _vbee.SubmitAsync(submitRequest, options, ct);", handler[pollIndex..]);
+        Assert.Contains("external voice resumed from existing request", handler);
+    }
+
+    [Fact]
+    public void SceneAudioVersionRebindUsesOptimisticOldJobCheck()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "SceneMediaVersioningService.cs");
+        var method = ExtractMethodBlock(source, "public async Task<bool> TryRebindSceneAudioVersionRenderJobAsync");
+
+        Assert.Contains("WHERE id=@versionId", method);
+        Assert.Contains("AND tenant_id=@tenant", method);
+        Assert.Contains("AND render_job_id=@expectedOldJobId", method);
+        Assert.DoesNotContain("OR render_job_id", method);
+        Assert.DoesNotContain("COALESCE(render_job_id", method);
     }
 
     [Fact]
