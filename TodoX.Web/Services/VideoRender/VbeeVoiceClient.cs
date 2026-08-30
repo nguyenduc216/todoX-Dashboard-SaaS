@@ -204,5 +204,8 @@ public sealed class VbeeVoiceClient : IVbeeVoiceClient
     }
 
     private static string? NormalizeUrl(string? value)
-        => Uri.TryCreate(value, UriKind.Absolute, out var uri) ? uri.ToString() : null;
+        => Uri.TryCreate(value, UriKind.Absolute, out var uri)
+           && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps)
+            ? uri.ToString()
+            : null;
 }

@@ -196,8 +196,25 @@ public sealed class RVideoLifecycleWorker : BackgroundService
                      .Where(scene => RVideoRules.RequiresExternalVoice(scene, setting))
                      .Select(scene => scene.Id))
         {
-            await audioAutoChain.TryEnqueueSceneAudioAsync(project.Id, sceneId, "RVIDEO_LIFECYCLE", ct);
-            await finalizer.TryFinalizeSceneMediaAsync(project.Id, sceneId, "RVIDEO_LIFECYCLE", ct);
+            try
+            {
+                await audioAutoChain.TryEnqueueSceneAudioAsync(project.Id, sceneId, "RVIDEO_LIFECYCLE", ct);
+                await finalizer.TryFinalizeSceneMediaAsync(project.Id, sceneId, "RVIDEO_LIFECYCLE", ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex,
+                    "RVIDEO_SCENE_AUDIO_LIFECYCLE_FAILED projectId={ProjectId} sceneId={SceneId}",
+                    project.Id,
+                    sceneId);
+                await repo.AddProjectEventAsync(project.Id, "SCENE_AUDIO_AUTO_ENQUEUE_FAILED", "error",
+                    "Scene audio lifecycle evaluation failed; other scenes will continue.",
+                    new { projectId = project.Id, sceneId, reason = "scene_lifecycle_exception", error = ex.Message }, ct);
+            }
         }
         foreach (var sceneId in readyScenes)
         {

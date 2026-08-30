@@ -41,6 +41,7 @@ public static class SceneAudioEndpoints
         TodoXConnectionFactory factory,
         IVbeeVoiceClient vbee,
         IOptionsMonitor<VbeeOptions> options,
+        VideoRenderRepository repo,
         ISceneMediaVersioningService versions,
         IMediaFileService media,
         IRVideoSceneMediaFinalizerService finalizer,
@@ -127,7 +128,30 @@ public static class SceneAudioEndpoints
             return Results.Ok(new { success = true, request_id = payload.RequestId, matched = true, status = payload.Status ?? "SUBMITTED" });
         }
 
-        await CompleteSceneAudioAsync(tenant.TenantId, version, payload.RequestId, payload.AudioUrl!, media, versions, finalizer, ct);
+        if (!IsHttpAudioUrl(payload.AudioUrl))
+        {
+            await versions.FailSceneAudioVersionAsync(version.Id, "VBEE_AUDIO_URL_INVALID", "Vbee returned an invalid audio URL.", ct);
+            return Results.Ok(new { success = true, request_id = payload.RequestId, matched = true, status = "failed" });
+        }
+
+        try
+        {
+            await CompleteSceneAudioAsync(tenant.TenantId, version, payload.RequestId, payload.AudioUrl!, media, versions, finalizer, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            await repo.AddProjectEventAsync(version.ProjectId, "SCENE_AUDIO_DOWNLOAD_FAILED", "error",
+                "Vbee callback audio download failed.",
+                new
+                {
+                    projectId = version.ProjectId,
+                    sceneId = version.SceneId,
+                    requestId = payload.RequestId,
+                    audioUrl = payload.AudioUrl,
+                    error = ex.Message
+                }, ct);
+            throw;
+        }
         return Results.Ok(new { success = true, request_id = payload.RequestId, matched = true, status = "completed" });
     }
 
@@ -175,6 +199,10 @@ public static class SceneAudioEndpoints
 
         await finalizer.TryFinalizeSceneMediaAsync(version.ProjectId, version.SceneId, "VBEE_CALLBACK", ct);
     }
+
+    private static bool IsHttpAudioUrl(string value)
+        => Uri.TryCreate(value, UriKind.Absolute, out var uri)
+           && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
 }
 
 public enum VbeeCallbackAuthorizationStatus

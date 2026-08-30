@@ -584,6 +584,44 @@ public sealed class RVideoRuntimeSqlTests
     }
 
     [Fact]
+    public void LibraryAudioAutoChainUsesProviderVoiceIdAndRecordsResolveFailures()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "RVideoSceneAudioAutoChainService.cs");
+
+        Assert.Contains("GetVoiceByCodeAsync(settings.VoiceCatalogCode, activeOnly: true, ct)", source);
+        Assert.Contains("ResolveProviderVoiceCode(voice)", source);
+        Assert.Contains("RVIDEO_VBEE_PROVIDER_VOICE_ID_MISSING", source);
+        Assert.Contains("SCENE_AUDIO_AUTO_ENQUEUE_FAILED", source);
+        Assert.DoesNotContain("voice.ProviderVoiceId ?? voice.Code", source);
+    }
+
+    [Fact]
+    public void AudioLifecycleFailureIsolatedPerScene()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "RVideoLifecycleWorker.cs");
+        var method = ExtractMethodBlock(source, "private async Task EvaluateProjectAsync");
+
+        Assert.Contains("foreach (var sceneId in project.Scenes", method);
+        Assert.Contains("catch (Exception ex)", method);
+        Assert.Contains("other scenes will continue", method);
+        Assert.Contains("SCENE_AUDIO_AUTO_ENQUEUE_FAILED", method);
+    }
+
+    [Fact]
+    public void SceneAudioUsesEnvironmentTokenFallbackAndRecordsDownloadFailures()
+    {
+        var handler = ReadRepoFile("Services", "VideoRender", "SceneAudioRenderHandler.cs");
+        var endpoints = ReadRepoFile("Services", "VideoRender", "SceneAudioEndpoints.cs");
+        var client = ReadRepoFile("Services", "VideoRender", "VbeeVoiceClient.cs");
+
+        Assert.Contains("GetTokenOrThrow()", handler);
+        Assert.Contains("SCENE_AUDIO_DOWNLOAD_FAILED", handler);
+        Assert.Contains("IsHttpAudioUrl", endpoints);
+        Assert.Contains("Vbee callback audio download failed.", endpoints);
+        Assert.Contains("Uri.UriSchemeHttps", client);
+    }
+
+    [Fact]
     public void SceneVideoCompletionTriggersSharedFinalMergeAfterLifecycleSync()
     {
         var source = ReadRepoFile("Services", "VideoRender", "RVideoSceneVideoCompletionService.cs");

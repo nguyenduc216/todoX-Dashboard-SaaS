@@ -96,12 +96,12 @@ public sealed class RVideoSceneAudioAutoChainService : IRVideoSceneAudioAutoChai
         var voice = await ResolveVoiceAsync(settings, ct);
         if (voice is null)
         {
-            await _repo.AddProjectEventAsync(projectId, "SCENE_AUDIO_AUTO_ENQUEUE_SKIPPED", "warning",
-                $"Scene {scene.SceneIndex} voice auto enqueue skipped because the selected voice is unavailable.",
-                new { projectId, sceneId, scene.SceneIndex, triggerSource, voiceCatalogCode = settings?.VoiceCatalogCode }, ct);
+            await RecordEnqueueFailureAsync(projectId, scene, settings, triggerSource,
+                "voice_catalog_unavailable", "The configured active voice could not be resolved.", ct);
             return false;
         }
 
+        var voiceCode = ResolveProviderVoiceCode(voice);
         var ttsRate = ResolveTtsRate(metadata, settings);
         ValidateTtsRate(voice, ttsRate);
 
@@ -139,7 +139,7 @@ public sealed class RVideoSceneAudioAutoChainService : IRVideoSceneAudioAutoChai
                 stage = "audio",
                 autoChain = true,
                 voiceCatalogCode = settings?.VoiceCatalogCode,
-                voiceCode = voice.ProviderVoiceId ?? voice.Code,
+                voiceCode,
                 defaultTtsRate = settings?.DefaultTtsRate,
                 vbeeDefaults = new
                 {
@@ -160,7 +160,7 @@ public sealed class RVideoSceneAudioAutoChainService : IRVideoSceneAudioAutoChai
                 versionId = version.Id,
                 logicalRequestId,
                 voiceCatalogCode = settings?.VoiceCatalogCode,
-                voiceCode = voice.ProviderVoiceId ?? voice.Code,
+                voiceCode,
                 ttsRate
             }, ct);
 
@@ -180,13 +180,13 @@ public sealed class RVideoSceneAudioAutoChainService : IRVideoSceneAudioAutoChai
                 CustomerId = project.CustomerId,
                 LogicalRequestId = logicalRequestId,
                 VoiceCatalogCode = settings?.VoiceCatalogCode ?? string.Empty,
-                VoiceCode = voice.ProviderVoiceId ?? voice.Code,
+                VoiceCode = voiceCode,
                 VoiceName = voice.Name,
                 NarrationText = voiceText,
                 VoiceInstruction = voiceInstruction,
                 TtsRate = ttsRate,
                 DefaultTtsRate = settings?.DefaultTtsRate,
-                SampleRate = _options.CurrentValue.ResolveSampleRate(voice.ProviderVoiceId ?? voice.Code),
+                SampleRate = _options.CurrentValue.ResolveSampleRate(voiceCode),
                 Bitrate = _options.CurrentValue.DefaultBitrate,
                 SpeedRate = _options.CurrentValue.DefaultSpeedRate,
                 CallbackUrl = _options.CurrentValue.GetCallbackUriOrNull()?.ToString(),
@@ -200,7 +200,7 @@ public sealed class RVideoSceneAudioAutoChainService : IRVideoSceneAudioAutoChai
                     operationId,
                     triggerSource,
                     voiceCatalogCode = settings?.VoiceCatalogCode,
-                    voiceCode = voice.ProviderVoiceId ?? voice.Code,
+                    voiceCode,
                     logicalRequestId
                 }
             },
@@ -215,7 +215,7 @@ public sealed class RVideoSceneAudioAutoChainService : IRVideoSceneAudioAutoChai
             References = Array.Empty<object>(),
             LogCode = logicalRequestId,
             ProviderCode = "vbee",
-            ModelCode = voice.ProviderVoiceId ?? voice.Code,
+            ModelCode = voiceCode,
             MaxAttempts = 3,
             PointCostEstimate = 0,
             PointStatus = RenderPointStatuses.NotRequired
@@ -245,6 +245,39 @@ public sealed class RVideoSceneAudioAutoChainService : IRVideoSceneAudioAutoChai
         }
 
         return await _catalog.GetVoiceByCodeAsync(settings.VoiceCatalogCode, activeOnly: true, ct);
+    }
+
+    private async Task RecordEnqueueFailureAsync(
+        long projectId,
+        VideoProjectSceneDto scene,
+        RVideoJobSettingsDto? settings,
+        string triggerSource,
+        string reason,
+        string error,
+        CancellationToken ct)
+    {
+        await _repo.AddProjectEventAsync(projectId, "SCENE_AUDIO_AUTO_ENQUEUE_FAILED", "error",
+            $"Scene {scene.SceneIndex} voice auto enqueue failed.",
+            new
+            {
+                projectId,
+                sceneId = scene.Id,
+                sceneIndex = scene.SceneIndex,
+                voiceCatalogCode = settings?.VoiceCatalogCode,
+                triggerSource,
+                reason,
+                error
+            }, ct);
+    }
+
+    private static string ResolveProviderVoiceCode(AiStudioVoiceDto voice)
+    {
+        if (string.IsNullOrWhiteSpace(voice.ProviderVoiceId))
+        {
+            throw new InvalidOperationException("RVIDEO_VBEE_PROVIDER_VOICE_ID_MISSING");
+        }
+
+        return voice.ProviderVoiceId.Trim();
     }
 
     private static decimal ResolveTtsRate(ScenePromptMetadata metadata, RVideoJobSettingsDto? settings)

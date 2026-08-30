@@ -80,10 +80,7 @@ public sealed class SceneAudioRenderHandler : IRenderJobHandler
             : input.CallbackUrl;
         var validCallbackUrl = _options.CurrentValue.GetCallbackUriOrNull()?.ToString() ?? callbackUrl;
 
-        if (string.IsNullOrWhiteSpace(_options.CurrentValue.ApiToken))
-        {
-            throw new InvalidOperationException("VBEE_API_TOKEN is missing.");
-        }
+        _options.CurrentValue.GetTokenOrThrow();
         if (string.IsNullOrWhiteSpace(input.AppId ?? _options.CurrentValue.AppId))
         {
             throw new InvalidOperationException("VBEE_APP_ID is missing.");
@@ -119,7 +116,6 @@ public sealed class SceneAudioRenderHandler : IRenderJobHandler
             await _repo.AddProjectEventAsync(project.Id, "SCENE_AUDIO_PROVIDER_SUBMITTING", "info",
                 $"Scene {scene.SceneIndex} external voice submitting.",
                 BuildEventData(project.Id, scene.Id, scene.SceneIndex, input, version.Id, null, "SUBMITTING", sampleRate), ct);
-
             var submitted = await _vbee.SubmitAsync(submitRequest, ct);
             requestId = NormalizeRequestId(submitted.RequestId) ?? input.LogicalRequestId;
 
@@ -219,15 +215,28 @@ public sealed class SceneAudioRenderHandler : IRenderJobHandler
 
         await _tenant.EnsureLoadedAsync(ct);
         var storageKey = version.StorageKey ?? SceneMediaStorageKeys.SceneAudioOutput(_tenant.TenantId, project.Id, scene.Id, version.Id);
-        var saved = await _media.DownloadAndSaveBinaryAtObjectKeyAsync(
-            audioUrl,
-            storageKey,
-            "scene_audio",
-            "audio/mpeg",
-            input.UserId,
-            input.CustomerId,
-            _tenant.TenantId,
-            ct);
+        MediaFileDto saved;
+        try
+        {
+            saved = await _media.DownloadAndSaveBinaryAtObjectKeyAsync(
+                audioUrl,
+                storageKey,
+                "scene_audio",
+                "audio/mpeg",
+                input.UserId,
+                input.CustomerId,
+                _tenant.TenantId,
+                ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            await _repo.AddProjectEventAsync(project.Id, "SCENE_AUDIO_DOWNLOAD_FAILED", "error",
+                $"Scene {scene.SceneIndex} external voice MP3 download failed.",
+                BuildEventData(project.Id, scene.Id, scene.SceneIndex, input, version.Id, requestId,
+                    "DOWNLOAD_FAILED", _options.CurrentValue.ResolveSampleRate(input.VoiceCode), audioUrl,
+                    errorCode: "SCENE_AUDIO_DOWNLOAD_FAILED", errorMessage: ex.Message), ct);
+            throw;
+        }
 
         await _versions.CompleteSceneAudioVersionAsync(version.Id, new SceneAudioVersionCompleteRequest(
             saved.PublicUrl ?? saved.FileUrl,
