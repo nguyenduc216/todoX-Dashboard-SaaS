@@ -343,6 +343,19 @@ public sealed class VbeeSceneRuntimeTests
         Assert.DoesNotContain("SubmitAsync(retryRequest", source, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void SceneAudioHandler_PersistsRequestIdAndPollsExistingTaskWithoutResubmitting()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "SceneAudioRenderHandler.cs");
+        var pollingStart = source.IndexOf("SCENE_AUDIO_PROVIDER_POLLING", StringComparison.Ordinal);
+
+        Assert.True(pollingStart >= 0);
+        Assert.Contains("MarkSceneAudioVersionSubmittedAsync(version.Id, \"vbee\", input.VoiceCode, null, requestId, ct)", source, StringComparison.Ordinal);
+        Assert.Contains("var status = await _vbee.GetStatusAsync(requestId, options, ct);", source, StringComparison.Ordinal);
+        Assert.Contains("ScheduleProviderPollAsync(job.Id, options.PollInterval, \"VBEE_PENDING\"", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("SubmitAsync", source[pollingStart..], StringComparison.Ordinal);
+    }
+
     private static string ReadRepoFile(params string[] parts)
         => File.ReadAllText(Path.Combine(new[] { AppContext.BaseDirectory, "..", "..", "..", "..", "TodoX.Web" }.Concat(parts).ToArray()));
 }
