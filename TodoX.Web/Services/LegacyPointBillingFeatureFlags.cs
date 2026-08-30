@@ -35,12 +35,8 @@ public static class LegacyPointBillingFeatureFlags
 
         var message = errorMessage.Trim();
         return message.Contains("Không đủ điểm", StringComparison.OrdinalIgnoreCase)
-            || message.Contains("KhÃ´ng Ä‘á»§ Ä‘iá»ƒm", StringComparison.OrdinalIgnoreCase)
             || message.Contains("insufficient point", StringComparison.OrdinalIgnoreCase)
-            || message.Contains("CÃ¡ÂºÂ§n:", StringComparison.OrdinalIgnoreCase)
-            || message.Contains("Cần:", StringComparison.OrdinalIgnoreCase)
-            || message.Contains("Hiện có:", StringComparison.OrdinalIgnoreCase)
-            || message.Contains("Cần bổ sung", StringComparison.OrdinalIgnoreCase)
-            || message.Contains("Cáº§n bá»• sung", StringComparison.OrdinalIgnoreCase);
+            || (message.Contains("Cần bổ sung", StringComparison.OrdinalIgnoreCase)
+                && message.Contains("điểm", StringComparison.OrdinalIgnoreCase));
     }
 }

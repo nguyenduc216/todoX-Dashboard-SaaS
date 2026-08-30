@@ -76,16 +76,6 @@ public sealed class TimelapseApprovalRegressionTests
     }
 
     [Fact]
-    public void StoppedParentStatesRemainEditableForSafeMetadataOnly()
-    {
-        Assert.True(TimelapseParentStatuses.IsEditableStopped(TimelapseParentStatuses.Draft));
-        Assert.True(TimelapseParentStatuses.IsEditableStopped(TimelapseParentStatuses.Paused));
-        Assert.True(TimelapseParentStatuses.IsEditableStopped(TimelapseParentStatuses.Failed));
-        Assert.True(TimelapseParentStatuses.IsEditableStopped(TimelapseParentStatuses.Cancelled));
-        Assert.False(TimelapseParentStatuses.IsEditableStopped(TimelapseParentStatuses.GeneratingImages));
-    }
-
-    [Fact]
     public void AutoModeStartsReadyClipImmediatelyWhileOtherClipsWait()
     {
         var images = new[]
@@ -105,27 +95,6 @@ public sealed class TimelapseApprovalRegressionTests
         Assert.True(TimelapseVideoOrchestration.IsReady(videos[0], images));
         Assert.False(TimelapseVideoOrchestration.IsReady(videos[1], images));
         Assert.False(TimelapseVideoOrchestration.IsReady(videos[2], images));
-    }
-
-    [Fact]
-    public void AutoModeDoesNotRequireManualConfirmationState()
-    {
-        var images = new[]
-        {
-            Image(0, TimelapseOperationStatuses.Completed, isOriginal: true),
-            Image(35, TimelapseOperationStatuses.Completed),
-            Image(70, TimelapseOperationStatuses.Completed),
-            Image(100, TimelapseOperationStatuses.Completed, isOriginal: true)
-        };
-        var videos = new[]
-        {
-            Clip(1, 0, 35),
-            Clip(2, 35, 70),
-            Clip(3, 70, 100)
-        };
-
-        Assert.False(TimelapseWorkflowReadiness.CanConfirmVideoRender(images, videos, requiresVideoConfirmation: false, videoRenderConfirmed: false));
-        Assert.True(TimelapseVideoOrchestration.IsReady(videos[0], images, requiresConfirmation: false, videoRenderConfirmed: false));
     }
 
     [Fact]

@@ -22,7 +22,12 @@ public sealed class LegacyPointBillingFeatureFlagsTests
     public void LegacyPointFailureDetectorRecognizesOldInsufficientPointMessages()
     {
         Assert.True(LegacyPointBillingFeatureFlags.IsLegacyInsufficientPointFailure("insufficient_points", "anything"));
-        Assert.True(LegacyPointBillingFeatureFlags.IsLegacyInsufficientPointFailure(null, "insufficient points: 173"));
+        Assert.True(LegacyPointBillingFeatureFlags.IsLegacyInsufficientPointFailure(null, "Không đủ điểm để tạo video."));
+        Assert.True(LegacyPointBillingFeatureFlags.IsLegacyInsufficientPointFailure(null, "insufficient point: 173"));
+        Assert.True(LegacyPointBillingFeatureFlags.IsLegacyInsufficientPointFailure(null, "Cần bổ sung thêm: 71 điểm"));
+        Assert.False(LegacyPointBillingFeatureFlags.IsLegacyInsufficientPointFailure(null, "Cần: 173 điểm"));
+        Assert.False(LegacyPointBillingFeatureFlags.IsLegacyInsufficientPointFailure(null, "Hiện có: 102 điểm"));
+        Assert.False(LegacyPointBillingFeatureFlags.IsLegacyInsufficientPointFailure(null, "Cần bổ sung thêm: 71"));
         Assert.False(LegacyPointBillingFeatureFlags.IsLegacyInsufficientPointFailure(null, "provider_failure"));
     }
 

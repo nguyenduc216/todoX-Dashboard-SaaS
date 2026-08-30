@@ -1,5 +1,3 @@
-@implements IAsyncDisposable
-
 <MudDialog>
     <TitleContent>
         <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="gap-2">
@@ -59,18 +57,4 @@
     }
 
     private void Close() => MudDialog.Close();
-
-    public async ValueTask DisposeAsync()
-    {
-        try
-        {
-            await JS.InvokeVoidAsync("todoXVideoPreview.pause", _videoElement);
-        }
-        catch (JSException)
-        {
-        }
-        catch (InvalidOperationException)
-        {
-        }
-    }
 }

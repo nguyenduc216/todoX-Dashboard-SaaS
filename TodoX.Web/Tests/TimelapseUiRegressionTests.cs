@@ -108,33 +108,7 @@ public sealed class TimelapseUiRegressionTests
         Assert.Contains("OpenVideoPreviewAsync(clip)", page);
         Assert.Contains("ReferenceImageLightboxDialog", page);
         Assert.Contains("LandingIndustryVideoPreviewDialog", page);
-        Assert.Contains("AutoPlay)] = true", page);
         Assert.Contains("IsRenderingOperation(clip.Status)) ? clip.PublicUrl : null", page);
-    }
-
-    [Fact]
-    public void TimelapseDetailShowsSafeStoppedEditingAndModeCopy()
-    {
-        var page = ReadRepoFile("Components", "Pages", "TimelapseJobDetail.razor");
-
-        Assert.Contains("CanEditSafeRequestFields", page);
-        Assert.Contains("CanEditRequest => CanEditFullRequest || CanEditSafeRequestFields", page);
-        Assert.Contains("Job đã có dữ liệu render", page);
-        Assert.Contains("Tự động hoàn thành", page);
-        Assert.Contains("Tự động tạo video ngay khi từng cặp ảnh đầu-cuối sẵn sàng.", page);
-        Assert.Contains("Chờ hoàn thành toàn bộ ảnh để bạn duyệt trước khi tạo video.", page);
-    }
-
-    [Fact]
-    public void VideoPreviewDialogAndScriptSupportPauseCleanup()
-    {
-        var dialog = ReadRepoFile("Components", "Dialogs", "LandingIndustryVideoPreviewDialog.razor");
-        var script = ReadRepoFile("wwwroot", "js", "todox-render-log.js");
-
-        Assert.Contains("autoplay=\"@AutoPlay\"", dialog);
-        Assert.Contains("IAsyncDisposable", dialog);
-        Assert.Contains("todoXVideoPreview.pause", dialog);
-        Assert.Contains("pause: function", script);
     }
 
     private static string ReadRepoFile(params string[] parts)

@@ -111,7 +111,7 @@
                                     <MudStack Spacing="1">
                                         <MudText Typo="Typo.subtitle2">Ảnh ban đầu / 0% - Không bắt buộc</MudText>
                                         <label class="timelapse-upload-card @(_editStartImageFile is not null ? "has-file" : string.Empty)">
-                                            <InputFile OnChange="OnEditStartImageSelected" accept="image/png,image/jpeg,image/webp" disabled="@(_busy || !CanEditFullRequest)" />
+                                            <InputFile OnChange="OnEditStartImageSelected" accept="image/png,image/jpeg,image/webp" disabled="@_busy" />
                                             @if (!string.IsNullOrWhiteSpace(_editStartPreviewUrl))
                                             {
                                                 <img src="@_editStartPreviewUrl" alt="Ảnh ban đầu 0%" />
@@ -140,7 +140,7 @@
                                     <MudStack Spacing="1">
                                         <MudText Typo="Typo.subtitle2">Ảnh thành phẩm / 100% - Bắt buộc</MudText>
                                         <label class="timelapse-upload-card @(_editImageFile is not null ? "has-file" : string.Empty)">
-                                            <InputFile OnChange="OnEditImageSelected" accept="image/png,image/jpeg,image/webp" disabled="@(_busy || !CanEditFullRequest)" />
+                                            <InputFile OnChange="OnEditImageSelected" accept="image/png,image/jpeg,image/webp" disabled="@_busy" />
                                             @if (!string.IsNullOrWhiteSpace(_editPreviewUrl))
                                             {
                                                 <img src="@_editPreviewUrl" alt="Ảnh tham chiếu đã chọn" />
@@ -161,7 +161,7 @@
                                     </MudItem>
                                     </MudGrid>
 
-                                    <MudSelect T="string" Label="Cấu hình dựng" Value="@_editRequest.ProfileCode" ValueChanged="SetEditProfile" Variant="Variant.Outlined" Required="true" Disabled="@(!CanEditFullRequest)">
+                                    <MudSelect T="string" Label="Cấu hình dựng" Value="@_editRequest.ProfileCode" ValueChanged="SetEditProfile" Variant="Variant.Outlined" Required="true">
                                         @foreach (var profile in _profiles)
                                         {
                                             <MudSelectItem T="string" Value="@profile.ProfileCode">@profile.ProfileName</MudSelectItem>
@@ -173,7 +173,7 @@
                                         <div class="timelapse-option-grid scene-options">
                                             @foreach (var count in TimelapseRequestRules.AllowedSceneCounts)
                                             {
-                                                <button type="button" disabled="@(!CanEditFullRequest)" class="timelapse-option @(IsEditSceneSelected(count) ? "selected" : string.Empty)" @onclick="() => SelectEditSceneCount(count)">
+                                                <button type="button" class="timelapse-option @(IsEditSceneSelected(count) ? "selected" : string.Empty)" @onclick="() => SelectEditSceneCount(count)">
                                                     <strong>@count scene</strong>
                                                 </button>
                                             }
@@ -183,11 +183,11 @@
                                     <MudStack Spacing="1">
                                         <MudText Typo="Typo.subtitle2">Chất lượng</MudText>
                                         <div class="timelapse-option-grid quality-options">
-                                            <button type="button" disabled="@(!CanEditFullRequest)" class="timelapse-option @(IsEditModeSelected(StandardModeValue) ? "selected" : string.Empty)" @onclick="() => SelectEditMode(StandardModeValue)">
+                                            <button type="button" class="timelapse-option @(IsEditModeSelected(StandardModeValue) ? "selected" : string.Empty)" @onclick="() => SelectEditMode(StandardModeValue)">
                                                 <strong>TIÊU CHUẨN</strong>
                                                 <span>Tối ưu chi phí, tốc độ xử lý nhanh</span>
                                             </button>
-                                            <button type="button" disabled="@(!CanEditFullRequest)" class="timelapse-option @(IsEditModeSelected(PremiumModeValue) ? "selected" : string.Empty)" @onclick="() => SelectEditMode(PremiumModeValue)">
+                                            <button type="button" class="timelapse-option @(IsEditModeSelected(PremiumModeValue) ? "selected" : string.Empty)" @onclick="() => SelectEditMode(PremiumModeValue)">
                                                 <strong>CAO CẤP</strong>
                                                 <span>Chất lượng xử lý cao hơn</span>
                                             </button>
@@ -197,29 +197,23 @@
                                     <MudStack Spacing="1">
                                         <MudText Typo="Typo.subtitle2">Tỷ lệ</MudText>
                                         <div class="timelapse-option-grid ratio-options">
-                                            <button type="button" disabled="@(!CanEditFullRequest)" class="timelapse-option @(IsEditRatioSelected(TimelapseRequestRules.LandscapeRatio) ? "selected" : string.Empty)" @onclick="() => SelectEditRatio(TimelapseRequestRules.LandscapeRatio)">
+                                            <button type="button" class="timelapse-option @(IsEditRatioSelected(TimelapseRequestRules.LandscapeRatio) ? "selected" : string.Empty)" @onclick="() => SelectEditRatio(TimelapseRequestRules.LandscapeRatio)">
                                                 <strong>16:9</strong>
                                                 <span>Ngang</span>
                                             </button>
-                                            <button type="button" disabled="@(!CanEditFullRequest)" class="timelapse-option @(IsEditRatioSelected(TimelapseRequestRules.PortraitRatio) ? "selected" : string.Empty)" @onclick="() => SelectEditRatio(TimelapseRequestRules.PortraitRatio)">
+                                            <button type="button" class="timelapse-option @(IsEditRatioSelected(TimelapseRequestRules.PortraitRatio) ? "selected" : string.Empty)" @onclick="() => SelectEditRatio(TimelapseRequestRules.PortraitRatio)">
                                                 <strong>9:16</strong>
                                                 <span>Dọc</span>
                                             </button>
                                         </div>
                                     </MudStack>
 
-                                    <MudSwitch T="bool" Color="Color.Warning" @bind-Value="_editRequest.AutoFinish" Disabled="@(!_editingRequest || !CanEditSafeRequestFields)">
+                                    <MudSwitch T="bool" Color="Color.Warning" @bind-Value="_editRequest.AutoFinish" Disabled="@(!_editingRequest || !CanEditFullRequest)">
                                         Tự động hoàn thành
                                     </MudSwitch>
                                     <MudText Typo="Typo.caption" Color="Color.Secondary">
-                                        @AutoFinishHelperText(_editRequest.AutoFinish)
+                                        Hệ thống sẽ tự động tạo ảnh trung gian, tạo các video scene và ghép video hoàn chỉnh khi dữ liệu sẵn sàng.
                                     </MudText>
-                                    @if (CanEditSafeRequestFields && !CanEditFullRequest)
-                                    {
-                                        <MudAlert Severity="Severity.Info" Dense="true">
-                                            Job đã có dữ liệu render. Bạn chỉ có thể cập nhật tên job và chế độ tự động hoàn thành.
-                                        </MudAlert>
-                                    }
 
                                     <MudStack Row="true" Spacing="2" Class="timelapse-action-row">
                                         <MudButton Variant="Variant.Outlined"
@@ -298,11 +292,6 @@
                                         <MudText Typo="Typo.subtitle2">Tỷ lệ</MudText>
                                         <MudText>@FormatRatio(_job.Snapshot.Ratio)</MudText>
                                     </MudItem>
-                                    <MudItem xs="12" md="6">
-                                        <MudText Typo="Typo.subtitle2">Tự động hoàn thành</MudText>
-                                        <MudText>@(_job.Snapshot.AutoFinish ? "Bật" : "Tắt")</MudText>
-                                        <MudText Typo="Typo.caption" Color="Color.Secondary">@AutoFinishHelperText(_job.Snapshot.AutoFinish)</MudText>
-                                    </MudItem>
                                 </MudGrid>
 
                                 @if (!_job.Workflow.CanEditRequest)
@@ -330,7 +319,7 @@
                                     <MudText Typo="Typo.caption" Color="Color.Secondary">Định giá khách hàng hiện không hiển thị trong luồng này. Số ảnh AI dự kiến: @_job.Workflow.GeneratedImageCount.</MudText>
                                 }
                                 <MudStack Row="true" Spacing="2" Class="timelapse-action-row">
-                                    @if (CanEditRequest)
+                                    @if (CanEditFullRequest)
                                     {
                                         <MudButton Variant="Variant.Outlined"
                                                    StartIcon="@Icons.Material.Filled.EditNote"
@@ -764,12 +753,6 @@
            && _job.Workflow.Images.Count == 0
            && _job.Workflow.Videos.Count == 0
            && _job.Workflow.FinalOutput is null;
-    private bool CanEditSafeRequestFields
-        => _job is not null
-           && _job.Workflow.CanEditRequest
-           && !_job.Workflow.HasActiveOperations
-           && TimelapseParentStatuses.IsEditableStopped(_job.Workflow.ParentStatus);
-    private bool CanEditRequest => CanEditFullRequest || CanEditSafeRequestFields;
     private bool IsFinalOutputLoading
         => _job?.Workflow.FinalOutput?.Status is TimelapseOperationStatuses.Waiting or TimelapseOperationStatuses.Rendering
            || string.Equals(_job?.Workflow.FinalOutput?.Status, TimelapseParentStatuses.Finalizing, StringComparison.OrdinalIgnoreCase)
@@ -786,10 +769,6 @@
             : _job?.Workflow.RequiresVideoConfirmation == true && !_job.Snapshot.VideoRenderConfirmed
                 ? "Duyệt ảnh & tạo video"
                 : "Bắt đầu tạo video";
-    private static string AutoFinishHelperText(bool autoFinish)
-        => autoFinish
-            ? "Tự động tạo video ngay khi từng cặp ảnh đầu-cuối sẵn sàng."
-            : "Chờ hoàn thành toàn bộ ảnh để bạn duyệt trước khi tạo video.";
 
     protected override void OnInitialized()
     {
@@ -897,9 +876,9 @@
 
     private async Task StartEditRequestAsync()
     {
-        if (_job is null || !CanEditRequest)
+        if (_job is null || !CanEditFullRequest)
         {
-            Snackbar.Add("Yêu cầu chỉ có thể chỉnh sửa khi job đã dừng.", Severity.Warning);
+            Snackbar.Add("Yêu cầu chỉ có thể chỉnh sửa trước khi bắt đầu render.", Severity.Warning);
             return;
         }
 
@@ -1010,26 +989,18 @@
             return;
         }
 
-        if (!CanEditRequest)
+        if (!CanEditFullRequest)
         {
-            Snackbar.Add("Yêu cầu chỉ có thể chỉnh sửa khi job đã dừng.", Severity.Warning);
+            Snackbar.Add("Yêu cầu chỉ có thể chỉnh sửa trước khi bắt đầu render.", Severity.Warning);
             return;
         }
 
-        if (!CanEditFullRequest && (_editImageFile is not null || _editStartImageFile is not null || _removeEditStartImage))
-        {
-            Snackbar.Add("Job đã có dữ liệu render nên không thể đổi ảnh hoặc cấu hình dựng.", Severity.Warning);
-            return;
-        }
-
-        if (CanEditFullRequest && _editImageFile is not null && !ValidateEditImage(showSnackbar: true))
+        if (_editImageFile is not null && !ValidateEditImage(showSnackbar: true))
         {
             return;
         }
 
-        var errors = CanEditFullRequest
-            ? TimelapseRequestRules.Validate(_editRequest, _editImageFile is not null || _job.Snapshot.OriginalImage.MediaId != Guid.Empty)
-            : Array.Empty<string>();
+        var errors = TimelapseRequestRules.Validate(_editRequest, _editImageFile is not null || _job.Snapshot.OriginalImage.MediaId != Guid.Empty);
         if (errors.Count > 0)
         {
             Snackbar.Add(errors[0], Severity.Warning);
@@ -1229,8 +1200,7 @@
         {
             [nameof(Components.Dialogs.LandingIndustryVideoPreviewDialog.Title)] = title,
             [nameof(Components.Dialogs.LandingIndustryVideoPreviewDialog.VideoUrl)] = clip.PublicUrl,
-            [nameof(Components.Dialogs.LandingIndustryVideoPreviewDialog.AspectRatio)] = FormatRatio(_job!.Snapshot.Ratio),
-            [nameof(Components.Dialogs.LandingIndustryVideoPreviewDialog.AutoPlay)] = true
+            [nameof(Components.Dialogs.LandingIndustryVideoPreviewDialog.AspectRatio)] = FormatRatio(_job!.Snapshot.Ratio)
         };
         var options = new DialogOptions { CloseButton = true, FullWidth = true, MaxWidth = MaxWidth.Large };
         _ = DialogService.ShowAsync<Components.Dialogs.LandingIndustryVideoPreviewDialog>(title, parameters, options);
@@ -1743,6 +1713,7 @@
                 ? $"Không thể tạo ảnh AI tại mốc {progressPercent}%."
                 : "Không thể tạo ảnh AI.";
     }
+
     private static string FormatRatio(string ratio)
         => string.Equals(ratio, TimelapseRequestRules.PortraitRatio, StringComparison.OrdinalIgnoreCase)
             ? "9:16"
