@@ -206,7 +206,7 @@ public sealed class AiImageBillingService : IAiImageBillingService
             var legacyExisting = await GetRecordForUpdateAsync(legacyConn, legacyTx, request.LogicalRequestId);
             if (legacyExisting is not null)
             {
-                var decision = HandleExistingReservation(legacyExisting);
+                var decision = await HandleExistingReservationWithLegacyBillingDisabledAsync(legacyConn, legacyTx, legacyExisting);
                 legacyTx.Commit();
                 return decision;
             }
@@ -582,6 +582,42 @@ public sealed class AiImageBillingService : IAiImageBillingService
             new { lockName = $"{tenantId:N}:{logicalRequestId}" }, tx);
     }
 
+    private static async Task<AiImageBillingReservation> HandleExistingReservationWithLegacyBillingDisabledAsync(
+        IDbConnection conn,
+        IDbTransaction tx,
+        BillingRecord existing)
+    {
+        if (existing.Status == "insufficient"
+            && string.IsNullOrWhiteSpace(existing.ProviderTaskId))
+        {
+            await conn.ExecuteAsync(
+                """
+                UPDATE billing.ai_image_billing_records
+                   SET status = 'not_required',
+                       customer_charged_points = 0,
+                       system_charged_points = 0,
+                       wallet_transaction_id = NULL,
+                       error_message = NULL,
+                       updated_at = now()
+                 WHERE id = @id;
+                """,
+                new { id = existing.Id }, tx);
+
+            return new AiImageBillingReservation(
+                true,
+                true,
+                existing.PayerType,
+                "not_required",
+                existing.LogicalRequestId,
+                0,
+                existing.Id,
+                null,
+                null);
+        }
+
+        return HandleExistingReservation(existing);
+    }
+
     private static AiImageBillingReservation HandleExistingReservation(BillingRecord existing)
     {
         if (existing.Status is "completed")
@@ -763,6 +799,7 @@ public sealed class AiImageBillingService : IAiImageBillingService
                    payer_type AS PayerType,
                    COALESCE(payer_wallet_id, wallet_id) AS PayerWalletId,
                    wallet_transaction_id AS WalletTransactionId,
+                   provider_task_id AS ProviderTaskId,
                    customer_charged_points AS CustomerChargedPoints,
                    system_charged_points AS SystemChargedPoints,
                    status AS Status,
@@ -937,6 +974,7 @@ public sealed class AiImageBillingService : IAiImageBillingService
         public string PayerType { get; init; } = AiBillingPayerTypes.Customer;
         public Guid? PayerWalletId { get; init; }
         public Guid? WalletTransactionId { get; init; }
+        public string? ProviderTaskId { get; init; }
         public decimal CustomerChargedPoints { get; init; }
         public decimal SystemChargedPoints { get; init; }
         public string Status { get; init; } = string.Empty;
@@ -950,6 +988,7 @@ public sealed class AiImageBillingService : IAiImageBillingService
                 PayerType = PayerType,
                 PayerWalletId = PayerWalletId,
                 WalletTransactionId = WalletTransactionId,
+                ProviderTaskId = ProviderTaskId,
                 CustomerChargedPoints = CustomerChargedPoints,
                 SystemChargedPoints = SystemChargedPoints,
                 Status = Status,
@@ -964,6 +1003,7 @@ public sealed class AiImageBillingService : IAiImageBillingService
         public string PayerType { get; init; } = AiBillingPayerTypes.Customer;
         public Guid? PayerWalletId { get; init; }
         public Guid? WalletTransactionId { get; init; }
+        public string? ProviderTaskId { get; init; }
         public decimal CustomerChargedPoints { get; init; }
         public decimal SystemChargedPoints { get; init; }
         public decimal ReservedPoints => CustomerChargedPoints + SystemChargedPoints;
