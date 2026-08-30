@@ -564,6 +564,26 @@ public sealed class RVideoRuntimeSqlTests
     }
 
     [Fact]
+    public void ManualLibraryPathKeepsTechnicalFinalizationWithoutAutoSceneGeneration()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "RVideoLifecycleWorker.cs");
+        var method = ExtractMethodBlock(source, "private async Task EvaluateProjectAsync");
+
+        Assert.Contains("execution_mode IN ('AUTO', 'MANUAL')", source);
+        Assert.Contains("var isAuto = string.Equals(setting.ExecutionMode, RVideoExecutionModes.Auto", method);
+        Assert.Contains("var imageSceneIds = isAuto && !usesSharedReferenceImage", method);
+        Assert.Contains("var readyScenes = isAuto", method);
+        Assert.Contains("Array.Empty<long>()", method);
+        Assert.Contains("TryEnqueueSceneAudioAsync", method);
+        Assert.Contains("TryFinalizeSceneMediaAsync", method);
+        Assert.Contains("TryEnqueueFinalMergeAsync", method);
+        Assert.Contains("SyncLifecycleAsync", method);
+        Assert.DoesNotContain("RVideoExecutionModes.Manual", method);
+        Assert.DoesNotContain("CreateQueuedSceneVideoVersionAsync", method);
+        Assert.DoesNotContain("RenderSceneVideo", method);
+    }
+
+    [Fact]
     public void SceneVideoCompletionTriggersSharedFinalMergeAfterLifecycleSync()
     {
         var source = ReadRepoFile("Services", "VideoRender", "RVideoSceneVideoCompletionService.cs");
@@ -584,6 +604,19 @@ public sealed class RVideoRuntimeSqlTests
 
         Assert.Contains("_finalization.TryEnqueueFinalMergeAsync", source);
         Assert.Contains("RVideoProjectFinalizationContracts.TriggerSceneAudioReady", source);
+    }
+
+    [Fact]
+    public void TerminalFailurePathsKeepCoreJobFromStayingRendering()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "RVideoJobService.cs");
+        var method = ExtractMethodBlock(source, "public async Task SyncLifecycleAsync");
+
+        Assert.Contains("ResolveCoreLifecycleState", source);
+        Assert.Contains("VideoProjectStatuses.Completed => (RenderJobStatuses.Completed, 100)", source);
+        Assert.Contains("VideoProjectStatuses.Failed => (RenderJobStatuses.Failed, 100)", source);
+        Assert.Contains("status NOT IN ('completed','failed','cancelled')", method);
+        Assert.Contains("if (jobId is null) return;", method);
     }
 
     [Fact]
