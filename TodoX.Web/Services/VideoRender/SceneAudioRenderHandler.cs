@@ -75,10 +75,9 @@ public sealed class SceneAudioRenderHandler : IRenderJobHandler
 
         var voice = await ResolveVoiceAsync(input, ct);
         var sampleRate = _options.CurrentValue.ResolveSampleRate(input.VoiceCode);
-        var callbackUrl = string.IsNullOrWhiteSpace(input.CallbackUrl)
-            ? _options.CurrentValue.GetCallbackUriOrNull()?.ToString()
-            : input.CallbackUrl;
-        var validCallbackUrl = _options.CurrentValue.GetCallbackUriOrNull()?.ToString() ?? callbackUrl;
+        var validCallbackUrl = VbeeOptions.BuildAuthorizedCallbackUriOrNull(
+            string.IsNullOrWhiteSpace(input.CallbackUrl) ? _options.CurrentValue.CallbackUrl : input.CallbackUrl,
+            _options.CurrentValue.CallbackSecret)?.ToString();
 
         _options.CurrentValue.GetTokenOrThrow();
         if (string.IsNullOrWhiteSpace(input.AppId ?? _options.CurrentValue.AppId))
@@ -117,13 +116,6 @@ public sealed class SceneAudioRenderHandler : IRenderJobHandler
                 $"Scene {scene.SceneIndex} external voice submitting.",
                 BuildEventData(project.Id, scene.Id, scene.SceneIndex, input, version.Id, null, "SUBMITTING", sampleRate), ct);
             var submitted = await _vbee.SubmitAsync(submitRequest, ct);
-            requestId = NormalizeRequestId(submitted.RequestId) ?? input.LogicalRequestId;
-
-            if (string.IsNullOrWhiteSpace(requestId))
-            {
-                throw new InvalidOperationException("Vbee submit did not return request_id.");
-            }
-
             if (IsDirectAudio(submitted.AudioUrl))
             {
                 await _repo.AddProjectEventAsync(project.Id, "SCENE_AUDIO_PROVIDER_DIRECT_RESULT", "info",
@@ -132,6 +124,18 @@ public sealed class SceneAudioRenderHandler : IRenderJobHandler
 
                 await CompleteFromAudioUrlAsync(project, scene, version, input, requestId, submitted.AudioUrl!, submitted.Response, ct);
                 return;
+            }
+
+            requestId = NormalizeRequestId(submitted.RequestId);
+            if (string.IsNullOrWhiteSpace(requestId))
+            {
+                await _repo.AddProjectEventAsync(project.Id, "SCENE_AUDIO_PROVIDER_SUBMIT_FAILED", "error",
+                    $"Scene {scene.SceneIndex} external voice submit did not return a provider request id.",
+                    BuildEventData(project.Id, scene.Id, scene.SceneIndex, input, version.Id, null, "FAILED", sampleRate,
+                        errorCode: "VBEE_SUBMIT_REQUEST_ID_MISSING",
+                        errorMessage: "Vbee returned no request_id and no direct MP3 audio URL.",
+                        reason: "provider_request_id_missing"), ct);
+                throw new InvalidOperationException("VBEE_SUBMIT_REQUEST_ID_MISSING");
             }
 
             await _versions.MarkSceneAudioVersionSubmittedAsync(version.Id, "vbee", voice?.ProviderCode ?? input.VoiceCode, null, requestId, ct);
@@ -164,11 +168,23 @@ public sealed class SceneAudioRenderHandler : IRenderJobHandler
 
             var retryRequest = submitRequest with { SampleRate = fallbackRate };
             var retrySubmitted = await _vbee.SubmitAsync(retryRequest, ct);
-            var retryRequestId = NormalizeRequestId(retrySubmitted.RequestId) ?? requestId;
             if (IsDirectAudio(retrySubmitted.AudioUrl))
             {
-                await CompleteFromAudioUrlAsync(project, scene, version, input, retryRequestId, retrySubmitted.AudioUrl!, retrySubmitted.Response, ct);
+                var directRetryRequestId = NormalizeRequestId(retrySubmitted.RequestId) ?? requestId;
+                await CompleteFromAudioUrlAsync(project, scene, version, input, directRetryRequestId, retrySubmitted.AudioUrl!, retrySubmitted.Response, ct);
                 return;
+            }
+
+            var retryRequestId = NormalizeRequestId(retrySubmitted.RequestId);
+            if (string.IsNullOrWhiteSpace(retryRequestId))
+            {
+                await _repo.AddProjectEventAsync(project.Id, "SCENE_AUDIO_PROVIDER_SUBMIT_FAILED", "error",
+                    $"Scene {scene.SceneIndex} external voice retry did not return a provider request id.",
+                    BuildEventData(project.Id, scene.Id, scene.SceneIndex, input, version.Id, null, "FAILED", fallbackRate,
+                        errorCode: "VBEE_SUBMIT_REQUEST_ID_MISSING",
+                        errorMessage: "Vbee retry returned no request_id and no direct MP3 audio URL.",
+                        reason: "provider_request_id_missing"), ct);
+                throw new InvalidOperationException("VBEE_SUBMIT_REQUEST_ID_MISSING");
             }
 
             await _versions.MarkSceneAudioVersionSubmittedAsync(version.Id, "vbee", voice?.ProviderCode ?? input.VoiceCode, null, retryRequestId, ct);
@@ -204,7 +220,7 @@ public sealed class SceneAudioRenderHandler : IRenderJobHandler
         VideoProjectSceneDto scene,
         SceneAudioVersionDto version,
         SceneAudioRenderWorkItemInput input,
-        string requestId,
+        string? requestId,
         string audioUrl,
         JsonObject? providerResponse,
         CancellationToken ct)
@@ -370,7 +386,8 @@ public sealed class SceneAudioRenderHandler : IRenderJobHandler
         string? errorMessage = null,
         bool? sampleRateRetryApplied = null,
         int? originalSampleRate = null,
-        int? fallbackSampleRate = null)
+        int? fallbackSampleRate = null,
+        string? reason = null)
         => new
         {
             projectId,
@@ -388,6 +405,7 @@ public sealed class SceneAudioRenderHandler : IRenderJobHandler
             audioUrl,
             errorCode,
             errorMessage,
+            reason,
             sampleRateRetryApplied,
             originalSampleRate,
             fallbackSampleRate

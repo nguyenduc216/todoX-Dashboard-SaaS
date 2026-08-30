@@ -596,6 +596,22 @@ public sealed class RVideoRuntimeSqlTests
     }
 
     [Fact]
+    public void VbeeSubmitRequiresProviderRequestIdForAsyncResponsesAndAllowsDirectAudio()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "SceneAudioRenderHandler.cs");
+        var directIndex = source.IndexOf("if (IsDirectAudio(submitted.AudioUrl))", StringComparison.Ordinal);
+        var requestIdIndex = source.IndexOf("requestId = NormalizeRequestId(submitted.RequestId);", directIndex, StringComparison.Ordinal);
+
+        Assert.True(directIndex >= 0);
+        Assert.True(requestIdIndex > directIndex);
+        Assert.Contains("VBEE_SUBMIT_REQUEST_ID_MISSING", source);
+        Assert.Contains("SCENE_AUDIO_PROVIDER_SUBMIT_FAILED", source);
+        Assert.Contains("reason: \"provider_request_id_missing\"", source);
+        Assert.DoesNotContain("NormalizeRequestId(submitted.RequestId) ?? input.LogicalRequestId", source);
+        Assert.Contains("CallbackUrl = null", ReadRepoFile("Services", "VideoRender", "RVideoSceneAudioAutoChainService.cs"));
+    }
+
+    [Fact]
     public void AudioLifecycleFailureIsolatedPerScene()
     {
         var source = ReadRepoFile("Services", "VideoRender", "RVideoLifecycleWorker.cs");

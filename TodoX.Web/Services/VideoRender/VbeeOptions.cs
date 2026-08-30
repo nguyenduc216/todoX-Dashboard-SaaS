@@ -36,17 +36,38 @@ public sealed class VbeeOptions
         => new(new Uri(GetApiBaseUri().ToString().TrimEnd('/') + "/"), TtsPath.TrimStart('/'));
 
     public Uri? GetCallbackUriOrNull()
+        => BuildAuthorizedCallbackUriOrNull(CallbackUrl, CallbackSecret);
+
+    public static Uri? BuildAuthorizedCallbackUriOrNull(string? callbackUrl, string? callbackSecret)
     {
-        if (string.IsNullOrWhiteSpace(CallbackUrl))
+        if (string.IsNullOrWhiteSpace(callbackUrl))
         {
             return null;
         }
 
-        if (!Uri.TryCreate(CallbackUrl.Trim(), UriKind.Absolute, out var uri)
+        if (!Uri.TryCreate(callbackUrl.Trim(), UriKind.Absolute, out var uri)
             || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
         {
             throw new InvalidOperationException("VBEE_CALLBACK_URL must be an absolute HTTP/HTTPS URL.");
         }
+
+        if (string.IsNullOrWhiteSpace(callbackSecret))
+        {
+            throw new InvalidOperationException("VBEE_CALLBACK_SECRET is required when VBEE_CALLBACK_URL is configured.");
+        }
+
+        var queryParts = uri.Query.TrimStart('?')
+            .Split('&', StringSplitOptions.RemoveEmptyEntries)
+            .Where(part =>
+            {
+                var key = Uri.UnescapeDataString(part.Split('=', 2)[0]);
+                return !string.Equals(key, "secret", StringComparison.OrdinalIgnoreCase)
+                       && !string.Equals(key, "callback_secret", StringComparison.OrdinalIgnoreCase);
+            })
+            .ToList();
+        queryParts.Add("secret=" + Uri.EscapeDataString(callbackSecret.Trim()));
+        var builder = new UriBuilder(uri) { Query = string.Join("&", queryParts) };
+        uri = builder.Uri;
 
         return uri;
     }

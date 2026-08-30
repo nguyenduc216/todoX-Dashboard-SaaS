@@ -101,7 +101,17 @@ public sealed class RVideoSceneAudioAutoChainService : IRVideoSceneAudioAutoChai
             return false;
         }
 
-        var voiceCode = ResolveProviderVoiceCode(voice);
+        string voiceCode;
+        try
+        {
+            voiceCode = ResolveProviderVoiceCode(voice);
+        }
+        catch (InvalidOperationException ex) when (string.Equals(ex.Message, "RVIDEO_VBEE_PROVIDER_VOICE_ID_MISSING", StringComparison.Ordinal))
+        {
+            await RecordEnqueueFailureAsync(projectId, scene, settings, triggerSource,
+                "provider_voice_id_missing", ex.Message, ct);
+            return false;
+        }
         var ttsRate = ResolveTtsRate(metadata, settings);
         ValidateTtsRate(voice, ttsRate);
 
@@ -189,7 +199,7 @@ public sealed class RVideoSceneAudioAutoChainService : IRVideoSceneAudioAutoChai
                 SampleRate = _options.CurrentValue.ResolveSampleRate(voiceCode),
                 Bitrate = _options.CurrentValue.DefaultBitrate,
                 SpeedRate = _options.CurrentValue.DefaultSpeedRate,
-                CallbackUrl = _options.CurrentValue.GetCallbackUriOrNull()?.ToString(),
+                CallbackUrl = null,
                 AppId = _options.CurrentValue.AppId,
                 VoiceSnapshot = voice,
                 SceneSnapshot = new { scene.Id, scene.ProjectId, scene.SceneIndex, scene.Title, scene.DurationSeconds, scene.ScenePrompt },

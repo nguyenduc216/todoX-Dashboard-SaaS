@@ -148,4 +148,17 @@ public sealed class VbeeSceneRuntimeTests
 
         Assert.Equal(VbeeCallbackAuthorizationStatus.Authorized, SceneAudioEndpoints.GetCallbackAuthorizationStatus(context.Request, "secret-1"));
     }
+
+    [Fact]
+    public void CallbackConfigurationWithoutSecretFailsClearly()
+    {
+        var options = new VbeeOptions
+        {
+            CallbackUrl = "https://dashboard.example.com/api/providers/vbee/callback"
+        };
+
+        var ex = Assert.Throws<InvalidOperationException>(() => options.GetCallbackUriOrNull());
+
+        Assert.Equal("VBEE_CALLBACK_SECRET is required when VBEE_CALLBACK_URL is configured.", ex.Message);
+    }
 }

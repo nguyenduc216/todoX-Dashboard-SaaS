@@ -73,6 +73,25 @@ public sealed class VbeeVoiceClientTests
         Assert.Equal("SUCCESS", result.Status);
     }
 
+    [Fact]
+    public void CallbackUrl_AppendsSecretWithoutDroppingExistingQueryOrDuplicatingIt()
+    {
+        var options = new VbeeOptions
+        {
+            CallbackUrl = "https://dashboard.example.com/api/providers/vbee/callback?tenant=demo",
+            CallbackSecret = "secret value"
+        };
+
+        var uri = options.GetCallbackUriOrNull()!;
+        var query = uri.Query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries)
+            .Select(part => part.Split('=', 2))
+            .ToDictionary(parts => Uri.UnescapeDataString(parts[0]), parts => parts.Length == 2 ? Uri.UnescapeDataString(parts[1]) : string.Empty);
+
+        Assert.Equal("demo", query["tenant"]);
+        Assert.Equal("secret value", query["secret"]);
+        Assert.Equal(1, query.Keys.Count(x => string.Equals(x, "secret", StringComparison.OrdinalIgnoreCase)));
+    }
+
     private static VbeeVoiceClient CreateClient(FakeHttpMessageHandler handler, VbeeOptions options)
         => new(new HttpClient(handler), new StaticOptionsMonitor<VbeeOptions>(options));
 
