@@ -477,6 +477,22 @@ public sealed class RVideoRuntimeSqlTests
         Assert.Contains("GetSceneAudioVersionByLogicalRequestIdAsync", source);
         Assert.Contains("BuildLogicalRequestKey(projectId, sceneId)", source);
         Assert.Contains("same request is already active", source);
+        Assert.Contains("VoiceCodeSnapshot", source);
+        Assert.Contains("voiceCode,", source);
+    }
+
+    [Fact]
+    public void SceneAudioVersionInsertBindsVoiceCodeSnapshotToNotNullColumn()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "SceneMediaVersioningService.cs");
+        var method = ExtractMethodBlock(source, "public async Task<SceneAudioVersionDto> CreateQueuedSceneAudioVersionAsync");
+        var insertBlock = method[method.IndexOf("INSERT INTO video_render.scene_audio_versions", StringComparison.Ordinal)..];
+
+        Assert.Contains("voice_catalog_code, voice_code_snapshot, voice_snapshot_json", insertBlock);
+        Assert.Contains("@voiceCodeSnapshot", insertBlock);
+        Assert.Contains("voiceCodeSnapshot = request.VoiceCodeSnapshot.Trim()", method);
+        Assert.Contains("SCENE_AUDIO_VOICE_CODE_SNAPSHOT_MISSING", method);
+        Assert.Contains("voice_code_snapshot AS VoiceCodeSnapshot", source);
     }
 
     [Fact]

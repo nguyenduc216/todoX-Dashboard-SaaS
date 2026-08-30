@@ -117,18 +117,19 @@ public sealed class RVideoSceneAudioAutoChainService : IRVideoSceneAudioAutoChai
 
         var operationId = existing?.RenderJobId ?? Guid.NewGuid();
         var version = existing ?? await _versions.CreateQueuedSceneAudioVersionAsync(new SceneAudioVersionCreateRequest(
-            project.Id,
-            scene.Id,
-            project.UserId,
-            project.CustomerId,
-            operationId,
-            logicalRequestId,
-            settings?.VoiceCatalogCode,
-            JsonSerializer.Serialize(voice, new JsonSerializerOptions(JsonSerializerDefaults.Web)),
-            voiceText,
-            voiceInstruction,
-            ttsRate,
-            scene.DurationSeconds,
+            ProjectId: project.Id,
+            SceneId: scene.Id,
+            UserId: project.UserId,
+            CustomerId: project.CustomerId,
+            RenderJobId: operationId,
+            LogicalRequestId: logicalRequestId,
+            VoiceCatalogCode: settings?.VoiceCatalogCode,
+            VoiceCodeSnapshot: voiceCode,
+            VoiceSnapshotJson: JsonSerializer.Serialize(voice, new JsonSerializerOptions(JsonSerializerDefaults.Web)),
+            NarrationTextSnapshot: voiceText,
+            VoiceInstructionSnapshot: voiceInstruction,
+            TtsRate: ttsRate,
+            DurationSeconds: scene.DurationSeconds,
             SceneSnapshot: new
             {
                 scene.Id,
