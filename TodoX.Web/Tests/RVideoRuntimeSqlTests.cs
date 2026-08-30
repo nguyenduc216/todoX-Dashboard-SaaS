@@ -476,7 +476,7 @@ public sealed class RVideoRuntimeSqlTests
         Assert.Contains("selected_video_not_completed", source);
         Assert.Contains("GetSceneAudioVersionByLogicalRequestIdAsync", source);
         Assert.Contains("BuildLogicalRequestKey(projectId, sceneId)", source);
-        Assert.Contains("same request is already active", source);
+        Assert.Contains("TryBindSceneAudioVersionRenderJobAsync", source);
         Assert.Contains("VoiceCodeSnapshot", source);
         Assert.Contains("VoiceTextSnapshot: voiceText", source);
         Assert.Contains("voiceCode,", source);
@@ -499,6 +499,29 @@ public sealed class RVideoRuntimeSqlTests
         Assert.Contains("SCENE_AUDIO_VOICE_TEXT_SNAPSHOT_MISSING", method);
         Assert.Contains("voice_code_snapshot AS VoiceCodeSnapshot", source);
         Assert.Contains("voice_text_snapshot AS VoiceTextSnapshot", source);
+    }
+
+    [Fact]
+    public void SceneAudioAutoChainCreatesVersionBeforeBindingARealRenderJob()
+    {
+        var chain = ReadRepoFile("Services", "VideoRender", "RVideoSceneAudioAutoChainService.cs");
+        var versioning = ReadRepoFile("Services", "VideoRender", "SceneMediaVersioningService.cs");
+
+        var createIndex = chain.IndexOf("CreateQueuedSceneAudioVersionAsync", StringComparison.Ordinal);
+        var enqueueIndex = chain.IndexOf("EnqueueForLogCodeIfNoneActiveAsync", StringComparison.Ordinal);
+        var bindIndex = chain.IndexOf("TryBindSceneAudioVersionRenderJobAsync", StringComparison.Ordinal);
+
+        Assert.True(createIndex >= 0);
+        Assert.True(enqueueIndex > createIndex);
+        Assert.True(bindIndex > enqueueIndex);
+        Assert.Contains("RenderJobId: null", chain);
+        Assert.DoesNotContain("Guid.NewGuid()", chain);
+        Assert.Contains("GetByLogCodeAsync(logicalRequestId, ct)", chain);
+        Assert.Contains("existingJob ?? (await _jobs.EnqueueForLogCodeIfNoneActiveAsync", chain);
+        Assert.Contains("Scene {scene.SceneIndex} external voice queued.", chain);
+        Assert.DoesNotContain("same request is already active", chain);
+        Assert.Contains("render_job_id=@renderJobId", versioning);
+        Assert.Contains("render_job_id IS NULL OR render_job_id=@renderJobId", versioning);
     }
 
     [Fact]

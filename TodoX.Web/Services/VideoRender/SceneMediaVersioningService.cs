@@ -331,6 +331,7 @@ public interface ISceneMediaVersioningService
     Task CompleteSceneAudioVersionAsync(Guid versionId, SceneAudioVersionCompleteRequest request, CancellationToken ct = default);
     Task FailSceneAudioVersionAsync(Guid versionId, string? errorCode, string? errorMessage, CancellationToken ct = default);
     Task MarkSceneAudioVersionSubmittedAsync(Guid versionId, string? providerCode, string? modelName, long? providerCapabilityId, string providerTaskId, CancellationToken ct = default);
+    Task<bool> TryBindSceneAudioVersionRenderJobAsync(Guid versionId, Guid renderJobId, CancellationToken ct = default);
     Task UpdateSceneAudioVersionRenderConfigAsync(Guid versionId, string renderConfigJson, CancellationToken ct = default);
     Task<string?> GetSceneAudioProviderTaskIdAsync(Guid versionId, CancellationToken ct = default);
     Task<SceneAudioVersionDto?> GetSceneAudioVersionByProviderTaskIdAsync(string providerTaskId, CancellationToken ct = default);
@@ -1156,6 +1157,7 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
             VersionNumber = versionNumber,
             LogicalRequestId = request.LogicalRequestId,
             Status = "queued",
+            RenderJobId = request.RenderJobId,
             StorageKey = storageKey,
             VoiceCatalogCode = request.VoiceCatalogCode,
             VoiceCodeSnapshot = request.VoiceCodeSnapshot.Trim(),
@@ -1262,6 +1264,23 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
              WHERE id=@versionId AND tenant_id=@tenant;
             """,
             new { versionId, tenant = _tenant.TenantId, providerCode, modelName, providerCapabilityId, providerTaskId });
+    }
+
+    public async Task<bool> TryBindSceneAudioVersionRenderJobAsync(Guid versionId, Guid renderJobId, CancellationToken ct = default)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        var updated = await conn.ExecuteAsync(
+            """
+            UPDATE video_render.scene_audio_versions
+               SET render_job_id=@renderJobId,
+                   updated_at=now()
+             WHERE id=@versionId
+               AND tenant_id=@tenant
+               AND (render_job_id IS NULL OR render_job_id=@renderJobId);
+            """,
+            new { versionId, renderJobId, tenant = _tenant.TenantId });
+        return updated > 0;
     }
 
     public async Task UpdateSceneAudioVersionRenderConfigAsync(Guid versionId, string renderConfigJson, CancellationToken ct = default)

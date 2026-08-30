@@ -115,13 +115,12 @@ public sealed class RVideoSceneAudioAutoChainService : IRVideoSceneAudioAutoChai
         var ttsRate = ResolveTtsRate(metadata, settings);
         ValidateTtsRate(voice, ttsRate);
 
-        var operationId = existing?.RenderJobId ?? Guid.NewGuid();
         var version = existing ?? await _versions.CreateQueuedSceneAudioVersionAsync(new SceneAudioVersionCreateRequest(
             ProjectId: project.Id,
             SceneId: scene.Id,
             UserId: project.UserId,
             CustomerId: project.CustomerId,
-            RenderJobId: operationId,
+            RenderJobId: null,
             LogicalRequestId: logicalRequestId,
             VoiceCatalogCode: settings?.VoiceCatalogCode,
             VoiceCodeSnapshot: voiceCode,
@@ -161,21 +160,6 @@ public sealed class RVideoSceneAudioAutoChainService : IRVideoSceneAudioAutoChai
                 }
             }), ct);
 
-        await _repo.AddProjectEventAsync(projectId, "SCENE_AUDIO_QUEUED", "info",
-            $"Scene {scene.SceneIndex} external voice queued.",
-            new
-            {
-                projectId,
-                sceneId,
-                scene.SceneIndex,
-                triggerSource,
-                versionId = version.Id,
-                logicalRequestId,
-                voiceCatalogCode = settings?.VoiceCatalogCode,
-                voiceCode,
-                ttsRate
-            }, ct);
-
         var model = new RenderJobCreateModel
         {
             JobType = RenderJobTypes.RenderSceneAudio,
@@ -183,7 +167,7 @@ public sealed class RVideoSceneAudioAutoChainService : IRVideoSceneAudioAutoChai
             CustomerId = project.CustomerId,
             Input = new SceneAudioRenderWorkItemInput
             {
-                ParentJobId = operationId,
+                ParentJobId = existing?.RenderJobId,
                 ProjectId = project.Id,
                 SceneId = scene.Id,
                 SceneIndex = scene.SceneIndex,
@@ -209,7 +193,6 @@ public sealed class RVideoSceneAudioAutoChainService : IRVideoSceneAudioAutoChai
                 {
                     projectId,
                     sceneId,
-                    operationId,
                     triggerSource,
                     voiceCatalogCode = settings?.VoiceCatalogCode,
                     voiceCode,
@@ -233,14 +216,47 @@ public sealed class RVideoSceneAudioAutoChainService : IRVideoSceneAudioAutoChai
             PointStatus = RenderPointStatuses.NotRequired
         };
 
-        var (job, alreadyActive) = await _jobs.EnqueueForLogCodeIfNoneActiveAsync(model, logicalRequestId, ct);
-        if (alreadyActive)
+        RenderJobDto? existingJob = null;
+        if (version.RenderJobId is Guid renderJobId)
         {
-            await _repo.AddProjectEventAsync(projectId, "SCENE_AUDIO_AUTO_ENQUEUE_SKIPPED", "info",
-                $"Scene {scene.SceneIndex} audio auto enqueue skipped because the same request is already active.",
-                new { projectId, sceneId, scene.SceneIndex, triggerSource, logicalRequestId, activeJobId = job.Id }, ct);
+            existingJob = await _jobs.GetAsync(renderJobId, ct);
+        }
+        existingJob ??= await _jobs.GetByLogCodeAsync(logicalRequestId, ct);
+
+        RenderJobDto job;
+        try
+        {
+            job = existingJob ?? (await _jobs.EnqueueForLogCodeIfNoneActiveAsync(model, logicalRequestId, ct)).Job;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            await RecordEnqueueFailureAsync(projectId, scene, settings, triggerSource,
+                "render_job_enqueue_failed", ex.Message, ct);
             return false;
         }
+
+        if (!await _versions.TryBindSceneAudioVersionRenderJobAsync(version.Id, job.Id, ct))
+        {
+            await RecordEnqueueFailureAsync(projectId, scene, settings, triggerSource,
+                "render_job_binding_conflict", "The audio version is already bound to another render job.", ct);
+            return false;
+        }
+
+        await _repo.AddProjectEventAsync(projectId, "SCENE_AUDIO_QUEUED", "info",
+            $"Scene {scene.SceneIndex} external voice queued.",
+            new
+            {
+                projectId,
+                sceneId,
+                scene.SceneIndex,
+                triggerSource,
+                versionId = version.Id,
+                logicalRequestId,
+                voiceCatalogCode = settings?.VoiceCatalogCode,
+                voiceCode,
+                ttsRate,
+                jobId = job.Id
+            }, ct);
 
         await _repo.AddProjectEventAsync(projectId, "SCENE_AUDIO_AUTO_ENQUEUED", "info",
             $"Scene {scene.SceneIndex} audio auto enqueue submitted.",
@@ -331,7 +347,7 @@ public sealed class RVideoSceneAudioAutoChainService : IRVideoSceneAudioAutoChai
 
 public sealed class SceneAudioRenderWorkItemInput
 {
-    public Guid ParentJobId { get; set; }
+    public Guid? ParentJobId { get; set; }
     public long ProjectId { get; set; }
     public long SceneId { get; set; }
     public int SceneIndex { get; set; }
