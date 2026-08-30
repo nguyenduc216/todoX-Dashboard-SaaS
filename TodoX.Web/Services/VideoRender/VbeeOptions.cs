@@ -51,11 +51,6 @@ public sealed class VbeeOptions
             throw new InvalidOperationException("VBEE_CALLBACK_URL must be an absolute HTTP/HTTPS URL.");
         }
 
-        if (string.IsNullOrWhiteSpace(callbackSecret))
-        {
-            throw new InvalidOperationException("VBEE_CALLBACK_SECRET is required when VBEE_CALLBACK_URL is configured.");
-        }
-
         var queryParts = uri.Query.TrimStart('?')
             .Split('&', StringSplitOptions.RemoveEmptyEntries)
             .Where(part =>
@@ -65,7 +60,10 @@ public sealed class VbeeOptions
                        && !string.Equals(key, "callback_secret", StringComparison.OrdinalIgnoreCase);
             })
             .ToList();
-        queryParts.Add("secret=" + Uri.EscapeDataString(callbackSecret.Trim()));
+        if (!string.IsNullOrWhiteSpace(callbackSecret))
+        {
+            queryParts.Add("secret=" + Uri.EscapeDataString(callbackSecret.Trim()));
+        }
         var builder = new UriBuilder(uri) { Query = string.Join("&", queryParts) };
         uri = builder.Uri;
 

@@ -8,7 +8,7 @@ namespace TodoX.Web.Tests;
 public sealed class VbeeVoiceClientTests
 {
     [Fact]
-    public async Task SubmitAsync_UsesVbeeContractAndOmitsZeroSampleRate()
+    public async Task SubmitAsync_UsesVbeeContractAndOmitsCallbackAndZeroSampleRate()
     {
         var handler = new FakeHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
         {
@@ -28,7 +28,7 @@ public sealed class VbeeVoiceClientTests
             1.0m,
             null,
             "https://dashboard.example.com/api/providers/vbee/callback",
-            null,
+            "logical-request-1",
             0,
             160,
             1.25m,
@@ -43,13 +43,39 @@ public sealed class VbeeVoiceClientTests
 
         var body = handler.LastBody ?? string.Empty;
         Assert.Contains("\"app_id\":\"app-456\"", body);
-        Assert.Contains("\"callback_url\":\"https://dashboard.example.com/api/providers/vbee/callback\"", body);
+        Assert.DoesNotContain("callback_url", body);
+        Assert.DoesNotContain("logical-request-1", body);
+        Assert.DoesNotContain("request_id", body);
         Assert.Contains("\"input_text\":\"Xin chao\"", body);
         Assert.Contains("\"voice_code\":\"voice-01\"", body);
         Assert.Contains("\"audio_type\":\"mp3\"", body);
         Assert.Contains("\"bitrate\":160", body);
         Assert.Contains("\"speed_rate\":1.25", body);
         Assert.DoesNotContain("sample_rate", body);
+    }
+
+    [Fact]
+    public async Task GetStatusAsync_UsesCallbackResultEndpointAndBearerToken()
+    {
+        var handler = new FakeHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("""{"status":"SUCCESS","audio_link":"https://cdn.example.com/out.mp3"}""")
+        });
+        var client = CreateClient(handler, new VbeeOptions
+        {
+            ApiBaseUrl = "https://vbee.example/api/v1",
+            TtsPath = "/tts",
+            ApiToken = "token-123",
+            AppId = "app-456"
+        });
+
+        var result = await client.GetStatusAsync("req-123");
+
+        Assert.Equal("SUCCESS", result["status"]?.GetValue<string>());
+        Assert.Equal(HttpMethod.Get, handler.LastRequest?.Method);
+        Assert.Equal("https://vbee.example/api/v1/tts/req-123/callback-result", handler.LastRequest?.RequestUri?.ToString());
+        Assert.Equal("Bearer", handler.LastRequest?.Headers.Authorization?.Scheme);
+        Assert.Equal("token-123", handler.LastRequest?.Headers.Authorization?.Parameter);
     }
 
     [Fact]
@@ -90,6 +116,19 @@ public sealed class VbeeVoiceClientTests
         Assert.Equal("demo", query["tenant"]);
         Assert.Equal("secret value", query["secret"]);
         Assert.Equal(1, query.Keys.Count(x => string.Equals(x, "secret", StringComparison.OrdinalIgnoreCase)));
+    }
+
+    [Fact]
+    public void CallbackUrl_DoesNotRequireSecretForLegacyOptionalUrl()
+    {
+        var options = new VbeeOptions
+        {
+            CallbackUrl = "https://dashboard.example.com/api/providers/vbee/callback?tenant=demo"
+        };
+
+        var uri = options.GetCallbackUriOrNull()!;
+
+        Assert.Equal("https://dashboard.example.com/api/providers/vbee/callback?tenant=demo", uri.ToString());
     }
 
     private static VbeeVoiceClient CreateClient(FakeHttpMessageHandler handler, VbeeOptions options)

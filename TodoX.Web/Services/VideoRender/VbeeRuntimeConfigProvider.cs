@@ -90,7 +90,7 @@ public sealed class VbeeRuntimeConfigProvider : IVbeeRuntimeConfigProvider
             VoiceSampleRates = new Dictionary<string, int>(fallback.VoiceSampleRates, StringComparer.OrdinalIgnoreCase)
         };
 
-        var callbackUrl = ResolveCallbackUrl(configuration, resolved.CallbackSecret);
+        var callbackUrl = ResolveCallbackUrl(configuration, resolved.CallbackSecret, fallback.CallbackUrl);
         if (callbackUrl is not null)
         {
             resolved.CallbackUrl = callbackUrl;
@@ -99,8 +99,22 @@ public sealed class VbeeRuntimeConfigProvider : IVbeeRuntimeConfigProvider
         return resolved;
     }
 
-    public static string? ResolveCallbackUrl(IConfiguration configuration, string? callbackSecret)
+    public static string? ResolveCallbackUrl(IConfiguration configuration, string? callbackSecret, string? fallbackCallbackUrl = null)
     {
+        var callbackUrl = FirstNonBlank(
+            fallbackCallbackUrl,
+            configuration["Vbee:CallbackUrl"],
+            configuration["VBEE_CALLBACK_URL"]);
+        if (!string.IsNullOrWhiteSpace(callbackUrl))
+        {
+            return VbeeOptions.BuildAuthorizedCallbackUriOrNull(callbackUrl, callbackSecret)?.ToString();
+        }
+
+        if (string.IsNullOrWhiteSpace(callbackSecret))
+        {
+            return null;
+        }
+
         var publicBaseUrl = FirstNonBlank(
             configuration["TodoX:PublicBaseUrl"],
             configuration["App:PublicBaseUrl"],

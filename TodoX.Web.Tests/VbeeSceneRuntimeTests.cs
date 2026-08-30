@@ -1,4 +1,3 @@
-using System.Text.Json.Nodes;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
@@ -10,23 +9,6 @@ namespace TodoX.Web.Tests;
 
 public sealed class VbeeSceneRuntimeTests
 {
-    [Fact]
-    public void SampleRateRetry_IsOneShot_AndPersistsMarker()
-    {
-        var providerResponse = new JsonObject { ["error"] = "sample rate unsupported" };
-
-        var first = SceneAudioRenderHandler.TryResolveSampleRateRetry(providerResponse, "1013", "sample rate", 24000, false, out var firstFallback);
-        var retryJson = SceneAudioRenderHandler.BuildSampleRateRetryConfigJson("""{"stage":"audio"}""", 24000, firstFallback, "req-1");
-        var applied = SceneAudioRenderHandler.HasSampleRateRetryApplied(retryJson);
-        var second = SceneAudioRenderHandler.TryResolveSampleRateRetry(providerResponse, "1013", "sample rate", 24000, applied, out var secondFallback);
-
-        Assert.True(first);
-        Assert.Equal(0, firstFallback);
-        Assert.True(applied);
-        Assert.False(second);
-        Assert.Equal(0, secondFallback);
-    }
-
     [Fact]
     public void MuxCompletion_UsesFinalPath_AndVoiceLinkage()
     {
@@ -159,9 +141,10 @@ public sealed class VbeeSceneRuntimeTests
             CallbackUrl = "https://dashboard.example.com/api/providers/vbee/callback"
         };
 
-        var ex = Assert.Throws<InvalidOperationException>(() => options.GetCallbackUriOrNull());
+        var uri = options.GetCallbackUriOrNull();
 
-        Assert.Equal("VBEE_CALLBACK_SECRET is required when VBEE_CALLBACK_URL is configured.", ex.Message);
+        Assert.NotNull(uri);
+        Assert.Equal("https://dashboard.example.com/api/providers/vbee/callback", uri!.ToString());
     }
 
     [Fact]
@@ -287,19 +270,19 @@ public sealed class VbeeSceneRuntimeTests
     }
 
     [Fact]
-    public void CallbackUrl_UsesTodoXPublicBaseUrlAndNeverN8n()
+    public void CallbackUrl_UsesExplicitCallbackUrlAndDoesNotRequirePublicBaseUrl()
     {
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["TodoX:PublicBaseUrl"] = "https://dashboard.example.com"
+                ["Vbee:CallbackUrl"] = "https://dashboard.example.com/api/providers/vbee/callback"
             })
             .Build();
 
         var callbackUrl = VbeeRuntimeConfigProvider.ResolveCallbackUrl(configuration, "secret-1");
 
         Assert.Equal("https://dashboard.example.com/api/providers/vbee/callback?secret=secret-1", callbackUrl);
-        Assert.DoesNotContain("n8n", callbackUrl, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("TodoX:PublicBaseUrl", callbackUrl, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -322,13 +305,9 @@ public sealed class VbeeSceneRuntimeTests
     }
 
     [Fact]
-    public void RuntimeConfig_ThrowsWhenCallbackEnabledWithoutSecret()
+    public void RuntimeConfig_AllowsMissingCallbackSecretAndPublicBaseUrl()
     {
         var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                ["TodoX:PublicBaseUrl"] = "https://dashboard.example.com"
-            })
             .Build();
 
         var fallback = new VbeeOptions
@@ -343,6 +322,26 @@ public sealed class VbeeSceneRuntimeTests
             DefaultSpeedRate = 1.0m
         };
 
-        Assert.Throws<InvalidOperationException>(() => VbeeRuntimeConfigProvider.Resolve(null, configuration, fallback));
+        var resolved = VbeeRuntimeConfigProvider.Resolve(null, configuration, fallback);
+
+        Assert.Null(resolved.CallbackUrl);
+        Assert.Null(resolved.CallbackSecret);
     }
+
+    [Fact]
+    public void SceneAudioHandler_SourceNoLongerDependsOnCallbackUrlForSubmitOrPoll()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "SceneAudioRenderHandler.cs");
+
+        Assert.DoesNotContain("BuildAuthorizedCallbackUriOrNull", source);
+        Assert.DoesNotContain("callback_url", source, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("SampleRateRetry", source, StringComparison.Ordinal);
+        Assert.Contains("GetStatusAsync(requestId", source, StringComparison.Ordinal);
+        Assert.Contains("ScheduleProviderPollAsync(job.Id, options.PollInterval, \"VBEE_PENDING\"", source, StringComparison.Ordinal);
+        Assert.Contains("ScheduleProviderPollAsync(job.Id, options.PollInterval, \"VBEE_SUBMITTED\"", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("SubmitAsync(retryRequest", source, StringComparison.Ordinal);
+    }
+
+    private static string ReadRepoFile(params string[] parts)
+        => File.ReadAllText(Path.Combine(new[] { AppContext.BaseDirectory, "..", "..", "..", "..", "TodoX.Web" }.Concat(parts).ToArray()));
 }

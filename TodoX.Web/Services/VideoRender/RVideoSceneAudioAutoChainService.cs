@@ -211,7 +211,7 @@ public sealed class RVideoSceneAudioAutoChainService : IRVideoSceneAudioAutoChai
             LogCode = logicalRequestId,
             ProviderCode = "vbee",
             ModelCode = voiceCode,
-            MaxAttempts = 3,
+            MaxAttempts = 100,
             PointCostEstimate = 0,
             PointStatus = RenderPointStatuses.NotRequired
         };

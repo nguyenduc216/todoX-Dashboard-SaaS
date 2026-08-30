@@ -70,7 +70,6 @@ public sealed class VbeeVoiceClient : IVbeeVoiceClient
         var body = new JsonObject
         {
             ["app_id"] = request.AppId ?? options.AppId,
-            ["callback_url"] = request.CallbackUrl,
             ["input_text"] = request.NarrationText,
             ["voice_code"] = request.VoiceCode,
             ["audio_type"] = "mp3",
@@ -80,10 +79,6 @@ public sealed class VbeeVoiceClient : IVbeeVoiceClient
         if (request.SampleRate > 0)
         {
             body["sample_rate"] = request.SampleRate;
-        }
-        if (!string.IsNullOrWhiteSpace(request.RequestId))
-        {
-            body["request_id"] = request.RequestId;
         }
 
         message.Content = JsonContent.Create(body, options: JsonOptions);
