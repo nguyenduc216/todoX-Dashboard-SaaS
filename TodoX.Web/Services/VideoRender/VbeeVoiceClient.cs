@@ -93,6 +93,14 @@ public sealed class VbeeVoiceClient : IVbeeVoiceClient
 
     public async Task<VbeeVoiceSubmitResult> SubmitAsync(VbeeVoiceSubmitRequest request, VbeeOptions options, CancellationToken ct = default)
     {
+        var callbackUrl = string.IsNullOrWhiteSpace(request.CallbackUrl)
+            ? options.GetCallbackUriOrNull()?.ToString()
+            : VbeeOptions.BuildAuthorizedCallbackUriOrNull(request.CallbackUrl, options.CallbackSecret)?.ToString();
+        if (string.IsNullOrWhiteSpace(callbackUrl))
+        {
+            throw new InvalidOperationException("VBEE_CALLBACK_URL_MISSING");
+        }
+
         var token = options.GetTokenOrThrow();
         using var message = new HttpRequestMessage(HttpMethod.Post, options.GetTtsUri());
         message.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
@@ -104,7 +112,8 @@ public sealed class VbeeVoiceClient : IVbeeVoiceClient
             ["voice_code"] = request.VoiceCode,
             ["audio_type"] = "mp3",
             ["bitrate"] = request.Bitrate,
-            ["speed_rate"] = request.SpeedRate
+            ["speed_rate"] = request.SpeedRate,
+            ["callback_url"] = callbackUrl
         };
         if (request.SampleRate > 0)
         {

@@ -27,6 +27,7 @@ public sealed class VbeeRuntimeConfigProvider : IVbeeRuntimeConfigProvider
     public const string BitrateKey = "rvideo.vbee.bitrate";
     public const string SpeedRateKey = "rvideo.vbee.speed_rate";
     public const string SampleRateKey = "rvideo.vbee.sample_rate";
+    public const string CallbackUrlKey = "rvideo.vbee.callback_url";
     public const string CallbackSecretKey = "rvideo.vbee.callback_secret";
 
     private readonly TodoXAutomationConnectionFactory _factory;
@@ -46,10 +47,11 @@ public sealed class VbeeRuntimeConfigProvider : IVbeeRuntimeConfigProvider
     public async Task<VbeeOptions> GetAsync(CancellationToken ct = default)
     {
         using var conn = await _factory.OpenAsync(ct);
-        var rows = await conn.QueryAsync<ConfigRow>(
-            new CommandDefinition(
-                LoadConfigSql,
-                new { Keys = new[]
+        var rows = await conn.QueryAsync<ConfigRow>(new CommandDefinition(
+            LoadConfigSql,
+            new
+            {
+                Keys = new[]
                 {
                     TokenKey,
                     ApiBaseKey,
@@ -58,9 +60,11 @@ public sealed class VbeeRuntimeConfigProvider : IVbeeRuntimeConfigProvider
                     BitrateKey,
                     SpeedRateKey,
                     SampleRateKey,
+                    CallbackUrlKey,
                     CallbackSecretKey
-                } },
-                cancellationToken: ct));
+                }
+            },
+            cancellationToken: ct));
 
         return Resolve(
             rows.ToDictionary(row => row.config_key, row => Normalize(row.config_value), StringComparer.OrdinalIgnoreCase),
@@ -90,7 +94,11 @@ public sealed class VbeeRuntimeConfigProvider : IVbeeRuntimeConfigProvider
             VoiceSampleRates = new Dictionary<string, int>(fallback.VoiceSampleRates, StringComparer.OrdinalIgnoreCase)
         };
 
-        var callbackUrl = ResolveCallbackUrl(configuration, resolved.CallbackSecret, fallback.CallbackUrl);
+        var callbackUrl = ResolveCallbackUrl(
+            configuration,
+            resolved.CallbackSecret,
+            fallback.CallbackUrl,
+            dbValues.GetValueOrDefault(CallbackUrlKey));
         if (callbackUrl is not null)
         {
             resolved.CallbackUrl = callbackUrl;
@@ -99,9 +107,14 @@ public sealed class VbeeRuntimeConfigProvider : IVbeeRuntimeConfigProvider
         return resolved;
     }
 
-    public static string? ResolveCallbackUrl(IConfiguration configuration, string? callbackSecret, string? fallbackCallbackUrl = null)
+    public static string? ResolveCallbackUrl(
+        IConfiguration configuration,
+        string? callbackSecret,
+        string? fallbackCallbackUrl = null,
+        string? configuredCallbackUrl = null)
     {
         var callbackUrl = FirstNonBlank(
+            configuredCallbackUrl,
             fallbackCallbackUrl,
             configuration["Vbee:CallbackUrl"],
             configuration["VBEE_CALLBACK_URL"]);

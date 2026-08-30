@@ -44,7 +44,7 @@ public sealed class VbeeVoiceClientTests
 
         var body = handler.LastBody ?? string.Empty;
         Assert.Contains("\"app_id\":\"app-456\"", body);
-        Assert.DoesNotContain("callback_url", body);
+        Assert.Contains("\"callback_url\":\"https://dashboard.example.com/api/providers/vbee/callback\"", body);
         Assert.DoesNotContain("logical-request-1", body);
         Assert.DoesNotContain("request_id", body);
         Assert.Contains("\"input_text\":\"Xin chao\"", body);
@@ -178,6 +178,47 @@ public sealed class VbeeVoiceClientTests
         Assert.Contains("status", ex.ResponseTopLevelKeys);
         var shapeKeys = Assert.IsType<JsonArray>(ex.ResponseShape["keys"]);
         Assert.Contains("error_code", shapeKeys.Select(x => x!.GetValue<string>()));
+    }
+
+    [Fact]
+    public async Task SubmitAsync_UsesOptionsCallbackUrlWhenRequestCallbackUrlIsEmpty()
+    {
+        var handler = new FakeHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("{\"request_id\":\"req-fallback\"}")
+        });
+        var client = CreateClient(handler, new VbeeOptions
+        {
+            ApiBaseUrl = "https://vbee.example/api/v1",
+            TtsPath = "/tts",
+            ApiToken = "token-123",
+            AppId = "app-456",
+            CallbackUrl = "https://dashboard.example.com/api/providers/vbee/callback"
+        });
+
+        await client.SubmitAsync(new VbeeVoiceSubmitRequest(
+            "voice-01", "Xin chao", 1.0m, null, string.Empty, null, 0, 160, 1.25m, null));
+
+        Assert.Contains("\"callback_url\":\"https://dashboard.example.com/api/providers/vbee/callback\"", handler.LastBody);
+    }
+
+    [Fact]
+    public async Task SubmitAsync_MissingCallbackUrlFailsBeforePost()
+    {
+        var handler = new FakeHttpMessageHandler(_ => throw new InvalidOperationException("POST should not be called."));
+        var client = CreateClient(handler, new VbeeOptions
+        {
+            ApiBaseUrl = "https://vbee.example/api/v1",
+            TtsPath = "/tts",
+            ApiToken = "token-123",
+            AppId = "app-456"
+        });
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => client.SubmitAsync(new VbeeVoiceSubmitRequest(
+            "voice-01", "Xin chao", 1.0m, null, string.Empty, null, 0, 160, 1.25m, null)));
+
+        Assert.Equal("VBEE_CALLBACK_URL_MISSING", ex.Message);
+        Assert.Null(handler.LastRequest);
     }
 
     [Fact]

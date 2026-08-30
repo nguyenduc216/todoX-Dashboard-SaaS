@@ -177,6 +177,7 @@ public sealed class VbeeSceneRuntimeTests
                 [VbeeRuntimeConfigProvider.TokenKey] = "db-token",
                 [VbeeRuntimeConfigProvider.AppIdKey] = "db-app",
                 [VbeeRuntimeConfigProvider.CallbackSecretKey] = "db-secret",
+                [VbeeRuntimeConfigProvider.CallbackUrlKey] = "https://db.example.com/api/providers/vbee/callback",
                 [VbeeRuntimeConfigProvider.ApiBaseKey] = "https://db.example/api/v1",
                 [VbeeRuntimeConfigProvider.TtsUrlKey] = "https://db.example/api/v1/tts",
                 [VbeeRuntimeConfigProvider.SampleRateKey] = "22050",
@@ -194,7 +195,7 @@ public sealed class VbeeSceneRuntimeTests
         Assert.Equal(22050, resolved.DefaultSampleRate);
         Assert.Equal(192, resolved.DefaultBitrate);
         Assert.Equal(0.95m, resolved.DefaultSpeedRate);
-        Assert.Equal("https://dashboard.example.com/api/providers/vbee/callback?secret=db-secret", resolved.CallbackUrl);
+        Assert.Equal("https://db.example.com/api/providers/vbee/callback?secret=db-secret", resolved.CallbackUrl);
     }
 
     [Fact]
