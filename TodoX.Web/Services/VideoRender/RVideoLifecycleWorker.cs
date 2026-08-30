@@ -130,13 +130,15 @@ public sealed class RVideoLifecycleWorker : BackgroundService
                 : project.Status, ct);
 
         var userId = project.UserId ?? Guid.Empty;
-        var imageSceneIds = usesSharedReferenceImage
-            ? Array.Empty<long>()
-            : sceneStates
+        var isAuto = string.Equals(setting.ExecutionMode, RVideoExecutionModes.Auto, StringComparison.OrdinalIgnoreCase);
+        var imageSceneIds = isAuto && !usesSharedReferenceImage
+            ? sceneStates
                 .Where(RVideoRules.NeedsImageWork)
                 .Select(x => x.SceneId)
-                .ToArray();
-        if (!sceneStates.Any(x => x.ImageFailedTerminal && !x.ImageRetryRequested)
+                .ToArray()
+            : Array.Empty<long>();
+        if (isAuto
+            && !sceneStates.Any(x => x.ImageFailedTerminal && !x.ImageRetryRequested)
             && imageSceneIds.Length > 0)
         {
             RVideoSceneImageReferenceSelection reference;
@@ -183,11 +185,13 @@ public sealed class RVideoLifecycleWorker : BackgroundService
             }, project.Id, ct);
         }
 
-        var readyScenes = sceneStates
-            .Where(x => x.IsImageReady)
-            .Select(x => x.SceneId)
-            .Except(activeSceneIds.VideoSceneIds)
-            .ToArray();
+        var readyScenes = isAuto
+            ? sceneStates
+                .Where(x => x.IsImageReady)
+                .Select(x => x.SceneId)
+                .Except(activeSceneIds.VideoSceneIds)
+                .ToArray()
+            : Array.Empty<long>();
         foreach (var sceneId in project.Scenes
                      .Where(scene => RVideoRules.RequiresExternalVoice(scene, setting))
                      .Select(scene => scene.Id))
@@ -336,7 +340,8 @@ public sealed class RVideoLifecycleWorker : BackgroundService
                    music_snapshot_json::text AS MusicSnapshotJson, music_volume AS MusicVolume,
                    created_at AS CreatedAt, updated_at AS UpdatedAt
               FROM video_render.rvideo_job_settings
-             WHERE tenant_id=@tenant AND execution_mode='AUTO';
+             WHERE tenant_id=@tenant
+               AND execution_mode IN ('AUTO', 'MANUAL');
             """, new { tenant = tenant.TenantId });
         return rows.ToList();
     }

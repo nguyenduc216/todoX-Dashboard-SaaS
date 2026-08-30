@@ -296,6 +296,42 @@ public sealed class RVideoProviderPollingRegressionTests
     }
 
     [Fact]
+    public void RVideoLifecycleLoadsManualProjectsForTechnicalFinalizationWithoutAutoGeneration()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "RVideoLifecycleWorker.cs");
+        var settingsQuery = source[
+            source.IndexOf("private static async Task<IReadOnlyList<RVideoJobSettingsDto>> ListAutoSettingsAsync", StringComparison.Ordinal)..];
+        var generationBlock = source[
+            source.IndexOf("var isAuto =", StringComparison.Ordinal)..source.IndexOf("var readyScenes = isAuto", StringComparison.Ordinal)];
+
+        Assert.Contains("execution_mode IN ('AUTO', 'MANUAL')", settingsQuery);
+        Assert.Contains("var isAuto = string.Equals(setting.ExecutionMode, RVideoExecutionModes.Auto", source);
+        Assert.Contains("if (isAuto", generationBlock);
+        Assert.DoesNotContain("execution_mode='AUTO'", settingsQuery);
+        Assert.Contains("TryEnqueueSceneAudioAsync", source);
+        Assert.Contains("TryFinalizeSceneMediaAsync", source);
+        Assert.Contains("TryEnqueueFinalMergeAsync", source);
+        Assert.Contains("SyncLifecycleAsync", source);
+    }
+
+    [Fact]
+    public void RVideoLifecycleManualPathCannotEnqueueSceneVideoOrImageJobs()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "RVideoLifecycleWorker.cs");
+        var autoGenerationStart = source.IndexOf("var isAuto =", StringComparison.Ordinal);
+        Assert.True(autoGenerationStart >= 0);
+        Assert.Contains("if (isAuto", source);
+        Assert.Contains("jobs.EnqueueForProjectIfNoneActiveAsync", source);
+        Assert.Contains("autoChain.TryEnqueueSceneVideoAsync", source);
+        Assert.Contains("var imageSceneIds = isAuto && !usesSharedReferenceImage", source);
+        Assert.Contains("var readyScenes = isAuto", source);
+        Assert.Contains("Array.Empty<long>()", source);
+        Assert.DoesNotContain("RVideoExecutionModes.Manual", source);
+        Assert.DoesNotContain("RenderSceneVideo", source);
+        Assert.DoesNotContain("CreateQueuedSceneVideoVersionAsync", source);
+    }
+
+    [Fact]
     public void SceneImageReadyTriggersSceneScopedAutoChain()
     {
         var source = ReadRepoFile("Services", "Render", "SceneImageRenderWorkItemHandler.cs");
@@ -606,8 +642,8 @@ public sealed class RVideoProviderPollingRegressionTests
         var eligibility = ReadRepoFile("Services", "VideoRender", "VideoRenderEligibilityService.cs");
         var handler = ReadRepoFile("Services", "VideoRender", "SceneVideoRenderHandler.cs");
 
-        Assert.Contains("var imageSceneIds = usesSharedReferenceImage", lifecycle);
-        Assert.Contains("? Array.Empty<long>()", lifecycle);
+        Assert.Contains("var imageSceneIds = isAuto && !usesSharedReferenceImage", lifecycle);
+        Assert.Contains("Array.Empty<long>()", lifecycle);
         Assert.Contains("rvideoSettings?.UseReferenceImageForAllScenes == true", autoChain);
         Assert.Contains("RVideoSceneImageReferenceSelection.Resolve(rvideoSettings)", autoChain);
         Assert.Contains("enqueueInput.ApplySharedReferenceImage(sharedReference)", autoChain);
