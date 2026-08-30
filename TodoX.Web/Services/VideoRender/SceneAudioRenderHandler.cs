@@ -1,6 +1,5 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using Microsoft.Extensions.Options;
 using TodoX.Web.Services;
 using TodoX.Web.Models;
 using TodoX.Web.Services.Media;
@@ -21,7 +20,7 @@ public sealed class SceneAudioRenderHandler : IRenderJobHandler
     private readonly IRenderJobService _jobs;
     private readonly IRVideoSceneMediaFinalizerService _finalizer;
     private readonly TenantContext _tenant;
-    private readonly IOptionsMonitor<VbeeOptions> _options;
+    private readonly IVbeeRuntimeConfigProvider _runtimeConfig;
     private readonly ILogger<SceneAudioRenderHandler> _logger;
 
     public string JobType => RenderJobTypes.RenderSceneAudio;
@@ -35,7 +34,7 @@ public sealed class SceneAudioRenderHandler : IRenderJobHandler
         IRenderJobService jobs,
         IRVideoSceneMediaFinalizerService finalizer,
         TenantContext tenant,
-        IOptionsMonitor<VbeeOptions> options,
+        IVbeeRuntimeConfigProvider runtimeConfig,
         ILogger<SceneAudioRenderHandler> logger)
     {
         _repo = repo;
@@ -46,7 +45,7 @@ public sealed class SceneAudioRenderHandler : IRenderJobHandler
         _jobs = jobs;
         _finalizer = finalizer;
         _tenant = tenant;
-        _options = options;
+        _runtimeConfig = runtimeConfig;
         _logger = logger;
     }
 
@@ -74,13 +73,14 @@ public sealed class SceneAudioRenderHandler : IRenderJobHandler
         }
 
         var voice = await ResolveVoiceAsync(input, ct);
-        var sampleRate = _options.CurrentValue.ResolveSampleRate(input.VoiceCode);
+        var options = await _runtimeConfig.GetAsync(ct);
+        var sampleRate = options.ResolveSampleRate(input.VoiceCode);
         var validCallbackUrl = VbeeOptions.BuildAuthorizedCallbackUriOrNull(
-            string.IsNullOrWhiteSpace(input.CallbackUrl) ? _options.CurrentValue.CallbackUrl : input.CallbackUrl,
-            _options.CurrentValue.CallbackSecret)?.ToString();
+            string.IsNullOrWhiteSpace(input.CallbackUrl) ? options.CallbackUrl : input.CallbackUrl,
+            options.CallbackSecret)?.ToString();
 
-        _options.CurrentValue.GetTokenOrThrow();
-        if (string.IsNullOrWhiteSpace(input.AppId ?? _options.CurrentValue.AppId))
+        options.GetTokenOrThrow();
+        if (string.IsNullOrWhiteSpace(input.AppId ?? options.AppId))
         {
             throw new InvalidOperationException("VBEE_APP_ID is missing.");
         }
@@ -107,7 +107,7 @@ public sealed class SceneAudioRenderHandler : IRenderJobHandler
             sampleRate,
             input.Bitrate,
             input.SpeedRate,
-            input.AppId ?? _options.CurrentValue.AppId);
+            input.AppId ?? options.AppId);
 
         var requestId = string.IsNullOrWhiteSpace(version.ProviderTaskId) ? null : version.ProviderTaskId.Trim();
         if (string.IsNullOrWhiteSpace(requestId))
@@ -115,14 +115,14 @@ public sealed class SceneAudioRenderHandler : IRenderJobHandler
             await _repo.AddProjectEventAsync(project.Id, "SCENE_AUDIO_PROVIDER_SUBMITTING", "info",
                 $"Scene {scene.SceneIndex} external voice submitting.",
                 BuildEventData(project.Id, scene.Id, scene.SceneIndex, input, version.Id, null, "SUBMITTING", sampleRate), ct);
-            var submitted = await _vbee.SubmitAsync(submitRequest, ct);
+            var submitted = await _vbee.SubmitAsync(submitRequest, options, ct);
             if (IsDirectAudio(submitted.AudioUrl))
             {
                 await _repo.AddProjectEventAsync(project.Id, "SCENE_AUDIO_PROVIDER_DIRECT_RESULT", "info",
                     $"Scene {scene.SceneIndex} external voice returned a direct MP3.",
                     BuildEventData(project.Id, scene.Id, scene.SceneIndex, input, version.Id, requestId, "SUCCESS", sampleRate, submitted.AudioUrl), ct);
 
-                await CompleteFromAudioUrlAsync(project, scene, version, input, requestId, submitted.AudioUrl!, submitted.Response, ct);
+                await CompleteFromAudioUrlAsync(project, scene, version, input, requestId, submitted.AudioUrl!, submitted.Response, sampleRate, ct);
                 return;
             }
 
@@ -150,7 +150,7 @@ public sealed class SceneAudioRenderHandler : IRenderJobHandler
                 BuildEventData(project.Id, scene.Id, scene.SceneIndex, input, version.Id, requestId, "RESUME", sampleRate), ct);
         }
 
-        var status = await _vbee.GetStatusAsync(requestId, ct);
+        var status = await _vbee.GetStatusAsync(requestId, options, ct);
         var normalizedStatus = ReadString(status, "status", "state");
         var audioUrl = ReadString(status, "audio_link", "audio_url", "audioUrl", "download_url", "downloadUrl", "url");
         var errorCode = ReadString(status, "error_code", "errorCode", "code");
@@ -167,11 +167,11 @@ public sealed class SceneAudioRenderHandler : IRenderJobHandler
                 BuildEventData(project.Id, scene.Id, scene.SceneIndex, input, version.Id, requestId, normalizedStatus ?? "SAMPLE_RATE_RETRY", sampleRate, audioUrl, errorCode, errorMessage, true, sampleRate, fallbackRate), ct);
 
             var retryRequest = submitRequest with { SampleRate = fallbackRate };
-            var retrySubmitted = await _vbee.SubmitAsync(retryRequest, ct);
+            var retrySubmitted = await _vbee.SubmitAsync(retryRequest, options, ct);
             if (IsDirectAudio(retrySubmitted.AudioUrl))
             {
                 var directRetryRequestId = NormalizeRequestId(retrySubmitted.RequestId) ?? requestId;
-                await CompleteFromAudioUrlAsync(project, scene, version, input, directRetryRequestId, retrySubmitted.AudioUrl!, retrySubmitted.Response, ct);
+                await CompleteFromAudioUrlAsync(project, scene, version, input, directRetryRequestId, retrySubmitted.AudioUrl!, retrySubmitted.Response, sampleRate, ct);
                 return;
             }
 
@@ -188,7 +188,7 @@ public sealed class SceneAudioRenderHandler : IRenderJobHandler
             }
 
             await _versions.MarkSceneAudioVersionSubmittedAsync(version.Id, "vbee", voice?.ProviderCode ?? input.VoiceCode, null, retryRequestId, ct);
-            await _jobs.ScheduleRetryAsync(job.Id, _options.CurrentValue.PollInterval, "VBEE_SAMPLE_RATE_RETRY", "Waiting for the retried Vbee request.", ct);
+            await _jobs.ScheduleRetryAsync(job.Id, options.PollInterval, "VBEE_SAMPLE_RATE_RETRY", "Waiting for the retried Vbee request.", ct);
             throw new RenderJobDeferredException("Waiting for retried Vbee request.");
         }
 
@@ -197,7 +197,7 @@ public sealed class SceneAudioRenderHandler : IRenderJobHandler
             await _repo.AddProjectEventAsync(project.Id, "SCENE_AUDIO_CALLBACK_RECEIVED", "info",
                 $"Scene {scene.SceneIndex} external voice completed from poll.",
                 BuildEventData(project.Id, scene.Id, scene.SceneIndex, input, version.Id, requestId, normalizedStatus ?? "SUCCESS", sampleRate, audioUrl), ct);
-            await CompleteFromAudioUrlAsync(project, scene, version, input, requestId, audioUrl!, status, ct);
+            await CompleteFromAudioUrlAsync(project, scene, version, input, requestId, audioUrl!, status, sampleRate, ct);
             return;
         }
 
@@ -211,7 +211,7 @@ public sealed class SceneAudioRenderHandler : IRenderJobHandler
         }
 
         await _versions.MarkSceneAudioVersionSubmittedAsync(version.Id, "vbee", voice?.ProviderCode ?? input.VoiceCode, null, requestId, ct);
-        await _jobs.ScheduleRetryAsync(job.Id, _options.CurrentValue.PollInterval, "VBEE_PENDING", "Waiting for Vbee callback or poll result.", ct);
+        await _jobs.ScheduleRetryAsync(job.Id, options.PollInterval, "VBEE_PENDING", "Waiting for Vbee callback or poll result.", ct);
         throw new RenderJobDeferredException("Waiting for Vbee callback or poll result.");
     }
 
@@ -223,11 +223,12 @@ public sealed class SceneAudioRenderHandler : IRenderJobHandler
         string? requestId,
         string audioUrl,
         JsonObject? providerResponse,
+        int sampleRate,
         CancellationToken ct)
     {
         await _repo.AddProjectEventAsync(project.Id, "SCENE_AUDIO_RESULT_DOWNLOADING", "info",
             $"Scene {scene.SceneIndex} external voice downloading MP3.",
-            BuildEventData(project.Id, scene.Id, scene.SceneIndex, input, version.Id, requestId, "DOWNLOAD", _options.CurrentValue.ResolveSampleRate(input.VoiceCode), audioUrl), ct);
+            BuildEventData(project.Id, scene.Id, scene.SceneIndex, input, version.Id, requestId, "DOWNLOAD", sampleRate, audioUrl), ct);
 
         await _tenant.EnsureLoadedAsync(ct);
         var storageKey = version.StorageKey ?? SceneMediaStorageKeys.SceneAudioOutput(_tenant.TenantId, project.Id, scene.Id, version.Id);
@@ -249,7 +250,7 @@ public sealed class SceneAudioRenderHandler : IRenderJobHandler
             await _repo.AddProjectEventAsync(project.Id, "SCENE_AUDIO_DOWNLOAD_FAILED", "error",
                 $"Scene {scene.SceneIndex} external voice MP3 download failed.",
                 BuildEventData(project.Id, scene.Id, scene.SceneIndex, input, version.Id, requestId,
-                    "DOWNLOAD_FAILED", _options.CurrentValue.ResolveSampleRate(input.VoiceCode), audioUrl,
+                    "DOWNLOAD_FAILED", sampleRate, audioUrl,
                     errorCode: "SCENE_AUDIO_DOWNLOAD_FAILED", errorMessage: ex.Message), ct);
             throw;
         }
@@ -272,7 +273,7 @@ public sealed class SceneAudioRenderHandler : IRenderJobHandler
 
         await _repo.AddProjectEventAsync(project.Id, "SCENE_AUDIO_READY", "info",
             $"Scene {scene.SceneIndex} external voice ready.",
-            BuildEventData(project.Id, scene.Id, scene.SceneIndex, input, version.Id, requestId, "SUCCESS", _options.CurrentValue.ResolveSampleRate(input.VoiceCode), audioUrl), ct);
+            BuildEventData(project.Id, scene.Id, scene.SceneIndex, input, version.Id, requestId, "SUCCESS", sampleRate, audioUrl), ct);
 
         await _finalizer.TryFinalizeSceneMediaAsync(project.Id, scene.Id, "SCENE_AUDIO_READY", ct);
     }

@@ -178,6 +178,7 @@ builder.Services.PostConfigure<TodoX.Web.Services.VideoRender.VbeeOptions>(optio
     ApplyEnvInt("VBEE_POLL_INTERVAL_SECONDS", value => options.PollIntervalSeconds = value);
     ApplyEnvInt("VBEE_MAX_POLL_COUNT", value => options.MaxPollCount = value);
 });
+builder.Services.AddScoped<TodoX.Web.Services.VideoRender.IVbeeRuntimeConfigProvider, TodoX.Web.Services.VideoRender.VbeeRuntimeConfigProvider>();
 builder.Services.AddHttpClient<TodoX.Web.Services.VideoRender.IVbeeVoiceClient, TodoX.Web.Services.VideoRender.VbeeVoiceClient>()
     .ConfigureHttpClient((sp, client) =>
     {

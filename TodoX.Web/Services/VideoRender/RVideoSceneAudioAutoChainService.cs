@@ -1,5 +1,4 @@
 using System.Text.Json;
-using Microsoft.Extensions.Options;
 using TodoX.Web.Models;
 using TodoX.Web.Services.Render;
 
@@ -17,7 +16,7 @@ public sealed class RVideoSceneAudioAutoChainService : IRVideoSceneAudioAutoChai
     private readonly RVideoJobSettingsRepository _settings;
     private readonly IRenderJobService _jobs;
     private readonly IAiStudioCatalogService _catalog;
-    private readonly IOptionsMonitor<VbeeOptions> _options;
+    private readonly IVbeeRuntimeConfigProvider _runtimeConfig;
     private readonly ILogger<RVideoSceneAudioAutoChainService> _logger;
 
     public RVideoSceneAudioAutoChainService(
@@ -26,7 +25,7 @@ public sealed class RVideoSceneAudioAutoChainService : IRVideoSceneAudioAutoChai
         RVideoJobSettingsRepository settings,
         IRenderJobService jobs,
         IAiStudioCatalogService catalog,
-        IOptionsMonitor<VbeeOptions> options,
+        IVbeeRuntimeConfigProvider runtimeConfig,
         ILogger<RVideoSceneAudioAutoChainService> logger)
     {
         _repo = repo;
@@ -34,7 +33,7 @@ public sealed class RVideoSceneAudioAutoChainService : IRVideoSceneAudioAutoChai
         _settings = settings;
         _jobs = jobs;
         _catalog = catalog;
-        _options = options;
+        _runtimeConfig = runtimeConfig;
         _logger = logger;
     }
 
@@ -114,6 +113,7 @@ public sealed class RVideoSceneAudioAutoChainService : IRVideoSceneAudioAutoChai
         }
         var ttsRate = ResolveTtsRate(metadata, settings);
         ValidateTtsRate(voice, ttsRate);
+        var options = await _runtimeConfig.GetAsync(ct);
 
         var version = existing ?? await _versions.CreateQueuedSceneAudioVersionAsync(new SceneAudioVersionCreateRequest(
             ProjectId: project.Id,
@@ -154,9 +154,9 @@ public sealed class RVideoSceneAudioAutoChainService : IRVideoSceneAudioAutoChai
                 defaultTtsRate = settings?.DefaultTtsRate,
                 vbeeDefaults = new
                 {
-                    _options.CurrentValue.DefaultSampleRate,
-                    _options.CurrentValue.DefaultBitrate,
-                    _options.CurrentValue.DefaultSpeedRate
+                    options.DefaultSampleRate,
+                    options.DefaultBitrate,
+                    options.DefaultSpeedRate
                 }
             }), ct);
 
@@ -182,11 +182,11 @@ public sealed class RVideoSceneAudioAutoChainService : IRVideoSceneAudioAutoChai
                 VoiceInstruction = voiceInstruction,
                 TtsRate = ttsRate,
                 DefaultTtsRate = settings?.DefaultTtsRate,
-                SampleRate = _options.CurrentValue.ResolveSampleRate(voiceCode),
-                Bitrate = _options.CurrentValue.DefaultBitrate,
-                SpeedRate = _options.CurrentValue.DefaultSpeedRate,
+                SampleRate = options.ResolveSampleRate(voiceCode),
+                Bitrate = options.DefaultBitrate,
+                SpeedRate = options.DefaultSpeedRate,
                 CallbackUrl = null,
-                AppId = _options.CurrentValue.AppId,
+                AppId = options.AppId,
                 VoiceSnapshot = voice,
                 SceneSnapshot = new { scene.Id, scene.ProjectId, scene.SceneIndex, scene.Title, scene.DurationSeconds, scene.ScenePrompt },
                 RenderConfigSnapshot = new

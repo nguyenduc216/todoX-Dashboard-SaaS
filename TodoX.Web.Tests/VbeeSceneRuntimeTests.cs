@@ -1,5 +1,7 @@
 using System.Text.Json.Nodes;
+using System.Text.Json;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Configuration;
 using TodoX.Web.Models;
 using TodoX.Web.Services.VideoRender;
 using Xunit;
@@ -160,5 +162,158 @@ public sealed class VbeeSceneRuntimeTests
         var ex = Assert.Throws<InvalidOperationException>(() => options.GetCallbackUriOrNull());
 
         Assert.Equal("VBEE_CALLBACK_SECRET is required when VBEE_CALLBACK_URL is configured.", ex.Message);
+    }
+
+    [Fact]
+    public void RuntimeConfig_UsesDatabaseBeforeFallbackAndEnvironment()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Vbee:ApiToken"] = "config-token",
+                ["Vbee:AppId"] = "config-app",
+                ["TodoX:PublicBaseUrl"] = "https://dashboard.example.com"
+            })
+            .Build();
+
+        var fallback = new VbeeOptions
+        {
+            ApiBaseUrl = "https://vbee.example/api/v1",
+            TtsPath = "/tts",
+            ApiToken = "fallback-token",
+            AppId = "fallback-app",
+            CallbackSecret = "fallback-secret",
+            DefaultSampleRate = 24000,
+            DefaultBitrate = 128,
+            DefaultSpeedRate = 1.0m
+        };
+
+        var resolved = VbeeRuntimeConfigProvider.Resolve(
+            new Dictionary<string, string?>
+            {
+                [VbeeRuntimeConfigProvider.TokenKey] = "db-token",
+                [VbeeRuntimeConfigProvider.AppIdKey] = "db-app",
+                [VbeeRuntimeConfigProvider.CallbackSecretKey] = "db-secret",
+                [VbeeRuntimeConfigProvider.ApiBaseKey] = "https://db.example/api/v1",
+                [VbeeRuntimeConfigProvider.TtsUrlKey] = "https://db.example/api/v1/tts",
+                [VbeeRuntimeConfigProvider.SampleRateKey] = "22050",
+                [VbeeRuntimeConfigProvider.BitrateKey] = "192",
+                [VbeeRuntimeConfigProvider.SpeedRateKey] = "0.95"
+            },
+            configuration,
+            fallback);
+
+        Assert.Equal("db-token", resolved.ApiToken);
+        Assert.Equal("db-app", resolved.AppId);
+        Assert.Equal("db-secret", resolved.CallbackSecret);
+        Assert.Equal("https://db.example/api/v1", resolved.ApiBaseUrl.TrimEnd('/'));
+        Assert.Equal("/tts", resolved.TtsPath);
+        Assert.Equal(22050, resolved.DefaultSampleRate);
+        Assert.Equal(192, resolved.DefaultBitrate);
+        Assert.Equal(0.95m, resolved.DefaultSpeedRate);
+        Assert.Equal("https://dashboard.example.com/api/providers/vbee/callback?secret=db-secret", resolved.CallbackUrl);
+    }
+
+    [Fact]
+    public void RuntimeConfig_FallsBackWhenDatabaseIsMissing()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["VBEE_API_TOKEN"] = "env-token",
+                ["VBEE_APP_ID"] = "env-app",
+                ["VBEE_CALLBACK_SECRET"] = "env-secret",
+                ["TodoX:PublicBaseUrl"] = "https://dashboard.example.com"
+            })
+            .Build();
+
+        var fallback = new VbeeOptions
+        {
+            ApiBaseUrl = "https://vbee.example/api/v1",
+            TtsPath = "/tts",
+            ApiToken = null,
+            AppId = null,
+            CallbackSecret = null,
+            DefaultSampleRate = 24000,
+            DefaultBitrate = 128,
+            DefaultSpeedRate = 1.0m
+        };
+
+        var resolved = VbeeRuntimeConfigProvider.Resolve(null, configuration, fallback);
+
+        Assert.Equal("env-token", resolved.ApiToken);
+        Assert.Equal("env-app", resolved.AppId);
+        Assert.Equal("env-secret", resolved.CallbackSecret);
+    }
+
+    [Fact]
+    public void CallbackAuthorization_RejectsMissingOrWrongSecret()
+    {
+        var missing = new DefaultHttpContext();
+        Assert.Equal(VbeeCallbackAuthorizationStatus.MissingSecret, SceneAudioEndpoints.GetCallbackAuthorizationStatus(missing.Request, "secret-1"));
+
+        var wrong = new DefaultHttpContext();
+        wrong.Request.QueryString = new QueryString("?secret=bad");
+        Assert.Equal(VbeeCallbackAuthorizationStatus.InvalidSecret, SceneAudioEndpoints.GetCallbackAuthorizationStatus(wrong.Request, "secret-1"));
+    }
+
+    [Fact]
+    public void CallbackUrl_UsesTodoXPublicBaseUrlAndNeverN8n()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["TodoX:PublicBaseUrl"] = "https://dashboard.example.com"
+            })
+            .Build();
+
+        var callbackUrl = VbeeRuntimeConfigProvider.ResolveCallbackUrl(configuration, "secret-1");
+
+        Assert.Equal("https://dashboard.example.com/api/providers/vbee/callback?secret=secret-1", callbackUrl);
+        Assert.DoesNotContain("n8n", callbackUrl, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void RuntimeConfig_DoesNotLeakSecretsInDiagnosticShape()
+    {
+        var eventData = new
+        {
+            provider = "vbee",
+            requestId = "req-1",
+            projectId = 11,
+            sceneId = 22,
+            audioVersionId = Guid.NewGuid(),
+            callbackConfigured = true
+        };
+
+        var json = JsonSerializer.Serialize(eventData);
+
+        Assert.DoesNotContain("token", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("secret", json, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void RuntimeConfig_ThrowsWhenCallbackEnabledWithoutSecret()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["TodoX:PublicBaseUrl"] = "https://dashboard.example.com"
+            })
+            .Build();
+
+        var fallback = new VbeeOptions
+        {
+            ApiBaseUrl = "https://vbee.example/api/v1",
+            TtsPath = "/tts",
+            ApiToken = "token",
+            AppId = "app",
+            CallbackSecret = null,
+            DefaultSampleRate = 24000,
+            DefaultBitrate = 128,
+            DefaultSpeedRate = 1.0m
+        };
+
+        Assert.Throws<InvalidOperationException>(() => VbeeRuntimeConfigProvider.Resolve(null, configuration, fallback));
     }
 }

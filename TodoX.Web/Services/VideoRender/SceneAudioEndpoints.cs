@@ -1,7 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Dapper;
-using Microsoft.Extensions.Options;
 using TodoX.Web.Data;
 using TodoX.Web.Models;
 using TodoX.Web.Services.Media;
@@ -40,7 +39,7 @@ public static class SceneAudioEndpoints
         TenantContext tenant,
         TodoXConnectionFactory factory,
         IVbeeVoiceClient vbee,
-        IOptionsMonitor<VbeeOptions> options,
+        IVbeeRuntimeConfigProvider runtimeConfig,
         VideoRenderRepository repo,
         ISceneMediaVersioningService versions,
         IMediaFileService media,
@@ -48,7 +47,8 @@ public static class SceneAudioEndpoints
         CancellationToken ct)
     {
         await tenant.EnsureLoadedAsync(ct);
-        var authorization = GetCallbackAuthorizationStatus(request, options.CurrentValue.CallbackSecret);
+        var options = await runtimeConfig.GetAsync(ct);
+        var authorization = GetCallbackAuthorizationStatus(request, options.CallbackSecret);
         if (authorization == VbeeCallbackAuthorizationStatus.NotConfigured)
         {
             return Results.Json(new { success = false, message = "Vbee callback secret is not configured." }, statusCode: StatusCodes.Status503ServiceUnavailable);

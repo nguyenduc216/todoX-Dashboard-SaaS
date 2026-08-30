@@ -36,9 +36,11 @@ public sealed record VbeeVoiceCallbackResult(
 public interface IVbeeVoiceClient
 {
     Task<VbeeVoiceSubmitResult> SubmitAsync(VbeeVoiceSubmitRequest request, CancellationToken ct = default);
+    Task<VbeeVoiceSubmitResult> SubmitAsync(VbeeVoiceSubmitRequest request, VbeeOptions options, CancellationToken ct = default);
     Task<VbeeVoiceCallbackResult> ParseCallbackAsync(HttpRequest request, CancellationToken ct = default);
     Task<VbeeVoiceCallbackResult> ParseCallbackPayloadAsync(string rawBody, IReadOnlyDictionary<string, string?>? query = null, CancellationToken ct = default);
     Task<JsonObject> GetStatusAsync(string requestId, CancellationToken ct = default);
+    Task<JsonObject> GetStatusAsync(string requestId, VbeeOptions options, CancellationToken ct = default);
 }
 
 public sealed class VbeeVoiceClient : IVbeeVoiceClient
@@ -56,6 +58,11 @@ public sealed class VbeeVoiceClient : IVbeeVoiceClient
     public async Task<VbeeVoiceSubmitResult> SubmitAsync(VbeeVoiceSubmitRequest request, CancellationToken ct = default)
     {
         var options = _options.CurrentValue;
+        return await SubmitAsync(request, options, ct);
+    }
+
+    public async Task<VbeeVoiceSubmitResult> SubmitAsync(VbeeVoiceSubmitRequest request, VbeeOptions options, CancellationToken ct = default)
+    {
         var token = options.GetTokenOrThrow();
         using var message = new HttpRequestMessage(HttpMethod.Post, options.GetTtsUri());
         message.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
@@ -98,6 +105,11 @@ public sealed class VbeeVoiceClient : IVbeeVoiceClient
     public async Task<JsonObject> GetStatusAsync(string requestId, CancellationToken ct = default)
     {
         var options = _options.CurrentValue;
+        return await GetStatusAsync(requestId, options, ct);
+    }
+
+    public async Task<JsonObject> GetStatusAsync(string requestId, VbeeOptions options, CancellationToken ct = default)
+    {
         var token = options.GetTokenOrThrow();
         using var message = new HttpRequestMessage(HttpMethod.Get, new Uri(options.GetTtsUri().ToString().TrimEnd('/') + "/" + Uri.EscapeDataString(requestId) + "/callback-result"));
         message.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
