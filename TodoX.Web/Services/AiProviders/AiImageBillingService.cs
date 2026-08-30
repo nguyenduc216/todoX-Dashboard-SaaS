@@ -602,9 +602,23 @@ public sealed class AiImageBillingService : IAiImageBillingService
                 """,
                 new { id = existing.Id }, tx);
 
+            if (string.IsNullOrWhiteSpace(existing.ProviderTaskId))
+            {
+                return new AiImageBillingReservation(
+                    true,
+                    true,
+                    existing.PayerType,
+                    "not_required",
+                    existing.LogicalRequestId,
+                    0,
+                    existing.Id,
+                    null,
+                    null);
+            }
+
             return new AiImageBillingReservation(
                 true,
-                string.IsNullOrWhiteSpace(existing.ProviderTaskId),
+                false,
                 existing.PayerType,
                 "not_required",
                 existing.LogicalRequestId,

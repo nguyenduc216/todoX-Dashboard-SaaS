@@ -42,9 +42,28 @@ public sealed class AiImageBillingRetryRegressionTests
         Assert.Contains("new AiImageBillingReservation(", source);
         Assert.Contains("\"not_required\"", source);
         Assert.Contains("string.IsNullOrWhiteSpace(existing.ProviderTaskId)", source);
-        Assert.Contains("true,\n                string.IsNullOrWhiteSpace(existing.ProviderTaskId),", source);
+        Assert.Contains("true,\n                    true,", source);
         Assert.Contains("return HandleExistingReservation(existing);", source);
         Assert.Contains("if (existing.Status is \"completed\")", source);
         Assert.Contains("return new AiImageBillingReservation(true, false", source);
+    }
+
+    [Fact]
+    public void LegacyBillingDisabledInsufficientRecordWithExistingProviderTaskIdDoesNotResubmitProvider()
+    {
+        var source = File.ReadAllText(Path.Combine(
+            AppContext.BaseDirectory,
+            "..", "..", "..", "..",
+            "TodoX.Web",
+            "Services",
+            "AiProviders",
+            "AiImageBillingService.cs")).Replace("\r\n", "\n");
+
+        Assert.Contains("if (existing.Status == \"insufficient\")", source);
+        Assert.Contains("if (string.IsNullOrWhiteSpace(existing.ProviderTaskId))", source);
+        Assert.Contains("return new AiImageBillingReservation(\n                    true,\n                    true,", source);
+        Assert.Contains("return new AiImageBillingReservation(\n                true,\n                false,", source);
+        Assert.Contains("\"not_required\"", source);
+        Assert.DoesNotContain("SET status = 'insufficient'", source);
     }
 }
