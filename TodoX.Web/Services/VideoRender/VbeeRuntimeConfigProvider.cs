@@ -11,6 +11,15 @@ public interface IVbeeRuntimeConfigProvider
 
 public sealed class VbeeRuntimeConfigProvider : IVbeeRuntimeConfigProvider
 {
+    internal const string LoadConfigSql =
+        """
+        SELECT
+            config_key,
+            config_value #>> '{}' AS config_value
+          FROM public.todox_config
+         WHERE config_key = ANY(@Keys);
+        """;
+
     public const string TokenKey = "rvideo.vbee.token";
     public const string ApiBaseKey = "rvideo.vbee.api_base";
     public const string TtsUrlKey = "rvideo.vbee.tts_url";
@@ -39,11 +48,7 @@ public sealed class VbeeRuntimeConfigProvider : IVbeeRuntimeConfigProvider
         using var conn = await _factory.OpenAsync(ct);
         var rows = await conn.QueryAsync<ConfigRow>(
             new CommandDefinition(
-                """
-                SELECT config_key, config_value::text AS config_value
-                  FROM public.todox_config
-                 WHERE config_key = ANY(@Keys);
-                """,
+                LoadConfigSql,
                 new { Keys = new[]
                 {
                     TokenKey,

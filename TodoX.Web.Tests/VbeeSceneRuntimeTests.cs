@@ -215,6 +215,35 @@ public sealed class VbeeSceneRuntimeTests
     }
 
     [Fact]
+    public void RuntimeConfig_LoadSqlExtractsJsonbScalarText()
+    {
+        Assert.Contains("config_value #>> '{}' AS config_value", VbeeRuntimeConfigProvider.LoadConfigSql, StringComparison.Ordinal);
+        Assert.DoesNotContain("config_value::text", VbeeRuntimeConfigProvider.LoadConfigSql, StringComparison.OrdinalIgnoreCase);
+
+        var configuration = new ConfigurationBuilder().Build();
+        var fallback = new VbeeOptions
+        {
+            ApiBaseUrl = "https://vbee.example/api/v1",
+            TtsPath = "/tts",
+            ApiToken = "fallback-token",
+            DefaultSampleRate = 24000,
+            DefaultBitrate = 128,
+            DefaultSpeedRate = 1.0m
+        };
+
+        var resolved = VbeeRuntimeConfigProvider.Resolve(
+            new Dictionary<string, string?>
+            {
+                [VbeeRuntimeConfigProvider.TokenKey] = "db-token"
+            },
+            configuration,
+            fallback);
+
+        Assert.Equal("db-token", resolved.ApiToken);
+        Assert.NotEqual("\"db-token\"", resolved.ApiToken);
+    }
+
+    [Fact]
     public void RuntimeConfig_FallsBackWhenDatabaseIsMissing()
     {
         var configuration = new ConfigurationBuilder()
