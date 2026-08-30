@@ -68,6 +68,7 @@ public sealed record SceneAudioVersionCreateRequest(
     string LogicalRequestId,
     string? VoiceCatalogCode,
     string VoiceCodeSnapshot,
+    string? VoiceTextSnapshot,
     string? VoiceSnapshotJson,
     string? NarrationTextSnapshot,
     string? VoiceInstructionSnapshot,
@@ -211,6 +212,7 @@ public sealed class SceneAudioVersionDto
     public Guid? RenderJobId { get; set; }
     public string? VoiceCatalogCode { get; set; }
     public string? VoiceCodeSnapshot { get; set; }
+    public string? VoiceTextSnapshot { get; set; }
     public string? VoiceSnapshotJson { get; set; }
     public string? NarrationTextSnapshot { get; set; }
     public string? VoiceInstructionSnapshot { get; set; }
@@ -1074,6 +1076,10 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
         {
             throw new InvalidOperationException("SCENE_AUDIO_VOICE_CODE_SNAPSHOT_MISSING");
         }
+        if (string.IsNullOrWhiteSpace(request.VoiceTextSnapshot))
+        {
+            throw new InvalidOperationException("SCENE_AUDIO_VOICE_TEXT_SNAPSHOT_MISSING");
+        }
 
         await LockSceneAsync(conn, tx, request.ProjectId, request.SceneId, _tenant.TenantId);
         var existing = await conn.QuerySingleOrDefaultAsync<SceneAudioVersionDto>(
@@ -1107,13 +1113,13 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
             INSERT INTO video_render.scene_audio_versions
                 (id, project_id, scene_id, tenant_id, customer_id, created_by,
                  version_number, logical_request_id, render_job_id,
-                 voice_catalog_code, voice_code_snapshot, voice_snapshot_json, narration_text_snapshot,
+                 voice_catalog_code, voice_code_snapshot, voice_text_snapshot, voice_snapshot_json, narration_text_snapshot,
                  voice_instruction_snapshot, tts_rate, duration_seconds,
                  scene_snapshot_json, render_config_json, storage_key, status, created_at, updated_at)
             VALUES
                 (@id, @projectId, @sceneId, @tenant, @customer, @user,
                  @versionNumber, @logicalRequestId, @renderJobId,
-                 @voiceCatalogCode, @voiceCodeSnapshot, CAST(@voiceSnapshotJson AS jsonb), @narrationTextSnapshot,
+                 @voiceCatalogCode, @voiceCodeSnapshot, @voiceTextSnapshot, CAST(@voiceSnapshotJson AS jsonb), @narrationTextSnapshot,
                  @voiceInstructionSnapshot, @ttsRate, @durationSeconds,
                  CAST(@sceneSnapshot AS jsonb), CAST(@renderConfig AS jsonb), @storageKey, 'queued', now(), now());
             """,
@@ -1130,6 +1136,7 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
                 request.RenderJobId,
                 request.VoiceCatalogCode,
                 voiceCodeSnapshot = request.VoiceCodeSnapshot.Trim(),
+                voiceTextSnapshot = request.VoiceTextSnapshot,
                 voiceSnapshotJson = string.IsNullOrWhiteSpace(request.VoiceSnapshotJson) ? "{}" : request.VoiceSnapshotJson,
                 request.NarrationTextSnapshot,
                 request.VoiceInstructionSnapshot,
@@ -1151,6 +1158,8 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
             Status = "queued",
             StorageKey = storageKey,
             VoiceCatalogCode = request.VoiceCatalogCode,
+            VoiceCodeSnapshot = request.VoiceCodeSnapshot.Trim(),
+            VoiceTextSnapshot = request.VoiceTextSnapshot,
             VoiceSnapshotJson = request.VoiceSnapshotJson,
             NarrationTextSnapshot = request.NarrationTextSnapshot,
             VoiceInstructionSnapshot = request.VoiceInstructionSnapshot,
@@ -2194,6 +2203,7 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
                is_selected AS IsSelected, storage_key AS StorageKey, public_url AS PublicUrl, source_file_path AS SourceFilePath,
                result_media_id AS ResultMediaId, render_job_id AS RenderJobId,
                voice_catalog_code AS VoiceCatalogCode, voice_code_snapshot AS VoiceCodeSnapshot,
+               voice_text_snapshot AS VoiceTextSnapshot,
                voice_snapshot_json::text AS VoiceSnapshotJson,
                narration_text_snapshot AS NarrationTextSnapshot, voice_instruction_snapshot AS VoiceInstructionSnapshot,
                tts_rate AS TtsRate, duration_seconds AS DurationSeconds, render_config_json::text AS RenderConfigJson, provider_code AS ProviderCode,

@@ -478,21 +478,27 @@ public sealed class RVideoRuntimeSqlTests
         Assert.Contains("BuildLogicalRequestKey(projectId, sceneId)", source);
         Assert.Contains("same request is already active", source);
         Assert.Contains("VoiceCodeSnapshot", source);
+        Assert.Contains("VoiceTextSnapshot: voiceText", source);
         Assert.Contains("voiceCode,", source);
     }
 
     [Fact]
-    public void SceneAudioVersionInsertBindsVoiceCodeSnapshotToNotNullColumn()
+    public void SceneAudioVersionInsertBindsRequiredVoiceSnapshotsAndCompatibleNarrationSnapshot()
     {
         var source = ReadRepoFile("Services", "VideoRender", "SceneMediaVersioningService.cs");
         var method = ExtractMethodBlock(source, "public async Task<SceneAudioVersionDto> CreateQueuedSceneAudioVersionAsync");
         var insertBlock = method[method.IndexOf("INSERT INTO video_render.scene_audio_versions", StringComparison.Ordinal)..];
 
-        Assert.Contains("voice_catalog_code, voice_code_snapshot, voice_snapshot_json", insertBlock);
+        Assert.Contains("voice_catalog_code, voice_code_snapshot, voice_text_snapshot, voice_snapshot_json, narration_text_snapshot", insertBlock);
         Assert.Contains("@voiceCodeSnapshot", insertBlock);
+        Assert.Contains("@voiceTextSnapshot", insertBlock);
+        Assert.Contains("@narrationTextSnapshot", insertBlock);
         Assert.Contains("voiceCodeSnapshot = request.VoiceCodeSnapshot.Trim()", method);
+        Assert.Contains("voiceTextSnapshot = request.VoiceTextSnapshot", method);
         Assert.Contains("SCENE_AUDIO_VOICE_CODE_SNAPSHOT_MISSING", method);
+        Assert.Contains("SCENE_AUDIO_VOICE_TEXT_SNAPSHOT_MISSING", method);
         Assert.Contains("voice_code_snapshot AS VoiceCodeSnapshot", source);
+        Assert.Contains("voice_text_snapshot AS VoiceTextSnapshot", source);
     }
 
     [Fact]

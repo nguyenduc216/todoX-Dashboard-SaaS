@@ -125,6 +125,7 @@ public sealed class RVideoSceneAudioAutoChainService : IRVideoSceneAudioAutoChai
             LogicalRequestId: logicalRequestId,
             VoiceCatalogCode: settings?.VoiceCatalogCode,
             VoiceCodeSnapshot: voiceCode,
+            VoiceTextSnapshot: voiceText,
             VoiceSnapshotJson: JsonSerializer.Serialize(voice, new JsonSerializerOptions(JsonSerializerDefaults.Web)),
             NarrationTextSnapshot: voiceText,
             VoiceInstructionSnapshot: voiceInstruction,
