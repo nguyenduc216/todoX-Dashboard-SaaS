@@ -2,6 +2,7 @@
 using Dapper;
 using Npgsql;
 using TodoX.Web.Data;
+using TodoX.Web.Services;
 
 namespace TodoX.Web.Services.Render;
 
@@ -45,11 +46,13 @@ public sealed class RenderJobService : IRenderJobService
     private readonly TodoXConnectionFactory _factory;
     private readonly TenantContext _tenant;
     private readonly ILogger<RenderJobService> _logger;
+    private readonly IConfiguration _configuration;
 
-    public RenderJobService(TodoXConnectionFactory factory, TenantContext tenant, ILogger<RenderJobService> logger)
+    public RenderJobService(TodoXConnectionFactory factory, TenantContext tenant, IConfiguration configuration, ILogger<RenderJobService> logger)
     {
         _factory = factory;
         _tenant = tenant;
+        _configuration = configuration;
         _logger = logger;
     }
 
@@ -65,6 +68,8 @@ public sealed class RenderJobService : IRenderJobService
         var inputJson = ToJson(model.Input ?? new { });
         var promptJson = ToJson(model.Prompt ?? new { });
         var referenceJson = ToJson(model.References ?? Array.Empty<object>());
+        var pointCostEstimate = LegacyPointBillingFeatureFlags.NormalizePointCostEstimate(_configuration, model.PointCostEstimate);
+        var pointStatus = LegacyPointBillingFeatureFlags.NormalizePointStatus(_configuration, model.PointStatus, pointCostEstimate);
 
         using var conn = await _factory.OpenAsync(ct);
         // customer_id must stay nullable for system/admin jobs (CurrentUser.CustomerId == null). We never
@@ -88,8 +93,8 @@ public sealed class RenderJobService : IRenderJobService
                 prompt = promptJson,
                 refs = referenceJson,
                 logCode = model.LogCode,
-                pointCost = model.PointCostEstimate,
-                pointStatus = model.PointStatus,
+                pointCost = pointCostEstimate,
+                pointStatus,
                 provider = model.ProviderCode,
                 model = model.ModelCode,
                 maxAttempts = Math.Max(1, model.MaxAttempts)
@@ -131,6 +136,8 @@ public sealed class RenderJobService : IRenderJobService
         await _tenant.EnsureLoadedAsync(ct);
         var jobType = model.JobType.Trim();
         var initialStatus = NormalizeInitialStatus(model.InitialStatus);
+        var pointCostEstimate = LegacyPointBillingFeatureFlags.NormalizePointCostEstimate(_configuration, model.PointCostEstimate);
+        var pointStatus = LegacyPointBillingFeatureFlags.NormalizePointStatus(_configuration, model.PointStatus, pointCostEstimate);
 
         using var conn = await _factory.OpenAsync(ct);
         using var tx = conn.BeginTransaction();
@@ -181,8 +188,8 @@ public sealed class RenderJobService : IRenderJobService
                     prompt = promptJson,
                     refs = referenceJson,
                     logCode = model.LogCode,
-                    pointCost = model.PointCostEstimate,
-                    pointStatus = model.PointStatus,
+                    pointCost = pointCostEstimate,
+                    pointStatus,
                     provider = model.ProviderCode,
                     model = model.ModelCode,
                     maxAttempts = Math.Max(1, model.MaxAttempts)
@@ -232,6 +239,8 @@ public sealed class RenderJobService : IRenderJobService
         var jobType = model.JobType.Trim();
         var uniqueLogCode = logCode.Trim();
         var initialStatus = NormalizeInitialStatus(model.InitialStatus);
+        var pointCostEstimate = LegacyPointBillingFeatureFlags.NormalizePointCostEstimate(_configuration, model.PointCostEstimate);
+        var pointStatus = LegacyPointBillingFeatureFlags.NormalizePointStatus(_configuration, model.PointStatus, pointCostEstimate);
 
         using var conn = await _factory.OpenAsync(ct);
         using var tx = conn.BeginTransaction();
@@ -279,8 +288,8 @@ public sealed class RenderJobService : IRenderJobService
                     prompt = promptJson,
                     refs = referenceJson,
                     logCode = uniqueLogCode,
-                    pointCost = model.PointCostEstimate,
-                    pointStatus = model.PointStatus,
+                    pointCost = pointCostEstimate,
+                    pointStatus,
                     provider = model.ProviderCode,
                     model = model.ModelCode,
                     maxAttempts = Math.Max(1, model.MaxAttempts)
@@ -448,8 +457,8 @@ public sealed class RenderJobService : IRenderJobService
             Prompt = JsonSerializer.Deserialize<object>(current.PromptJson),
             References = JsonSerializer.Deserialize<object>(current.ReferenceJson),
             LogCode = current.LogCode,
-            PointCostEstimate = current.PointCostEstimate,
-            PointStatus = current.PointCostEstimate > 0 ? RenderPointStatuses.Pending : RenderPointStatuses.NotRequired,
+            PointCostEstimate = LegacyPointBillingFeatureFlags.NormalizePointCostEstimate(_configuration, current.PointCostEstimate),
+            PointStatus = LegacyPointBillingFeatureFlags.NormalizePointStatus(_configuration, current.PointStatus, current.PointCostEstimate),
             ProviderCode = current.ProviderCode,
             ModelCode = current.ModelCode,
             MaxAttempts = current.MaxAttempts

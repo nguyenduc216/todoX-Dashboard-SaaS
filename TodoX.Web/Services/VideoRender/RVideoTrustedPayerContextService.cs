@@ -1,6 +1,7 @@
 using Dapper;
 using TodoX.Web.Data;
 using TodoX.Web.Services.AiProviders;
+using TodoX.Web.Services;
 
 namespace TodoX.Web.Services.VideoRender;
 
@@ -16,11 +17,13 @@ public sealed class RVideoTrustedPayerContextService : IRVideoTrustedPayerContex
 
     private readonly TodoXConnectionFactory _factory;
     private readonly TenantContext _tenant;
+    private readonly IConfiguration _configuration;
 
-    public RVideoTrustedPayerContextService(TodoXConnectionFactory factory, TenantContext tenant)
+    public RVideoTrustedPayerContextService(TodoXConnectionFactory factory, TenantContext tenant, IConfiguration configuration)
     {
         _factory = factory;
         _tenant = tenant;
+        _configuration = configuration;
     }
 
     public async Task<AiBillingTrustedPayerContext> BuildRVideoTrustedPayerContextAsync(long projectId, long sceneId, CancellationToken ct = default)
@@ -56,6 +59,16 @@ public sealed class RVideoTrustedPayerContextService : IRVideoTrustedPayerContex
             throw new InvalidOperationException($"{MismatchCode}: persisted RVIDEO project/core-job ownership is invalid.");
         }
 
+        if (LegacyPointBillingFeatureFlags.IsDisabled(_configuration))
+        {
+            return new AiBillingTrustedPayerContext(
+                AiBillingPayerTypes.Customer,
+                ownership.ProjectCustomerId,
+                ownership.ProjectUserId ?? ownership.CoreJobUserId,
+                SystemWalletCode: null,
+                Source: "legacy_point_billing_disabled");
+        }
+
         return new AiBillingTrustedPayerContext(
             AiBillingPayerTypes.Customer,
             ownership.ProjectCustomerId,
@@ -72,6 +85,11 @@ public sealed class RVideoTrustedPayerContextService : IRVideoTrustedPayerContex
         AiBillingTrustedPayerContext? inputContext,
         CancellationToken ct = default)
     {
+        if (LegacyPointBillingFeatureFlags.IsDisabled(_configuration))
+        {
+            return await BuildRVideoTrustedPayerContextAsync(projectId, sceneId, ct);
+        }
+
         if (inputContext is null
             || !string.Equals(inputContext.PayerType, AiBillingPayerTypes.Customer, StringComparison.OrdinalIgnoreCase))
         {

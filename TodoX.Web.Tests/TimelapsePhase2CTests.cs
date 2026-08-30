@@ -1155,7 +1155,7 @@ public class TimelapsePhase2CTests
         Assert.Contains("AutoFinish = request.AutoFinish", service, StringComparison.Ordinal);
         Assert.Contains("RequireVideoConfirmation = request.RequireVideoConfirmation && !request.AutoFinish", service, StringComparison.Ordinal);
         Assert.Contains("VideoRenderConfirmed = request.AutoFinish", service, StringComparison.Ordinal);
-        Assert.Contains("Disabled=\"@(!_editingRequest || !CanEditFullRequest)\"", detail, StringComparison.Ordinal);
+        Assert.Contains("Disabled=\"@(!_editingRequest || !CanEditSafeRequestFields)\"", detail, StringComparison.Ordinal);
         Assert.Contains("_job.Snapshot.AutoFinish ? ", detail, StringComparison.Ordinal);
         Assert.Contains("\"Bật\" : \"Tắt\"", detail, StringComparison.Ordinal);
         Assert.Contains("StartReadyVideosAsync(conn, tx, jobId)", workflow, StringComparison.Ordinal);

@@ -5,6 +5,7 @@ using TodoX.Web.Data;
 using TodoX.Web.Models.Catalog;
 using TodoX.Web.Services.AiProviders;
 using TodoX.Web.Services.Render;
+using TodoX.Web.Services;
 
 namespace TodoX.Web.Services.Platform;
 
@@ -89,17 +90,20 @@ public sealed class CoreBillingService : ICoreBillingService
     private readonly TenantContext _tenant;
     private readonly IServiceSellPriceResolver _prices;
     private readonly WalletService _wallets;
+    private readonly IConfiguration _configuration;
 
     public CoreBillingService(
         TodoXConnectionFactory factory,
         TenantContext tenant,
         IServiceSellPriceResolver prices,
-        WalletService wallets)
+        WalletService wallets,
+        IConfiguration configuration)
     {
         _factory = factory;
         _tenant = tenant;
         _prices = prices;
         _wallets = wallets;
+        _configuration = configuration;
     }
 
     public async Task<CoreBillingEstimate> EstimateAsync(
@@ -118,6 +122,18 @@ public sealed class CoreBillingService : ICoreBillingService
         var imageCount = ReadInt(input, "imageCount", "image_count") ?? 0;
         var sceneCount = ReadInt(input, "sceneCount", "scene_count") ?? 0;
         var durationSeconds = ReadInt(input, "durationSeconds", "duration_seconds", "sceneDurationSeconds", "scene_duration_seconds");
+
+        if (LegacyPointBillingFeatureFlags.IsDisabled(_configuration))
+        {
+            return new CoreBillingEstimate(
+                0,
+                ChargeRequired: false,
+                qualityTier,
+                imageCount,
+                sceneCount,
+                durationSeconds,
+                "Legacy point billing is disabled.");
+        }
 
         if (imageCount <= 0 && sceneCount <= 0)
         {

@@ -4,6 +4,7 @@
 @using System.Text.Json.Nodes
 @using Microsoft.AspNetCore.Components.Forms
 @using TodoX.Web.Components.Dialogs
+@using TodoX.Web.Services
 @using TodoX.Web.Services.AiProviders
 @inject AuthStateService AuthState
 @inject NavigationManager Navigation
@@ -2865,7 +2866,8 @@ else
             Status = version.Status, StatusColor = VersionStatusColor(version.Status), CreatedAt = version.CreatedAt,
             IsSelected = version.IsSelected, CanSelect = CanSelectVersion(version.Status, version.IsSelected), MediaUrl = version.PublicUrl,
             Metadata = $"{version.ProviderCode ?? "provider"} / {version.ModelName ?? "model"}",
-            Prompt = version.CompiledImagePromptSnapshot ?? version.ImagePromptSnapshot, Error = version.ErrorMessage
+            Prompt = version.CompiledImagePromptSnapshot ?? version.ImagePromptSnapshot,
+            Error = LegacyPointBillingFeatureFlags.IsLegacyInsufficientPointFailure(null, version.ErrorMessage) ? null : version.ErrorMessage
         }).ToList();
         var dialog = await DialogService.ShowAsync<MediaHistoryDialog>($"Lịch sử ảnh scene {scene.SceneIndex}", new DialogParameters<MediaHistoryDialog>
         {
@@ -2908,7 +2910,8 @@ else
             Status = version.Status, StatusColor = VersionStatusColor(version.Status), CreatedAt = version.CreatedAt,
             IsSelected = version.IsSelected, CanSelect = CanSelectVersion(version.Status, version.IsSelected), IsVideo = true,
             MediaUrl = version.PublicUrl, Metadata = $"{version.ProviderCode ?? "provider"} / {version.ModelName ?? "model"} · {version.DurationSeconds?.ToString("0.##") ?? "?"} giây",
-            Prompt = version.VideoPromptSnapshot, Error = version.ErrorMessage
+            Prompt = version.VideoPromptSnapshot,
+            Error = LegacyPointBillingFeatureFlags.IsLegacyInsufficientPointFailure(null, version.ErrorMessage) ? null : version.ErrorMessage
         }).ToList();
         var dialog = await DialogService.ShowAsync<MediaHistoryDialog>($"Lịch sử video scene {scene.SceneIndex}", new DialogParameters<MediaHistoryDialog>
         {
@@ -3153,7 +3156,7 @@ else
                                 <img src="@version.PublicUrl" style="max-width:160px;max-height:96px;object-fit:cover;border-radius:6px" />
                             }
                             <MudText Typo="Typo.caption">Provider: @version.ProviderCode | Model: @version.ModelName | Task: @version.ProviderTaskId</MudText>
-                            <MudText Typo="Typo.caption">Điểm trừ: @version.ChargedPoints.ToString("0.####") | USD dự kiến: @FormatMoney(version.EstimatedUsd) | USD thực tế: @FormatMoney(version.ActualUsd)</MudText>
+                            <MudText Typo="Typo.caption">USD dự kiến: @FormatMoney(version.EstimatedUsd) | USD thực tế: @FormatMoney(version.ActualUsd)</MudText>
                             <MudText Typo="Typo.caption">Prompt gốc: @ShortText(version.ImagePromptSnapshot)</MudText>
                             <MudText Typo="Typo.caption">Prompt gửi provider: @ShortText(version.CompiledImagePromptSnapshot)</MudText>
                             <MudText Typo="Typo.caption">Prompt video: @ShortText(version.VideoPromptSnapshot)</MudText>

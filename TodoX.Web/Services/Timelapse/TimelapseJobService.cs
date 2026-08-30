@@ -376,9 +376,60 @@ public sealed class TimelapseJobService : ITimelapseJobService
                 OR EXISTS (SELECT 1 FROM timelapse.timelapse_final_outputs WHERE job_id=@jobId);
             """,
             new { jobId }, tx);
-        if (graphStarted || !string.Equals(current.Status, RenderJobStatuses.Draft, StringComparison.OrdinalIgnoreCase))
+        var canEditFull = !graphStarted && string.Equals(current.Status, RenderJobStatuses.Draft, StringComparison.OrdinalIgnoreCase);
+        var canEditSafe = current.Workflow.CanEditRequest
+            && TimelapseParentStatuses.IsEditableStopped(current.Workflow.ParentStatus)
+            && !current.Workflow.HasActiveOperations;
+        if (!canEditFull && !canEditSafe)
         {
-            throw new InvalidOperationException("Yêu cầu chỉ có thể chỉnh sửa trước khi bắt đầu render.");
+            throw new InvalidOperationException("Yêu cầu đang được xử lý hoặc không còn ở trạng thái có thể chỉnh sửa.");
+        }
+
+        if (!canEditFull)
+        {
+            if (!IsSafeRuntimeEdit(current.Snapshot, request, hasReplacementImage, startImageContent is { Length: > 0 }, removeStartImage))
+            {
+                throw new InvalidOperationException("Job đã có dữ liệu render nên chỉ có thể cập nhật tên job và chế độ tự động hoàn thành.");
+            }
+
+            var runtimeUpdatedRows = await conn.ExecuteAsync(
+                """
+                UPDATE render.render_jobs
+                   SET input_json=jsonb_set(
+                       jsonb_set(
+                           jsonb_set(
+                               jsonb_set(COALESCE(input_json, '{}'::jsonb), '{title}', CAST(@title AS jsonb), true),
+                               '{autoFinish}', CAST(@autoFinish AS jsonb), true),
+                           '{requireVideoConfirmation}', CAST(@requireVideoConfirmation AS jsonb), true),
+                       '{videoRenderConfirmed}', CAST(@videoRenderConfirmed AS jsonb), true),
+                       updated_at=now()
+                 WHERE id=@jobId
+                   AND tenant_id=@tenant;
+                """,
+                new
+                {
+                    jobId,
+                    tenant = _tenant.TenantId,
+                    title = JsonSerializer.Serialize(NormalizeTitle(request.Title)),
+                    autoFinish = JsonSerializer.Serialize(request.AutoFinish),
+                    requireVideoConfirmation = JsonSerializer.Serialize(!request.AutoFinish),
+                    videoRenderConfirmed = JsonSerializer.Serialize(request.AutoFinish)
+                }, tx);
+            if (runtimeUpdatedRows != 1)
+            {
+                throw new InvalidOperationException("Không thể lưu cấu hình Timelapse.");
+            }
+
+            tx.Commit();
+
+            await _renderJobs.AddEventAsync(
+                jobId,
+                "TIMELAPSE_RUNTIME_SETTINGS_UPDATED",
+                "Customer updated Timelapse title and orchestration mode while stopped.",
+                new { autoFinish = request.AutoFinish, providerWorkStarted = false },
+                ct: ct);
+
+            return await RequireOwnedAsync(jobId, currentUser, ct);
         }
 
         if (!request.ServiceId.HasValue || request.ServiceId.Value == Guid.Empty)
@@ -536,6 +587,23 @@ public sealed class TimelapseJobService : ITimelapseJobService
 
         return await RequireOwnedAsync(jobId, currentUser, ct);
     }
+
+    private static bool IsSafeRuntimeEdit(
+        TimelapseJobSnapshot snapshot,
+        TimelapseCreateRequest request,
+        bool hasReplacementImage,
+        bool hasStartImageReplacement,
+        bool removeStartImage)
+        => !hasReplacementImage
+           && !hasStartImageReplacement
+           && !removeStartImage
+           && snapshot.ServiceId == request.ServiceId
+           && string.Equals(snapshot.ServiceCode, request.ServiceCode, StringComparison.OrdinalIgnoreCase)
+           && string.Equals(snapshot.ServiceCategory, request.ServiceCategory, StringComparison.OrdinalIgnoreCase)
+           && string.Equals(snapshot.ProfileCode, request.ProfileCode, StringComparison.OrdinalIgnoreCase)
+           && snapshot.SceneCount == request.SceneCount
+           && string.Equals(snapshot.VideoMode, request.VideoMode, StringComparison.OrdinalIgnoreCase)
+           && string.Equals(snapshot.Ratio, request.Ratio, StringComparison.OrdinalIgnoreCase);
 
     public async Task<TimelapseJobView> StartOrResumeAsync(Guid jobId, CurrentUserSession currentUser, CancellationToken ct = default)
     {

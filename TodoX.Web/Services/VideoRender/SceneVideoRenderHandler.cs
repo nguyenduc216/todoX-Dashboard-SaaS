@@ -1,6 +1,7 @@
 using System.Text.Json;
 using TodoX.Web.Models;
 using TodoX.Web.Services.AiProviders;
+using TodoX.Web.Services;
 using TodoX.Web.Services.Render;
 
 namespace TodoX.Web.Services.VideoRender;
@@ -70,6 +71,7 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
     private readonly IVideoRenderEligibilityService _eligibility;
     private readonly IVideoPromptValidator _promptValidator;
     private readonly IRVideoTrustedPayerContextService _payers;
+    private readonly IConfiguration _config;
     private readonly ILogger<SceneVideoRenderHandler> _logger;
 
     public string JobType => JobTypeName;
@@ -84,6 +86,7 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
         IVideoRenderEligibilityService eligibility,
         IVideoPromptValidator promptValidator,
         IRVideoTrustedPayerContextService payers,
+        IConfiguration config,
         ILogger<SceneVideoRenderHandler> logger)
     {
         _repo = repo;
@@ -95,6 +98,7 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
         _eligibility = eligibility;
         _promptValidator = promptValidator;
         _payers = payers;
+        _config = config;
         _logger = logger;
     }
 
@@ -131,7 +135,7 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
         {
             return;
         }
-        if (input.TrustedPayerContext is null)
+        if (input.TrustedPayerContext is null && LegacyPointBillingFeatureFlags.IsEnabled(_config))
         {
             await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_PAYER_CONTEXT_MISSING", "error",
                 "Scene-video batch was blocked because trusted payer context is missing.",

@@ -2,6 +2,7 @@ using System.Data;
 using System.Text.Json;
 using Dapper;
 using TodoX.Web.Data;
+using TodoX.Web.Services;
 
 namespace TodoX.Web.Services.AiProviders;
 
@@ -192,6 +193,35 @@ public sealed class AiImageBillingService : IAiImageBillingService
         if (string.IsNullOrWhiteSpace(request.LogicalRequestId))
         {
             return AiImageBillingReservation.Failed(string.Empty, "invalid", "Missing logical_request_id for image billing.");
+        }
+
+        if (LegacyPointBillingFeatureFlags.IsDisabled(_config))
+        {
+            await _tenant.EnsureLoadedAsync(ct);
+            using var legacyConn = await _factory.OpenAsync(ct);
+            using var legacyTx = legacyConn.BeginTransaction();
+
+            await LockLogicalRequestAsync(legacyConn, legacyTx, _tenant.TenantId, request.LogicalRequestId);
+
+            var legacyExisting = await GetRecordForUpdateAsync(legacyConn, legacyTx, request.LogicalRequestId);
+            if (legacyExisting is not null)
+            {
+                var decision = HandleExistingReservation(legacyExisting);
+                legacyTx.Commit();
+                return decision;
+            }
+
+            var legacyPayer = new AiBillingPayerContext(
+                request.CustomerId.HasValue
+                    ? AiBillingPayerTypes.Customer
+                    : AiBillingPayerTypes.System,
+                request.CustomerId,
+                SystemWalletCode: null,
+                ResolutionSource: "legacy_point_billing_disabled");
+
+            var recordId = await InsertRecordAsync(legacyConn, legacyTx, request, legacyPayer, walletId: null, status: "not_required", walletTransactionId: null);
+            legacyTx.Commit();
+            return new AiImageBillingReservation(true, true, legacyPayer.PayerType, "not_required", request.LogicalRequestId, 0, recordId, null, null);
         }
 
         AiBillingPayerContext payer;
@@ -436,7 +466,7 @@ public sealed class AiImageBillingService : IAiImageBillingService
                    pending_reconciliation_at = now(),
                    updated_at = now()
              WHERE id = @id
-               AND status IN ('reserved','pending_reconciliation');
+               AND status IN ('not_required','reserved','pending_reconciliation');
             """,
             new { id = record.Id, model = request.ActualModel, taskId = request.ProviderTaskId, errorMessage = request.ErrorMessage }, tx);
 
@@ -560,6 +590,12 @@ public sealed class AiImageBillingService : IAiImageBillingService
                 existing.ReservedPoints, existing.Id, existing.WalletTransactionId, "Image render request was already completed.");
         }
 
+        if (existing.Status is "not_required")
+        {
+            return new AiImageBillingReservation(true, true, existing.PayerType, "not_required", existing.LogicalRequestId,
+                0, existing.Id, existing.WalletTransactionId, null);
+        }
+
         if (existing.Status is "reserved" or "pending_reconciliation")
         {
             return new AiImageBillingReservation(true, false, existing.PayerType, existing.Status, existing.LogicalRequestId,
@@ -654,8 +690,12 @@ public sealed class AiImageBillingService : IAiImageBillingService
         string status,
         Guid? walletTransactionId)
     {
-        var customerPoints = payer.PayerType == AiBillingPayerTypes.Customer ? request.Cost.CustomerChargedPoints : 0m;
-        var systemPoints = payer.PayerType == AiBillingPayerTypes.System ? request.Cost.CustomerChargedPoints : 0m;
+        var customerPoints = LegacyPointBillingFeatureFlags.IsDisabled(_config)
+            ? 0m
+            : payer.PayerType == AiBillingPayerTypes.Customer ? request.Cost.CustomerChargedPoints : 0m;
+        var systemPoints = LegacyPointBillingFeatureFlags.IsDisabled(_config)
+            ? 0m
+            : payer.PayerType == AiBillingPayerTypes.System ? request.Cost.CustomerChargedPoints : 0m;
 
         return await conn.ExecuteScalarAsync<Guid>(
             """

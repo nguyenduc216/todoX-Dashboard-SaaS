@@ -517,7 +517,8 @@ app.MapGet("/system/version", (IConfiguration configuration) =>
         features = new
         {
             renderQueueEnabled = configuration.GetValue("RenderQueue:Enabled", false),
-            rvideoLifecycleRegistered = app.Services.GetServices<IHostedService>().OfType<RVideoLifecycleWorker>().Any()
+            rvideoLifecycleRegistered = app.Services.GetServices<IHostedService>().OfType<RVideoLifecycleWorker>().Any(),
+            legacyPointBillingEnabled = LegacyPointBillingFeatureFlags.IsEnabled(configuration)
         }
     });
 });

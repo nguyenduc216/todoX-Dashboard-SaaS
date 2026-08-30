@@ -30,5 +30,13 @@ window.todoXVideoPreview = window.todoXVideoPreview || {
       await video.play();
     } catch {
     }
+  },
+  pause: function (video) {
+    if (!video) return;
+    try {
+      video.pause();
+      video.currentTime = 0;
+    } catch {
+    }
   }
 };
