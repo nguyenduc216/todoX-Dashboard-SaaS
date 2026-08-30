@@ -721,15 +721,33 @@ public sealed class RVideoRuntimeSqlTests
     {
         var source = ReadRepoFile("Services", "VideoRender", "SceneAudioRenderHandler.cs");
         var directIndex = source.IndexOf("if (IsDirectAudio(submitted.AudioUrl))", StringComparison.Ordinal);
-        var requestIdIndex = source.IndexOf("requestId = NormalizeRequestId(submitted.RequestId);", directIndex, StringComparison.Ordinal);
+        var requestIdIndex = source.IndexOf("requestId = NormalizeRequestId(submitted.RequestId);", StringComparison.Ordinal);
 
         Assert.True(directIndex >= 0);
-        Assert.True(requestIdIndex > directIndex);
+        Assert.True(requestIdIndex >= 0);
+        Assert.True(requestIdIndex < directIndex);
         Assert.Contains("VBEE_SUBMIT_REQUEST_ID_MISSING", source);
         Assert.Contains("SCENE_AUDIO_PROVIDER_SUBMIT_FAILED", source);
-        Assert.Contains("reason: \"provider_request_id_missing\"", source);
+        Assert.Contains("responseTopLevelKeys", source);
+        Assert.Contains("responseShape", source);
         Assert.DoesNotContain("NormalizeRequestId(submitted.RequestId) ?? input.LogicalRequestId", source);
         Assert.Contains("CallbackUrl = null", ReadRepoFile("Services", "VideoRender", "RVideoSceneAudioAutoChainService.cs"));
+    }
+
+    [Fact]
+    public void VbeeSubmitFailureDiagnosticsStayRedacted()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "SceneAudioRenderHandler.cs");
+        var failureMethod = ExtractMethodBlock(source, "private static object BuildSubmitFailureData");
+
+        Assert.Contains("responseTopLevelKeys", failureMethod);
+        Assert.Contains("responseShape", failureMethod);
+        Assert.DoesNotContain("raw_response", failureMethod, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("input_text", failureMethod, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("authorization", failureMethod, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("callback_secret", failureMethod, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("app_secret", failureMethod, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("token", failureMethod, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

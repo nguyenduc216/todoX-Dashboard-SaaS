@@ -1,5 +1,6 @@
 using System.Net;
 using Microsoft.Extensions.Options;
+using System.Text.Json.Nodes;
 using TodoX.Web.Services.VideoRender;
 using Xunit;
 
@@ -8,11 +9,11 @@ namespace TodoX.Web.Tests;
 public sealed class VbeeVoiceClientTests
 {
     [Fact]
-    public async Task SubmitAsync_UsesVbeeContractAndOmitsCallbackAndZeroSampleRate()
+    public async Task SubmitAsync_ParsesRootRequestId()
     {
         var handler = new FakeHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
         {
-            Content = new StringContent("""{"request_id":"req-123","audio_url":"https://cdn.example.com/out.mp3"}""")
+            Content = new StringContent("""{"request_id":"req-123"}""")
         });
         var client = CreateClient(handler, new VbeeOptions
         {
@@ -35,7 +36,7 @@ public sealed class VbeeVoiceClientTests
             null));
 
         Assert.Equal("req-123", result.RequestId);
-        Assert.Equal("https://cdn.example.com/out.mp3", result.AudioUrl);
+        Assert.Equal(200, result.Response!["http_status"]!.GetValue<int>());
         Assert.Equal(HttpMethod.Post, handler.LastRequest?.Method);
         Assert.Equal("https://vbee.example/api/v1/tts", handler.LastRequest?.RequestUri?.ToString());
         Assert.Equal("Bearer", handler.LastRequest?.Headers.Authorization?.Scheme);
@@ -52,6 +53,131 @@ public sealed class VbeeVoiceClientTests
         Assert.Contains("\"bitrate\":160", body);
         Assert.Contains("\"speed_rate\":1.25", body);
         Assert.DoesNotContain("sample_rate", body);
+    }
+
+    [Fact]
+    public async Task SubmitAsync_ParsesNestedRequestId()
+    {
+        var handler = new FakeHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("""{"result":{"request_id":"req-2"}}""")
+        });
+        var client = CreateClient(handler, new VbeeOptions
+        {
+            ApiBaseUrl = "https://vbee.example/api/v1",
+            TtsPath = "/tts",
+            ApiToken = "token-123",
+            AppId = "app-456"
+        });
+
+        var result = await client.SubmitAsync(new VbeeVoiceSubmitRequest(
+            "voice-01",
+            "Xin chao",
+            1.0m,
+            null,
+            "https://dashboard.example.com/api/providers/vbee/callback",
+            null,
+            0,
+            160,
+            1.25m,
+            null));
+
+        Assert.Equal("req-2", result.RequestId);
+    }
+
+    [Fact]
+    public async Task SubmitAsync_ParsesNestedCamelRequestId()
+    {
+        var handler = new FakeHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("""{"data":{"requestId":"req-3"}}""")
+        });
+        var client = CreateClient(handler, new VbeeOptions
+        {
+            ApiBaseUrl = "https://vbee.example/api/v1",
+            TtsPath = "/tts",
+            ApiToken = "token-123",
+            AppId = "app-456"
+        });
+
+        var result = await client.SubmitAsync(new VbeeVoiceSubmitRequest(
+            "voice-01",
+            "Xin chao",
+            1.0m,
+            null,
+            "https://dashboard.example.com/api/providers/vbee/callback",
+            null,
+            0,
+            160,
+            1.25m,
+            null));
+
+        Assert.Equal("req-3", result.RequestId);
+    }
+
+    [Fact]
+    public async Task SubmitAsync_ParsesNestedAudioUrl()
+    {
+        var handler = new FakeHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("""{"result":{"audio_link":"https://cdn.example.com/out.mp3"}}""")
+        });
+        var client = CreateClient(handler, new VbeeOptions
+        {
+            ApiBaseUrl = "https://vbee.example/api/v1",
+            TtsPath = "/tts",
+            ApiToken = "token-123",
+            AppId = "app-456"
+        });
+
+        var result = await client.SubmitAsync(new VbeeVoiceSubmitRequest(
+            "voice-01",
+            "Xin chao",
+            1.0m,
+            null,
+            "https://dashboard.example.com/api/providers/vbee/callback",
+            null,
+            0,
+            160,
+            1.25m,
+            null));
+
+        Assert.Equal("https://cdn.example.com/out.mp3", result.AudioUrl);
+    }
+
+    [Fact]
+    public async Task SubmitAsync_Non2xxThrowsSafeSubmitException()
+    {
+        var handler = new FakeHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.BadRequest)
+        {
+            Content = new StringContent("""{"status":"FAILED","error_code":"bad_request","error_message":"Provider rejected"}""")
+        });
+        var client = CreateClient(handler, new VbeeOptions
+        {
+            ApiBaseUrl = "https://vbee.example/api/v1",
+            TtsPath = "/tts",
+            ApiToken = "token-123",
+            AppId = "app-456"
+        });
+
+        var ex = await Assert.ThrowsAsync<VbeeVoiceSubmitException>(() => client.SubmitAsync(new VbeeVoiceSubmitRequest(
+            "voice-01",
+            "Xin chao",
+            1.0m,
+            null,
+            "https://dashboard.example.com/api/providers/vbee/callback",
+            null,
+            0,
+            160,
+            1.25m,
+            null)));
+
+        Assert.Equal(HttpStatusCode.BadRequest, ex.HttpStatusCode);
+        Assert.Equal("bad_request", ex.ErrorCode);
+        Assert.Equal("Provider rejected", ex.ErrorMessage);
+        Assert.Contains("status", ex.ResponseTopLevelKeys);
+        var shapeKeys = Assert.IsType<JsonArray>(ex.ResponseShape["keys"]);
+        Assert.Contains("error_code", shapeKeys.Select(x => x!.GetValue<string>()));
     }
 
     [Fact]

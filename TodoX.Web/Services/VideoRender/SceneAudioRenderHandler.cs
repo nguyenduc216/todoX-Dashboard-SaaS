@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using TodoX.Web.Services;
@@ -74,7 +75,7 @@ public sealed class SceneAudioRenderHandler : IRenderJobHandler
         var options = await _runtimeConfig.GetAsync(ct);
         var sampleRate = options.ResolveSampleRate(input.VoiceCode);
 
-        options.GetTokenOrThrow();
+        var vbeeToken = options.GetTokenOrThrow();
         if (string.IsNullOrWhiteSpace(input.AppId ?? options.AppId))
         {
             throw new InvalidOperationException("VBEE_APP_ID is missing.");
@@ -106,7 +107,25 @@ public sealed class SceneAudioRenderHandler : IRenderJobHandler
             await _repo.AddProjectEventAsync(project.Id, "SCENE_AUDIO_PROVIDER_SUBMITTING", "info",
                 $"Scene {scene.SceneIndex} external voice submitting.",
                 BuildEventData(project.Id, scene.Id, scene.SceneIndex, input, version.Id, null, "SUBMITTING", sampleRate), ct);
-            var submitted = await _vbee.SubmitAsync(submitRequest, options, ct);
+            VbeeVoiceSubmitResult submitted;
+            try
+            {
+                submitted = await _vbee.SubmitAsync(submitRequest, options, ct);
+            }
+            catch (VbeeVoiceSubmitException ex)
+            {
+                var safeErrorMessage = RedactSensitiveText(
+                    ex.ErrorMessage ?? ex.Message,
+                    vbeeToken,
+                    input.NarrationText,
+                    input.VoiceInstruction,
+                    input.AppId,
+                    options.AppId,
+                    options.CallbackSecret);
+                await HandleSubmitFailureAsync(project, scene, version, input, sampleRate, ex.HttpStatusCode, ex.ProviderStatus, ex.ResponseTopLevelKeys, ex.ResponseShape, ex.ErrorCode, safeErrorMessage, ct);
+                throw new RenderJobTerminalFailureException(safeErrorMessage);
+            }
+
             requestId = NormalizeRequestId(submitted.RequestId);
             if (IsDirectAudio(submitted.AudioUrl))
             {
@@ -120,13 +139,20 @@ public sealed class SceneAudioRenderHandler : IRenderJobHandler
 
             if (string.IsNullOrWhiteSpace(requestId))
             {
-                await _repo.AddProjectEventAsync(project.Id, "SCENE_AUDIO_PROVIDER_SUBMIT_FAILED", "error",
-                    $"Scene {scene.SceneIndex} external voice submit did not return a provider request id.",
-                    BuildEventData(project.Id, scene.Id, scene.SceneIndex, input, version.Id, null, "FAILED", sampleRate,
-                        errorCode: "VBEE_SUBMIT_REQUEST_ID_MISSING",
-                        errorMessage: "Vbee returned no request_id and no direct MP3 audio URL.",
-                        reason: "provider_request_id_missing"), ct);
-                throw new InvalidOperationException("VBEE_SUBMIT_REQUEST_ID_MISSING");
+                await HandleSubmitFailureAsync(
+                    project,
+                    scene,
+                    version,
+                    input,
+                    sampleRate,
+                    GetProviderHttpStatus(submitted.Response),
+                    GetProviderStatus(submitted.Response),
+                    GetResponseTopLevelKeys(submitted.Response),
+                    submitted.Response is null ? null : VbeeVoiceClient.BuildResponseShape(submitted.Response),
+                    "VBEE_SUBMIT_REQUEST_ID_MISSING",
+                    "Vbee returned no request_id and no direct MP3 audio URL.",
+                    ct);
+                throw new RenderJobTerminalFailureException("VBEE_SUBMIT_REQUEST_ID_MISSING");
             }
 
             await _versions.MarkSceneAudioVersionSubmittedAsync(version.Id, "vbee", input.VoiceCode, null, requestId, ct);
@@ -249,14 +275,33 @@ public sealed class SceneAudioRenderHandler : IRenderJobHandler
 
     private static string? ReadString(JsonObject node, params string[] keys)
     {
-        foreach (var key in keys)
-        {
-            if (node[key] is JsonValue value && value.TryGetValue<string>(out var text) && !string.IsNullOrWhiteSpace(text))
-            {
-                return text.Trim();
-            }
-        }
-        return null;
+        return VbeeVoiceClient.FindStringRecursive(node, keys);
+    }
+
+    private async Task HandleSubmitFailureAsync(
+        VideoProjectDto project,
+        VideoProjectSceneDto scene,
+        SceneAudioVersionDto version,
+        SceneAudioRenderWorkItemInput input,
+        int sampleRate,
+        HttpStatusCode? providerHttpStatus,
+        string? providerStatus,
+        IReadOnlyList<string>? responseTopLevelKeys,
+        JsonObject? responseShape,
+        string? providerErrorCode,
+        string providerErrorMessage,
+        CancellationToken ct)
+    {
+        await _versions.FailSceneAudioVersionAsync(version.Id, providerErrorCode ?? "VBEE_SUBMIT_FAILED", providerErrorMessage, ct);
+        await _repo.AddProjectEventAsync(project.Id, "SCENE_AUDIO_PROVIDER_SUBMIT_FAILED", "error",
+            $"Scene {scene.SceneIndex} external voice submit failed.",
+            BuildSubmitFailureData(project.Id, scene.Id, scene.SceneIndex, input, version.Id, sampleRate,
+                providerHttpStatus,
+                providerStatus,
+                responseTopLevelKeys,
+                responseShape,
+                providerErrorCode,
+                providerErrorMessage), ct);
     }
 
     private static object BuildEventData(
@@ -297,5 +342,83 @@ public sealed class SceneAudioRenderHandler : IRenderJobHandler
             originalSampleRate,
             fallbackSampleRate
         };
+
+    private static object BuildSubmitFailureData(
+        long projectId,
+        long sceneId,
+        int sceneIndex,
+        SceneAudioRenderWorkItemInput input,
+        Guid versionId,
+        int sampleRate,
+        HttpStatusCode? providerHttpStatus,
+        string? providerStatus,
+        IReadOnlyList<string>? responseTopLevelKeys,
+        JsonObject? responseShape,
+        string? providerErrorCode,
+        string? providerErrorMessage)
+        => new
+        {
+            projectId,
+            sceneId,
+            sceneIndex,
+            audioVersionId = versionId,
+            renderJobId = input.ParentJobId,
+            input.LogicalRequestId,
+            input.VoiceCatalogCode,
+            input.VoiceCode,
+            providerHttpStatus = providerHttpStatus is null ? (int?)null : (int)providerHttpStatus.Value,
+            providerStatus,
+            providerErrorCode = providerErrorCode,
+            providerErrorMessage = providerErrorMessage,
+            responseTopLevelKeys = responseTopLevelKeys ?? Array.Empty<string>(),
+            responseShape,
+            sampleRate,
+            input.TtsRate
+        };
+
+    private static HttpStatusCode? GetProviderHttpStatus(JsonObject? response)
+    {
+        if (response is null || !response.TryGetPropertyValue("http_status", out var node) || node is not JsonValue value)
+        {
+            return null;
+        }
+
+        if (value.TryGetValue<int>(out var httpStatus))
+        {
+            return (HttpStatusCode)httpStatus;
+        }
+
+        if (value.TryGetValue<string>(out var text) && int.TryParse(text, out var parsed))
+        {
+            return (HttpStatusCode)parsed;
+        }
+
+        return null;
+    }
+
+    private static string? GetProviderStatus(JsonObject? response)
+        => response is null ? null : VbeeVoiceClient.FindStringRecursive(response, "status", "state");
+
+    private static IReadOnlyList<string> GetResponseTopLevelKeys(JsonObject? response)
+        => response is null ? Array.Empty<string>() : VbeeVoiceClient.GetResponseTopLevelKeys(response);
+
+    private static string RedactSensitiveText(string? value, params string?[] sensitiveValues)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var redacted = value;
+        foreach (var sensitive in sensitiveValues)
+        {
+            if (!string.IsNullOrWhiteSpace(sensitive))
+            {
+                redacted = redacted.Replace(sensitive, "***", StringComparison.Ordinal);
+            }
+        }
+
+        return redacted;
+    }
 
 }

@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -32,6 +33,35 @@ public sealed record VbeeVoiceCallbackResult(
     string? ErrorCode,
     string? ErrorMessage,
     JsonObject Raw);
+
+public sealed class VbeeVoiceSubmitException : InvalidOperationException
+{
+    public VbeeVoiceSubmitException(
+        string message,
+        HttpStatusCode httpStatusCode,
+        IReadOnlyList<string> responseTopLevelKeys,
+        JsonObject responseShape,
+        string? providerStatus = null,
+        string? errorCode = null,
+        string? errorMessage = null,
+        Exception? innerException = null)
+        : base(message, innerException)
+    {
+        HttpStatusCode = httpStatusCode;
+        ResponseTopLevelKeys = responseTopLevelKeys;
+        ResponseShape = responseShape;
+        ProviderStatus = providerStatus;
+        ErrorCode = errorCode;
+        ErrorMessage = errorMessage;
+    }
+
+    public HttpStatusCode HttpStatusCode { get; }
+    public IReadOnlyList<string> ResponseTopLevelKeys { get; }
+    public JsonObject ResponseShape { get; }
+    public string? ProviderStatus { get; }
+    public string? ErrorCode { get; }
+    public string? ErrorMessage { get; }
+}
 
 public interface IVbeeVoiceClient
 {
@@ -85,9 +115,22 @@ public sealed class VbeeVoiceClient : IVbeeVoiceClient
 
         using var response = await _http.SendAsync(message, ct);
         var payload = await ReadJsonObjectAsync(response, ct);
-        var requestId = FindString(payload, "request_id", "requestId", "requestID");
-        var audioUrl = FindString(payload, "audio_link", "audio_url", "audioUrl", "download_url", "downloadUrl", "url");
-        var status = FindString(payload, "status", "state");
+        var requestId = FindStringRecursive(payload, "request_id", "requestId", "requestID");
+        var audioUrl = FindStringRecursive(payload, "audio_link", "audio_url", "audioUrl", "download_url", "downloadUrl", "url");
+        var status = FindStringRecursive(payload, "status", "state");
+        if (!response.IsSuccessStatusCode)
+        {
+            var topLevelKeys = GetResponseTopLevelKeys(payload);
+            throw new VbeeVoiceSubmitException(
+                $"Vbee submit returned HTTP {(int)response.StatusCode}.",
+                response.StatusCode,
+                topLevelKeys,
+                BuildResponseShape(payload),
+                FindStringRecursive(payload, "status", "state"),
+                FindStringRecursive(payload, "error_code", "errorCode", "code"),
+                FindStringRecursive(payload, "error_message", "errorMessage", "message", "error"));
+        }
+
         return new VbeeVoiceSubmitResult(requestId, NormalizeUrl(audioUrl), status, payload);
     }
 
@@ -124,7 +167,7 @@ public sealed class VbeeVoiceClient : IVbeeVoiceClient
     private static VbeeVoiceCallbackResult BuildCallbackResult(JsonObject payload, IReadOnlyDictionary<string, string?>? query)
     {
         string? GetValue(params string[] keys)
-            => keys.Select(key => FindString(payload, key)).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))
+            => keys.Select(key => FindStringRecursive(payload, key)).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))
                ?? (query is null
                    ? null
                    : keys.Select(key => query.TryGetValue(key, out var value) ? value : null)
@@ -155,17 +198,7 @@ public sealed class VbeeVoiceClient : IVbeeVoiceClient
         catch (JsonException)
         {
             var payload = new JsonObject();
-            var requestMatch = Regex.Match(text, @"(?:request_id|requestId|requestID)\s*[:=]\s*[""']?([A-Za-z0-9._:-]+)", RegexOptions.IgnoreCase);
-            var urlMatch = Regex.Match(text, @"https?:\/\/[^\s""'<>()]+\.mp3(?:\?[^\s""'<>()]*)?", RegexOptions.IgnoreCase);
-            if (requestMatch.Success)
-            {
-                payload["request_id"] = requestMatch.Groups[1].Value;
-            }
-            if (urlMatch.Success)
-            {
-                payload["audio_url"] = urlMatch.Value;
-            }
-            payload["raw_text"] = text[..Math.Min(text.Length, 6000)];
+            payload["parse_error"] = "invalid_json";
             return payload;
         }
     }
@@ -178,35 +211,140 @@ public sealed class VbeeVoiceClient : IVbeeVoiceClient
         return parsed;
     }
 
-    private static string? FindString(JsonObject payload, params string[] keys)
+    internal static string? FindStringRecursive(JsonNode? payload, params string[] keys)
     {
-        foreach (var key in keys)
+        if (payload is JsonObject obj)
         {
-            if (payload[key] is JsonValue value && value.TryGetValue<string>(out var text) && !string.IsNullOrWhiteSpace(text))
+            if (TryFindStringDirect(obj, keys, out var direct))
             {
-                return text.Trim();
+                return direct;
+            }
+
+            foreach (var property in obj)
+            {
+                var found = FindStringRecursive(property.Value, keys);
+                if (!string.IsNullOrWhiteSpace(found))
+                {
+                    return found;
+                }
+            }
+        }
+        else if (payload is JsonArray array)
+        {
+            foreach (var item in array)
+            {
+                var found = FindStringRecursive(item, keys);
+                if (!string.IsNullOrWhiteSpace(found))
+                {
+                    return found;
+                }
             }
         }
 
         return null;
     }
 
-    private static long? TryReadLong(JsonObject payload, params string[] keys)
+    internal static IReadOnlyList<string> GetResponseTopLevelKeys(JsonObject payload)
+        => payload.Select(x => x.Key).ToArray();
+
+    internal static JsonObject BuildResponseShape(JsonObject payload)
     {
-        foreach (var key in keys)
+        var shape = new JsonObject
         {
-            if (payload.TryGetPropertyValue(key, out var node) && node is JsonValue valueNode)
+            ["keys"] = new JsonArray(payload.Select(x => JsonValue.Create(x.Key)).ToArray())
+        };
+
+        foreach (var property in payload)
+        {
+            if (property.Value is JsonObject childObject)
             {
-                if (valueNode.TryGetValue<long>(out var value))
+                shape[$"{property.Key}Keys"] = new JsonArray(childObject.Select(x => JsonValue.Create(x.Key)).ToArray());
+                continue;
+            }
+
+            if (property.Value is JsonArray childArray)
+            {
+                var firstObject = childArray.OfType<JsonObject>().FirstOrDefault(item => item.Count > 0);
+                if (firstObject is not null)
                 {
-                    return value;
-                }
-                if (valueNode.TryGetValue<string>(out var text) && long.TryParse(text, out var parsed))
-                {
-                    return parsed;
+                    shape[$"{property.Key}Keys"] = new JsonArray(firstObject.Select(x => JsonValue.Create(x.Key)).ToArray());
                 }
             }
         }
+
+        return shape;
+    }
+
+    private static string? FindString(JsonObject payload, params string[] keys)
+        => FindStringRecursive(payload, keys);
+
+    private static bool TryFindStringDirect(JsonObject payload, IReadOnlyCollection<string> keys, out string? value)
+    {
+        foreach (var key in keys)
+        {
+            if (payload[key] is JsonValue jsonValue && jsonValue.TryGetValue<string>(out var text) && !string.IsNullOrWhiteSpace(text))
+            {
+                value = text.Trim();
+                return true;
+            }
+        }
+
+        value = null;
+        return false;
+    }
+
+    private static long? TryReadLong(JsonObject payload, params string[] keys)
+        => TryReadLongRecursive(payload, keys);
+
+    private static long? TryReadLongRecursive(JsonNode? payload, params string[] keys)
+    {
+        if (payload is JsonObject obj)
+        {
+            foreach (var key in keys)
+            {
+                if (obj.TryGetPropertyValue(key, out var node) && node is JsonValue valueNode)
+                {
+                    if (valueNode.TryGetValue<long>(out var value))
+                    {
+                        return value;
+                    }
+                    if (valueNode.TryGetValue<string>(out var text) && long.TryParse(text, out var parsed))
+                    {
+                        return parsed;
+                    }
+                }
+
+                if (obj.TryGetPropertyValue(key, out var child))
+                {
+                    var found = TryReadLongRecursive(child, keys);
+                    if (found is not null)
+                    {
+                        return found;
+                    }
+                }
+            }
+
+            foreach (var property in obj)
+            {
+                var found = TryReadLongRecursive(property.Value, keys);
+                if (found is not null)
+                {
+                    return found;
+                }
+            }
+        }
+        else if (payload is JsonArray array)
+        {
+            foreach (var item in array)
+            {
+                var found = TryReadLongRecursive(item, keys);
+                if (found is not null)
+                {
+                    return found;
+                }
+            }
+        }
+
         return null;
     }
 
