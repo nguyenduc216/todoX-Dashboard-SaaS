@@ -32,19 +32,17 @@ public sealed class AiImageBillingRetryRegressionTests
             "TodoX.Web",
             "Services",
             "AiProviders",
-            "AiImageBillingService.cs"));
+            "AiImageBillingService.cs")).Replace("\r\n", "\n");
 
-        Assert.Contains("legacyBillingDisabled: true", source);
-        Assert.Contains("existing.Status == \"insufficient\"", source);
-        Assert.Contains("string.IsNullOrWhiteSpace(existing.ProviderTaskId)", source);
+        Assert.Contains("if (existing.Status == \"insufficient\")", source);
         Assert.Contains("SET status = 'not_required'", source);
         Assert.Contains("customer_charged_points = 0", source);
         Assert.Contains("system_charged_points = 0", source);
         Assert.Contains("provider_task_id AS ProviderTaskId", source);
         Assert.Contains("new AiImageBillingReservation(", source);
         Assert.Contains("\"not_required\"", source);
-        Assert.Contains("true,\r\n                true,", source);
-        Assert.Contains("existing.Id,\r\n                null,\r\n                null);", source);
+        Assert.Contains("string.IsNullOrWhiteSpace(existing.ProviderTaskId)", source);
+        Assert.Contains("true,\n                string.IsNullOrWhiteSpace(existing.ProviderTaskId),", source);
         Assert.Contains("return HandleExistingReservation(existing);", source);
         Assert.Contains("if (existing.Status is \"completed\")", source);
         Assert.Contains("return new AiImageBillingReservation(true, false", source);

@@ -587,8 +587,7 @@ public sealed class AiImageBillingService : IAiImageBillingService
         IDbTransaction tx,
         BillingRecord existing)
     {
-        if (existing.Status == "insufficient"
-            && string.IsNullOrWhiteSpace(existing.ProviderTaskId))
+        if (existing.Status == "insufficient")
         {
             await conn.ExecuteAsync(
                 """
@@ -605,7 +604,7 @@ public sealed class AiImageBillingService : IAiImageBillingService
 
             return new AiImageBillingReservation(
                 true,
-                true,
+                string.IsNullOrWhiteSpace(existing.ProviderTaskId),
                 existing.PayerType,
                 "not_required",
                 existing.LogicalRequestId,
