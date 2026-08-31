@@ -987,6 +987,48 @@ public sealed class RVideoRuntimeSqlTests
     }
 
     [Fact]
+    public void SceneVideoCompletionAutoChainsSceneAudioAfterReady()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "RVideoSceneVideoCompletionService.cs");
+
+        var readyIndex = source.IndexOf("\"SCENE_VIDEO_READY\"", StringComparison.Ordinal);
+        var autoChainIndex = source.IndexOf("_audioAutoChain.TryEnqueueSceneAudioAsync", StringComparison.Ordinal);
+        var audioFailureIndex = source.IndexOf("RVIDEO_SCENE_AUDIO_AUTO_CHAIN_FAILED", StringComparison.Ordinal);
+
+        Assert.True(readyIndex >= 0);
+        Assert.True(autoChainIndex > readyIndex);
+        Assert.True(audioFailureIndex > autoChainIndex);
+        Assert.Contains("IsRecovery ? \"RVIDEO_VIDEO_RECOVERED\" : \"SCENE_VIDEO_READY\"", source);
+    }
+
+    [Fact]
+    public void RenderVideoSceneStatusKeepsLibraryVoicePendingAndMuxPendingVisible()
+    {
+        var source = ReadRepoFile("Components", "Pages", "RenderVideoJobs.razor");
+
+        Assert.Contains("private TodoX.Web.Services.VideoRender.SceneVideoVersionDto? ResolveVideoVersion", source);
+        Assert.Contains("\"voice_rendering\" => \"Đang tạo giọng\"", source);
+        Assert.Contains("\"voice_mux_pending\" => \"Đang ghép giọng\"", source);
+        Assert.Contains("\"voice_failed\" => \"Giọng lỗi\"", source);
+        Assert.Contains("\"voice_failed\" => Color.Error", source);
+        Assert.Contains("VOICE_FAILED", source);
+    }
+
+    [Fact]
+    public void SceneAudioDialog_ShowsPlayerWhenCompletedAndProcessingMessageOtherwise()
+    {
+        var dialog = File.ReadAllText(
+            Path.Combine(RepoRoot, "TodoX.Web", "Components", "Dialogs", "SceneAudioVersionDialog.razor"),
+            Encoding.UTF8);
+
+        Assert.Contains("<audio controls preload=\"metadata\"", dialog);
+        Assert.Contains("Giọng đọc đã sẵn sàng", dialog);
+        Assert.Contains("Đang tạo giọng đọc...", dialog);
+        Assert.Contains("ResolveStatusColor", dialog);
+        Assert.Contains("Tạo giọng đọc thất bại:", dialog);
+    }
+
+    [Fact]
     public void ReconciliationIsolatesItemsAndReschedulesUnexpectedFailures()
     {
         var source = ReadRepoFile("Services", "AiProviders", "AiImageBillingReconciliationWorker.cs");

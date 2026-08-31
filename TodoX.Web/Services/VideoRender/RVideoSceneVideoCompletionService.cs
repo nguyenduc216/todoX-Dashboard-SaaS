@@ -39,6 +39,7 @@ public sealed class RVideoSceneVideoCompletionService : IRVideoSceneVideoComplet
 {
     private readonly IMediaFileService _media;
     private readonly ISceneMediaVersioningService _versions;
+    private readonly IRVideoSceneAudioAutoChainService _audioAutoChain;
     private readonly IRVideoSceneMediaFinalizerService _finalizer;
     private readonly IRVideoJobService _rvideoJobs;
     private readonly IRVideoProjectFinalizationService _finalization;
@@ -52,6 +53,7 @@ public sealed class RVideoSceneVideoCompletionService : IRVideoSceneVideoComplet
     public RVideoSceneVideoCompletionService(
         IMediaFileService media,
         ISceneMediaVersioningService versions,
+        IRVideoSceneAudioAutoChainService audioAutoChain,
         IRVideoSceneMediaFinalizerService finalizer,
         IRVideoJobService rvideoJobs,
         IRVideoProjectFinalizationService finalization,
@@ -64,6 +66,7 @@ public sealed class RVideoSceneVideoCompletionService : IRVideoSceneVideoComplet
     {
         _media = media;
         _versions = versions;
+        _audioAutoChain = audioAutoChain;
         _finalizer = finalizer;
         _rvideoJobs = rvideoJobs;
         _finalization = finalization;
@@ -155,6 +158,28 @@ public sealed class RVideoSceneVideoCompletionService : IRVideoSceneVideoComplet
             $"Scene {request.SceneIndex} rendered successfully.",
             new { request.SceneId, request.SceneIndex, request.ProviderTaskId, videoUrl = saved.PublicUrl ?? saved.FileUrl },
             ct);
+
+        try
+        {
+            await _audioAutoChain.TryEnqueueSceneAudioAsync(
+                request.ProjectId,
+                request.SceneId,
+                request.IsRecovery ? "RVIDEO_VIDEO_RECOVERED" : "SCENE_VIDEO_READY",
+                ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            await RecordPostCompletionFailureAsync(
+                request,
+                "RVIDEO_SCENE_AUDIO_AUTO_CHAIN_FAILED",
+                "Scene audio auto-chain failed after scene-video completion.",
+                ex,
+                ct);
+        }
 
         await _billing.CompleteAsync(new AiImageBillingCompleteRequest
         {

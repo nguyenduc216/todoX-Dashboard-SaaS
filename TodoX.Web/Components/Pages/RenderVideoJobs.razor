@@ -1584,8 +1584,42 @@ else
                && versions.Any(x => x.Status.Equals("completed", StringComparison.OrdinalIgnoreCase)
                                     && !string.IsNullOrWhiteSpace(x.PublicUrl ?? x.SourceFilePath)));
 
+    private TodoX.Web.Services.VideoRender.SceneVideoVersionDto? ResolveVideoVersion(VideoProjectSceneDto scene)
+    {
+        if (!_videoVersions.TryGetValue(scene.Id, out var versions) || versions.Count == 0)
+        {
+            return null;
+        }
+
+        return versions.FirstOrDefault(x => x.IsSelected)
+            ?? versions.OrderByDescending(x => x.VersionNumber).FirstOrDefault();
+    }
+
     private string ResolveVideoSceneStatus(VideoProjectSceneDto scene)
-        => ResolveVideoMediaState(scene) switch
+    {
+        var videoState = ResolveVideoMediaState(scene);
+        if (videoState == MediaRenderState.Ready && RequiresExternalVoice(scene))
+        {
+            var selectedVideo = ResolveVideoVersion(scene);
+            var selectedAudio = ResolveVoiceVersion(scene);
+            if (selectedAudio is null)
+            {
+                return "voice_rendering";
+            }
+
+            if (string.Equals(selectedAudio.Status, "failed", StringComparison.OrdinalIgnoreCase))
+            {
+                return "voice_failed";
+            }
+
+            return selectedVideo?.VoiceAudioVersionId == selectedAudio.Id
+                ? VideoSceneStatuses.VideoReady
+                : string.Equals(selectedAudio.Status, "completed", StringComparison.OrdinalIgnoreCase)
+                    ? "voice_mux_pending"
+                    : "voice_rendering";
+        }
+
+        return videoState switch
         {
             MediaRenderState.Queued => VideoSceneStatuses.VideoQueued,
             MediaRenderState.Rendering or MediaRenderState.Downloading => VideoSceneStatuses.VideoRendering,
@@ -1593,6 +1627,7 @@ else
             MediaRenderState.Failed => VideoSceneStatuses.Failed,
             _ => scene.Status
         };
+    }
 
     private string ResolveVideoSceneLabel(VideoProjectSceneDto scene)
         => ResolveVideoSceneStatus(scene) switch
@@ -1600,6 +1635,9 @@ else
             VideoSceneStatuses.VideoQueued => "Đang chờ",
             VideoSceneStatuses.VideoRendering => "Đang tạo video",
             VideoSceneStatuses.VideoReady => "Hoàn tất",
+            "voice_rendering" => "Đang tạo giọng",
+            "voice_mux_pending" => "Đang ghép giọng",
+            "voice_failed" => "Giọng lỗi",
             VideoSceneStatuses.Failed => "Lỗi",
             _ => "Chưa render video"
         };
@@ -3025,7 +3063,8 @@ else
             return null;
         }
 
-        return versions.OrderByDescending(x => x.VersionNumber).FirstOrDefault();
+        return versions.FirstOrDefault(x => x.IsSelected)
+            ?? versions.OrderByDescending(x => x.VersionNumber).FirstOrDefault();
     }
 
     private MediaRenderState ResolveVoiceMediaState(VideoProjectSceneDto scene)
@@ -3370,7 +3409,18 @@ else
     private bool HasActiveSceneRenders()
         => _sceneEventState.Values.Any(RenderSceneImageUiState.IsActive)
            || _sceneRerendering.Count > 0
-           || (_project?.Scenes.Any(IsVideoSceneActive) ?? false);
+           || (_project?.Scenes.Any(IsVideoSceneActive) ?? false)
+           || _audioVersions.Values.SelectMany(x => x).Any(IsAudioVersionActive)
+           || _jobs.Any(IsAudioOrMuxJobActive);
+
+    private static bool IsAudioVersionActive(TodoX.Web.Services.VideoRender.SceneAudioVersionDto version)
+        => version.Status?.Trim().ToLowerInvariant() is
+            "queued" or "submitted" or "processing" or "pending_reconciliation" or "rendering" or
+            "downloading" or "importing" or "reconciling";
+
+    private static bool IsAudioOrMuxJobActive(RenderJobDto job)
+        => job.JobType is TodoX.Web.Services.Render.RenderJobTypes.RenderSceneAudio or TodoX.Web.Services.Render.RenderJobTypes.RenderSceneAudioMux
+           && job.Status is RenderJobStatuses.Queued or RenderJobStatuses.Preparing or RenderJobStatuses.Rendering or RenderJobStatuses.PostProcessing or RenderJobStatuses.PendingReconciliation or RenderJobStatuses.Processing;
 
     private static bool IsVideoSceneActive(VideoProjectSceneDto scene)
         => scene.Status?.Trim().ToLowerInvariant() is
@@ -3885,18 +3935,23 @@ else
         VideoSceneStatuses.VideoQueued => "Đang chờ",
         VideoSceneStatuses.VideoRendering => "Đang tạo video",
         VideoSceneStatuses.VideoReady => "Hoàn tất",
+        "voice_rendering" => "Đang tạo giọng",
+        "voice_mux_pending" => "Đang ghép giọng",
+        "voice_failed" => "Giọng lỗi",
         VideoSceneStatuses.Failed => "Lỗi",
         _ => status
     };
 
     private static bool IsErrorStatus(string? status)
-        => status?.Trim().ToUpperInvariant() is "FAILED" or "FAILURE" or "ERROR" or "CANCELLED" or "CANCELED" or "EXPIRED";
+        => status?.Trim().ToUpperInvariant() is "FAILED" or "FAILURE" or "ERROR" or "CANCELLED" or "CANCELED" or "EXPIRED" or "VOICE_FAILED";
 
     private static Color SceneColor(string status) => status switch
     {
         VideoSceneStatuses.VideoReady => Color.Success,
         VideoSceneStatuses.ImageReady => Color.Info,
         VideoSceneStatuses.VideoQueued or VideoSceneStatuses.VideoRendering => Color.Warning,
+        "voice_rendering" or "voice_mux_pending" => Color.Warning,
+        "voice_failed" => Color.Error,
         VideoSceneStatuses.Failed => Color.Error,
         _ => Color.Default
     };

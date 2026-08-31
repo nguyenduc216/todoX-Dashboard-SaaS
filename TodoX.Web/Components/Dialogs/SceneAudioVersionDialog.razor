@@ -5,7 +5,7 @@
         <MudStack Spacing="2">
             <MudText Typo="Typo.h6">Voice version @Model.VersionNumber</MudText>
             <MudStack Row="true" Spacing="1" Class="flex-wrap gap-1">
-                <MudChip T="string" Size="Size.Small" Color="Color.Info">@Model.Status</MudChip>
+                <MudChip T="string" Size="Size.Small" Color="@ResolveStatusColor(Model.Status)">@Model.Status</MudChip>
                 @if (Model.IsSelected)
                 {
                     <MudChip T="string" Size="Size.Small" Color="Color.Success">Đang dùng</MudChip>
@@ -19,13 +19,19 @@
             <MudText Typo="Typo.body2">TTS rate: @(Model.TtsRate?.ToString("0.###") ?? "n/a")</MudText>
             <MudText Typo="Typo.body2">Narration: @(Model.NarrationTextSnapshot ?? "n/a")</MudText>
             <MudText Typo="Typo.body2">Instruction: @(Model.VoiceInstructionSnapshot ?? "n/a")</MudText>
-            @if (!string.IsNullOrWhiteSpace(Model.PublicUrl))
+            @if (string.Equals(Model.Status, "completed", StringComparison.OrdinalIgnoreCase)
+                && !string.IsNullOrWhiteSpace(Model.PublicUrl))
             {
                 <audio controls preload="metadata" src="@Model.PublicUrl" style="width:100%"></audio>
+                <MudText Typo="Typo.body2" Color="Color.Success">Giọng đọc đã sẵn sàng</MudText>
+            }
+            else if (string.Equals(Model.Status, "failed", StringComparison.OrdinalIgnoreCase))
+            {
+                <MudAlert Severity="Severity.Error" Dense="true">Tạo giọng đọc thất bại: @SafeErrorMessage(Model.ErrorMessage)</MudAlert>
             }
             else
             {
-                <MudAlert Severity="Severity.Info" Dense="true">Chưa có URL audio công khai.</MudAlert>
+                <MudAlert Severity="Severity.Info" Dense="true">Đang tạo giọng đọc...</MudAlert>
             }
         </MudStack>
     </DialogContent>
@@ -33,4 +39,19 @@
 
 @code {
     [Parameter, EditorRequired] public TodoX.Web.Services.VideoRender.SceneAudioVersionDto Model { get; set; } = default!;
+
+    private static Color ResolveStatusColor(string? status)
+        => status?.Trim().ToLowerInvariant() switch
+        {
+            "completed" => Color.Success,
+            "failed" => Color.Error,
+            "queued" or "submitted" or "processing" or "pending_reconciliation" or "rendering" or "downloading" or "importing" or "reconciling" => Color.Warning,
+            _ => Color.Default
+        };
+
+    private static string SafeErrorMessage(string? message)
+    {
+        var value = string.IsNullOrWhiteSpace(message) ? "Không rõ nguyên nhân." : message.Trim();
+        return value.Length <= 300 ? value : value[..300] + "...";
+    }
 }
