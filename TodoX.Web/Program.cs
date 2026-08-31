@@ -1,4 +1,4 @@
-using TodoX.Web.Components;
+﻿using TodoX.Web.Components;
 using TodoX.Web.Data;
 using TodoX.Web.Models;
 using TodoX.Web.Services;
@@ -90,6 +90,12 @@ builder.Services.AddScoped<FacebookOAuthService>();
 
 // Sprint 2F: media, image render (Vertex), avatar + chibi.
 builder.Services.AddScoped<TodoX.Web.Services.Media.IMediaFileService, TodoX.Web.Services.Media.MediaFileService>();
+builder.Services.AddHttpClient("MediaBinaryDownload", client => client.Timeout = TimeSpan.FromSeconds(60))
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+    {
+        AllowAutoRedirect = false,
+        AutomaticDecompression = System.Net.DecompressionMethods.All
+    });
 builder.Services.AddScoped<TodoX.Web.Services.Settings.SettingsApiRepository>();
 builder.Services.AddScoped<TodoX.Web.Services.Settings.PromptTemplateRepository>();
 builder.Services.AddScoped<TodoX.Web.Services.Settings.IPromptTemplateService, TodoX.Web.Services.Settings.PromptTemplateService>();

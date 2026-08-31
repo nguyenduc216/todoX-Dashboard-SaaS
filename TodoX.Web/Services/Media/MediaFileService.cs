@@ -576,36 +576,89 @@ public sealed class MediaFileService : IMediaFileService
         Guid tenantId,
         CancellationToken ct)
     {
-        var uri = ValidatePublicImageUri(fileUrl);
-        _logger.LogInformation("MEDIA_BINARY_URL_DOWNLOAD_START url={Url}", uri);
+        if (!Uri.TryCreate(fileUrl, UriKind.Absolute, out var uri)
+            || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+        {
+            throw new InvalidOperationException("URL media dau vao phai la dia chi http/https hop le.");
+        }
 
-        var client = _httpClientFactory.CreateClient();
+        _logger.LogInformation("MEDIA_BINARY_URL_DOWNLOAD_START initialHost={InitialHost} initialPathShape={InitialPathShape}",
+            uri.Host, DescribePathShape(uri));
+
+        var client = _httpClientFactory.CreateClient("MediaBinaryDownload");
         client.Timeout = TimeSpan.FromSeconds(60);
-        using var request = new HttpRequestMessage(HttpMethod.Get, uri);
-        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue(expectedMimeType));
+        var currentUri = uri;
+        var requestUri = fileUrl;
+        HttpResponseMessage? response = null;
 
-        using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
-        if (!response.IsSuccessStatusCode)
+        try
         {
-            throw new InvalidOperationException($"KhÃ´ng táº£i Ä‘Æ°á»£c file media tá»« URL. HTTP {(int)response.StatusCode}.");
-        }
+            for (var hop = 0; hop < 5; hop++)
+            {
+                response?.Dispose();
+                using var request = new HttpRequestMessage(HttpMethod.Get, requestUri);
+                response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
 
-        var responseMime = NormalizeMimeType(response.Content.Headers.ContentType?.MediaType, uri.AbsolutePath);
-        var length = response.Content.Headers.ContentLength;
-        if (length.HasValue && length.Value > GetMaxVideoBytes())
+                if (response.StatusCode is not (HttpStatusCode.Moved
+                    or HttpStatusCode.Redirect
+                    or HttpStatusCode.RedirectMethod
+                    or HttpStatusCode.RedirectKeepVerb
+                    or HttpStatusCode.PermanentRedirect))
+                {
+                    break;
+                }
+
+                var location = response.Headers.Location;
+                if (location is null)
+                {
+                    break;
+                }
+
+                currentUri = location.IsAbsoluteUri ? location : new Uri(currentUri, location);
+                requestUri = currentUri.ToString();
+            }
+
+            if (response is null)
+            {
+                throw new InvalidOperationException("Khong tai duoc file media tu URL. HTTP 0.");
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var location = response.Headers.Location;
+                _logger.LogWarning(
+                    "MEDIA_BINARY_URL_DOWNLOAD_FAILED httpStatus={HttpStatus} initialHost={InitialHost} finalHost={FinalHost} finalPathShape={FinalPathShape} locationHost={LocationHost} locationPathShape={LocationPathShape} contentType={ContentType}",
+                    (int)response.StatusCode,
+                    uri.Host,
+                    currentUri.Host,
+                    DescribePathShape(currentUri),
+                    location?.Host ?? string.Empty,
+                    location is null ? string.Empty : DescribePathShape(location.IsAbsoluteUri ? location : new Uri(currentUri, location)),
+                    response.Content.Headers.ContentType?.MediaType ?? "unknown");
+                throw new InvalidOperationException($"Khong tai duoc file media tu URL. HTTP {(int)response.StatusCode}.");
+            }
+
+            var responseMime = NormalizeMimeType(response.Content.Headers.ContentType?.MediaType, currentUri.AbsolutePath);
+            var length = response.Content.Headers.ContentLength;
+            if (length.HasValue && length.Value > GetMaxVideoBytes())
+            {
+                throw new InvalidOperationException("File media tu URL vuot qua 10MB.");
+            }
+
+            await using var stream = await response.Content.ReadAsStreamAsync(ct);
+            var fileName = Path.GetFileName(currentUri.AbsolutePath);
+            if (string.IsNullOrWhiteSpace(fileName) || !Path.HasExtension(fileName))
+            {
+                fileName = $"media-url{ContentTypeToExtension(responseMime == "application/octet-stream" ? expectedMimeType : responseMime)}";
+            }
+
+            return await SaveDownloadedBinaryStreamAsync(stream, objectKey, fileName, fileCategory, expectedMimeType, responseMime,
+                userId, customerId, tenantId, ct);
+        }
+        finally
         {
-            throw new InvalidOperationException("File media tá»« URL vÆ°á»£t quÃ¡ 10MB.");
+            response?.Dispose();
         }
-
-        await using var stream = await response.Content.ReadAsStreamAsync(ct);
-        var fileName = Path.GetFileName(uri.AbsolutePath);
-        if (string.IsNullOrWhiteSpace(fileName) || !Path.HasExtension(fileName))
-        {
-            fileName = $"media-url{ContentTypeToExtension(responseMime == "application/octet-stream" ? expectedMimeType : responseMime)}";
-        }
-
-        return await SaveDownloadedBinaryStreamAsync(stream, objectKey, fileName, fileCategory, expectedMimeType, responseMime,
-            userId, customerId, tenantId, ct);
     }
 
     private async Task<MediaFileDto> SaveDownloadedBinaryStreamAsync(
@@ -809,6 +862,12 @@ public sealed class MediaFileService : IMediaFileService
 
     private static bool IsAudioMime(string mimeType)
         => mimeType is "audio/mpeg" or "audio/mp3" or "audio/wav" or "audio/x-wav" or "audio/mp4" or "audio/m4a";
+
+    private static string DescribePathShape(Uri uri)
+    {
+        var segments = uri.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        return segments.Length == 0 ? "/" : "/" + string.Join("/", segments.Select(_ => "{segment}"));
+    }
 
     private static void EnsureExistingMediaMatches(MediaFileDto existing, string mimeType, string fileCategory)
     {

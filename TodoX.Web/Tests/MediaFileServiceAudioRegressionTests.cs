@@ -90,6 +90,56 @@ public sealed class MediaFileServiceAudioRegressionTests
         Assert.Contains("MimeType: saved.MimeType", source);
     }
 
+    [Fact]
+    public void VbeeBinaryDownloadUsesRawUrlWithoutBearerOrAcceptAndFollowsRedirects()
+    {
+        var source = ReadRepoFile("Services", "Media", "MediaFileService.cs");
+        var start = source.IndexOf("private async Task<MediaFileDto> DownloadBinaryToObjectKeyAsync", StringComparison.Ordinal);
+        var end = source.IndexOf("private async Task<MediaFileDto> SaveDownloadedBinaryStreamAsync", start, StringComparison.Ordinal);
+
+        Assert.True(start >= 0);
+        Assert.True(end > start);
+
+        var download = source[start..end];
+        Assert.Contains("var requestUri = fileUrl;", download);
+        Assert.DoesNotContain("Uri.EscapeDataString", download, StringComparison.Ordinal);
+        Assert.DoesNotContain("request.Headers.Authorization", download, StringComparison.Ordinal);
+        Assert.DoesNotContain("request.Headers.Accept", download, StringComparison.Ordinal);
+        Assert.Contains("HttpStatusCode.RedirectKeepVerb", download, StringComparison.Ordinal);
+        Assert.Contains("currentUri = location.IsAbsoluteUri ? location : new Uri(currentUri, location);", download, StringComparison.Ordinal);
+        Assert.Contains("CreateClient(\"MediaBinaryDownload\")", download, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void MediaBinaryDownloadClientFollowsN8nFileDownloadTransportContract()
+    {
+        var source = ReadRepoFile("Program.cs");
+
+        Assert.Contains("AddHttpClient(\"MediaBinaryDownload\"", source, StringComparison.Ordinal);
+        Assert.Contains("AllowAutoRedirect = false", source, StringComparison.Ordinal);
+        Assert.Contains("AutomaticDecompression = System.Net.DecompressionMethods.All", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void VbeeBinaryDownloadDiagnosticsExcludeSecretsAndNarration()
+    {
+        var source = ReadRepoFile("Services", "Media", "MediaFileService.cs");
+        var start = source.IndexOf("MEDIA_BINARY_URL_DOWNLOAD_FAILED", StringComparison.Ordinal);
+        var end = source.IndexOf("throw new InvalidOperationException", start, StringComparison.Ordinal);
+
+        Assert.True(start >= 0);
+        Assert.True(end > start);
+
+        var diagnostic = source[start..end];
+        Assert.Contains("initialHost", diagnostic, StringComparison.Ordinal);
+        Assert.Contains("finalHost", diagnostic, StringComparison.Ordinal);
+        Assert.Contains("httpStatus", diagnostic, StringComparison.Ordinal);
+        Assert.Contains("locationHost", diagnostic, StringComparison.Ordinal);
+        Assert.Contains("contentType", diagnostic, StringComparison.Ordinal);
+        Assert.DoesNotContain("token", diagnostic, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("narration", diagnostic, StringComparison.OrdinalIgnoreCase);
+    }
+
     private static T InvokePrivateStatic<T>(string methodName, params object?[] args)
     {
         var parameterTypes = args.Select(arg => arg?.GetType() ?? typeof(object)).ToArray();
