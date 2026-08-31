@@ -326,6 +326,47 @@ public sealed class RVideoRuntimeSqlTests
     }
 
     [Fact]
+    public async Task FinalMergeConcatFileUsesUtf8NoBomAndNormalizedWindowsPaths()
+    {
+        var lines = TodoX.Web.Services.VideoRender.VideoRenderMergeHandler.BuildConcatLines(new[]
+        {
+            @"H:\video scenes\scene-01.mp4",
+            @"H:\video scenes\scene-02.mp4",
+            @"H:\O'Brien\scene-03.mp4"
+        });
+
+        Assert.Equal("file 'H:/video scenes/scene-01.mp4'", lines[0]);
+        Assert.Equal("file 'H:/video scenes/scene-02.mp4'", lines[1]);
+        Assert.Equal("file 'H:/O''Brien/scene-03.mp4'", lines[2]);
+        Assert.All(lines, line => Assert.StartsWith("file '", line, StringComparison.Ordinal));
+        Assert.All(lines, line => Assert.DoesNotContain(@"\", line, StringComparison.Ordinal));
+
+        var concatPath = Path.Combine(Path.GetTempPath(), $"todox-concat-{Guid.NewGuid():N}.txt");
+        try
+        {
+            await File.WriteAllLinesAsync(concatPath, lines, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            var bytes = await File.ReadAllBytesAsync(concatPath);
+
+            Assert.False(bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF);
+            Assert.Equal('f', (char)bytes[0]);
+
+            Assert.Equal(
+                new[] { "-y", "-f", "concat", "-safe", "0", "-i", concatPath, "-c", "copy", "final.mp4" },
+                TodoX.Web.Services.VideoRender.VideoRenderMergeHandler.BuildCopyConcatArguments(concatPath, "final.mp4"));
+            Assert.Equal(
+                new[] { "-y", "-f", "concat", "-safe", "0", "-i", concatPath, "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-ar", "48000", "-ac", "2", "-movflags", "+faststart", "final.mp4" },
+                TodoX.Web.Services.VideoRender.VideoRenderMergeHandler.BuildTranscodeConcatArguments(concatPath, "final.mp4"));
+        }
+        finally
+        {
+            if (File.Exists(concatPath))
+            {
+                File.Delete(concatPath);
+            }
+        }
+    }
+
+    [Fact]
     public void FinalMergeUsesSelectedLocalSceneVideosAndDoesNotUsePublicUrlsAsFiles()
     {
         var source = ReadRepoFile("Services", "VideoRender", "VideoRenderMergeHandler.cs");
@@ -334,6 +375,7 @@ public sealed class RVideoRuntimeSqlTests
         Assert.Contains("GetSelectedVideoVersionAsync(scene.Id, ct)", mergeItems);
         Assert.Contains("selectedVideo.SourceFilePath ?? scene.SceneVideoPath", mergeItems);
         Assert.Contains("ResolveRenderPhysicalPath(videoPath)", mergeItems);
+        Assert.Contains("OrderBy(x => x.SceneIndex)", mergeItems);
         Assert.DoesNotContain("selectedVideo.PublicUrl", mergeItems);
     }
 

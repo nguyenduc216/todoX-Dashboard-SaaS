@@ -84,8 +84,8 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
             var concat = Path.Combine(finalDir, "concat.txt");
             var finalPath = Path.Combine(finalDir, version is null ? "final.mp4" : "final-video.mp4");
             ValidateMergeInputs(mergeItems);
-            var lines = mergeItems.Select(item => $"file '{Path.GetFullPath(item.VideoPath ?? string.Empty).Replace("'", "''")}'").ToArray();
-            await File.WriteAllLinesAsync(concat, lines, Encoding.UTF8, ct);
+            var lines = BuildConcatLines(mergeItems.Select(item => item.VideoPath ?? string.Empty));
+            await File.WriteAllLinesAsync(concat, lines, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), ct);
             await WriteCompositionManifestAsync(finalDir, version, mergeItems, ct);
 
             var ffmpegPath = _options.CurrentValue.FfmpegPath;
@@ -278,6 +278,12 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
             "-shortest",
             outputPath
         ];
+
+    internal static string[] BuildConcatLines(IEnumerable<string> videoPaths)
+        => videoPaths.Select(BuildConcatLine).ToArray();
+
+    internal static string BuildConcatLine(string videoPath)
+        => $"file '{Path.GetFullPath(videoPath).Replace('\\', '/').Replace("'", "''")}'";
 
     private static async Task<FfmpegResult> RunFfmpegAsync(
         string ffmpegPath,
