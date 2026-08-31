@@ -327,9 +327,12 @@ else
                             {
                                 <MudChip T="string" Color="Color.Warning" Icon="@Icons.Material.Filled.HourglassBottom">Đang tạo ảnh</MudChip>
                             }
-                            <MudTooltip Text="Tạo ảnh tĩnh cho các scene còn thiếu hoặc lỗi">
-                                <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.AddPhotoAlternate" OnClick="RenderMissingSceneImagesAsync" Disabled="@(_batchActive || _useReferenceImageForAllScenes)">Tạo ảnh còn thiếu</MudButton>
-                            </MudTooltip>
+                            @if (HasActionableMissingSceneImages)
+                            {
+                                <MudTooltip Text="Tạo ảnh tĩnh cho các scene còn thiếu hoặc lỗi">
+                                    <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.AddPhotoAlternate" OnClick="RenderMissingSceneImagesAsync" Disabled="@(_batchActive || _useReferenceImageForAllScenes)">Tạo ảnh còn thiếu</MudButton>
+                                </MudTooltip>
+                            }
                             <MudTooltip Text="Thêm scene thủ công">
                                 <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="AddSceneAsync" Disabled="@_busy">Thêm scene</MudButton>
                             </MudTooltip>
@@ -476,6 +479,28 @@ else
                                     {
                                         <video src="@_project.FinalVideoUrl" controls style="width:100%;border-radius:12px;min-height:320px"></video>
                                     }
+                                    else if (IsFinalMergeProcessing)
+                                    {
+                                        <RenderMediaFrame IsVideo="true"
+                                                          MediaUrl="@_project.FinalVideoUrl"
+                                                          ThumbnailUrl="@(_project.Scenes.OrderBy(x => x.SceneIndex).Select(x => ResolveDraftImageUrl(x, GetSceneDraft(x))).FirstOrDefault(x => !string.IsNullOrWhiteSpace(x)))"
+                                                          AspectRatio="@ProjectAspectRatio"
+                                                          State="MediaRenderState.Rendering"
+                                                          EmptyText="Đang ghép video..."
+                                                          FailedText="Lỗi ghép video" />
+                                        <MudAlert Severity="Severity.Info" Dense="true">Đang ghép video...</MudAlert>
+                                    }
+                                    else if (IsFinalMergeFailed)
+                                    {
+                                        <RenderMediaFrame IsVideo="true"
+                                                          MediaUrl="@_project.FinalVideoUrl"
+                                                          ThumbnailUrl="@(_project.Scenes.OrderBy(x => x.SceneIndex).Select(x => ResolveDraftImageUrl(x, GetSceneDraft(x))).FirstOrDefault(x => !string.IsNullOrWhiteSpace(x)))"
+                                                          AspectRatio="@ProjectAspectRatio"
+                                                          State="MediaRenderState.Failed"
+                                                          EmptyText="Chưa có final video"
+                                                          FailedText="Lỗi ghép video" />
+                                        <MudAlert Severity="Severity.Error" Dense="true">@FinalMergeErrorText</MudAlert>
+                                    }
                                     else
                                     {
                                         <div class="scene-thumb-placeholder" style="min-height:320px">Chưa có final video</div>
@@ -498,7 +523,7 @@ else
                                         <MudButton Size="Size.Small" Color="Color.Primary" Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.Download" Disabled="@string.IsNullOrWhiteSpace(_project.FinalVideoUrl)" OnClick="@(() => OpenUrl(_project.FinalVideoUrl!))">Tải video</MudButton>
                                         @if (string.IsNullOrWhiteSpace(_project.FinalVideoUrl))
                                         {
-                                            <MudButton Size="Size.Small" Color="Color.Success" Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.PlayArrow" Disabled="@(!CanMerge || _busy || IsFinalMergeActive)" OnClick="EnqueueMergeAsync">@(IsFinalMergeActive ? "Đang hoàn tất..." : "Hoàn tất video")</MudButton>
+                                            <MudButton Size="Size.Small" Color="Color.Success" Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.PlayArrow" Disabled="@(!CanClickFinalMerge)" OnClick="EnqueueMergeAsync">@(IsFinalMergeProcessing ? "Đang hoàn tất..." : "Hoàn tất video")</MudButton>
                                             @if (!CanMerge)
                                             {
                                                 <MudText Typo="Typo.caption" Color="Color.Warning">@FinalMergeReadinessText</MudText>
@@ -674,6 +699,7 @@ else
     private readonly SemaphoreSlim _draftSaveGate = new(1, 1);
     // True while a background scene image batch job for this project is queued/rendering.
     private bool _batchActive;
+    private bool _finalMergeFinalizing;
     private IReadOnlyList<TodoX.Web.Services.Platform.CoreServiceView> _coreServices = Array.Empty<TodoX.Web.Services.Platform.CoreServiceView>();
 
     private sealed class SceneEditorState
@@ -702,6 +728,11 @@ else
 
     private bool CanMerge => _project is not null && _project.Scenes.Count > 0 && GetFinalMergeReadiness().CanMerge;
     private string FinalMergeReadinessText => GetFinalMergeReadiness().Message;
+    private bool CanClickFinalMerge
+        => CanMerge
+           && !_busy
+           && !IsFinalMergeProcessing
+           && !string.Equals(_project?.Status, VideoProjectStatuses.Completed, StringComparison.OrdinalIgnoreCase);
 
     private (bool CanMerge, string Message) GetFinalMergeReadiness()
     {
@@ -729,10 +760,98 @@ else
     private bool HasSharedReferenceImage => _useReferenceImageForAllScenes && (!string.IsNullOrWhiteSpace(_sharedReferenceImageUrl) || !string.IsNullOrWhiteSpace(_sharedReferenceImageObjectKey));
     private bool IsFinalMergeActive
         => _project is not null
-           && _jobs.Any(job =>
+           && (_finalMergeFinalizing
+               || string.Equals(_project.Status, VideoProjectStatuses.Merging, StringComparison.OrdinalIgnoreCase)
+               || _finalVersions.Any(IsActiveFinalVideoVersion)
+               || _jobs.Any(job =>
+                   string.Equals(job.JobType, TodoX.Web.Services.Render.RenderJobTypes.MergeProjectVideo, StringComparison.OrdinalIgnoreCase)
+                   && string.Equals(job.LogCode, TodoX.Web.Services.VideoRender.RVideoProjectFinalizationService.BuildMergeLogicalRequestKey(_project.Id), StringComparison.OrdinalIgnoreCase)
+                   && IsActiveRenderJobStatus(job.Status)));
+
+    private bool IsFinalMergeProcessing => IsFinalMergeActive && !IsFinalMergeFailed;
+
+    private bool IsFinalMergeFailed
+        => _project is not null
+           && string.IsNullOrWhiteSpace(_project.FinalVideoUrl)
+           && (_finalVersions.Any(IsFailedFinalVideoVersion)
+               || _jobs.Any(job =>
+                   string.Equals(job.JobType, TodoX.Web.Services.Render.RenderJobTypes.MergeProjectVideo, StringComparison.OrdinalIgnoreCase)
+                   && string.Equals(job.LogCode, TodoX.Web.Services.VideoRender.RVideoProjectFinalizationService.BuildMergeLogicalRequestKey(_project.Id), StringComparison.OrdinalIgnoreCase)
+                   && job.Status is RenderJobStatuses.Failed or RenderJobStatuses.Cancelled)
+               || string.Equals(_project.Status, VideoProjectStatuses.Failed, StringComparison.OrdinalIgnoreCase));
+
+    private string FinalMergeErrorText
+        => _finalVersions.FirstOrDefault(IsFailedFinalVideoVersion)?.ErrorMessage
+           ?? _jobs.FirstOrDefault(job =>
                string.Equals(job.JobType, TodoX.Web.Services.Render.RenderJobTypes.MergeProjectVideo, StringComparison.OrdinalIgnoreCase)
-               && string.Equals(job.LogCode, TodoX.Web.Services.VideoRender.RVideoProjectFinalizationService.BuildMergeLogicalRequestKey(_project.Id), StringComparison.OrdinalIgnoreCase)
-               && job.Status is RenderJobStatuses.Queued or RenderJobStatuses.Preparing or RenderJobStatuses.Rendering or RenderJobStatuses.PostProcessing or RenderJobStatuses.PendingReconciliation);
+               && string.Equals(job.LogCode, _project is null ? string.Empty : TodoX.Web.Services.VideoRender.RVideoProjectFinalizationService.BuildMergeLogicalRequestKey(_project.Id), StringComparison.OrdinalIgnoreCase)
+               && job.Status is RenderJobStatuses.Failed or RenderJobStatuses.Cancelled)?.ErrorMessage
+           ?? _project?.ErrorMessage
+           ?? "Ghép video thất bại. Vui lòng kiểm tra log và thử lại nếu lifecycle cho phép.";
+
+    private bool HasActionableMissingSceneImages
+        => _project is not null
+           && !_useReferenceImageForAllScenes
+           && _project.Scenes.Any(IsSceneMissingOrFailedImage);
+
+    private static bool IsActiveRenderJobStatus(string status)
+        => status is RenderJobStatuses.Queued or RenderJobStatuses.Preparing or RenderJobStatuses.Rendering or RenderJobStatuses.Processing or RenderJobStatuses.PostProcessing or RenderJobStatuses.PendingReconciliation;
+
+    private static bool IsActiveFinalVideoVersion(TodoX.Web.Services.VideoRender.FinalVideoVersionDto version)
+        => string.Equals(version.Status, "queued", StringComparison.OrdinalIgnoreCase)
+           || string.Equals(version.Status, "submitted", StringComparison.OrdinalIgnoreCase)
+           || string.Equals(version.Status, "rendering", StringComparison.OrdinalIgnoreCase)
+           || string.Equals(version.Status, "processing", StringComparison.OrdinalIgnoreCase)
+           || string.Equals(version.Status, "pending", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsFailedFinalVideoVersion(TodoX.Web.Services.VideoRender.FinalVideoVersionDto version)
+        => string.Equals(version.Status, "failed", StringComparison.OrdinalIgnoreCase)
+           || string.Equals(version.Status, "cancelled", StringComparison.OrdinalIgnoreCase);
+
+    private bool IsSceneMissingOrFailedImage(VideoProjectSceneDto scene)
+    {
+        var state = ResolveSceneImageState(scene);
+        if (state is RenderSceneImageVisualState.Failed)
+        {
+            return true;
+        }
+
+        if (RenderSceneImageUiState.IsActive(state) || state is RenderSceneImageVisualState.Queued)
+        {
+            return false;
+        }
+
+        if (_imageVersions.TryGetValue(scene.Id, out var versions) && versions.Count > 0)
+        {
+            var current = versions.FirstOrDefault(x => x.IsSelected) ?? versions.OrderByDescending(x => x.VersionNumber).First();
+            if (IsActiveSceneImageVersion(current))
+            {
+                return false;
+            }
+
+            if (IsFailedSceneImageVersion(current))
+            {
+                return true;
+            }
+
+            return !string.Equals(current.Status, "completed", StringComparison.OrdinalIgnoreCase);
+        }
+
+        return string.IsNullOrWhiteSpace(scene.StaticImageUrl);
+    }
+
+    private static bool IsActiveSceneImageVersion(TodoX.Web.Services.VideoRender.SceneImageVersionDto version)
+        => string.Equals(version.Status, "queued", StringComparison.OrdinalIgnoreCase)
+           || string.Equals(version.Status, "submitted", StringComparison.OrdinalIgnoreCase)
+           || string.Equals(version.Status, "processing", StringComparison.OrdinalIgnoreCase)
+           || string.Equals(version.Status, "rendering", StringComparison.OrdinalIgnoreCase)
+           || string.Equals(version.Status, "downloading", StringComparison.OrdinalIgnoreCase)
+           || string.Equals(version.Status, "pending_reconciliation", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsFailedSceneImageVersion(TodoX.Web.Services.VideoRender.SceneImageVersionDto version)
+        => string.Equals(version.Status, "failed", StringComparison.OrdinalIgnoreCase)
+           || string.Equals(version.Status, "missing", StringComparison.OrdinalIgnoreCase)
+           || string.Equals(version.Status, "cancelled", StringComparison.OrdinalIgnoreCase);
 
     private string BuildLogCode() => _projectId is null ? string.Empty : $"video-{_projectId.Value}";
 
@@ -1298,8 +1417,10 @@ else
                 }
                 ReconcileSceneDrafts();
                 RebuildSceneEventState();
+                await LoadSceneImageVersionsForStateAsync(_project.Scenes);
                 await LoadSceneVideoVersionsForStateAsync(_project.Scenes);
                 await LoadSceneAudioVersionsForStateAsync(_project.Scenes);
+                await LoadFinalHistoryAsync(showSnackbar: false);
                 try
                 {
                     _defaultImageToVideoProvider = await AiProviders.GetDefaultProviderAsync(TodoX.Web.Services.VideoRender.RVideoVideoModelPolicy.CapabilityCode);
@@ -2268,6 +2389,9 @@ else
             _batchActive = _jobs.Any(j =>
                 string.Equals(j.JobType, TodoX.Web.Services.Render.SceneImageBatchRenderHandler.JobTypeName, StringComparison.OrdinalIgnoreCase)
                 && j.Status is RenderJobStatuses.Queued or RenderJobStatuses.Preparing or RenderJobStatuses.Rendering or RenderJobStatuses.PostProcessing);
+            _finalMergeFinalizing = _jobs.Any(j =>
+                string.Equals(j.JobType, TodoX.Web.Services.Render.RenderJobTypes.MergeProjectVideo, StringComparison.OrdinalIgnoreCase)
+                && j.Status is RenderJobStatuses.Queued or RenderJobStatuses.Preparing or RenderJobStatuses.Rendering or RenderJobStatuses.PostProcessing or RenderJobStatuses.PendingReconciliation);
         }
         catch (Exception ex)
         {
@@ -2750,6 +2874,11 @@ else
         {
             return;
         }
+        if (!HasActionableMissingSceneImages)
+        {
+            Snackbar.Add("Không còn scene thiếu ảnh để tạo.", Severity.Info);
+            return;
+        }
 
         _batchActive = true;
         await InvokeAsync(StateHasChanged);
@@ -3164,7 +3293,7 @@ else
         await LoadFinalHistoryAsync();
     }
 
-    private async Task LoadFinalHistoryAsync()
+    private async Task LoadFinalHistoryAsync(bool showSnackbar = true)
     {
         if (_project is null || AuthState.CurrentUser is null) return;
         _finalVersions = await SceneVersions.ListFinalVideoVersionsAsync(_project.Id, AuthState.CurrentUser, 0, 20);
@@ -3173,7 +3302,10 @@ else
         {
             _finalVersionItems[version.Id] = await SceneVersions.ListFinalVideoVersionItemsAsync(version.Id, AuthState.CurrentUser);
         }
-        Snackbar.Add($"Đã tải {_finalVersions.Count} phiên bản video hoàn chỉnh.", Severity.Info);
+        if (showSnackbar)
+        {
+            Snackbar.Add($"Đã tải {_finalVersions.Count} phiên bản video hoàn chỉnh.", Severity.Info);
+        }
     }
 
     private async Task OpenFinalHistoryAsync()
@@ -3207,7 +3339,7 @@ else
         await ReloadAsync();
         if (_showFinalHistory)
         {
-            await LoadFinalHistoryAsync();
+            await LoadFinalHistoryAsync(showSnackbar: false);
         }
     }
 
@@ -3333,7 +3465,7 @@ else
         <MudStack Spacing="2">
             <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
                 <MudText Typo="Typo.subtitle2">Lịch sử video hoàn chỉnh</MudText>
-                <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="LoadFinalHistoryAsync">Refresh</MudButton>
+                <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(() => LoadFinalHistoryAsync())">Refresh</MudButton>
             </MudStack>
             @if (_finalVersions.Count == 0)
             {
@@ -3646,6 +3778,24 @@ else
         await Task.WhenAll(loads);
     }
 
+    private async Task LoadSceneImageVersionsForStateAsync(IEnumerable<VideoProjectSceneDto> scenes)
+    {
+        if (AuthState.CurrentUser is null) return;
+
+        var loads = scenes.Select(async scene =>
+        {
+            try
+            {
+                _imageVersions[scene.Id] = await SceneVersions.ListImageVersionsAsync(scene.Id, AuthState.CurrentUser, 0, 20);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "RVIDEO_LOAD_IMAGE_STATE_FAILED sceneId={SceneId}", scene.Id);
+            }
+        });
+        await Task.WhenAll(loads);
+    }
+
     private async Task LoadSceneAudioVersionsForStateAsync(IEnumerable<VideoProjectSceneDto> scenes)
     {
         if (AuthState.CurrentUser is null) return;
@@ -3821,29 +3971,49 @@ else
     private async Task EnqueueMergeAsync()
     {
         if (_project is null || AuthState.CurrentUser is null) return;
-        if (!CanMerge)
+        if (!CanClickFinalMerge)
         {
             Snackbar.Add(FinalMergeReadinessText, Severity.Warning);
             return;
         }
 
-        var result = await RVideoFinalization.TryEnqueueFinalMergeAsync(_project.Id, TodoX.Web.Services.VideoRender.RVideoProjectFinalizationContracts.TriggerManual);
+        var project = _project;
+        _finalMergeFinalizing = true;
+        project.Status = VideoProjectStatuses.Merging;
+        await InvokeAsync(StateHasChanged);
 
-        if (result.AlreadyActive)
+        try
         {
-            Snackbar.Add("Project này đang có job ghép video.", Severity.Info);
-        }
-        else if (!result.Enqueued)
-        {
-            Snackbar.Add(result.Reason == "already_final" ? "Final video đã sẵn sàng." : FinalMergeReadinessText, Severity.Warning);
-        }
-        else
-        {
-            await LogProjectEvent("FINAL_VIDEO_MERGE_ENQUEUED", "info", "Đã enqueue ghép final video.", new { id = result.RenderJobId, projectId = _project.Id, result.LogicalRequestId });
-            Snackbar.Add("Đã enqueue ghép final video.", Severity.Success);
-        }
+            var result = await RVideoFinalization.TryEnqueueFinalMergeAsync(project.Id, TodoX.Web.Services.VideoRender.RVideoProjectFinalizationContracts.TriggerManual);
 
-        await StartPolling();
+            if (result.AlreadyActive)
+            {
+                Snackbar.Add("Project này đang có job ghép video.", Severity.Info);
+            }
+            else if (!result.Enqueued)
+            {
+                Snackbar.Add(result.Reason == "already_final" ? "Final video đã sẵn sàng." : FinalMergeReadinessText, Severity.Warning);
+            }
+            else
+            {
+                await LogProjectEvent("FINAL_VIDEO_MERGE_ENQUEUED", "info", "Đã enqueue ghép final video.", new { id = result.RenderJobId, projectId = project.Id, result.LogicalRequestId });
+                Snackbar.Add("Đã enqueue ghép final video.", Severity.Success);
+            }
+
+            if (!result.AlreadyActive && !result.Enqueued)
+            {
+                _finalMergeFinalizing = false;
+            }
+            await ReloadAsync();
+            await StartPolling();
+        }
+        catch
+        {
+            _finalMergeFinalizing = false;
+            await ReloadAsync();
+            await InvokeAsync(StateHasChanged);
+            throw;
+        }
     }
 
     private async Task EnqueueSceneVideoAsync(VideoProjectSceneDto scene)

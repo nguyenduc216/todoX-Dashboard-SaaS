@@ -91,6 +91,59 @@ public class RenderVideoJobsLayoutTests
     }
 
     [Fact]
+    public void ResultTab_ShowsMergeStateImmediatelyAndLocksFinalMergeAction()
+    {
+        var source = File.ReadAllText(RazorPath);
+
+        Assert.Contains("private bool _finalMergeFinalizing;", source);
+        Assert.Contains("_finalMergeFinalizing = true;", source);
+        Assert.Contains("project.Status = VideoProjectStatuses.Merging;", source);
+        Assert.Contains("private bool IsFinalMergeProcessing => IsFinalMergeActive && !IsFinalMergeFailed;", source);
+        Assert.Contains("EmptyText=\"Đang ghép video...\"", source);
+        Assert.Contains("State=\"MediaRenderState.Rendering\"", source);
+        Assert.Contains("Disabled=\"@(!CanClickFinalMerge)\"", source);
+    }
+
+    [Fact]
+    public void ResultTab_HandlesFinalMergeFailureWithoutBrowserReload()
+    {
+        var source = File.ReadAllText(RazorPath);
+
+        Assert.Contains("private bool IsFinalMergeFailed", source);
+        Assert.Contains("FinalMergeErrorText", source);
+        Assert.Contains("State=\"MediaRenderState.Failed\"", source);
+        Assert.Contains("Ghép video thất bại", source);
+        Assert.Contains("await ReloadAsync();", source);
+    }
+
+    [Fact]
+    public void SceneImageToolbar_HidesMissingImageButtonWhenNoActionableSceneImages()
+    {
+        var source = File.ReadAllText(RazorPath);
+        var helper = Between(source, "private bool IsSceneMissingOrFailedImage", "private static bool IsActiveSceneImageVersion");
+
+        Assert.Contains("@if (HasActionableMissingSceneImages)", source);
+        Assert.Contains("private bool HasActionableMissingSceneImages", source);
+        Assert.Contains("_project.Scenes.Any(IsSceneMissingOrFailedImage)", source);
+        Assert.Contains("IsActiveSceneImageVersion(current)", source);
+        Assert.Contains("IsFailedSceneImageVersion(current)", source);
+        Assert.DoesNotContain("PublicUrl", helper);
+    }
+
+    [Fact]
+    public void ReloadRefreshesSceneImageVideoFinalAndJobsState()
+    {
+        var source = File.ReadAllText(RazorPath);
+
+        Assert.Contains("await LoadSceneImageVersionsForStateAsync(_project.Scenes);", source);
+        Assert.Contains("await LoadSceneVideoVersionsForStateAsync(_project.Scenes);", source);
+        Assert.Contains("await LoadSceneAudioVersionsForStateAsync(_project.Scenes);", source);
+        Assert.Contains("await LoadFinalHistoryAsync(showSnackbar: false);", source);
+        Assert.Contains("await ReloadJobsAsync();", source);
+        Assert.Contains("await InvokeAsync(StateHasChanged);", source);
+    }
+
+    [Fact]
     public void VideoCards_HideVoiceFieldsButKeepSceneBindings()
     {
         var razor = File.ReadAllText(RazorPath);
