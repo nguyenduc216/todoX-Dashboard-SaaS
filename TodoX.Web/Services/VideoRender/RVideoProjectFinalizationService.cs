@@ -66,7 +66,8 @@ public sealed class RVideoProjectFinalizationService : IRVideoProjectFinalizatio
             return NotEnqueued("no_scenes", logicalRequestId);
         }
 
-        if (!string.IsNullOrWhiteSpace(project.FinalVideoUrl))
+        if (!string.IsNullOrWhiteSpace(project.FinalVideoUrl)
+            && await IsCurrentFinalVideoAsync(project.Id, project.Scenes, ct))
         {
             await _rvideoJobs.SyncLifecycleAsync(project.Id, RVideoStages.Result, project.Status, ct);
             return NotEnqueued("already_final", logicalRequestId);
@@ -79,7 +80,7 @@ public sealed class RVideoProjectFinalizationService : IRVideoProjectFinalizatio
             var selectedAudio = await _versions.GetSelectedAudioVersionAsync(scene.Id, ct);
             readiness.Add(RVideoRules.GetSceneReadiness(scene, settings, selectedVideo, selectedAudio));
         }
-        var missing = readiness.Where(x => !x.VideoReady || (x.AudioRequired && (!x.AudioReady || !x.MuxReady))).ToList();
+        var missing = readiness.Where(x => !x.VideoReady).ToList();
         if (missing.Count > 0)
         {
             await _repo.AddProjectEventAsync(project.Id, "PROJECT_FINAL_MERGE_NOT_READY", "info",
@@ -125,6 +126,31 @@ public sealed class RVideoProjectFinalizationService : IRVideoProjectFinalizatio
 
     public static string BuildMergeLogicalRequestKey(long projectId)
         => $"rvideo-final-merge:{projectId}";
+
+    private async Task<bool> IsCurrentFinalVideoAsync(long projectId, IReadOnlyCollection<VideoProjectSceneDto> scenes, CancellationToken ct)
+    {
+        var versions = await _versions.ListFinalVideoVersionsAsync(projectId, ct: ct);
+        var current = versions.FirstOrDefault(x => x.IsSelected && string.Equals(x.Status, "completed", StringComparison.OrdinalIgnoreCase));
+        if (current is null)
+        {
+            return false;
+        }
+
+        var items = await _versions.ListFinalVideoVersionItemsAsync(current.Id, ct);
+        var selectedVersions = new List<Guid>(scenes.Count);
+        foreach (var scene in scenes.OrderBy(x => x.SceneIndex))
+        {
+            var selected = await _versions.GetSelectedVideoVersionAsync(scene.Id, ct);
+            if (selected is null)
+            {
+                return false;
+            }
+            selectedVersions.Add(selected.Id);
+        }
+
+        return items.Count == selectedVersions.Count
+               && items.OrderBy(x => x.ItemOrder).Select(x => x.SceneVideoVersionId).SequenceEqual(selectedVersions);
+    }
 
     private static RVideoProjectFinalizationResult NotEnqueued(string reason, string logicalRequestId)
         => new(false, false, reason, null, logicalRequestId);

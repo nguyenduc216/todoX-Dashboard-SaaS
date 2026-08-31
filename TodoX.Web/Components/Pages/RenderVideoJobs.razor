@@ -129,6 +129,8 @@ else
                                             }
                                         }
                                     }
+                                    <MudCheckBox @bind-Value="_useReferenceImageForAllScenes" Label="Giữ nguyên hình ảnh tham khảo cho mọi scene" />
+                                    <MudText Typo="Typo.caption">Khi bật, hình ảnh tham khảo sẽ được dùng xuyên suốt các scene để tăng tính nhất quán.</MudText>
                                 </MudStack>
                             </MudPaper>
                         </MudItem>
@@ -218,6 +220,7 @@ else
                                         <MudRadioGroup T="string" Value="@_musicMode" ValueChanged="OnMusicModeChanged">
                                             <MudRadio T="string" Value="@RVideoMusicModes.None">Không dùng</MudRadio>
                                             <MudRadio T="string" Value="@RVideoMusicModes.Library">Chọn từ Music Library</MudRadio>
+                                            <MudRadio T="string" Value="@RVideoMusicModes.Upload">Tải file MP3</MudRadio>
                                         </MudRadioGroup>
                                         @if (_musicMode == RVideoMusicModes.Library)
                                         {
@@ -232,6 +235,23 @@ else
                                                 <audio controls src="@musicPreview.FileUrl" style="width:100%"></audio>
                                             }
                                         }
+                                        else if (_musicMode == RVideoMusicModes.Upload)
+                                        {
+                                            <MudPaper Class="pa-3" Outlined="true" rounded="true">
+                                                <MudStack Spacing="1">
+                                                    <MudText Typo="Typo.caption">Tải MP3 trực tiếp vào cấu hình video hiện tại.</MudText>
+                                                    <InputFile OnChange="UploadMusicAsync" accept="audio/mpeg,.mp3" />
+                                                    @if (_uploadedMusic is not null)
+                                                    {
+                                                        <MudStack Spacing="1">
+                                                            <audio controls src="@_uploadedMusic.FileUrl" style="width:100%"></audio>
+                                                            <MudText Typo="Typo.caption">@_uploadedMusic.FileName</MudText>
+                                                            <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Delete" OnClick="RemoveUploadedMusicAsync">Bỏ file đã tải</MudButton>
+                                                        </MudStack>
+                                                    }
+                                                </MudStack>
+                                            </MudPaper>
+                                        }
                                     </MudPaper>
                                     <MudExpansionPanels Elevation="0" Dense="true">
                                         <MudExpansionPanel Text="Cài đặt nâng cao">
@@ -241,8 +261,10 @@ else
                                                 <MudItem xs="12" sm="4"><MudNumericField T="decimal" Label="Tốc độ nói mặc định" @bind-Value="_defaultTtsRate" Min="0.1m" Max="4m" Step="0.05m" Variant="Variant.Outlined" /></MudItem>
                                                 <MudItem xs="12" sm="6"><MudNumericField T="decimal" Label="Âm lượng nhạc" @bind-Value="_musicVolume" Min="0m" Max="1m" Step="0.05m" Variant="Variant.Outlined" /></MudItem>
                                                 <MudItem xs="12" sm="6"><MudCheckBox @bind-Value="_thinkScenes" Label="Suy nghĩ kịch bản" /></MudItem>
-                                                <MudItem xs="12" sm="6"><MudCheckBox @bind-Value="_useReferenceImageForAllScenes" Label="Giữ nguyên hình ảnh tham khảo cho mọi scene" /></MudItem>
                                             </MudGrid>
+                                            <MudDivider Class="my-3" />
+                                            <MudText Typo="Typo.subtitle2">Nhân vật tham chiếu</MudText>
+                                            <MudText Typo="Typo.caption">Các tùy chọn này đã được đưa lên phần chính để dễ nhìn thấy hơn.</MudText>
                                             <MudDivider Class="my-3" />
                                             <MudText Typo="Typo.subtitle2">Chế độ xử lý</MudText>
                                             <MudRadioGroup T="string" @bind-Value="_executionMode">
@@ -610,6 +632,7 @@ else
     private decimal _defaultTtsRate = 1.0m;
     private string _musicMode = RVideoMusicModes.None;
     private string? _musicCatalogCode;
+    private UploadedMusicSnapshot? _uploadedMusic;
     private decimal _musicVolume = 0.8m;
     private bool _useReferenceImageForAllScenes;
     private string? _sharedReferenceImageUrl;
@@ -702,14 +725,7 @@ else
         if (missingVideo.Length > 0)
             return (false, $"Đang chờ video hoàn tất cho scene {string.Join(", ", missingVideo)}.");
 
-        var waitingAudio = readiness.Where(x => x.AudioRequired && !x.AudioReady).Select(x => x.SceneIndex).ToArray();
-        if (waitingAudio.Length > 0)
-            return (false, $"Đang chờ tạo giọng đọc cho scene {string.Join(", ", waitingAudio)}.");
-
-        var waitingMux = readiness.Where(x => x.AudioRequired && x.AudioReady && !x.MuxReady).Select(x => x.SceneIndex).ToArray();
-        return waitingMux.Length == 0
-            ? (true, string.Empty)
-            : (false, $"Đang chờ ghép giọng cho scene {string.Join(", ", waitingMux)}.");
+        return (true, string.Empty);
     }
     private bool HasSharedReferenceImage => _useReferenceImageForAllScenes && (!string.IsNullOrWhiteSpace(_sharedReferenceImageUrl) || !string.IsNullOrWhiteSpace(_sharedReferenceImageObjectKey));
     private bool IsFinalMergeActive
@@ -2060,11 +2076,54 @@ else
 
     private Task OnMusicModeChanged(string mode)
     {
-        _musicMode = mode == RVideoMusicModes.Library ? RVideoMusicModes.Library : RVideoMusicModes.None;
-        if (_musicMode == RVideoMusicModes.None)
+        _musicMode = mode is RVideoMusicModes.Library or RVideoMusicModes.Upload ? mode : RVideoMusicModes.None;
+        if (_musicMode != RVideoMusicModes.Library)
         {
             _musicCatalogCode = null;
         }
+        if (_musicMode != RVideoMusicModes.Upload)
+        {
+            _uploadedMusic = null;
+        }
+        return InvokeAsync(StateHasChanged);
+    }
+
+    private async Task UploadMusicAsync(InputFileChangeEventArgs args)
+    {
+        if (AuthState.CurrentUser is null) return;
+
+        try
+        {
+            var file = args.File;
+            AiStudioCatalogRules.ValidateMusicMp3Upload(file.Name, file.ContentType, file.Size);
+            await using var stream = file.OpenReadStream(AiStudioCatalogRules.MaxAudioBytes);
+            using var memory = new MemoryStream();
+            await stream.CopyToAsync(memory);
+            await Tenant.EnsureLoadedAsync();
+            var media = await MediaFiles.SaveAsync(memory.ToArray(), file.Name, "audio/mpeg", "rvideo_music",
+                AuthState.CurrentUser.UserId, AuthState.CurrentUser.CustomerId, Tenant.TenantId);
+            _uploadedMusic = new UploadedMusicSnapshot(
+                "UPLOAD",
+                file.Name,
+                media.ObjectKey ?? string.Empty,
+                media.PublicUrl ?? media.FileUrl ?? string.Empty,
+                "audio/mpeg",
+                file.Size);
+            _musicMode = RVideoMusicModes.Upload;
+            _musicCatalogCode = null;
+            Snackbar.Add("Đã tải file nhạc nền.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "RVVIDEO_UPLOAD_MUSIC_FAILED");
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+    }
+
+    private Task RemoveUploadedMusicAsync()
+    {
+        _uploadedMusic = null;
+        _musicMode = RVideoMusicModes.None;
         return InvokeAsync(StateHasChanged);
     }
 
@@ -2497,7 +2556,7 @@ else
             MusicCatalogCode = _musicMode == RVideoMusicModes.Library ? _musicCatalogCode : null,
             MusicSnapshot = _musicMode == RVideoMusicModes.Library
                 ? _music.FirstOrDefault(x => string.Equals(x.Code, _musicCatalogCode, StringComparison.OrdinalIgnoreCase))
-                : null,
+                : _musicMode == RVideoMusicModes.Upload ? _uploadedMusic : null,
             MusicVolume = _musicVolume
         };
 
@@ -2539,7 +2598,12 @@ else
             _voiceCatalogCode = _voiceMode == RVideoVoiceModes.Library ? settings?.VoiceCatalogCode : null;
             _defaultTtsRate = settings?.DefaultTtsRate > 0 ? settings.DefaultTtsRate : 1.0m;
             _musicCatalogCode = settings?.MusicCatalogCode;
-            _musicMode = string.IsNullOrWhiteSpace(_musicCatalogCode) ? RVideoMusicModes.None : RVideoMusicModes.Library;
+            _uploadedMusic = RVideoRules.HasUsableUploadedMusicSnapshot(settings?.MusicSnapshotJson)
+                ? JsonSerializer.Deserialize<UploadedMusicSnapshot>(settings!.MusicSnapshotJson!, RVideoJsonOptions)
+                : null;
+            _musicMode = !string.IsNullOrWhiteSpace(_musicCatalogCode)
+                ? RVideoMusicModes.Library
+                : _uploadedMusic is not null ? RVideoMusicModes.Upload : RVideoMusicModes.None;
             _musicVolume = settings?.MusicVolume is >= 0 and <= 1 ? settings.MusicVolume : 0.8m;
         }
         catch (Exception ex)

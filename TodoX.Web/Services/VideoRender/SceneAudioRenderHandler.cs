@@ -133,7 +133,7 @@ public sealed class SceneAudioRenderHandler : IRenderJobHandler
                     $"Scene {scene.SceneIndex} external voice returned a direct MP3.",
                     BuildEventData(project.Id, scene.Id, scene.SceneIndex, input, version.Id, requestId, "SUCCESS", sampleRate, submitted.AudioUrl), ct);
 
-                await CompleteFromAudioUrlAsync(project, scene, version, input, requestId, submitted.AudioUrl!, submitted.Response, sampleRate, ct);
+                await CompleteFromAudioUrlAsync(job, project, scene, version, input, requestId, submitted.AudioUrl!, submitted.Response, sampleRate, ct);
                 return;
             }
 
@@ -181,7 +181,7 @@ public sealed class SceneAudioRenderHandler : IRenderJobHandler
             await _repo.AddProjectEventAsync(project.Id, "SCENE_AUDIO_PROVIDER_RESULT_READY", "info",
                 $"Scene {scene.SceneIndex} external voice completed from poll.",
                 BuildEventData(project.Id, scene.Id, scene.SceneIndex, input, version.Id, requestId, normalizedStatus ?? "SUCCESS", sampleRate, audioUrl), ct);
-            await CompleteFromAudioUrlAsync(project, scene, version, input, requestId, audioUrl!, status, sampleRate, ct);
+            await CompleteFromAudioUrlAsync(job, project, scene, version, input, requestId, audioUrl!, status, sampleRate, ct);
             return;
         }
 
@@ -199,6 +199,7 @@ public sealed class SceneAudioRenderHandler : IRenderJobHandler
     }
 
     private async Task CompleteFromAudioUrlAsync(
+        RenderJobDto job,
         VideoProjectDto project,
         VideoProjectSceneDto scene,
         SceneAudioVersionDto version,
@@ -227,6 +228,20 @@ public sealed class SceneAudioRenderHandler : IRenderJobHandler
                 input.CustomerId,
                 _tenant.TenantId,
                 ct);
+        }
+        catch (InvalidOperationException ex) when (IsHttp400(ex))
+        {
+            if (await TryRecoverStaleVbeeRequestAsync(job, project, scene, version, input, sampleRate, options: null, ct))
+            {
+                throw new RenderJobDeferredException("Vbee stale audio URL was recreated; waiting for the replacement request.");
+            }
+
+            await _versions.FailSceneAudioVersionAsync(version.Id, "VBEE_AUDIO_DOWNLOAD_HTTP_400", ex.Message, ct);
+            await _repo.AddProjectEventAsync(project.Id, "SCENE_AUDIO_DOWNLOAD_TERMINAL_FAILED", "error",
+                $"Scene {scene.SceneIndex} external voice MP3 download returned HTTP 400 after recovery.",
+                BuildEventData(project.Id, scene.Id, scene.SceneIndex, input, version.Id, requestId,
+                    "DOWNLOAD_FAILED", sampleRate, audioUrl, "VBEE_AUDIO_DOWNLOAD_HTTP_400", ex.Message), ct);
+            throw new RenderJobTerminalFailureException("VBEE_AUDIO_DOWNLOAD_HTTP_400");
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
@@ -259,6 +274,119 @@ public sealed class SceneAudioRenderHandler : IRenderJobHandler
             BuildEventData(project.Id, scene.Id, scene.SceneIndex, input, version.Id, requestId, "SUCCESS", sampleRate, audioUrl), ct);
 
         await _finalizer.TryFinalizeSceneMediaAsync(project.Id, scene.Id, "SCENE_AUDIO_READY", ct);
+    }
+
+    private async Task<bool> TryRecoverStaleVbeeRequestAsync(
+        RenderJobDto job,
+        VideoProjectDto project,
+        VideoProjectSceneDto scene,
+        SceneAudioVersionDto version,
+        SceneAudioRenderWorkItemInput input,
+        int sampleRate,
+        VbeeOptions? options,
+        CancellationToken ct)
+    {
+        if (version.CreatedAt > DateTimeOffset.UtcNow.AddMinutes(-30)
+            || string.IsNullOrWhiteSpace(version.ProviderTaskId)
+            || HasVbeeRecoveryMarker(version.RenderConfigJson))
+        {
+            return false;
+        }
+
+        options ??= await _runtimeConfig.GetAsync(ct);
+        var submitRequest = new VbeeVoiceSubmitRequest(
+            input.VoiceCode,
+            input.NarrationText,
+            input.TtsRate,
+            input.VoiceInstruction,
+            string.Empty,
+            null,
+            sampleRate,
+            input.Bitrate,
+            input.SpeedRate,
+            input.AppId ?? options.AppId);
+        // Persist the guard before submission so even a provider-side submit error cannot cause a third attempt.
+        await _versions.UpdateSceneAudioVersionRenderConfigAsync(
+            version.Id,
+            MarkVbeeRecovery(version.RenderConfigJson),
+            ct);
+
+        VbeeVoiceSubmitResult submitted;
+        try
+        {
+            submitted = await _vbee.SubmitAsync(submitRequest, options, ct);
+        }
+        catch (VbeeVoiceSubmitException ex)
+        {
+            var safeErrorMessage = RedactSensitiveText(
+                ex.ErrorMessage ?? ex.Message,
+                options.GetTokenOrThrow(),
+                input.NarrationText,
+                input.VoiceInstruction,
+                input.AppId,
+                options.AppId,
+                options.CallbackSecret);
+            await _versions.FailSceneAudioVersionAsync(version.Id, ex.ErrorCode ?? "VBEE_RECOVERY_SUBMIT_FAILED", safeErrorMessage, ct);
+            await _repo.AddProjectEventAsync(project.Id, "SCENE_AUDIO_VBEE_RECOVERY_FAILED", "error",
+                $"Scene {scene.SceneIndex} external voice recovery submit failed after the one allowed attempt.",
+                BuildEventData(project.Id, scene.Id, scene.SceneIndex, input, version.Id, null,
+                    "RECOVERY_FAILED", sampleRate, errorCode: ex.ErrorCode, errorMessage: safeErrorMessage,
+                    reason: "stale_url_http_400"), ct);
+            return false;
+        }
+        var requestId = NormalizeRequestId(submitted.RequestId);
+        if (string.IsNullOrWhiteSpace(requestId) && !IsDirectAudio(submitted.AudioUrl))
+        {
+            await _versions.FailSceneAudioVersionAsync(version.Id, "VBEE_RECOVERY_REQUEST_ID_MISSING", "Vbee recovery returned no request_id or audio URL.", ct);
+            return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(requestId))
+        {
+            await _versions.MarkSceneAudioVersionSubmittedAsync(version.Id, "vbee", input.VoiceCode, null, requestId, ct);
+        }
+
+        await _repo.AddProjectEventAsync(project.Id, "SCENE_AUDIO_VBEE_RECOVERY_SUBMITTED", "warning",
+            $"Scene {scene.SceneIndex} external voice was recreated once after a stale provider URL returned HTTP 400.",
+            BuildEventData(project.Id, scene.Id, scene.SceneIndex, input, version.Id, requestId,
+                "RECOVERY_SUBMITTED", sampleRate, submitted.AudioUrl, reason: "stale_url_http_400"), ct);
+
+        if (IsDirectAudio(submitted.AudioUrl))
+        {
+            await CompleteFromAudioUrlAsync(job, project, scene, version, input, requestId, submitted.AudioUrl!, submitted.Response, sampleRate, ct);
+            return true;
+        }
+
+        var pollOptions = await _runtimeConfig.GetAsync(ct);
+        await _jobs.ScheduleProviderPollAsync(job.Id, pollOptions.PollInterval, "VBEE_RECOVERY_SUBMITTED", "Waiting for the recovered Vbee request.", ct);
+        return true;
+    }
+
+    private static bool IsHttp400(InvalidOperationException ex)
+        => ex.Message.Contains("HTTP 400", StringComparison.OrdinalIgnoreCase);
+
+    private static bool HasVbeeRecoveryMarker(string? renderConfigJson)
+        => !string.IsNullOrWhiteSpace(renderConfigJson)
+           && JsonNode.Parse(renderConfigJson) is JsonObject obj
+           && obj["vbee_recovery_attempted"]?.GetValue<bool>() == true;
+
+    private static string MarkVbeeRecovery(string? renderConfigJson)
+    {
+        JsonObject obj;
+        try
+        {
+            obj = string.IsNullOrWhiteSpace(renderConfigJson)
+                ? new JsonObject()
+                : JsonNode.Parse(renderConfigJson) as JsonObject ?? new JsonObject();
+        }
+        catch (JsonException)
+        {
+            obj = new JsonObject();
+        }
+
+        obj["vbee_recovery_attempted"] = true;
+        obj["vbee_recovery_at_utc"] = DateTimeOffset.UtcNow;
+        return obj.ToJsonString();
     }
 
     private static bool IsDirectAudio(string? value)

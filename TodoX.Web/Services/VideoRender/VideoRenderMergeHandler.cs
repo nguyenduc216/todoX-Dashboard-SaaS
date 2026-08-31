@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.Extensions.Options;
 using TodoX.Web.Models;
 using TodoX.Web.Services.Render;
@@ -17,16 +18,20 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
     private readonly VideoRenderRepository _repo;
     private readonly IWebHostEnvironment _env;
     private readonly ISceneMediaVersioningService _versions;
+    private readonly RVideoJobSettingsRepository _settings;
     private readonly IRVideoJobService _rvideoJobs;
+    private readonly IConfiguration _configuration;
 
-    public VideoRenderMergeHandler(ILogger<VideoRenderMergeHandler> logger, IOptionsMonitor<VideoRenderOptions> options, VideoRenderRepository repo, IWebHostEnvironment env, ISceneMediaVersioningService versions, IRVideoJobService rvideoJobs)
+    public VideoRenderMergeHandler(ILogger<VideoRenderMergeHandler> logger, IOptionsMonitor<VideoRenderOptions> options, VideoRenderRepository repo, IWebHostEnvironment env, ISceneMediaVersioningService versions, RVideoJobSettingsRepository settings, IRVideoJobService rvideoJobs, IConfiguration configuration)
     {
         _logger = logger;
         _options = options;
         _repo = repo;
         _env = env;
         _versions = versions;
+        _settings = settings;
         _rvideoJobs = rvideoJobs;
+        _configuration = configuration;
     }
 
     public async Task HandleAsync(RenderJobDto job, CancellationToken ct)
@@ -48,6 +53,7 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
         var root = ResolveRoot(_options.CurrentValue.StorageRoot);
         var projectRoot = Path.Combine(root, project.JobFolder);
         var versioningEnabled = await _versions.IsEnabledAsync(SceneMediaVersioningFlags.FinalVideos, ct);
+        var settings = await _settings.GetAsync(project.Id, ct);
         FinalVideoVersionDto? version = null;
         IReadOnlyList<MergeInput> mergeItems;
         if (versioningEnabled)
@@ -60,21 +66,13 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
                 $"final-video-job-{job.Id:N}-project-{project.Id}",
                 CompositionConfigSnapshot: new { source = "merge_video_job", sceneCount = mergeableScenes.Count, failedSceneCount = project.Scenes.Count - mergeableScenes.Count, scenes = mergeableScenes.Select(x => new { x.Id, x.SceneIndex, x.SceneVideoPath }) },
                 TransitionConfigSnapshot: new { mode = "copy_concat" },
-                AudioConfigSnapshot: new { },
+                AudioConfigSnapshot: new { music = settings?.MusicSnapshotJson, musicVolume = settings?.MusicVolume },
                 SubtitleConfigSnapshot: new { }), ct);
-            mergeItems = (await _versions.ListFinalVideoVersionItemsAsync(version.Id, ct))
-                .Select(item => new MergeInput(item.SceneId, item.ItemOrder, item.SceneVideoVersionId, item.SourceFilePath))
-                .ToList();
-            if (mergeItems.Count != mergeableScenes.Count)
-            {
-                throw new InvalidOperationException("Project is missing selected completed scene video versions.");
-            }
+            mergeItems = await BuildCurrentMergeItemsAsync(mergeableScenes, ct);
         }
         else
         {
-            mergeItems = mergeableScenes
-                .Select(scene => new MergeInput(scene.Id, scene.SceneIndex, null, scene.SceneVideoPath))
-                .ToList();
+            mergeItems = await BuildCurrentMergeItemsAsync(mergeableScenes, ct);
         }
 
         try
@@ -120,6 +118,26 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
                 await _repo.AddProjectEventAsync(project.Id, "PROJECT_MERGE_TRANSCODE_FALLBACK_COMPLETED", "info",
                     "Normalized final merge transcode fallback completed.",
                     new { projectId = project.Id, finalVideoVersionId = version?.Id, inputCount = mergeItems.Count }, ct);
+            }
+
+            if (TryResolveBackgroundMusic(settings, out var musicPath, out var musicVolume))
+            {
+                var mixedPath = Path.Combine(finalDir, version is null ? "final-music.mp4" : "final-video-music.mp4");
+                var hasAudio = await HasAudioStreamAsync(ffmpegPath, finalPath, ct);
+                var musicResult = await RunFfmpegAsync(
+                    ffmpegPath,
+                    finalDir,
+                    hasAudio
+                        ? BuildMusicMixArguments(finalPath, mixedPath, musicPath, musicVolume)
+                        : BuildMusicOnlyArguments(finalPath, mixedPath, musicPath, musicVolume),
+                    timeout,
+                    ct);
+                await File.WriteAllTextAsync(Path.Combine(finalDir, "ffmpeg-music.log"), musicResult.ToLogText(), ct);
+                if (musicResult.ExitCode != 0)
+                {
+                    throw new InvalidOperationException($"FFmpeg music mix failed. ExitCode={musicResult.ExitCode}. {SafeTail(musicResult.Stderr)}");
+                }
+                File.Copy(mixedPath, finalPath, true);
             }
 
             var relative = Path.GetRelativePath(root, finalPath).Replace(Path.DirectorySeparatorChar, '/');
@@ -227,6 +245,40 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
             outputPath
         ];
 
+    internal static string[] BuildMusicMixArguments(string inputVideoPath, string outputPath, string musicPath, decimal musicVolume)
+        =>
+        [
+            "-y",
+            "-i", inputVideoPath,
+            "-stream_loop", "-1",
+            "-i", musicPath,
+            "-filter_complex", $"[1:a]volume={musicVolume.ToString(System.Globalization.CultureInfo.InvariantCulture)}[bg];[0:a][bg]amix=inputs=2:duration=first:dropout_transition=0[a]",
+            "-map", "0:v:0",
+            "-map", "[a]",
+            "-c:v", "copy",
+            "-c:a", "aac",
+            "-b:a", "192k",
+            "-shortest",
+            outputPath
+        ];
+
+    internal static string[] BuildMusicOnlyArguments(string inputVideoPath, string outputPath, string musicPath, decimal musicVolume)
+        =>
+        [
+            "-y",
+            "-i", inputVideoPath,
+            "-stream_loop", "-1",
+            "-i", musicPath,
+            "-filter_complex", $"[1:a]volume={musicVolume.ToString(System.Globalization.CultureInfo.InvariantCulture)}[bg]",
+            "-map", "0:v:0",
+            "-map", "[bg]",
+            "-c:v", "copy",
+            "-c:a", "aac",
+            "-b:a", "192k",
+            "-shortest",
+            outputPath
+        ];
+
     private static async Task<FfmpegResult> RunFfmpegAsync(
         string ffmpegPath,
         string workingDirectory,
@@ -255,6 +307,30 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
         timeoutCts.CancelAfter(timeout);
         await process.WaitForExitAsync(timeoutCts.Token);
         return new FfmpegResult(process.ExitCode, await stdoutTask, await stderrTask);
+    }
+
+    private static async Task<bool> HasAudioStreamAsync(string ffmpegPath, string inputPath, CancellationToken ct)
+    {
+        var psi = new ProcessStartInfo
+        {
+            FileName = ffmpegPath,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+        psi.ArgumentList.Add("-hide_banner");
+        psi.ArgumentList.Add("-i");
+        psi.ArgumentList.Add(inputPath);
+        psi.ArgumentList.Add("-f");
+        psi.ArgumentList.Add("null");
+        psi.ArgumentList.Add("-");
+
+        using var process = Process.Start(psi) ?? throw new InvalidOperationException("Khong khoi dong duoc FFmpeg.");
+        var output = await process.StandardOutput.ReadToEndAsync(ct);
+        var error = await process.StandardError.ReadToEndAsync(ct);
+        await process.WaitForExitAsync(ct);
+        return process.ExitCode == 0 && (error.Contains("Audio:", StringComparison.OrdinalIgnoreCase) || output.Contains("Audio:", StringComparison.OrdinalIgnoreCase));
     }
 
     internal static string SafeTail(string? value, int maxChars = 2000)
@@ -287,5 +363,98 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
                 || value.ValueKind == JsonValueKind.String && long.TryParse(value.GetString(), out parsedId))
             ? parsedId
             : null;
+    }
+
+    private async Task<IReadOnlyList<MergeInput>> BuildCurrentMergeItemsAsync(IReadOnlyList<VideoProjectSceneDto> scenes, CancellationToken ct)
+    {
+        var items = new List<MergeInput>(scenes.Count);
+        foreach (var scene in scenes.OrderBy(x => x.SceneIndex))
+        {
+            var selectedVideo = await _versions.GetSelectedVideoVersionAsync(scene.Id, ct)
+                ?? throw new InvalidOperationException("Project is missing selected completed scene video versions.");
+            var videoPath = selectedVideo.SourceFilePath ?? scene.SceneVideoPath;
+            items.Add(new MergeInput(scene.Id, scene.SceneIndex, selectedVideo.Id, ResolveRenderPhysicalPath(videoPath)));
+        }
+
+        return items;
+    }
+
+    private bool TryResolveBackgroundMusic(RVideoJobSettingsDto? settings, out string musicPath, out decimal musicVolume)
+    {
+        musicPath = string.Empty;
+        musicVolume = 0m;
+        if (settings is null || settings.MusicVolume <= 0)
+        {
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(settings.MusicSnapshotJson))
+        {
+            return false;
+        }
+
+        JsonObject? snapshot;
+        try
+        {
+            snapshot = JsonNode.Parse(settings.MusicSnapshotJson) as JsonObject;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+
+        var storageKey = ReadString(snapshot, "storageKey", "ObjectKey");
+        if (string.IsNullOrWhiteSpace(storageKey))
+        {
+            return false;
+        }
+
+        musicPath = ResolveMediaPhysicalPath(storageKey);
+        if (!File.Exists(musicPath))
+        {
+            return false;
+        }
+
+        musicVolume = Math.Clamp(settings.MusicVolume, 0m, 1m);
+        return true;
+    }
+
+    private string ResolveMediaPhysicalPath(string objectKey)
+    {
+        var uploadRoot = _configuration["Storage:LocalUploadRoot"] ?? "wwwroot/uploads";
+        return Path.Combine(_env.ContentRootPath, uploadRoot, objectKey.Replace('/', Path.DirectorySeparatorChar));
+    }
+
+    private string? ResolveRenderPhysicalPath(string? objectKeyOrPath)
+    {
+        if (string.IsNullOrWhiteSpace(objectKeyOrPath))
+        {
+            return objectKeyOrPath;
+        }
+
+        if (Path.IsPathRooted(objectKeyOrPath))
+        {
+            return objectKeyOrPath;
+        }
+
+        return Path.Combine(ResolveRoot(_options.CurrentValue.StorageRoot), objectKeyOrPath.Replace('/', Path.DirectorySeparatorChar));
+    }
+
+    private static string? ReadString(JsonObject? snapshot, params string[] keys)
+    {
+        if (snapshot is null)
+        {
+            return null;
+        }
+
+        foreach (var key in keys)
+        {
+            if (snapshot[key] is JsonValue value && value.TryGetValue<string>(out var text) && !string.IsNullOrWhiteSpace(text))
+            {
+                return text.Trim();
+            }
+        }
+
+        return null;
     }
 }

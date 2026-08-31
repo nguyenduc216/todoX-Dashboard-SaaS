@@ -37,6 +37,7 @@ public static class RVideoMusicModes
 {
     public const string None = "NONE";
     public const string Library = "LIBRARY";
+    public const string Upload = "UPLOAD";
 }
 
 public sealed class RVideoJobSettingsDto
@@ -78,6 +79,7 @@ public sealed class RVideoJobSettingsRequest
 }
 
 public sealed record UploadedCharacterSnapshot(string Source, string FileName, string StorageKey, string FileUrl);
+public sealed record UploadedMusicSnapshot(string Source, string FileName, string StorageKey, string FileUrl, string MimeType, long FileSize);
 
 public sealed class RVideoSceneImportDocument
 {
@@ -337,8 +339,10 @@ public static class RVideoRules
             _ => RVideoCharacterModes.None
         };
 
-    public static string NormalizeMusicMode(string? value, string? catalogCode)
-        => string.IsNullOrWhiteSpace(catalogCode) ? RVideoMusicModes.None : RVideoMusicModes.Library;
+    public static string NormalizeMusicMode(string? value, string? catalogCode, string? snapshotJson = null)
+        => !string.IsNullOrWhiteSpace(catalogCode)
+            ? RVideoMusicModes.Library
+            : HasUsableUploadedMusicSnapshot(snapshotJson) ? RVideoMusicModes.Upload : RVideoMusicModes.None;
 
     public static string? NormalizeAspectRatio(string? value)
         => SupportedAspectRatios.FirstOrDefault(x => string.Equals(x, value?.Trim(), StringComparison.OrdinalIgnoreCase));
@@ -398,8 +402,11 @@ public static class RVideoRules
         }
         if (string.IsNullOrWhiteSpace(request.MusicCatalogCode))
         {
+            if (!HasUsableUploadedMusicSnapshot(request.MusicSnapshot))
+            {
+                request.MusicSnapshot = null;
+            }
             request.MusicCatalogCode = null;
-            request.MusicSnapshot = null;
         }
         else if (request.MusicSnapshot is null)
         {
@@ -535,6 +542,26 @@ public static class RVideoRules
 
     private static string? FirstNonBlank(params string?[] values)
         => values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim();
+
+    public static bool HasUsableUploadedMusicSnapshot(object? snapshot)
+        => snapshot is not null
+           && HasUsableUploadedMusicSnapshot(JsonSerializer.Serialize(snapshot, JsonOptions));
+
+    public static bool HasUsableUploadedMusicSnapshot(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return false;
+
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            var root = document.RootElement;
+            return HasValue(root, "fileUrl") || HasValue(root, "storageKey");
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
 
     public static void ValidateScene(RVideoSceneEditorItem scene)
     {

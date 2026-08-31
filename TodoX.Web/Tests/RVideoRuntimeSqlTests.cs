@@ -326,6 +326,51 @@ public sealed class RVideoRuntimeSqlTests
     }
 
     [Fact]
+    public void FinalMergeUsesSelectedLocalSceneVideosAndDoesNotUsePublicUrlsAsFiles()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "VideoRenderMergeHandler.cs");
+        var mergeItems = ExtractMethodBlock(source, "private async Task<IReadOnlyList<MergeInput>> BuildCurrentMergeItemsAsync");
+
+        Assert.Contains("GetSelectedVideoVersionAsync(scene.Id, ct)", mergeItems);
+        Assert.Contains("selectedVideo.SourceFilePath ?? scene.SceneVideoPath", mergeItems);
+        Assert.Contains("ResolveRenderPhysicalPath(videoPath)", mergeItems);
+        Assert.DoesNotContain("selectedVideo.PublicUrl", mergeItems);
+    }
+
+    [Fact]
+    public void BackgroundMusicUsesPersistedStorageKeyAndMixesAtConfiguredVolume()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "VideoRenderMergeHandler.cs");
+        var args = TodoX.Web.Services.VideoRender.VideoRenderMergeHandler.BuildMusicMixArguments(
+            "final.mp4", "mixed.mp4", "music/demo.mp3", 0.35m);
+        var musicOnlyArgs = TodoX.Web.Services.VideoRender.VideoRenderMergeHandler.BuildMusicOnlyArguments(
+            "silent.mp4", "music-only.mp4", "music/demo.mp3", 0.5m);
+
+        Assert.Contains("storageKey", ExtractMethodBlock(source, "private bool TryResolveBackgroundMusic"));
+        Assert.DoesNotContain("fileUrl!", ExtractMethodBlock(source, "private bool TryResolveBackgroundMusic"));
+        Assert.Contains("volume=0.35", string.Join(" ", args));
+        Assert.Contains("[0:a][bg]amix=inputs=2", string.Join(" ", args));
+        Assert.Contains("volume=0.5", string.Join(" ", musicOnlyArgs));
+        Assert.Contains("-map", musicOnlyArgs);
+        Assert.Contains("[bg]", string.Join(" ", musicOnlyArgs));
+    }
+
+    [Fact]
+    public void VbeeRecoveryMarksAudioVersionBeforeSubmittingAndAllowsOnlyOneRecovery()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "SceneAudioRenderHandler.cs");
+        var recovery = ExtractMethodBlock(source, "private async Task<bool> TryRecoverStaleVbeeRequestAsync");
+
+        var markerIndex = recovery.IndexOf("UpdateSceneAudioVersionRenderConfigAsync", StringComparison.Ordinal);
+        var submitIndex = recovery.IndexOf("_vbee.SubmitAsync", StringComparison.Ordinal);
+
+        Assert.True(markerIndex >= 0);
+        Assert.True(submitIndex > markerIndex);
+        Assert.Contains("HasVbeeRecoveryMarker(version.RenderConfigJson)", recovery);
+        Assert.Contains("SCENE_AUDIO_VBEE_RECOVERY_FAILED", recovery);
+    }
+
+    [Fact]
     public void ManualNativeReadyProjectEnqueuesSingleFfmpegCopyConcatFinalMerge()
     {
         var source = ReadRepoFile("Services", "VideoRender", "RVideoProjectFinalizationService.cs");
@@ -367,7 +412,7 @@ public sealed class RVideoRuntimeSqlTests
     }
 
     [Fact]
-    public void IncompleteProjectDoesNotEnqueueFinalMerge()
+    public void ProjectWithoutSelectedVideoDoesNotEnqueueFinalMerge()
     {
         var source = ReadRepoFile("Services", "VideoRender", "RVideoProjectFinalizationService.cs");
         var method = ExtractMethodBlock(source, "public async Task<RVideoProjectFinalizationResult> TryEnqueueFinalMergeAsync");
@@ -381,7 +426,7 @@ public sealed class RVideoRuntimeSqlTests
     }
 
     [Fact]
-    public void LibraryVoiceProjectRequiresSelectedCompletedAudioMuxBeforeFinalMerge()
+    public void LibraryVoiceProjectCanMergeBaseVideoBeforeExternalAudioIsReady()
     {
         var settings = new TodoX.Web.Models.RVideoJobSettingsDto
         {
@@ -405,7 +450,7 @@ public sealed class RVideoRuntimeSqlTests
             Status = "completed"
         };
 
-        Assert.False(TodoX.Web.Models.RVideoRules.IsSceneFinalReady(scene, settings, completedVideoWithoutMuxAudio, completedAudio));
+        Assert.True(TodoX.Web.Models.RVideoRules.GetSceneReadiness(scene, settings, completedVideoWithoutMuxAudio, null).VideoReady);
         var completedVideoWithMuxAudio = new TodoX.Web.Services.VideoRender.SceneVideoVersionDto
         {
             Status = "completed",
@@ -582,8 +627,10 @@ public sealed class RVideoRuntimeSqlTests
         Assert.True(pollIndex > submitIndex);
 
         var submitBlock = handler[submitIndex..pollIndex];
+        var recoveryIndex = handler.IndexOf("private async Task<bool> TryRecoverStaleVbeeRequestAsync", StringComparison.Ordinal);
+        Assert.True(recoveryIndex > pollIndex);
         Assert.Contains("await _vbee.SubmitAsync(submitRequest, options, ct);", submitBlock);
-        Assert.DoesNotContain("await _vbee.SubmitAsync(submitRequest, options, ct);", handler[pollIndex..]);
+        Assert.DoesNotContain("await _vbee.SubmitAsync(submitRequest, options, ct);", handler[pollIndex..recoveryIndex]);
         Assert.Contains("external voice resumed from existing request", handler);
     }
 
