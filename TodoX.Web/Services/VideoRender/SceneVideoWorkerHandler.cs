@@ -192,18 +192,25 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         VideoProjectSceneDto scene,
         CancellationToken ct)
     {
+        var requestedSourceImageVersionId = input.SourceImageVersionId ?? input.SelectedSourceImageVersionId;
         var sourceVersion = await ResolveSourceImageVersionAsync(
             scene.Id,
-            input.SourceImageVersionId ?? input.SelectedSourceImageVersionId,
+            requestedSourceImageVersionId,
             input.UseSharedReferenceImage,
             input.SourceImageUrl,
             input.SourceImageObjectKey,
             ct);
         if (sourceVersion is null)
         {
-            await FailAsync(project.Id, scene, Guid.Empty, "RVIDEO_VIDEO_SELECTED_IMAGE_VERSION_REQUIRED",
-                "Selected completed image version is required before rendering scene video.", ct);
-            throw new RenderJobTerminalFailureException("RVIDEO_VIDEO_SELECTED_IMAGE_VERSION_REQUIRED");
+            var hasExplicitSourceImageVersion = requestedSourceImageVersionId is Guid requestedId && requestedId != Guid.Empty;
+            var errorCode = hasExplicitSourceImageVersion
+                ? "RVIDEO_VIDEO_SOURCE_IMAGE_VERSION_NOT_FOUND"
+                : "RVIDEO_VIDEO_SELECTED_IMAGE_VERSION_REQUIRED";
+            var message = hasExplicitSourceImageVersion
+                ? "Explicit completed source image version is required before rendering scene video."
+                : "Selected completed image version is required before rendering scene video.";
+            await FailAsync(project.Id, scene, Guid.Empty, errorCode, message, ct);
+            throw new RenderJobTerminalFailureException(errorCode);
         }
         var sourceImageVersionId = input.UseSharedReferenceImage ? (Guid?)null : sourceVersion.Id;
 
@@ -962,6 +969,16 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                 Status = "completed",
                 IsSelected = true
             };
+        }
+
+        if (selectedVersionId is Guid explicitVersionId && explicitVersionId != Guid.Empty)
+        {
+            var versions = await _versions.ListImageVersionsAsync(sceneId, 0, 100, ct);
+            var explicitVersion = versions.FirstOrDefault(version =>
+                version.Id == explicitVersionId
+                && version.Status.Equals("completed", StringComparison.OrdinalIgnoreCase));
+
+            return explicitVersion;
         }
 
         var selected = await _versions.GetSelectedImageVersionAsync(sceneId, ct);

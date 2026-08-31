@@ -146,6 +146,180 @@ public sealed class RVideoVideoHotfixTests
     }
 
     [Fact]
+    public async Task ExplicitSourceImageVersionWinsOverCurrentSelected()
+    {
+        var explicitVersionId = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+        var currentSelectedVersionId = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+        var worker = CreateWorker(
+            new SceneImageVersionDto
+            {
+                Id = currentSelectedVersionId,
+                IsSelected = true,
+                Status = "completed",
+                PublicUrl = "https://example.test/current.png",
+                StorageKey = "scene/current.png"
+            },
+            new[]
+            {
+                new SceneImageVersionDto
+                {
+                    Id = explicitVersionId,
+                    IsSelected = false,
+                    Status = "completed",
+                    PublicUrl = "https://example.test/explicit.png",
+                    StorageKey = "scene/explicit.png"
+                },
+                new SceneImageVersionDto
+                {
+                    Id = currentSelectedVersionId,
+                    IsSelected = true,
+                    Status = "completed",
+                    PublicUrl = "https://example.test/current.png",
+                    StorageKey = "scene/current.png"
+                }
+            });
+
+        var method = typeof(SceneVideoWorkerHandler).GetMethod("ResolveSourceImageVersionAsync", BindingFlags.NonPublic | BindingFlags.Instance);
+        Assert.NotNull(method);
+
+        var task = (Task<SceneImageVersionDto?>)method!.Invoke(worker, new object?[]
+        {
+            7L,
+            explicitVersionId,
+            false,
+            null,
+            null,
+            CancellationToken.None
+        })!;
+
+        var version = await task;
+        Assert.NotNull(version);
+        Assert.Equal(explicitVersionId, version!.Id);
+        Assert.False(version.IsSelected);
+    }
+
+    [Fact]
+    public async Task MissingExplicitSourceImageVersionDoesNotFallback()
+    {
+        var worker = CreateWorker(
+            new SceneImageVersionDto
+            {
+                Id = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
+                IsSelected = true,
+                Status = "completed",
+                PublicUrl = "https://example.test/current.png",
+                StorageKey = "scene/current.png"
+            },
+            new[]
+            {
+                new SceneImageVersionDto
+                {
+                    Id = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
+                    IsSelected = true,
+                    Status = "completed",
+                    PublicUrl = "https://example.test/current.png",
+                    StorageKey = "scene/current.png"
+                }
+            });
+
+        var method = typeof(SceneVideoWorkerHandler).GetMethod("ResolveSourceImageVersionAsync", BindingFlags.NonPublic | BindingFlags.Instance);
+        Assert.NotNull(method);
+
+        var task = (Task<SceneImageVersionDto?>)method!.Invoke(worker, new object?[]
+        {
+            7L,
+            Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+            false,
+            null,
+            null,
+            CancellationToken.None
+        })!;
+
+        var version = await task;
+        Assert.Null(version);
+    }
+
+    [Fact]
+    public async Task LegacyMissingSourceImageVersionFallsBackToCurrentSelected()
+    {
+        var worker = CreateWorker(
+            new SceneImageVersionDto
+            {
+                Id = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
+                IsSelected = true,
+                Status = "completed",
+                PublicUrl = "https://example.test/current.png",
+                StorageKey = "scene/current.png"
+            });
+
+        var method = typeof(SceneVideoWorkerHandler).GetMethod("ResolveSourceImageVersionAsync", BindingFlags.NonPublic | BindingFlags.Instance);
+        Assert.NotNull(method);
+
+        var task = (Task<SceneImageVersionDto?>)method!.Invoke(worker, new object?[]
+        {
+            7L,
+            null,
+            false,
+            null,
+            null,
+            CancellationToken.None
+        })!;
+
+        var version = await task;
+        Assert.NotNull(version);
+        Assert.Equal(Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"), version!.Id);
+    }
+
+    [Fact]
+    public async Task ExplicitVersionMustBeCompleted()
+    {
+        var worker = CreateWorker(
+            new SceneImageVersionDto
+            {
+                Id = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
+                IsSelected = true,
+                Status = "completed",
+                PublicUrl = "https://example.test/current.png",
+                StorageKey = "scene/current.png"
+            },
+            new[]
+            {
+                new SceneImageVersionDto
+                {
+                    Id = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+                    IsSelected = false,
+                    Status = "processing",
+                    PublicUrl = "https://example.test/processing.png",
+                    StorageKey = "scene/processing.png"
+                },
+                new SceneImageVersionDto
+                {
+                    Id = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
+                    IsSelected = true,
+                    Status = "completed",
+                    PublicUrl = "https://example.test/current.png",
+                    StorageKey = "scene/current.png"
+                }
+            });
+
+        var method = typeof(SceneVideoWorkerHandler).GetMethod("ResolveSourceImageVersionAsync", BindingFlags.NonPublic | BindingFlags.Instance);
+        Assert.NotNull(method);
+
+        var task = (Task<SceneImageVersionDto?>)method!.Invoke(worker, new object?[]
+        {
+            7L,
+            Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+            false,
+            null,
+            null,
+            CancellationToken.None
+        })!;
+
+        var version = await task;
+        Assert.Null(version);
+    }
+
+    [Fact]
     public async Task WorkerFallsBackToCurrentSelectedCompletedImageVersion()
     {
         var worker = CreateWorker(new SceneImageVersionDto
@@ -341,13 +515,17 @@ public sealed class RVideoVideoHotfixTests
             }).Build(),
             NullLogger<Gommo79AiImageService>.Instance);
 
-    private static SceneVideoWorkerHandler CreateWorker(SceneImageVersionDto selectedImageVersion)
+    private static SceneVideoWorkerHandler CreateWorker(
+        SceneImageVersionDto? selectedImageVersion,
+        IReadOnlyList<SceneImageVersionDto>? imageVersions = null)
     {
 #pragma warning disable SYSLIB0050
         var handler = (SceneVideoWorkerHandler)FormatterServices.GetUninitializedObject(typeof(SceneVideoWorkerHandler));
 #pragma warning restore SYSLIB0050
         var versionsProxy = DispatchProxy.Create<ISceneMediaVersioningService, SceneMediaVersioningServiceProxy>();
-        ((SceneMediaVersioningServiceProxy)(object)versionsProxy).SelectedImageVersion = selectedImageVersion;
+        var proxy = (SceneMediaVersioningServiceProxy)(object)versionsProxy;
+        proxy.SelectedImageVersion = selectedImageVersion;
+        proxy.ImageVersions = imageVersions ?? Array.Empty<SceneImageVersionDto>();
 
         typeof(SceneVideoWorkerHandler)
             .GetField("_versions", BindingFlags.Instance | BindingFlags.NonPublic)!
@@ -418,12 +596,19 @@ public sealed class RVideoVideoHotfixTests
     public class SceneMediaVersioningServiceProxy : DispatchProxy
     {
         public SceneImageVersionDto? SelectedImageVersion { get; set; }
+        public IReadOnlyList<SceneImageVersionDto> ImageVersions { get; set; } = Array.Empty<SceneImageVersionDto>();
 
         protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
         {
             if (targetMethod?.Name == nameof(ISceneMediaVersioningService.GetSelectedImageVersionAsync))
             {
                 return Task.FromResult(SelectedImageVersion);
+            }
+
+            if (targetMethod?.Name == nameof(ISceneMediaVersioningService.ListImageVersionsAsync)
+                && targetMethod.GetParameters().Length == 4)
+            {
+                return Task.FromResult(ImageVersions);
             }
 
             throw new NotSupportedException(targetMethod?.Name);
