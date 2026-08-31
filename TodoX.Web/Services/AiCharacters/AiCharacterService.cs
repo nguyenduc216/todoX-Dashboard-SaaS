@@ -23,33 +23,23 @@ public interface IAiCharacterService
 public static class CharacterUploadValidation
 {
     public static readonly IReadOnlySet<string> AllowedImageMimeTypes =
-        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "image/jpeg", "image/png", "image/webp" };
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "image/jpeg", "image/jpg", "image/png", "image/webp" };
 
     public static void ValidateImage(byte[] content, string? contentType, long maxBytes)
     {
-        if (content.Length == 0)
-            throw new InvalidOperationException("File ảnh đang rỗng.");
-        if (content.Length > maxBytes)
-            throw new InvalidOperationException($"File ảnh tối đa {Math.Max(1, maxBytes / 1024 / 1024)}MB.");
-
-        var mime = (contentType ?? string.Empty).Split(';')[0].Trim().ToLowerInvariant();
-        if (!AllowedImageMimeTypes.Contains(mime))
-            throw new InvalidOperationException("Chỉ hỗ trợ ảnh JPEG, PNG hoặc WEBP.");
-        if (!MatchesSignature(content, mime))
-            throw new InvalidOperationException("Nội dung file không khớp với định dạng ảnh đã chọn.");
+        var detectedMime = ImageUploadValidation.DetectMime(content);
+        var fileName = detectedMime switch
+        {
+            "image/png" => "upload.png",
+            "image/jpeg" => "upload.jpg",
+            "image/webp" => "upload.webp",
+            _ => "upload"
+        };
+        ImageUploadValidation.Validate(content, fileName, contentType, maxBytes);
     }
 
-    private static bool MatchesSignature(ReadOnlySpan<byte> content, string mime)
-        => mime switch
-        {
-            "image/png" => content.Length >= 8
-                && content[..8].SequenceEqual(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 }),
-            "image/jpeg" => content.Length >= 3 && content[..3].SequenceEqual(new byte[] { 255, 216, 255 }),
-            "image/webp" => content.Length >= 12
-                && content[..4].SequenceEqual("RIFF"u8)
-                && content.Slice(8, 4).SequenceEqual("WEBP"u8),
-            _ => false
-        };
+    public static void ValidateImage(byte[] content, string? fileName, string? contentType, long maxBytes)
+        => ImageUploadValidation.Validate(content, fileName, contentType, maxBytes);
 }
 
 public sealed class AiCharacterService : IAiCharacterService
@@ -354,7 +344,7 @@ public sealed class AiCharacterService : IAiCharacterService
         var character = await _repo.GetAsync(scope, characterId, ct)
             ?? throw new InvalidOperationException("Không tìm thấy Character hoặc bạn không có quyền truy cập.");
 
-        CharacterUploadValidation.ValidateImage(content, contentType, GetMaxImageBytes());
+        ImageUploadValidation.Validate(content, fileName, contentType, GetMaxImageBytes());
 
         var category = BuildStorageCategory(scope, character.CharacterCode);
         var media = await _media.SaveAsync(content, fileName, contentType, category, user.UserId, user.CustomerId, _tenant.TenantId, ct);
@@ -405,7 +395,7 @@ public sealed class AiCharacterService : IAiCharacterService
         var character = await _repo.GetAsync(scope, characterId, ct)
             ?? throw new InvalidOperationException("Không tìm thấy Character hoặc bạn không có quyền truy cập.");
 
-        CharacterUploadValidation.ValidateImage(content, contentType, GetMaxImageBytes());
+        ImageUploadValidation.Validate(content, fileName, contentType, GetMaxImageBytes());
         var media = await _media.SaveAsync(content, fileName, contentType,
             BuildStorageCategory(scope, character.CharacterCode), user.UserId, user.CustomerId, _tenant.TenantId, ct);
         var imageUrl = media.PublicUrl ?? media.FileUrl

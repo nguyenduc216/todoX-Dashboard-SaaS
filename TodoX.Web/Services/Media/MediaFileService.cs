@@ -97,11 +97,8 @@ public sealed class MediaFileService : IMediaFileService
     public async Task<MediaFileDto> SaveAsync(byte[] content, string originalFileName, string mimeType,
         string fileCategory, Guid? userId, Guid? customerId, Guid tenantId, CancellationToken ct = default)
     {
-        mimeType = NormalizeMimeType(mimeType, originalFileName);
         fileCategory = NormalizeDbText(fileCategory, "media");
-        if (content.Length == 0) throw new InvalidOperationException("Tá»‡p rá»—ng.");
-        if (content.Length > GetMaxImageBytes()) throw new InvalidOperationException("Tá»‡p vÆ°á»£t quÃ¡ 10MB.");
-        if (!IsAllowedImageMime(mimeType)) throw new InvalidOperationException("Chá»‰ cháº¥p nháº­n áº£nh PNG, JPEG, WEBP.");
+        mimeType = ImageUploadValidation.Validate(content, originalFileName, mimeType, GetMaxImageBytes());
 
         var ext = mimeType.ToLowerInvariant() switch
         {
@@ -182,6 +179,10 @@ public sealed class MediaFileService : IMediaFileService
         fileCategory = NormalizeDbText(fileCategory, "media");
         if (content.Length == 0) throw new InvalidOperationException("Tá»‡p rá»—ng.");
         if (content.Length > GetMaxBytesForMime(mimeType)) throw new InvalidOperationException("Tá»‡p vÆ°á»£t quÃ¡ 10MB.");
+        if (IsAllowedImageMime(mimeType))
+        {
+            mimeType = ImageUploadValidation.Validate(content, originalFileName, mimeType, GetMaxImageBytes());
+        }
         if (!IsPersistableMime(mimeType)) throw new InvalidOperationException("Chá»‰ cháº¥p nháº­n media há»£p lá»‡.");
 
         objectKey = NormalizeObjectKey(objectKey);
@@ -377,10 +378,7 @@ public sealed class MediaFileService : IMediaFileService
             throw new InvalidOperationException("Báº¡n khÃ´ng cÃ³ quyá»n sá»­a áº£nh nÃ y.");
         }
 
-        mimeType = NormalizeMimeType(mimeType, media.FileName);
-        if (content.Length == 0) throw new InvalidOperationException("Tá»‡p rá»—ng.");
-        if (content.Length > GetMaxImageBytes()) throw new InvalidOperationException("Tá»‡p vÆ°á»£t quÃ¡ 10MB.");
-        if (!IsAllowedImageMime(mimeType)) throw new InvalidOperationException("Chá»‰ cháº¥p nháº­n áº£nh PNG, JPEG, WEBP.");
+        mimeType = ImageUploadValidation.Validate(content, media.FileName, mimeType, GetMaxImageBytes());
         if (string.IsNullOrWhiteSpace(media.ObjectKey))
         {
             throw new InvalidOperationException("áº¢nh khÃ´ng cÃ³ Ä‘Æ°á»ng dáº«n lÆ°u trá»¯ Ä‘á»ƒ ghi Ä‘Ã¨.");
@@ -528,10 +526,6 @@ public sealed class MediaFileService : IMediaFileService
         }
 
         var contentType = NormalizeMimeType(response.Content.Headers.ContentType?.MediaType, uri.AbsolutePath);
-        if (!IsAllowedImageMime(contentType))
-        {
-            throw new InvalidOperationException($"URL khong tra ve anh hop le. Content-Type: {response.Content.Headers.ContentType?.MediaType ?? "unknown"}.");
-        }
 
         var length = response.Content.Headers.ContentLength;
         if (length.HasValue && length.Value > GetMaxImageBytes())
@@ -557,13 +551,20 @@ public sealed class MediaFileService : IMediaFileService
             throw new InvalidOperationException("URL media tra ve tep rong.");
         }
 
+        var bytes = ms.ToArray();
         var fileName = Path.GetFileName(uri.AbsolutePath);
         if (string.IsNullOrWhiteSpace(fileName) || !Path.HasExtension(fileName))
         {
             fileName = $"product-url{ContentTypeToExtension(contentType)}";
         }
 
-        return (ms.ToArray(), contentType, fileName, uri);
+        var sniffedMime = ImageUploadValidation.DetectMime(bytes);
+        if (sniffedMime is not null)
+        {
+            fileName = $"product-url{ContentTypeToExtension(sniffedMime)}";
+        }
+
+        return (bytes, contentType, fileName, uri);
     }
 
     private async Task<MediaFileDto> DownloadBinaryToObjectKeyAsync(

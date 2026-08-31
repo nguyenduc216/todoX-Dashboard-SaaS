@@ -1,4 +1,5 @@
 using TodoX.Web.Services.AiCharacters;
+using TodoX.Web.Services.Media;
 using Xunit;
 
 namespace TodoX.Web.Tests;
@@ -69,35 +70,59 @@ public sealed class AiCharacterCustomerUiTests
     }
 
     [Theory]
-    [InlineData("image/jpeg", new byte[] { 255, 216, 255 })]
-    [InlineData("image/png", new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 })]
-    [InlineData("image/webp", new byte[] { 82, 73, 70, 70, 0, 0, 0, 0, 87, 69, 66, 80 })]
-    public void UploadValidationAcceptsSupportedImageSignatures(string mime, byte[] signature)
+    [InlineData("photo.png", "image/png", new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 })]
+    [InlineData("photo.jpg", "image/jpeg", new byte[] { 255, 216, 255 })]
+    [InlineData("photo.jpeg", "image/jpg", new byte[] { 255, 216, 255 })]
+    [InlineData("photo.webp", "application/octet-stream", new byte[] { 82, 73, 70, 70, 0, 0, 0, 0, 87, 69, 66, 80 })]
+    public void UploadValidationAcceptsSupportedImageSignatures(string fileName, string mime, byte[] signature)
     {
         var content = new byte[Math.Max(signature.Length, 16)];
         signature.CopyTo(content, 0);
 
-        CharacterUploadValidation.ValidateImage(content, mime, 1024);
+        var detected = ImageUploadValidation.Validate(content, fileName, mime, 1024);
+
+        Assert.StartsWith("image/", detected, StringComparison.Ordinal);
     }
 
     [Fact]
     public void UploadValidationRejectsInvalidMimeAndOversizedFiles()
     {
-        Assert.Throws<InvalidOperationException>(() =>
-            CharacterUploadValidation.ValidateImage(new byte[] { 1, 2, 3 }, "image/gif", 1024));
+        var unsupported = Assert.Throws<InvalidOperationException>(() =>
+            ImageUploadValidation.Validate(new byte[] { 1, 2, 3 }, "photo.gif", "image/gif", 1024));
+        Assert.Equal(ImageUploadValidation.InvalidImageMessage, unsupported.Message);
 
         Assert.Throws<InvalidOperationException>(() =>
-            CharacterUploadValidation.ValidateImage(new byte[] { 255, 216, 255 }, "image/jpeg", 2));
+            ImageUploadValidation.Validate(new byte[] { 255, 216, 255 }, "photo.jpg", "image/jpeg", 2));
     }
 
     [Fact]
     public void UploadValidationDoesNotTrustMimeWithoutMatchingFileSignature()
     {
         Assert.Throws<InvalidOperationException>(() =>
-            CharacterUploadValidation.ValidateImage(
+            ImageUploadValidation.Validate(
                 new byte[] { 0, 1, 2, 3, 4, 5 },
+                "photo.jpg",
                 "image/png",
                 1024));
+    }
+
+    [Fact]
+    public void UploadValidationRequiresMatchingExtensionAndSignature()
+    {
+        Assert.Throws<InvalidOperationException>(() =>
+            ImageUploadValidation.Validate(
+                new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 },
+                "photo.jpg",
+                "application/octet-stream",
+                1024));
+    }
+
+    [Fact]
+    public void UploadValidationMessageIsUtf8AndNotMojibake()
+    {
+        Assert.Equal("Chỉ chấp nhận ảnh PNG, JPEG, WEBP.", ImageUploadValidation.InvalidImageMessage);
+        Assert.DoesNotContain("Chá»", ImageUploadValidation.InvalidImageMessage, StringComparison.Ordinal);
+        Assert.DoesNotContain("nháº", ImageUploadValidation.InvalidImageMessage, StringComparison.Ordinal);
     }
 
     private static string ReadSource(params string[] parts)
