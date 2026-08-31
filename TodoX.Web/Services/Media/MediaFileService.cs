@@ -76,7 +76,7 @@ public interface IMediaFileService
 public sealed class MediaFileService : IMediaFileService
 {
     private static readonly HashSet<string> AllowedMime = new(StringComparer.OrdinalIgnoreCase)
-        { "image/png", "image/jpeg", "image/webp", "video/mp4", "audio/mpeg", "audio/wav", "audio/x-wav", "audio/mp4", "audio/m4a", "application/octet-stream" };
+        { "image/png", "image/jpeg", "image/webp", "video/mp4", "audio/mpeg", "audio/mp3", "audio/wav", "audio/x-wav", "audio/mp4", "audio/m4a", "application/octet-stream" };
 
     private readonly TodoXConnectionFactory _factory;
     private readonly IWebHostEnvironment _env;
@@ -601,7 +601,7 @@ public sealed class MediaFileService : IMediaFileService
         var fileName = Path.GetFileName(uri.AbsolutePath);
         if (string.IsNullOrWhiteSpace(fileName) || !Path.HasExtension(fileName))
         {
-            fileName = "media-url.mp4";
+            fileName = $"media-url{ContentTypeToExtension(responseMime == "application/octet-stream" ? expectedMimeType : responseMime)}";
         }
 
         return await SaveDownloadedBinaryStreamAsync(stream, objectKey, fileName, fileCategory, expectedMimeType, responseMime,
@@ -622,7 +622,7 @@ public sealed class MediaFileService : IMediaFileService
     {
         objectKey = NormalizeObjectKey(objectKey);
         var mimeType = ResolveDownloadedBinaryMime(expectedMimeType, responseMime, originalFileName);
-        if (!string.Equals(mimeType, "video/mp4", StringComparison.OrdinalIgnoreCase))
+        if (!IsPersistableMime(mimeType))
         {
             throw new InvalidOperationException($"URL khÃ´ng tráº£ vá» media há»£p lá»‡. Content-Type: {responseMime}.");
         }
@@ -645,7 +645,7 @@ public sealed class MediaFileService : IMediaFileService
         var storageProvider = NormalizeDbText(_config["Storage:Provider"] ?? "local", "local");
         var id = Guid.NewGuid();
         long totalBytes = 0;
-        var sniff = new byte[32];
+        var sniff = new byte[64];
         var sniffCount = 0;
 
         try
@@ -678,9 +678,15 @@ public sealed class MediaFileService : IMediaFileService
                 throw new InvalidOperationException("URL media tráº£ vá» tá»‡p rá»—ng.");
             }
 
-            if (!LooksLikeMp4(sniff.AsSpan(0, sniffCount)))
+            var payload = sniff.AsSpan(0, sniffCount);
+            if (string.Equals(mimeType, "video/mp4", StringComparison.OrdinalIgnoreCase)
+                && !LooksLikeMp4(payload))
             {
                 throw new InvalidOperationException("URL media khÃ´ng tráº£ vá» video MP4 há»£p lá»‡.");
+            }
+            if (IsAudioMime(mimeType) && !LooksLikeAudio(payload, mimeType))
+            {
+                throw new InvalidOperationException("URL media khÃ´ng tráº£ vá» audio há»£p lá»‡.");
             }
 
             if (File.Exists(absPath))
@@ -751,6 +757,7 @@ public sealed class MediaFileService : IMediaFileService
     {
         var normalized = (mimeType ?? string.Empty).Split(';')[0].Trim().ToLowerInvariant();
         if (normalized is "image/jpg" or "image/pjpeg") return "image/jpeg";
+        if (normalized == "audio/mp3") return "audio/mpeg";
         if (AllowedMime.Contains(normalized)) return normalized;
 
         return Path.GetExtension(originalFileName).ToLowerInvariant() switch
@@ -772,7 +779,7 @@ public sealed class MediaFileService : IMediaFileService
         "image/jpeg" => ".jpg",
         "image/webp" => ".webp",
         "video/mp4" => ".mp4",
-        "audio/mpeg" => ".mp3",
+        "audio/mpeg" or "audio/mp3" => ".mp3",
         "audio/wav" or "audio/x-wav" => ".wav",
         "audio/mp4" or "audio/m4a" => ".m4a",
         _ => ".img"
@@ -798,10 +805,10 @@ public sealed class MediaFileService : IMediaFileService
         => mimeType is "image/png" or "image/jpeg" or "image/webp";
 
     private static bool IsPersistableMime(string mimeType)
-        => mimeType is "image/png" or "image/jpeg" or "image/webp" or "video/mp4" or "audio/mpeg" or "audio/wav" or "audio/x-wav" or "audio/mp4" or "audio/m4a" or "application/octet-stream";
+        => mimeType is "image/png" or "image/jpeg" or "image/webp" or "video/mp4" or "audio/mpeg" or "audio/wav" or "audio/x-wav" or "audio/mp4" or "audio/m4a";
 
     private static bool IsAudioMime(string mimeType)
-        => mimeType is "audio/mpeg" or "audio/wav" or "audio/x-wav" or "audio/mp4" or "audio/m4a";
+        => mimeType is "audio/mpeg" or "audio/mp3" or "audio/wav" or "audio/x-wav" or "audio/mp4" or "audio/m4a";
 
     private static void EnsureExistingMediaMatches(MediaFileDto existing, string mimeType, string fileCategory)
     {
@@ -843,9 +850,10 @@ public sealed class MediaFileService : IMediaFileService
         }
 
         if (string.Equals(responseMime, "application/octet-stream", StringComparison.OrdinalIgnoreCase)
-            && string.Equals(expectedMimeType, "video/mp4", StringComparison.OrdinalIgnoreCase))
+            && (string.Equals(expectedMimeType, "video/mp4", StringComparison.OrdinalIgnoreCase)
+                || IsAudioMime(expectedMimeType)))
         {
-            return "video/mp4";
+            return NormalizeMimeType(expectedMimeType, originalFileName);
         }
 
         return NormalizeMimeType(responseMime, originalFileName);
@@ -862,6 +870,36 @@ public sealed class MediaFileService : IMediaFileService
         {
             if (bytes.Slice(i, 4).SequenceEqual("ftyp"u8))
             {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool LooksLikeAudio(byte[] bytes, string mimeType)
+        => LooksLikeAudio(bytes.AsSpan(), mimeType);
+
+    private static bool LooksLikeAudio(ReadOnlySpan<byte> bytes, string mimeType)
+    {
+        if (mimeType is "audio/mpeg" or "audio/mp3")
+        {
+            if (bytes.Length >= 3 && bytes[..3].SequenceEqual("ID3"u8))
+            {
+                return true;
+            }
+
+            for (var i = 0; i <= bytes.Length - 4; i++)
+            {
+                var header = BinaryPrimitives.ReadUInt32BigEndian(bytes[i..]);
+                if ((header & 0xFFE00000) != 0xFFE00000
+                    || ((header >> 17) & 0b11) == 0
+                    || ((header >> 12) & 0b1111) is 0 or 15
+                    || ((header >> 10) & 0b11) == 3)
+                {
+                    continue;
+                }
+
                 return true;
             }
         }
