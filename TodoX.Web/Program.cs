@@ -90,6 +90,7 @@ builder.Services.AddScoped<FacebookOAuthService>();
 
 // Sprint 2F: media, image render (Vertex), avatar + chibi.
 builder.Services.AddScoped<TodoX.Web.Services.Media.IMediaFileService, TodoX.Web.Services.Media.MediaFileService>();
+builder.Services.AddScoped<TodoX.Web.Services.Media.LocalMediaPathResolver>();
 builder.Services.AddHttpClient("MediaBinaryDownload", client => client.Timeout = TimeSpan.FromSeconds(60))
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
     {

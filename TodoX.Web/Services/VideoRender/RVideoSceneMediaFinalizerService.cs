@@ -1,4 +1,5 @@
 using TodoX.Web.Models;
+using TodoX.Web.Services.Media;
 using TodoX.Web.Services.Render;
 using Microsoft.Extensions.Options;
 
@@ -17,6 +18,7 @@ public sealed class RVideoSceneMediaFinalizerService : IRVideoSceneMediaFinalize
     private readonly IRenderJobService _jobs;
     private readonly IWebHostEnvironment _env;
     private readonly IOptionsMonitor<VideoRenderOptions> _options;
+    private readonly LocalMediaPathResolver _localMediaPaths;
     private readonly ILogger<RVideoSceneMediaFinalizerService> _logger;
 
     public RVideoSceneMediaFinalizerService(
@@ -26,6 +28,7 @@ public sealed class RVideoSceneMediaFinalizerService : IRVideoSceneMediaFinalize
         IRenderJobService jobs,
         IWebHostEnvironment env,
         IOptionsMonitor<VideoRenderOptions> options,
+        LocalMediaPathResolver localMediaPaths,
         ILogger<RVideoSceneMediaFinalizerService> logger)
     {
         _repo = repo;
@@ -34,6 +37,7 @@ public sealed class RVideoSceneMediaFinalizerService : IRVideoSceneMediaFinalize
         _jobs = jobs;
         _env = env;
         _options = options;
+        _localMediaPaths = localMediaPaths;
         _logger = logger;
     }
 
@@ -149,9 +153,12 @@ public sealed class RVideoSceneMediaFinalizerService : IRVideoSceneMediaFinalize
         => !string.IsNullOrWhiteSpace(selectedVideo.PublicUrl)
            && !string.IsNullOrWhiteSpace(selectedVideo.SourceFilePath)
            && IsMuxOutputPath(selectedVideo.SourceFilePath)
-           && File.Exists(ResolveLocalPath(selectedVideo.SourceFilePath));
+           && _localMediaPaths.TryResolveExistingFile(
+               selectedVideo.SourceFilePath,
+               LocalMediaPathSource.SourceFilePath,
+               out _);
 
-    private static bool IsMuxOutputPath(string? path)
+    internal static bool IsMuxOutputPath(string? path)
         => !string.IsNullOrWhiteSpace(path)
            && path.Replace('\\', '/').Contains("/final-scenes/", StringComparison.OrdinalIgnoreCase);
 

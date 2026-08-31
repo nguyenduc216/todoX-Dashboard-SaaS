@@ -18,6 +18,7 @@ public sealed class SceneAudioMuxHandler : IRenderJobHandler
     private readonly IWebHostEnvironment _env;
     private readonly ISceneMediaVersioningService _versions;
     private readonly IMediaFileService _media;
+    private readonly LocalMediaPathResolver _localMediaPaths;
     private readonly TenantContext _tenant;
     private readonly IConfiguration _configuration;
     private readonly IRVideoProjectFinalizationService _finalization;
@@ -29,6 +30,7 @@ public sealed class SceneAudioMuxHandler : IRenderJobHandler
         IWebHostEnvironment env,
         ISceneMediaVersioningService versions,
         IMediaFileService media,
+        LocalMediaPathResolver localMediaPaths,
         TenantContext tenant,
         IConfiguration configuration,
         IRVideoProjectFinalizationService finalization)
@@ -39,6 +41,7 @@ public sealed class SceneAudioMuxHandler : IRenderJobHandler
         _env = env;
         _versions = versions;
         _media = media;
+        _localMediaPaths = localMediaPaths;
         _tenant = tenant;
         _configuration = configuration;
         _finalization = finalization;
@@ -71,20 +74,38 @@ public sealed class SceneAudioMuxHandler : IRenderJobHandler
             throw new RenderJobDeferredException("Scene video/audio is not ready for mux yet.");
         }
 
+        if (sceneVideo.VoiceAudioVersionId == sceneAudio.Id
+            && IsCompletedMuxOutput(sceneVideo))
+        {
+            return;
+        }
+
         var root = ResolveRoot(_options.CurrentValue.StorageRoot);
         var projectRoot = Path.Combine(root, project.JobFolder);
         var finalDir = Path.Combine(projectRoot, "final-scenes", scene.SceneIndex.ToString("00"));
         Directory.CreateDirectory(finalDir);
         var finalPath = Path.Combine(finalDir, "final.mp4");
         var sourceVideoPath = ResolveLocalPath(sceneVideo.SourceFilePath);
-        var audioPath = ResolveLocalPath(sceneAudio.SourceFilePath);
+        var audioPath = await ResolveSceneAudioPathAsync(sceneAudio, _localMediaPaths, _media, ct);
         if (string.IsNullOrWhiteSpace(sourceVideoPath) || !File.Exists(sourceVideoPath))
         {
             throw new InvalidOperationException("Source scene video is missing.");
         }
         if (string.IsNullOrWhiteSpace(audioPath) || !File.Exists(audioPath))
         {
-            throw new InvalidOperationException("Source scene audio is missing.");
+            var sourcePathKind = DescribeSourcePathKind(sceneAudio.SourceFilePath);
+            var publicUrlLocal = LocalMediaPathResolver.IsLocalPublicUrl(
+                sceneAudio.PublicUrl,
+                _configuration["Storage:PublicUploadBase"] ?? "/uploads");
+            _logger.LogWarning(
+                "RVIDEO_SCENE_AUDIO_LOCAL_PATH_MISSING sceneId={SceneId} audioVersionId={AudioVersionId} sourcePathKind={SourcePathKind} storageKeyPresent={StorageKeyPresent} publicUrlLocal={PublicUrlLocal}",
+                scene.Id,
+                sceneAudio.Id,
+                sourcePathKind,
+                !string.IsNullOrWhiteSpace(sceneAudio.StorageKey),
+                publicUrlLocal);
+            throw new InvalidOperationException(
+                $"Source scene audio is missing. sceneId={scene.Id}; audioVersionId={sceneAudio.Id}; sourcePathKind={sourcePathKind}; storageKeyPresent={!string.IsNullOrWhiteSpace(sceneAudio.StorageKey)}; publicUrlLocal={publicUrlLocal}");
         }
 
         await _repo.AddProjectEventAsync(project.Id, "SCENE_AUDIO_MUX_STARTED", "info",
@@ -216,6 +237,48 @@ public sealed class SceneAudioMuxHandler : IRenderJobHandler
         var uploadRoot = _options.CurrentValue.StorageRoot;
         return Path.Combine(_env.ContentRootPath, uploadRoot, objectKey.Replace('/', Path.DirectorySeparatorChar));
     }
+
+    internal static async Task<string> ResolveSceneAudioPathAsync(
+        SceneAudioVersionDto sceneAudio,
+        LocalMediaPathResolver localMediaPaths,
+        IMediaFileService media,
+        CancellationToken ct)
+    {
+        if (localMediaPaths.TryResolveExistingFile(sceneAudio.SourceFilePath, LocalMediaPathSource.SourceFilePath, out var sourcePath)
+            || localMediaPaths.TryResolveExistingFile(sceneAudio.StorageKey, LocalMediaPathSource.StorageKey, out sourcePath))
+        {
+            return sourcePath;
+        }
+
+        if (sceneAudio.ResultMediaId is Guid mediaId)
+        {
+            var mediaFile = await media.GetAsync(mediaId, ct);
+            if (localMediaPaths.TryResolveExistingFile(mediaFile?.ObjectKey, LocalMediaPathSource.StorageKey, out sourcePath)
+                || localMediaPaths.TryResolveExistingFile(mediaFile?.PublicUrl ?? mediaFile?.FileUrl, LocalMediaPathSource.PublicUrl, out sourcePath))
+            {
+                return sourcePath;
+            }
+        }
+
+        return localMediaPaths.TryResolveExistingFile(sceneAudio.PublicUrl, LocalMediaPathSource.PublicUrl, out sourcePath)
+            ? sourcePath
+            : string.Empty;
+    }
+
+    private static string DescribeSourcePathKind(string? sourceFilePath)
+        => string.IsNullOrWhiteSpace(sourceFilePath)
+            ? "missing"
+            : Path.IsPathRooted(sourceFilePath)
+                ? "absolute"
+                : "relative";
+
+    private bool IsCompletedMuxOutput(SceneVideoVersionDto sceneVideo)
+        => !string.IsNullOrWhiteSpace(sceneVideo.PublicUrl)
+           && RVideoSceneMediaFinalizerService.IsMuxOutputPath(sceneVideo.SourceFilePath)
+           && _localMediaPaths.TryResolveExistingFile(
+               sceneVideo.SourceFilePath,
+               LocalMediaPathSource.SourceFilePath,
+               out _);
 
     private string ResolveRoot(string? path)
         => Path.IsPathRooted(path) ? path! : Path.Combine(_env.ContentRootPath, path ?? string.Empty);

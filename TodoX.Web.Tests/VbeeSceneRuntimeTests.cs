@@ -1,6 +1,10 @@
 using System.Text.Json;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.FileProviders;
+using TodoX.Web.Services.ImageRender;
+using TodoX.Web.Services.Media;
 using TodoX.Web.Models;
 using TodoX.Web.Services.VideoRender;
 using Xunit;
@@ -9,6 +13,138 @@ namespace TodoX.Web.Tests;
 
 public sealed class VbeeSceneRuntimeTests
 {
+    [Fact]
+    public void LocalMediaPathResolver_UsesAbsoluteSourceFilePathWhenItExists()
+    {
+        var tempFile = Path.GetTempFileName();
+        try
+        {
+            Assert.True(LocalMediaPathResolver.TryResolveExistingFile(
+                tempFile,
+                LocalMediaPathSource.SourceFilePath,
+                AppContext.BaseDirectory,
+                "wwwroot/uploads",
+                "/uploads",
+                out var resolved));
+
+            Assert.Equal(Path.GetFullPath(tempFile), resolved);
+        }
+        finally
+        {
+            File.Delete(tempFile);
+        }
+    }
+
+    [Fact]
+    public void LocalMediaPathResolver_ResolvesRelativeSourceFilePathUnderUploadRoot()
+    {
+        var contentRoot = CreateTempContentRoot(out var audioPath);
+        try
+        {
+            Assert.True(LocalMediaPathResolver.TryResolveExistingFile(
+                "render-projects/a/b/scene-audio.mp3",
+                LocalMediaPathSource.SourceFilePath,
+                contentRoot,
+                "wwwroot/uploads",
+                "/uploads",
+                out var resolved));
+
+            Assert.Equal(audioPath, resolved);
+        }
+        finally
+        {
+            Directory.Delete(contentRoot, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task MuxAudioResolver_FallsBackToStorageKeyResultMediaAndLocalPublicUrl()
+    {
+        var contentRoot = CreateTempContentRoot(out var audioPath);
+        var resolver = CreateResolver(contentRoot);
+        var mediaId = Guid.NewGuid();
+        var media = new StubMediaFileService(new MediaFileDto
+        {
+            Id = mediaId,
+            ObjectKey = "render-projects/a/b/scene-audio.mp3",
+            PublicUrl = "/uploads/render-projects/a/b/scene-audio.mp3"
+        });
+        try
+        {
+            var fromStorageKey = await SceneAudioMuxHandler.ResolveSceneAudioPathAsync(
+                new SceneAudioVersionDto { StorageKey = "render-projects/a/b/scene-audio.mp3" },
+                resolver,
+                media,
+                CancellationToken.None);
+            var fromMedia = await SceneAudioMuxHandler.ResolveSceneAudioPathAsync(
+                new SceneAudioVersionDto { ResultMediaId = mediaId },
+                resolver,
+                media,
+                CancellationToken.None);
+            var fromPublicUrl = await SceneAudioMuxHandler.ResolveSceneAudioPathAsync(
+                new SceneAudioVersionDto { PublicUrl = "/uploads/render-projects/a/b/scene-audio.mp3" },
+                resolver,
+                media,
+                CancellationToken.None);
+
+            Assert.Equal(audioPath, fromStorageKey);
+            Assert.Equal(audioPath, fromMedia);
+            Assert.Equal(audioPath, fromPublicUrl);
+        }
+        finally
+        {
+            Directory.Delete(contentRoot, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void LocalMediaPathResolver_RejectsTraversalOutsideUploadRoot()
+    {
+        var contentRoot = CreateTempContentRoot(out _);
+        try
+        {
+            Assert.False(LocalMediaPathResolver.TryResolveExistingFile(
+                "../../secret",
+                LocalMediaPathSource.StorageKey,
+                contentRoot,
+                "wwwroot/uploads",
+                "/uploads",
+                out var resolved));
+
+            Assert.Equal(string.Empty, resolved);
+        }
+        finally
+        {
+            Directory.Delete(contentRoot, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void SceneAudioMuxHandler_ResolvesAudioBeforeReportingMissingAndNeverCallsVbee()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "SceneAudioMuxHandler.cs");
+        var handlerStart = source.IndexOf("public async Task HandleAsync", StringComparison.Ordinal);
+        var audioResolveIndex = source.IndexOf("ResolveSceneAudioPathAsync(sceneAudio", handlerStart, StringComparison.Ordinal);
+        var missingIndex = source.IndexOf("Source scene audio is missing", handlerStart, StringComparison.Ordinal);
+
+        Assert.True(audioResolveIndex >= 0);
+        Assert.True(missingIndex > audioResolveIndex);
+        Assert.DoesNotContain("IVbeeVoiceClient", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("SubmitAsync", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SceneAudioMuxHandler_SkipsRepeatedCompletedMuxOutput()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "SceneAudioMuxHandler.cs");
+        var finalizer = ReadRepoFile("Services", "VideoRender", "RVideoSceneMediaFinalizerService.cs");
+
+        Assert.Contains("sceneVideo.VoiceAudioVersionId == sceneAudio.Id", source, StringComparison.Ordinal);
+        Assert.Contains("IsCompletedMuxOutput(sceneVideo)", source, StringComparison.Ordinal);
+        Assert.Contains("LocalMediaPathResolver", finalizer, StringComparison.Ordinal);
+        Assert.Contains("TryResolveExistingFile", finalizer, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void MuxCompletion_UsesFinalPath_AndVoiceLinkage()
     {
@@ -348,14 +484,116 @@ public sealed class VbeeSceneRuntimeTests
     {
         var source = ReadRepoFile("Services", "VideoRender", "SceneAudioRenderHandler.cs");
         var pollingStart = source.IndexOf("SCENE_AUDIO_PROVIDER_POLLING", StringComparison.Ordinal);
+        var pollingEnd = source.IndexOf("var status = await _vbee.GetStatusAsync", pollingStart, StringComparison.Ordinal);
 
         Assert.True(pollingStart >= 0);
+        Assert.True(pollingEnd > pollingStart);
         Assert.Contains("MarkSceneAudioVersionSubmittedAsync(version.Id, \"vbee\", input.VoiceCode, null, requestId, ct)", source, StringComparison.Ordinal);
         Assert.Contains("var status = await _vbee.GetStatusAsync(requestId, options, ct);", source, StringComparison.Ordinal);
         Assert.Contains("ScheduleProviderPollAsync(job.Id, options.PollInterval, \"VBEE_PENDING\"", source, StringComparison.Ordinal);
-        Assert.DoesNotContain("SubmitAsync", source[pollingStart..], StringComparison.Ordinal);
+        Assert.DoesNotContain("SubmitAsync", source[pollingStart..pollingEnd], StringComparison.Ordinal);
     }
+
+    private static string CreateTempContentRoot(out string audioPath)
+    {
+        var contentRoot = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        audioPath = Path.GetFullPath(Path.Combine(
+            contentRoot,
+            "wwwroot",
+            "uploads",
+            "render-projects",
+            "a",
+            "b",
+            "scene-audio.mp3"));
+        Directory.CreateDirectory(Path.GetDirectoryName(audioPath)!);
+        File.WriteAllText(audioPath, "mp3");
+        return contentRoot;
+    }
+
+    private static LocalMediaPathResolver CreateResolver(string contentRoot)
+        => new(
+            new StubWebHostEnvironment(contentRoot),
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Storage:LocalUploadRoot"] = "wwwroot/uploads",
+                    ["Storage:PublicUploadBase"] = "/uploads"
+                })
+                .Build());
 
     private static string ReadRepoFile(params string[] parts)
         => File.ReadAllText(Path.Combine(new[] { AppContext.BaseDirectory, "..", "..", "..", "..", "TodoX.Web" }.Concat(parts).ToArray()));
+
+    private sealed class StubWebHostEnvironment : IWebHostEnvironment
+    {
+        public StubWebHostEnvironment(string contentRootPath)
+        {
+            ContentRootPath = contentRootPath;
+            WebRootPath = Path.Combine(contentRootPath, "wwwroot");
+            ContentRootFileProvider = new NullFileProvider();
+            WebRootFileProvider = new NullFileProvider();
+        }
+
+        public string ApplicationName { get; set; } = "TodoX.Web.Tests";
+        public IFileProvider ContentRootFileProvider { get; set; }
+        public string ContentRootPath { get; set; }
+        public string EnvironmentName { get; set; } = "Development";
+        public string WebRootPath { get; set; }
+        public IFileProvider WebRootFileProvider { get; set; }
+    }
+
+    private sealed class StubMediaFileService : IMediaFileService
+    {
+        private readonly MediaFileDto? _media;
+
+        public StubMediaFileService(MediaFileDto? media)
+        {
+            _media = media;
+        }
+
+        public Task<MediaFileDto?> GetAsync(Guid id, CancellationToken ct = default)
+            => Task.FromResult(_media?.Id == id ? _media : null);
+
+        public Task<MediaFileDto> SaveAsync(byte[] content, string originalFileName, string mimeType, string fileCategory, Guid? userId, Guid? customerId, Guid tenantId, CancellationToken ct = default)
+            => throw new NotSupportedException();
+
+        public Task<MediaFileDto> SaveAtObjectKeyAsync(byte[] content, string objectKey, string originalFileName, string mimeType, string fileCategory, Guid? userId, Guid? customerId, Guid tenantId, CancellationToken ct = default)
+            => throw new NotSupportedException();
+
+        public Task<MediaFileDto?> GetByObjectKeyAsync(string objectKey, CancellationToken ct = default)
+            => throw new NotSupportedException();
+
+        public Task<MediaFileDto?> GetByObjectKeyAsync(Guid tenantId, string objectKey, CancellationToken ct = default)
+            => throw new NotSupportedException();
+
+        public Task<MediaFileDto?> GetByPublicUrlAsync(string publicUrl, CancellationToken ct = default)
+            => throw new NotSupportedException();
+
+        public Task<byte[]?> ReadBytesAsync(Guid id, CancellationToken ct = default)
+            => throw new NotSupportedException();
+
+        public Task<Stream?> OpenReadAsync(Guid id, CancellationToken ct = default)
+            => throw new NotSupportedException();
+
+        public Task<MediaFileDto> ReplaceContentAsync(Guid mediaId, byte[] content, string mimeType, Guid userId, CancellationToken ct = default)
+            => throw new NotSupportedException();
+
+        public Task<bool> IsOwnedByAsync(Guid mediaId, Guid userId, CancellationToken ct = default)
+            => throw new NotSupportedException();
+
+        public Task<ReferenceImage?> BuildReferenceImageAsync(Guid mediaId, string role, Guid userId, bool enforceOwnership = true, CancellationToken ct = default)
+            => throw new NotSupportedException();
+
+        public Task<MediaFileDto> DownloadAndSaveImageAsync(string imageUrl, string fileCategory, Guid? userId, Guid? customerId, Guid tenantId, CancellationToken ct = default)
+            => throw new NotSupportedException();
+
+        public Task<MediaFileDto> DownloadAndSaveImageAtObjectKeyAsync(string imageUrl, string objectKey, string fileCategory, Guid? userId, Guid? customerId, Guid tenantId, CancellationToken ct = default)
+            => throw new NotSupportedException();
+
+        public Task<MediaFileDto> SaveBinaryAtObjectKeyAsync(byte[] content, string objectKey, string originalFileName, string mimeType, string fileCategory, Guid? userId, Guid? customerId, Guid tenantId, CancellationToken ct = default)
+            => throw new NotSupportedException();
+
+        public Task<MediaFileDto> DownloadAndSaveBinaryAtObjectKeyAsync(string fileUrl, string objectKey, string fileCategory, string expectedMimeType, Guid? userId, Guid? customerId, Guid tenantId, CancellationToken ct = default)
+            => throw new NotSupportedException();
+    }
 }
