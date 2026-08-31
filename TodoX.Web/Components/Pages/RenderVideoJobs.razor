@@ -191,6 +191,17 @@ else
                                         <MudAlert Severity="Severity.Warning" Dense="true">@warning</MudAlert>
                                     }
                                     <MudPaper Class="pa-3" Outlined="true" rounded="true">
+                                        <MudText Typo="Typo.subtitle1">Chế độ xử lý</MudText>
+                                        <MudRadioGroup T="string" @bind-Value="_executionMode">
+                                            <MudRadio T="string" Value="@RVideoExecutionModes.Manual" Color="Color.Warning">Duyệt từng bước</MudRadio>
+                                            <MudRadio T="string" Value="@RVideoExecutionModes.Auto" Color="Color.Warning">Tự động thực hiện</MudRadio>
+                                        </MudRadioGroup>
+                                        @if (_executionMode == RVideoExecutionModes.Auto)
+                                        {
+                                            <MudAlert Severity="Severity.Info" Dense="true">Server sẽ tiếp tục ảnh → video → hoàn thiện mà không cần xác nhận giữa các giai đoạn.</MudAlert>
+                                        }
+                                    </MudPaper>
+                                    <MudPaper Class="pa-3" Outlined="true" rounded="true">
                                         <MudText Typo="Typo.subtitle1">Giọng nói</MudText>
                                         <MudRadioGroup T="string" @bind-Value="_voiceMode">
                                             <MudRadio T="string" Value="@RVideoVoiceModes.None">Không sử dụng giọng</MudRadio>
@@ -263,18 +274,6 @@ else
                                                 <MudItem xs="12" sm="6"><MudCheckBox @bind-Value="_thinkScenes" Label="Suy nghĩ kịch bản" /></MudItem>
                                             </MudGrid>
                                             <MudDivider Class="my-3" />
-                                            <MudText Typo="Typo.subtitle2">Nhân vật tham chiếu</MudText>
-                                            <MudText Typo="Typo.caption">Các tùy chọn này đã được đưa lên phần chính để dễ nhìn thấy hơn.</MudText>
-                                            <MudDivider Class="my-3" />
-                                            <MudText Typo="Typo.subtitle2">Chế độ xử lý</MudText>
-                                            <MudRadioGroup T="string" @bind-Value="_executionMode">
-                                                <MudRadio T="string" Value="@RVideoExecutionModes.Manual" Color="Color.Warning">Duyệt từng bước</MudRadio>
-                                                <MudRadio T="string" Value="@RVideoExecutionModes.Auto" Color="Color.Warning">Tự động thực hiện</MudRadio>
-                                            </MudRadioGroup>
-                                            @if (_executionMode == RVideoExecutionModes.Auto)
-                                            {
-                                                <MudAlert Severity="Severity.Info" Dense="true">Server sẽ tiếp tục ảnh → video → hoàn thiện mà không cần xác nhận giữa các giai đoạn.</MudAlert>
-                                            }
                                             <MudDivider Class="my-3" />
                                             <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
                                                 <MudText Typo="Typo.subtitle2">Log kỹ thuật phân tách scene</MudText>

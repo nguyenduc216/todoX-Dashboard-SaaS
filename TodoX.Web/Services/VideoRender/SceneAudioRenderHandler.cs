@@ -286,9 +286,7 @@ public sealed class SceneAudioRenderHandler : IRenderJobHandler
         VbeeOptions? options,
         CancellationToken ct)
     {
-        if (version.CreatedAt > DateTimeOffset.UtcNow.AddMinutes(-30)
-            || string.IsNullOrWhiteSpace(version.ProviderTaskId)
-            || HasVbeeRecoveryMarker(version.RenderConfigJson))
+        if (!IsEligibleForVbeeRecovery(version, DateTimeOffset.UtcNow))
         {
             return false;
         }
@@ -364,6 +362,12 @@ public sealed class SceneAudioRenderHandler : IRenderJobHandler
 
     private static bool IsHttp400(InvalidOperationException ex)
         => ex.Message.Contains("HTTP 400", StringComparison.OrdinalIgnoreCase);
+
+    internal static bool IsEligibleForVbeeRecovery(SceneAudioVersionDto version, DateTimeOffset utcNow)
+        => version.SubmittedAt is DateTimeOffset submittedAt
+           && submittedAt <= utcNow.AddMinutes(-30)
+           && !string.IsNullOrWhiteSpace(version.ProviderTaskId)
+           && !HasVbeeRecoveryMarker(version.RenderConfigJson);
 
     private static bool HasVbeeRecoveryMarker(string? renderConfigJson)
         => !string.IsNullOrWhiteSpace(renderConfigJson)

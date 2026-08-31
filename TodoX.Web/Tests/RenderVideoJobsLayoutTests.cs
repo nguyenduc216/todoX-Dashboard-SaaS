@@ -81,6 +81,24 @@ public class RenderVideoJobsLayoutTests
         Assert.Contains("IsFinalMergeActive", source);
     }
 
+    [Fact]
+    public void ExecutionMode_IsVisibleBeforeAdvancedAndNotInsideAdvanced()
+    {
+        var source = File.ReadAllText(RazorPath);
+        var advancedIndex = source.IndexOf("<MudExpansionPanel Text=\"Cài đặt nâng cao\">", StringComparison.Ordinal);
+        var executionIndex = source.IndexOf("<MudText Typo=\"Typo.subtitle1\">Chế độ xử lý</MudText>", StringComparison.Ordinal);
+        var advancedBlock = source[advancedIndex..];
+
+        Assert.True(advancedIndex >= 0);
+        Assert.True(executionIndex >= 0);
+        Assert.True(executionIndex < advancedIndex);
+        Assert.DoesNotContain("Chế độ xử lý", advancedBlock);
+        Assert.DoesNotContain("Các tùy chọn này đã được đưa lên phần chính", advancedBlock);
+        Assert.Contains("@bind-Value=\"_executionMode\"", source);
+        Assert.Contains("RVideoExecutionModes.Manual", source);
+        Assert.Contains("RVideoExecutionModes.Auto", source);
+    }
+
     private static string Between(string source, string startText, string endText)
     {
         var start = source.IndexOf(startText, StringComparison.Ordinal);

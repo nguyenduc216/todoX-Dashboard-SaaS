@@ -360,14 +360,57 @@ public sealed class RVideoRuntimeSqlTests
     {
         var source = ReadRepoFile("Services", "VideoRender", "SceneAudioRenderHandler.cs");
         var recovery = ExtractMethodBlock(source, "private async Task<bool> TryRecoverStaleVbeeRequestAsync");
+        var eligibility = ExtractMethodBlock(source, "internal static bool IsEligibleForVbeeRecovery");
 
         var markerIndex = recovery.IndexOf("UpdateSceneAudioVersionRenderConfigAsync", StringComparison.Ordinal);
         var submitIndex = recovery.IndexOf("_vbee.SubmitAsync", StringComparison.Ordinal);
 
         Assert.True(markerIndex >= 0);
         Assert.True(submitIndex > markerIndex);
-        Assert.Contains("HasVbeeRecoveryMarker(version.RenderConfigJson)", recovery);
+        Assert.Contains("HasVbeeRecoveryMarker(version.RenderConfigJson)", eligibility);
         Assert.Contains("SCENE_AUDIO_VBEE_RECOVERY_FAILED", recovery);
+    }
+
+    [Fact]
+    public void VbeeRecoveryUsesProviderSubmittedAtInsteadOfAudioVersionCreatedAt()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var oldVersionRecentProviderRequest = new TodoX.Web.Services.VideoRender.SceneAudioVersionDto
+        {
+            CreatedAt = now.AddHours(-10),
+            SubmittedAt = now.AddMinutes(-5),
+            ProviderTaskId = "recent-vbee-request"
+        };
+        var oldVersionStaleProviderRequest = new TodoX.Web.Services.VideoRender.SceneAudioVersionDto
+        {
+            CreatedAt = now.AddHours(-10),
+            SubmittedAt = now.AddMinutes(-31),
+            ProviderTaskId = "stale-vbee-request"
+        };
+        var recoveryAlreadyAttempted = new TodoX.Web.Services.VideoRender.SceneAudioVersionDto
+        {
+            CreatedAt = now.AddHours(-10),
+            SubmittedAt = now.AddMinutes(-31),
+            ProviderTaskId = "stale-vbee-request",
+            RenderConfigJson = "{\"vbee_recovery_attempted\":true}"
+        };
+
+        Assert.False(TodoX.Web.Services.VideoRender.SceneAudioRenderHandler.IsEligibleForVbeeRecovery(oldVersionRecentProviderRequest, now));
+        Assert.True(TodoX.Web.Services.VideoRender.SceneAudioRenderHandler.IsEligibleForVbeeRecovery(oldVersionStaleProviderRequest, now));
+        Assert.False(TodoX.Web.Services.VideoRender.SceneAudioRenderHandler.IsEligibleForVbeeRecovery(recoveryAlreadyAttempted, now));
+    }
+
+    [Fact]
+    public void SceneAudioVersionSqlHydratesAndRefreshesProviderSubmittedAt()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "SceneMediaVersioningService.cs");
+        var select = ExtractConstBlock(source, "SelectSceneAudioVersionSql");
+        var markSubmitted = ExtractMethodBlock(source, "public async Task MarkSceneAudioVersionSubmittedAsync");
+
+        Assert.Contains("submitted_at AS SubmittedAt", select);
+        Assert.Contains("public DateTimeOffset? SubmittedAt", source);
+        Assert.Contains("submitted_at=now()", markSubmitted);
+        Assert.DoesNotContain("submitted_at=COALESCE(submitted_at, now())", markSubmitted);
     }
 
     [Fact]

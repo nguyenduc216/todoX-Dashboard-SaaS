@@ -231,6 +231,7 @@ public sealed class SceneAudioVersionDto
     public string? CostSource { get; set; }
     public string? MimeType { get; set; }
     public string? ErrorMessage { get; set; }
+    public DateTimeOffset? SubmittedAt { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
 }
 
@@ -1260,7 +1261,7 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
                    requested_model=COALESCE(requested_model, @modelName),
                    actual_model=COALESCE(@modelName, actual_model),
                    provider_task_id=@providerTaskId,
-                   submitted_at=COALESCE(submitted_at, now()),
+                   submitted_at=now(),
                    updated_at=now()
              WHERE id=@versionId AND tenant_id=@tenant;
             """,
@@ -2248,7 +2249,7 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
                provider_task_id AS ProviderTaskId, billing_logical_request_id AS BillingLogicalRequestId,
                estimated_usd AS EstimatedUsd, actual_usd AS ActualUsd, charged_points AS ChargedPoints,
                refunded_points AS RefundedPoints, cost_source AS CostSource, mime_type AS MimeType,
-               error_message AS ErrorMessage, created_at AS CreatedAt
+               error_message AS ErrorMessage, submitted_at AS SubmittedAt, created_at AS CreatedAt
           FROM video_render.scene_audio_versions
         """;
 
