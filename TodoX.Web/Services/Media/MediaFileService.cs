@@ -511,7 +511,7 @@ public sealed class MediaFileService : IMediaFileService
 
     private async Task<(byte[] Bytes, string ContentType, string FileName, Uri Uri)> DownloadImageBytesAsync(string imageUrl, CancellationToken ct)
     {
-        var uri = ValidatePublicImageUri(imageUrl);
+        var uri = ValidatePublicMediaUri(imageUrl);
         _logger.LogInformation("MEDIA_IMAGE_URL_DOWNLOAD_START url={Url}", uri);
 
         var client = _httpClientFactory.CreateClient();
@@ -576,11 +576,7 @@ public sealed class MediaFileService : IMediaFileService
         Guid tenantId,
         CancellationToken ct)
     {
-        if (!Uri.TryCreate(fileUrl, UriKind.Absolute, out var uri)
-            || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
-        {
-            throw new InvalidOperationException("URL media dau vao phai la dia chi http/https hop le.");
-        }
+        var uri = ValidatePublicMediaUri(fileUrl);
 
         _logger.LogInformation("MEDIA_BINARY_URL_DOWNLOAD_START initialHost={InitialHost} initialPathShape={InitialPathShape}",
             uri.Host, DescribePathShape(uri));
@@ -614,7 +610,9 @@ public sealed class MediaFileService : IMediaFileService
                     break;
                 }
 
-                currentUri = location.IsAbsoluteUri ? location : new Uri(currentUri, location);
+                var nextUri = location.IsAbsoluteUri ? location : new Uri(currentUri, location);
+                ValidatePublicMediaUri(nextUri.ToString());
+                currentUri = nextUri;
                 requestUri = currentUri.ToString();
             }
 
@@ -1061,9 +1059,12 @@ public sealed class MediaFileService : IMediaFileService
         }
     }
 
-    private static Uri ValidatePublicImageUri(string imageUrl)
+    private static Uri ValidatePublicMediaUri(string mediaUrl)
+        => ValidatePublicMediaUri(mediaUrl, Dns.GetHostAddresses);
+
+    private static Uri ValidatePublicMediaUri(string mediaUrl, Func<string, IPAddress[]> resolveHostAddresses)
     {
-        if (!Uri.TryCreate(imageUrl.Trim(), UriKind.Absolute, out var uri)
+        if (!Uri.TryCreate(mediaUrl.Trim(), UriKind.Absolute, out var uri)
             || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
         {
             throw new InvalidOperationException("URL media dau ra phai la dia chi http/https hop le.");
@@ -1071,13 +1072,15 @@ public sealed class MediaFileService : IMediaFileService
 
         if (uri.IsLoopback || uri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase))
         {
-            throw new InvalidOperationException("Khong cho phep tai anh tu localhost.");
+            throw new InvalidOperationException("Khong cho phep tai media tu localhost.");
         }
 
-        var addresses = Dns.GetHostAddresses(uri.Host);
+        var addresses = IPAddress.TryParse(uri.Host, out var literalAddress)
+            ? [literalAddress]
+            : resolveHostAddresses(uri.Host);
         if (addresses.Length == 0 || addresses.Any(IsPrivateAddress))
         {
-            throw new InvalidOperationException("Khong cho phep tai anh tu IP noi bo/private.");
+            throw new InvalidOperationException("Khong cho phep tai media tu IP noi bo/private.");
         }
 
         return uri;

@@ -1,4 +1,6 @@
 using System.Reflection;
+using System.Runtime.ExceptionServices;
+using System.Net;
 using System.Text;
 using Xunit;
 using TodoX.Web.Services.Media;
@@ -106,8 +108,60 @@ public sealed class MediaFileServiceAudioRegressionTests
         Assert.DoesNotContain("request.Headers.Authorization", download, StringComparison.Ordinal);
         Assert.DoesNotContain("request.Headers.Accept", download, StringComparison.Ordinal);
         Assert.Contains("HttpStatusCode.RedirectKeepVerb", download, StringComparison.Ordinal);
-        Assert.Contains("currentUri = location.IsAbsoluteUri ? location : new Uri(currentUri, location);", download, StringComparison.Ordinal);
+        Assert.Contains("var nextUri = location.IsAbsoluteUri ? location : new Uri(currentUri, location);", download, StringComparison.Ordinal);
+        Assert.Contains("ValidatePublicMediaUri(nextUri.ToString());", download, StringComparison.Ordinal);
+        Assert.Contains("currentUri = nextUri;", download, StringComparison.Ordinal);
         Assert.Contains("CreateClient(\"MediaBinaryDownload\")", download, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PublicVbeeUrlIsAllowedByMediaValidator()
+    {
+        var uri = InvokeValidatePublicMediaUri("https://vbee.vn/s/request-id/asset", _ => new[] { IPAddress.Parse("93.184.216.34") });
+
+        Assert.Equal("https", uri.Scheme);
+        Assert.Equal("vbee.vn", uri.Host);
+    }
+
+    [Theory]
+    [InlineData("http://localhost/audio.mp3")]
+    [InlineData("http://127.0.0.1/audio.mp3")]
+    [InlineData("http://10.0.0.1/audio.mp3")]
+    [InlineData("http://192.168.1.10/audio.mp3")]
+    public void PrivateNetworkMediaUrlsAreBlocked(string url)
+    {
+        Assert.Throws<InvalidOperationException>(() => InvokeValidatePublicMediaUri(url, _ => new[] { IPAddress.Parse("93.184.216.34") }));
+    }
+
+    [Fact]
+    public void PublicRedirectToPrivateMediaUrlIsBlocked()
+    {
+        var current = InvokeValidatePublicMediaUri("https://vbee.vn/s/request-id/start", _ => new[] { IPAddress.Parse("93.184.216.34") });
+        var next = new Uri(current, "http://10.0.0.2/audio.mp3");
+
+        Assert.Throws<InvalidOperationException>(() => InvokeValidatePublicMediaUri(next.ToString(), _ => new[] { IPAddress.Parse("93.184.216.34") }));
+    }
+
+    [Fact]
+    public void PublicRedirectToPublicMediaUrlIsAllowed()
+    {
+        var current = InvokeValidatePublicMediaUri("https://vbee.vn/s/request-id/start", _ => new[] { IPAddress.Parse("93.184.216.34") });
+        var next = new Uri(current, "https://cdn.example.com/audio.mp3");
+
+        var validated = InvokeValidatePublicMediaUri(next.ToString(), host => host == "cdn.example.com"
+            ? new[] { IPAddress.Parse("93.184.216.35") }
+            : new[] { IPAddress.Parse("93.184.216.34") });
+
+        Assert.Equal(next, validated);
+    }
+
+    [Fact]
+    public void ValidatorMethodUsesGenericMediaName()
+    {
+        var source = ReadRepoFile("Services", "Media", "MediaFileService.cs");
+
+        Assert.Contains("ValidatePublicMediaUri", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("ValidatePublicImageUri(", source, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -142,7 +196,10 @@ public sealed class MediaFileServiceAudioRegressionTests
 
     private static T InvokePrivateStatic<T>(string methodName, params object?[] args)
     {
-        var parameterTypes = args.Select(arg => arg?.GetType() ?? typeof(object)).ToArray();
+        var parameterTypes = args.Select(arg =>
+            arg is null ? typeof(object)
+            : arg is Func<string, IPAddress[]> ? typeof(Func<string, IPAddress[]>)
+            : arg.GetType()).ToArray();
         var method = typeof(MediaFileService).GetMethod(
             methodName,
             BindingFlags.NonPublic | BindingFlags.Static,
@@ -150,8 +207,19 @@ public sealed class MediaFileServiceAudioRegressionTests
             types: parameterTypes,
             modifiers: null);
         Assert.NotNull(method);
-        return (T)method!.Invoke(null, args)!;
+        try
+        {
+            return (T)method!.Invoke(null, args)!;
+        }
+        catch (TargetInvocationException ex) when (ex.InnerException is not null)
+        {
+            ExceptionDispatchInfo.Capture(ex.InnerException).Throw();
+            throw;
+        }
     }
+
+    private static Uri InvokeValidatePublicMediaUri(string url, Func<string, IPAddress[]> resolver)
+        => InvokePrivateStatic<Uri>("ValidatePublicMediaUri", url, resolver);
 
     private static string ReadRepoFile(params string[] parts)
         => File.ReadAllText(Path.Combine(new[] { AppContext.BaseDirectory, "..", "..", "..", ".." }.Concat(parts).ToArray()));
