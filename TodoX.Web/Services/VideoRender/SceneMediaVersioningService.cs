@@ -791,6 +791,11 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
 
     public async Task<SceneVideoVersionDto> CreateQueuedSceneVideoVersionAsync(SceneVideoVersionCreateRequest request, CancellationToken ct = default)
     {
+        if (request.SourceImageVersionId == Guid.Empty)
+        {
+            throw new InvalidOperationException("RVIDEO_VIDEO_SOURCE_IMAGE_VERSION_GUID_EMPTY");
+        }
+
         await _tenant.EnsureLoadedAsync(ct);
         using var conn = await _factory.OpenAsync(ct);
         using var tx = conn.BeginTransaction();

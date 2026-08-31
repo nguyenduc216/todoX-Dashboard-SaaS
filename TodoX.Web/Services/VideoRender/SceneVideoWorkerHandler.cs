@@ -16,6 +16,7 @@ public sealed class SceneVideoRenderWorkItemInput
     public Guid? UserId { get; set; }
     public Guid? CustomerId { get; set; }
     public AiBillingTrustedPayerContext? TrustedPayerContext { get; set; }
+    public Guid? SourceImageVersionId { get; set; }
     public Guid? SelectedSourceImageVersionId { get; set; }
     public string? SourceImageUrl { get; set; }
     public string? SourceImageObjectKey { get; set; }
@@ -192,13 +193,19 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         CancellationToken ct)
     {
         var sourceVersion = await ResolveSourceImageVersionAsync(
-                scene.Id,
-                input.SelectedSourceImageVersionId,
-                input.UseSharedReferenceImage,
-                input.SourceImageUrl,
-                input.SourceImageObjectKey,
-                ct)
-            ?? throw new InvalidOperationException("SCENE_VIDEO_SOURCE_IMAGE_UNAVAILABLE");
+            scene.Id,
+            input.SourceImageVersionId ?? input.SelectedSourceImageVersionId,
+            input.UseSharedReferenceImage,
+            input.SourceImageUrl,
+            input.SourceImageObjectKey,
+            ct);
+        if (sourceVersion is null)
+        {
+            await FailAsync(project.Id, scene, Guid.Empty, "RVIDEO_VIDEO_SELECTED_IMAGE_VERSION_REQUIRED",
+                "Selected completed image version is required before rendering scene video.", ct);
+            throw new RenderJobTerminalFailureException("RVIDEO_VIDEO_SELECTED_IMAGE_VERSION_REQUIRED");
+        }
+        var sourceImageVersionId = input.UseSharedReferenceImage ? (Guid?)null : sourceVersion.Id;
 
         var validation = _promptValidator.Validate(
             input.VideoPrompt,
@@ -245,7 +252,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                 ?? await _versions.CreateQueuedSceneVideoVersionAsync(new SceneVideoVersionCreateRequest(
                     input.ProjectId,
                     input.SceneId,
-                    sourceVersion.Id,
+                    sourceImageVersionId,
                     input.UserId,
                     input.CustomerId,
                     job.Id,
@@ -957,14 +964,20 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
             };
         }
 
-        if (selectedVersionId is null || selectedVersionId == Guid.Empty)
+        var selected = await _versions.GetSelectedImageVersionAsync(sceneId, ct);
+        if (IsCompletedSelectedImageVersion(selected))
         {
-            return await _versions.GetSelectedImageVersionAsync(sceneId, ct);
+            return selected;
         }
 
-        var versions = await _versions.ListImageVersionsAsync(sceneId, 0, 100, ct);
-        return versions.FirstOrDefault(x => x.Id == selectedVersionId.Value && x.Status.Equals("completed", StringComparison.OrdinalIgnoreCase));
+        return null;
     }
+
+    private static bool IsCompletedSelectedImageVersion(SceneImageVersionDto? version)
+        => version is not null
+           && version.Id != Guid.Empty
+           && version.IsSelected
+           && version.Status.Equals("completed", StringComparison.OrdinalIgnoreCase);
 
     private async Task<MediaFileDto?> ResolveSourceImageMediaAsync(SceneImageVersionDto version, CancellationToken ct)
     {

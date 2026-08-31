@@ -223,6 +223,18 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
         var selectedImage = input.UseSharedReferenceImage
             ? null
             : await _versions.GetSelectedImageVersionAsync(scene.Id, ct);
+        if (!input.UseSharedReferenceImage && !IsCompletedSelectedImageVersion(selectedImage))
+        {
+            await MarkSceneValidationFailedAsync(project.Id, scene, new VideoPromptValidationResult(
+                false,
+                route.ModelName ?? string.Empty,
+                scene.VideoPrompt?.Trim() ?? string.Empty,
+                VideoPromptValidator.CountUnicodeScalars(scene.VideoPrompt?.Trim() ?? string.Empty),
+                VideoPromptValidator.ResolveMaxPromptCharacters(route.ModelName, route.CapabilityConfigJson),
+                "RVIDEO_VIDEO_SELECTED_IMAGE_VERSION_REQUIRED",
+                $"Scene {scene.SceneIndex:00}: selected completed image version is required before render video."), ct);
+            return false;
+        }
         if (input.UseSharedReferenceImage
             && string.IsNullOrWhiteSpace(input.SharedReferenceImageUrl)
             && string.IsNullOrWhiteSpace(input.SharedReferenceImageObjectKey))
@@ -311,6 +323,7 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
             CustomerId = input.CustomerId,
             TrustedPayerContext = input.TrustedPayerContext,
             UseSharedReferenceImage = input.UseSharedReferenceImage,
+            SourceImageVersionId = sourceImageVersionId,
             SelectedSourceImageVersionId = sourceImageVersionId,
             SourceImageUrl = sourceImageUrl,
             SourceImageObjectKey = sourceImageObjectKey,
@@ -411,4 +424,10 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
 
     public static string BuildLogicalRequestId(Guid parentJobId, long sceneId)
         => $"render_job_scene_video-job-{parentJobId:N}-scene-{sceneId}";
+
+    private static bool IsCompletedSelectedImageVersion(SceneImageVersionDto? version)
+        => version is not null
+           && version.Id != Guid.Empty
+           && version.IsSelected
+           && version.Status.Equals("completed", StringComparison.OrdinalIgnoreCase);
 }

@@ -1,9 +1,12 @@
 using System.Reflection;
+using System.Runtime.Serialization;
 using System.Text.Json;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using TodoX.Web.Services.AiCharacters;
+using TodoX.Web.Data;
 using TodoX.Web.Models;
+using TodoX.Web.Services;
 using TodoX.Web.Services.AiProviders;
 using TodoX.Web.Services.Render;
 using TodoX.Web.Services.VideoRender;
@@ -90,6 +93,139 @@ public sealed class RVideoVideoHotfixTests
         using var doc = JsonDocument.Parse(json);
         Assert.Equal("scene-base-fallback-1", doc.RootElement.GetProperty("logicalRequestId").GetString());
         Assert.Equal("task-123", doc.RootElement.GetProperty("providerTaskId").GetString());
+    }
+
+    [Fact]
+    public void SelectedCompletedImageVersionIsAcceptedAndGuidEmptyIsRejected()
+    {
+        var method = typeof(SceneVideoRenderHandler).GetMethod("IsCompletedSelectedImageVersion", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        Assert.True((bool)method!.Invoke(null, new object[]
+        {
+            new SceneImageVersionDto
+            {
+                Id = Guid.NewGuid(),
+                IsSelected = true,
+                Status = "completed"
+            }
+        })!);
+        Assert.False((bool)method.Invoke(null, new object[]
+        {
+            new SceneImageVersionDto
+            {
+                Id = Guid.Empty,
+                IsSelected = true,
+                Status = "completed"
+            }
+        })!);
+        Assert.False((bool)method.Invoke(null, new object[]
+        {
+            new SceneImageVersionDto
+            {
+                Id = Guid.NewGuid(),
+                IsSelected = true,
+                Status = "processing"
+            }
+        })!);
+    }
+
+    [Fact]
+    public void SceneVideoWorkItemInputSerializesSourceImageVersionIdContract()
+    {
+        var sourceImageVersionId = Guid.Parse("70a7d49f-62b8-402a-8cc7-9b743af0ecda");
+        var json = JsonSerializer.Serialize(new SceneVideoRenderWorkItemInput
+        {
+            SourceImageVersionId = sourceImageVersionId,
+            SelectedSourceImageVersionId = sourceImageVersionId
+        }, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+
+        using var doc = JsonDocument.Parse(json);
+        Assert.Equal(sourceImageVersionId, doc.RootElement.GetProperty("sourceImageVersionId").GetGuid());
+        Assert.Equal(sourceImageVersionId, doc.RootElement.GetProperty("selectedSourceImageVersionId").GetGuid());
+    }
+
+    [Fact]
+    public async Task WorkerFallsBackToCurrentSelectedCompletedImageVersion()
+    {
+        var worker = CreateWorker(new SceneImageVersionDto
+        {
+            Id = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+            IsSelected = true,
+            Status = "completed",
+            PublicUrl = "https://example.test/image.png",
+            StorageKey = "scene/image.png"
+        });
+
+        var method = typeof(SceneVideoWorkerHandler).GetMethod("ResolveSourceImageVersionAsync", BindingFlags.NonPublic | BindingFlags.Instance);
+        Assert.NotNull(method);
+
+        var task = (Task<SceneImageVersionDto?>)method!.Invoke(worker, new object?[]
+        {
+            7L,
+            null,
+            false,
+            null,
+            null,
+            CancellationToken.None
+        })!;
+
+        var version = await task;
+        Assert.NotNull(version);
+        Assert.Equal(Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"), version!.Id);
+        Assert.Equal("completed", version.Status);
+    }
+
+    [Fact]
+    public async Task WorkerRejectsNonCompletedSelectedImageVersion()
+    {
+        var worker = CreateWorker(new SceneImageVersionDto
+        {
+            Id = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
+            IsSelected = true,
+            Status = "processing",
+            PublicUrl = "https://example.test/image.png",
+            StorageKey = "scene/image.png"
+        });
+
+        var method = typeof(SceneVideoWorkerHandler).GetMethod("ResolveSourceImageVersionAsync", BindingFlags.NonPublic | BindingFlags.Instance);
+        Assert.NotNull(method);
+
+        var task = (Task<SceneImageVersionDto?>)method!.Invoke(worker, new object?[]
+        {
+            7L,
+            null,
+            false,
+            null,
+            null,
+            CancellationToken.None
+        })!;
+
+        var version = await task;
+        Assert.Null(version);
+    }
+
+    [Fact]
+    public async Task SceneVideoVersionCreateRejectsGuidEmptySourceImageVersionId()
+    {
+        var service = CreateSceneMediaVersioningService();
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => service.CreateQueuedSceneVideoVersionAsync(
+            new SceneVideoVersionCreateRequest(
+                22,
+                120,
+                Guid.Empty,
+                null,
+                null,
+                null,
+                "logical-request",
+                null,
+                null,
+                new { sceneId = 120 },
+                new { mode = "test" }),
+            CancellationToken.None));
+
+        Assert.Equal("RVIDEO_VIDEO_SOURCE_IMAGE_VERSION_GUID_EMPTY", ex.Message);
     }
 
     [Fact]
@@ -205,6 +341,36 @@ public sealed class RVideoVideoHotfixTests
             }).Build(),
             NullLogger<Gommo79AiImageService>.Instance);
 
+    private static SceneVideoWorkerHandler CreateWorker(SceneImageVersionDto selectedImageVersion)
+    {
+#pragma warning disable SYSLIB0050
+        var handler = (SceneVideoWorkerHandler)FormatterServices.GetUninitializedObject(typeof(SceneVideoWorkerHandler));
+#pragma warning restore SYSLIB0050
+        var versionsProxy = DispatchProxy.Create<ISceneMediaVersioningService, SceneMediaVersioningServiceProxy>();
+        ((SceneMediaVersioningServiceProxy)(object)versionsProxy).SelectedImageVersion = selectedImageVersion;
+
+        typeof(SceneVideoWorkerHandler)
+            .GetField("_versions", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .SetValue(handler, versionsProxy);
+
+        return handler;
+    }
+
+    private static SceneMediaVersioningService CreateSceneMediaVersioningService()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["ConnectionStrings:TodoXSaaS"] = "Host=127.0.0.1;Database=todox_test;Username=test;Password=test",
+                ["TodoX:TenantId"] = "11111111-1111-1111-1111-111111111111"
+            })
+            .Build();
+
+        return new SceneMediaVersioningService(
+            new TodoXConnectionFactory(configuration),
+            new TenantContext(new TodoXConnectionFactory(configuration), configuration));
+    }
+
     private sealed class StaticCredentialResolver : IProviderCredentialResolver
     {
         public Task<ResolvedProviderCredential> ResolveAsync(string providerCode, string credentialRole, CancellationToken ct = default)
@@ -247,5 +413,20 @@ public sealed class RVideoVideoHotfixTests
 
         public Task<Ai79TaskStatusResult> GetStatusAsync(Ai79TaskStatusRequest request, CancellationToken ct = default)
             => throw new NotSupportedException();
+    }
+
+    public class SceneMediaVersioningServiceProxy : DispatchProxy
+    {
+        public SceneImageVersionDto? SelectedImageVersion { get; set; }
+
+        protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
+        {
+            if (targetMethod?.Name == nameof(ISceneMediaVersioningService.GetSelectedImageVersionAsync))
+            {
+                return Task.FromResult(SelectedImageVersion);
+            }
+
+            throw new NotSupportedException(targetMethod?.Name);
+        }
     }
 }
