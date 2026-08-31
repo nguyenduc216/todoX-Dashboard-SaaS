@@ -884,22 +884,70 @@ public sealed class MediaFileService : IMediaFileService
     {
         if (mimeType is "audio/mpeg" or "audio/mp3")
         {
-            if (bytes.Length >= 3 && bytes[..3].SequenceEqual("ID3"u8))
+            return LooksLikeMp3(bytes);
+        }
+
+        if (mimeType is "audio/wav" or "audio/x-wav")
+        {
+            return LooksLikeWav(bytes);
+        }
+
+        if (mimeType is "audio/mp4" or "audio/m4a")
+        {
+            return LooksLikeMp4Audio(bytes);
+        }
+
+        return false;
+    }
+
+    private static bool LooksLikeWav(ReadOnlySpan<byte> bytes)
+        => bytes.Length >= 12
+           && bytes[..4].SequenceEqual("RIFF"u8)
+           && bytes.Slice(8, 4).SequenceEqual("WAVE"u8);
+
+    private static bool LooksLikeMp3(ReadOnlySpan<byte> bytes)
+    {
+        if (bytes.Length >= 3 && bytes[..3].SequenceEqual("ID3"u8))
+        {
+            return true;
+        }
+
+        for (var i = 0; i <= bytes.Length - 4; i++)
+        {
+            var header = BinaryPrimitives.ReadUInt32BigEndian(bytes[i..]);
+            if ((header & 0xFFE00000) != 0xFFE00000
+                || ((header >> 17) & 0b11) == 0
+                || ((header >> 12) & 0b1111) is 0 or 15
+                || ((header >> 10) & 0b11) == 3)
             {
-                return true;
+                continue;
             }
 
-            for (var i = 0; i <= bytes.Length - 4; i++)
-            {
-                var header = BinaryPrimitives.ReadUInt32BigEndian(bytes[i..]);
-                if ((header & 0xFFE00000) != 0xFFE00000
-                    || ((header >> 17) & 0b11) == 0
-                    || ((header >> 12) & 0b1111) is 0 or 15
-                    || ((header >> 10) & 0b11) == 3)
-                {
-                    continue;
-                }
+            return true;
+        }
 
+        return false;
+    }
+
+    private static bool LooksLikeMp4Audio(ReadOnlySpan<byte> bytes)
+    {
+        if (bytes.Length < 12 || !bytes.Slice(4, 4).SequenceEqual("ftyp"u8))
+        {
+            return false;
+        }
+
+        for (var offset = 8; offset + 4 <= Math.Min(bytes.Length, 64); offset += 4)
+        {
+            var brand = bytes.Slice(offset, 4);
+            if (brand.SequenceEqual("isom"u8)
+                || brand.SequenceEqual("iso2"u8)
+                || brand.SequenceEqual("mp41"u8)
+                || brand.SequenceEqual("mp42"u8)
+                || brand.SequenceEqual("m4a "u8)
+                || brand.SequenceEqual("M4A "u8)
+                || brand.SequenceEqual("M4B "u8)
+                || brand.SequenceEqual("qt  "u8))
+            {
                 return true;
             }
         }

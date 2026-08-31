@@ -8,27 +8,54 @@ namespace TodoX.Web.Tests;
 public sealed class MediaFileServiceAudioRegressionTests
 {
     [Fact]
-    public void AudioMpegContentTypeIsAccepted()
-    {
-        var mime = InvokePrivateStatic<string>("ResolveDownloadedBinaryMime", "audio/mpeg", "audio/mpeg", "scene-audio.mp3");
-        var payload = Encoding.ASCII.GetBytes("ID3\0\0\0\0\0\0\0\0");
-
-        Assert.Equal("audio/mpeg", mime);
-        Assert.True(InvokePrivateStatic<bool>("LooksLikeAudio", payload, mime));
-    }
-
-    [Fact]
-    public void OctetStreamMp3PayloadIsAcceptedButHtmlAndJsonAreRejected()
+    public void OctetStreamMp3PayloadIsAccepted()
     {
         var mime = InvokePrivateStatic<string>("ResolveDownloadedBinaryMime", "audio/mpeg", "application/octet-stream", "scene-audio.mp3");
         var mp3Payload = Encoding.ASCII.GetBytes("ID3\0\0\0\0\0\0\0\0");
-        var htmlPayload = Encoding.UTF8.GetBytes("<html><body>error</body></html>");
-        var jsonPayload = Encoding.UTF8.GetBytes("{\"error\":\"nope\"}");
 
         Assert.Equal("audio/mpeg", mime);
         Assert.True(InvokePrivateStatic<bool>("LooksLikeAudio", mp3Payload, mime));
-        Assert.False(InvokePrivateStatic<bool>("LooksLikeAudio", htmlPayload, mime));
-        Assert.False(InvokePrivateStatic<bool>("LooksLikeAudio", jsonPayload, mime));
+    }
+
+    [Fact]
+    public void WavPayloadIsAccepted()
+    {
+        var mime = InvokePrivateStatic<string>("ResolveDownloadedBinaryMime", "audio/wav", "audio/wav", "scene-audio.wav");
+        var wavPayload = Encoding.ASCII.GetBytes("RIFF\x24\0\0\0WAVEfmt ");
+
+        Assert.Equal("audio/wav", mime);
+        Assert.True(InvokePrivateStatic<bool>("LooksLikeAudio", wavPayload, mime));
+    }
+
+    [Theory]
+    [InlineData("audio/mp4")]
+    [InlineData("audio/m4a")]
+    public void M4AAndAudioMp4PayloadsAreAccepted(string expectedMime)
+    {
+        var mime = InvokePrivateStatic<string>("ResolveDownloadedBinaryMime", expectedMime, expectedMime, "scene-audio.m4a");
+        var m4aPayload = new byte[]
+        {
+            0x00, 0x00, 0x00, 0x20,
+            (byte)'f', (byte)'t', (byte)'y', (byte)'p',
+            (byte)'M', (byte)'4', (byte)'A', (byte)' ',
+            0x00, 0x00, 0x00, 0x00,
+            (byte)'i', (byte)'s', (byte)'o', (byte)'m'
+        };
+
+        Assert.Equal(expectedMime, mime);
+        Assert.True(InvokePrivateStatic<bool>("LooksLikeAudio", m4aPayload, mime));
+    }
+
+    [Fact]
+    public void HtmlAndJsonPayloadsAreRejectedAsAudio()
+    {
+        var htmlPayload = Encoding.UTF8.GetBytes("<html><body>error</body></html>");
+        var jsonPayload = Encoding.UTF8.GetBytes("{\"error\":\"nope\"}");
+
+        Assert.False(InvokePrivateStatic<bool>("LooksLikeAudio", htmlPayload, "audio/mpeg"));
+        Assert.False(InvokePrivateStatic<bool>("LooksLikeAudio", jsonPayload, "audio/mpeg"));
+        Assert.False(InvokePrivateStatic<bool>("LooksLikeAudio", htmlPayload, "audio/wav"));
+        Assert.False(InvokePrivateStatic<bool>("LooksLikeAudio", jsonPayload, "audio/mp4"));
     }
 
     [Fact]
