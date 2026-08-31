@@ -97,8 +97,7 @@ else
                                             @if (_uploadedCharacter is not null)
                                             {
                                                 <MudPaper Class="pa-3" Outlined="true" rounded="true">
-                                                    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
-                                                        <MudText>@_uploadedCharacter.FileName</MudText>
+                                                    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.FlexEnd">
                                                         <MudIconButton Icon="@Icons.Material.Filled.Delete" OnClick="RemoveUploadedCharacterAsync" />
                                                     </MudStack>
                                                     <img src="@_uploadedCharacter.FileUrl" style="max-width:100%;max-height:160px;object-fit:contain" />
@@ -388,10 +387,6 @@ else
                                                                   OnRetry="@(() => RerenderSceneImageAsync(scene))"
                                                                   OnClick="@(() => OpenScenePreview(scene))" />
                                                 <MudText Typo="Typo.caption" Color="Color.Secondary">@ProjectAspectRatio · @ProjectResolution</MudText>
-                                                @if (_useReferenceImageForAllScenes)
-                                                {
-                                                    <MudText Typo="Typo.caption" Color="Color.Info">Ảnh tham khảo dùng chung</MudText>
-                                                }
                                                 <div class="scene-media-actions">
                                                 <MudStack Row="true" Spacing="1" Class="flex-wrap gap-1">
                                                     <MudTooltip Text="Xem prompt ảnh"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Image" OnClick="@(() => OpenScenePrompt(scene, ScenePromptKind.Image))" aria-label="Xem prompt ảnh" /></MudTooltip>

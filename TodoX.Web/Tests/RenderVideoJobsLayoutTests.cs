@@ -72,6 +72,17 @@ public class RenderVideoJobsLayoutTests
     }
 
     [Fact]
+    public void ReferenceImagePreview_DoesNotExposeRawStorageIdentifiers()
+    {
+        var source = File.ReadAllText(RazorPath);
+
+        Assert.Contains("<img src=\"@_uploadedCharacter.FileUrl\"", source);
+        Assert.Contains("RemoveUploadedCharacterAsync", source);
+        Assert.DoesNotContain("<MudText>@_uploadedCharacter.FileName</MudText>", source);
+        Assert.DoesNotContain("Ảnh tham khảo dùng chung", source);
+    }
+
+    [Fact]
     public void ResultTab_RendersManualFinalMergeAction()
     {
         var source = File.ReadAllText(RazorPath);
