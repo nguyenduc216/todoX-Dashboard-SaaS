@@ -22,6 +22,21 @@ public sealed class FavoriteServicesRegressionTests
     }
 
     [Fact]
+    public void FavoriteAction_IsRenderedBesidePrimaryAction_NotOverThumbnail()
+    {
+        var source = Read("Components", "Shared", "ServiceCatalogCard.razor");
+        var mediaStart = source.IndexOf("<div class=\"todox-service-media\">", StringComparison.Ordinal);
+        var mediaEnd = source.IndexOf("</div>", mediaStart, StringComparison.Ordinal);
+        var favoriteAction = source.IndexOf("Icons.Material.Filled.Favorite", StringComparison.Ordinal);
+        var primaryAction = source.IndexOf("PrimaryActionLabel", StringComparison.Ordinal);
+
+        Assert.True(mediaStart >= 0 && mediaEnd > mediaStart);
+        Assert.True(favoriteAction > mediaEnd);
+        Assert.True(primaryAction > favoriteAction);
+        Assert.DoesNotContain("todox-service-favorite\"", source);
+    }
+
+    [Fact]
     public void CustomerDashboard_UsesFavoriteServicesOnly()
     {
         var source = Read("Components", "Pages", "CustomerDashboard.razor");
@@ -41,14 +56,22 @@ public sealed class FavoriteServicesRegressionTests
     }
 
     [Fact]
-    public void MigrationScript_CreatesFavoriteRelationAndBackfillsActiveServices()
+    public void MigrationScript_CreatesFavoriteRelationWithoutDefaultBackfill()
     {
         var source = Read("database", "manual", "customer-service-favorites", "20260901_customer_service_favorites.sql");
         Assert.Contains("crm.customer_service_favorites", source);
         Assert.Contains("CREATE UNIQUE INDEX IF NOT EXISTS ux_customer_service_favorites_tenant_user_service", source);
-        Assert.Contains("ON CONFLICT (tenant_id, user_id, service_id) DO NOTHING", source);
-        Assert.Contains("u.user_type = 'customer'", source);
-        Assert.Contains("lower(s.status) = 'active'", source);
+        Assert.Contains("Do NOT backfill active services", source);
+        Assert.DoesNotContain("CROSS JOIN catalog.services", source);
+        Assert.DoesNotContain("INSERT INTO crm.customer_service_favorites", source);
+    }
+
+    [Fact]
+    public void CleanupScript_ClearsPreviouslyBackfilledFavorites()
+    {
+        var source = Read("database", "manual", "customer-service-favorites", "20260901_clear_all_customer_service_favorites.sql");
+        Assert.Contains("DELETE FROM crm.customer_service_favorites", source);
+        Assert.Contains("favorite_count", source);
     }
 
     [Fact]
