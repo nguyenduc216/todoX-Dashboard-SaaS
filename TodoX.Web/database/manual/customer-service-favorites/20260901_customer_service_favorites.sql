@@ -1,5 +1,7 @@
 -- Manual, idempotent customer account favorite service setup.
 -- Database: todo_saas. Do not execute automatically.
+-- IMPORTANT: new and existing customer accounts start with NO favorite services.
+-- Admin/user must explicitly add favorites after this setup.
 
 BEGIN;
 
@@ -28,22 +30,7 @@ CREATE INDEX IF NOT EXISTS ix_customer_service_favorites_tenant_customer
 CREATE INDEX IF NOT EXISTS ix_customer_service_favorites_tenant_service
     ON crm.customer_service_favorites (tenant_id, service_id);
 
-INSERT INTO crm.customer_service_favorites (
-    id, tenant_id, customer_id, user_id, service_id, added_source, created_by_user_id, created_at)
-SELECT
-    gen_random_uuid(),
-    u.tenant_id,
-    cu.customer_id,
-    u.id,
-    s.id,
-    'admin',
-    NULL,
-    now()
-FROM auth.app_users u
-JOIN crm.customer_users cu ON cu.user_id = u.id
-CROSS JOIN catalog.services s
-WHERE u.user_type = 'customer'
-  AND lower(s.status) = 'active'
-ON CONFLICT (tenant_id, user_id, service_id) DO NOTHING;
+-- Do NOT backfill active services.
+-- Favorite list is intentionally empty by default for every account.
 
 COMMIT;
