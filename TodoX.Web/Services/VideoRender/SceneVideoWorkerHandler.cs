@@ -52,13 +52,14 @@ public enum VideoSceneImageInputMode
     None,
     SceneSource,
     ReferenceOnly,
-    LegacySelectedSource
+    LegacySelectedSource,
+    SharedBaseImage
 }
 
 public static class RVideoReferenceOnlyPromptGuard
 {
     public const string Text =
-        "Use the supplied reference image only to preserve the character's identity, facial features, hairstyle, clothing, and overall appearance. Do not reproduce the reference image as the first frame, opening shot, frozen frame, or initial composition. Start immediately inside the environment, action, camera framing, and composition described in this scene prompt. The referenced character should already exist naturally inside the described scene from the first frame.";
+        "Use the supplied image as the fixed visual base for this scene. Preserve the same exact person, face, hairstyle, same exact outfit, background, room/set, products, props, furniture, layout, lighting, color palette, and camera framing. Do not redesign, replace, relocate, or reinterpret the environment or outfit. Animate only the subject's natural movements, expressions, gestures, speech, and product interaction required by this scene. The scene must remain visually continuous with the supplied image. Do not show the supplied image as a frozen still or separate opening shot. Begin immediately with natural motion inside this exact setup.";
 
     public static string Apply(string? prompt, bool useSharedReferenceImage)
     {
@@ -80,7 +81,8 @@ public static class RVideoReferenceOnlyPromptGuard
             return false;
         }
 
-        return prompt.Contains("supplied reference image only to preserve the character", StringComparison.OrdinalIgnoreCase)
+        return prompt.Contains("Use the supplied image as the fixed visual base for this scene", StringComparison.OrdinalIgnoreCase)
+               || prompt.Contains("supplied reference image only to preserve the character", StringComparison.OrdinalIgnoreCase)
                || prompt.Contains("reference image only for character/identity consistency", StringComparison.OrdinalIgnoreCase)
                || (prompt.Contains("Do not reproduce the reference image as the first frame", StringComparison.OrdinalIgnoreCase)
                    && prompt.Contains("Start immediately inside the environment", StringComparison.OrdinalIgnoreCase));
@@ -156,7 +158,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
             throw new InvalidOperationException("Missing scene video worker snapshot.");
         }
         input.ImageInputMode = ResolveImageInputMode(input);
-        if (input.ImageInputMode == VideoSceneImageInputMode.ReferenceOnly)
+        if (input.ImageInputMode == VideoSceneImageInputMode.SharedBaseImage)
         {
             input.VideoPrompt = RVideoReferenceOnlyPromptGuard.Apply(input.VideoPrompt, useSharedReferenceImage: true);
         }
@@ -474,7 +476,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                 {
                     var imageInputMode = ResolveImageInputMode(input);
                     var sourceMedia = await ResolveSourceImageMediaAsync(sourceVersion, ct);
-                    var sourceImageAsset = imageInputMode == VideoSceneImageInputMode.ReferenceOnly
+                    var sourceImageAsset = imageInputMode == VideoSceneImageInputMode.SharedBaseImage
                         ? null
                         : new VideoProviderSourceImage(
                             sourceVersion.ResultMediaId,
@@ -482,7 +484,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                             sourceVersion.PublicUrl,
                             sourceMedia?.FileName,
                             sourceMedia?.MimeType);
-                    var referenceImages = imageInputMode == VideoSceneImageInputMode.ReferenceOnly
+                    var referenceImages = imageInputMode == VideoSceneImageInputMode.SharedBaseImage
                         ? new[]
                         {
                             new VideoProviderSourceImage(
@@ -1066,11 +1068,13 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         if (input.ImageInputMode == VideoSceneImageInputMode.LegacySelectedSource)
         {
             return input.UseSharedReferenceImage
-                ? VideoSceneImageInputMode.ReferenceOnly
+                ? VideoSceneImageInputMode.SharedBaseImage
                 : VideoSceneImageInputMode.SceneSource;
         }
 
-        return input.ImageInputMode;
+        return input.ImageInputMode == VideoSceneImageInputMode.ReferenceOnly
+            ? VideoSceneImageInputMode.SharedBaseImage
+            : input.ImageInputMode;
     }
 
     private async Task<MediaFileDto?> ResolveSourceImageMediaAsync(SceneImageVersionDto version, CancellationToken ct)

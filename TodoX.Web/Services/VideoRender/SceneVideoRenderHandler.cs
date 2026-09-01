@@ -325,7 +325,7 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
             TrustedPayerContext = input.TrustedPayerContext,
             UseSharedReferenceImage = input.UseSharedReferenceImage,
             ImageInputMode = input.UseSharedReferenceImage
-                ? VideoSceneImageInputMode.ReferenceOnly
+                ? VideoSceneImageInputMode.SharedBaseImage
                 : VideoSceneImageInputMode.SceneSource,
             SourceImageVersionId = sourceImageVersionId,
             SelectedSourceImageVersionId = sourceImageVersionId,

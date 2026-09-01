@@ -96,7 +96,7 @@ public sealed class RVideoVideoHotfixTests
     }
 
     [Fact]
-    public void LegacySharedReferenceInputInfersReferenceOnlyMode()
+    public void LegacySharedReferenceInputInfersSharedBaseImageMode()
     {
         var method = typeof(SceneVideoWorkerHandler).GetMethod("ResolveImageInputMode", BindingFlags.NonPublic | BindingFlags.Static);
         Assert.NotNull(method);
@@ -112,8 +112,23 @@ public sealed class RVideoVideoHotfixTests
             ImageInputMode = VideoSceneImageInputMode.LegacySelectedSource
         };
 
-        Assert.Equal(VideoSceneImageInputMode.ReferenceOnly, method!.Invoke(null, new object[] { legacyShared }));
+        Assert.Equal(VideoSceneImageInputMode.SharedBaseImage, method!.Invoke(null, new object[] { legacyShared }));
         Assert.Equal(VideoSceneImageInputMode.SceneSource, method.Invoke(null, new object[] { legacySceneSource }));
+    }
+
+    [Fact]
+    public void LegacyReferenceOnlyInputInfersSharedBaseImageMode()
+    {
+        var method = typeof(SceneVideoWorkerHandler).GetMethod("ResolveImageInputMode", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var legacyReferenceOnly = new SceneVideoRenderWorkItemInput
+        {
+            UseSharedReferenceImage = true,
+            ImageInputMode = VideoSceneImageInputMode.ReferenceOnly
+        };
+
+        Assert.Equal(VideoSceneImageInputMode.SharedBaseImage, method!.Invoke(null, new object[] { legacyReferenceOnly }));
     }
 
     [Fact]
@@ -169,7 +184,7 @@ public sealed class RVideoVideoHotfixTests
     }
 
     [Fact]
-    public void ReferenceOnlyPromptGuardAppendsOnce()
+    public void SharedBasePromptGuardLocksVisualSetupAndAppendsOnce()
     {
         var prompt = "A worker enters the construction site, camera follows from a low angle.";
 
@@ -177,16 +192,20 @@ public sealed class RVideoVideoHotfixTests
         var guardedAgain = RVideoReferenceOnlyPromptGuard.Apply(guarded, useSharedReferenceImage: true);
         var unchanged = RVideoReferenceOnlyPromptGuard.Apply(prompt, useSharedReferenceImage: false);
 
-        Assert.Contains("preserve the character's identity", guarded);
-        Assert.Contains("Do not reproduce the reference image as the first frame", guarded);
-        Assert.Contains("Start immediately inside the environment", guarded);
-        Assert.Contains("referenced character should already exist naturally", guarded);
+        Assert.Contains("same exact person", guarded);
+        Assert.Contains("same exact outfit", guarded);
+        Assert.Contains("background, room/set", guarded);
+        Assert.Contains("products, props, furniture, layout, lighting", guarded);
+        Assert.Contains("camera framing", guarded);
+        Assert.Contains("Animate only the subject's natural movements, expressions, gestures, speech, and product interaction", guarded);
+        Assert.Contains("Do not show the supplied image as a frozen still or separate opening shot", guarded);
+        Assert.Contains("Begin immediately with natural motion inside this exact setup", guarded);
         Assert.Equal(guarded, guardedAgain);
         Assert.Equal(prompt, unchanged);
     }
 
     [Fact]
-    public async Task RVideo79AiReferenceOnlyPayloadContainsImageReference()
+    public async Task RVideo79AiSharedBasePayloadContainsImageReference()
     {
         var client = new CapturingAi79TaskClient();
         var service = Create79AiVideoService(client);
@@ -212,7 +231,7 @@ public sealed class RVideoVideoHotfixTests
         Assert.NotNull(client.LastSubmit);
         Assert.True(client.LastSubmit!.Options.TryGetValue("images", out var imagesJson));
         Assert.Contains("reference-character.png", imagesJson);
-        Assert.Contains("Do not reproduce the reference image as the first frame", client.LastSubmit.Prompt);
+        Assert.Contains("Use the supplied image as the fixed visual base for this scene", client.LastSubmit.Prompt);
 
         var sanitized = JsonSerializer.Deserialize<JsonElement>((await service.SubmitAsync(new RVideo79AiVideoSubmitRequest(
             Create79AiRuntime(),
