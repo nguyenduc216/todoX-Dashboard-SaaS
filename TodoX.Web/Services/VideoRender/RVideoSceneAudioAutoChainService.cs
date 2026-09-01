@@ -1,5 +1,8 @@
 using System.Text.Json;
+using Dapper;
+using TodoX.Web.Data;
 using TodoX.Web.Models;
+using TodoX.Web.Models.Catalog;
 using TodoX.Web.Services.Render;
 
 namespace TodoX.Web.Services.VideoRender;
@@ -17,6 +20,9 @@ public sealed class RVideoSceneAudioAutoChainService : IRVideoSceneAudioAutoChai
     private readonly IRenderJobService _jobs;
     private readonly IAiStudioCatalogService _catalog;
     private readonly IVbeeRuntimeConfigProvider _runtimeConfig;
+    private readonly IPointPricingService _pointPricing;
+    private readonly TodoXConnectionFactory _factory;
+    private readonly TenantContext _tenant;
     private readonly ILogger<RVideoSceneAudioAutoChainService> _logger;
 
     public RVideoSceneAudioAutoChainService(
@@ -26,6 +32,9 @@ public sealed class RVideoSceneAudioAutoChainService : IRVideoSceneAudioAutoChai
         IRenderJobService jobs,
         IAiStudioCatalogService catalog,
         IVbeeRuntimeConfigProvider runtimeConfig,
+        IPointPricingService pointPricing,
+        TodoXConnectionFactory factory,
+        TenantContext tenant,
         ILogger<RVideoSceneAudioAutoChainService> logger)
     {
         _repo = repo;
@@ -34,6 +43,9 @@ public sealed class RVideoSceneAudioAutoChainService : IRVideoSceneAudioAutoChai
         _jobs = jobs;
         _catalog = catalog;
         _runtimeConfig = runtimeConfig;
+        _pointPricing = pointPricing;
+        _factory = factory;
+        _tenant = tenant;
         _logger = logger;
     }
 
@@ -114,6 +126,16 @@ public sealed class RVideoSceneAudioAutoChainService : IRVideoSceneAudioAutoChai
         var ttsRate = ResolveTtsRate(metadata, settings);
         ValidateTtsRate(voice, ttsRate);
         var options = await _runtimeConfig.GetAsync(ct);
+        var pointServiceId = await ResolvePointServiceIdAsync(project.CoreJobId, ct);
+        var pointEstimate = await _pointPricing.EstimateAsync(new PointPricingEstimateRequest(
+            pointServiceId,
+            0,
+            ServiceSellPriceQualityTiers.Standard,
+            0,
+            ServiceSellPriceQualityTiers.Standard,
+            1,
+            ServiceSellPriceQualityTiers.Standard,
+            true), ct);
 
         var version = existing ?? await _versions.CreateQueuedSceneAudioVersionAsync(new SceneAudioVersionCreateRequest(
             ProjectId: project.Id,
@@ -212,8 +234,8 @@ public sealed class RVideoSceneAudioAutoChainService : IRVideoSceneAudioAutoChai
             ProviderCode = "vbee",
             ModelCode = voiceCode,
             MaxAttempts = 100,
-            PointCostEstimate = 0,
-            PointStatus = RenderPointStatuses.NotRequired
+            PointCostEstimate = pointEstimate.TotalPoints,
+            PointStatus = pointEstimate.TotalPoints > 0 ? RenderPointStatuses.Pending : RenderPointStatuses.NotRequired
         };
 
         var existingJob = await ResolveReusableRenderJobAsync(version.RenderJobId, logicalRequestId, ct);
@@ -332,6 +354,26 @@ public sealed class RVideoSceneAudioAutoChainService : IRVideoSceneAudioAutoChai
         }
 
         return voice.ProviderVoiceId.Trim();
+    }
+
+    private async Task<Guid?> ResolvePointServiceIdAsync(Guid? coreJobId, CancellationToken ct)
+    {
+        if (coreJobId is not Guid jobId)
+        {
+            return null;
+        }
+
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        return await conn.ExecuteScalarAsync<Guid?>(
+            """
+            SELECT service_id
+              FROM render.render_jobs
+             WHERE id=@jobId
+               AND tenant_id=@tenant
+             LIMIT 1;
+            """,
+            new { jobId, tenant = _tenant.TenantId });
     }
 
     private static decimal ResolveTtsRate(ScenePromptMetadata metadata, RVideoJobSettingsDto? settings)

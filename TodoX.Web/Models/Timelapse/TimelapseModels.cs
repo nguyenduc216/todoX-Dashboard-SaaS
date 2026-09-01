@@ -162,8 +162,37 @@ public sealed class TimelapseSellPriceSnapshot
     public int RuntimeClipDurationSeconds { get; set; }
     public int SceneCount { get; set; }
     public decimal VideoSceneSellPoints { get; set; }
+    public int ImageCount { get; set; }
+    public decimal ImageRate { get; set; }
+    public decimal ImageSubtotal { get; set; }
+    public int VideoSeconds { get; set; }
+    public decimal VideoRatePerSecond { get; set; }
     public decimal VideoSubtotal { get; set; }
+    public int VoiceCount { get; set; }
+    public decimal VoiceRate { get; set; }
+    public decimal VoiceSubtotal { get; set; }
     public decimal TotalPoints { get; set; }
+    public PointPricingEstimate? Pricing { get; set; }
+
+    public static TimelapseSellPriceSnapshot FromPointEstimate(PointPricingEstimate estimate, int sceneCount, int clipDurationSeconds)
+        => new()
+        {
+            QualityTier = estimate.Video.Quality,
+            RuntimeClipDurationSeconds = clipDurationSeconds,
+            SceneCount = sceneCount,
+            VideoSceneSellPoints = estimate.Video.Rate * clipDurationSeconds,
+            ImageCount = estimate.Image.Count,
+            ImageRate = estimate.Image.Rate,
+            ImageSubtotal = estimate.Image.Points,
+            VideoSeconds = estimate.Video.Count,
+            VideoRatePerSecond = estimate.Video.Rate,
+            VideoSubtotal = estimate.Video.Points,
+            VoiceCount = estimate.Voice.Count,
+            VoiceRate = estimate.Voice.Rate,
+            VoiceSubtotal = estimate.Voice.Points,
+            TotalPoints = estimate.TotalPoints,
+            Pricing = estimate
+        };
 }
 
 public sealed class TimelapseJobView

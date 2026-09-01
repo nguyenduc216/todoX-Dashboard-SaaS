@@ -7,7 +7,7 @@
 @using Microsoft.AspNetCore.WebUtilities
 @inject AuthStateService AuthState
 @inject CatalogRepository Catalog
-@inject IServiceSellPriceResolver SellPrices
+@inject IPointPricingService PointPricing
 @inject ITimelapseProfileRepository Profiles
 @inject ITimelapseJobService Jobs
 @inject NavigationManager Navigation
@@ -217,12 +217,12 @@
                             {
                                 <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
                             }
-                            else if (_priceEstimate?.Success == true && _priceEstimate.VideoScenePrice is not null)
+                            else if (_priceEstimate is not null)
                             {
-                                <div class="price-row"><span>Đơn giá video</span><strong>@FormatPoints(_priceEstimate.VideoScenePrice.SellPoints) / scene</strong></div>
-                                <div class="price-row"><span>Video</span><strong>@($"{_request.SceneCount} x {FormatPoints(_priceEstimate.VideoScenePrice.SellPoints)} = {FormatPoints(_priceEstimate.VideoSubtotal)}")</strong></div>
+                                <div class="price-row"><span>Images</span><strong>@($"{_priceEstimate.Image.Count} x {FormatPoints(_priceEstimate.Image.Rate)} = {FormatPoints(_priceEstimate.Image.Points)}")</strong></div>
+                                <div class="price-row"><span>Video</span><strong>@($"{_priceEstimate.Video.Count} sec x {FormatPoints(_priceEstimate.Video.Rate)} = {FormatPoints(_priceEstimate.Video.Points)}")</strong></div>
+                                <div class="price-row"><span>Voice</span><strong>@(_priceEstimate.Voice.Count == 0 ? "Not used = 0" : $"{_priceEstimate.Voice.Count} x {FormatPoints(_priceEstimate.Voice.Rate)} = {FormatPoints(_priceEstimate.Voice.Points)}")</strong></div>
                                 <MudDivider />
-                                <MudText Typo="Typo.caption" Color="Color.Secondary">Ảnh AI trung gian chưa tính trong phase UI này.</MudText>
                                 <div class="timelapse-total">
                                     <span>TỔNG DỰ KIẾN</span>
                                     <strong>@FormatPoints(_priceEstimate.TotalPoints) todoX</strong>
@@ -261,7 +261,7 @@
     private IReadOnlyList<TimelapseProfileDto> _profiles = Array.Empty<TimelapseProfileDto>();
     private CatalogServiceView? _selectedService;
     private TimelapseServiceDefinition? _serviceDefinition;
-    private ServiceSellPriceEstimate? _priceEstimate;
+    private PointPricingEstimate? _priceEstimate;
     private IBrowserFile? _selectedFile;
     private IBrowserFile? _selectedStartFile;
     private string? _previewDataUrl;
@@ -283,9 +283,9 @@
     private string PageSubtitle => _selectedService is null
         ? "Tạo video Timelapse AI từ ảnh thành phẩm."
         : "Tạo video Timelapse AI từ ảnh thành phẩm.";
-    private string PriceMessage => _priceError ?? _priceEstimate?.Message ?? "Chưa cấu hình giá cho lựa chọn này.";
+    private string PriceMessage => _priceError ?? "Chưa cấu hình giá cho lựa chọn này.";
     private bool HasValidImage => _selectedFile is not null && ValidateSelectedImage(showSnackbar: false);
-    private bool HasValidPrice => _priceEstimate is { Success: true, VideoScenePrice: not null };
+    private bool HasValidPrice => _priceEstimate is not null;
     private bool ServiceReady => _selectedService is { Enabled: true } && string.Equals(_selectedService.ServiceType, TodoXServiceEngineTypes.Timelapse, StringComparison.OrdinalIgnoreCase);
     private bool CanStartWorkflow
         => AuthState.CurrentUser is { IsCustomer: true }
@@ -608,12 +608,15 @@
         _priceLoading = true;
         try
         {
-            var estimate = await SellPrices.EstimateAsync(new ServiceSellPriceEstimateRequest(
+            var estimate = await PointPricing.EstimateAsync(new PointPricingEstimateRequest(
                 _selectedService.Id,
+                Math.Max(0, _request.SceneCount - 1),
                 TimelapseSellPricing.QualityTierForMode(_request.VideoMode),
-                TimelapseRequestRules.RuntimeClipDurationSeconds,
-                _request.SceneCount,
-                ImageCount: 0));
+                _request.SceneCount * TimelapseRequestRules.RuntimeClipDurationSeconds,
+                TimelapseSellPricing.QualityTierForMode(_request.VideoMode),
+                0,
+                TimelapseSellPricing.QualityTierForMode(_request.VideoMode),
+                false));
 
             if (version == _priceLoadVersion)
             {

@@ -16,7 +16,11 @@ public sealed record CoreBillingEstimate(
     int ImageCount,
     int SceneCount,
     int? DurationSeconds,
-    string? Message);
+    string? Message,
+    PointPricingEstimate? Pricing = null,
+    int VideoSeconds = 0,
+    int VoiceCount = 0,
+    bool VoiceEnabled = true);
 
 public sealed record CoreBillingReservation(
     bool Success,
@@ -88,14 +92,14 @@ public sealed class CoreBillingService : ICoreBillingService
 {
     private readonly TodoXConnectionFactory _factory;
     private readonly TenantContext _tenant;
-    private readonly IServiceSellPriceResolver _prices;
+    private readonly IPointPricingService _prices;
     private readonly WalletService _wallets;
     private readonly IConfiguration _configuration;
 
     public CoreBillingService(
         TodoXConnectionFactory factory,
         TenantContext tenant,
-        IServiceSellPriceResolver prices,
+        IPointPricingService prices,
         WalletService wallets,
         IConfiguration configuration)
     {
@@ -112,57 +116,60 @@ public sealed class CoreBillingService : ICoreBillingService
         JsonElement input,
         CancellationToken ct = default)
     {
-        var activePrices = await _prices.GetActivePricesAsync(service.Id, ct);
-        if (activePrices.Count == 0)
-        {
-            return new CoreBillingEstimate(0, false, ServiceSellPriceQualityTiers.Standard, 0, 0, null, "Free service.");
-        }
-
         var qualityTier = ResolveQualityTier(input);
         var imageCount = ReadInt(input, "imageCount", "image_count") ?? 0;
         var sceneCount = ReadInt(input, "sceneCount", "scene_count") ?? 0;
         var durationSeconds = ReadInt(input, "durationSeconds", "duration_seconds", "sceneDurationSeconds", "scene_duration_seconds");
+        var videoSeconds = ReadInt(input, "videoSeconds", "video_seconds") ?? (sceneCount * (durationSeconds ?? 0));
+        var voiceEnabled = ReadBool(input, "voiceEnabled", "voice_enabled") ?? true;
+        var voiceCount = ReadInt(input, "voiceCount", "voice_count") ?? 0;
 
         if (LegacyPointBillingFeatureFlags.IsDisabled(_configuration))
         {
             return new CoreBillingEstimate(
                 0,
-                ChargeRequired: false,
+                false,
                 qualityTier,
                 imageCount,
                 sceneCount,
                 durationSeconds,
-                "Legacy point billing is disabled.");
+                "Legacy point billing is disabled.",
+                null,
+                videoSeconds,
+                voiceEnabled ? voiceCount : 0,
+                voiceEnabled);
         }
 
-        if (imageCount <= 0 && sceneCount <= 0)
+        if (imageCount <= 0 && videoSeconds <= 0 && (!voiceEnabled || voiceCount <= 0))
         {
             throw new InvalidOperationException(
-                "Billable service input must include imageCount/image_count or sceneCount/scene_count.");
+                "Billable service input must include image_count, video_seconds, or enabled voice_count.");
         }
 
-        var estimate = await _prices.EstimateAsync(new ServiceSellPriceEstimateRequest(
+        var estimate = await _prices.EstimateAsync(new PointPricingEstimateRequest(
             service.Id,
+            imageCount,
             qualityTier,
-            durationSeconds,
-            sceneCount,
-            imageCount), ct);
-
-        if (!estimate.Success)
-        {
-            throw new InvalidOperationException(estimate.Message ?? "TodoX service price could not be estimated.");
-        }
+            videoSeconds,
+            qualityTier,
+            voiceCount,
+            qualityTier,
+            voiceEnabled), ct);
 
         var trustedNoCharge = context.IsTrustedInternal
             && context.NormalizedChannel == CoreChannelCodes.System;
         return new CoreBillingEstimate(
             estimate.TotalPoints,
-            ChargeRequired: !trustedNoCharge && context.CustomerId is not null && estimate.TotalPoints > 0,
+            !trustedNoCharge && context.CustomerId is not null && estimate.TotalPoints > 0,
             qualityTier,
             imageCount,
             sceneCount,
             durationSeconds,
-            trustedNoCharge ? "Trusted internal job is billing-exempt." : null);
+            trustedNoCharge ? "Trusted internal job is billing-exempt." : null,
+            estimate,
+            videoSeconds,
+            voiceEnabled ? voiceCount : 0,
+            voiceEnabled);
     }
 
     public async Task<CoreBillingReservation> ReserveAsync(
@@ -887,6 +894,35 @@ public sealed class CoreBillingService : ICoreBillingService
                 && int.TryParse(property.Value.GetString(), out number))
             {
                 return Math.Max(0, number);
+            }
+        }
+
+        return null;
+    }
+
+    private static bool? ReadBool(JsonElement input, params string[] names)
+    {
+        if (input.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        foreach (var property in input.EnumerateObject())
+        {
+            if (!names.Any(name => string.Equals(name, property.Name, StringComparison.OrdinalIgnoreCase)))
+            {
+                continue;
+            }
+
+            if (property.Value.ValueKind is JsonValueKind.True or JsonValueKind.False)
+            {
+                return property.Value.GetBoolean();
+            }
+
+            if (property.Value.ValueKind == JsonValueKind.String
+                && bool.TryParse(property.Value.GetString(), out var parsed))
+            {
+                return parsed;
             }
         }
 

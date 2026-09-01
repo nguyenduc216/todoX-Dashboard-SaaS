@@ -63,7 +63,8 @@ public sealed class TimelapseJobService : ITimelapseJobService
     private readonly ITimelapseProfileRepository _profiles;
     private readonly IMediaFileService _media;
     private readonly IRenderJobService _renderJobs;
-    private readonly IServiceSellPriceResolver _sellPrices;
+    private readonly IPointPricingService _pointPricing;
+    private readonly WalletService _wallets;
     private readonly ITimelapseWorkflowService _workflow;
     private readonly TodoXConnectionFactory _factory;
     private readonly TenantContext _tenant;
@@ -74,7 +75,8 @@ public sealed class TimelapseJobService : ITimelapseJobService
         ITimelapseProfileRepository profiles,
         IMediaFileService media,
         IRenderJobService renderJobs,
-        IServiceSellPriceResolver sellPrices,
+        IPointPricingService pointPricing,
+        WalletService wallets,
         ITimelapseWorkflowService workflow,
         TodoXConnectionFactory factory,
         TenantContext tenant,
@@ -84,7 +86,8 @@ public sealed class TimelapseJobService : ITimelapseJobService
         _profiles = profiles;
         _media = media;
         _renderJobs = renderJobs;
-        _sellPrices = sellPrices;
+        _pointPricing = pointPricing;
+        _wallets = wallets;
         _workflow = workflow;
         _factory = factory;
         _tenant = tenant;
@@ -141,18 +144,7 @@ public sealed class TimelapseJobService : ITimelapseJobService
             ? definition
             : null;
 
-        var qualityTier = TimelapseSellPricing.QualityTierForMode(request.VideoMode);
-        var sellPrice = await _sellPrices.ResolveVideoScenePriceAsync(
-            service.Id,
-            qualityTier,
-            TimelapseRequestRules.RuntimeClipDurationSeconds,
-            ct);
-        if (!sellPrice.Found || sellPrice.Price is null)
-        {
-            throw new InvalidOperationException(sellPrice.Message ?? "Chưa cấu hình giá cho lựa chọn này.");
-        }
-
-        var videoSubtotal = TimelapseSellPricing.EstimateVideoSubtotal(sellPrice.Price.SellPoints, request.SceneCount);
+        var pointEstimate = await EstimatePointsAsync(service.Id, request.SceneCount, request.VideoMode, ct);
 
         var profile = serviceDefinition is null
             ? await _profiles.GetEnabledProfileAsync(request.ProfileCode, ct)
@@ -198,15 +190,7 @@ public sealed class TimelapseJobService : ITimelapseJobService
             Title = NormalizeTitle(request.Title),
             RequireVideoConfirmation = request.RequireVideoConfirmation && !request.AutoFinish,
             AutoFinish = request.AutoFinish,
-            SellPrice = new TimelapseSellPriceSnapshot
-            {
-                QualityTier = qualityTier,
-                RuntimeClipDurationSeconds = TimelapseRequestRules.RuntimeClipDurationSeconds,
-                SceneCount = request.SceneCount,
-                VideoSceneSellPoints = sellPrice.Price.SellPoints,
-                VideoSubtotal = videoSubtotal,
-                TotalPoints = videoSubtotal
-            },
+            SellPrice = TimelapseSellPriceSnapshot.FromPointEstimate(pointEstimate, request.SceneCount, TimelapseRequestRules.RuntimeClipDurationSeconds),
             OriginalImage = new TimelapseOriginalImageSnapshot
             {
                 MediaId = media.Id,
@@ -226,7 +210,8 @@ public sealed class TimelapseJobService : ITimelapseJobService
                 InitialStatus = RenderJobStatuses.Draft,
                 Input = snapshot,
                 References = BuildReferenceJson(snapshot),
-                PointStatus = RenderPointStatuses.NotRequired,
+                PointCostEstimate = pointEstimate.TotalPoints,
+                PointStatus = RenderPointStatuses.Pending,
                 MaxAttempts = 1
             },
             ct);
@@ -415,16 +400,7 @@ public sealed class TimelapseJobService : ITimelapseJobService
         {
             throw new InvalidOperationException("TIMELAPSE_PROFILE_SERVICE_MISMATCH: Cấu hình Timelapse không phù hợp với loại dịch vụ đã chọn.");
         }
-        var qualityTier = TimelapseSellPricing.QualityTierForMode(request.VideoMode);
-        var sellPrice = await _sellPrices.ResolveVideoScenePriceAsync(
-            service.Id,
-            qualityTier,
-            TimelapseRequestRules.RuntimeClipDurationSeconds,
-            ct);
-        if (!sellPrice.Found || sellPrice.Price is null)
-        {
-            throw new InvalidOperationException(sellPrice.Message ?? "Chưa cấu hình giá cho lựa chọn này.");
-        }
+        var pointEstimate = await EstimatePointsAsync(service.Id, request.SceneCount, request.VideoMode, ct);
 
         var original = current.Snapshot.OriginalImage;
         if (hasReplacementImage)
@@ -462,7 +438,6 @@ public sealed class TimelapseJobService : ITimelapseJobService
             throw new InvalidOperationException("Ảnh ban đầu / 0% phải khác ảnh thành phẩm / 100%.");
         }
 
-        var videoSubtotal = TimelapseSellPricing.EstimateVideoSubtotal(sellPrice.Price.SellPoints, request.SceneCount);
         var snapshot = new TimelapseJobSnapshot
         {
             ServiceId = service.Id,
@@ -479,15 +454,7 @@ public sealed class TimelapseJobService : ITimelapseJobService
             RequireVideoConfirmation = request.RequireVideoConfirmation && !request.AutoFinish,
             AutoFinish = request.AutoFinish,
             VideoRenderConfirmed = request.AutoFinish,
-            SellPrice = new TimelapseSellPriceSnapshot
-            {
-                QualityTier = qualityTier,
-                RuntimeClipDurationSeconds = TimelapseRequestRules.RuntimeClipDurationSeconds,
-                SceneCount = request.SceneCount,
-                VideoSceneSellPoints = sellPrice.Price.SellPoints,
-                VideoSubtotal = videoSubtotal,
-                TotalPoints = videoSubtotal
-            },
+            SellPrice = TimelapseSellPriceSnapshot.FromPointEstimate(pointEstimate, request.SceneCount, TimelapseRequestRules.RuntimeClipDurationSeconds),
             OriginalImage = original,
             StartImage = startImage
         };
@@ -497,6 +464,8 @@ public sealed class TimelapseJobService : ITimelapseJobService
             UPDATE render.render_jobs
                SET input_json=CAST(@inputJson AS jsonb),
                    reference_json=CAST(@referenceJson AS jsonb),
+                   point_cost_estimate=@pointCostEstimate,
+                   point_status=@pointStatus,
                    updated_at=now()
              WHERE id=@jobId
                AND tenant_id=@tenant
@@ -507,6 +476,8 @@ public sealed class TimelapseJobService : ITimelapseJobService
                 jobId,
                 tenant = _tenant.TenantId,
                 status = RenderJobStatuses.Draft,
+                pointCostEstimate = pointEstimate.TotalPoints,
+                pointStatus = pointEstimate.TotalPoints > 0 ? RenderPointStatuses.Pending : RenderPointStatuses.NotRequired,
                 inputJson = JsonSerializer.Serialize(snapshot, JsonOptions),
                 referenceJson = JsonSerializer.Serialize(BuildReferenceJson(snapshot), JsonOptions)
             }, tx);
@@ -540,6 +511,29 @@ public sealed class TimelapseJobService : ITimelapseJobService
     public async Task<TimelapseJobView> StartOrResumeAsync(Guid jobId, CurrentUserSession currentUser, CancellationToken ct = default)
     {
         var view = await RequireOwnedAsync(jobId, currentUser, ct);
+        var required = view.Snapshot.SellPrice?.TotalPoints ?? 0m;
+        if (required > 0)
+        {
+            var charge = await _wallets.ChargeAsync(
+                currentUser.CustomerId,
+                currentUser.UserId,
+                required,
+                1,
+                "timelapse_render",
+                "todox",
+                "point_pricing",
+                "timelapse",
+                referenceId: jobId,
+                referenceType: "timelapse_job");
+            if (!charge.Ok)
+            {
+                await MarkBillingBlockedAsync(jobId, charge.Error ?? "Insufficient points.", ct);
+                throw new InvalidOperationException(charge.Error ?? "Insufficient points.");
+            }
+
+            await MarkChargedAsync(jobId, required, ct);
+        }
+
         view.Workflow = await _workflow.StartOrResumeAsync(jobId, view.Snapshot, currentUser, ct);
         view.Status = view.Workflow.ParentStatus;
         HydrateImagePrompts(view);
@@ -671,6 +665,51 @@ public sealed class TimelapseJobService : ITimelapseJobService
 
     private static string NormalizeTitle(string? title)
         => string.IsNullOrWhiteSpace(title) ? "Video Timelapse" : title.Trim();
+
+    private Task<PointPricingEstimate> EstimatePointsAsync(Guid serviceId, int sceneCount, string videoMode, CancellationToken ct)
+    {
+        var quality = TimelapseSellPricing.QualityTierForMode(videoMode);
+        return _pointPricing.EstimateAsync(new PointPricingEstimateRequest(
+            serviceId,
+            ImageCount: Math.Max(0, sceneCount - 1),
+            ImageQuality: quality,
+            VideoSeconds: sceneCount * TimelapseRequestRules.RuntimeClipDurationSeconds,
+            VideoQuality: quality,
+            VoiceCount: 0,
+            VoiceQuality: quality,
+            VoiceEnabled: false), ct);
+    }
+
+    private async Task MarkBillingBlockedAsync(Guid jobId, string message, CancellationToken ct)
+    {
+        using var conn = await _factory.OpenAsync(ct);
+        await conn.ExecuteAsync(
+            """
+            UPDATE render.render_jobs
+               SET point_status=@pointStatus,
+                   error_code='insufficient_points',
+                   error_message=@message,
+                   updated_at=now()
+             WHERE id=@jobId AND tenant_id=@tenant;
+            """,
+            new { jobId, tenant = _tenant.TenantId, pointStatus = RenderPointStatuses.Insufficient, message });
+    }
+
+    private async Task MarkChargedAsync(Guid jobId, decimal points, CancellationToken ct)
+    {
+        using var conn = await _factory.OpenAsync(ct);
+        await conn.ExecuteAsync(
+            """
+            UPDATE render.render_jobs
+               SET point_cost_charged=@points,
+                   point_status=@pointStatus,
+                   error_code=NULL,
+                   error_message=NULL,
+                   updated_at=now()
+             WHERE id=@jobId AND tenant_id=@tenant;
+            """,
+            new { jobId, tenant = _tenant.TenantId, points, pointStatus = RenderPointStatuses.Charged });
+    }
 
     private async Task<TimelapseOriginalImageSnapshot?> SaveOptionalStartImageAsync(
         byte[]? content,

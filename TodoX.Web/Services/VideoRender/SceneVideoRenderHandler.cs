@@ -1,5 +1,8 @@
 using System.Text.Json;
+using Dapper;
+using TodoX.Web.Data;
 using TodoX.Web.Models;
+using TodoX.Web.Models.Catalog;
 using TodoX.Web.Services.AiProviders;
 using TodoX.Web.Services;
 using TodoX.Web.Services.Render;
@@ -90,6 +93,9 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
     private readonly IVideoProviderRoutingService _routing;
     private readonly IRenderJobService _jobs;
     private readonly IVideoRenderPricingResolver _pricing;
+    private readonly IPointPricingService _pointPricing;
+    private readonly TodoXConnectionFactory _factory;
+    private readonly TenantContext _tenant;
     private readonly IVideoRenderEligibilityService _eligibility;
     private readonly IVideoPromptValidator _promptValidator;
     private readonly IRVideoTrustedPayerContextService _payers;
@@ -105,6 +111,9 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
         IVideoProviderRoutingService routing,
         IRenderJobService jobs,
         IVideoRenderPricingResolver pricing,
+        IPointPricingService pointPricing,
+        TodoXConnectionFactory factory,
+        TenantContext tenant,
         IVideoRenderEligibilityService eligibility,
         IVideoPromptValidator promptValidator,
         IRVideoTrustedPayerContextService payers,
@@ -117,6 +126,9 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
         _routing = routing;
         _jobs = jobs;
         _pricing = pricing;
+        _pointPricing = pointPricing;
+        _factory = factory;
+        _tenant = tenant;
         _eligibility = eligibility;
         _promptValidator = promptValidator;
         _payers = payers;
@@ -316,6 +328,16 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
             input.AspectRatio,
             input.Resolution,
             scene.DurationSeconds);
+        var pointServiceId = await ResolvePointServiceIdAsync(project.CoreJobId, ct);
+        var pointEstimate = await _pointPricing.EstimateAsync(new PointPricingEstimateRequest(
+            pointServiceId,
+            0,
+            scene.DurationSeconds >= 8 ? ServiceSellPriceQualityTiers.Premium : ServiceSellPriceQualityTiers.Standard,
+            scene.DurationSeconds,
+            scene.DurationSeconds >= 8 ? ServiceSellPriceQualityTiers.Premium : ServiceSellPriceQualityTiers.Standard,
+            0,
+            ServiceSellPriceQualityTiers.Standard,
+            false), ct);
 
         await _repo.UpdateSceneAsync(
             scene.Id,
@@ -366,7 +388,7 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
             Resolution = input.Resolution,
             DurationSeconds = scene.DurationSeconds,
             EstimatedUsd = resolvedPrice.ProviderEstimatedCostUsd,
-            EstimatedPoints = resolvedPrice.ChargedPoints,
+            EstimatedPoints = pointEstimate.TotalPoints,
             PricingMode = resolvedPrice.Mode,
             PricingRuleKey = resolvedPrice.RuleKey,
             TariffSnapshotJson = resolvedPrice.TariffSnapshotJson,
@@ -455,4 +477,24 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
            && version.Id != Guid.Empty
            && version.IsSelected
            && version.Status.Equals("completed", StringComparison.OrdinalIgnoreCase);
+
+    private async Task<Guid?> ResolvePointServiceIdAsync(Guid? coreJobId, CancellationToken ct)
+    {
+        if (coreJobId is not Guid jobId)
+        {
+            return null;
+        }
+
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        return await conn.ExecuteScalarAsync<Guid?>(
+            """
+            SELECT service_id
+              FROM render.render_jobs
+             WHERE id=@jobId
+               AND tenant_id=@tenant
+             LIMIT 1;
+            """,
+            new { jobId, tenant = _tenant.TenantId });
+    }
 }

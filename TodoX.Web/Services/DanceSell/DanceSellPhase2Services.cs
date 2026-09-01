@@ -6,6 +6,7 @@ using SixLabors.ImageSharp.Formats.Png;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
 using TodoX.Web.Models;
+using TodoX.Web.Models.Catalog;
 using TodoX.Web.Services.AiProviders.Kie;
 using TodoX.Web.Services.Media;
 using TodoX.Web.Services.Render;
@@ -1417,6 +1418,7 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
     private readonly IDanceSellProviderCatalog _catalog;
     private readonly IDanceSellOperationRepository _operations;
     private readonly IDanceSellCostEstimator _costs;
+    private readonly IPointPricingService _pointPricing;
     private readonly IRDanceDownloadTicketService _downloadTickets;
     private readonly IOptionsMonitor<KieOptions> _kie;
     private readonly IOptionsMonitor<DanceSellPhase2Options> _options;
@@ -1430,6 +1432,7 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
         IDanceSellProviderCatalog catalog,
         IDanceSellOperationRepository operations,
         IDanceSellCostEstimator costs,
+        IPointPricingService pointPricing,
         IRDanceDownloadTicketService downloadTickets,
         IOptionsMonitor<KieOptions> kie,
         IOptionsMonitor<DanceSellPhase2Options> options,
@@ -1442,6 +1445,7 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
         _catalog = catalog;
         _operations = operations;
         _costs = costs;
+        _pointPricing = pointPricing;
         _downloadTickets = downloadTickets;
         _kie = kie;
         _options = options;
@@ -1621,6 +1625,15 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
         var motionRoute = await _catalog.ResolveAsync(DanceSellOperationTypes.MotionVideo, job.MotionProviderCode, job.MotionProviderModel, ct);
         var providerMode = DanceSellMotionProviderContract.ResolveProviderMode(motionRoute, job.Mode);
         var estimate = await _costs.EstimateAsync(motionRoute, providerMode, null, ct);
+        var pointEstimate = await _pointPricing.EstimateAsync(new PointPricingEstimateRequest(
+            null,
+            1,
+            job.Mode.Equals("premium", StringComparison.OrdinalIgnoreCase) ? ServiceSellPriceQualityTiers.Premium : ServiceSellPriceQualityTiers.Standard,
+            10,
+            job.Mode.Equals("premium", StringComparison.OrdinalIgnoreCase) ? ServiceSellPriceQualityTiers.Premium : ServiceSellPriceQualityTiers.Standard,
+            0,
+            ServiceSellPriceQualityTiers.Standard,
+            false), ct);
         var attemptNo = await _operations.GetNextAttemptNoAsync(job.Id, DanceSellOperationTypes.MotionVideo, ct);
         var operation = await _operations.UpsertOperationAsync(new DanceSellProviderOperationDto
         {
@@ -1672,8 +1685,8 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
             References = new { referenceUrl = job.PreparedReferenceUrl!, motionVideoUrl = job.MotionVideoUrl, operationId = operation?.Id },
             ProviderCode = motionRoute.ProviderCode,
             ModelCode = motionRoute.ModelName,
-            PointCostEstimate = estimate.EstimatedTodoxPoints ?? 0,
-            PointStatus = estimate.EstimatedTodoxPoints is null ? RenderPointStatuses.NotRequired : RenderPointStatuses.Pending,
+            PointCostEstimate = pointEstimate.TotalPoints,
+            PointStatus = pointEstimate.TotalPoints > 0 ? RenderPointStatuses.Pending : RenderPointStatuses.NotRequired,
             MaxAttempts = Math.Max(3, _kie.CurrentValue.MaxPollCount + _kie.CurrentValue.SubmitMaxRetry + 5)
         }, ct);
 
@@ -1713,6 +1726,15 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
             var motionRoute = await _catalog.ResolveAsync(DanceSellOperationTypes.MotionVideo, job.MotionProviderCode, job.MotionProviderModel, ct);
             var providerMode = DanceSellMotionProviderContract.ResolveProviderMode(motionRoute, job.Mode);
             var estimate = await _costs.EstimateAsync(motionRoute, providerMode, null, ct);
+            var pointEstimate = await _pointPricing.EstimateAsync(new PointPricingEstimateRequest(
+                null,
+                1,
+                job.Mode.Equals("premium", StringComparison.OrdinalIgnoreCase) ? ServiceSellPriceQualityTiers.Premium : ServiceSellPriceQualityTiers.Standard,
+                10,
+                job.Mode.Equals("premium", StringComparison.OrdinalIgnoreCase) ? ServiceSellPriceQualityTiers.Premium : ServiceSellPriceQualityTiers.Standard,
+                0,
+                ServiceSellPriceQualityTiers.Standard,
+                false), ct);
             var attemptNo = await _operations.GetNextAttemptNoAsync(job.Id, DanceSellOperationTypes.MotionVideo, ct);
             var logicalRequestId = string.IsNullOrWhiteSpace(job.LogicalRequestId)
                 ? $"dance-sell-{Guid.NewGuid():N}"
@@ -1760,8 +1782,8 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
                 Prompt = JsonSerializer.Deserialize<object>(coreJob?.PromptJson ?? "{}"),
                 References = JsonSerializer.Deserialize<object>(coreJob?.ReferenceJson ?? "[]"),
                 LogCode = coreJob?.LogCode,
-                PointCostEstimate = coreJob?.PointCostEstimate ?? estimate.EstimatedTodoxPoints ?? 0,
-                PointStatus = (coreJob?.PointCostEstimate ?? estimate.EstimatedTodoxPoints ?? 0) > 0
+                PointCostEstimate = coreJob?.PointCostEstimate ?? pointEstimate.TotalPoints,
+                PointStatus = (coreJob?.PointCostEstimate ?? pointEstimate.TotalPoints) > 0
                     ? RenderPointStatuses.Pending
                     : RenderPointStatuses.NotRequired,
                 ProviderCode = motionRoute.ProviderCode,

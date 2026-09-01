@@ -1,0 +1,89 @@
+@using TodoX.Web.Models.Catalog
+@inject BillingRepository Billing
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">Point rates · @Service.ServiceName</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudTable Items="_rates" Dense="true" Hover="true">
+            <HeaderContent>
+                <MudTh>Resource</MudTh>
+                <MudTh>Quality</MudTh>
+                <MudTh Style="text-align:right">Global</MudTh>
+                <MudTh Style="text-align:right">Override</MudTh>
+                <MudTh Style="text-align:right">Effective</MudTh>
+                <MudTh>Source</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd>@context.ResourceType</MudTd>
+                <MudTd>@context.QualityTier</MudTd>
+                <MudTd Style="text-align:right">@context.GlobalRate.ToString("#,0.##")</MudTd>
+                <MudTd Style="text-align:right">@((context.OverrideRate?.ToString("#,0.##")) ?? "—")</MudTd>
+                <MudTd Style="text-align:right">@context.EffectiveRate.ToString("#,0.##")</MudTd>
+                <MudTd>@context.Source</MudTd>
+            </RowTemplate>
+        </MudTable>
+
+        <MudDivider Class="my-4" />
+
+        <MudGrid Spacing="2">
+            <MudItem xs="12" sm="3">
+                <MudSelect T="string" @bind-Value="_resource" Label="Resource">
+                    <MudSelectItem Value="@("image")">Image</MudSelectItem>
+                    <MudSelectItem Value="@("video")">Video</MudSelectItem>
+                    <MudSelectItem Value="@("voice")">Voice</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" sm="3">
+                <MudSelect T="string" @bind-Value="_quality" Label="Quality">
+                    <MudSelectItem Value="@("standard")">Standard</MudSelectItem>
+                    <MudSelectItem Value="@("premium")">Premium</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" sm="3">
+                <MudNumericField T="decimal" @bind-Value="_rate" Label="Override rate" Min="0" />
+            </MudItem>
+            <MudItem xs="12" sm="3" Class="d-flex align-end">
+                <MudStack Row="true" Spacing="1">
+                    <MudButton StartIcon="@Icons.Material.Filled.Save" OnClick="SaveOverrideAsync">Save</MudButton>
+                    <MudButton StartIcon="@Icons.Material.Filled.Delete" Color="Color.Error" Variant="Variant.Outlined" OnClick="RemoveOverrideAsync">Remove</MudButton>
+                </MudStack>
+            </MudItem>
+        </MudGrid>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Close">Close</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public ServiceDto Service { get; set; } = default!;
+
+    private IReadOnlyList<ServicePointRateView> _rates = Array.Empty<ServicePointRateView>();
+    private string _resource = "image";
+    private string _quality = "standard";
+    private decimal _rate = 3000;
+
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
+
+    private async Task ReloadAsync() => _rates = await Billing.GetServicePointRatesAsync(Service.Id);
+
+    private async Task SaveOverrideAsync()
+    {
+        await Billing.UpsertServicePointOverrideAsync(Service.Id, _resource, _quality, _rate, null);
+        Snackbar.Add("Override saved.", Severity.Success);
+        await ReloadAsync();
+    }
+
+    private async Task RemoveOverrideAsync()
+    {
+        await Billing.RemoveServicePointOverrideAsync(Service.Id, _resource, _quality, null);
+        Snackbar.Add("Override removed.", Severity.Success);
+        await ReloadAsync();
+    }
+
+    private void Close() => MudDialog.Close();
+}

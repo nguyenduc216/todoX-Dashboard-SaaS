@@ -165,7 +165,11 @@ public sealed class CoreJobApplicationService : ICoreJobApplicationService
                 estimate.QualityTier,
                 estimate.ImageCount,
                 estimate.SceneCount,
-                estimate.DurationSeconds
+                estimate.DurationSeconds,
+                estimate.VideoSeconds,
+                estimate.VoiceCount,
+                estimate.VoiceEnabled,
+                estimate.Pricing
             }
         }, JsonOptions);
 

@@ -71,6 +71,7 @@
                             <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="mt-4">
                                 <div class="todox-service-actions">
                                     <MudIconButton Icon="@Icons.Material.Filled.Sell" Size="Size.Small" title="Giá bán" OnClick="@(() => OpenSellPrices(svc))" />
+                                    <MudIconButton Icon="@Icons.Material.Filled.Tune" Size="Size.Small" title="Point rates" OnClick="@(() => OpenPointRates(svc))" />
                                     <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" title="Sửa" OnClick="@(() => OpenEdit(svc))" />
                                 </div>
                             </MudStack>
@@ -142,6 +143,17 @@
         };
         var options = new DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true };
         await DialogService.ShowAsync<ServiceSellPricesDialog>($"Giá bán · {svc.ServiceName}", parameters, options);
+        await Reload();
+    }
+
+    private async Task OpenPointRates(ServiceDto svc)
+    {
+        var parameters = new DialogParameters<ServicePointRatesDialog>
+        {
+            { x => x.Service, svc }
+        };
+        var options = new DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true };
+        await DialogService.ShowAsync<ServicePointRatesDialog>($"Point rates · {svc.ServiceName}", parameters, options);
         await Reload();
     }
 }

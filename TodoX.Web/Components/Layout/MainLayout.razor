@@ -3,6 +3,7 @@
 @inject AuthStateService AuthState
 @inject AccountService Accounts
 @inject NavigationMenuRepository NavigationMenus
+@inject WalletService Wallets
 @inject NavigationManager Navigation
 @inject ISnackbar Snackbar
 
@@ -51,6 +52,10 @@
                     <MudHidden Breakpoint="Breakpoint.SmAndDown">
                         <MudText Typo="Typo.body2" Class="todox-user-hello">Xin chào, <b>@UserDisplayName</b></MudText>
                     </MudHidden>
+                    @if (_balance is not null)
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined">Điểm @_balance.Value.ToString("#,0")</MudChip>
+                    }
                     <MudAvatar Class="todox-avatar">
                         @if (!string.IsNullOrWhiteSpace(UserAvatarUrl))
                         {
@@ -69,6 +74,10 @@
                     <div class="todox-user-menu-name">@UserDisplayName</div>
                     <div class="todox-user-menu-email">@UserEmail</div>
                     <div class="todox-user-menu-role">@RoleLabel</div>
+                    @if (_balance is not null)
+                    {
+                        <div class="todox-user-menu-role">Điểm khả dụng: @_balance.Value.ToString("#,0")</div>
+                    }
                 </div>
                 <MudDivider />
                 <MudMenuItem Icon="@Icons.Material.Filled.Person" Href="/profile">Hồ sơ cá nhân</MudMenuItem>
@@ -147,6 +156,7 @@
     private bool _notifyOpen;
     private IReadOnlyList<NavigationMenuGroupDto> _menuGroups = Array.Empty<NavigationMenuGroupDto>();
     private bool _menuLoaded;
+    private decimal? _balance;
 
     private readonly MudTheme _theme = new()
     {
@@ -185,6 +195,7 @@
         if (firstRender && AuthState.IsInitialized)
         {
             await LoadNavigationMenuAsync();
+            await LoadBalanceAsync();
             StateHasChanged();
         }
     }
@@ -211,6 +222,7 @@
     {
         _menuLoaded = false;
         await LoadNavigationMenuAsync();
+        await LoadBalanceAsync();
         StateHasChanged();
     });
 
@@ -289,6 +301,13 @@
         }
 
         _menuLoaded = true;
+    }
+
+    private async Task LoadBalanceAsync()
+    {
+        _balance = AuthState.CurrentUser?.IsCustomer == true && AuthState.CurrentUser.CustomerId is Guid customerId
+            ? await Wallets.GetBalanceAsync(customerId)
+            : null;
     }
 
     private IEnumerable<NavigationMenuGroupDto> ApplyMenuVisibility(IEnumerable<NavigationMenuGroupDto> groups)
