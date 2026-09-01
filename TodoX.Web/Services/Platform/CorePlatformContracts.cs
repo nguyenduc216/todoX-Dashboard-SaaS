@@ -128,6 +128,7 @@ public sealed record CoreServiceView(
     string? WorkflowCode,
     string? ThumbnailUrl,
     JsonElement FormSchema,
+    JsonElement JobDefaults,
     IReadOnlyList<CoreServicePriceView> Prices,
     bool Enabled,
     int SortOrder);

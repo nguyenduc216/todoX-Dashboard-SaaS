@@ -102,6 +102,7 @@ public sealed class CoreServiceCatalogService : ICoreServiceCatalogService
             row.WorkflowCode,
             row.ThumbnailUrl,
             formSchema,
+            ParseJson(row.JobDefaultsJson),
             prices,
             row.Enabled,
             row.SortOrder);
@@ -120,6 +121,7 @@ public sealed class CoreServiceCatalogService : ICoreServiceCatalogService
                s.workflow_code AS WorkflowCode,
                s.thumbnail_url AS ThumbnailUrl,
                COALESCE(s.default_options->'form_schema', '{}'::jsonb)::text AS FormSchemaJson,
+               COALESCE(s.default_options->'job_defaults', '{}'::jsonb)::text AS JobDefaultsJson,
                COALESCE((
                    SELECT jsonb_agg(jsonb_build_object(
                        'assetType', p.asset_type,
@@ -147,8 +149,27 @@ public sealed class CoreServiceCatalogService : ICoreServiceCatalogService
         public string? WorkflowCode { get; set; }
         public string? ThumbnailUrl { get; set; }
         public string FormSchemaJson { get; set; } = "{}";
+        public string JobDefaultsJson { get; set; } = "{}";
         public string PricesJson { get; set; } = "[]";
         public bool Enabled { get; set; }
         public int SortOrder { get; set; }
+    }
+
+    private static JsonElement ParseJson(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return EmptyObject();
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            return document.RootElement.Clone();
+        }
+        catch (JsonException)
+        {
+            return EmptyObject();
+        }
     }
 }

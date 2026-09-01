@@ -2,7 +2,9 @@
 @using Microsoft.AspNetCore.Components.Forms
 @using Microsoft.AspNetCore.Components.Web
 @using Microsoft.Extensions.Options
+@using TodoX.Web.Models.Catalog
 @using TodoX.Web.Services.DanceSell
+@inject CatalogRepository Catalog
 @inject AuthStateService AuthState
 @inject IDanceSellPhase2Service DanceSell
 @inject IDanceSellProviderCatalog ProviderCatalog
@@ -140,7 +142,29 @@
 
     protected override async Task OnInitializedAsync()
     {
+        await LoadServiceDefaultsAsync();
         await CheckReadinessAsync();
+    }
+
+    private async Task LoadServiceDefaultsAsync()
+    {
+        CatalogServiceView? service = (await Catalog.GetActiveCatalogServicesAsync())
+            .FirstOrDefault(x => string.Equals(x.ServiceCode, FixedTodoXServiceCatalog.RDance, StringComparison.OrdinalIgnoreCase));
+
+        if (service is null)
+        {
+            return;
+        }
+
+        var defaults = ServiceJobDefaultsCodec.FromJson(service.JobDefaultsJson);
+        if (defaults.Ratio is "9_16" or "16_9")
+        {
+            _ratio = defaults.Ratio!;
+        }
+        if (defaults.AutoFinish.HasValue)
+        {
+            _autoFinish = defaults.AutoFinish.Value;
+        }
     }
 
     private async Task CheckReadinessAsync()

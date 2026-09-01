@@ -663,8 +663,8 @@ else
     private string _prompt = string.Empty;
     private string _characterPrompt = string.Empty;
     private TodoXVideoPromptParseResult _promptParseResult = new();
-    private string _aspectRatio = string.Empty;
-    private string _resolution = string.Empty;
+    private string _aspectRatio = AspectRatioLandscape;
+    private string _resolution = Resolution720p;
     private int _totalSeconds = 16;
     private int _sceneSeconds = 8;
     private bool _thinkScenes = false;
@@ -978,6 +978,7 @@ else
                 try
                 {
                     _coreServices = await CoreCatalog.ListAsync();
+                    ApplyServiceJobDefaults();
                 }
                 catch (Exception ex)
                 {
@@ -997,10 +998,11 @@ else
                         var view = await RVideoJobs.GetByJobIdAsync(_jobId.Value, user);
                         _projectId = view?.Project.Id ?? _projectId;
                         if (view is not null)
-                        {
-                            ServiceId = view.CoreJob.ServiceId;
-                            ServiceCode = view.CoreJob.ServiceCode;
-                        }
+                    {
+                        ServiceId = view.CoreJob.ServiceId;
+                        ServiceCode = view.CoreJob.ServiceCode;
+                        ApplyServiceJobDefaults();
+                    }
                     }
                     catch (Exception ex)
                     {
@@ -1057,10 +1059,11 @@ else
                             var view = await RVideoJobs.GetByJobIdAsync(_jobId.Value, user);
                             _projectId = view?.Project.Id ?? _projectId;
                             if (view is not null)
-                            {
-                                ServiceId = view.CoreJob.ServiceId;
-                                ServiceCode = view.CoreJob.ServiceCode;
-                            }
+                    {
+                        ServiceId = view.CoreJob.ServiceId;
+                        ServiceCode = view.CoreJob.ServiceCode;
+                        ApplyServiceJobDefaults();
+                    }
                         }
                         catch (Exception ex)
                         {
@@ -1318,8 +1321,8 @@ else
         _project = null;
         _prompt = string.Empty;
         _promptParseResult = new();
-        _aspectRatio = string.Empty;
-        _resolution = string.Empty;
+        _aspectRatio = AspectRatioLandscape;
+        _resolution = Resolution720p;
         _characterPrompt = string.Empty;
         _totalSeconds = 16;
         _sceneSeconds = 8;
@@ -2858,6 +2861,88 @@ else
             _executionMode = RVideoExecutionModes.Manual;
         }
     }
+
+    private void ApplyServiceJobDefaults()
+    {
+        if (_project is not null || !string.IsNullOrWhiteSpace(_prompt))
+        {
+            return;
+        }
+
+        var service = ResolveCurrentService();
+        if (service is null)
+        {
+            return;
+        }
+
+        var defaults = TodoX.Web.Models.Catalog.ServiceJobDefaultsCodec.FromJson(service.JobDefaults.ToString());
+        ApplyServiceDefaults(defaults);
+    }
+
+    private TodoX.Web.Services.Platform.CoreServiceView? ResolveCurrentService()
+    {
+        var serviceCode = ServiceCode
+            ?? (ServiceId.HasValue ? _coreServices.FirstOrDefault(x => x.Id == ServiceId.Value)?.ServiceCode : null);
+
+        return _coreServices.FirstOrDefault(x =>
+            (ServiceId.HasValue && x.Id == ServiceId.Value)
+            || string.Equals(x.ServiceCode, serviceCode, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private void ApplyServiceDefaults(TodoX.Web.Models.Catalog.ServiceJobDefaults defaults)
+    {
+        _aspectRatio = NormalizeServiceAspectRatio(defaults.AspectRatio) ?? _aspectRatio;
+        _resolution = NormalizeServiceResolution(defaults.Resolution) ?? _resolution;
+        _totalSeconds = defaults.TotalSeconds is > 0 ? defaults.TotalSeconds.Value : _totalSeconds;
+        _sceneSeconds = defaults.SceneSeconds is > 0 ? defaults.SceneSeconds.Value : _sceneSeconds;
+        _executionMode = NormalizeServiceExecutionMode(defaults.ExecutionMode) ?? _executionMode;
+        _useReferenceImageForAllScenes = defaults.UseReferenceImageForAllScenes ?? _useReferenceImageForAllScenes;
+        _voiceMode = NormalizeServiceVoiceMode(defaults.VoiceMode) ?? _voiceMode;
+        _voiceCatalogCode = _voiceMode == RVideoVoiceModes.Library ? defaults.VoiceCatalogCode ?? _voiceCatalogCode : null;
+        _defaultTtsRate = defaults.DefaultTtsRate is > 0m ? defaults.DefaultTtsRate.Value : _defaultTtsRate;
+        _musicMode = NormalizeServiceMusicMode(defaults.MusicMode);
+        _musicCatalogCode = _musicMode == RVideoMusicModes.Library ? defaults.MusicCatalogCode ?? _musicCatalogCode : null;
+        _musicVolume = defaults.MusicVolume is >= 0m and <= 1m ? defaults.MusicVolume.Value : _musicVolume;
+    }
+
+    private static string? NormalizeServiceAspectRatio(string? value)
+        => string.Equals(value, AspectRatioLandscape, StringComparison.OrdinalIgnoreCase)
+            ? AspectRatioLandscape
+            : string.Equals(value, AspectRatioPortrait, StringComparison.OrdinalIgnoreCase)
+                ? AspectRatioPortrait
+                : null;
+
+    private static string? NormalizeServiceResolution(string? value)
+        => string.IsNullOrWhiteSpace(value) ? null : value.Trim() switch
+        {
+            Resolution720p => Resolution720p,
+            Resolution1080p => Resolution1080p,
+            Resolution4K => Resolution4K,
+            _ => null
+        };
+
+    private static string? NormalizeServiceExecutionMode(string? value)
+        => string.Equals(value, RVideoExecutionModes.Auto, StringComparison.OrdinalIgnoreCase)
+            ? RVideoExecutionModes.Auto
+            : string.Equals(value, RVideoExecutionModes.Manual, StringComparison.OrdinalIgnoreCase)
+                ? RVideoExecutionModes.Manual
+                : null;
+
+    private static string? NormalizeServiceVoiceMode(string? value)
+        => string.Equals(value, RVideoVoiceModes.Native, StringComparison.OrdinalIgnoreCase)
+            ? RVideoVoiceModes.Native
+            : string.Equals(value, RVideoVoiceModes.Library, StringComparison.OrdinalIgnoreCase)
+                ? RVideoVoiceModes.Library
+                : string.Equals(value, RVideoVoiceModes.None, StringComparison.OrdinalIgnoreCase)
+                    ? RVideoVoiceModes.None
+                    : null;
+
+    private static string NormalizeServiceMusicMode(string? value)
+        => string.Equals(value, RVideoMusicModes.Library, StringComparison.OrdinalIgnoreCase)
+            ? RVideoMusicModes.Library
+            : string.Equals(value, RVideoMusicModes.Upload, StringComparison.OrdinalIgnoreCase)
+                ? RVideoMusicModes.Upload
+                : RVideoMusicModes.None;
 
     private object BuildJobSnapshot()
     {

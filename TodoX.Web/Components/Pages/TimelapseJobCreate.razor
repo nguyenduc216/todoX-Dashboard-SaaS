@@ -334,6 +334,7 @@
         try
         {
             await LoadSelectedServiceAsync();
+            ApplyServiceDefaults();
             await LoadProfilesAsync();
             await RefreshPriceEstimateAsync();
         }
@@ -562,6 +563,36 @@
     private bool IsModeSelected(string mode) => string.Equals(_request.VideoMode, mode, StringComparison.OrdinalIgnoreCase);
 
     private bool IsRatioSelected(string ratio) => string.Equals(_request.Ratio, ratio, StringComparison.OrdinalIgnoreCase);
+
+    private void ApplyServiceDefaults()
+    {
+        if (_selectedService is null)
+        {
+            return;
+        }
+
+        var defaults = ServiceJobDefaultsCodec.FromJson(_selectedService.JobDefaultsJson);
+        if (!string.IsNullOrWhiteSpace(defaults.ProfileCode))
+        {
+            _request.ProfileCode = defaults.ProfileCode.Trim();
+        }
+        if (defaults.SceneCount is > 0)
+        {
+            _request.SceneCount = defaults.SceneCount.Value;
+        }
+        if (TimelapseRequestRules.IsSupportedMode(defaults.VideoMode))
+        {
+            _request.VideoMode = defaults.VideoMode!;
+        }
+        if (TimelapseRequestRules.IsSupportedRatio(defaults.Ratio))
+        {
+            _request.Ratio = defaults.Ratio!;
+        }
+        if (defaults.AutoFinish.HasValue)
+        {
+            _request.AutoFinish = defaults.AutoFinish.Value;
+        }
+    }
 
     private async Task RefreshPriceEstimateAsync()
     {

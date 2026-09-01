@@ -1,5 +1,6 @@
 ﻿@using TodoX.Web.Services
 @using TodoX.Web.Models.Catalog
+@using TodoX.Web.Models
 @inject SystemImageStorage SystemImageStorage
 @inject IDialogService DialogService
 @inject ISnackbar Snackbar
@@ -104,6 +105,43 @@
                     <MudExpansionPanel Text="Nâng cao">
                         <MudTextField T="string" Label="Workflow reference" @bind-Value="_model.WorkflowCode" Variant="Variant.Outlined" />
                     </MudExpansionPanel>
+                    <MudExpansionPanel Text="Cấu hình mặc định khi tạo job">
+                        @if (IsRVideo)
+                        {
+                            <MudGrid>
+                                <MudItem xs="12" sm="6"><MudSelect T="string" Label="Aspect ratio" @bind-Value="_defaults.AspectRatio" Variant="Variant.Outlined" Clearable="true"><MudSelectItem T="string" Value="@("9:16")">9:16</MudSelectItem><MudSelectItem T="string" Value="@("16:9")">16:9</MudSelectItem></MudSelect></MudItem>
+                                <MudItem xs="12" sm="6"><MudSelect T="string" Label="Resolution" @bind-Value="_defaults.Resolution" Variant="Variant.Outlined" Clearable="true"><MudSelectItem T="string" Value="@("720p")">720p</MudSelectItem><MudSelectItem T="string" Value="@("1080p")">1080p</MudSelectItem><MudSelectItem T="string" Value="@("4K")">4K</MudSelectItem></MudSelect></MudItem>
+                                <MudItem xs="12" sm="4"><MudNumericField T="int?" Label="Total seconds" @bind-Value="_defaults.TotalSeconds" Variant="Variant.Outlined" Min="1" /></MudItem>
+                                <MudItem xs="12" sm="4"><MudNumericField T="int?" Label="Scene seconds" @bind-Value="_defaults.SceneSeconds" Variant="Variant.Outlined" Min="1" /></MudItem>
+                                <MudItem xs="12" sm="4"><MudSelect T="string" Label="Execution mode" @bind-Value="_defaults.ExecutionMode" Variant="Variant.Outlined" Clearable="true"><MudSelectItem T="string" Value="@RVideoExecutionModes.Manual">manual</MudSelectItem><MudSelectItem T="string" Value="@RVideoExecutionModes.Auto">auto</MudSelectItem></MudSelect></MudItem>
+                                <MudItem xs="12"><MudCheckBox @bind-Value="_defaults.UseReferenceImageForAllScenes" Label="Giữ nguyên hình ảnh tham khảo cho mọi scene" /></MudItem>
+                                <MudItem xs="12" sm="4"><MudSelect T="string" Label="Voice mode" @bind-Value="_defaults.VoiceMode" Variant="Variant.Outlined" Clearable="true"><MudSelectItem T="string" Value="@RVideoVoiceModes.None">none</MudSelectItem><MudSelectItem T="string" Value="@RVideoVoiceModes.Native">native</MudSelectItem><MudSelectItem T="string" Value="@RVideoVoiceModes.Library">library</MudSelectItem></MudSelect></MudItem>
+                                <MudItem xs="12" sm="4"><MudTextField T="string" Label="Voice catalog" @bind-Value="_defaults.VoiceCatalogCode" Variant="Variant.Outlined" /></MudItem>
+                                <MudItem xs="12" sm="4"><MudNumericField T="decimal?" Label="Voice volume" @bind-Value="_defaults.VoiceVolume" Variant="Variant.Outlined" Min="0m" Max="1m" Step="0.05m" /></MudItem>
+                                <MudItem xs="12" sm="4"><MudNumericField T="decimal?" Label="TTS rate" @bind-Value="_defaults.DefaultTtsRate" Variant="Variant.Outlined" Min="0.1m" Max="4m" Step="0.05m" /></MudItem>
+                                <MudItem xs="12" sm="4"><MudSelect T="string" Label="Music mode" @bind-Value="_defaults.MusicMode" Variant="Variant.Outlined" Clearable="true"><MudSelectItem T="string" Value="@RVideoMusicModes.None">none</MudSelectItem><MudSelectItem T="string" Value="@RVideoMusicModes.Library">library</MudSelectItem><MudSelectItem T="string" Value="@RVideoMusicModes.Upload">upload</MudSelectItem></MudSelect></MudItem>
+                                <MudItem xs="12" sm="4"><MudTextField T="string" Label="Music catalog" @bind-Value="_defaults.MusicCatalogCode" Variant="Variant.Outlined" /></MudItem>
+                                <MudItem xs="12" sm="4"><MudNumericField T="decimal?" Label="Music volume" @bind-Value="_defaults.MusicVolume" Variant="Variant.Outlined" Min="0m" Max="1m" Step="0.05m" /></MudItem>
+                            </MudGrid>
+                        }
+                        else if (IsTimelapse)
+                        {
+                            <MudGrid>
+                                <MudItem xs="12" sm="6"><MudTextField T="string" Label="Profile code" @bind-Value="_defaults.ProfileCode" Variant="Variant.Outlined" /></MudItem>
+                                <MudItem xs="12" sm="6"><MudSelect T="string" Label="Ratio" @bind-Value="_defaults.Ratio" Variant="Variant.Outlined" Clearable="true"><MudSelectItem T="string" Value="@("16_9")">16_9</MudSelectItem><MudSelectItem T="string" Value="@("9_16")">9_16</MudSelectItem></MudSelect></MudItem>
+                                <MudItem xs="12" sm="4"><MudNumericField T="int?" Label="Scene count" @bind-Value="_defaults.SceneCount" Variant="Variant.Outlined" Min="3" Max="6" /></MudItem>
+                                <MudItem xs="12" sm="4"><MudSelect T="string" Label="Video mode" @bind-Value="_defaults.VideoMode" Variant="Variant.Outlined" Clearable="true"><MudSelectItem T="string" Value="@("fast")">fast</MudSelectItem><MudSelectItem T="string" Value="@("professional")">professional</MudSelectItem></MudSelect></MudItem>
+                                <MudItem xs="12" sm="4"><MudCheckBox @bind-Value="_defaults.AutoFinish" Label="Auto finish" /></MudItem>
+                            </MudGrid>
+                        }
+                        else if (IsRDance)
+                        {
+                            <MudGrid>
+                                <MudItem xs="12" sm="6"><MudTextField T="string" Label="Model mode" @bind-Value="_defaults.ModelMode" Variant="Variant.Outlined" /></MudItem>
+                                <MudItem xs="12" sm="6"><MudTextField T="string" Label="Character/product mode" @bind-Value="_defaults.CharacterProductMode" Variant="Variant.Outlined" /></MudItem>
+                            </MudGrid>
+                        }
+                    </MudExpansionPanel>
                 </MudExpansionPanels>
             </MudItem>
         </MudGrid>
@@ -123,6 +161,7 @@
     private ServiceDto _model = new();
     private bool _isNew;
     private bool _thumbnailBusy;
+    private ServiceJobDefaults _defaults = new();
 
     protected override void OnInitialized()
     {
@@ -143,8 +182,11 @@
                 CoverImageUrl = Source.CoverImageUrl,
                 WorkflowCode = Source.WorkflowCode,
                 Status = TodoXServiceStatuses.Normalize(Source.Status),
-                SortOrder = Source.SortOrder
+                SortOrder = Source.SortOrder,
+                JobDefaultsJson = Source.JobDefaultsJson
             };
+
+        _defaults = ServiceJobDefaultsCodec.FromJson(_model.JobDefaultsJson);
     }
 
     private async Task UploadThumbnail(InputFileChangeEventArgs e)
@@ -219,8 +261,61 @@
             return;
         }
 
+        _model.JobDefaultsJson = ServiceJobDefaultsCodec.ToJson(NormalizeDefaults());
         MudDialog.Close(DialogResult.Ok(_model));
     }
 
     private void Cancel() => MudDialog.Cancel();
+
+    private bool IsRVideo => string.Equals(_model.ServiceType, TodoXServiceEngineTypes.RVideo, StringComparison.OrdinalIgnoreCase);
+    private bool IsTimelapse => string.Equals(_model.ServiceType, TodoXServiceEngineTypes.Timelapse, StringComparison.OrdinalIgnoreCase);
+    private bool IsRDance => string.Equals(_model.ServiceType, TodoXServiceEngineTypes.RDance, StringComparison.OrdinalIgnoreCase);
+
+    private ServiceJobDefaults NormalizeDefaults()
+    {
+        return new ServiceJobDefaults
+        {
+            Version = Math.Max(1, _defaults.Version),
+            AspectRatio = NormalizeText(_defaults.AspectRatio),
+            Resolution = NormalizeText(_defaults.Resolution),
+            TotalSeconds = NormalizePositiveInt(_defaults.TotalSeconds),
+            SceneSeconds = NormalizePositiveInt(_defaults.SceneSeconds),
+            ExecutionMode = NormalizeExecutionMode(_defaults.ExecutionMode),
+            UseReferenceImageForAllScenes = _defaults.UseReferenceImageForAllScenes,
+            VoiceMode = NormalizeText(_defaults.VoiceMode),
+            VoiceCatalogCode = NormalizeText(_defaults.VoiceCatalogCode),
+            VoiceVolume = NormalizeVolume(_defaults.VoiceVolume),
+            DefaultTtsRate = NormalizePositiveDecimal(_defaults.DefaultTtsRate),
+            MusicMode = NormalizeText(_defaults.MusicMode),
+            MusicCatalogCode = NormalizeText(_defaults.MusicCatalogCode),
+            MusicVolume = NormalizeVolume(_defaults.MusicVolume),
+            ProfileCode = NormalizeText(_defaults.ProfileCode),
+            SceneCount = NormalizePositiveInt(_defaults.SceneCount),
+            VideoMode = NormalizeText(_defaults.VideoMode),
+            Ratio = NormalizeText(_defaults.Ratio),
+            RequireVideoConfirmation = _defaults.RequireVideoConfirmation,
+            AutoFinish = _defaults.AutoFinish,
+            ModelMode = NormalizeText(_defaults.ModelMode),
+            CharacterProductMode = NormalizeText(_defaults.CharacterProductMode)
+        };
+    }
+
+    private static string? NormalizeText(string? value)
+        => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static int? NormalizePositiveInt(int? value)
+        => value is > 0 ? value : null;
+
+    private static decimal? NormalizePositiveDecimal(decimal? value)
+        => value is > 0m ? value : null;
+
+    private static decimal? NormalizeVolume(decimal? value)
+        => value is >= 0m and <= 1m ? value : null;
+
+    private static string? NormalizeExecutionMode(string? value)
+        => string.Equals(value, RVideoExecutionModes.Auto, StringComparison.OrdinalIgnoreCase)
+            ? RVideoExecutionModes.Auto
+            : string.Equals(value, RVideoExecutionModes.Manual, StringComparison.OrdinalIgnoreCase)
+                ? RVideoExecutionModes.Manual
+                : null;
 }

@@ -20,6 +20,7 @@ public sealed class CatalogServiceView
     public string? ThumbnailUrl { get; set; }
     public string? CoverImageUrl { get; set; }
     public string? StartingPriceSummary { get; set; }
+    public string JobDefaultsJson { get; set; } = "{}";
     public bool Enabled { get; set; }
     public int SortOrder { get; set; }
 }
