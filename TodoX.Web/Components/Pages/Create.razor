@@ -1,18 +1,19 @@
-﻿@page "/create"
+@page "/create"
 @implements IDisposable
 @using TodoX.Web.Models.Catalog
 @using TodoX.Web.Models.Timelapse
 @inject AuthStateService AuthState
+@inject AccountService Accounts
 @inject CatalogRepository Catalog
 @inject NavigationManager Navigation
 @inject ISnackbar Snackbar
 
-<PageTitle>Tạo video</PageTitle>
+<PageTitle>Kho dịch vụ video</PageTitle>
 
 <MudStack Spacing="3">
     <div>
-        <MudText Typo="Typo.h4" Class="todox-page-title">Tạo video</MudText>
-        <MudText Typo="Typo.body1" Class="todox-page-subtitle">Chọn một dịch vụ todoX để bắt đầu.</MudText>
+        <MudText Typo="Typo.h4" Class="todox-page-title">Kho dịch vụ video</MudText>
+        <MudText Typo="Typo.body1" Class="todox-page-subtitle">Chọn dịch vụ phù hợp để bắt đầu tạo job.</MudText>
     </div>
 
     @if (!AuthState.IsInitialized)
@@ -31,67 +32,31 @@
     {
         <MudAlert Severity="Severity.Error">@_error</MudAlert>
     }
+    else if (_services.Count == 0)
+    {
+        <MudAlert Severity="Severity.Info">Hiện chưa có dịch vụ khả dụng.</MudAlert>
+    }
     else
     {
         <MudGrid Class="todox-service-grid">
             @foreach (var service in _services)
             {
                 <MudItem xs="12" sm="6" md="4" lg="4">
-                    <MudPaper Class="todox-card todox-service-card pa-0" rounded="true">
-                        <div class="todox-service-media">
-                            @if (!string.IsNullOrWhiteSpace(service.ThumbnailUrl))
-                            {
-                                <img src="@service.ThumbnailUrl" alt="@service.DisplayName" />
-                            }
-                            else if (!string.IsNullOrWhiteSpace(service.CoverImageUrl))
-                            {
-                                <img src="@service.CoverImageUrl" alt="@service.DisplayName" />
-                            }
-                            else
-                            {
-                                <div class="todox-service-media-empty">
-                                    <MudIcon Icon="@Icons.Material.Filled.Movie" Size="Size.Large" />
-                                </div>
-                            }
-                        </div>
-
-                        <div class="todox-service-body pa-4">
-                            <MudStack Spacing="2">
-                                <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="gap-2">
-                                    <MudText Typo="Typo.h6" Class="todox-service-title">@service.DisplayName</MudText>
-                                </MudStack>
-
-                                <MudText Typo="Typo.body2" Color="Color.Secondary" Class="todox-service-desc">
-                                    @service.Description
-                                </MudText>
-
-                                <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
-                                    <div>
-                                        <span class="todox-service-price">@service.StartingPriceSummary</span>
-                                    </div>
-                                    <MudButton Variant="Variant.Filled"
-                                               Color="Color.Warning"
-                                               StartIcon="@Icons.Material.Filled.ArrowForward"
-                                               OnClick="@(() => OpenService(service))">
-                                        Tạo video
-                                    </MudButton>
-                                </MudStack>
-                            </MudStack>
-                        </div>
-                    </MudPaper>
+                    <ServiceCatalogCard Service="service"
+                                        ShowFavorite="true"
+                                        IsFavorite="@_favoriteServiceIds.Contains(service.Id)"
+                                        PrimaryActionLabel="Tạo video"
+                                        OnFavoriteChanged="ToggleFavoriteAsync"
+                                        OnPrimaryAction="OpenServiceAsync" />
                 </MudItem>
             }
         </MudGrid>
-
-        @if (_services.Count == 0)
-        {
-            <MudAlert Severity="Severity.Info">Hiện chưa có dịch vụ khả dụng.</MudAlert>
-        }
     }
 </MudStack>
 
 @code {
     private IReadOnlyList<CatalogServiceView> _services = Array.Empty<CatalogServiceView>();
+    private HashSet<Guid> _favoriteServiceIds = new();
     private bool _loading = true;
     private bool _hasServiceUnavailableInfo;
     private string? _error;
@@ -113,9 +78,10 @@
     private async Task LoadServicesAsync()
     {
         _error = null;
-        if (AuthState.CurrentUser is not { IsCustomer: true })
+        if (AuthState.CurrentUser is not { IsCustomer: true } user || user.CustomerId is null)
         {
             _services = Array.Empty<CatalogServiceView>();
+            _favoriteServiceIds = new HashSet<Guid>();
             _loading = false;
             return;
         }
@@ -124,6 +90,7 @@
         try
         {
             _services = SortServices(await Catalog.GetActiveCatalogServicesAsync());
+            _favoriteServiceIds = (await Accounts.GetFavoriteServiceIdsAsync(user.UserId, user.CustomerId.Value)).ToHashSet();
         }
         catch (Exception ex)
         {
@@ -143,7 +110,56 @@
             .ThenBy(x => x.ServiceCode, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-    private void OpenService(CatalogServiceView service)
+    private static string? ImageUrl(CatalogServiceView service)
+        => !string.IsNullOrWhiteSpace(service.ThumbnailUrl) ? service.ThumbnailUrl : service.CoverImageUrl;
+
+    private async Task ToggleFavoriteAsync(Guid serviceId)
+    {
+        var user = AuthState.CurrentUser;
+        if (user is not { IsCustomer: true } || user.CustomerId is null)
+        {
+            return;
+        }
+
+        var wasFavorite = _favoriteServiceIds.Contains(serviceId);
+        if (wasFavorite)
+        {
+            _favoriteServiceIds.Remove(serviceId);
+        }
+        else
+        {
+            _favoriteServiceIds.Add(serviceId);
+        }
+
+        var (ok, isFavorite, message) = await Accounts.ToggleFavoriteAsync(user, serviceId);
+        if (!ok)
+        {
+            if (wasFavorite)
+            {
+                _favoriteServiceIds.Add(serviceId);
+            }
+            else
+            {
+                _favoriteServiceIds.Remove(serviceId);
+            }
+
+            Snackbar.Add(message, Severity.Error);
+            return;
+        }
+
+        if (isFavorite)
+        {
+            _favoriteServiceIds.Add(serviceId);
+        }
+        else
+        {
+            _favoriteServiceIds.Remove(serviceId);
+        }
+
+        Snackbar.Add(message, Severity.Success);
+    }
+
+    private async Task OpenServiceAsync(CatalogServiceView service)
     {
         var route = CustomerServiceRouting.Resolve(service.ServiceType, service.Id, service.ServiceCode);
         if (!string.IsNullOrWhiteSpace(route.Route))

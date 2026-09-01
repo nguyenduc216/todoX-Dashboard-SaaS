@@ -42,6 +42,7 @@ builder.Services.AddTodoXCorePlatform();
 builder.Services.AddSingleton<PasswordHasher>();
 builder.Services.AddScoped<AccountRepository>();
 builder.Services.AddScoped<CustomerRepository>();
+builder.Services.AddScoped<ServiceFavoriteRepository>();
 builder.Services.AddScoped<PermissionRepository>();
 builder.Services.AddScoped<NavigationMenuRepository>();
 builder.Services.AddScoped<LandingContactLeadRepository>();

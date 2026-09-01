@@ -1,4 +1,5 @@
 using TodoX.Web.Models;
+using TodoX.Web.Models.Catalog;
 
 namespace TodoX.Web.Services;
 
@@ -10,14 +11,16 @@ public sealed class AccountService
 {
     private readonly AccountRepository _accounts;
     private readonly CustomerRepository _customers;
+    private readonly ServiceFavoriteRepository _favorites;
     private readonly PermissionRepository _permissions;
     private readonly PasswordHasher _passwords;
 
     public AccountService(AccountRepository accounts, CustomerRepository customers,
-        PermissionRepository permissions, PasswordHasher passwords)
+        ServiceFavoriteRepository favorites, PermissionRepository permissions, PasswordHasher passwords)
     {
         _accounts = accounts;
         _customers = customers;
+        _favorites = favorites;
         _permissions = permissions;
         _passwords = passwords;
     }
@@ -27,6 +30,11 @@ public sealed class AccountService
     public Task<IReadOnlyList<SystemUser>> GetSystemUsersAsync() => _accounts.GetSystemUsersAsync();
     public Task<IReadOnlyList<CustomerProfile>> GetCustomersAsync() => _customers.GetCustomersAsync();
     public Task<IReadOnlyList<CustomerAccount>> GetCustomerAccountsAsync() => _customers.GetCustomerAccountsAsync();
+    public Task<IReadOnlyList<Guid>> GetFavoriteServiceIdsAsync(Guid userId, Guid customerId)
+        => _favorites.GetFavoriteServiceIdsAsync(userId, customerId);
+
+    public Task<IReadOnlyList<CatalogServiceView>> GetFavoriteServicesAsync(Guid userId, Guid customerId)
+        => _favorites.GetFavoriteServicesAsync(userId, customerId);
 
     // ===================== Login / Register =====================
 
@@ -287,7 +295,7 @@ public sealed class AccountService
                 return (false, "Vui lòng nhập mật khẩu.");
             }
 
-            await _customers.InsertCustomerAccountAsync(model, _passwords.Hash(model.Password));
+            model.Id = await _customers.InsertCustomerAccountAsync(model, _passwords.Hash(model.Password));
             return (true, "Đã tạo tài khoản khách hàng.");
         }
 
@@ -314,5 +322,56 @@ public sealed class AccountService
     {
         await _customers.DeleteCustomerAccountAsync(id);
         return (true, "Đã xóa tài khoản khách hàng.");
+    }
+
+    public async Task<(bool Success, string Message)> SetCustomerAccountFavoritesAsync(
+        CustomerAccount account,
+        CurrentUserSession? actor = null)
+    {
+        if (account.Id == Guid.Empty || account.CustomerId == Guid.Empty)
+        {
+            return (false, "Tài khoản khách hàng không hợp lệ.");
+        }
+
+        try
+        {
+            await _favorites.ReplaceFavoritesAsync(
+                account.Id,
+                account.CustomerId,
+                account.FavoriteServiceIds,
+                actor?.IsCustomer == true ? "user" : "admin",
+                actor?.UserId);
+            return (true, "Đã cập nhật dịch vụ hiển thị trên Dashboard.");
+        }
+        catch (Exception ex)
+        {
+            return (false, $"Không thể cập nhật dịch vụ hiển thị trên Dashboard: {ex.Message}");
+        }
+    }
+
+    public async Task<(bool Success, bool IsFavorite, string Message)> ToggleFavoriteAsync(
+        CurrentUserSession user,
+        Guid serviceId)
+    {
+        if (!user.IsCustomer || user.CustomerId is null || user.CustomerId == Guid.Empty)
+        {
+            return (false, false, "Chỉ tài khoản khách hàng mới có thể thao tác favorite.");
+        }
+
+        try
+        {
+            var isFavorite = await _favorites.IsFavoriteAsync(user.UserId, user.CustomerId.Value, serviceId);
+            await _favorites.ToggleFavoriteAsync(
+                user.UserId,
+                user.CustomerId.Value,
+                serviceId,
+                "user",
+                user.UserId);
+            return (true, !isFavorite, !isFavorite ? "Đã thêm dịch vụ vào Dashboard." : "Đã bỏ dịch vụ khỏi Dashboard.");
+        }
+        catch (Exception ex)
+        {
+            return (false, false, $"Không thể cập nhật favorite: {ex.Message}");
+        }
     }
 }

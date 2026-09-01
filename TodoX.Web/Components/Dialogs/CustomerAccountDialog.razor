@@ -1,4 +1,5 @@
 @using TodoX.Web.Models
+@using TodoX.Web.Models.Catalog
 
 <MudDialog>
     <TitleContent>
@@ -10,7 +11,7 @@
                 <MudSelect T="Guid" Label="Khách hàng" @bind-Value="_model.CustomerId" Variant="Variant.Outlined" Required="true">
                     @foreach (var c in Customers)
                     {
-                        <MudSelectItem Value="c.Id">@c.CompanyName (@c.CustomerCode)</MudSelectItem>
+                        <MudSelectItem Value="@c.Id">@c.CompanyName (@c.CustomerCode)</MudSelectItem>
                     }
                 </MudSelect>
             </MudItem>
@@ -41,6 +42,52 @@
                               @bind-Value="_model.Password" Variant="Variant.Outlined" InputType="InputType.Password" />
             </MudItem>
         </MudGrid>
+
+        <MudDivider Class="my-4" />
+
+        <MudStack Spacing="2">
+            <MudText Typo="Typo.subtitle2">Dịch vụ hiển thị trên Dashboard</MudText>
+            @if (Services.Count == 0)
+            {
+                <MudAlert Severity="Severity.Info" Dense="true">Hiện chưa có dịch vụ active để chọn.</MudAlert>
+            }
+            else
+            {
+                <MudGrid Class="todox-favorite-service-grid">
+                    @foreach (var service in Services)
+                    {
+                        <MudItem xs="12" sm="6">
+                            <MudPaper Class="todox-favorite-service-item pa-3" rounded="true" Elevation="0">
+                                <MudStack Row="true" AlignItems="AlignItems.Center" Class="gap-3">
+                                    <MudCheckBox T="bool"
+                                                 Color="Color.Warning"
+                                                 Value="@_favoriteServiceIds.Contains(service.Id)"
+                                                 ValueChanged="@((bool value) => ToggleFavorite(service.Id, value))" />
+                                    <div class="todox-favorite-service-thumb">
+                                        @if (!string.IsNullOrWhiteSpace(service.ThumbnailUrl))
+                                        {
+                                            <img src="@service.ThumbnailUrl" alt="@service.DisplayName" />
+                                        }
+                                        else if (!string.IsNullOrWhiteSpace(service.CoverImageUrl))
+                                        {
+                                            <img src="@service.CoverImageUrl" alt="@service.DisplayName" />
+                                        }
+                                        else
+                                        {
+                                            <MudIcon Icon="@Icons.Material.Filled.Movie" />
+                                        }
+                                    </div>
+                                    <MudStack Spacing="0">
+                                        <MudText Typo="Typo.body2">@service.DisplayName</MudText>
+                                        <MudText Typo="Typo.caption" Color="Color.Secondary">@service.StartingPriceSummary</MudText>
+                                    </MudStack>
+                                </MudStack>
+                            </MudPaper>
+                        </MudItem>
+                    }
+                </MudGrid>
+            }
+        </MudStack>
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="Cancel">Hủy</MudButton>
@@ -53,9 +100,12 @@
 
     [Parameter] public CustomerAccount? Source { get; set; }
     [Parameter] public IReadOnlyList<CustomerProfile> Customers { get; set; } = new List<CustomerProfile>();
+    [Parameter] public IReadOnlyList<CatalogServiceView> Services { get; set; } = [];
+    [Parameter] public IReadOnlyCollection<Guid> FavoriteServiceIds { get; set; } = Array.Empty<Guid>();
 
     private CustomerAccount _model = new();
     private bool _isNew;
+    private HashSet<Guid> _favoriteServiceIds = new();
 
     protected override void OnInitialized()
     {
@@ -80,8 +130,28 @@
                 Role = Source.Role,
                 Status = Source.Status,
                 CreatedAt = Source.CreatedAt,
-                Password = string.Empty
+                Password = string.Empty,
+                FavoriteServiceIds = Source.FavoriteServiceIds.ToList()
             };
+
+        _favoriteServiceIds = FavoriteServiceIds.Count > 0
+            ? FavoriteServiceIds.ToHashSet()
+            : _model.FavoriteServiceIds.ToHashSet();
+        _model.FavoriteServiceIds = _favoriteServiceIds.OrderBy(x => x).ToList();
+    }
+
+    private void ToggleFavorite(Guid serviceId, bool isChecked)
+    {
+        if (isChecked)
+        {
+            _favoriteServiceIds.Add(serviceId);
+        }
+        else
+        {
+            _favoriteServiceIds.Remove(serviceId);
+        }
+
+        _model.FavoriteServiceIds = _favoriteServiceIds.OrderBy(x => x).ToList();
     }
 
     private void Submit() => MudDialog.Close(DialogResult.Ok(_model));

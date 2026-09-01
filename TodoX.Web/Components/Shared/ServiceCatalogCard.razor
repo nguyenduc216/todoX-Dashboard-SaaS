@@ -1,0 +1,83 @@
+@using TodoX.Web.Models.Catalog
+@using TodoX.Web.Models.Timelapse
+
+<MudPaper Class="todox-card todox-service-card pa-0" rounded="true">
+    <div class="todox-service-media">
+        @if (!string.IsNullOrWhiteSpace(Service.ThumbnailUrl))
+        {
+            <img src="@Service.ThumbnailUrl" alt="@Service.DisplayName" />
+        }
+        else if (!string.IsNullOrWhiteSpace(Service.CoverImageUrl))
+        {
+            <img src="@Service.CoverImageUrl" alt="@Service.DisplayName" />
+        }
+        else
+        {
+            <div class="todox-service-media-empty">
+                <MudIcon Icon="@Icons.Material.Filled.Movie" Size="Size.Large" />
+            </div>
+        }
+
+        @if (ShowFavorite)
+        {
+            <div class="todox-service-favorite">
+                <MudTooltip Text="@(IsFavorite ? RemoveFavoriteTooltip : AddFavoriteTooltip)">
+                    <MudIconButton Icon="@(IsFavorite ? Icons.Material.Filled.Favorite : Icons.Material.Outlined.FavoriteBorder)"
+                                   Color="@(IsFavorite ? Color.Error : Color.Default)"
+                                   Size="Size.Small"
+                                   Class="todox-service-favorite-btn"
+                                   OnClick="ToggleFavoriteAsync"
+                                   aria-label="@(IsFavorite ? RemoveFavoriteTooltip : AddFavoriteTooltip)" />
+                </MudTooltip>
+            </div>
+        }
+    </div>
+
+    <div class="todox-service-body pa-4">
+        <MudStack Spacing="2">
+            <MudText Typo="Typo.h6" Class="todox-service-title">@Service.DisplayName</MudText>
+
+            <MudText Typo="Typo.body2" Color="Color.Secondary" Class="todox-service-desc">
+                @Service.Description
+            </MudText>
+
+            @if (ShowPrice && !string.IsNullOrWhiteSpace(Service.StartingPriceSummary))
+            {
+                <div class="todox-service-price">@Service.StartingPriceSummary</div>
+            }
+        </MudStack>
+
+        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="mt-4 flex-wrap gap-2">
+            @if (ShowPrice && string.IsNullOrWhiteSpace(Service.StartingPriceSummary))
+            {
+                <MudText Typo="Typo.caption" Color="Color.Secondary">Chưa có giá khởi điểm</MudText>
+            }
+
+            <MudButton Variant="Variant.Filled"
+                       Color="Color.Warning"
+                       StartIcon="@Icons.Material.Filled.ArrowForward"
+                       Disabled="@(!OnPrimaryAction.HasDelegate)"
+                       OnClick="OpenServiceAsync">
+                @PrimaryActionLabel
+            </MudButton>
+        </MudStack>
+    </div>
+</MudPaper>
+
+@code {
+    [Parameter, EditorRequired] public CatalogServiceView Service { get; set; } = default!;
+    [Parameter] public bool ShowFavorite { get; set; }
+    [Parameter] public bool IsFavorite { get; set; }
+    [Parameter] public bool ShowPrice { get; set; } = true;
+    [Parameter] public string PrimaryActionLabel { get; set; } = "Tạo video";
+    [Parameter] public string AddFavoriteTooltip { get; set; } = "Thêm vào Dashboard";
+    [Parameter] public string RemoveFavoriteTooltip { get; set; } = "Bỏ khỏi Dashboard";
+    [Parameter] public EventCallback<Guid> OnFavoriteChanged { get; set; }
+    [Parameter] public EventCallback<CatalogServiceView> OnPrimaryAction { get; set; }
+
+    private Task ToggleFavoriteAsync()
+        => OnFavoriteChanged.HasDelegate ? OnFavoriteChanged.InvokeAsync(Service.Id) : Task.CompletedTask;
+
+    private Task OpenServiceAsync()
+        => OnPrimaryAction.HasDelegate ? OnPrimaryAction.InvokeAsync(Service) : Task.CompletedTask;
+}

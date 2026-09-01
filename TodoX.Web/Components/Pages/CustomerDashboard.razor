@@ -1,7 +1,7 @@
 @using TodoX.Web.Models.Catalog
 @using TodoX.Web.Models.Timelapse
 @inject AuthStateService AuthState
-@inject CatalogRepository Catalog
+@inject AccountService Accounts
 @inject ICustomerDashboardService Dashboard
 @inject NavigationManager Navigation
 @inject ILogger<CustomerDashboard> Logger
@@ -36,30 +36,30 @@
             <MudAlert Severity="Severity.Warning" Dense="true">Một số dữ liệu phụ chưa tải được. Bạn vẫn có thể sử dụng trang chủ.</MudAlert>
         }
 
-        <MudGrid>
-            @foreach (var service in _services)
-            {
-                <MudItem xs="12" sm="6" lg="4">
-                    <MudPaper Class="todox-card pa-4 h-100" rounded="true">
-                        <MudStack Spacing="2" Class="h-100">
-                            <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="gap-3">
-                                <MudIcon Icon="@ResolveIcon(service.ServiceType)" Color="Color.Warning" Size="Size.Large" />
-                                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Default">@service.ServiceType</MudChip>
-                            </MudStack>
-                            <div>
-                                <MudText Typo="Typo.h6">@service.DisplayName</MudText>
-                                <MudText Typo="Typo.body2" Color="Color.Secondary">@service.Description</MudText>
-                            </div>
-                            <MudSpacer />
-                            <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="gap-3 flex-wrap">
-                                <MudText Typo="Typo.caption" Class="todox-page-subtitle">@service.StartingPriceSummary</MudText>
-                                <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.ArrowForward" OnClick="@(() => OpenService(service))">Tạo ngay</MudButton>
-                            </MudStack>
-                        </MudStack>
-                    </MudPaper>
-                </MudItem>
-            }
-        </MudGrid>
+        @if (_services.Count == 0)
+        {
+            <MudPaper Class="todox-card pa-6" rounded="true">
+                <MudStack AlignItems="AlignItems.Center" Spacing="2">
+                    <MudText>Chưa có dịch vụ nào trong danh sách của bạn.</MudText>
+                    <MudText Typo="Typo.body2" Color="Color.Secondary">Vào Kho dịch vụ video để chọn dịch vụ muốn hiển thị trên Dashboard.</MudText>
+                    <MudButton Variant="Variant.Outlined" Color="Color.Warning" Href="/create">Vào Kho dịch vụ video</MudButton>
+                </MudStack>
+            </MudPaper>
+        }
+        else
+        {
+            <MudGrid Class="todox-service-grid">
+                @foreach (var service in _services)
+                {
+                    <MudItem xs="12" sm="6" lg="4">
+                        <ServiceCatalogCard Service="service"
+                                            ShowFavorite="false"
+                                            PrimaryActionLabel="Tạo ngay"
+                                            OnPrimaryAction="OpenServiceAsync" />
+                    </MudItem>
+                }
+            </MudGrid>
+        }
 
         <MudGrid>
             <MudItem xs="12" sm="6" lg="4">
@@ -167,7 +167,7 @@
 
         try
         {
-            if (!AuthState.IsInitialized || !user.IsCustomer)
+            if (!AuthState.IsInitialized || !user.IsCustomer || user.CustomerId is null)
             {
                 _state = DashboardLoadState.Empty;
                 return;
@@ -179,7 +179,7 @@
             IReadOnlyList<CatalogServiceView> services;
             try
             {
-                services = await Catalog.GetActiveCatalogServicesAsync().WaitAsync(ct);
+                services = await Accounts.GetFavoriteServicesAsync(user.UserId, user.CustomerId.Value).WaitAsync(ct);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -187,12 +187,11 @@
             }
             catch (Exception ex)
             {
-                Logger.LogWarning(ex, "CUSTOMER_DASHBOARD_CATALOG_FAILED userId={UserId} customerId={CustomerId}", user.UserId, user.CustomerId);
+                Logger.LogWarning(ex, "CUSTOMER_DASHBOARD_FAVORITES_FAILED userId={UserId} customerId={CustomerId}", user.UserId, user.CustomerId);
                 services = Array.Empty<CatalogServiceView>();
             }
 
             _services = services
-                .Where(x => CustomerServiceRouting.Resolve(x.ServiceType, x.Id, x.ServiceCode).Destination != CustomerServiceDestination.Unavailable)
                 .OrderBy(x => x.SortOrder)
                 .ThenBy(x => x.DisplayName, StringComparer.OrdinalIgnoreCase)
                 .ToList();
@@ -247,7 +246,7 @@
         _loadCancellation?.Dispose();
     }
 
-    private void OpenService(CatalogServiceView service)
+    private async Task OpenServiceAsync(CatalogServiceView service)
     {
         var route = CustomerServiceRouting.Resolve(service.ServiceType, service.Id, service.ServiceCode);
         if (!string.IsNullOrWhiteSpace(route.Route))
@@ -263,15 +262,6 @@
             var value when CustomerDashboardStatusRules.IsFailedStatus(value) => Color.Error,
             var value when CustomerDashboardStatusRules.IsProcessingStatus(value) => Color.Warning,
             _ => Color.Default
-        };
-
-    private static string ResolveIcon(string? serviceType)
-        => serviceType switch
-        {
-            TodoXServiceEngineTypes.Timelapse => Icons.Material.Filled.Construction,
-            TodoXServiceEngineTypes.RVideo => Icons.Material.Filled.Movie,
-            TodoXServiceEngineTypes.RDance => Icons.Material.Filled.DirectionsRun,
-            _ => Icons.Material.Filled.AutoFixHigh
         };
 
     private enum DashboardLoadState

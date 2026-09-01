@@ -239,7 +239,7 @@
         => CurrentPath switch
         {
             "/" => ("Trang chủ", string.Empty),
-            "/create" => ("Video của tôi", "Tạo video"),
+            "/create" => ("Video của tôi", "Kho dịch vụ video"),
             "/jobs" => ("Video của tôi", "Jobs của tôi"),
             var path when path.StartsWith("/jobs/", StringComparison.OrdinalIgnoreCase) => ("Video của tôi", "Chi tiết job"),
             "/ai-assets/characters" => ("AI Studio", "Characters"),
@@ -394,7 +394,7 @@
                 {
                     Id = Guid.NewGuid(),
                     Code = "customer_create_video",
-                    Title = "Tạo video",
+                    Title = "Kho dịch vụ video",
                     Href = "/create",
                     IconKey = "Movie",
                     ModuleKeys = Array.Empty<string>(),
@@ -811,7 +811,7 @@
                 Id = Guid.NewGuid(),
                 GroupId = groupId,
                 Code = "customer_create_video",
-                Title = "Tạo video",
+                Title = "Kho dịch vụ video",
                 Href = "/create",
                 IconKey = "Movie",
                 ModuleKeys = Array.Empty<string>(),
