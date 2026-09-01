@@ -114,6 +114,13 @@
                                 <MudItem xs="12" sm="4"><MudNumericField T="int?" Label="Total seconds" @bind-Value="_defaults.TotalSeconds" Variant="Variant.Outlined" Min="1" /></MudItem>
                                 <MudItem xs="12" sm="4"><MudNumericField T="int?" Label="Scene seconds" @bind-Value="_defaults.SceneSeconds" Variant="Variant.Outlined" Min="1" /></MudItem>
                                 <MudItem xs="12" sm="4"><MudSelect T="string" Label="Execution mode" @bind-Value="_defaults.ExecutionMode" Variant="Variant.Outlined" Clearable="true"><MudSelectItem T="string" Value="@RVideoExecutionModes.Manual">manual</MudSelectItem><MudSelectItem T="string" Value="@RVideoExecutionModes.Auto">auto</MudSelectItem></MudSelect></MudItem>
+                                <MudItem xs="12" sm="6">
+                                    <MudSelect T="string" Label="Nhân vật tham chiếu mặc định" @bind-Value="_defaults.CharacterMode" Variant="Variant.Outlined" Clearable="true">
+                                        <MudSelectItem T="string" Value="@("none")">Không sử dụng nhân vật</MudSelectItem>
+                                        <MudSelectItem T="string" Value="@RVideoCharacterModes.Upload">Upload hình ảnh</MudSelectItem>
+                                        <MudSelectItem T="string" Value="@RVideoCharacterModes.Library">Chọn từ Character Library</MudSelectItem>
+                                    </MudSelect>
+                                </MudItem>
                                 <MudItem xs="12"><MudCheckBox @bind-Value="_defaults.UseReferenceImageForAllScenes" Label="Giữ nguyên hình ảnh tham khảo cho mọi scene" /></MudItem>
                                 <MudItem xs="12" sm="4"><MudSelect T="string" Label="Voice mode" @bind-Value="_defaults.VoiceMode" Variant="Variant.Outlined" Clearable="true"><MudSelectItem T="string" Value="@RVideoVoiceModes.None">none</MudSelectItem><MudSelectItem T="string" Value="@RVideoVoiceModes.Native">native</MudSelectItem><MudSelectItem T="string" Value="@RVideoVoiceModes.Library">library</MudSelectItem></MudSelect></MudItem>
                                 <MudItem xs="12" sm="4"><MudTextField T="string" Label="Voice catalog" @bind-Value="_defaults.VoiceCatalogCode" Variant="Variant.Outlined" /></MudItem>
@@ -281,6 +288,7 @@
             TotalSeconds = NormalizePositiveInt(_defaults.TotalSeconds),
             SceneSeconds = NormalizePositiveInt(_defaults.SceneSeconds),
             ExecutionMode = NormalizeExecutionMode(_defaults.ExecutionMode),
+            CharacterMode = NormalizeCharacterMode(_defaults.CharacterMode),
             UseReferenceImageForAllScenes = _defaults.UseReferenceImageForAllScenes,
             VoiceMode = NormalizeText(_defaults.VoiceMode),
             VoiceCatalogCode = NormalizeText(_defaults.VoiceCatalogCode),
@@ -318,4 +326,13 @@
             : string.Equals(value, RVideoExecutionModes.Manual, StringComparison.OrdinalIgnoreCase)
                 ? RVideoExecutionModes.Manual
                 : null;
+
+    private static string? NormalizeCharacterMode(string? value)
+        => string.Equals(value, "none", StringComparison.OrdinalIgnoreCase)
+            ? "none"
+            : string.Equals(value, RVideoCharacterModes.Upload, StringComparison.OrdinalIgnoreCase)
+                ? RVideoCharacterModes.Upload
+                : string.Equals(value, RVideoCharacterModes.Library, StringComparison.OrdinalIgnoreCase)
+                    ? RVideoCharacterModes.Library
+                    : null;
 }
