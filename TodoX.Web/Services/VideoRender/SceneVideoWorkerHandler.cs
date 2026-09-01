@@ -58,7 +58,7 @@ public enum VideoSceneImageInputMode
 public static class RVideoReferenceOnlyPromptGuard
 {
     public const string Text =
-        "Use the reference image only for character/identity consistency. Do not use the reference image as the opening frame, first frame, or initial composition. Start the video directly in the scene, environment, action, and composition described below. Do not show, freeze, or transition from the reference image.";
+        "Use the supplied reference image only to preserve the character's identity, facial features, hairstyle, clothing, and overall appearance. Do not reproduce the reference image as the first frame, opening shot, frozen frame, or initial composition. Start immediately inside the environment, action, camera framing, and composition described in this scene prompt. The referenced character should already exist naturally inside the described scene from the first frame.";
 
     public static string Apply(string? prompt, bool useSharedReferenceImage)
     {
@@ -80,9 +80,10 @@ public static class RVideoReferenceOnlyPromptGuard
             return false;
         }
 
-        return prompt.Contains("reference image only for character/identity consistency", StringComparison.OrdinalIgnoreCase)
-               || (prompt.Contains("Do not use the reference image as the opening frame", StringComparison.OrdinalIgnoreCase)
-                   && prompt.Contains("Start the video directly in the scene", StringComparison.OrdinalIgnoreCase));
+        return prompt.Contains("supplied reference image only to preserve the character", StringComparison.OrdinalIgnoreCase)
+               || prompt.Contains("reference image only for character/identity consistency", StringComparison.OrdinalIgnoreCase)
+               || (prompt.Contains("Do not reproduce the reference image as the first frame", StringComparison.OrdinalIgnoreCase)
+                   && prompt.Contains("Start immediately inside the environment", StringComparison.OrdinalIgnoreCase));
     }
 }
 
@@ -153,6 +154,11 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         if (input.ProjectId <= 0 || input.SceneId <= 0 || string.IsNullOrWhiteSpace(input.LogicalRequestId))
         {
             throw new InvalidOperationException("Missing scene video worker snapshot.");
+        }
+        input.ImageInputMode = ResolveImageInputMode(input);
+        if (input.ImageInputMode == VideoSceneImageInputMode.ReferenceOnly)
+        {
+            input.VideoPrompt = RVideoReferenceOnlyPromptGuard.Apply(input.VideoPrompt, useSharedReferenceImage: true);
         }
 
         var project = await _repo.GetProjectAsync(input.ProjectId, ct)
@@ -466,10 +472,9 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
 
                 try
                 {
-                    var sourceMedia = input.ImageInputMode == VideoSceneImageInputMode.ReferenceOnly
-                        ? null
-                        : await ResolveSourceImageMediaAsync(sourceVersion, ct);
-                    var sourceImageAsset = input.ImageInputMode == VideoSceneImageInputMode.ReferenceOnly
+                    var imageInputMode = ResolveImageInputMode(input);
+                    var sourceMedia = await ResolveSourceImageMediaAsync(sourceVersion, ct);
+                    var sourceImageAsset = imageInputMode == VideoSceneImageInputMode.ReferenceOnly
                         ? null
                         : new VideoProviderSourceImage(
                             sourceVersion.ResultMediaId,
@@ -477,6 +482,17 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                             sourceVersion.PublicUrl,
                             sourceMedia?.FileName,
                             sourceMedia?.MimeType);
+                    var referenceImages = imageInputMode == VideoSceneImageInputMode.ReferenceOnly
+                        ? new[]
+                        {
+                            new VideoProviderSourceImage(
+                                sourceVersion.ResultMediaId,
+                                sourceVersion.StorageKey,
+                                sourceVersion.PublicUrl,
+                                sourceMedia?.FileName,
+                                sourceMedia?.MimeType)
+                        }
+                        : Array.Empty<VideoProviderSourceImage>();
                     var providerPrompt = sourceImageAsset is null
                         ? RVideoReferenceOnlyPromptGuard.Apply(input.VideoPrompt, input.UseSharedReferenceImage)
                         : input.VideoPrompt?.Trim() ?? string.Empty;
@@ -504,7 +520,8 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                         input.AspectRatio,
                         input.Resolution,
                         input.DurationSeconds,
-                        sourceImageAsset), ct);
+                        sourceImageAsset,
+                        referenceImages), ct);
                     taskId = string.IsNullOrWhiteSpace(submit.ProviderTaskId) ? null : submit.ProviderTaskId.Trim();
                     if (string.IsNullOrWhiteSpace(taskId))
                     {
@@ -513,7 +530,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
 
                     await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_SOURCE_UPLOAD_SUCCESS", "info",
                         "Scene-video source image handoff completed.",
-                        new { jobId = job.Id, input.ProjectId, input.SceneId, input.SceneIndex, sourceImageVersionId = sourceVersion.Id, imageInputMode = input.ImageInputMode.ToString() }, ct);
+                        new { jobId = job.Id, input.ProjectId, input.SceneId, input.SceneIndex, sourceImageVersionId = sourceVersion.Id, imageInputMode = imageInputMode.ToString() }, ct);
                     await _versions.MarkSceneVideoVersionSubmittedAsync(version.Id, input.ProviderCode, policy.Model, input.ProviderCapabilityId, taskId, ct);
                     await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_SUBMITTED", "info",
                         "Scene-video provider submit completed.",
@@ -536,7 +553,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                 {
                     await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_SOURCE_UPLOAD_FAILED", "error",
                         "Scene-video source image handoff or provider submit failed.",
-                        new { jobId = job.Id, input.ProjectId, input.SceneId, input.SceneIndex, errorCode = ex.GetType().Name, imageInputMode = input.ImageInputMode.ToString() }, CancellationToken.None);
+                        new { jobId = job.Id, input.ProjectId, input.SceneId, input.SceneIndex, errorCode = ex.GetType().Name, imageInputMode = ResolveImageInputMode(input).ToString() }, CancellationToken.None);
                     await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_SUBMIT_FAILED", "error",
                         "Scene-video provider submit failed.",
                         new { jobId = job.Id, input.ProjectId, input.SceneId, input.SceneIndex, errorCode = ex.GetType().Name }, CancellationToken.None);
@@ -1043,6 +1060,18 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
            && version.Id != Guid.Empty
            && version.IsSelected
            && version.Status.Equals("completed", StringComparison.OrdinalIgnoreCase);
+
+    private static VideoSceneImageInputMode ResolveImageInputMode(SceneVideoRenderWorkItemInput input)
+    {
+        if (input.ImageInputMode == VideoSceneImageInputMode.LegacySelectedSource)
+        {
+            return input.UseSharedReferenceImage
+                ? VideoSceneImageInputMode.ReferenceOnly
+                : VideoSceneImageInputMode.SceneSource;
+        }
+
+        return input.ImageInputMode;
+    }
 
     private async Task<MediaFileDto?> ResolveSourceImageMediaAsync(SceneImageVersionDto version, CancellationToken ct)
     {

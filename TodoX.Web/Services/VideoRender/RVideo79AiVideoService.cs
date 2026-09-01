@@ -77,7 +77,8 @@ public sealed record RVideo79AiVideoSubmitRequest(
     string AspectRatio,
     string Resolution,
     int DurationSeconds,
-    RVideo79AiProviderImageAsset? SourceImageAsset);
+    RVideo79AiProviderImageAsset? SourceImageAsset,
+    IReadOnlyList<RVideo79AiProviderImageAsset> ReferenceImageAssets);
 
 public sealed record RVideo79AiVideoSubmitResult(string TaskId, string SanitizedResponseJson, string SanitizedRequestJson);
 
@@ -197,15 +198,21 @@ public sealed class RVideo79AiVideoService : IRVideo79AiVideoService
             ["translate_to_en"] = "false",
             ["project_id"] = request.Runtime.ProjectId
         };
+        var providerImages = new List<RVideo79AiProviderImageAsset>();
         if (request.SourceImageAsset is not null)
         {
-            options["images"] = JsonSerializer.Serialize(new[] { new
+            providerImages.Add(request.SourceImageAsset);
+        }
+        providerImages.AddRange(request.ReferenceImageAssets);
+        if (providerImages.Count > 0)
+        {
+            options["images"] = JsonSerializer.Serialize(providerImages.Select(image => new
             {
-                id_base = request.SourceImageAsset.IdBase,
-                project_id = request.SourceImageAsset.ProjectId,
-                url = request.SourceImageAsset.Url,
-                file_name = request.SourceImageAsset.FileName
-            } }, JsonOptions);
+                id_base = image.IdBase,
+                project_id = image.ProjectId,
+                url = image.Url,
+                file_name = image.FileName
+            }), JsonOptions);
         }
         if (!string.IsNullOrWhiteSpace(request.Model.Mode))
         {
@@ -236,7 +243,14 @@ public sealed class RVideo79AiVideoService : IRVideo79AiVideoService
                 request.SourceImageAsset.ProjectId,
                 request.SourceImageAsset.Url,
                 request.SourceImageAsset.FileName
-            }
+            },
+            referenceImages = request.ReferenceImageAssets.Select(image => new
+            {
+                image.IdBase,
+                image.ProjectId,
+                image.Url,
+                image.FileName
+            })
         }, JsonOptions);
         var submit = await _client.SubmitAsync(raw, ct);
         return new RVideo79AiVideoSubmitResult(submit.TaskId, submit.SanitizedResponseJson, sanitizedRequest);

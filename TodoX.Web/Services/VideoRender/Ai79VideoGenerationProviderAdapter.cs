@@ -32,6 +32,16 @@ public sealed class Ai79VideoGenerationProviderAdapter : IVideoGenerationProvide
                     request.SourceImage.PublicUrl,
                     request.SourceImage.FileName,
                     request.SourceImage.MimeType), ct);
+            var references = new List<RVideo79AiProviderImageAsset>();
+            foreach (var reference in request.ReferenceImages)
+            {
+                references.Add(await _video.UploadSourceImageAsync(runtime, new RVideo79AiVideoSourceImage(
+                    reference.MediaId,
+                    reference.ObjectKey,
+                    reference.PublicUrl,
+                    reference.FileName,
+                    reference.MimeType), ct));
+            }
             var result = await _video.SubmitAsync(new RVideo79AiVideoSubmitRequest(
                 runtime,
                 new RVideoVideoModelPolicyEntry(0, request.ProviderCode, request.RequestedModel, request.ModelMode),
@@ -39,7 +49,8 @@ public sealed class Ai79VideoGenerationProviderAdapter : IVideoGenerationProvide
                 request.AspectRatio,
                 request.Resolution,
                 request.DurationSeconds,
-                source), ct);
+                source,
+                references), ct);
             return new VideoProviderSubmitResult(
                 request.ProviderCode,
                 result.TaskId,

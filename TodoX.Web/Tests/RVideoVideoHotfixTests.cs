@@ -96,6 +96,27 @@ public sealed class RVideoVideoHotfixTests
     }
 
     [Fact]
+    public void LegacySharedReferenceInputInfersReferenceOnlyMode()
+    {
+        var method = typeof(SceneVideoWorkerHandler).GetMethod("ResolveImageInputMode", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var legacyShared = new SceneVideoRenderWorkItemInput
+        {
+            UseSharedReferenceImage = true,
+            ImageInputMode = VideoSceneImageInputMode.LegacySelectedSource
+        };
+        var legacySceneSource = new SceneVideoRenderWorkItemInput
+        {
+            UseSharedReferenceImage = false,
+            ImageInputMode = VideoSceneImageInputMode.LegacySelectedSource
+        };
+
+        Assert.Equal(VideoSceneImageInputMode.ReferenceOnly, method!.Invoke(null, new object[] { legacyShared }));
+        Assert.Equal(VideoSceneImageInputMode.SceneSource, method.Invoke(null, new object[] { legacySceneSource }));
+    }
+
+    [Fact]
     public void SelectedCompletedImageVersionIsAcceptedAndGuidEmptyIsRejected()
     {
         var method = typeof(SceneVideoRenderHandler).GetMethod("IsCompletedSelectedImageVersion", BindingFlags.NonPublic | BindingFlags.Static);
@@ -156,15 +177,16 @@ public sealed class RVideoVideoHotfixTests
         var guardedAgain = RVideoReferenceOnlyPromptGuard.Apply(guarded, useSharedReferenceImage: true);
         var unchanged = RVideoReferenceOnlyPromptGuard.Apply(prompt, useSharedReferenceImage: false);
 
-        Assert.Contains("reference image only for character/identity consistency", guarded);
-        Assert.Contains("Do not use the reference image as the opening frame", guarded);
-        Assert.Contains("Start the video directly in the scene", guarded);
+        Assert.Contains("preserve the character's identity", guarded);
+        Assert.Contains("Do not reproduce the reference image as the first frame", guarded);
+        Assert.Contains("Start immediately inside the environment", guarded);
+        Assert.Contains("referenced character should already exist naturally", guarded);
         Assert.Equal(guarded, guardedAgain);
         Assert.Equal(prompt, unchanged);
     }
 
     [Fact]
-    public async Task RVideo79AiReferenceOnlySubmitOmitsImagesOption()
+    public async Task RVideo79AiReferenceOnlyPayloadContainsImageReference()
     {
         var client = new CapturingAi79TaskClient();
         var service = Create79AiVideoService(client);
@@ -176,11 +198,41 @@ public sealed class RVideoVideoHotfixTests
             "9:16",
             "720p",
             6,
-            SourceImageAsset: null));
+            SourceImageAsset: null,
+            ReferenceImageAssets: new[]
+            {
+                new RVideo79AiProviderImageAsset(
+                    "reference-base",
+                    "project-1",
+                    "https://example.test/reference-character.png",
+                    "reference-character.png",
+                    """{"ok":true}""")
+            }));
 
         Assert.NotNull(client.LastSubmit);
-        Assert.DoesNotContain("images", client.LastSubmit!.Options.Keys);
-        Assert.Contains("Do not use the reference image as the opening frame", client.LastSubmit.Prompt);
+        Assert.True(client.LastSubmit!.Options.TryGetValue("images", out var imagesJson));
+        Assert.Contains("reference-character.png", imagesJson);
+        Assert.Contains("Do not reproduce the reference image as the first frame", client.LastSubmit.Prompt);
+
+        var sanitized = JsonSerializer.Deserialize<JsonElement>((await service.SubmitAsync(new RVideo79AiVideoSubmitRequest(
+            Create79AiRuntime(),
+            RVideoVideoModelPolicy.GetInitial(),
+            RVideoReferenceOnlyPromptGuard.Apply("Open directly on the described scene.", useSharedReferenceImage: true),
+            "9:16",
+            "720p",
+            6,
+            SourceImageAsset: null,
+            ReferenceImageAssets: new[]
+            {
+                new RVideo79AiProviderImageAsset(
+                    "reference-base",
+                    "project-1",
+                    "https://example.test/reference-character.png",
+                    "reference-character.png",
+                    """{"ok":true}""")
+            }))).SanitizedRequestJson);
+        Assert.Equal(JsonValueKind.Null, sanitized.GetProperty("sourceImage").ValueKind);
+        Assert.Single(sanitized.GetProperty("referenceImages").EnumerateArray());
     }
 
     [Fact]
@@ -201,7 +253,8 @@ public sealed class RVideoVideoHotfixTests
                 "project-1",
                 "https://example.test/generated-scene.png",
                 "generated-scene.png",
-                """{"ok":true}""")));
+                """{"ok":true}"""),
+            ReferenceImageAssets: Array.Empty<RVideo79AiProviderImageAsset>()));
 
         Assert.NotNull(client.LastSubmit);
         Assert.True(client.LastSubmit!.Options.TryGetValue("images", out var imagesJson));
