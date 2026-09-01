@@ -61,6 +61,21 @@ public sealed class FavoriteServicesRegressionTests
         Assert.Contains("ToggleFavoriteAsync", source);
     }
 
+    [Fact]
+    public void AdminFavoriteMutation_IsProtectedByServiceAuthorization()
+    {
+        var source = Read("Services", "AccountService.cs");
+        Assert.Contains("CanManageCustomerAccountFavorites(actor)", source);
+        Assert.Contains("actor.IsAuthenticated", source);
+        Assert.Contains("!actor.IsCustomer", source);
+        Assert.Contains("actor.IsRoot", source);
+        Assert.Contains("TodoXUserRole.Admin", source);
+        Assert.Contains("TodoXUserRole.SystemOperator", source);
+        Assert.Contains("actor.Can(\"customer_accounts.create\")", source);
+        Assert.Contains("actor.Can(\"customer_accounts.update\")", source);
+        Assert.Contains("Bạn không có quyền cập nhật dịch vụ hiển thị trên Dashboard", source);
+    }
+
     private static string Read(params string[] parts)
         => File.ReadAllText(Path.Combine(new[] { WebRoot }.Concat(parts).ToArray()), Encoding.UTF8);
 }
