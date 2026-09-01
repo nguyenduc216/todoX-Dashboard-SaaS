@@ -17,20 +17,6 @@
                 <MudIcon Icon="@Icons.Material.Filled.Movie" Size="Size.Large" />
             </div>
         }
-
-        @if (ShowFavorite)
-        {
-            <div class="todox-service-favorite">
-                <MudTooltip Text="@(IsFavorite ? RemoveFavoriteTooltip : AddFavoriteTooltip)">
-                    <MudIconButton Icon="@(IsFavorite ? Icons.Material.Filled.Favorite : Icons.Material.Outlined.FavoriteBorder)"
-                                   Color="@(IsFavorite ? Color.Error : Color.Default)"
-                                   Size="Size.Small"
-                                   Class="todox-service-favorite-btn"
-                                   OnClick="ToggleFavoriteAsync"
-                                   aria-label="@(IsFavorite ? RemoveFavoriteTooltip : AddFavoriteTooltip)" />
-                </MudTooltip>
-            </div>
-        }
     </div>
 
     <div class="todox-service-body pa-4">
@@ -53,13 +39,26 @@
                 <MudText Typo="Typo.caption" Color="Color.Secondary">Chưa có giá khởi điểm</MudText>
             }
 
-            <MudButton Variant="Variant.Filled"
-                       Color="Color.Warning"
-                       StartIcon="@Icons.Material.Filled.ArrowForward"
-                       Disabled="@(!OnPrimaryAction.HasDelegate)"
-                       OnClick="OpenServiceAsync">
-                @PrimaryActionLabel
-            </MudButton>
+            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                @if (ShowFavorite)
+                {
+                    <MudTooltip Text="@(IsFavorite ? RemoveFavoriteTooltip : AddFavoriteTooltip)">
+                        <MudIconButton Icon="@(IsFavorite ? Icons.Material.Filled.Favorite : Icons.Material.Outlined.FavoriteBorder)"
+                                       Color="@(IsFavorite ? Color.Error : Color.Default)"
+                                       Size="Size.Medium"
+                                       OnClick="ToggleFavoriteAsync"
+                                       aria-label="@(IsFavorite ? RemoveFavoriteTooltip : AddFavoriteTooltip)" />
+                    </MudTooltip>
+                }
+
+                <MudButton Variant="Variant.Filled"
+                           Color="Color.Warning"
+                           StartIcon="@Icons.Material.Filled.ArrowForward"
+                           Disabled="@(!OnPrimaryAction.HasDelegate)"
+                           OnClick="OpenServiceAsync">
+                    @PrimaryActionLabel
+                </MudButton>
+            </MudStack>
         </MudStack>
     </div>
 </MudPaper>
