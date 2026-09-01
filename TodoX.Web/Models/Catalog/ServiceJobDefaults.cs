@@ -11,6 +11,7 @@ public sealed class ServiceJobDefaults
     public int? TotalSeconds { get; set; }
     public int? SceneSeconds { get; set; }
     public string? ExecutionMode { get; set; }
+    public string? CharacterMode { get; set; }
     public bool? UseReferenceImageForAllScenes { get; set; }
     public string? VoiceMode { get; set; }
     public string? VoiceCatalogCode { get; set; }
