@@ -144,6 +144,29 @@ public class RenderVideoJobsLayoutTests
     }
 
     [Fact]
+    public void VideoCardsDoNotExposeRawVbeeVideoBeforeVoiceMuxCompletes()
+    {
+        var source = File.ReadAllText(RazorPath);
+
+        Assert.Contains("ResolveOfficialVideoUrl(scene, version)", source);
+        Assert.Contains("ResolveOfficialVideoUrl(scene, ResolveVideoVersion(scene))", source);
+        Assert.Contains("version.VoiceAudioVersionId == selectedAudio.Id", source);
+        Assert.Contains("return MediaRenderState.Rendering;", source);
+        Assert.DoesNotContain("return version.PublicUrl ?? scene.SceneVideoUrl;", source);
+    }
+
+    [Fact]
+    public void ResultAndSceneVideoViewersUseAutoplayPreviewBehavior()
+    {
+        var source = File.ReadAllText(RazorPath);
+
+        Assert.Contains("playsinline preload=\"metadata\" @onclick=\"OpenFinalVideoPreview\"", source);
+        Assert.Contains("private Task OpenFinalVideoPreview()", source);
+        Assert.Contains("LandingIndustryVideoPreviewDialog.AutoPlay)] = true", source);
+        Assert.Contains("Tải lên file MP3", source);
+    }
+
+    [Fact]
     public void VideoCards_HideVoiceFieldsButKeepSceneBindings()
     {
         var razor = File.ReadAllText(RazorPath);

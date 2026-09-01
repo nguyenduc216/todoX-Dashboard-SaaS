@@ -230,7 +230,7 @@ else
                                         <MudRadioGroup T="string" Value="@_musicMode" ValueChanged="OnMusicModeChanged">
                                             <MudRadio T="string" Value="@RVideoMusicModes.None">Không dùng</MudRadio>
                                             <MudRadio T="string" Value="@RVideoMusicModes.Library">Chọn từ Music Library</MudRadio>
-                                            <MudRadio T="string" Value="@RVideoMusicModes.Upload">Tải file MP3</MudRadio>
+                                            <MudRadio T="string" Value="@RVideoMusicModes.Upload">Tải lên file MP3</MudRadio>
                                         </MudRadioGroup>
                                         @if (_musicMode == RVideoMusicModes.Library)
                                         {
@@ -405,6 +405,7 @@ else
                                                                   ThumbnailUrl="@ResolveDraftImageUrl(scene, draft)"
                                                                   AspectRatio="@ProjectAspectRatio"
                                                                   State="@ResolveVideoMediaState(scene)"
+                                                                  LoadingLabel="@ResolveVideoSceneLabel(scene)"
                                                                   EmptyText="Chưa render video"
                                                                   FailedText="Lỗi render video"
                                                                   RetryDisabled="@_sceneVideoRetrying.Contains(scene.Id)"
@@ -472,7 +473,7 @@ else
                                     <MudText Typo="Typo.h5">@(_project.Title ?? "Video project")</MudText>
                                     @if (!string.IsNullOrWhiteSpace(_project.FinalVideoUrl))
                                     {
-                                        <video src="@_project.FinalVideoUrl" controls style="width:100%;border-radius:12px;min-height:320px"></video>
+                                        <video src="@_project.FinalVideoUrl" controls playsinline preload="metadata" @onclick="OpenFinalVideoPreview" style="width:100%;border-radius:12px;min-height:320px;cursor:pointer"></video>
                                     }
                                     else if (IsFinalMergeProcessing)
                                     {
@@ -749,9 +750,9 @@ else
             return RVideoRules.GetSceneReadiness(scene, settings, video, audio);
         }).ToArray();
 
-        var missingVideo = readiness.Where(x => !x.VideoReady).Select(x => x.SceneIndex).ToArray();
+        var missingVideo = readiness.Where(x => !x.VideoReady || !x.MuxReady).Select(x => x.SceneIndex).ToArray();
         if (missingVideo.Length > 0)
-            return (false, $"Đang chờ video hoàn tất cho scene {string.Join(", ", missingVideo)}.");
+            return (false, $"Đang chờ video/giọng hoàn tất cho scene {string.Join(", ", missingVideo)}.");
 
         return (true, string.Empty);
     }
@@ -1697,17 +1698,18 @@ else
             && _videoVersions.TryGetValue(scene.Id, out var versions)
             && versions.FirstOrDefault(x => x.Id == videoVersionId) is { } version)
         {
-            return version.PublicUrl ?? scene.SceneVideoUrl;
+            return ResolveOfficialVideoUrl(scene, version);
         }
 
-        return scene.SceneVideoUrl;
+        return ResolveOfficialVideoUrl(scene, ResolveVideoVersion(scene));
     }
 
     private bool HasCompletedVideoVersion(VideoProjectSceneDto scene)
-        => (!string.IsNullOrWhiteSpace(scene.SceneVideoUrl) || !string.IsNullOrWhiteSpace(scene.SceneVideoPath))
+        => !string.IsNullOrWhiteSpace(ResolveDraftVideoUrl(scene, GetSceneDraft(scene)))
            || (_videoVersions.TryGetValue(scene.Id, out var versions)
                && versions.Any(x => x.Status.Equals("completed", StringComparison.OrdinalIgnoreCase)
-                                    && !string.IsNullOrWhiteSpace(x.PublicUrl ?? x.SourceFilePath)));
+                                    && !string.IsNullOrWhiteSpace(x.PublicUrl ?? x.SourceFilePath)
+                                    && IsOfficialVideoVersion(scene, x)));
 
     private TodoX.Web.Services.VideoRender.SceneVideoVersionDto? ResolveVideoVersion(VideoProjectSceneDto scene)
     {
@@ -1723,9 +1725,21 @@ else
     private string ResolveVideoSceneStatus(VideoProjectSceneDto scene)
     {
         var videoState = ResolveVideoMediaState(scene);
-        if (videoState == MediaRenderState.Ready && RequiresExternalVoice(scene))
+        if (RequiresExternalVoice(scene))
         {
             var selectedVideo = ResolveVideoVersion(scene);
+            if (selectedVideo is null
+                || !string.Equals(selectedVideo.Status, "completed", StringComparison.OrdinalIgnoreCase))
+            {
+                return videoState switch
+                {
+                    MediaRenderState.Queued => VideoSceneStatuses.VideoQueued,
+                    MediaRenderState.Rendering or MediaRenderState.Downloading => VideoSceneStatuses.VideoRendering,
+                    MediaRenderState.Failed => VideoSceneStatuses.Failed,
+                    _ => scene.Status
+                };
+            }
+
             var selectedAudio = ResolveVoiceVersion(scene);
             if (selectedAudio is null)
             {
@@ -1737,7 +1751,7 @@ else
                 return "voice_failed";
             }
 
-            return selectedVideo?.VoiceAudioVersionId == selectedAudio.Id
+            return IsOfficialVideoVersion(scene, selectedVideo)
                 ? VideoSceneStatuses.VideoReady
                 : string.Equals(selectedAudio.Status, "completed", StringComparison.OrdinalIgnoreCase)
                     ? "voice_mux_pending"
@@ -1773,10 +1787,15 @@ else
             && _videoVersions.TryGetValue(scene.Id, out var versions)
             && versions.FirstOrDefault(x => x.Id == videoVersionId) is { } version)
         {
-            return version.SourceFilePath ?? version.StorageKey ?? scene.SceneVideoPath;
+            return IsOfficialVideoVersion(scene, version)
+                ? version.SourceFilePath ?? version.StorageKey ?? scene.SceneVideoPath
+                : null;
         }
 
-        return scene.SceneVideoPath;
+        var selectedVideo = ResolveVideoVersion(scene);
+        return selectedVideo is not null && IsOfficialVideoVersion(scene, selectedVideo)
+            ? selectedVideo.SourceFilePath ?? selectedVideo.StorageKey ?? scene.SceneVideoPath
+            : null;
     }
 
     private Task OpenScenePrompt(VideoProjectSceneDto scene, ScenePromptKind kind)
@@ -2004,6 +2023,26 @@ else
         {
             [nameof(Components.Dialogs.LandingIndustryVideoPreviewDialog.Title)] = title,
             [nameof(Components.Dialogs.LandingIndustryVideoPreviewDialog.VideoUrl)] = videoUrl,
+            [nameof(Components.Dialogs.LandingIndustryVideoPreviewDialog.AspectRatio)] = ProjectAspectRatio,
+            [nameof(Components.Dialogs.LandingIndustryVideoPreviewDialog.AutoPlay)] = true
+        };
+        var options = new DialogOptions { CloseButton = true, FullWidth = true, MaxWidth = MaxWidth.Large };
+        _ = DialogService.ShowAsync<Components.Dialogs.LandingIndustryVideoPreviewDialog>(title, parameters, options);
+        return Task.CompletedTask;
+    }
+
+    private Task OpenFinalVideoPreview()
+    {
+        if (_project is null || string.IsNullOrWhiteSpace(_project.FinalVideoUrl))
+        {
+            return Task.CompletedTask;
+        }
+
+        var title = _project.Title ?? "Video project";
+        var parameters = new DialogParameters
+        {
+            [nameof(Components.Dialogs.LandingIndustryVideoPreviewDialog.Title)] = title,
+            [nameof(Components.Dialogs.LandingIndustryVideoPreviewDialog.VideoUrl)] = _project.FinalVideoUrl,
             [nameof(Components.Dialogs.LandingIndustryVideoPreviewDialog.AspectRatio)] = ProjectAspectRatio,
             [nameof(Components.Dialogs.LandingIndustryVideoPreviewDialog.AutoPlay)] = true
         };
@@ -3772,15 +3811,27 @@ else
             ? loadedVersions
             : Array.Empty<TodoX.Web.Services.VideoRender.SceneVideoVersionDto>();
         var latest = versions.OrderByDescending(x => x.VersionNumber).FirstOrDefault();
+        var selectedVideo = ResolveVideoVersion(scene);
         var selectedCompleted = versions.FirstOrDefault(x =>
             x.IsSelected
             && string.Equals(x.Status, "completed", StringComparison.OrdinalIgnoreCase)
-            && HasUsableVideoMedia(x));
+            && HasUsableVideoMedia(x)
+            && IsOfficialVideoVersion(scene, x));
 
-        if (selectedCompleted is not null
-            || (!string.IsNullOrWhiteSpace(scene.SceneVideoUrl) && HasCompletedVideoVersion(scene)))
+        if (selectedCompleted is not null)
         {
             return MediaRenderState.Ready;
+        }
+
+        if (RequiresExternalVoice(scene)
+            && selectedVideo is not null
+            && string.Equals(selectedVideo.Status, "completed", StringComparison.OrdinalIgnoreCase))
+        {
+            var selectedAudio = ResolveVoiceVersion(scene);
+            return selectedAudio is not null
+                   && string.Equals(selectedAudio.Status, "failed", StringComparison.OrdinalIgnoreCase)
+                ? MediaRenderState.Failed
+                : MediaRenderState.Rendering;
         }
 
         if (latest is not null)
@@ -3808,6 +3859,11 @@ else
         }
 
         var status = scene.Status.Trim().ToLowerInvariant();
+        if (RequiresExternalVoice(scene) && status == VideoSceneStatuses.VideoReady)
+        {
+            return MediaRenderState.Rendering;
+        }
+
         return status switch
         {
             VideoSceneStatuses.VideoQueued => MediaRenderState.Queued,
@@ -3823,6 +3879,39 @@ else
         => !string.IsNullOrWhiteSpace(version.PublicUrl)
            || !string.IsNullOrWhiteSpace(version.SourceFilePath)
            || !string.IsNullOrWhiteSpace(version.StorageKey);
+
+    private bool IsOfficialVideoVersion(
+        VideoProjectSceneDto scene,
+        TodoX.Web.Services.VideoRender.SceneVideoVersionDto version)
+    {
+        if (!string.Equals(version.Status, "completed", StringComparison.OrdinalIgnoreCase)
+            || !HasUsableVideoMedia(version))
+        {
+            return false;
+        }
+
+        if (!RequiresExternalVoice(scene))
+        {
+            return true;
+        }
+
+        var selectedAudio = ResolveVoiceVersion(scene);
+        return selectedAudio is not null
+               && string.Equals(selectedAudio.Status, "completed", StringComparison.OrdinalIgnoreCase)
+               && version.VoiceAudioVersionId == selectedAudio.Id;
+    }
+
+    private string? ResolveOfficialVideoUrl(
+        VideoProjectSceneDto scene,
+        TodoX.Web.Services.VideoRender.SceneVideoVersionDto? version)
+    {
+        if (version is not null && IsOfficialVideoVersion(scene, version))
+        {
+            return version.PublicUrl ?? version.SourceFilePath ?? scene.SceneVideoUrl ?? scene.SceneVideoPath;
+        }
+
+        return !RequiresExternalVoice(scene) ? scene.SceneVideoUrl ?? scene.SceneVideoPath : null;
+    }
 
     private async Task LoadSceneVideoVersionsForStateAsync(IEnumerable<VideoProjectSceneDto> scenes)
     {

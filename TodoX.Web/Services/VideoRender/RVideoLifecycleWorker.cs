@@ -187,7 +187,7 @@ public sealed class RVideoLifecycleWorker : BackgroundService
 
         var readyScenes = isAuto
             ? sceneStates
-                .Where(x => x.IsImageReady)
+                .Where(x => x.IsImageReady || x.UsesSharedReferenceImage)
                 .Select(x => x.SceneId)
                 .Except(activeSceneIds.VideoSceneIds)
                 .ToArray()

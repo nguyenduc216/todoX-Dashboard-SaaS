@@ -43,6 +43,22 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
             throw new InvalidOperationException("Project khong co scene de merge.");
         }
 
+        var settings = await _settings.GetAsync(project.Id, ct);
+        if (settings is null)
+        {
+            throw new RenderJobDeferredException("RVideo settings are not ready for merge.");
+        }
+
+        foreach (var scene in project.Scenes)
+        {
+            var selectedVideo = await _versions.GetSelectedVideoVersionAsync(scene.Id, ct);
+            var selectedAudio = await _versions.GetSelectedAudioVersionAsync(scene.Id, ct);
+            if (!RVideoRules.IsSceneFinalReady(scene, settings, selectedVideo, selectedAudio))
+            {
+                throw new RenderJobDeferredException($"Scene {scene.SceneIndex} is not final-ready for merge.");
+            }
+        }
+
         await _repo.UpdateProjectAsync(project.Id, VideoProjectStatuses.Merging, errorMessage: null, ct: ct);
         var mergeableScenes = project.Scenes
             .Where(x => x.Status == VideoSceneStatuses.VideoReady)
@@ -53,7 +69,6 @@ public sealed class VideoRenderMergeHandler : IRenderJobHandler
         var root = ResolveRoot(_options.CurrentValue.StorageRoot);
         var projectRoot = Path.Combine(root, project.JobFolder);
         var versioningEnabled = await _versions.IsEnabledAsync(SceneMediaVersioningFlags.FinalVideos, ct);
-        var settings = await _settings.GetAsync(project.Id, ct);
         FinalVideoVersionDto? version = null;
         IReadOnlyList<MergeInput> mergeItems;
         if (versioningEnabled)

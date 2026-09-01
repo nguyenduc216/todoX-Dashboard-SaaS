@@ -80,7 +80,7 @@ public sealed class RVideoProjectFinalizationService : IRVideoProjectFinalizatio
             var selectedAudio = await _versions.GetSelectedAudioVersionAsync(scene.Id, ct);
             readiness.Add(RVideoRules.GetSceneReadiness(scene, settings, selectedVideo, selectedAudio));
         }
-        var missing = readiness.Where(x => !x.VideoReady).ToList();
+        var missing = readiness.Where(x => !x.VideoReady || !x.MuxReady).ToList();
         if (missing.Count > 0)
         {
             await _repo.AddProjectEventAsync(project.Id, "PROJECT_FINAL_MERGE_NOT_READY", "info",

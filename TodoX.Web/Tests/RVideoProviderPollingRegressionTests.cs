@@ -397,7 +397,7 @@ public sealed class RVideoProviderPollingRegressionTests
 
         Assert.Contains("IRVideoSceneVideoAutoChainService", source);
         Assert.Contains("TryEnqueueSceneVideoAsync(project.Id, sceneId, \"RVIDEO_LIFECYCLE\"", source);
-        Assert.Contains("Where(x => x.IsImageReady)", source);
+        Assert.Contains("x.IsImageReady || x.UsesSharedReferenceImage", source);
         Assert.DoesNotContain("var videoSceneIds = decision.ShouldQueueVideo", source);
     }
 
@@ -698,7 +698,7 @@ public sealed class RVideoProviderPollingRegressionTests
 
         Assert.Contains("MediaRenderState", frame);
         Assert.Contains("State=\"@ResolveImageMediaState(sceneState)\"", rvideo);
-        Assert.Contains("State=\"@ResolveTimelapseMediaState(image.Status)\"", timelapse);
+        Assert.Contains("ResolveTimelapseMediaState", timelapse);
         Assert.Contains("RenderMediaFrame", rdance);
     }
 
@@ -750,20 +750,32 @@ public sealed class RVideoProviderPollingRegressionTests
 
         Assert.Contains("var imageSceneIds = isAuto && !usesSharedReferenceImage", lifecycle);
         Assert.Contains("Array.Empty<long>()", lifecycle);
+        Assert.Contains(".Where(x => x.IsImageReady || x.UsesSharedReferenceImage)", lifecycle);
         Assert.Contains("rvideoSettings?.UseReferenceImageForAllScenes == true", autoChain);
         Assert.Contains("RVideoSceneImageReferenceSelection.Resolve(rvideoSettings)", autoChain);
         Assert.Contains("enqueueInput.ApplySharedReferenceImage(sharedReference)", autoChain);
         Assert.Contains("SCENE_VIDEO_SHARED_REFERENCE_VALIDATION_FAILED", autoChain);
         Assert.Contains("var imageVersion = usesSharedReferenceImage", eligibility);
         Assert.Contains("? null", eligibility);
-        Assert.Contains("!string.IsNullOrWhiteSpace(sharedReference.ObjectKey)", eligibility);
+        Assert.Contains("sharedReference?.ObjectKey", eligibility);
         Assert.DoesNotContain("ResolveSharedReferenceImageVersion", eligibility);
         Assert.Contains("input.SharedReferenceImageUrl", handler);
         Assert.Contains("input.SharedReferenceImageObjectKey", handler);
         Assert.Contains("SelectedSourceImageVersionId = sourceImageVersionId", handler);
-        Assert.Contains("var sourceImageVersionId = input.UseSharedReferenceImage ? null", handler);
+        Assert.Contains("var sourceImageVersionId = effectiveSource.SelectedImageVersionId", handler);
         Assert.DoesNotContain("CreateImageVersion", autoChain);
         Assert.DoesNotContain("scene_image_versions", autoChain);
+    }
+
+    [Fact]
+    public void RVideoFinalizationAndMergeHandlerRequireOfficialSceneReadiness()
+    {
+        var finalization = ReadRepoFile("Services", "VideoRender", "RVideoProjectFinalizationService.cs");
+        var mergeHandler = ReadRepoFile("Services", "VideoRender", "VideoRenderMergeHandler.cs");
+
+        Assert.Contains("missing = readiness.Where(x => !x.VideoReady || !x.MuxReady)", finalization);
+        Assert.Contains("RVideoRules.IsSceneFinalReady(scene, settings, selectedVideo, selectedAudio)", mergeHandler);
+        Assert.Contains("RenderJobDeferredException", mergeHandler);
     }
 
     [Fact]
