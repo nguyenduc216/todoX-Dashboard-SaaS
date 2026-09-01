@@ -2,7 +2,12 @@
 @using TodoX.Web.Models.Timelapse
 
 <MudPaper Class="todox-card todox-service-card pa-0" rounded="true">
-    <div class="todox-service-media">
+    <div class="todox-service-media todox-service-media-clickable"
+         role="button"
+         tabindex="0"
+         @onclick="OpenServiceAsync"
+         @onkeydown="HandleMediaKeyDownAsync"
+         aria-label="Mở dịch vụ @Service.DisplayName">
         @if (!string.IsNullOrWhiteSpace(Service.ThumbnailUrl))
         {
             <img src="@Service.ThumbnailUrl" alt="@Service.DisplayName" />
@@ -79,4 +84,7 @@
 
     private Task OpenServiceAsync()
         => OnPrimaryAction.HasDelegate ? OnPrimaryAction.InvokeAsync(Service) : Task.CompletedTask;
+
+    private Task HandleMediaKeyDownAsync(KeyboardEventArgs args)
+        => args.Key is "Enter" or " " ? OpenServiceAsync() : Task.CompletedTask;
 }
