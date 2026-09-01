@@ -2729,9 +2729,34 @@ else
         };
 
     private string? ResolveDirectSourceImageUrl()
-        => !string.IsNullOrWhiteSpace(_uploadedCharacter?.FileUrl)
-            ? _uploadedCharacter.FileUrl
-            : _selectedCharacter?.MasterImageUrl;
+    {
+        if (_useReferenceImageForAllScenes && !string.IsNullOrWhiteSpace(_sharedReferenceImageUrl))
+        {
+            return _sharedReferenceImageUrl;
+        }
+
+        if (_skipCharacter)
+        {
+            return null;
+        }
+
+        if (string.Equals(_characterMode, RVideoCharacterModes.Upload, StringComparison.OrdinalIgnoreCase))
+        {
+            return !string.IsNullOrWhiteSpace(_uploadedCharacter?.FileUrl)
+                ? _uploadedCharacter.FileUrl
+                : _project?.SourceImageUrl;
+        }
+
+        if (string.Equals(_characterMode, RVideoCharacterModes.Library, StringComparison.OrdinalIgnoreCase))
+        {
+            var character = ResolveCurrentCharacter();
+            return !string.IsNullOrWhiteSpace(character?.MasterImageUrl)
+                ? character.MasterImageUrl
+                : _project?.SourceImageUrl;
+        }
+
+        return _project?.SourceImageUrl;
+    }
 
     private async Task LoadRVideoSettingsAsync(long projectId)
     {

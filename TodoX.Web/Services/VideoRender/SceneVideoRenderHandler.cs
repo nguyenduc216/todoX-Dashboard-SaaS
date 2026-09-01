@@ -405,7 +405,7 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
                 route.ModelName,
                 sourceImageVersionId,
                 sourceImageType = effectiveSource.SourceLabel,
-                sourceImageUrl,
+                hasSourceImage = !string.IsNullOrWhiteSpace(sourceImageUrl) || !string.IsNullOrWhiteSpace(sourceImageObjectKey),
                 useSharedReferenceImage = input.UseSharedReferenceImage
             }, ct);
 

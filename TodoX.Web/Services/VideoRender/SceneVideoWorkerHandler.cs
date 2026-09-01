@@ -574,7 +574,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                         new { jobId = job.Id, input.ProjectId, input.SceneId, input.SceneIndex, input.ProviderCode, input.ModelName, input.CapabilityCode }, ct);
                     await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_SOURCE_UPLOAD_BEGIN", "info",
                         "Scene-video source image handoff started.",
-                        new { jobId = job.Id, input.ProjectId, input.SceneId, input.SceneIndex, sourceImageVersionId, sourceImageType = input.SourceImageType, sourceImageUrl = input.SourceImageUrl }, ct);
+                        new { jobId = job.Id, input.ProjectId, input.SceneId, input.SceneIndex, sourceImageVersionId, sourceImageType = input.SourceImageType, hasSourceImage = !string.IsNullOrWhiteSpace(input.SourceImageUrl) || !string.IsNullOrWhiteSpace(input.SourceImageObjectKey) }, ct);
                     await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_SUBMIT_BEGIN", "info",
                         "Scene-video provider submit started.",
                         new { jobId = job.Id, input.ProjectId, input.SceneId, input.SceneIndex, input.ProviderCode, model = policy.Model, input.CapabilityCode }, ct);

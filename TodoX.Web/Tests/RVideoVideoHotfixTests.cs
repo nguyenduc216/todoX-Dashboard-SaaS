@@ -611,6 +611,26 @@ public sealed class RVideoVideoHotfixTests
     }
 
     [Fact]
+    public void SceneVideoSourceEventsDoNotLogRawSourceImageUrl()
+    {
+        var handler = ReadRepoFile("Services", "VideoRender", "SceneVideoRenderHandler.cs");
+        var worker = ReadRepoFile("Services", "VideoRender", "SceneVideoWorkerHandler.cs");
+        var enqueueEvent = handler[
+            handler.IndexOf("\"SCENE_VIDEO_CHILD_JOB_ENQUEUED\"", StringComparison.Ordinal)
+            ..handler.IndexOf("}, ct);", handler.IndexOf("\"SCENE_VIDEO_CHILD_JOB_ENQUEUED\"", StringComparison.Ordinal), StringComparison.Ordinal)];
+        var uploadEvent = worker[
+            worker.IndexOf("\"RVIDEO_VIDEO_SOURCE_UPLOAD_BEGIN\"", StringComparison.Ordinal)
+            ..worker.IndexOf("}, ct);", worker.IndexOf("\"RVIDEO_VIDEO_SOURCE_UPLOAD_BEGIN\"", StringComparison.Ordinal), StringComparison.Ordinal)];
+
+        Assert.Contains("sourceImageType", enqueueEvent);
+        Assert.Contains("hasSourceImage", enqueueEvent);
+        Assert.DoesNotContain("sourceImageUrl =", enqueueEvent);
+        Assert.Contains("sourceImageType", uploadEvent);
+        Assert.Contains("hasSourceImage", uploadEvent);
+        Assert.DoesNotContain("sourceImageUrl =", uploadEvent);
+    }
+
+    [Fact]
     public void VideoRenderPricingUsesPositiveCapabilityTariffBeforeUnitCostFallback()
     {
         var resolver = new VideoRenderPricingResolver();

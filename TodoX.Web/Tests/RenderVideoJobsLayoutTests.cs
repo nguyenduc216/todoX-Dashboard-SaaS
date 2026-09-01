@@ -83,6 +83,20 @@ public class RenderVideoJobsLayoutTests
     }
 
     [Fact]
+    public void DirectSourceImageResolverCoversLiveSharedUploadLibraryAndPersistedState()
+    {
+        var source = File.ReadAllText(RazorPath);
+        var method = Between(source, "private string? ResolveDirectSourceImageUrl()", "private async Task LoadRVideoSettingsAsync");
+
+        Assert.Contains("_useReferenceImageForAllScenes", method);
+        Assert.Contains("_sharedReferenceImageUrl", method);
+        Assert.Contains("_uploadedCharacter?.FileUrl", method);
+        Assert.Contains("ResolveCurrentCharacter()", method);
+        Assert.Contains("character?.MasterImageUrl", method);
+        Assert.Contains("_project?.SourceImageUrl", method);
+    }
+
+    [Fact]
     public void ResultTab_RendersManualFinalMergeAction()
     {
         var source = File.ReadAllText(RazorPath);
