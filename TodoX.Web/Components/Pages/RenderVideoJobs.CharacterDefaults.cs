@@ -1,39 +1,29 @@
+using TodoX.Web.Models;
 using TodoX.Web.Models.Catalog;
 
 namespace TodoX.Web.Components.Pages;
 
 public partial class RenderVideoJobs
 {
-    private const string CharacterModeNoneDefault = "none";
-    private const string CharacterModeUploadDefault = "upload";
-    private const string CharacterModeLibraryDefault = "library";
-
     private Guid? _characterDefaultAppliedServiceId;
+    private bool _characterModeTouched;
 
-    protected override Task OnAfterRenderAsync(bool firstRender)
+    private void ApplyCharacterServiceDefaultIfNeeded(ServiceJobDefaults defaults, Guid serviceId)
     {
-        if (_project is not null || !string.IsNullOrWhiteSpace(_prompt))
+        if (_project is not null || !string.IsNullOrWhiteSpace(_prompt) || _characterModeTouched || _characterDefaultAppliedServiceId == serviceId)
         {
-            return Task.CompletedTask;
+            return;
         }
 
-        var service = ResolveCurrentService();
-        if (service is null || _characterDefaultAppliedServiceId == service.Id)
-        {
-            return Task.CompletedTask;
-        }
-
-        var defaults = ServiceJobDefaultsCodec.FromJson(service.JobDefaults.ToString());
         var mode = NormalizeCharacterServiceDefault(defaults.CharacterMode);
-        _characterDefaultAppliedServiceId = service.Id;
+        _characterDefaultAppliedServiceId = serviceId;
 
         if (mode is null)
         {
-            return Task.CompletedTask;
+            return;
         }
 
         ApplyCharacterServiceDefault(mode);
-        return InvokeAsync(StateHasChanged);
     }
 
     private void ApplyCharacterServiceDefault(string mode)
@@ -42,9 +32,10 @@ public partial class RenderVideoJobs
         _selectedCharacterId = null;
         _uploadedCharacter = null;
 
-        if (string.Equals(mode, CharacterModeNoneDefault, StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(mode, RVideoCharacterModes.None, StringComparison.OrdinalIgnoreCase))
         {
             _skipCharacter = true;
+            _characterMode = RVideoCharacterModes.None;
             return;
         }
 
@@ -53,11 +44,11 @@ public partial class RenderVideoJobs
     }
 
     private static string? NormalizeCharacterServiceDefault(string? value)
-        => string.Equals(value, CharacterModeNoneDefault, StringComparison.OrdinalIgnoreCase)
-            ? CharacterModeNoneDefault
-            : string.Equals(value, CharacterModeUploadDefault, StringComparison.OrdinalIgnoreCase)
-                ? CharacterModeUploadDefault
-                : string.Equals(value, CharacterModeLibraryDefault, StringComparison.OrdinalIgnoreCase)
-                    ? CharacterModeLibraryDefault
+        => string.Equals(value, RVideoCharacterModes.None, StringComparison.OrdinalIgnoreCase)
+            ? RVideoCharacterModes.None
+            : string.Equals(value, RVideoCharacterModes.Upload, StringComparison.OrdinalIgnoreCase)
+                ? RVideoCharacterModes.Upload
+                : string.Equals(value, RVideoCharacterModes.Library, StringComparison.OrdinalIgnoreCase)
+                    ? RVideoCharacterModes.Library
                     : null;
 }

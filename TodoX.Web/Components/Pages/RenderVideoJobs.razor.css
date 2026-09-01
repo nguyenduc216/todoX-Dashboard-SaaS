@@ -223,19 +223,63 @@
     padding: 12px 10px 32px 0;
 }
 
-/* Keep all reference-character controls grouped at the top of the card.
-   The shared-reference switch must stay directly below the main character toggle,
-   while upload/library controls and their preview remain together immediately after it. */
-.render-info-scroll ::deep .mud-grid > .mud-grid-item:first-child > .mud-paper > .mud-stack.h-100 > :nth-child(n+3) {
-    order: 4;
+.reference-character-section {
+    height: 100%;
 }
 
-.render-info-scroll ::deep .mud-grid > .mud-grid-item:first-child > .mud-paper > .mud-stack.h-100 > :nth-last-child(2) {
-    order: 2;
+.reference-character-stack {
+    height: 100%;
 }
 
-.render-info-scroll ::deep .mud-grid > .mud-grid-item:first-child > .mud-paper > .mud-stack.h-100 > :last-child {
-    order: 3;
+.reference-character-options {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.reference-character-caption {
+    margin-top: -4px;
+}
+
+.reference-character-upload,
+.reference-character-library {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.reference-character-upload-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+}
+
+.reference-character-upload-button input[type="file"] {
+    display: none;
+}
+
+.reference-character-preview {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.reference-character-preview-media {
+    width: 100%;
+    min-height: 180px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.reference-character-preview-media img {
+    width: 100%;
+    max-height: 320px;
+    object-fit: contain;
 }
 
 .scene-video-tab {

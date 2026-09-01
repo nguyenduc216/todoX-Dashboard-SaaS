@@ -116,7 +116,7 @@
                                 <MudItem xs="12" sm="4"><MudSelect T="string" Label="Execution mode" @bind-Value="_defaults.ExecutionMode" Variant="Variant.Outlined" Clearable="true"><MudSelectItem T="string" Value="@RVideoExecutionModes.Manual">manual</MudSelectItem><MudSelectItem T="string" Value="@RVideoExecutionModes.Auto">auto</MudSelectItem></MudSelect></MudItem>
                                 <MudItem xs="12" sm="6">
                                     <MudSelect T="string" Label="Nhân vật tham chiếu mặc định" @bind-Value="_defaults.CharacterMode" Variant="Variant.Outlined" Clearable="true">
-                                        <MudSelectItem T="string" Value="@("none")">Không sử dụng nhân vật</MudSelectItem>
+                                        <MudSelectItem T="string" Value="@RVideoCharacterModes.None">Không sử dụng nhân vật</MudSelectItem>
                                         <MudSelectItem T="string" Value="@RVideoCharacterModes.Upload">Upload hình ảnh</MudSelectItem>
                                         <MudSelectItem T="string" Value="@RVideoCharacterModes.Library">Chọn từ Character Library</MudSelectItem>
                                     </MudSelect>

@@ -64,6 +64,26 @@ public sealed class ServiceJobDefaultsRegressionTests
     }
 
     [Fact]
+    public void RenderVideoJobs_CharacterDefaults_AreAppliedInInitAndLayoutIsStructured()
+    {
+        var renderVideo = Read("Components", "Pages", "RenderVideoJobs.razor");
+        var characterDefaults = Read("Components", "Pages", "RenderVideoJobs.CharacterDefaults.cs");
+        var renderCss = Read("Components", "Pages", "RenderVideoJobs.razor.css");
+        var serviceDialog = Read("Components", "Dialogs", "ServiceDialog.razor");
+
+        Assert.Contains("ApplyServiceJobDefaultsIfNeeded()", renderVideo, StringComparison.Ordinal);
+        Assert.DoesNotContain("OnAfterRenderAsync", characterDefaults, StringComparison.Ordinal);
+        Assert.Contains("_characterModeTouched", characterDefaults, StringComparison.Ordinal);
+        Assert.Contains("reference-character-section", renderVideo, StringComparison.Ordinal);
+        Assert.Contains("reference-character-options", renderVideo, StringComparison.Ordinal);
+        Assert.Contains("reference-character-preview", renderVideo, StringComparison.Ordinal);
+        Assert.Contains("reference-character-upload-button", renderCss, StringComparison.Ordinal);
+        Assert.DoesNotContain(":nth-child", renderCss, StringComparison.Ordinal);
+        Assert.DoesNotContain(":last-child", renderCss, StringComparison.Ordinal);
+        Assert.Contains("RVideoCharacterModes.None", serviceDialog, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ServiceDefaults_ReachAllCreateScreensAndCatalogQuery()
     {
         var serviceDialog = Read("Components", "Dialogs", "ServiceDialog.razor");
@@ -74,7 +94,7 @@ public sealed class ServiceJobDefaultsRegressionTests
 
         Assert.Contains("JobDefaultsJson", serviceDialog, StringComparison.Ordinal);
         Assert.Contains("NormalizeDefaults()", serviceDialog, StringComparison.Ordinal);
-        Assert.Contains("ApplyServiceJobDefaults()", renderVideo, StringComparison.Ordinal);
+        Assert.Contains("ApplyServiceJobDefaultsIfNeeded()", renderVideo, StringComparison.Ordinal);
         Assert.Contains("ServiceJobDefaultsCodec.FromJson(service.JobDefaults.ToString())", renderVideo, StringComparison.Ordinal);
         Assert.Contains("ApplyServiceDefaults()", timelapse, StringComparison.Ordinal);
         Assert.Contains("ServiceJobDefaultsCodec.FromJson(_selectedService.JobDefaultsJson)", timelapse, StringComparison.Ordinal);
