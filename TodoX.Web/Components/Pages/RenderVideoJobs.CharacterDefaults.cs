@@ -1,10 +1,13 @@
 using TodoX.Web.Models.Catalog;
-using TodoX.Web.Services.VideoRender;
 
 namespace TodoX.Web.Components.Pages;
 
 public partial class RenderVideoJobs
 {
+    private const string CharacterModeNoneDefault = "none";
+    private const string CharacterModeUploadDefault = "upload";
+    private const string CharacterModeLibraryDefault = "library";
+
     private Guid? _characterDefaultAppliedServiceId;
 
     protected override Task OnAfterRenderAsync(bool firstRender)
@@ -35,31 +38,26 @@ public partial class RenderVideoJobs
 
     private void ApplyCharacterServiceDefault(string mode)
     {
-        if (string.Equals(mode, RVideoCharacterModes.None, StringComparison.OrdinalIgnoreCase))
+        _selectedCharacter = null;
+        _selectedCharacterId = null;
+        _uploadedCharacter = null;
+
+        if (string.Equals(mode, CharacterModeNoneDefault, StringComparison.OrdinalIgnoreCase))
         {
             _skipCharacter = true;
-            _characterMode = RVideoCharacterModes.None;
-            _selectedCharacter = null;
-            _selectedCharacterId = null;
-            _uploadedCharacter = null;
             return;
         }
 
         _skipCharacter = false;
-        _uploadedCharacter = null;
-        _selectedCharacter = null;
-        _selectedCharacterId = null;
-        _characterMode = string.Equals(mode, RVideoCharacterModes.Upload, StringComparison.OrdinalIgnoreCase)
-            ? RVideoCharacterModes.Upload
-            : RVideoCharacterModes.Library;
+        _characterMode = mode;
     }
 
     private static string? NormalizeCharacterServiceDefault(string? value)
-        => string.Equals(value, RVideoCharacterModes.None, StringComparison.OrdinalIgnoreCase)
-            ? RVideoCharacterModes.None
-            : string.Equals(value, RVideoCharacterModes.Upload, StringComparison.OrdinalIgnoreCase)
-                ? RVideoCharacterModes.Upload
-                : string.Equals(value, RVideoCharacterModes.Library, StringComparison.OrdinalIgnoreCase)
-                    ? RVideoCharacterModes.Library
+        => string.Equals(value, CharacterModeNoneDefault, StringComparison.OrdinalIgnoreCase)
+            ? CharacterModeNoneDefault
+            : string.Equals(value, CharacterModeUploadDefault, StringComparison.OrdinalIgnoreCase)
+                ? CharacterModeUploadDefault
+                : string.Equals(value, CharacterModeLibraryDefault, StringComparison.OrdinalIgnoreCase)
+                    ? CharacterModeLibraryDefault
                     : null;
 }
