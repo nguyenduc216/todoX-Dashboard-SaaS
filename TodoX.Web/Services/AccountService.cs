@@ -333,14 +333,19 @@ public sealed class AccountService
             return (false, "Tài khoản khách hàng không hợp lệ.");
         }
 
+        if (!CanManageCustomerAccountFavorites(actor))
+        {
+            return (false, "Bạn không có quyền cập nhật dịch vụ hiển thị trên Dashboard của tài khoản khách hàng.");
+        }
+
         try
         {
             await _favorites.ReplaceFavoritesAsync(
                 account.Id,
                 account.CustomerId,
                 account.FavoriteServiceIds,
-                actor?.IsCustomer == true ? "user" : "admin",
-                actor?.UserId);
+                "admin",
+                actor!.UserId);
             return (true, "Đã cập nhật dịch vụ hiển thị trên Dashboard.");
         }
         catch (Exception ex)
@@ -348,6 +353,15 @@ public sealed class AccountService
             return (false, $"Không thể cập nhật dịch vụ hiển thị trên Dashboard: {ex.Message}");
         }
     }
+
+    private static bool CanManageCustomerAccountFavorites(CurrentUserSession? actor)
+        => actor is not null
+           && actor.IsAuthenticated
+           && !actor.IsCustomer
+           && (actor.IsRoot
+               || actor.Role is TodoXUserRole.Admin or TodoXUserRole.SystemOperator
+               || actor.Can("customer_accounts.create")
+               || actor.Can("customer_accounts.update"));
 
     public async Task<(bool Success, bool IsFavorite, string Message)> ToggleFavoriteAsync(
         CurrentUserSession user,
