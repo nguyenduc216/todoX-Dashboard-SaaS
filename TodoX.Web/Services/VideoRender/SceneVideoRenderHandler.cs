@@ -265,6 +265,7 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
         var finalPrompt = voiceMode == RVideoVoiceModes.Native
             ? RVideoRules.ComposeNativeVoicePrompt(scene.VideoPrompt, voiceText, voiceInstruction)
             : scene.VideoPrompt;
+        finalPrompt = RVideoReferenceOnlyPromptGuard.Apply(finalPrompt, input.UseSharedReferenceImage);
         var validation = _promptValidator.Validate(finalPrompt, route.ModelName, route.CapabilityConfigJson, scene.SceneIndex);
         if (!validation.IsValid)
         {
@@ -323,6 +324,9 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
             CustomerId = input.CustomerId,
             TrustedPayerContext = input.TrustedPayerContext,
             UseSharedReferenceImage = input.UseSharedReferenceImage,
+            ImageInputMode = input.UseSharedReferenceImage
+                ? VideoSceneImageInputMode.ReferenceOnly
+                : VideoSceneImageInputMode.SceneSource,
             SourceImageVersionId = sourceImageVersionId,
             SelectedSourceImageVersionId = sourceImageVersionId,
             SourceImageUrl = sourceImageUrl,

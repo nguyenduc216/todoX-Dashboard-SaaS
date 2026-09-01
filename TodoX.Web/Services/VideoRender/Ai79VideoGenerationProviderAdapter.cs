@@ -24,12 +24,14 @@ public sealed class Ai79VideoGenerationProviderAdapter : IVideoGenerationProvide
                 request.ProviderCapabilityId,
                 request.ProviderCode,
                 ct);
-            var source = await _video.UploadSourceImageAsync(runtime, new RVideo79AiVideoSourceImage(
-                request.SourceImage.MediaId,
-                request.SourceImage.ObjectKey,
-                request.SourceImage.PublicUrl,
-                request.SourceImage.FileName,
-                request.SourceImage.MimeType), ct);
+            var source = request.SourceImage is null
+                ? null
+                : await _video.UploadSourceImageAsync(runtime, new RVideo79AiVideoSourceImage(
+                    request.SourceImage.MediaId,
+                    request.SourceImage.ObjectKey,
+                    request.SourceImage.PublicUrl,
+                    request.SourceImage.FileName,
+                    request.SourceImage.MimeType), ct);
             var result = await _video.SubmitAsync(new RVideo79AiVideoSubmitRequest(
                 runtime,
                 new RVideoVideoModelPolicyEntry(0, request.ProviderCode, request.RequestedModel, request.ModelMode),

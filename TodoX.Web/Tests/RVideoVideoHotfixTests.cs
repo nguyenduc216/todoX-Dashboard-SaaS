@@ -137,12 +137,75 @@ public sealed class RVideoVideoHotfixTests
         var json = JsonSerializer.Serialize(new SceneVideoRenderWorkItemInput
         {
             SourceImageVersionId = sourceImageVersionId,
-            SelectedSourceImageVersionId = sourceImageVersionId
+            SelectedSourceImageVersionId = sourceImageVersionId,
+            ImageInputMode = VideoSceneImageInputMode.SceneSource
         }, new JsonSerializerOptions(JsonSerializerDefaults.Web));
 
         using var doc = JsonDocument.Parse(json);
         Assert.Equal(sourceImageVersionId, doc.RootElement.GetProperty("sourceImageVersionId").GetGuid());
         Assert.Equal(sourceImageVersionId, doc.RootElement.GetProperty("selectedSourceImageVersionId").GetGuid());
+        Assert.Equal((int)VideoSceneImageInputMode.SceneSource, doc.RootElement.GetProperty("imageInputMode").GetInt32());
+    }
+
+    [Fact]
+    public void ReferenceOnlyPromptGuardAppendsOnce()
+    {
+        var prompt = "A worker enters the construction site, camera follows from a low angle.";
+
+        var guarded = RVideoReferenceOnlyPromptGuard.Apply(prompt, useSharedReferenceImage: true);
+        var guardedAgain = RVideoReferenceOnlyPromptGuard.Apply(guarded, useSharedReferenceImage: true);
+        var unchanged = RVideoReferenceOnlyPromptGuard.Apply(prompt, useSharedReferenceImage: false);
+
+        Assert.Contains("reference image only for character/identity consistency", guarded);
+        Assert.Contains("Do not use the reference image as the opening frame", guarded);
+        Assert.Contains("Start the video directly in the scene", guarded);
+        Assert.Equal(guarded, guardedAgain);
+        Assert.Equal(prompt, unchanged);
+    }
+
+    [Fact]
+    public async Task RVideo79AiReferenceOnlySubmitOmitsImagesOption()
+    {
+        var client = new CapturingAi79TaskClient();
+        var service = Create79AiVideoService(client);
+
+        await service.SubmitAsync(new RVideo79AiVideoSubmitRequest(
+            Create79AiRuntime(),
+            RVideoVideoModelPolicy.GetInitial(),
+            RVideoReferenceOnlyPromptGuard.Apply("Open directly on the described scene.", useSharedReferenceImage: true),
+            "9:16",
+            "720p",
+            6,
+            SourceImageAsset: null));
+
+        Assert.NotNull(client.LastSubmit);
+        Assert.DoesNotContain("images", client.LastSubmit!.Options.Keys);
+        Assert.Contains("Do not use the reference image as the opening frame", client.LastSubmit.Prompt);
+    }
+
+    [Fact]
+    public async Task RVideo79AiSceneSourceSubmitKeepsImagesOption()
+    {
+        var client = new CapturingAi79TaskClient();
+        var service = Create79AiVideoService(client);
+
+        await service.SubmitAsync(new RVideo79AiVideoSubmitRequest(
+            Create79AiRuntime(),
+            RVideoVideoModelPolicy.GetInitial(),
+            "Animate the generated scene image.",
+            "9:16",
+            "720p",
+            6,
+            new RVideo79AiProviderImageAsset(
+                "scene-image-base",
+                "project-1",
+                "https://example.test/generated-scene.png",
+                "generated-scene.png",
+                """{"ok":true}""")));
+
+        Assert.NotNull(client.LastSubmit);
+        Assert.True(client.LastSubmit!.Options.TryGetValue("images", out var imagesJson));
+        Assert.Contains("generated-scene.png", imagesJson);
     }
 
     [Fact]
@@ -514,6 +577,39 @@ public sealed class RVideoVideoHotfixTests
                 ["TimelapseProviderWorkers:Default79AiBaseUrl"] = "https://example.test/ai"
             }).Build(),
             NullLogger<Gommo79AiImageService>.Instance);
+
+    private static RVideo79AiVideoService Create79AiVideoService(CapturingAi79TaskClient client)
+    {
+#pragma warning disable SYSLIB0050
+        var service = (RVideo79AiVideoService)FormatterServices.GetUninitializedObject(typeof(RVideo79AiVideoService));
+#pragma warning restore SYSLIB0050
+        typeof(RVideo79AiVideoService)
+            .GetField("_client", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .SetValue(service, client);
+        return service;
+    }
+
+    private static RVideo79AiRuntime Create79AiRuntime()
+        => new(
+            18,
+            99,
+            "79ai",
+            "https://example.test/ai",
+            "/create-video",
+            "/video",
+            "/image-upload",
+            "79ai.net",
+            "project-1",
+            new ResolvedProviderCredential
+            {
+                ProviderAccountId = Guid.NewGuid(),
+                ProviderCode = "79ai",
+                CredentialRole = "access_token",
+                Secret = "test-token"
+            },
+            null,
+            null,
+            42);
 
     private static SceneVideoWorkerHandler CreateWorker(
         SceneImageVersionDto? selectedImageVersion,

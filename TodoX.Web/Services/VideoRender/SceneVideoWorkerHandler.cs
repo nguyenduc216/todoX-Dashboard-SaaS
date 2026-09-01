@@ -44,6 +44,46 @@ public sealed class SceneVideoRenderWorkItemInput
     public string? CostSource { get; set; }
     public string LogicalRequestId { get; set; } = string.Empty;
     public DateTimeOffset CreatedAtUtc { get; set; }
+    public VideoSceneImageInputMode ImageInputMode { get; set; } = VideoSceneImageInputMode.LegacySelectedSource;
+}
+
+public enum VideoSceneImageInputMode
+{
+    None,
+    SceneSource,
+    ReferenceOnly,
+    LegacySelectedSource
+}
+
+public static class RVideoReferenceOnlyPromptGuard
+{
+    public const string Text =
+        "Use the reference image only for character/identity consistency. Do not use the reference image as the opening frame, first frame, or initial composition. Start the video directly in the scene, environment, action, and composition described below. Do not show, freeze, or transition from the reference image.";
+
+    public static string Apply(string? prompt, bool useSharedReferenceImage)
+    {
+        var trimmed = prompt?.Trim() ?? string.Empty;
+        if (!useSharedReferenceImage || Contains(trimmed))
+        {
+            return trimmed;
+        }
+
+        return string.IsNullOrWhiteSpace(trimmed)
+            ? Text
+            : $"{Text}\n\n{trimmed}";
+    }
+
+    public static bool Contains(string prompt)
+    {
+        if (string.IsNullOrWhiteSpace(prompt))
+        {
+            return false;
+        }
+
+        return prompt.Contains("reference image only for character/identity consistency", StringComparison.OrdinalIgnoreCase)
+               || (prompt.Contains("Do not use the reference image as the opening frame", StringComparison.OrdinalIgnoreCase)
+                   && prompt.Contains("Start the video directly in the scene", StringComparison.OrdinalIgnoreCase));
+    }
 }
 
 public sealed class SceneVideoWorkerHandler : IRenderJobHandler
@@ -426,7 +466,20 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
 
                 try
                 {
-                    var sourceMedia = await ResolveSourceImageMediaAsync(sourceVersion, ct);
+                    var sourceMedia = input.ImageInputMode == VideoSceneImageInputMode.ReferenceOnly
+                        ? null
+                        : await ResolveSourceImageMediaAsync(sourceVersion, ct);
+                    var sourceImageAsset = input.ImageInputMode == VideoSceneImageInputMode.ReferenceOnly
+                        ? null
+                        : new VideoProviderSourceImage(
+                            sourceVersion.ResultMediaId,
+                            sourceVersion.StorageKey,
+                            sourceVersion.PublicUrl,
+                            sourceMedia?.FileName,
+                            sourceMedia?.MimeType);
+                    var providerPrompt = sourceImageAsset is null
+                        ? RVideoReferenceOnlyPromptGuard.Apply(input.VideoPrompt, input.UseSharedReferenceImage)
+                        : input.VideoPrompt?.Trim() ?? string.Empty;
                     await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_PROVIDER_RESOLVE_BEGIN", "info",
                         "Scene-video provider resolution started.",
                         new { jobId = job.Id, input.ProjectId, input.SceneId, input.SceneIndex, input.ProviderCode, input.ModelName, input.CapabilityCode }, ct);
@@ -447,16 +500,11 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                         input.CapabilityCode,
                         policy.Model,
                         policy.Mode,
-                        input.VideoPrompt ?? string.Empty,
+                        providerPrompt,
                         input.AspectRatio,
                         input.Resolution,
                         input.DurationSeconds,
-                        new VideoProviderSourceImage(
-                            sourceVersion.ResultMediaId,
-                            sourceVersion.StorageKey,
-                            sourceVersion.PublicUrl,
-                            sourceMedia?.FileName,
-                            sourceMedia?.MimeType)), ct);
+                        sourceImageAsset), ct);
                     taskId = string.IsNullOrWhiteSpace(submit.ProviderTaskId) ? null : submit.ProviderTaskId.Trim();
                     if (string.IsNullOrWhiteSpace(taskId))
                     {
@@ -465,7 +513,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
 
                     await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_SOURCE_UPLOAD_SUCCESS", "info",
                         "Scene-video source image handoff completed.",
-                        new { jobId = job.Id, input.ProjectId, input.SceneId, input.SceneIndex, sourceImageVersionId = sourceVersion.Id }, ct);
+                        new { jobId = job.Id, input.ProjectId, input.SceneId, input.SceneIndex, sourceImageVersionId = sourceVersion.Id, imageInputMode = input.ImageInputMode.ToString() }, ct);
                     await _versions.MarkSceneVideoVersionSubmittedAsync(version.Id, input.ProviderCode, policy.Model, input.ProviderCapabilityId, taskId, ct);
                     await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_SUBMITTED", "info",
                         "Scene-video provider submit completed.",
@@ -488,7 +536,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                 {
                     await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_SOURCE_UPLOAD_FAILED", "error",
                         "Scene-video source image handoff or provider submit failed.",
-                        new { jobId = job.Id, input.ProjectId, input.SceneId, input.SceneIndex, errorCode = ex.GetType().Name }, CancellationToken.None);
+                        new { jobId = job.Id, input.ProjectId, input.SceneId, input.SceneIndex, errorCode = ex.GetType().Name, imageInputMode = input.ImageInputMode.ToString() }, CancellationToken.None);
                     await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_SUBMIT_FAILED", "error",
                         "Scene-video provider submit failed.",
                         new { jobId = job.Id, input.ProjectId, input.SceneId, input.SceneIndex, errorCode = ex.GetType().Name }, CancellationToken.None);

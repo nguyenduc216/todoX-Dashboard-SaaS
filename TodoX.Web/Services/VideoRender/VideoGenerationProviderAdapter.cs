@@ -26,7 +26,7 @@ public sealed record VideoProviderSubmitRequest(
     string AspectRatio,
     string Resolution,
     int DurationSeconds,
-    VideoProviderSourceImage SourceImage);
+    VideoProviderSourceImage? SourceImage);
 
 public sealed record VideoProviderSubmitResult(
     string ProviderCode,

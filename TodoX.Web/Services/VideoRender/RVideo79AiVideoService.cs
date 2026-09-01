@@ -77,7 +77,7 @@ public sealed record RVideo79AiVideoSubmitRequest(
     string AspectRatio,
     string Resolution,
     int DurationSeconds,
-    RVideo79AiProviderImageAsset SourceImageAsset);
+    RVideo79AiProviderImageAsset? SourceImageAsset);
 
 public sealed record RVideo79AiVideoSubmitResult(string TaskId, string SanitizedResponseJson, string SanitizedRequestJson);
 
@@ -187,13 +187,6 @@ public sealed class RVideo79AiVideoService : IRVideo79AiVideoService
 
     public async Task<RVideo79AiVideoSubmitResult> SubmitAsync(RVideo79AiVideoSubmitRequest request, CancellationToken ct = default)
     {
-        var imagesJson = JsonSerializer.Serialize(new[] { new
-        {
-            id_base = request.SourceImageAsset.IdBase,
-            project_id = request.SourceImageAsset.ProjectId,
-            url = request.SourceImageAsset.Url,
-            file_name = request.SourceImageAsset.FileName
-        } }, JsonOptions);
         var options = new Dictionary<string, string?>
         {
             ["type"] = "video",
@@ -202,9 +195,18 @@ public sealed class RVideo79AiVideoService : IRVideo79AiVideoService
             ["resolution"] = NormalizeResolution(request.Resolution),
             ["privacy"] = "PRIVATE",
             ["translate_to_en"] = "false",
-            ["project_id"] = request.Runtime.ProjectId,
-            ["images"] = imagesJson
+            ["project_id"] = request.Runtime.ProjectId
         };
+        if (request.SourceImageAsset is not null)
+        {
+            options["images"] = JsonSerializer.Serialize(new[] { new
+            {
+                id_base = request.SourceImageAsset.IdBase,
+                project_id = request.SourceImageAsset.ProjectId,
+                url = request.SourceImageAsset.Url,
+                file_name = request.SourceImageAsset.FileName
+            } }, JsonOptions);
+        }
         if (!string.IsNullOrWhiteSpace(request.Model.Mode))
         {
             options["mode"] = request.Model.Mode;
@@ -228,7 +230,7 @@ public sealed class RVideo79AiVideoService : IRVideo79AiVideoService
             ratio = options["ratio"],
             resolution = options["resolution"],
             duration = options["duration"],
-            sourceImage = new
+            sourceImage = request.SourceImageAsset is null ? null : new
             {
                 request.SourceImageAsset.IdBase,
                 request.SourceImageAsset.ProjectId,
