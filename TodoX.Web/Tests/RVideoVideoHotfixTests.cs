@@ -200,8 +200,52 @@ public sealed class RVideoVideoHotfixTests
         Assert.Contains("Animate only the subject's natural movements, expressions, gestures, speech, and product interaction", guarded);
         Assert.Contains("Do not show the supplied image as a frozen still or separate opening shot", guarded);
         Assert.Contains("Begin immediately with natural motion inside this exact setup", guarded);
-        Assert.Equal(guarded, guardedAgain);
+        Assert.Contains("same exact person", guardedAgain);
+        Assert.Contains("natural movements", guardedAgain);
         Assert.Equal(prompt, unchanged);
+    }
+
+    [Fact]
+    public void SharedBasePromptGuardNeutralizesVisualConflictsButKeepsMotionAndDialogue()
+    {
+        var prompt = """
+            move to another room, wearing a different outfit, and change background.
+            raise the product and smile while saying hello.
+            """;
+
+        var guarded = RVideoSharedBaseImagePromptGuard.Apply(prompt, useSharedReferenceImage: true);
+
+        Assert.Contains("same exact person", guarded);
+        Assert.Contains("raise the product and smile", guarded, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("while saying hello", guarded, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("move to another room", guarded, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("wearing a different outfit", guarded, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("change background", guarded, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void SharedReferenceSnapshotCarriesMediaMetadata()
+    {
+        var reference = new RVideoSceneImageReferenceSelection(
+            true,
+            CharacterId: 42,
+            ObjectKey: "references/shared.png",
+            Url: "https://example.invalid/shared.png",
+            CharacterPrompt: "consistent character",
+            Source: RVideoSceneImageReferenceSelection.LibrarySource)
+        {
+            MediaId = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+            FileName = "shared.png",
+            MimeType = "image/png"
+        };
+
+        var snapshot = reference.ToSnapshot();
+
+        Assert.Equal(reference.MediaId, snapshot.MediaId);
+        Assert.Equal(reference.ObjectKey, snapshot.ObjectKey);
+        Assert.Equal(reference.Url, snapshot.PublicUrl);
+        Assert.Equal(reference.FileName, snapshot.FileName);
+        Assert.Equal(reference.MimeType, snapshot.MimeType);
     }
 
     [Fact]
@@ -252,6 +296,16 @@ public sealed class RVideoVideoHotfixTests
             }))).SanitizedRequestJson);
         Assert.Equal(JsonValueKind.Null, sanitized.GetProperty("sourceImage").ValueKind);
         Assert.Single(sanitized.GetProperty("referenceImages").EnumerateArray());
+    }
+
+    [Fact]
+    public void SharedBaseImagePromptGuardDoesNotRewriteNormalMode()
+    {
+        var prompt = "Open directly on the described scene.";
+
+        var guarded = RVideoSharedBaseImagePromptGuard.Apply(prompt, useSharedReferenceImage: false);
+
+        Assert.Equal(prompt, guarded);
     }
 
     [Fact]
@@ -324,6 +378,7 @@ public sealed class RVideoVideoHotfixTests
             false,
             null,
             null,
+            null,
             CancellationToken.None
         })!;
 
@@ -367,6 +422,7 @@ public sealed class RVideoVideoHotfixTests
             false,
             null,
             null,
+            null,
             CancellationToken.None
         })!;
 
@@ -395,6 +451,7 @@ public sealed class RVideoVideoHotfixTests
             7L,
             null,
             false,
+            null,
             null,
             null,
             CancellationToken.None
@@ -447,6 +504,7 @@ public sealed class RVideoVideoHotfixTests
             false,
             null,
             null,
+            null,
             CancellationToken.None
         })!;
 
@@ -474,6 +532,7 @@ public sealed class RVideoVideoHotfixTests
             7L,
             null,
             false,
+            null,
             null,
             null,
             CancellationToken.None
@@ -505,6 +564,7 @@ public sealed class RVideoVideoHotfixTests
             7L,
             null,
             false,
+            null,
             null,
             null,
             CancellationToken.None

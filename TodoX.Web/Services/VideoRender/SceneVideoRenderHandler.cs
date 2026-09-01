@@ -15,6 +15,9 @@ public sealed class SceneVideoRenderInput
     public bool UseSharedReferenceImage { get; set; }
     public string? SharedReferenceImageUrl { get; set; }
     public string? SharedReferenceImageObjectKey { get; set; }
+    public Guid? SharedReferenceImageMediaId { get; set; }
+    public string? SharedReferenceImageFileName { get; set; }
+    public string? SharedReferenceImageMimeType { get; set; }
     public Guid? UserId { get; set; }
     public Guid? CustomerId { get; set; }
     public AiBillingTrustedPayerContext? TrustedPayerContext { get; set; }
@@ -32,6 +35,9 @@ public sealed class SceneVideoRenderInput
         UseSharedReferenceImage = true;
         SharedReferenceImageUrl = reference.Url;
         SharedReferenceImageObjectKey = reference.ObjectKey;
+        SharedReferenceImageMediaId = reference.MediaId;
+        SharedReferenceImageFileName = reference.FileName;
+        SharedReferenceImageMimeType = reference.MimeType;
     }
 
     public void ApplySharedReferenceImage(string? url, string? objectKey)
@@ -44,6 +50,22 @@ public sealed class SceneVideoRenderInput
         UseSharedReferenceImage = true;
         SharedReferenceImageUrl = url;
         SharedReferenceImageObjectKey = objectKey;
+    }
+
+    public void ApplySharedReferenceImage(RVideoSharedReferenceImageSnapshot snapshot)
+    {
+        if (snapshot is null
+            || (string.IsNullOrWhiteSpace(snapshot.PublicUrl) && string.IsNullOrWhiteSpace(snapshot.ObjectKey)))
+        {
+            throw new InvalidOperationException("RVIDEO_SHARED_REFERENCE_IMAGE_REQUIRED");
+        }
+
+        UseSharedReferenceImage = true;
+        SharedReferenceImageMediaId = snapshot.MediaId;
+        SharedReferenceImageUrl = snapshot.PublicUrl;
+        SharedReferenceImageObjectKey = snapshot.ObjectKey;
+        SharedReferenceImageFileName = snapshot.FileName;
+        SharedReferenceImageMimeType = snapshot.MimeType;
     }
 }
 
@@ -239,7 +261,7 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
             && string.IsNullOrWhiteSpace(input.SharedReferenceImageUrl)
             && string.IsNullOrWhiteSpace(input.SharedReferenceImageObjectKey))
         {
-            input.ApplySharedReferenceImage(RVideoSceneImageReferenceSelection.Resolve(settings));
+            input.ApplySharedReferenceImage(RVideoSceneImageReferenceSelection.Resolve(settings).ToSnapshot());
         }
         var sourceImageUrl = input.UseSharedReferenceImage ? input.SharedReferenceImageUrl : selectedImage?.PublicUrl;
         var sourceImageObjectKey = input.UseSharedReferenceImage ? input.SharedReferenceImageObjectKey : selectedImage?.StorageKey;
@@ -265,7 +287,7 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
         var finalPrompt = voiceMode == RVideoVoiceModes.Native
             ? RVideoRules.ComposeNativeVoicePrompt(scene.VideoPrompt, voiceText, voiceInstruction)
             : scene.VideoPrompt;
-        finalPrompt = RVideoReferenceOnlyPromptGuard.Apply(finalPrompt, input.UseSharedReferenceImage);
+        finalPrompt = RVideoSharedBaseImagePromptGuard.Apply(finalPrompt, input.UseSharedReferenceImage);
         var validation = _promptValidator.Validate(finalPrompt, route.ModelName, route.CapabilityConfigJson, scene.SceneIndex);
         if (!validation.IsValid)
         {
@@ -331,6 +353,11 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
             SelectedSourceImageVersionId = sourceImageVersionId,
             SourceImageUrl = sourceImageUrl,
             SourceImageObjectKey = sourceImageObjectKey,
+            SharedReferenceImageMediaId = input.SharedReferenceImageMediaId,
+            SharedReferenceImageUrl = input.SharedReferenceImageUrl,
+            SharedReferenceImageObjectKey = input.SharedReferenceImageObjectKey,
+            SharedReferenceImageFileName = input.SharedReferenceImageFileName,
+            SharedReferenceImageMimeType = input.SharedReferenceImageMimeType,
             ImagePrompt = scene.ImagePrompt,
             VideoPrompt = validation.TrimmedPrompt,
             Voice = voiceMode == RVideoVoiceModes.Native ? voiceText : null,

@@ -21,6 +21,11 @@ public sealed class SceneVideoRenderWorkItemInput
     public string? SourceImageUrl { get; set; }
     public string? SourceImageObjectKey { get; set; }
     public bool UseSharedReferenceImage { get; set; }
+    public Guid? SharedReferenceImageMediaId { get; set; }
+    public string? SharedReferenceImageUrl { get; set; }
+    public string? SharedReferenceImageObjectKey { get; set; }
+    public string? SharedReferenceImageFileName { get; set; }
+    public string? SharedReferenceImageMimeType { get; set; }
     public string? ImagePrompt { get; set; }
     public string? VideoPrompt { get; set; }
     public string? Voice { get; set; }
@@ -61,17 +66,49 @@ public static class RVideoReferenceOnlyPromptGuard
     public const string Text =
         "Use the supplied image as the fixed visual base for this scene. Preserve the same exact person, face, hairstyle, same exact outfit, background, room/set, products, props, furniture, layout, lighting, color palette, and camera framing. Do not redesign, replace, relocate, or reinterpret the environment or outfit. Animate only the subject's natural movements, expressions, gestures, speech, and product interaction required by this scene. The scene must remain visually continuous with the supplied image. Do not show the supplied image as a frozen still or separate opening shot. Begin immediately with natural motion inside this exact setup.";
 
+    internal static readonly string[] BlockedTerms =
+    [
+        "move to another room",
+        "change background",
+        "different background",
+        "at the beach",
+        "in another office",
+        "wearing a different outfit",
+        "change clothes",
+        "different location",
+        "new environment",
+        "wide shot in another place",
+        "switch scene",
+        "redesign the room",
+        "new room",
+        "another room"
+    ];
+
     public static string Apply(string? prompt, bool useSharedReferenceImage)
     {
         var trimmed = prompt?.Trim() ?? string.Empty;
-        if (!useSharedReferenceImage || Contains(trimmed))
+        if (!useSharedReferenceImage)
         {
             return trimmed;
         }
 
-        return string.IsNullOrWhiteSpace(trimmed)
+        if (Contains(trimmed))
+        {
+            if (!trimmed.StartsWith(Text, StringComparison.OrdinalIgnoreCase))
+            {
+                return Sanitize(trimmed);
+            }
+
+            var actionPrompt = Sanitize(trimmed[Text.Length..]);
+            return string.IsNullOrWhiteSpace(actionPrompt)
+                ? Text
+                : $"{Text}\n\n{actionPrompt}";
+        }
+
+        var sanitized = Sanitize(trimmed);
+        return string.IsNullOrWhiteSpace(sanitized)
             ? Text
-            : $"{Text}\n\n{trimmed}";
+            : $"{Text}\n\n{sanitized}";
     }
 
     public static bool Contains(string prompt)
@@ -87,6 +124,28 @@ public static class RVideoReferenceOnlyPromptGuard
                || (prompt.Contains("Do not reproduce the reference image as the first frame", StringComparison.OrdinalIgnoreCase)
                    && prompt.Contains("Start immediately inside the environment", StringComparison.OrdinalIgnoreCase));
     }
+
+    private static string Sanitize(string prompt)
+    {
+        var sanitized = prompt;
+        foreach (var term in BlockedTerms)
+        {
+            sanitized = sanitized.Replace(term, string.Empty, StringComparison.OrdinalIgnoreCase);
+        }
+
+        while (sanitized.Contains("  ", StringComparison.Ordinal))
+        {
+            sanitized = sanitized.Replace("  ", " ", StringComparison.Ordinal);
+        }
+
+        return sanitized.Trim();
+    }
+}
+
+public static class RVideoSharedBaseImagePromptGuard
+{
+    public static string Apply(string? prompt, bool useSharedReferenceImage)
+        => RVideoReferenceOnlyPromptGuard.Apply(prompt, useSharedReferenceImage);
 }
 
 public sealed class SceneVideoWorkerHandler : IRenderJobHandler
@@ -160,7 +219,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         input.ImageInputMode = ResolveImageInputMode(input);
         if (input.ImageInputMode == VideoSceneImageInputMode.SharedBaseImage)
         {
-            input.VideoPrompt = RVideoReferenceOnlyPromptGuard.Apply(input.VideoPrompt, useSharedReferenceImage: true);
+            input.VideoPrompt = RVideoSharedBaseImagePromptGuard.Apply(input.VideoPrompt, useSharedReferenceImage: true);
         }
 
         var project = await _repo.GetProjectAsync(input.ProjectId, ct)
@@ -247,6 +306,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
             input.UseSharedReferenceImage,
             input.SourceImageUrl,
             input.SourceImageObjectKey,
+            input.SharedReferenceImageMediaId,
             ct);
         if (sourceVersion is null)
         {
@@ -477,7 +537,12 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                     var imageInputMode = ResolveImageInputMode(input);
                     var sourceMedia = await ResolveSourceImageMediaAsync(sourceVersion, ct);
                     var sourceImageAsset = imageInputMode == VideoSceneImageInputMode.SharedBaseImage
-                        ? null
+                        ? new VideoProviderSourceImage(
+                            input.SharedReferenceImageMediaId ?? sourceVersion.ResultMediaId,
+                            input.SharedReferenceImageObjectKey ?? sourceVersion.StorageKey,
+                            input.SharedReferenceImageUrl ?? sourceVersion.PublicUrl,
+                            input.SharedReferenceImageFileName ?? sourceMedia?.FileName,
+                            input.SharedReferenceImageMimeType ?? sourceMedia?.MimeType)
                         : new VideoProviderSourceImage(
                             sourceVersion.ResultMediaId,
                             sourceVersion.StorageKey,
@@ -488,16 +553,14 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                         ? new[]
                         {
                             new VideoProviderSourceImage(
-                                sourceVersion.ResultMediaId,
-                                sourceVersion.StorageKey,
-                                sourceVersion.PublicUrl,
-                                sourceMedia?.FileName,
-                                sourceMedia?.MimeType)
+                                input.SharedReferenceImageMediaId ?? sourceVersion.ResultMediaId,
+                                input.SharedReferenceImageObjectKey ?? sourceVersion.StorageKey,
+                                input.SharedReferenceImageUrl ?? sourceVersion.PublicUrl,
+                                input.SharedReferenceImageFileName ?? sourceMedia?.FileName,
+                                input.SharedReferenceImageMimeType ?? sourceMedia?.MimeType)
                         }
                         : Array.Empty<VideoProviderSourceImage>();
-                    var providerPrompt = sourceImageAsset is null
-                        ? RVideoReferenceOnlyPromptGuard.Apply(input.VideoPrompt, input.UseSharedReferenceImage)
-                        : input.VideoPrompt?.Trim() ?? string.Empty;
+                    var providerPrompt = RVideoSharedBaseImagePromptGuard.Apply(input.VideoPrompt, input.UseSharedReferenceImage);
                     await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_PROVIDER_RESOLVE_BEGIN", "info",
                         "Scene-video provider resolution started.",
                         new { jobId = job.Id, input.ProjectId, input.SceneId, input.SceneIndex, input.ProviderCode, input.ModelName, input.CapabilityCode }, ct);
@@ -1019,6 +1082,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         bool useSharedReferenceImage,
         string? sourceImageUrl,
         string? sourceImageObjectKey,
+        Guid? sharedReferenceMediaId,
         CancellationToken ct)
     {
         if (useSharedReferenceImage)
@@ -1030,7 +1094,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
 
             return new SceneImageVersionDto
             {
-                Id = Guid.Empty,
+                Id = sharedReferenceMediaId ?? Guid.Empty,
                 PublicUrl = sourceImageUrl,
                 StorageKey = sourceImageObjectKey,
                 Status = "completed",

@@ -10,6 +10,8 @@ public sealed class SceneImageBatchInput
 {
     public string CapabilityCode { get; set; } = SceneImageRenderContext.RVideoCapabilityCode;
     public string ReferenceSource { get; set; } = "NONE";
+    public bool UseSharedReferenceImage { get; set; }
+    public VideoSceneImageInputMode ImageInputMode { get; set; } = VideoSceneImageInputMode.SceneSource;
     public long ProjectId { get; set; }
     public string AspectRatio { get; set; } = "9:16";
     public long? CharacterId { get; set; }
@@ -110,6 +112,14 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
             ?? throw new InvalidOperationException("Scene image batch job input invalid.");
         var project = await _repo.GetProjectAsync(input.ProjectId, ct)
             ?? throw new InvalidOperationException("Video project not found.");
+        if (input.UseSharedReferenceImage || input.ImageInputMode == VideoSceneImageInputMode.SharedBaseImage)
+        {
+            await _repo.AddProjectEventAsync(input.ProjectId, "SCENE_IMAGE_BATCH_SHARED_BASE_SKIPPED", "info",
+                "SharedBaseImage uses the shared reference image directly; scene image generation was skipped.",
+                new { jobId = job.Id, projectId = input.ProjectId, input.ImageInputMode, input.UseSharedReferenceImage }, ct);
+            return;
+        }
+
         var scenes = project.Scenes.OrderBy(x => x.SceneIndex)
             .Where(x => input.SceneIds is null || input.SceneIds.Contains(x.Id))
             .Where(x => ShouldRenderScene(x, input.OnlyMissingOrFailed))
@@ -164,12 +174,29 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
         var version = await _versions.CreateQueuedImageVersionAsync(new SceneImageVersionCreateRequest(
             input.ProjectId, scene.Id, input.UserId, input.CustomerId, parentJobId, logicalRequestId,
             scene.ImagePrompt, compiledPrompt, scene.VideoPrompt, null,
-            new { scene.Id, scene.ProjectId, scene.SceneIndex, scene.Title, scene.DurationSeconds,
-                scene.ScenePrompt, scene.ImagePrompt, scene.VideoPrompt },
+            new
+            {
+                scene.Id,
+                scene.ProjectId,
+                scene.SceneIndex,
+                scene.Title,
+                scene.DurationSeconds,
+                scene.ScenePrompt,
+                scene.ImagePrompt,
+                scene.VideoPrompt
+            },
             new { input.CharacterId, referenceMediaId, referenceUrl, referenceObjectKey, referenceSource = input.ReferenceSource, characterPrompt },
-            new { capability = input.CapabilityCode, aspectRatio = SceneImageRenderService.NormalizeAspectRatio(input.AspectRatio),
-                outputFormat = "png", source = "scene_image_batch", model = model.Model, model.Mode,
-                model.Resolution, modelAttemptIndex = model.AttemptIndex }), ct);
+            new
+            {
+                capability = input.CapabilityCode,
+                aspectRatio = SceneImageRenderService.NormalizeAspectRatio(input.AspectRatio),
+                outputFormat = "png",
+                source = "scene_image_batch",
+                model = model.Model,
+                model.Mode,
+                model.Resolution,
+                modelAttemptIndex = model.AttemptIndex
+            }), ct);
 
         await _repo.UpdateSceneAsync(scene.Id, VideoSceneStatuses.Draft, errorMessage: null,
             title: scene.Title, scenePrompt: scene.ScenePrompt, imagePrompt: scene.ImagePrompt,
@@ -181,20 +208,32 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
             CustomerId = input.CustomerId,
             Input = new SceneImageRenderWorkItemInput
             {
-                ParentJobId = parentJobId, ImageVersionId = version.Id, ProjectId = input.ProjectId,
-                SceneId = scene.Id, SceneIndex = scene.SceneIndex, UserId = input.UserId,
-                CustomerId = input.CustomerId, CreatedBy = input.CreatedBy,
+                ParentJobId = parentJobId,
+                ImageVersionId = version.Id,
+                ProjectId = input.ProjectId,
+                SceneId = scene.Id,
+                SceneIndex = scene.SceneIndex,
+                UserId = input.UserId,
+                CustomerId = input.CustomerId,
+                CreatedBy = input.CreatedBy,
                 TrustedPayerContext = input.TrustedPayerContext,
                 Prompt = version.CompiledImagePromptSnapshot ?? compiledPrompt,
                 AspectRatio = SceneImageRenderService.NormalizeAspectRatio(input.AspectRatio),
-                CharacterId = input.CharacterId, ReferenceMediaId = referenceMediaId,
-                ReferenceObjectKey = referenceObjectKey, ReferenceUrl = referenceUrl,
-                CapabilityCode = input.CapabilityCode, LogicalRequestId = logicalRequestId,
-                RequestedModel = model.Model, ModelAttemptIndex = model.AttemptIndex
+                CharacterId = input.CharacterId,
+                ReferenceMediaId = referenceMediaId,
+                ReferenceObjectKey = referenceObjectKey,
+                ReferenceUrl = referenceUrl,
+                CapabilityCode = input.CapabilityCode,
+                LogicalRequestId = logicalRequestId,
+                RequestedModel = model.Model,
+                ModelAttemptIndex = model.AttemptIndex
             },
             Prompt = new { projectId = input.ProjectId, sceneId = scene.Id, parentJobId },
-            References = Array.Empty<object>(), LogCode = parentJobId.ToString("N"),
-            MaxAttempts = 100, PointCostEstimate = 0, PointStatus = RenderPointStatuses.NotRequired
+            References = Array.Empty<object>(),
+            LogCode = parentJobId.ToString("N"),
+            MaxAttempts = 100,
+            PointCostEstimate = 0,
+            PointStatus = RenderPointStatuses.NotRequired
         }, ct);
         await _repo.AddProjectEventAsync(input.ProjectId, "SCENE_IMAGE_CHILD_JOB_ENQUEUED", "info",
             $"Scene {scene.SceneIndex} image child job queued.",

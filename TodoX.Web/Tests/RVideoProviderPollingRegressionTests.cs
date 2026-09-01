@@ -100,6 +100,112 @@ public sealed class RVideoProviderPollingRegressionTests
     }
 
     [Fact]
+    public void SharedBaseSkipsSceneImageAutoEnqueue()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "RVideoLifecycleWorker.cs");
+
+        Assert.Contains("var imageSceneIds = isAuto && !usesSharedReferenceImage", source);
+        Assert.Contains(": Array.Empty<long>();", source);
+    }
+
+    [Fact]
+    public void SharedBaseSkipsSceneImageBatch()
+    {
+        var source = ReadRepoFile("Services", "Render", "SceneImageBatchRenderHandler.cs");
+
+        Assert.Contains("SCENE_IMAGE_BATCH_SHARED_BASE_SKIPPED", source);
+        Assert.Contains("UseSharedReferenceImage || input.ImageInputMode == VideoSceneImageInputMode.SharedBaseImage", source);
+    }
+
+    [Fact]
+    public void SharedBaseAllScenesUseSameSnapshot()
+    {
+        var source = ReadRepoFile("Components", "Pages", "RenderVideoJobs.razor");
+
+        Assert.Contains("_sharedReferenceImageMediaId", source);
+        Assert.Contains("_sharedReferenceImageFileName", source);
+        Assert.Contains("_sharedReferenceImageMimeType", source);
+        Assert.Contains("input.ApplySharedReferenceImage(new TodoX.Web.Services.Render.RVideoSharedReferenceImageSnapshot(", source);
+    }
+
+    [Fact]
+    public void RetryKeepsSharedSnapshot()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "SceneVideoWorkerHandler.cs");
+
+        Assert.Contains("SharedReferenceImageMediaId", source);
+        Assert.Contains("SharedReferenceImageFileName", source);
+        Assert.Contains("SharedReferenceImageMimeType", source);
+        Assert.Contains("ResolveSourceImageVersionAsync(", source);
+    }
+
+    [Fact]
+    public void SharedBaseStillSendsImageTo79Ai()
+    {
+        var worker = ReadRepoFile("Services", "VideoRender", "SceneVideoWorkerHandler.cs");
+        var provider = ReadRepoFile("Services", "VideoRender", "RVideo79AiVideoService.cs");
+
+        Assert.Contains("options[\"images\"]", provider);
+        Assert.Contains("referenceImages = imageInputMode == VideoSceneImageInputMode.SharedBaseImage", worker);
+        Assert.Contains("new VideoProviderSourceImage(", worker);
+    }
+
+    [Fact]
+    public void ConflictingBackgroundPromptIsNeutralized()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "SceneVideoWorkerHandler.cs");
+
+        Assert.Contains("change background", source);
+        Assert.Contains("RVideoSharedBaseImagePromptGuard", source);
+    }
+
+    [Fact]
+    public void ConflictingOutfitPromptIsNeutralized()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "SceneVideoWorkerHandler.cs");
+
+        Assert.Contains("wearing a different outfit", source);
+        Assert.Contains("BlockedTerms", source);
+    }
+
+    [Fact]
+    public void MotionPromptStillWorks()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "SceneVideoWorkerHandler.cs");
+
+        Assert.Contains("Animate only the subject's natural movements", source);
+        Assert.Contains("product interaction", source);
+    }
+
+    [Fact]
+    public void DialogueUnaffected()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "SceneVideoRenderHandler.cs");
+
+        Assert.Contains("voiceText", source);
+        Assert.Contains("voiceInstruction", source);
+        Assert.Contains("RVideoRules.ComposeNativeVoicePrompt", source);
+    }
+
+    [Fact]
+    public void NoFrozenOpeningGuard()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "SceneVideoWorkerHandler.cs");
+
+        Assert.Contains("Do not show the supplied image as a frozen still or separate opening shot", source);
+        Assert.Contains("Begin immediately with natural motion inside this exact setup", source);
+    }
+
+    [Fact]
+    public void NormalModeUnchanged()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "SceneVideoWorkerHandler.cs");
+
+        Assert.Contains("if (!useSharedReferenceImage)", source);
+        Assert.Contains("return trimmed;", source);
+    }
+
+    [Fact]
     public void TransientPollFailureWithPersistedTaskUsesProviderPollScheduler()
     {
         var source = ReadRepoFile("Services", "VideoRender", "SceneVideoWorkerHandler.cs");
@@ -674,7 +780,7 @@ public sealed class RVideoProviderPollingRegressionTests
         Assert.Contains("TryBuildSceneVideoRenderInput(sceneIds", renderAll);
         Assert.Contains("TryBuildSceneVideoRenderInput(new[] { scene.Id }", renderOne);
         Assert.Contains("_useReferenceImageForAllScenes", inputHelper);
-        Assert.Contains("input.ApplySharedReferenceImage(_sharedReferenceImageUrl, _sharedReferenceImageObjectKey)", inputHelper);
+        Assert.Contains("input.ApplySharedReferenceImage(new TodoX.Web.Services.Render.RVideoSharedReferenceImageSnapshot(", inputHelper);
         Assert.Contains("UseSharedReferenceImage = true;", ReadRepoFile("Services", "VideoRender", "SceneVideoRenderHandler.cs"));
         Assert.DoesNotContain("scene_image_versions", renderAll);
         Assert.DoesNotContain("scene_image_versions", renderOne);

@@ -656,6 +656,9 @@ else
     private bool _useReferenceImageForAllScenes;
     private string? _sharedReferenceImageUrl;
     private string? _sharedReferenceImageObjectKey;
+    private Guid? _sharedReferenceImageMediaId;
+    private string? _sharedReferenceImageFileName;
+    private string? _sharedReferenceImageMimeType;
     private string _prompt = string.Empty;
     private string _characterPrompt = string.Empty;
     private TodoXVideoPromptParseResult _promptParseResult = new();
@@ -862,7 +865,12 @@ else
             return false;
         }
 
-        input.ApplySharedReferenceImage(_sharedReferenceImageUrl, _sharedReferenceImageObjectKey);
+        input.ApplySharedReferenceImage(new TodoX.Web.Services.Render.RVideoSharedReferenceImageSnapshot(
+            _sharedReferenceImageMediaId,
+            _sharedReferenceImageObjectKey,
+            _sharedReferenceImageUrl,
+            _sharedReferenceImageFileName,
+            _sharedReferenceImageMimeType));
         return true;
     }
 
@@ -2731,17 +2739,26 @@ else
                     var reference = TodoX.Web.Services.Render.RVideoSceneImageReferenceSelection.Resolve(settings);
                     _sharedReferenceImageUrl = reference.Url;
                     _sharedReferenceImageObjectKey = reference.ObjectKey;
+                    _sharedReferenceImageMediaId = reference.MediaId;
+                    _sharedReferenceImageFileName = reference.FileName;
+                    _sharedReferenceImageMimeType = reference.MimeType;
                 }
                 catch
                 {
                     _sharedReferenceImageUrl = null;
                     _sharedReferenceImageObjectKey = null;
+                    _sharedReferenceImageMediaId = null;
+                    _sharedReferenceImageFileName = null;
+                    _sharedReferenceImageMimeType = null;
                 }
             }
             else
             {
                 _sharedReferenceImageUrl = null;
                 _sharedReferenceImageObjectKey = null;
+                _sharedReferenceImageMediaId = null;
+                _sharedReferenceImageFileName = null;
+                _sharedReferenceImageMimeType = null;
             }
             _characterMode = _skipCharacter ? RVideoCharacterModes.None : RVideoRules.NormalizeCharacterMode(settings?.CharacterMode);
             _selectedCharacterId = _skipCharacter ? null : settings?.SelectedCharacterId;
@@ -2822,6 +2839,15 @@ else
     private async Task EnqueueBulkSceneImageRenderAsync(bool onlyMissingOrFailed)
     {
         if (_project is null || AuthState.CurrentUser is null) return;
+        if (_useReferenceImageForAllScenes)
+        {
+            Snackbar.Add("Chế độ dùng ảnh tham chiếu chung sẽ bỏ qua render ảnh từng scene.", Severity.Info);
+            await LogProjectEvent("SCENE_IMAGE_BATCH_SHARED_BASE_SKIPPED", "info",
+                "SharedBaseImage uses the shared reference image directly; scene image generation was skipped.",
+                new { projectId = _project.Id, onlyMissingOrFailed });
+            return;
+        }
+
         var reference = await PersistAndResolveRVideoImageReferenceAsync();
         var input = TodoX.Web.Services.Render.RVideoSceneImageReferenceSelection.BuildBatchInput(reference);
         input.CapabilityCode = TodoX.Web.Services.Render.SceneImageRenderContext.RVideoCapabilityCode;
@@ -2897,6 +2923,15 @@ else
     private async Task RerenderSceneImageAsync(VideoProjectSceneDto scene)
     {
         if (_project is null || AuthState.CurrentUser is null) return;
+        if (_useReferenceImageForAllScenes)
+        {
+            Snackbar.Add("Chế độ dùng ảnh tham chiếu chung không render lại ảnh scene riêng.", Severity.Info);
+            await LogProjectEvent("SCENE_IMAGE_RERENDER_SHARED_BASE_SKIPPED", "info",
+                $"Scene {scene.SceneIndex} image rerender skipped because SharedBaseImage is enabled.",
+                new { projectId = _project.Id, sceneId = scene.Id, sceneIndex = scene.SceneIndex });
+            return;
+        }
+
         if (!EnsureAspectRatioSelected())
         {
             return;

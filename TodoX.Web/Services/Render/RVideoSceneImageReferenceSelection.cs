@@ -3,6 +3,13 @@ using TodoX.Web.Models;
 
 namespace TodoX.Web.Services.Render;
 
+public sealed record RVideoSharedReferenceImageSnapshot(
+    Guid? MediaId,
+    string? ObjectKey,
+    string? PublicUrl,
+    string? FileName,
+    string? MimeType);
+
 public sealed record RVideoSceneImageReferenceSelection(
     bool ReferenceRequested,
     long? CharacterId,
@@ -14,6 +21,13 @@ public sealed record RVideoSceneImageReferenceSelection(
     public const string NoneSource = "NONE";
     public const string UploadSource = "UPLOAD";
     public const string LibrarySource = "LIBRARY";
+
+    public Guid? MediaId { get; init; }
+    public string? FileName { get; init; }
+    public string? MimeType { get; init; }
+
+    public RVideoSharedReferenceImageSnapshot ToSnapshot()
+        => new(MediaId, ObjectKey, Url, FileName, MimeType);
 
     public static RVideoSceneImageReferenceSelection Resolve(
         bool skipCharacter,
@@ -65,7 +79,12 @@ public sealed record RVideoSceneImageReferenceSelection(
                 throw new InvalidOperationException("RVVIDEO_UPLOADED_CHARACTER_REFERENCE_UNAVAILABLE");
             }
 
-            return new(true, null, objectKey, url, null, UploadSource);
+            return new(true, null, objectKey, url, null, UploadSource)
+            {
+                MediaId = ReadSnapshotGuid(settings.CharacterSnapshotJson, "mediaId", "id"),
+                FileName = ReadSnapshotString(settings.CharacterSnapshotJson, "fileName", "name"),
+                MimeType = ReadSnapshotString(settings.CharacterSnapshotJson, "mimeType", "contentType")
+            };
         }
 
         var libraryObjectKey = ReadSnapshotString(settings.CharacterSnapshotJson, "storageKey", "masterImageObjectKey", "objectKey");
@@ -78,7 +97,12 @@ public sealed record RVideoSceneImageReferenceSelection(
             throw new InvalidOperationException("RVVIDEO_LIBRARY_CHARACTER_REFERENCE_UNAVAILABLE");
         }
 
-        return new(true, settings.SelectedCharacterId, libraryObjectKey, libraryUrl, characterPrompt, LibrarySource);
+        return new(true, settings.SelectedCharacterId, libraryObjectKey, libraryUrl, characterPrompt, LibrarySource)
+        {
+            MediaId = ReadSnapshotGuid(settings.CharacterSnapshotJson, "mediaId", "masterImageMediaId"),
+            FileName = ReadSnapshotString(settings.CharacterSnapshotJson, "fileName", "masterImageFileName", "name"),
+            MimeType = ReadSnapshotString(settings.CharacterSnapshotJson, "mimeType", "masterImageMimeType", "contentType")
+        };
     }
 
     public static SceneImageBatchInput BuildBatchInput(RVideoJobSettingsDto settings)
@@ -116,5 +140,11 @@ public sealed record RVideoSceneImageReferenceSelection(
         }
 
         return null;
+    }
+
+    private static Guid? ReadSnapshotGuid(string? json, params string[] names)
+    {
+        var value = ReadSnapshotString(json, names);
+        return Guid.TryParse(value, out var parsed) && parsed != Guid.Empty ? parsed : null;
     }
 }
