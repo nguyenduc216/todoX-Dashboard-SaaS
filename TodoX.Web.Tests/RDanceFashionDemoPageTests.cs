@@ -142,6 +142,21 @@ public sealed class RDanceFashionDemoPageTests
     }
 
     [Fact]
+    public void RDanceDetailPageUsesPersonOnlyReferenceApprovalAndMismatchMessage()
+    {
+        var page = ReadStrictUtf8(Path.Combine(FindRepoRoot(), "TodoX.Web", "Components", "Pages", "RDanceJobDetail.razor"));
+
+        Assert.Contains("IsPersonOnlyReferenceFlow", page, StringComparison.Ordinal);
+        Assert.Contains("Dùng ảnh người mẫu", page, StringComparison.Ordinal);
+        Assert.Contains("OnClick=\"ApproveCharacterAsync\"", page, StringComparison.Ordinal);
+        Assert.Contains("ApproveLatestReferenceAsync", page, StringComparison.Ordinal);
+        Assert.Contains("DANCE_SELL_CHARACTER_REFERENCE_NOT_ALLOWED", page, StringComparison.Ordinal);
+        Assert.Contains("DANCE_SELL_PERSON_ONLY_REFERENCE_SOURCE_MISMATCH", page, StringComparison.Ordinal);
+        Assert.Contains("DANCE_SELL_REFERENCE_RATIO_MISMATCH", page, StringComparison.Ordinal);
+        Assert.Contains("Ảnh người mẫu tham chiếu không còn khớp với dữ liệu hiện tại. Vui lòng tải lại ảnh.", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void RDanceDetailPageKeepsMotionDropZoneAndValidation()
     {
         var page = ReadStrictUtf8(Path.Combine(FindRepoRoot(), "TodoX.Web", "Components", "Pages", "RDanceJobDetail.razor"));
@@ -192,8 +207,7 @@ public sealed class RDanceFashionDemoPageTests
         Assert.Contains("OnClick=\"DownloadResultAsync\"", page, StringComparison.Ordinal);
         Assert.Contains("OnClick=\"DownloadReferenceAsync\"", page, StringComparison.Ordinal);
         Assert.Contains("var job = await DanceSell.GetAsync(_job.Id, AuthState.CurrentUser);", page, StringComparison.Ordinal);
-        Assert.Contains("todoxDownload.downloadRemoteFile", page, StringComparison.Ordinal);
-        Assert.Contains("todox-rdance-{job.Id:N}.mp4", page, StringComparison.Ordinal);
+        Assert.Contains("todoxDownload.startBrowserDownload", page, StringComparison.Ordinal);
         Assert.Contains("_isDownloadingResult", page, StringComparison.Ordinal);
         Assert.Contains("_isDownloadingReference", page, StringComparison.Ordinal);
         Assert.Contains("fetch(url, { credentials: \"omit\" })", downloadScript, StringComparison.Ordinal);
@@ -206,13 +220,14 @@ public sealed class RDanceFashionDemoPageTests
     {
         var endpoints = ReadStrictUtf8(Path.Combine(FindRepoRoot(), "TodoX.Web", "Services", "DanceSell", "DanceSellPhase2Endpoints.cs"));
 
-        Assert.Contains("=> await ExecuteResultAsync(auth, async user =>", endpoints, StringComparison.Ordinal);
-        Assert.Contains("new DanceSellRemoteDownloadResult(response, \"video/mp4\", $\"todox-rdance-{id:N}.mp4\")", endpoints, StringComparison.Ordinal);
-        Assert.Contains("new DanceSellRemoteDownloadResult(response, \"image/jpeg\", $\"todox-rdance-reference-{id:N}.jpg\")", endpoints, StringComparison.Ordinal);
-        Assert.Contains("private static async Task<IResult> ExecuteResultAsync", endpoints, StringComparison.Ordinal);
+        Assert.Contains("ExecuteResultAsync(", endpoints, StringComparison.Ordinal);
+        Assert.Contains("return new DanceSellRemoteDownloadResult(response, contentType, fileName);", endpoints, StringComparison.Ordinal);
+        Assert.Contains("private static async Task<IResult> ExecuteDownloadAsync", endpoints, StringComparison.Ordinal);
         Assert.Contains("httpContext.Response.ContentType = contentType;", endpoints, StringComparison.Ordinal);
         Assert.Contains("httpContext.Response.Headers.ContentDisposition = $\"attachment; filename=\\\"{fileName}\\\"\";", endpoints, StringComparison.Ordinal);
         Assert.Contains("await stream.CopyToAsync(httpContext.Response.Body, httpContext.RequestAborted);", endpoints, StringComparison.Ordinal);
+        Assert.Contains("todox-rdance-{id:N}.mp4", endpoints, StringComparison.Ordinal);
+        Assert.Contains("todox-rdance-reference-{id:N}.jpg", endpoints, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -257,7 +272,6 @@ public sealed class RDanceFashionDemoPageTests
         Assert.DoesNotContain("<InputFile OnChange=\"OnCharacterSelected\"", page, StringComparison.Ordinal);
         Assert.DoesNotContain("<InputFile OnChange=\"OnProductSelected\"", page, StringComparison.Ordinal);
         Assert.DoesNotContain("Tạo ảnh AI", page, StringComparison.Ordinal);
-        Assert.DoesNotContain("Dùng ảnh người mẫu", page, StringComparison.Ordinal);
         Assert.DoesNotContain("AI sẽ kết hợp ảnh người mẫu và ảnh sản phẩm", page, StringComparison.Ordinal);
         Assert.Contains("OnClick=\"RemoveProductAsync\"", page, StringComparison.Ordinal);
     }
@@ -658,7 +672,7 @@ public sealed class RDanceFashionDemoPageTests
         Assert.Contains("service.GetAsync(id, user, ct)", endpoints, StringComparison.Ordinal);
         Assert.Contains("job.ResultVideoUrl", endpoints, StringComparison.Ordinal);
         Assert.Contains("EnsurePublicHttpsUrlAsync", endpoints, StringComparison.Ordinal);
-        Assert.Contains("ExecuteResultAsync(auth", endpoints, StringComparison.Ordinal);
+        Assert.Contains("ExecuteDownloadAsync", endpoints, StringComparison.Ordinal);
         Assert.Contains("DanceSellRemoteDownloadResult", endpoints, StringComparison.Ordinal);
         Assert.Contains("video/mp4", endpoints, StringComparison.Ordinal);
         Assert.DoesNotContain("string url", endpoints, StringComparison.OrdinalIgnoreCase);
@@ -819,6 +833,20 @@ public sealed class RDanceFashionDemoPageTests
         Assert.Contains("todox-rdance-reference-{id:N}.jpg", endpoints, StringComparison.Ordinal);
         Assert.Contains("DANCE_SELL_REFERENCE_DOWNLOAD_FAILED", endpoints, StringComparison.Ordinal);
         Assert.DoesNotContain("Request.Query", endpoints, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void DanceSellCharacterReferenceSnapshotsCarryRatioAndScopedLegacyBypass()
+    {
+        var service = ReadStrictUtf8(Path.Combine(FindRepoRoot(), "TodoX.Web", "Services", "DanceSell", "DanceSellPhase2Services.cs"));
+
+        Assert.Contains("var ratio = DanceSellRatioNormalizer.NormalizeDanceSellRatio(job.Ratio);", service, StringComparison.Ordinal);
+        Assert.Contains("RequestJson = DanceSellRepository.ToJson(new { source = \"character_input\", job.CharacterMediaId, ratio })", service, StringComparison.Ordinal);
+        Assert.Contains("ResponseJson = DanceSellRepository.ToJson(new { source = \"character_input\", job.CharacterMediaId, ratio })", service, StringComparison.Ordinal);
+        Assert.Contains("|| IsLegacyPersonOnlyReference(version, job)", service, StringComparison.Ordinal);
+        Assert.Contains("job.ProductMediaId is null", service, StringComparison.Ordinal);
+        Assert.Contains("version.ProductMediaId is null", service, StringComparison.Ordinal);
+        Assert.Contains("string.IsNullOrWhiteSpace(ReadRequestRatio(version.RequestJson))", service, StringComparison.Ordinal);
     }
 
     private static string ReadStrictUtf8(string file)

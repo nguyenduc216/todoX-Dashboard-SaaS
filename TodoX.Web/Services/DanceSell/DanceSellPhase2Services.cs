@@ -781,6 +781,7 @@ Photorealistic, product preview quality.
         }
 
         var versions = await _repo.ListReferenceVersionsAsync(job.Id, ct);
+        var ratio = DanceSellRatioNormalizer.NormalizeDanceSellRatio(job.Ratio);
         var version = await _repo.CreateReferenceVersionAsync(new DanceSellReferenceVersionDto
         {
             Id = Guid.NewGuid(),
@@ -791,8 +792,8 @@ Photorealistic, product preview quality.
             Prompt = BuildReferencePrompt(job),
             ProviderCode = "local_composite",
             ProviderModel = "local_composite",
-            RequestJson = DanceSellRepository.ToJson(new { source = "character_input" }),
-            ResponseJson = DanceSellRepository.ToJson(new { source = "character_input", job.CharacterMediaId }),
+            RequestJson = DanceSellRepository.ToJson(new { source = "character_input", job.CharacterMediaId, ratio }),
+            ResponseJson = DanceSellRepository.ToJson(new { source = "character_input", job.CharacterMediaId, ratio }),
             MediaId = job.CharacterMediaId,
             ObjectKey = job.CharacterObjectKey,
             PublicUrl = job.CharacterImageUrl,
@@ -818,6 +819,7 @@ Photorealistic, product preview quality.
 
     private async Task<DanceSellJobDto> PrepareCharacterReferenceAsync(DanceSellJobDto job, CurrentUserSession user, IReadOnlyList<DanceSellReferenceVersionDto> versions, CancellationToken ct)
     {
+        var ratio = DanceSellRatioNormalizer.NormalizeDanceSellRatio(job.Ratio);
         var version = await _repo.CreateReferenceVersionAsync(new DanceSellReferenceVersionDto
         {
             Id = Guid.NewGuid(),
@@ -829,8 +831,8 @@ Photorealistic, product preview quality.
             Prompt = BuildReferencePrompt(job),
             ProviderCode = "local_composite",
             ProviderModel = "character_input",
-            RequestJson = DanceSellRepository.ToJson(new { source = "character_input", job.CharacterMediaId }),
-            ResponseJson = DanceSellRepository.ToJson(new { source = "character_input", job.CharacterMediaId }),
+            RequestJson = DanceSellRepository.ToJson(new { source = "character_input", job.CharacterMediaId, ratio }),
+            ResponseJson = DanceSellRepository.ToJson(new { source = "character_input", job.CharacterMediaId, ratio }),
             MediaId = job.CharacterMediaId,
             ObjectKey = job.CharacterObjectKey,
             PublicUrl = job.CharacterImageUrl,
@@ -860,7 +862,8 @@ Photorealistic, product preview quality.
     private static bool ReferenceVersionMatches(DanceSellReferenceVersionDto version, DanceSellJobDto job)
         => version.CharacterMediaId == job.CharacterMediaId
            && version.ProductMediaId == job.ProductMediaId
-           && string.Equals(ReadRequestRatio(version.RequestJson), DanceSellRatioNormalizer.NormalizeDanceSellRatio(job.Ratio), StringComparison.Ordinal);
+           && (string.Equals(ReadRequestRatio(version.RequestJson), DanceSellRatioNormalizer.NormalizeDanceSellRatio(job.Ratio), StringComparison.Ordinal)
+               || IsLegacyPersonOnlyReference(version, job));
 
     private static void EnsureReferenceVersionRatioMatchesJob(DanceSellReferenceVersionDto version, DanceSellJobDto job)
     {
@@ -871,8 +874,20 @@ Photorealistic, product preview quality.
             return;
         }
 
+        if (IsLegacyPersonOnlyReference(version, job))
+        {
+            return;
+        }
+
         throw new InvalidOperationException($"DANCE_SELL_REFERENCE_RATIO_MISMATCH:{versionRatio ?? "unknown"}:{jobRatio}");
     }
+
+    private static bool IsLegacyPersonOnlyReference(DanceSellReferenceVersionDto version, DanceSellJobDto job)
+        => job.ProductMediaId is null
+           && version.ProductMediaId is null
+           && version.CharacterMediaId == job.CharacterMediaId
+           && string.Equals(ReadRequestString(version.RequestJson, "source"), "character_input", StringComparison.OrdinalIgnoreCase)
+           && string.IsNullOrWhiteSpace(ReadRequestRatio(version.RequestJson));
 
     private static string? ReadRequestRatio(string? requestJson)
     {
@@ -887,6 +902,29 @@ Photorealistic, product preview quality.
             return doc.RootElement.TryGetProperty("ratio", out var value) && value.ValueKind == JsonValueKind.String
                 ? value.GetString()
                 : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static string? ReadRequestString(string? requestJson, string propertyName)
+    {
+        if (string.IsNullOrWhiteSpace(requestJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(requestJson);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object || !doc.RootElement.TryGetProperty(propertyName, out var value))
+            {
+                return null;
+            }
+
+            return value.ValueKind == JsonValueKind.String ? value.GetString() : value.ToString();
         }
         catch (JsonException)
         {

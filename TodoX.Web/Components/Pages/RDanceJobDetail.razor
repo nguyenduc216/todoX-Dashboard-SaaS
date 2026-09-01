@@ -252,7 +252,14 @@
                                 }
                                 else if (_latestReference?.Status == DanceSellReferenceStatuses.Ready)
                                 {
-                                    <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Success" StartIcon="@Icons.Material.Filled.Check" Disabled="@_busy" OnClick="ApproveLatestReferenceAsync">Duyệt ảnh</MudButton>
+                                    @if (IsPersonOnlyReferenceFlow)
+                                    {
+                                        <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Success" StartIcon="@Icons.Material.Filled.Person" Disabled="@_busy" OnClick="ApproveCharacterAsync">Dùng ảnh người mẫu</MudButton>
+                                    }
+                                    else
+                                    {
+                                        <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Success" StartIcon="@Icons.Material.Filled.Check" Disabled="@_busy" OnClick="ApproveLatestReferenceAsync">Duyệt ảnh</MudButton>
+                                    }
                                 }
                                 @if (_job?.ProductMediaId is not null
                                     && (_job?.PreparedReferenceStatus is DanceSellReferenceStatuses.Ready or DanceSellReferenceStatuses.Approved or DanceSellReferenceStatuses.Failed
@@ -540,6 +547,7 @@
     private bool IsCoreCancelled => _renderJob?.Status == RenderJobStatuses.Cancelled;
     private bool IsReferenceGenerating => _job?.PreparedReferenceStatus == DanceSellReferenceStatuses.Generating
         || _latestReference?.Status == DanceSellReferenceStatuses.Generating;
+    private bool IsPersonOnlyReferenceFlow => _job?.ProductMediaId is null && _job?.CharacterMediaId is not null;
     private long MaxImageBytes => (long)Math.Max(1, DanceOptions.CurrentValue.MaxImageMb) * 1024 * 1024;
     private long MaxMotionVideoBytes => (long)Math.Max(1, DanceOptions.CurrentValue.MaxVideoMb) * 1024 * 1024;
     private string MaxImageLabel => $"{Math.Max(1, DanceOptions.CurrentValue.MaxImageMb)}MB";
@@ -1229,7 +1237,9 @@
             _autoFinishing = true;
             try
             {
-                _job = await References.ApproveAsync(_job.Id, _latestReference.Id, AuthState.CurrentUser);
+                _job = IsPersonOnlyReferenceFlow
+                    ? await References.ApproveCharacterAsync(_job.Id, AuthState.CurrentUser)
+                    : await References.ApproveAsync(_job.Id, _latestReference.Id, AuthState.CurrentUser);
                 await ReloadAsync();
                 return;
             }
@@ -1384,6 +1394,13 @@
         if (message.Contains("DANCE_SELL_REFERENCE_NOT_APPROVED", StringComparison.OrdinalIgnoreCase))
         {
             return "Ảnh dùng để tạo video đã thay đổi. Vui lòng tạo và duyệt lại ảnh trước khi render.";
+        }
+
+        if (message.Contains("DANCE_SELL_CHARACTER_REFERENCE_NOT_ALLOWED", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("DANCE_SELL_PERSON_ONLY_REFERENCE_SOURCE_MISMATCH", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("DANCE_SELL_REFERENCE_RATIO_MISMATCH", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Ảnh người mẫu tham chiếu không còn khớp với dữ liệu hiện tại. Vui lòng tải lại ảnh.";
         }
 
         if (message.Contains("DANCE_SELL_CANCEL_FAILED", StringComparison.OrdinalIgnoreCase))
