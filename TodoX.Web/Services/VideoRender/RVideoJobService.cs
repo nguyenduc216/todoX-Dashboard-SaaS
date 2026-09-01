@@ -27,6 +27,7 @@ public sealed class RVideoJobUpdateRequest
     public int SceneSeconds { get; init; } = 8;
     public bool ThinkScenes { get; init; }
     public RVideoJobSettingsRequest Settings { get; init; } = new();
+    public string? SourceImageUrl { get; init; }
 }
 
 public sealed class RVideoJobCreateRequest
@@ -41,6 +42,7 @@ public sealed class RVideoJobCreateRequest
     public int SceneSeconds { get; init; } = 8;
     public bool ThinkScenes { get; init; }
     public RVideoJobSettingsRequest Settings { get; init; } = new();
+    public string? SourceImageUrl { get; init; }
 }
 
 public sealed record RVideoJobCreatedResult(Guid JobId, long ProjectId, string Status, string Route);
@@ -89,13 +91,22 @@ public sealed class RVideoJobService : IRVideoJobService
         var jobId = Guid.NewGuid();
         var snapshot = JsonSerializer.Serialize(new
         {
-            engine = "RVIDEO", serviceId = service.Id, serviceCode = service.ServiceCode,
-            title = request.Title, description = request.Prompt, prompt = request.Prompt,
-            aspectRatio = request.AspectRatio, resolution = request.Resolution,
-            executionMode = request.Settings.ExecutionMode, character = request.Settings.CharacterSnapshot,
+            engine = "RVIDEO",
+            serviceId = service.Id,
+            serviceCode = service.ServiceCode,
+            title = request.Title,
+            description = request.Prompt,
+            prompt = request.Prompt,
+            aspectRatio = request.AspectRatio,
+            resolution = request.Resolution,
+            executionMode = request.Settings.ExecutionMode,
+            character = request.Settings.CharacterSnapshot,
             voice = new { request.Settings.VoiceMode, request.Settings.VoiceCatalogCode, request.Settings.DefaultTtsRate },
             music = new { request.Settings.MusicCatalogCode, request.Settings.MusicVolume },
-            request.TotalSeconds, request.SceneSeconds, request.ThinkScenes
+            sourceImageUrl = request.SourceImageUrl,
+            request.TotalSeconds,
+            request.SceneSeconds,
+            request.ThinkScenes
         }, JsonOptions);
         await conn.ExecuteAsync("""
             INSERT INTO render.render_jobs
@@ -104,31 +115,65 @@ public sealed class RVideoJobService : IRVideoJobService
                  output_json, options, point_cost_estimate, point_cost_charged, point_status, max_attempts, queued_at, created_at)
             VALUES (@jobId,@tenant,@customer,@user,@serviceId,@jobType,@operationType,'dashboard','draft','info',0,100,
                     CAST(@snapshot AS jsonb),CAST(@prompt AS jsonb),'[]'::jsonb,'[]'::jsonb,'{}'::jsonb,0,0,'not_required',1,now(),now());
-            """, new { jobId, tenant = _tenant.TenantId, customer = user.CustomerId, user = user.UserId, serviceId = service.Id,
-                jobType = RenderJobTypes.CoreService, operationType = service.ServiceType, snapshot, prompt = JsonSerializer.Serialize(new { text = request.Prompt }, JsonOptions) }, tx);
+            """, new
+        {
+            jobId,
+            tenant = _tenant.TenantId,
+            customer = user.CustomerId,
+            user = user.UserId,
+            serviceId = service.Id,
+            jobType = RenderJobTypes.CoreService,
+            operationType = service.ServiceType,
+            snapshot,
+            prompt = JsonSerializer.Serialize(new { text = request.Prompt }, JsonOptions)
+        }, tx);
 
         var projectId = await conn.QuerySingleAsync<long>("""
             INSERT INTO video_render.video_projects
                 (tenant_id,user_id,customer_id,core_job_id,title,original_prompt,total_seconds,scene_seconds,scene_count,
-                 think_scenes,character_id,storage_root,public_base,job_folder,status,created_at,updated_at)
-            VALUES (@tenant,@user,@customer,@jobId,@title,@prompt,@total,@sceneSeconds,0,@think,NULL,@storageRoot,@publicBase,@jobFolder,'draft',now(),now())
+                 think_scenes,character_id,source_image_url,storage_root,public_base,job_folder,status,created_at,updated_at)
+            VALUES (@tenant,@user,@customer,@jobId,@title,@prompt,@total,@sceneSeconds,0,@think,NULL,@sourceImageUrl,@storageRoot,@publicBase,@jobFolder,'draft',now(),now())
             RETURNING id;
-            """, new { tenant = _tenant.TenantId, user = user.UserId, customer = user.CustomerId, jobId, title = request.Title,
-                prompt = request.Prompt, total = Math.Max(1, request.TotalSeconds), sceneSeconds = Math.Max(1, request.SceneSeconds),
-                think = request.ThinkScenes, storageRoot, publicBase, jobFolder }, tx);
+            """, new
+        {
+            tenant = _tenant.TenantId,
+            user = user.UserId,
+            customer = user.CustomerId,
+            jobId,
+            title = request.Title,
+            prompt = request.Prompt,
+            total = Math.Max(1, request.TotalSeconds),
+            sceneSeconds = Math.Max(1, request.SceneSeconds),
+            think = request.ThinkScenes,
+            sourceImageUrl = request.SourceImageUrl,
+            storageRoot,
+            publicBase,
+            jobFolder
+        }, tx);
         await conn.ExecuteAsync("UPDATE render.render_jobs SET input_json=jsonb_set(input_json,'{projectId}',to_jsonb(@projectId::text),true),updated_at=now() WHERE id=@jobId;", new { projectId, jobId }, tx);
         await conn.ExecuteAsync("""
             INSERT INTO video_render.rvideo_job_settings
                 (project_id,tenant_id,execution_mode,current_stage,skip_character,use_reference_image_for_all_scenes,character_mode,selected_character_id,
                  character_snapshot_json,voice_mode,voice_catalog_code,voice_snapshot_json,default_tts_rate,music_catalog_code,music_snapshot_json,music_volume,created_at,updated_at)
             VALUES (@projectId,@tenant,@executionMode,'INFO',@skip,@useReferenceImageForAllScenes,@characterMode,@selected,CAST(@character AS jsonb),@voice,@voiceCode,CAST(@voiceSnapshot AS jsonb),@rate,@musicCode,CAST(@musicSnapshot AS jsonb),@volume,now(),now());
-            """, new { projectId, tenant = _tenant.TenantId, executionMode = request.Settings.ExecutionMode, skip = request.Settings.SkipCharacter,
-                useReferenceImageForAllScenes = request.Settings.UseReferenceImageForAllScenes,
-                characterMode = request.Settings.CharacterMode, selected = request.Settings.SelectedCharacterId,
-                character = JsonSerializer.Serialize(request.Settings.CharacterSnapshot ?? new { }, JsonOptions), voice = request.Settings.VoiceMode,
-                voiceCode = request.Settings.VoiceCatalogCode, voiceSnapshot = JsonSerializer.Serialize(request.Settings.VoiceSnapshot ?? new { }, JsonOptions),
-                rate = request.Settings.DefaultTtsRate, musicCode = request.Settings.MusicCatalogCode,
-                musicSnapshot = JsonSerializer.Serialize(request.Settings.MusicSnapshot ?? new { }, JsonOptions), volume = request.Settings.MusicVolume }, tx);
+            """, new
+        {
+            projectId,
+            tenant = _tenant.TenantId,
+            executionMode = request.Settings.ExecutionMode,
+            skip = request.Settings.SkipCharacter,
+            useReferenceImageForAllScenes = request.Settings.UseReferenceImageForAllScenes,
+            characterMode = request.Settings.CharacterMode,
+            selected = request.Settings.SelectedCharacterId,
+            character = JsonSerializer.Serialize(request.Settings.CharacterSnapshot ?? new { }, JsonOptions),
+            voice = request.Settings.VoiceMode,
+            voiceCode = request.Settings.VoiceCatalogCode,
+            voiceSnapshot = JsonSerializer.Serialize(request.Settings.VoiceSnapshot ?? new { }, JsonOptions),
+            rate = request.Settings.DefaultTtsRate,
+            musicCode = request.Settings.MusicCatalogCode,
+            musicSnapshot = JsonSerializer.Serialize(request.Settings.MusicSnapshot ?? new { }, JsonOptions),
+            volume = request.Settings.MusicVolume
+        }, tx);
         await conn.ExecuteAsync("INSERT INTO render.render_job_events(job_id,tenant_id,event_type,level,message,data_json,created_at) VALUES(@jobId,@tenant,'CORE_JOB_CREATED','info','RVIDEO draft created without billing.','{}'::jsonb,now());", new { jobId, tenant = _tenant.TenantId }, tx);
         tx.Commit();
         return new(jobId, projectId, RenderJobStatuses.Draft, $"/jobs/rvideo/{jobId}");
@@ -186,6 +231,7 @@ public sealed class RVideoJobService : IRVideoJobService
             character = request.Settings.CharacterSnapshot,
             voice = new { request.Settings.VoiceMode, request.Settings.VoiceCatalogCode, request.Settings.DefaultTtsRate },
             music = new { request.Settings.MusicCatalogCode, request.Settings.MusicVolume },
+            sourceImageUrl = request.SourceImageUrl,
             request.TotalSeconds,
             request.SceneSeconds,
             request.ThinkScenes,
@@ -213,6 +259,7 @@ public sealed class RVideoJobService : IRVideoJobService
             UPDATE video_render.video_projects
                SET title=@title,
                    original_prompt=@prompt,
+                   source_image_url=@sourceImageUrl,
                    total_seconds=@totalSeconds,
                    scene_seconds=@sceneSeconds,
                    think_scenes=@thinkScenes,
@@ -225,6 +272,7 @@ public sealed class RVideoJobService : IRVideoJobService
                 tenant = _tenant.TenantId,
                 request.Title,
                 request.Prompt,
+                sourceImageUrl = request.SourceImageUrl,
                 totalSeconds = Math.Max(1, request.TotalSeconds),
                 sceneSeconds = Math.Max(1, request.SceneSeconds),
                 thinkScenes = request.ThinkScenes

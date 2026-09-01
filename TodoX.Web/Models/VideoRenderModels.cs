@@ -43,6 +43,7 @@ public sealed class VideoProjectDto
     public bool ThinkScenes { get; set; }
     public long? CharacterId { get; set; }
     public string? UploadedCharacterUrl { get; set; }
+    public string? SourceImageUrl { get; set; }
     public string StorageRoot { get; set; } = string.Empty;
     public string PublicBase { get; set; } = string.Empty;
     public string JobFolder { get; set; } = string.Empty;
@@ -119,6 +120,7 @@ public sealed class VideoProjectCreateRequest
     public string AspectRatio { get; set; } = "9:16";
     public long? CharacterId { get; set; }
     public string? UploadedCharacterUrl { get; set; }
+    public string? SourceImageUrl { get; set; }
     public bool ThinkScenes { get; set; } = true;
     public int TotalSeconds { get; set; } = 16;
     public int SceneSeconds { get; set; } = 8;
@@ -187,6 +189,7 @@ public sealed class VideoProjectUpdateRequest
     public string? Title { get; set; }
     public string OriginalPrompt { get; set; } = string.Empty;
     public long? CharacterId { get; set; }
+    public string? SourceImageUrl { get; set; }
     public int TotalSeconds { get; set; }
     public int SceneSeconds { get; set; }
     public bool ThinkScenes { get; set; }

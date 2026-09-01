@@ -354,6 +354,95 @@ public sealed class RVideoFoundationTests
     }
 
     [Fact]
+    public void DirectProjectSourceImageResolverPrefersProjectSourceImage()
+    {
+        var source = RVideoEffectiveSceneImageSourceResolver.Resolve(
+            new VideoProjectSceneDto { Id = 1, SceneIndex = 1, Status = VideoSceneStatuses.Draft },
+            settings: null,
+            selectedImageVersion: null,
+            project: new VideoProjectDto
+            {
+                Id = 99,
+                SourceImageUrl = "https://example.invalid/source.jpg"
+            });
+
+        Assert.False(source.UsesSharedReferenceImage);
+        Assert.Equal("https://example.invalid/source.jpg", source.SourceImageUrl);
+        Assert.Equal(RVideoEffectiveSceneImageSourceResolver.ProjectSourceImage, source.SourceLabel);
+        Assert.Null(source.SelectedImageVersionId);
+    }
+
+    [Fact]
+    public void SelectedAiImageStillTakesPriorityOverProjectSourceImage()
+    {
+        var selectedImageVersionId = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+
+        var source = RVideoEffectiveSceneImageSourceResolver.Resolve(
+            new VideoProjectSceneDto
+            {
+                Id = 1,
+                SceneIndex = 1,
+                Status = VideoSceneStatuses.Draft,
+                StaticImageUrl = "https://example.invalid/static.jpg"
+            },
+            settings: null,
+            selectedImageVersion: new SceneImageVersionDto
+            {
+                Id = selectedImageVersionId,
+                Status = "completed",
+                PublicUrl = "https://example.invalid/selected.jpg",
+                StorageKey = "scene/selected.jpg"
+            },
+            project: new VideoProjectDto
+            {
+                Id = 99,
+                SourceImageUrl = "https://example.invalid/source.jpg"
+            });
+
+        Assert.Equal(selectedImageVersionId, source.SelectedImageVersionId);
+        Assert.Equal("https://example.invalid/selected.jpg", source.SourceImageUrl);
+        Assert.Equal("scene/selected.jpg", source.SourceImageObjectKey);
+        Assert.Equal(RVideoEffectiveSceneImageSourceResolver.SceneImageVersion, source.SourceLabel);
+    }
+
+    [Fact]
+    public void StaticSceneImageStillTakesPriorityOverProjectSourceImage()
+    {
+        var source = RVideoEffectiveSceneImageSourceResolver.Resolve(
+            new VideoProjectSceneDto
+            {
+                Id = 1,
+                SceneIndex = 1,
+                Status = VideoSceneStatuses.Draft,
+                StaticImageUrl = "https://example.invalid/static.jpg"
+            },
+            settings: null,
+            selectedImageVersion: null,
+            project: new VideoProjectDto
+            {
+                Id = 99,
+                SourceImageUrl = "https://example.invalid/source.jpg"
+            });
+
+        Assert.Equal("https://example.invalid/static.jpg", source.SourceImageUrl);
+        Assert.Equal(RVideoEffectiveSceneImageSourceResolver.SceneStaticImage, source.SourceLabel);
+    }
+
+    [Fact]
+    public void MissingAllSourceImagesIsReported()
+    {
+        var source = RVideoEffectiveSceneImageSourceResolver.Resolve(
+            new VideoProjectSceneDto { Id = 1, SceneIndex = 1, Status = VideoSceneStatuses.Draft },
+            settings: null,
+            selectedImageVersion: null,
+            project: new VideoProjectDto { Id = 99 });
+
+        Assert.False(source.HasUsableInput);
+        Assert.Equal(RVideoEffectiveSceneImageSourceResolver.Missing, source.SourceLabel);
+        Assert.Null(source.SourceImageUrl);
+    }
+
+    [Fact]
     public void SceneVideoRenderInputCarriesSharedReferenceImageSelection()
     {
         var reference = new RVideoSceneImageReferenceSelection(

@@ -1190,6 +1190,7 @@ else
                 Prompt = PersistPromptVideoSettings(_prompt, _aspectRatio, _resolution, _autoFinish),
                 AspectRatio = _aspectRatio,
                 CharacterId = _selectedCharacter?.Id,
+                SourceImageUrl = ResolveDirectSourceImageUrl(),
                 TotalSeconds = _totalSeconds,
                 SceneSeconds = Math.Max(1, _sceneSeconds),
                 ThinkScenes = false,
@@ -2620,6 +2621,7 @@ else
                     ServiceCode = ServiceCode,
                     Title = _promptParseResult.Model.VideoTitle ?? "RVIDEO",
                     Prompt = _prompt,
+                    SourceImageUrl = ResolveDirectSourceImageUrl(),
                     AspectRatio = _aspectRatio,
                     Resolution = _resolution,
                     TotalSeconds = _totalSeconds,
@@ -2657,6 +2659,7 @@ else
                 Title = _project.Title,
                 OriginalPrompt = _prompt,
                 CharacterId = _selectedCharacter?.Id ?? _selectedCharacterId,
+                SourceImageUrl = ResolveDirectSourceImageUrl(),
                 TotalSeconds = _totalSeconds,
                 SceneSeconds = Math.Max(1, _sceneSeconds),
                 ThinkScenes = _thinkScenes,
@@ -2670,6 +2673,7 @@ else
                 {
                     Title = _project.Title ?? _promptParseResult.Model.VideoTitle ?? "RVIDEO",
                     Prompt = _prompt,
+                    SourceImageUrl = ResolveDirectSourceImageUrl(),
                     AspectRatio = _aspectRatio,
                     Resolution = _resolution,
                     TotalSeconds = _totalSeconds,
@@ -2723,6 +2727,11 @@ else
                 : _musicMode == RVideoMusicModes.Upload ? _uploadedMusic : null,
             MusicVolume = _musicVolume
         };
+
+    private string? ResolveDirectSourceImageUrl()
+        => !string.IsNullOrWhiteSpace(_uploadedCharacter?.FileUrl)
+            ? _uploadedCharacter.FileUrl
+            : _selectedCharacter?.MasterImageUrl;
 
     private async Task LoadRVideoSettingsAsync(long projectId)
     {

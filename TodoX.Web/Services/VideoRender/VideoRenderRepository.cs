@@ -40,14 +40,15 @@ public sealed class VideoRenderRepository
                 """
                 INSERT INTO video_render.video_projects
                     (tenant_id, user_id, customer_id, title, original_prompt, total_seconds, scene_seconds, scene_count,
-                     think_scenes, character_id, uploaded_character_url, storage_root, public_base, job_folder, status, created_at, updated_at)
+                     think_scenes, character_id, uploaded_character_url, source_image_url, storage_root, public_base, job_folder, status, created_at, updated_at)
                 VALUES
                     (@tenant, @user, @customer, @title, @prompt, @total, @sceneSeconds, @sceneCount,
-                     @think, @character, @uploaded, @storageRoot, @publicBase, @jobFolder, @status, now(), now())
+                     @think, @character, @uploaded, @sourceImageUrl, @storageRoot, @publicBase, @jobFolder, @status, now(), now())
                 RETURNING id AS Id, tenant_id AS TenantId, user_id AS UserId, customer_id AS CustomerId, title AS Title,
                           original_prompt AS OriginalPrompt, total_seconds AS TotalSeconds, scene_seconds AS SceneSeconds,
                           scene_count AS SceneCount, think_scenes AS ThinkScenes, character_id AS CharacterId,
-                          uploaded_character_url AS UploadedCharacterUrl, storage_root AS StorageRoot, public_base AS PublicBase,
+                          uploaded_character_url AS UploadedCharacterUrl, source_image_url AS SourceImageUrl,
+                          storage_root AS StorageRoot, public_base AS PublicBase,
                           job_folder AS JobFolder, status AS Status, final_video_url AS FinalVideoUrl,
                           final_video_path AS FinalVideoPath, error_message AS ErrorMessage, created_at AS CreatedAt,
                           updated_at AS UpdatedAt;
@@ -65,6 +66,7 @@ public sealed class VideoRenderRepository
                     think = request.ThinkScenes,
                     character = request.CharacterId,
                     uploaded = request.UploadedCharacterUrl,
+                    sourceImageUrl = request.SourceImageUrl,
                     storageRoot,
                     publicBase,
                     jobFolder,
@@ -148,7 +150,8 @@ public sealed class VideoRenderRepository
                 SELECT id AS Id, core_job_id AS CoreJobId, tenant_id AS TenantId, user_id AS UserId, customer_id AS CustomerId, title AS Title,
                        original_prompt AS OriginalPrompt, total_seconds AS TotalSeconds, scene_seconds AS SceneSeconds,
                        scene_count AS SceneCount, think_scenes AS ThinkScenes, character_id AS CharacterId,
-                       uploaded_character_url AS UploadedCharacterUrl, storage_root AS StorageRoot, public_base AS PublicBase,
+                       uploaded_character_url AS UploadedCharacterUrl, source_image_url AS SourceImageUrl,
+                       storage_root AS StorageRoot, public_base AS PublicBase,
                        job_folder AS JobFolder, status AS Status, final_video_url AS FinalVideoUrl,
                        final_video_path AS FinalVideoPath, error_message AS ErrorMessage, created_at AS CreatedAt,
                        updated_at AS UpdatedAt
@@ -418,6 +421,7 @@ public sealed class VideoRenderRepository
                    SET title=@title,
                        original_prompt=@prompt,
                        character_id=@characterId,
+                       source_image_url=@sourceImageUrl,
                        total_seconds=@totalSeconds,
                        scene_seconds=@sceneSeconds,
                        scene_count=@sceneCount,
@@ -432,6 +436,7 @@ public sealed class VideoRenderRepository
                     title = request.Title,
                     prompt = request.OriginalPrompt,
                     characterId = request.CharacterId,
+                    sourceImageUrl = request.SourceImageUrl,
                     totalSeconds = Math.Max(1, request.TotalSeconds),
                     sceneSeconds = Math.Max(1, request.SceneSeconds),
                     sceneCount = scenes.Count,

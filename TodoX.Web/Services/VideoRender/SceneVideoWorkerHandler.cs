@@ -20,6 +20,7 @@ public sealed class SceneVideoRenderWorkItemInput
     public Guid? SelectedSourceImageVersionId { get; set; }
     public string? SourceImageUrl { get; set; }
     public string? SourceImageObjectKey { get; set; }
+    public string? SourceImageType { get; set; }
     public bool UseSharedReferenceImage { get; set; }
     public Guid? SharedReferenceImageMediaId { get; set; }
     public string? SharedReferenceImageUrl { get; set; }
@@ -313,14 +314,16 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
             var hasExplicitSourceImageVersion = requestedSourceImageVersionId is Guid requestedId && requestedId != Guid.Empty;
             var errorCode = hasExplicitSourceImageVersion
                 ? "RVIDEO_VIDEO_SOURCE_IMAGE_VERSION_NOT_FOUND"
-                : "RVIDEO_VIDEO_SELECTED_IMAGE_VERSION_REQUIRED";
+                : "scene_source_image_required";
             var message = hasExplicitSourceImageVersion
                 ? "Explicit completed source image version is required before rendering scene video."
-                : "Selected completed image version is required before rendering scene video.";
+                : "Scene source image is required before rendering scene video.";
             await FailAsync(project.Id, scene, Guid.Empty, errorCode, message, ct);
             throw new RenderJobTerminalFailureException(errorCode);
         }
-        var sourceImageVersionId = input.UseSharedReferenceImage ? (Guid?)null : sourceVersion.Id;
+        var sourceImageVersionId = input.UseSharedReferenceImage
+            ? null
+            : requestedSourceImageVersionId ?? (sourceVersion.Id == Guid.Empty ? null : sourceVersion.Id);
 
         var validation = _promptValidator.Validate(
             input.VideoPrompt,
@@ -385,6 +388,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                         input.SourceImageObjectKey,
                         sourceVersion.PublicUrl,
                         sourceVersion.StorageKey,
+                        input.SourceImageType,
                         attemptIndex
                     },
                     RenderConfigSnapshot: new
@@ -570,7 +574,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                         new { jobId = job.Id, input.ProjectId, input.SceneId, input.SceneIndex, input.ProviderCode, input.ModelName, input.CapabilityCode }, ct);
                     await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_SOURCE_UPLOAD_BEGIN", "info",
                         "Scene-video source image handoff started.",
-                        new { jobId = job.Id, input.ProjectId, input.SceneId, input.SceneIndex, sourceImageVersionId = sourceVersion.Id }, ct);
+                        new { jobId = job.Id, input.ProjectId, input.SceneId, input.SceneIndex, sourceImageVersionId, sourceImageType = input.SourceImageType, sourceImageUrl = input.SourceImageUrl }, ct);
                     await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_SUBMIT_BEGIN", "info",
                         "Scene-video provider submit started.",
                         new { jobId = job.Id, input.ProjectId, input.SceneId, input.SceneIndex, input.ProviderCode, model = policy.Model, input.CapabilityCode }, ct);
@@ -1116,6 +1120,18 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         if (IsCompletedSelectedImageVersion(selected))
         {
             return selected;
+        }
+
+        if (!string.IsNullOrWhiteSpace(sourceImageUrl) || !string.IsNullOrWhiteSpace(sourceImageObjectKey))
+        {
+            return new SceneImageVersionDto
+            {
+                Id = Guid.Empty,
+                PublicUrl = sourceImageUrl,
+                StorageKey = sourceImageObjectKey,
+                Status = "completed",
+                IsSelected = false
+            };
         }
 
         return null;

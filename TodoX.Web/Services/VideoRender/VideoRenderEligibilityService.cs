@@ -113,12 +113,10 @@ public sealed class VideoRenderEligibilityService : IVideoRenderEligibilityServi
             var imageVersion = usesSharedReferenceImage
                 ? null
                 : await _versions.GetSelectedImageVersionAsync(scene.Id, ct);
-            var hasSourceImage = usesSharedReferenceImage
-                ? sharedReference is not null
-                  && (!string.IsNullOrWhiteSpace(sharedReference.Url) || !string.IsNullOrWhiteSpace(sharedReference.ObjectKey))
-                : imageVersion is not null
-                  && imageVersion.Id != Guid.Empty
-                  && !string.IsNullOrWhiteSpace(imageVersion.PublicUrl);
+            var effectiveSource = usesSharedReferenceImage
+                ? new RVideoEffectiveSceneImageSource(true, null, sharedReference?.Url, sharedReference?.ObjectKey, "shared_reference_image")
+                : RVideoEffectiveSceneImageSourceResolver.Resolve(scene, settings, imageVersion, project);
+            var hasSourceImage = effectiveSource.HasUsableInput;
             if (!hasSourceImage)
             {
                 eligible.Add(new VideoRenderEligibilityResult(
@@ -139,7 +137,7 @@ public sealed class VideoRenderEligibilityService : IVideoRenderEligibilityServi
                     VideoRenderEligibilityStatus.InvalidPrompt,
                     "RVIDEO_VIDEO_PROMPT_REQUIRED",
                     $"Scene {scene.SceneIndex:00}: prompt video không được để trống.",
-                    imageVersion?.Id));
+                    effectiveSource.SelectedImageVersionId));
                 continue;
             }
 

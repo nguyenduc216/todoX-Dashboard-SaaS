@@ -463,6 +463,32 @@ public sealed class RVideoVideoHotfixTests
     }
 
     [Fact]
+    public async Task DirectSourceImageUrlCanSkipSceneImageVersion()
+    {
+        var worker = CreateWorker(null);
+
+        var method = typeof(SceneVideoWorkerHandler).GetMethod("ResolveSourceImageVersionAsync", BindingFlags.NonPublic | BindingFlags.Instance);
+        Assert.NotNull(method);
+
+        var task = (Task<SceneImageVersionDto?>)method!.Invoke(worker, new object?[]
+        {
+            7L,
+            null,
+            false,
+            "https://example.test/direct-source.png",
+            null,
+            null,
+            CancellationToken.None
+        })!;
+
+        var version = await task;
+        Assert.NotNull(version);
+        Assert.Equal(Guid.Empty, version!.Id);
+        Assert.Equal("https://example.test/direct-source.png", version.PublicUrl);
+        Assert.False(version.IsSelected);
+    }
+
+    [Fact]
     public async Task ExplicitVersionMustBeCompleted()
     {
         var worker = CreateWorker(
@@ -575,26 +601,13 @@ public sealed class RVideoVideoHotfixTests
     }
 
     [Fact]
-    public async Task SceneVideoVersionCreateRejectsGuidEmptySourceImageVersionId()
+    public void SceneVideoVersionCreateAllowsNullSourceImageVersionId()
     {
-        var service = CreateSceneMediaVersioningService();
+        var source = ReadRepoFile("Services", "VideoRender", "SceneMediaVersioningService.cs");
 
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => service.CreateQueuedSceneVideoVersionAsync(
-            new SceneVideoVersionCreateRequest(
-                22,
-                120,
-                Guid.Empty,
-                null,
-                null,
-                null,
-                "logical-request",
-                null,
-                null,
-                new { sceneId = 120 },
-                new { mode = "test" }),
-            CancellationToken.None));
-
-        Assert.Equal("RVIDEO_VIDEO_SOURCE_IMAGE_VERSION_GUID_EMPTY", ex.Message);
+        Assert.Contains("@sourceImageVersionId", source);
+        Assert.Contains("request.SourceImageVersionId", source);
+        Assert.DoesNotContain("request.SourceImageVersionId == Guid.Empty", source);
     }
 
     [Fact]
@@ -775,6 +788,15 @@ public sealed class RVideoVideoHotfixTests
         return new SceneMediaVersioningService(
             new TodoXConnectionFactory(configuration),
             new TenantContext(new TodoXConnectionFactory(configuration), configuration));
+    }
+
+    private static string ReadRepoFile(params string[] parts)
+    {
+        var path = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "..", "..", "..", "..",
+            Path.Combine(parts)));
+        return File.ReadAllText(path);
     }
 
     private sealed class StaticCredentialResolver : IProviderCredentialResolver
