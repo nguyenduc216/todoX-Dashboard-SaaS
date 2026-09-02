@@ -183,6 +183,7 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
             input.ProjectId, scenes[0].Id, input.CustomerId, input.UserId, input.TrustedPayerContext, ct);
         var settings = await _settings.GetAsync(project.Id, ct);
         var qualityTier = ResolveQualityTier(route);
+        var parentJobBilled = project.Events.Any(x => x.EventType == "RVIDEO_PARENT_BILLED");
         var voiceCount = scenes.Count(scene =>
             RVideoRules.RequiresExternalVoice(scene, settings)
             && !string.IsNullOrWhiteSpace(RVideoRules.ResolveSceneVoiceText(scene)));
@@ -223,7 +224,7 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
             ServiceSellPriceQualityTiers.Standard,
             voiceCount > 0).Validate();
         var aggregateEstimate = await _pointPricing.EstimateAsync(usagePlan.ToPricingRequest(), ct);
-        if (aggregateEstimate.TotalPoints > 0 && (input.CustomerId ?? job.CustomerId) is Guid customerId)
+        if (!parentJobBilled && aggregateEstimate.TotalPoints > 0 && (input.CustomerId ?? job.CustomerId) is Guid customerId)
         {
             var charge = await _wallets.ChargeAsync(
                 customerId, input.UserId, aggregateEstimate.TotalPoints, 1, "rvideo_initial_render",

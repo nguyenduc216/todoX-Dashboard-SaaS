@@ -57,6 +57,37 @@ public sealed class PointModuleRegressionTests
     }
 
     [Fact]
+    public void TimelapsePromptEditRerenderUsesFreshOperationIdentity()
+    {
+        var page = File.ReadAllText(Path.Combine(RepoRoot, "TodoX.Web", "Components", "Pages", "TimelapseJobDetail.razor"));
+
+        Assert.Contains("edit.Rerender ? Guid.NewGuid() : null", page, StringComparison.Ordinal);
+        Assert.Contains("RetryImageAsync(JobId, image.ProgressPercent, AuthState.CurrentUser, Guid.NewGuid())", page, StringComparison.Ordinal);
+        Assert.Contains("RetryVideoAsync(JobId, clipIndex, AuthState.CurrentUser, Guid.NewGuid())", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PointBalanceNotifierIsSingleton()
+    {
+        var program = File.ReadAllText(Path.Combine(RepoRoot, "TodoX.Web", "Program.cs"));
+
+        Assert.Contains("AddSingleton<IPointBalanceChangeNotifier, PointBalanceChangeNotifier>()", program, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RVideoInitialRenderChargesAndSnapshotsBeforeProviderSubmission()
+    {
+        var handler = File.ReadAllText(Path.Combine(RepoRoot, "TodoX.Web", "Services", "Render", "SceneImageBatchRenderHandler.cs"));
+
+        Assert.Contains("RVIDEO_PARENT_BILLED", handler, StringComparison.Ordinal);
+        Assert.Contains("ChargeInitialRenderAsync", handler, StringComparison.Ordinal);
+        Assert.Contains("UpsertSnapshotAsync", handler, StringComparison.Ordinal);
+        Assert.Contains("available_points_at_check", handler, StringComparison.Ordinal);
+        Assert.Contains("balance_after_charge", handler, StringComparison.Ordinal);
+        Assert.Contains("SkipCustomerCharge = true", handler, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void RVideoImagePlanCountsOnlyScenesWithoutUsableImageInput()
     {
         var project = new VideoProjectDto
@@ -98,6 +129,18 @@ public sealed class PointModuleRegressionTests
     }
 
     [Fact]
+    public void RVideoVideoAndVoiceBillingSkipsSecondChargeAfterParentBill()
+    {
+        var handler = File.ReadAllText(Path.Combine(RepoRoot, "TodoX.Web", "Services", "VideoRender", "SceneVideoRenderHandler.cs"));
+        var audio = File.ReadAllText(Path.Combine(RepoRoot, "TodoX.Web", "Services", "VideoRender", "RVideoSceneAudioAutoChainService.cs"));
+
+        Assert.Contains("RVIDEO_PARENT_BILLED", handler, StringComparison.Ordinal);
+        Assert.Contains("!parentJobBilled", handler, StringComparison.Ordinal);
+        Assert.Contains("PointCostEstimate = parentJobBilled ? 0", audio, StringComparison.Ordinal);
+        Assert.Contains("PointStatus = parentJobBilled", audio, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void TimelapseSellPriceSnapshotCarriesUnifiedEstimate()
     {
         var imageRate = new PointPricingRate(PointPricingResourceTypes.Image, ServiceSellPriceQualityTiers.Standard, 3000, "per_render", "global");
@@ -111,6 +154,17 @@ public sealed class PointModuleRegressionTests
         Assert.Equal(54000, snapshot.VideoSubtotal);
         Assert.Equal(0, snapshot.VoiceSubtotal);
         Assert.Equal(69000, snapshot.TotalPoints);
+    }
+
+    [Fact]
+    public void RDanceQueueRenderFreezesConsumedImageAndUsesLogicalTotal()
+    {
+        var source = File.ReadAllText(Path.Combine(RepoRoot, "TodoX.Web", "Services", "DanceSell", "DanceSellPhase2Services.cs"));
+
+        Assert.Contains("logicalTotalPoints", source, StringComparison.Ordinal);
+        Assert.Contains("total_planned_points = logicalTotalPoints", source, StringComparison.Ordinal);
+        Assert.Contains("PointCostEstimate = logicalTotalPoints", source, StringComparison.Ordinal);
+        Assert.Contains("remainingPoints = pointEstimate.Video.Points + pointEstimate.Voice.Points", source, StringComparison.Ordinal);
     }
 
     [Fact]

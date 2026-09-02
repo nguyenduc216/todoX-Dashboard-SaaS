@@ -136,6 +136,7 @@ public sealed class RVideoSceneAudioAutoChainService : IRVideoSceneAudioAutoChai
             1,
             ServiceSellPriceQualityTiers.Standard,
             true), ct);
+        var parentJobBilled = project.Events.Any(x => x.EventType == "RVIDEO_PARENT_BILLED");
 
         var version = existing ?? await _versions.CreateQueuedSceneAudioVersionAsync(new SceneAudioVersionCreateRequest(
             ProjectId: project.Id,
@@ -234,8 +235,10 @@ public sealed class RVideoSceneAudioAutoChainService : IRVideoSceneAudioAutoChai
             ProviderCode = "vbee",
             ModelCode = voiceCode,
             MaxAttempts = 100,
-            PointCostEstimate = pointEstimate.TotalPoints,
-            PointStatus = pointEstimate.TotalPoints > 0 ? RenderPointStatuses.Pending : RenderPointStatuses.NotRequired
+            PointCostEstimate = parentJobBilled ? 0 : pointEstimate.TotalPoints,
+            PointStatus = parentJobBilled
+                ? RenderPointStatuses.NotRequired
+                : pointEstimate.TotalPoints > 0 ? RenderPointStatuses.Pending : RenderPointStatuses.NotRequired
         };
 
         var existingJob = await ResolveReusableRenderJobAsync(version.RenderJobId, logicalRequestId, ct);

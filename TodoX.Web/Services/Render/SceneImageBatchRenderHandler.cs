@@ -1,5 +1,8 @@
 using System.Text.Json;
+using Dapper;
+using TodoX.Web.Data;
 using TodoX.Web.Models;
+using TodoX.Web.Models.Catalog;
 using TodoX.Web.Services.AiCharacters;
 using TodoX.Web.Services.AiProviders;
 using TodoX.Web.Services.VideoRender;
@@ -96,6 +99,11 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
     private readonly ISceneMediaVersioningService _versions;
     private readonly IAiCharacterService _characters;
     private readonly IRenderJobService _jobs;
+    private readonly RVideoJobSettingsRepository _settings;
+    private readonly IPointPricingService _pointPricing;
+    private readonly WalletService _wallets;
+    private readonly TodoXConnectionFactory _factory;
+    private readonly TenantContext _tenant;
     private readonly ILogger<SceneImageBatchRenderHandler> _logger;
 
     public SceneImageBatchRenderHandler(
@@ -104,6 +112,11 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
         ISceneMediaVersioningService versions,
         IAiCharacterService characters,
         IRenderJobService jobs,
+        RVideoJobSettingsRepository settings,
+        IPointPricingService pointPricing,
+        WalletService wallets,
+        TodoXConnectionFactory factory,
+        TenantContext tenant,
         IConfiguration config,
         ILogger<SceneImageBatchRenderHandler> logger)
     {
@@ -112,6 +125,11 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
         _versions = versions;
         _characters = characters;
         _jobs = jobs;
+        _settings = settings;
+        _pointPricing = pointPricing;
+        _wallets = wallets;
+        _factory = factory;
+        _tenant = tenant;
         _logger = logger;
     }
 
@@ -146,6 +164,12 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
         scenes = scenes.Where(scene => !activeSceneIds.Contains(scene.Id)).ToList();
         if (scenes.Count == 0) return;
 
+        if (input.BillingIntent == PointBillingIntent.InitialRender
+            && !project.Events.Any(x => x.EventType == "RVIDEO_PARENT_BILLED"))
+        {
+            await ChargeInitialRenderAsync(job, input, project, scenes, ct);
+        }
+
         var (referenceMediaId, referenceUrl, referenceObjectKey, characterPrompt) =
             await ResolveCharacterReferenceAsync(input, ct);
 
@@ -167,6 +191,97 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
         => !onlyMissingOrFailed
            || string.IsNullOrWhiteSpace(scene.StaticImageUrl)
            || string.Equals(scene.Status, VideoSceneStatuses.Failed, StringComparison.OrdinalIgnoreCase);
+
+    private async Task ChargeInitialRenderAsync(
+        RenderJobDto job,
+        SceneImageBatchInput input,
+        VideoProjectDto project,
+        IReadOnlyList<VideoProjectSceneDto> scenes,
+        CancellationToken ct)
+    {
+        var settings = await _settings.GetAsync(project.Id, ct);
+        var imageCount = 0;
+        foreach (var scene in scenes)
+        {
+            var selected = await _versions.GetSelectedImageVersionAsync(scene.Id, ct);
+            if (!RVideoEffectiveSceneImageSourceResolver.RequiresAiGeneration(scene, settings, selected, project))
+            {
+                continue;
+            }
+            imageCount++;
+        }
+
+        var videoScenes = scenes
+            .Select(scene => new PreRenderVideoScene(scene.Id, scene.DurationSeconds))
+            .ToArray();
+        var plan = new PreRenderUsagePlan(
+            await ResolvePointServiceIdAsync(project.CoreJobId, ct),
+            imageCount,
+            string.Equals(RVideoImageModelPolicy.GetInitial().Mode, "vip", StringComparison.OrdinalIgnoreCase)
+                ? ServiceSellPriceQualityTiers.Premium
+                : ServiceSellPriceQualityTiers.Standard,
+            videoScenes,
+            ServiceSellPriceQualityTiers.Standard,
+            settings is not null
+                ? scenes.Count(scene => RVideoRules.RequiresExternalVoice(scene, settings)
+                    && !string.IsNullOrWhiteSpace(RVideoRules.ResolveSceneVoiceText(scene)))
+                : 0,
+            ServiceSellPriceQualityTiers.Standard,
+            settings is not null && RVideoRules.ResolveVoiceMode(settings) == RVideoVoiceModes.Library)
+            .Validate();
+        var estimate = await _pointPricing.EstimateAsync(plan.ToPricingRequest(), ct);
+        var customerId = input.CustomerId ?? job.CustomerId;
+        var available = customerId is Guid cid ? await _wallets.GetBalanceAsync(cid) : 0m;
+        var charge = await _wallets.ChargeAsync(
+            customerId, input.UserId, estimate.TotalPoints, 1, "rvideo_initial_render",
+            "todox", "point_pricing", "rvideo", "point", job.Id, "rvideo_parent_job");
+        if (!charge.Ok)
+        {
+            await _jobs.MarkStatusAsync(job.Id, RenderJobStatuses.Failed,
+                errorCode: "insufficient_points", errorMessage: charge.Error, ct: ct);
+            await _repo.AddProjectEventAsync(project.Id, "RVIDEO_PARENT_BILLING_FAILED", "error",
+                "Initial rVideo render was blocked before provider submission.",
+                new { jobId = job.Id, available_points_at_check = available, required_points = estimate.TotalPoints }, ct);
+            throw new RenderJobTerminalFailureException(charge.Error ?? "Insufficient points.");
+        }
+
+        await _jobs.UpsertSnapshotAsync(job.Id,
+            new
+            {
+                projectId = project.Id,
+                serviceId = plan.ServiceId,
+                imageCount = plan.ImageCount,
+                imageQuality = plan.ImageQuality,
+                videoSeconds = plan.VideoSeconds,
+                videoQuality = plan.VideoQuality,
+                voiceCount = plan.VoiceCount,
+                voiceQuality = plan.VoiceQuality,
+                voiceEnabled = plan.VoiceEnabled,
+                imagePoints = estimate.Image.Points,
+                videoPoints = estimate.Video.Points,
+                voicePoints = estimate.Voice.Points,
+                totalPoints = estimate.TotalPoints,
+                available_points_at_check = available,
+                balance_after_charge = charge.BalanceAfter
+            },
+            project.Scenes.Select(scene => new { scene.Id, scene.SceneIndex, scene.DurationSeconds }).ToArray(), ct);
+        await _repo.AddProjectEventAsync(project.Id, "RVIDEO_PARENT_BILLED", "info",
+            "Initial IMAGE + VIDEO + VOICE points were charged before provider submission.",
+            new { jobId = job.Id, totalPoints = estimate.TotalPoints, balance_after_charge = charge.BalanceAfter }, ct);
+        input.ParentJobBilled = true;
+        input.SkipCustomerCharge = true;
+        input.BillingReferenceId = job.Id;
+    }
+
+    private async Task<Guid?> ResolvePointServiceIdAsync(Guid? coreJobId, CancellationToken ct)
+    {
+        if (coreJobId is not Guid jobId) return null;
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        return await conn.ExecuteScalarAsync<Guid?>(
+            "SELECT service_id FROM render.render_jobs WHERE id=@jobId AND tenant_id=@tenant LIMIT 1;",
+            new { jobId, tenant = _tenant.TenantId });
+    }
 
     private async Task EnqueueSceneAsync(
         SceneImageBatchInput input,

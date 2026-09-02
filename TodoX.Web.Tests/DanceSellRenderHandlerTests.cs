@@ -329,6 +329,7 @@ public sealed class DanceSellRenderHandlerTests
         public Task<bool> ScheduleProviderPollAsync(Guid jobId, TimeSpan delay, string reasonCode, string reasonMessage, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<bool> MarkRecoveredCompletedAsync(Guid jobId, long projectId, long sceneId, Guid sceneVideoVersionId, string logicalRequestId, CancellationToken ct = default) => Task.FromResult(false);
         public Task<int> GetProviderReconciliationAttemptCountAsync(Guid jobId, CancellationToken ct = default) => Task.FromResult(0);
+        public Task UpsertSnapshotAsync(Guid jobId, object projectSnapshot, object sceneSnapshots, CancellationToken ct = default) => Task.CompletedTask;
     }
 
     private sealed class CapturingProviderService : IAiProviderService

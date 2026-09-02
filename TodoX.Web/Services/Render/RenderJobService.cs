@@ -36,6 +36,7 @@ public interface IRenderJobService
     Task ScheduleRetryAsync(Guid jobId, TimeSpan delay, string errorCode, string errorMessage, CancellationToken ct = default);
     Task<bool> ScheduleProviderPollAsync(Guid jobId, TimeSpan delay, string reasonCode, string reasonMessage, CancellationToken ct = default);
     Task<bool> MarkRecoveredCompletedAsync(Guid jobId, long projectId, long sceneId, Guid sceneVideoVersionId, string logicalRequestId, CancellationToken ct = default);
+    Task UpsertSnapshotAsync(Guid jobId, object projectSnapshot, object sceneSnapshots, CancellationToken ct = default);
 }
 
 public sealed class RenderJobService : IRenderJobService

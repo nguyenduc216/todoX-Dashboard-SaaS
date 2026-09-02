@@ -245,7 +245,7 @@ builder.Services.AddScoped<AuthStateService>();
 builder.Services.AddScoped<StartupSeedFixer>();
 builder.Services.AddScoped<TokenSettingsService>();
 builder.Services.AddScoped<WalletService>();
-builder.Services.AddScoped<IPointBalanceChangeNotifier, PointBalanceChangeNotifier>();
+builder.Services.AddSingleton<IPointBalanceChangeNotifier, PointBalanceChangeNotifier>();
 builder.Services.AddScoped<IRenderJobService, RenderJobService>();
 builder.Services.AddScoped<IRenderJobDispatcher, RenderJobDispatcher>();
 builder.Services.AddHostedService<RenderJobWorker>();

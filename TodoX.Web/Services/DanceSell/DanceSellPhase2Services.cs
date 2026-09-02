@@ -1758,6 +1758,7 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
         // The reference image was consumed and billed in a prior operation. Its historical
         // component is immutable; this render can bill only newly consumed components.
         var remainingPoints = pointEstimate.Video.Points + pointEstimate.Voice.Points;
+        var logicalTotalPoints = alreadyChargedImage + remainingPoints;
         var charge = await _wallets.ChargeAsync(
             user.CustomerId,
             user.UserId,
@@ -1787,7 +1788,7 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
             ProviderAccountId = motionRoute.ProviderAccountId,
             ProviderModel = motionRoute.ModelName,
             Status = DanceSellOperationStatuses.Queued,
-            BillingStatus = pointEstimate.TotalPoints > 0 ? DanceSellBillingStatuses.Charged : DanceSellBillingStatuses.NotRequired,
+            BillingStatus = logicalTotalPoints > 0 ? DanceSellBillingStatuses.Charged : DanceSellBillingStatuses.NotRequired,
             RefundStatus = DanceSellRefundStatuses.NotCharged,
             RequestJson = DanceSellRepository.ToJson(new { job.Id, job.PreparedReferenceUrl, job.MotionVideoUrl, job.Prompt, businessMode = job.Mode, providerMode, job.CharacterOrientation, job.Ratio }),
             UsageUnit = estimate.UsageUnit,
@@ -1819,7 +1820,7 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
                     charged_points = 0m,
                     charge_reference = (Guid?)null
                 },
-                total_planned_points = alreadyChargedImage + pointEstimate.Video.Points + pointEstimate.Voice.Points,
+                total_planned_points = logicalTotalPoints,
                 total_charged_points = alreadyChargedImage + remainingPoints,
                 remaining_points_to_charge = 0m
             }),
@@ -1850,8 +1851,8 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
             References = new { referenceUrl = job.PreparedReferenceUrl!, motionVideoUrl = job.MotionVideoUrl, operationId = operation?.Id },
             ProviderCode = motionRoute.ProviderCode,
             ModelCode = motionRoute.ModelName,
-            PointCostEstimate = pointEstimate.TotalPoints,
-            PointStatus = pointEstimate.TotalPoints > 0 ? RenderPointStatuses.Pending : RenderPointStatuses.NotRequired,
+            PointCostEstimate = logicalTotalPoints,
+            PointStatus = logicalTotalPoints > 0 ? RenderPointStatuses.Pending : RenderPointStatuses.NotRequired,
             MaxAttempts = Math.Max(3, _kie.CurrentValue.MaxPollCount + _kie.CurrentValue.SubmitMaxRetry + 5)
         }, ct);
 

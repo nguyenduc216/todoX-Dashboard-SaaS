@@ -26,8 +26,9 @@ public sealed class RDanceStagedBillingRegressionTests
 
         Assert.Contains("alreadyChargedImage", queue);
         Assert.Contains("remainingPoints", queue);
-        Assert.Contains("pointEstimate.TotalPoints - alreadyChargedImage", queue);
-        Assert.Contains("PointCostEstimate = pointEstimate.TotalPoints", queue);
+        Assert.Contains("logicalTotalPoints", queue);
+        Assert.Contains("total_planned_points = logicalTotalPoints", queue);
+        Assert.Contains("PointCostEstimate = logicalTotalPoints", queue);
     }
 
     [Fact]

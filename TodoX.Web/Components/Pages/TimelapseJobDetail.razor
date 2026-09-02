@@ -1157,7 +1157,8 @@
                 image.Id,
                 edit.Prompt,
                 edit.Rerender,
-                AuthState.CurrentUser);
+                AuthState.CurrentUser,
+                edit.Rerender ? Guid.NewGuid() : null);
             _activeTabIndex = 1;
             Snackbar.Add(
                 edit.Rerender
