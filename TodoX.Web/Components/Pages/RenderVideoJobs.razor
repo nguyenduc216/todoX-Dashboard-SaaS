@@ -3059,6 +3059,7 @@ else
         input.CustomerId = AuthState.CurrentUser.CustomerId;
         input.TrustedPayerContext = TodoX.Web.Services.AiProviders.AiBillingPayerResolver.CreateTrustedBackgroundContext(AuthState.CurrentUser);
         input.OnlyMissingOrFailed = onlyMissingOrFailed;
+        input.ParentJobBilled = true;
 
         var (job, alreadyActive) = await RenderJobs.EnqueueForProjectIfNoneActiveAsync(new RenderJobCreateModel
         {
@@ -3242,7 +3243,9 @@ else
                     CapabilityCode = TodoX.Web.Services.Render.SceneImageRenderContext.RVideoCapabilityCode,
                     LogicalRequestId = logicalRequestId,
                     RequestedModel = model.Model,
-                    ModelAttemptIndex = model.AttemptIndex
+                    ModelAttemptIndex = model.AttemptIndex,
+                    BillingIntent = TodoX.Web.Services.PointBillingIntent.UserRerender,
+                    BillingReferenceId = operationId
                 },
                 Prompt = new { projectId = _project.Id, sceneId = scene.Id, imageVersionId = version.Id },
                 References = Array.Empty<object>(),

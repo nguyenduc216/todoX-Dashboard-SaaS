@@ -186,6 +186,17 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
         var voiceCount = scenes.Count(scene =>
             RVideoRules.RequiresExternalVoice(scene, settings)
             && !string.IsNullOrWhiteSpace(RVideoRules.ResolveSceneVoiceText(scene)));
+        var imageCount = 0;
+        foreach (var scene in scenes)
+        {
+            var selectedImage = input.UseSharedReferenceImage
+                ? null
+                : await _versions.GetSelectedImageVersionAsync(scene.Id, ct);
+            if (RVideoEffectiveSceneImageSourceResolver.RequiresAiGeneration(scene, settings, selectedImage, project))
+            {
+                imageCount++;
+            }
+        }
 
         await _repo.AddProjectEventAsync(project.Id, "SCENE_VIDEO_BATCH_STARTED", "info",
             $"Batch render video started for {scenes.Count} scenes.",
@@ -193,6 +204,9 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
             {
                 batchJobId = job.Id,
                 sceneCount = scenes.Count,
+                imageCount,
+                videoSeconds = scenes.Sum(x => x.DurationSeconds),
+                voiceCount,
                 route.ProviderCode,
                 route.ModelName,
                 input.AspectRatio,
@@ -201,7 +215,7 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
 
         var usagePlan = new PreRenderUsagePlan(
             await ResolvePointServiceIdAsync(project.CoreJobId, ct),
-            0,
+            imageCount,
             qualityTier,
             scenes.Select(scene => new PreRenderVideoScene(scene.Id, scene.DurationSeconds)).ToArray(),
             qualityTier,

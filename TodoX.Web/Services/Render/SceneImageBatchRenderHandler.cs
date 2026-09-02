@@ -23,10 +23,21 @@ public sealed class SceneImageBatchInput
     public AiBillingTrustedPayerContext? TrustedPayerContext { get; set; }
     public bool OnlyMissingOrFailed { get; set; }
     public long[]? SceneIds { get; set; }
+    public bool ParentJobBilled { get; set; }
+    public PointBillingIntent BillingIntent { get; set; } = PointBillingIntent.InitialRender;
+    public Guid? BillingReferenceId { get; set; }
+    public bool SkipCustomerCharge
+    {
+        get => ParentJobBilled;
+        set => ParentJobBilled = value;
+    }
 }
 
 public sealed class SceneImageRenderWorkItemInput
 {
+    public bool SkipCustomerCharge { get; set; }
+    public PointBillingIntent BillingIntent { get; set; } = PointBillingIntent.InitialRender;
+    public Guid? BillingReferenceId { get; set; }
     public Guid ParentJobId { get; set; }
     public Guid ImageVersionId { get; set; }
     public long ProjectId { get; set; }
@@ -226,7 +237,10 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
                 CapabilityCode = input.CapabilityCode,
                 LogicalRequestId = logicalRequestId,
                 RequestedModel = model.Model,
-                ModelAttemptIndex = model.AttemptIndex
+                ModelAttemptIndex = model.AttemptIndex,
+                SkipCustomerCharge = input.SkipCustomerCharge,
+                BillingIntent = input.BillingIntent,
+                BillingReferenceId = input.BillingReferenceId
             },
             Prompt = new { projectId = input.ProjectId, sceneId = scene.Id, parentJobId },
             References = Array.Empty<object>(),

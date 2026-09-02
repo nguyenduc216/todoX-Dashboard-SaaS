@@ -1,6 +1,7 @@
 @using TodoX.Web.Models.Catalog
 @inject BillingRepository Billing
 @inject ISnackbar Snackbar
+@inject AuthStateService AuthState
 
 <MudDialog>
     <TitleContent>
@@ -69,18 +70,22 @@
 
     protected override async Task OnInitializedAsync() => await ReloadAsync();
 
-    private async Task ReloadAsync() => _rates = await Billing.GetServicePointRatesAsync(Service.Id);
+    private async Task ReloadAsync()
+    {
+        if (AuthState.CurrentUser is null) return;
+        _rates = await Billing.GetServicePointRatesAsync(Service.Id, AuthState.CurrentUser);
+    }
 
     private async Task SaveOverrideAsync()
     {
-        await Billing.UpsertServicePointOverrideAsync(Service.Id, _resource, _quality, _rate, null);
+        await Billing.UpsertServicePointOverrideAsync(Service.Id, _resource, _quality, _rate, AuthState.CurrentUser!);
         Snackbar.Add("Override saved.", Severity.Success);
         await ReloadAsync();
     }
 
     private async Task RemoveOverrideAsync()
     {
-        await Billing.RemoveServicePointOverrideAsync(Service.Id, _resource, _quality, null);
+        await Billing.RemoveServicePointOverrideAsync(Service.Id, _resource, _quality, AuthState.CurrentUser!);
         Snackbar.Add("Override removed.", Severity.Success);
         await ReloadAsync();
     }

@@ -1,5 +1,6 @@
 using Dapper;
 using TodoX.Web.Data;
+using TodoX.Web.Models;
 
 namespace TodoX.Web.Services;
 
@@ -45,17 +46,29 @@ public sealed class WalletService
         return id;
     }
 
-    public async Task<WalletMutationResult> TopUpAsync(Guid customerId, decimal amount, string? description, string? note, Guid? actorUserId)
-        => await MutateAsync(customerId, amount, "topup", description, note, RequireAdmin(actorUserId));
+    public async Task<WalletMutationResult> TopUpAsync(Guid customerId, decimal amount, string? description, string? note, CurrentUserSession actor)
+    {
+        PointModuleAuthorization.Require(actor, PointModulePermissions.WalletTopUp);
+        return await MutateAsync(customerId, amount, "topup", description, note, actor.UserId);
+    }
 
-    public async Task<WalletMutationResult> AdjustPlusAsync(Guid customerId, decimal amount, string? description, string? note, Guid? actorUserId)
-        => await MutateAsync(customerId, amount, "adjust_plus", description, note, RequireAdmin(actorUserId));
+    public async Task<WalletMutationResult> AdjustPlusAsync(Guid customerId, decimal amount, string? description, string? note, CurrentUserSession actor)
+    {
+        PointModuleAuthorization.Require(actor, PointModulePermissions.WalletAdjust);
+        return await MutateAsync(customerId, amount, "adjust_plus", description, note, actor.UserId);
+    }
 
-    public async Task<WalletMutationResult> AdjustMinusAsync(Guid customerId, decimal amount, string? description, string? note, Guid? actorUserId)
-        => await MutateAsync(customerId, -Math.Abs(amount), "adjust_minus", description, note, RequireAdmin(actorUserId));
+    public async Task<WalletMutationResult> AdjustMinusAsync(Guid customerId, decimal amount, string? description, string? note, CurrentUserSession actor)
+    {
+        PointModuleAuthorization.Require(actor, PointModulePermissions.WalletAdjust);
+        return await MutateAsync(customerId, -Math.Abs(amount), "adjust_minus", description, note, actor.UserId);
+    }
 
-    public async Task<WalletMutationResult> RefundAsync(Guid customerId, decimal amount, string? description, string? note, Guid? actorUserId, Guid? referenceId = null)
-        => await MutateAsync(customerId, amount, "refund", description, note, RequireAdmin(actorUserId), referenceId);
+    public async Task<WalletMutationResult> RefundAsync(Guid customerId, decimal amount, string? description, string? note, CurrentUserSession actor, Guid? referenceId = null)
+    {
+        PointModuleAuthorization.Require(actor, PointModulePermissions.WalletRefund);
+        return await MutateAsync(customerId, amount, "refund", description, note, actor.UserId, referenceId);
+    }
 
     public async Task<VoucherCreateResult> CreateVoucherAsync(
         string voucherCode,
@@ -64,9 +77,9 @@ public sealed class WalletService
         DateTimeOffset? validFrom,
         DateTimeOffset? validUntil,
         string? description,
-        Guid? actorUserId)
+        CurrentUserSession actor)
     {
-        RequireAdmin(actorUserId);
+        PointModuleAuthorization.Require(actor, PointModulePermissions.VoucherManage);
         if (string.IsNullOrWhiteSpace(voucherCode))
         {
             return new(false, null, null, "Voucher code is required.");
@@ -115,7 +128,7 @@ public sealed class WalletService
                 maxRedemptions,
                 validFrom,
                 validUntil,
-                actorUserId
+                actorUserId = actor.UserId
             },
             tx);
 
@@ -126,18 +139,16 @@ public sealed class WalletService
             VALUES
                 (gen_random_uuid(), @tenant, @actorUserId, NULL, 'admin', 'voucher', 'voucher_create', 1, 'call', @points, false, 'voucher', @voucherId, 'wallets', 'success', now());
             """,
-            new { tenant = _tenant.TenantId, actorUserId, points = pointAmount, voucherId },
+            new { tenant = _tenant.TenantId, actorUserId = actor.UserId, points = pointAmount, voucherId },
             tx);
 
         tx.Commit();
         return new(true, voucherId, normalized, null);
     }
 
-    private static Guid RequireAdmin(Guid? actorUserId)
-        => actorUserId ?? throw new UnauthorizedAccessException("Administrator authorization is required.");
-
-    public async Task<WalletMutationResult> RedeemVoucherAsync(Guid customerId, string voucherCode, Guid? actorUserId)
+    public async Task<WalletMutationResult> RedeemVoucherAsync(Guid customerId, string voucherCode, CurrentUserSession actor)
     {
+        PointModuleAuthorization.RequireOwnCustomer(actor, customerId);
         if (string.IsNullOrWhiteSpace(voucherCode))
         {
             return new(false, null, 0, 0, "Voucher code is required.");
@@ -192,7 +203,7 @@ public sealed class WalletService
             return new(false, null, 0, 0, "Voucher was already redeemed.");
         }
 
-        var result = await MutateAsync(conn, tx, customerId, voucher.PointAmount, "voucher", $"Voucher {voucherCode.Trim().ToUpperInvariant()}", null, actorUserId, voucher.Id);
+        var result = await MutateAsync(conn, tx, customerId, voucher.PointAmount, "voucher", $"Voucher {voucherCode.Trim().ToUpperInvariant()}", null, actor.UserId, voucher.Id);
         if (!result.Ok || result.TransactionId is null)
         {
             tx.Commit();

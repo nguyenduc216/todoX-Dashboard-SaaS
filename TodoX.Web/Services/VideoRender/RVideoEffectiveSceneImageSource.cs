@@ -24,6 +24,13 @@ public static class RVideoEffectiveSceneImageSourceResolver
     public const string LegacyUploadedCharacter = "legacy_uploaded_character";
     public const string Missing = "missing";
 
+    public static bool RequiresAiGeneration(
+        VideoProjectSceneDto scene,
+        RVideoJobSettingsDto? settings,
+        SceneImageVersionDto? selectedImageVersion,
+        VideoProjectDto? project = null)
+        => !Resolve(scene, settings, selectedImageVersion, project).HasUsableInput;
+
     public static RVideoEffectiveSceneImageSource Resolve(
         VideoProjectSceneDto scene,
         RVideoJobSettingsDto? settings,

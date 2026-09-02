@@ -188,10 +188,11 @@
     private async Task ReloadAsync()
     {
         var cid = AuthState.CurrentUser?.IsCustomer == true ? AuthState.CurrentUser.CustomerId : null;
-        _rates = IsCustomer ? Array.Empty<PointRateConfigView>() : await Billing.GetPointRatesAsync();
-        _wallets = await Billing.GetWalletsAsync(cid);
-        _transactions = await Billing.GetRecentTransactionsAsync(cid);
-        _vouchers = IsCustomer ? Array.Empty<PointVoucherView>() : await Billing.GetPointVouchersAsync();
+        if (AuthState.CurrentUser is null) return;
+        _rates = IsCustomer ? Array.Empty<PointRateConfigView>() : await Billing.GetPointRatesAsync(AuthState.CurrentUser);
+        _wallets = await Billing.GetWalletsAsync(cid, AuthState.CurrentUser);
+        _transactions = await Billing.GetRecentTransactionsAsync(cid, AuthState.CurrentUser);
+        _vouchers = IsCustomer ? Array.Empty<PointVoucherView>() : await Billing.GetPointVouchersAsync(AuthState.CurrentUser);
         _selectedCustomerId ??= _wallets.FirstOrDefault()?.CustomerId;
     }
 
@@ -199,7 +200,7 @@
     {
         try
         {
-            await Billing.UpsertPointRateAsync(_rateResource, _rateQuality, _rateValue, AuthState.CurrentUser?.UserId);
+            await Billing.UpsertPointRateAsync(_rateResource, _rateQuality, _rateValue, AuthState.CurrentUser!);
             Snackbar.Add("Point rate saved.", Severity.Success);
             await ReloadAsync();
         }
@@ -220,10 +221,10 @@
         var actor = AuthState.CurrentUser?.UserId;
         var result = kind switch
         {
-            "topup" => await WalletService.TopUpAsync(customerId, _mutationAmount, "TOPUP", _mutationNote, actor),
-            "adjust_plus" => await WalletService.AdjustPlusAsync(customerId, _mutationAmount, "ADJUST_PLUS", _mutationNote, actor),
-            "adjust_minus" => await WalletService.AdjustMinusAsync(customerId, _mutationAmount, "ADJUST_MINUS", _mutationNote, actor),
-            "refund" => await WalletService.RefundAsync(customerId, _mutationAmount, "REFUND", _mutationNote, actor),
+            "topup" => await WalletService.TopUpAsync(customerId, _mutationAmount, "TOPUP", _mutationNote, AuthState.CurrentUser!),
+            "adjust_plus" => await WalletService.AdjustPlusAsync(customerId, _mutationAmount, "ADJUST_PLUS", _mutationNote, AuthState.CurrentUser!),
+            "adjust_minus" => await WalletService.AdjustMinusAsync(customerId, _mutationAmount, "ADJUST_MINUS", _mutationNote, AuthState.CurrentUser!),
+            "refund" => await WalletService.RefundAsync(customerId, _mutationAmount, "REFUND", _mutationNote, AuthState.CurrentUser!),
             _ => new WalletMutationResult(false, null, 0, 0, "Unsupported mutation.")
         };
 
@@ -248,7 +249,7 @@
             null,
             null,
             "Created from wallet admin page",
-            AuthState.CurrentUser?.UserId);
+            AuthState.CurrentUser!);
 
         Snackbar.Add(result.Error ?? $"Voucher {result.VoucherCode} created.", result.Ok ? Severity.Success : Severity.Error);
         if (result.Ok)
@@ -265,7 +266,7 @@
             return;
         }
 
-        var result = await WalletService.RedeemVoucherAsync(customerId, _redeemCode, AuthState.CurrentUser?.UserId);
+        var result = await WalletService.RedeemVoucherAsync(customerId, _redeemCode, AuthState.CurrentUser!);
         Snackbar.Add(result.Error ?? $"Voucher redeemed. New balance: {result.BalanceAfter:#,0}", result.Ok ? Severity.Success : Severity.Error);
         if (result.Ok)
         {

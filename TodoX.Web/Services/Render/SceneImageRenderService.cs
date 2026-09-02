@@ -151,6 +151,7 @@ public sealed class SceneImageRenderContext
     public Guid? RenderJobId { get; init; }
     public string? LogicalRequestId { get; init; }
     public string? OutputObjectKey { get; init; }
+    public bool SkipCustomerCharge { get; init; }
 
     /// <summary>Media id of the character reference (Vertex path passes references by media id).</summary>
     public Guid? CharacterReferenceMediaId { get; init; }
@@ -441,6 +442,7 @@ public sealed class SceneImageRenderService : ISceneImageRenderService
             Resolution = "4K",
             FileCategory = "video_scene_image",
             RequestId = requestId,
+            SkipCustomerCharge = context.SkipCustomerCharge,
             LogicalRequestId = requestId,
             RenderJobId = context.RenderJobId?.ToString("N"),
             Metadata = new

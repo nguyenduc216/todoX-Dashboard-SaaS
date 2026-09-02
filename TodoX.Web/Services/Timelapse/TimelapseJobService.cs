@@ -551,6 +551,15 @@ public sealed class TimelapseJobService : ITimelapseJobService
     public async Task<TimelapseJobView> RetryImageAsync(Guid jobId, int progressPercent, CurrentUserSession currentUser, CancellationToken ct = default)
     {
         var view = await RequireOwnedAsync(jobId, currentUser, ct);
+        var rate = await _pointPricing.ResolveRateAsync(view.Snapshot.ServiceId,
+            PointPricingResourceTypes.Image,
+            TimelapseSellPricing.QualityTierForMode(view.Snapshot.VideoMode), ct);
+        var charge = await _wallets.ChargeAsync(
+            currentUser.CustomerId, currentUser.UserId, rate.Rate, 1,
+            "timelapse_user_rerender_image", "todox", "point_pricing", "timelapse",
+            "point", PointBillingReference.ForRerender(jobId, "image", progressPercent.ToString()),
+            "timelapse_user_rerender");
+        if (!charge.Ok) throw new InvalidOperationException(charge.Error ?? "Insufficient points.");
         view.Workflow = await _workflow.RetryImageAsync(jobId, progressPercent, view.Snapshot, currentUser, ct);
         view.Status = view.Workflow.ParentStatus;
         HydrateImagePrompts(view);
@@ -566,6 +575,18 @@ public sealed class TimelapseJobService : ITimelapseJobService
         CancellationToken ct = default)
     {
         var view = await RequireOwnedAsync(jobId, currentUser, ct);
+        if (rerender)
+        {
+            var rate = await _pointPricing.ResolveRateAsync(view.Snapshot.ServiceId,
+                PointPricingResourceTypes.Image,
+                TimelapseSellPricing.QualityTierForMode(view.Snapshot.VideoMode), ct);
+            var charge = await _wallets.ChargeAsync(
+                currentUser.CustomerId, currentUser.UserId, rate.Rate, 1,
+                "timelapse_user_rerender_image", "todox", "point_pricing", "timelapse",
+                "point", PointBillingReference.ForRerender(jobId, "image", imageStageId.ToString("N")),
+                "timelapse_user_rerender");
+            if (!charge.Ok) throw new InvalidOperationException(charge.Error ?? "Insufficient points.");
+        }
         view.Workflow = await _workflow.UpdateImagePromptAsync(
             jobId,
             imageStageId,
@@ -582,6 +603,17 @@ public sealed class TimelapseJobService : ITimelapseJobService
     public async Task<TimelapseJobView> RetryVideoAsync(Guid jobId, int clipIndex, CurrentUserSession currentUser, CancellationToken ct = default)
     {
         var view = await RequireOwnedAsync(jobId, currentUser, ct);
+        var duration = view.Snapshot.SellPrice?.ClipDurationsSeconds.ElementAtOrDefault(clipIndex - 1);
+        if (duration is not > 0) throw new InvalidOperationException("TIMELAPSE_CLIP_DURATION_REQUIRED");
+        var rate = await _pointPricing.ResolveRateAsync(view.Snapshot.ServiceId,
+            PointPricingResourceTypes.Video,
+            TimelapseSellPricing.QualityTierForMode(view.Snapshot.VideoMode), ct);
+        var charge = await _wallets.ChargeAsync(
+            currentUser.CustomerId, currentUser.UserId, duration.Value * rate.Rate, 1,
+            "timelapse_user_rerender_video", "todox", "point_pricing", "timelapse",
+            "point", PointBillingReference.ForRerender(jobId, "video", clipIndex.ToString()),
+            "timelapse_user_rerender");
+        if (!charge.Ok) throw new InvalidOperationException(charge.Error ?? "Insufficient points.");
         view.Workflow = await _workflow.RetryVideoAsync(jobId, clipIndex, view.Snapshot, currentUser, ct);
         view.Status = view.Workflow.ParentStatus;
         HydrateImagePrompts(view);

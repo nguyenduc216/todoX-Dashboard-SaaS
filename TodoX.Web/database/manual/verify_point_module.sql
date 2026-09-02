@@ -164,3 +164,79 @@ SELECT routine_schema, routine_name
  WHERE routine_schema IN ('billing', 'render', 'catalog')
    AND routine_name ILIKE '%legacy%'
  ORDER BY routine_schema, routine_name;
+
+-- rVideo parent image aggregation and persisted pricing snapshot.
+SELECT id AS rvideo_parent_job_id,
+       customer_id,
+       point_cost_estimate,
+       point_cost_charged,
+       point_status,
+       input_json #>> '{usagePlan,imageCount}' AS image_count,
+       input_json #>> '{usagePlan,videoSeconds}' AS video_seconds,
+       input_json #>> '{usagePlan,voiceCount}' AS voice_count,
+       input_json #>> '{usagePlan,totalPoints}' AS total_points
+  FROM render.render_jobs
+ WHERE job_type IN ('render_video_batch', 'rvideo')
+ ORDER BY created_at DESC
+ LIMIT 50;
+
+-- rDance service and image usage recorded in the render-job input.
+SELECT id AS rdance_parent_job_id,
+       point_cost_estimate,
+       point_cost_charged,
+       point_status,
+       input_json #>> '{usagePlan,serviceId}' AS service_id,
+       input_json #>> '{usagePlan,imageCount}' AS image_count,
+       input_json #>> '{usagePlan,videoSeconds}' AS video_seconds,
+       input_json #>> '{usagePlan,totalPoints}' AS total_points
+  FROM render.render_jobs
+ WHERE job_type = 'dance_sell'
+ ORDER BY created_at DESC
+ LIMIT 50;
+
+-- Initial parent charges must not be duplicated by child image/video jobs.
+SELECT reference_type,
+       reference_id,
+       COUNT(*) AS charge_count,
+       SUM(amount) AS charged_points
+  FROM billing.token_transactions
+ WHERE transaction_type IN ('debit', 'charge')
+   AND reference_type IN ('rvideo_parent_job', 'dance_sell_job', 'timelapse_job')
+ GROUP BY reference_type, reference_id
+ HAVING COUNT(*) > 1
+ ORDER BY charge_count DESC;
+
+-- Explicit USER_RERENDER charges and duplicate deterministic references.
+SELECT id,
+       amount,
+       reference_type,
+       reference_id,
+       description,
+       created_at
+  FROM billing.token_transactions
+ WHERE reference_type ILIKE '%user_rerender%'
+ ORDER BY created_at DESC
+ LIMIT 100;
+
+SELECT reference_type,
+       reference_id,
+       COUNT(*) AS duplicate_count,
+       SUM(amount) AS total_points
+  FROM billing.token_transactions
+ WHERE reference_type ILIKE '%user_rerender%'
+   AND transaction_type IN ('debit', 'charge')
+ GROUP BY reference_type, reference_id
+ HAVING COUNT(*) > 1
+ ORDER BY duplicate_count DESC;
+
+-- SYSTEM_RETRY should not produce an additional customer debit.
+SELECT t.reference_type,
+       t.reference_id,
+       COUNT(*) AS retry_debit_count,
+       SUM(t.amount) AS retry_points
+  FROM billing.token_transactions t
+ WHERE t.reference_type ILIKE '%retry%'
+   AND t.transaction_type IN ('debit', 'charge')
+ GROUP BY t.reference_type, t.reference_id
+ HAVING SUM(t.amount) <> 0 OR COUNT(*) > 0
+ ORDER BY t.created_at DESC;

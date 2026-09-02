@@ -1,12 +1,87 @@
+using TodoX.Web.Models;
 using TodoX.Web.Models.Catalog;
 using TodoX.Web.Models.Timelapse;
 using TodoX.Web.Services;
+using TodoX.Web.Services.VideoRender;
 using Xunit;
 
 namespace TodoX.Web.Tests;
 
 public sealed class PointModuleRegressionTests
 {
+    [Fact]
+    public void CustomerUserIdDoesNotGrantPointAdminPermission()
+    {
+        var customer = new CurrentUserSession
+        {
+            UserId = Guid.NewGuid(),
+            CustomerId = Guid.NewGuid(),
+            Role = TodoXUserRole.CustomerOwner,
+            IsAuthenticated = true
+        };
+
+        Assert.Throws<UnauthorizedAccessException>(() =>
+            PointModuleAuthorization.Require(customer, PointModulePermissions.PointConfigManage));
+        Assert.Throws<UnauthorizedAccessException>(() =>
+            PointModuleAuthorization.Require(customer, PointModulePermissions.WalletTopUp));
+    }
+
+    [Fact]
+    public void AuthorizedPointOperatorCanManageConfiguredRates()
+    {
+        var operatorUser = new CurrentUserSession
+        {
+            UserId = Guid.NewGuid(),
+            Role = TodoXUserRole.SystemOperator,
+            IsAuthenticated = true,
+            Permissions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                PointModulePermissions.PointConfigManage
+            }
+        };
+
+        PointModuleAuthorization.Require(operatorUser, PointModulePermissions.PointConfigManage);
+    }
+
+    [Fact]
+    public void UserRerenderReferenceIsDeterministic()
+    {
+        var jobId = Guid.NewGuid();
+
+        var first = PointBillingReference.ForRerender(jobId, "video", "scene-9");
+        var second = PointBillingReference.ForRerender(jobId, "video", "scene-9");
+        var differentAsset = PointBillingReference.ForRerender(jobId, "video", "scene-10");
+
+        Assert.Equal(first, second);
+        Assert.NotEqual(first, differentAsset);
+    }
+
+    [Fact]
+    public void RVideoImagePlanCountsOnlyScenesWithoutUsableImageInput()
+    {
+        var project = new VideoProjectDto
+        {
+            SourceImageUrl = null,
+            UploadedCharacterUrl = null,
+            Scenes =
+            [
+                new() { Id = 1, StaticImageUrl = null },
+                new() { Id = 2, StaticImageUrl = null },
+                new() { Id = 3, StaticImageUrl = null },
+                new() { Id = 4, StaticImageUrl = null },
+                new() { Id = 5, StaticImageUrl = "uploaded.png" },
+                new() { Id = 6, StaticImageUrl = null }
+            ]
+        };
+        var settings = new RVideoJobSettingsDto { UseReferenceImageForAllScenes = false };
+        var selected = new SceneImageVersionDto { Id = Guid.NewGuid(), IsSelected = true, Status = "completed", PublicUrl = "reused.png" };
+
+        var imageCount = project.Scenes.Count(scene =>
+            RVideoEffectiveSceneImageSourceResolver.RequiresAiGeneration(
+                scene, settings, scene.Id == 6 ? selected : null, project));
+
+        Assert.Equal(4, imageCount);
+    }
     [Fact]
     public void PointPricingCalculatorUsesCountAndSecondsFormulas()
     {

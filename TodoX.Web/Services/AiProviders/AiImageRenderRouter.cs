@@ -6,6 +6,7 @@ namespace TodoX.Web.Services.AiProviders;
 
 public sealed class AiImageRenderRequest
 {
+    public bool SkipCustomerCharge { get; set; }
     public long? CustomerId { get; set; }
     public Guid? CustomerGuid { get; set; }
     public Guid? UserId { get; set; }
@@ -128,6 +129,10 @@ public sealed class AiImageRenderRouter : IAiImageRenderRouter
         request.RequestId ??= logicalRequestId;
         request.JobId ??= request.RenderJobId;
         var billingCost = _billing.BuildConfiguredCost(unitCost, quantity);
+        if (request.SkipCustomerCharge)
+        {
+            billingCost = billingCost with { CustomerChargedPoints = 0 };
+        }
         var tariffSnapshotJson = BuildTariffSnapshotJson(detail?.Capabilities, option.CapabilityCode, billingCost.ExchangeRateVndPerUsd, billingCost.TodoXVndPerPoint);
         ValidateYEScaleTariffCoverage(factoryKey, selectedModel, detail?.ConfigJson, capability?.ConfigJson, tariffSnapshotJson);
 

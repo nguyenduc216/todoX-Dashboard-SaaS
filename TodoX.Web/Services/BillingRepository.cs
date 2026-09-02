@@ -1,5 +1,6 @@
 using Dapper;
 using TodoX.Web.Data;
+using TodoX.Web.Models;
 using TodoX.Web.Models.Catalog;
 
 namespace TodoX.Web.Services;
@@ -49,8 +50,16 @@ public sealed class BillingRepository
         return new TokenSummary(wallet.bal ?? 0, wallet.locked ?? 0, wallet.cnt, sold ?? 0);
     }
 
-    public async Task<IReadOnlyList<WalletView>> GetWalletsAsync(Guid? customerId = null)
+    public async Task<IReadOnlyList<WalletView>> GetWalletsAsync(Guid? customerId, CurrentUserSession user)
     {
+        if (user.IsCustomer)
+        {
+            PointModuleAuthorization.RequireOwnCustomer(user, customerId ?? Guid.Empty);
+        }
+        else
+        {
+            PointModuleAuthorization.Require(user, PointModulePermissions.WalletViewAll);
+        }
         await _tenant.EnsureLoadedAsync();
         using var conn = await _factory.OpenAsync();
         var rows = await conn.QueryAsync<WalletView>(
@@ -66,16 +75,16 @@ public sealed class BillingRepository
         return rows.ToList();
     }
 
-    private static void EnsureAdmin(Guid? actorUserId)
+    public async Task<IReadOnlyList<TransactionView>> GetRecentTransactionsAsync(Guid? customerId, CurrentUserSession user, int limit = 20)
     {
-        if (actorUserId is null)
+        if (user.IsCustomer)
         {
-            throw new UnauthorizedAccessException("Administrator authorization is required.");
+            PointModuleAuthorization.RequireOwnCustomer(user, customerId ?? Guid.Empty);
         }
-    }
-
-    public async Task<IReadOnlyList<TransactionView>> GetRecentTransactionsAsync(Guid? customerId = null, int limit = 20)
-    {
+        else
+        {
+            PointModuleAuthorization.Require(user, PointModulePermissions.WalletViewAll);
+        }
         await _tenant.EnsureLoadedAsync();
         using var conn = await _factory.OpenAsync();
         var rows = await conn.QueryAsync<TransactionView>(
@@ -95,8 +104,9 @@ public sealed class BillingRepository
         return rows.ToList();
     }
 
-    public async Task<IReadOnlyList<PointRateConfigView>> GetPointRatesAsync()
+    public async Task<IReadOnlyList<PointRateConfigView>> GetPointRatesAsync(CurrentUserSession user)
     {
+        PointModuleAuthorization.Require(user, PointModulePermissions.PointConfigView);
         await _tenant.EnsureLoadedAsync();
         using var conn = await _factory.OpenAsync();
         var rows = await conn.QueryAsync<PointRateConfigView>(
@@ -115,8 +125,9 @@ public sealed class BillingRepository
         return rows.ToList();
     }
 
-    public async Task<IReadOnlyList<PointVoucherView>> GetPointVouchersAsync()
+    public async Task<IReadOnlyList<PointVoucherView>> GetPointVouchersAsync(CurrentUserSession user)
     {
+        PointModuleAuthorization.Require(user, PointModulePermissions.VoucherView);
         await _tenant.EnsureLoadedAsync();
         using var conn = await _factory.OpenAsync();
         var rows = await conn.QueryAsync<PointVoucherView>(
@@ -137,8 +148,9 @@ public sealed class BillingRepository
         return rows.ToList();
     }
 
-    public async Task<IReadOnlyList<PointVoucherRedemptionView>> GetPointVoucherRedemptionsAsync()
+    public async Task<IReadOnlyList<PointVoucherRedemptionView>> GetPointVoucherRedemptionsAsync(CurrentUserSession user)
     {
+        PointModuleAuthorization.Require(user, PointModulePermissions.VoucherView);
         await _tenant.EnsureLoadedAsync();
         using var conn = await _factory.OpenAsync();
         var rows = await conn.QueryAsync<PointVoucherRedemptionView>(
@@ -159,9 +171,9 @@ public sealed class BillingRepository
         return rows.ToList();
     }
 
-    public async Task UpsertPointRateAsync(string resourceType, string qualityTier, decimal rate, Guid? actorUserId)
+    public async Task UpsertPointRateAsync(string resourceType, string qualityTier, decimal rate, CurrentUserSession user)
     {
-        EnsureAdmin(actorUserId);
+        PointModuleAuthorization.Require(user, PointModulePermissions.PointConfigManage);
         if (rate < 0)
         {
             throw new InvalidOperationException("Point rate cannot be negative.");
@@ -186,11 +198,14 @@ public sealed class BillingRepository
                           updated_at=now(),
                           updated_by=EXCLUDED.updated_by;
             """,
-            new { tenant = _tenant.TenantId, resource, quality, rate, unit, actor = actorUserId });
+            new { tenant = _tenant.TenantId, resource, quality, rate, unit, actor = user.UserId });
     }
 
-    public async Task<IReadOnlyList<ServicePointRateView>> GetServicePointRatesAsync(Guid serviceId)
+    public async Task<IReadOnlyList<ServicePointRateView>> GetServicePointRatesAsync(
+        Guid serviceId,
+        CurrentUserSession user)
     {
+        PointModuleAuthorization.Require(user, PointModulePermissions.ServicePointOverrideManage);
         await _tenant.EnsureLoadedAsync();
         using var conn = await _factory.OpenAsync();
         var rows = await conn.QueryAsync<ServicePointRateView>(
@@ -228,9 +243,9 @@ public sealed class BillingRepository
         return rows.ToList();
     }
 
-    public async Task UpsertServicePointOverrideAsync(Guid serviceId, string resourceType, string qualityTier, decimal rate, Guid? actorUserId)
+    public async Task UpsertServicePointOverrideAsync(Guid serviceId, string resourceType, string qualityTier, decimal rate, CurrentUserSession user)
     {
-        EnsureAdmin(actorUserId);
+        PointModuleAuthorization.Require(user, PointModulePermissions.ServicePointOverrideManage);
         if (rate < 0)
         {
             throw new InvalidOperationException("Point override cannot be negative.");
@@ -255,12 +270,12 @@ public sealed class BillingRepository
                           updated_at=now(),
                           updated_by=EXCLUDED.updated_by;
             """,
-            new { tenant = _tenant.TenantId, serviceId, resource, quality, rate, unit, actor = actorUserId });
+            new { tenant = _tenant.TenantId, serviceId, resource, quality, rate, unit, actor = user.UserId });
     }
 
-    public async Task RemoveServicePointOverrideAsync(Guid serviceId, string resourceType, string qualityTier, Guid? actorUserId)
+    public async Task RemoveServicePointOverrideAsync(Guid serviceId, string resourceType, string qualityTier, CurrentUserSession user)
     {
-        EnsureAdmin(actorUserId);
+        PointModuleAuthorization.Require(user, PointModulePermissions.ServicePointOverrideManage);
         await _tenant.EnsureLoadedAsync();
         using var conn = await _factory.OpenAsync();
         await conn.ExecuteAsync(
@@ -280,7 +295,7 @@ public sealed class BillingRepository
                 serviceId,
                 resource = NormalizeResource(resourceType),
                 quality = NormalizeQuality(qualityTier),
-                actor = actorUserId
+                actor = user.UserId
             });
     }
 

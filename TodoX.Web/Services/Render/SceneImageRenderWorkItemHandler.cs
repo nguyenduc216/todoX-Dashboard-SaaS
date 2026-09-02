@@ -1,4 +1,5 @@
 using System.Text.Json;
+using TodoX.Web.Models.Catalog;
 using TodoX.Web.Services.AiCharacters;
 using TodoX.Web.Services.AiProviders;
 using TodoX.Web.Models;
@@ -16,6 +17,8 @@ public sealed class SceneImageRenderWorkItemHandler : IRenderJobHandler
     private readonly IRenderJobService _jobs;
     private readonly IRVideoSceneVideoAutoChainService _autoChain;
     private readonly IRVideoJobService _rvideoJobs;
+    private readonly IPointPricingService _pointPricing;
+    private readonly WalletService _wallets;
     private readonly ILogger<SceneImageRenderWorkItemHandler> _logger;
 
     public SceneImageRenderWorkItemHandler(
@@ -25,6 +28,8 @@ public sealed class SceneImageRenderWorkItemHandler : IRenderJobHandler
         IRenderJobService jobs,
         IRVideoSceneVideoAutoChainService autoChain,
         IRVideoJobService rvideoJobs,
+        IPointPricingService pointPricing,
+        WalletService wallets,
         ILogger<SceneImageRenderWorkItemHandler> logger)
     {
         _repo = repo;
@@ -33,6 +38,8 @@ public sealed class SceneImageRenderWorkItemHandler : IRenderJobHandler
         _jobs = jobs;
         _autoChain = autoChain;
         _rvideoJobs = rvideoJobs;
+        _pointPricing = pointPricing;
+        _wallets = wallets;
         _logger = logger;
     }
 
@@ -58,6 +65,33 @@ public sealed class SceneImageRenderWorkItemHandler : IRenderJobHandler
 
         try
         {
+            if (input.BillingIntent == PointBillingIntent.UserRerender && !input.SkipCustomerCharge)
+            {
+                var model = RVideoImageModelPolicy.GetByAttemptIndex(input.ModelAttemptIndex)
+                    ?? RVideoImageModelPolicy.GetInitial();
+                var quality = string.Equals(model.Mode, "vip", StringComparison.OrdinalIgnoreCase)
+                    ? ServiceSellPriceQualityTiers.Premium
+                    : ServiceSellPriceQualityTiers.Standard;
+                var rate = await _pointPricing.ResolveRateAsync(
+                    null, PointPricingResourceTypes.Image, quality, ct);
+                var referenceId = input.BillingReferenceId ?? job.Id;
+                var charge = await _wallets.ChargeAsync(
+                    input.CustomerId, input.UserId, rate.Rate, 1,
+                    "rvideo_user_rerender_image", "todox", "point_pricing", "rvideo",
+                    "point", PointBillingReference.ForRerender(
+                        input.ParentJobId, "image", referenceId.ToString("N")),
+                    "rvideo_user_rerender");
+                if (!charge.Ok)
+                {
+                    await _versions.FailImageVersionAsync(
+                        version.Id, "insufficient_points", charge.Error, CancellationToken.None);
+                    throw new RenderJobTerminalFailureException(
+                        charge.Error ?? "Insufficient points.");
+                }
+
+                input.SkipCustomerCharge = true;
+            }
+
             var outcome = await _images.RenderSceneImageAsync(new SceneImageRenderContext
             {
                 ProjectId = input.ProjectId,
@@ -73,6 +107,7 @@ public sealed class SceneImageRenderWorkItemHandler : IRenderJobHandler
                 RenderJobId = job.Id,
                 LogicalRequestId = input.LogicalRequestId,
                 OutputObjectKey = version.StorageKey,
+                SkipCustomerCharge = input.SkipCustomerCharge,
                 CharacterReferenceMediaId = input.ReferenceMediaId,
                 CharacterReferenceObjectKey = input.ReferenceObjectKey,
                 CharacterReferenceUrl = input.ReferenceUrl,
@@ -191,7 +226,10 @@ public sealed class SceneImageRenderWorkItemHandler : IRenderJobHandler
                 CapabilityCode = input.CapabilityCode,
                 LogicalRequestId = logicalRequestId,
                 RequestedModel = nextModel.Model,
-                ModelAttemptIndex = nextModel.AttemptIndex
+                ModelAttemptIndex = nextModel.AttemptIndex,
+                SkipCustomerCharge = input.SkipCustomerCharge,
+                BillingIntent = input.BillingIntent,
+                BillingReferenceId = input.BillingReferenceId
             },
             Prompt = new { projectId = input.ProjectId, sceneId = input.SceneId, fallbackFromJobId = job.Id },
             References = Array.Empty<object>(),
