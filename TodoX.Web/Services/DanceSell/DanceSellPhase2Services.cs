@@ -164,6 +164,7 @@ public sealed class DanceSellMotionSourceService : IDanceSellMotionSourceService
             throw new InvalidOperationException("DANCE_SELL_UNAUTHORIZED");
         }
     }
+
 }
 
 public interface IDanceSellReferenceImageService
@@ -1419,6 +1420,7 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
     private readonly IDanceSellOperationRepository _operations;
     private readonly IDanceSellCostEstimator _costs;
     private readonly IPointPricingService _pointPricing;
+    private readonly WalletService _wallets;
     private readonly IRDanceDownloadTicketService _downloadTickets;
     private readonly IOptionsMonitor<KieOptions> _kie;
     private readonly IOptionsMonitor<DanceSellPhase2Options> _options;
@@ -1433,6 +1435,7 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
         IDanceSellOperationRepository operations,
         IDanceSellCostEstimator costs,
         IPointPricingService pointPricing,
+        WalletService wallets,
         IRDanceDownloadTicketService downloadTickets,
         IOptionsMonitor<KieOptions> kie,
         IOptionsMonitor<DanceSellPhase2Options> options,
@@ -1446,6 +1449,7 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
         _operations = operations;
         _costs = costs;
         _pointPricing = pointPricing;
+        _wallets = wallets;
         _downloadTickets = downloadTickets;
         _kie = kie;
         _options = options;
@@ -1625,15 +1629,35 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
         var motionRoute = await _catalog.ResolveAsync(DanceSellOperationTypes.MotionVideo, job.MotionProviderCode, job.MotionProviderModel, ct);
         var providerMode = DanceSellMotionProviderContract.ResolveProviderMode(motionRoute, job.Mode);
         var estimate = await _costs.EstimateAsync(motionRoute, providerMode, null, ct);
+        var quality = job.Mode.Equals("premium", StringComparison.OrdinalIgnoreCase)
+            ? ServiceSellPriceQualityTiers.Premium
+            : ServiceSellPriceQualityTiers.Standard;
+        var durationSeconds = ResolveMotionDurationSeconds(job, motionRoute, estimate);
         var pointEstimate = await _pointPricing.EstimateAsync(new PointPricingEstimateRequest(
             null,
-            1,
-            job.Mode.Equals("premium", StringComparison.OrdinalIgnoreCase) ? ServiceSellPriceQualityTiers.Premium : ServiceSellPriceQualityTiers.Standard,
-            10,
-            job.Mode.Equals("premium", StringComparison.OrdinalIgnoreCase) ? ServiceSellPriceQualityTiers.Premium : ServiceSellPriceQualityTiers.Standard,
+            0,
+            quality,
+            durationSeconds,
+            quality,
             0,
             ServiceSellPriceQualityTiers.Standard,
             false), ct);
+        var charge = await _wallets.ChargeAsync(
+            user.CustomerId,
+            user.UserId,
+            pointEstimate.TotalPoints,
+            1,
+            "dance_sell_initial_render",
+            motionRoute.ProviderCode,
+            motionRoute.ModelName,
+            "dance_sell",
+            "point",
+            job.Id,
+            "dance_sell_job");
+        if (!charge.Ok)
+        {
+            throw new InvalidOperationException(charge.Error ?? "Insufficient points.");
+        }
         var attemptNo = await _operations.GetNextAttemptNoAsync(job.Id, DanceSellOperationTypes.MotionVideo, ct);
         var operation = await _operations.UpsertOperationAsync(new DanceSellProviderOperationDto
         {
@@ -1990,6 +2014,63 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
         {
             throw new InvalidOperationException("DANCE_SELL_UNAUTHORIZED");
         }
+    }
+
+    private static int ResolveMotionDurationSeconds(
+        DanceSellJobDto job,
+        DanceSellProviderRouteDto route,
+        DanceSellCostEstimate estimate)
+    {
+        var configured = ReadInt(job.RequestJson, "durationSeconds", "duration_seconds", "videoDurationSeconds", "video_duration_seconds")
+            ?? ReadInt(route.ConfigJson, "durationSeconds", "duration_seconds");
+        if (configured is > 0)
+        {
+            return configured.Value;
+        }
+
+        if (estimate.UsageUnit.Contains("second", StringComparison.OrdinalIgnoreCase)
+            && estimate.EstimatedUsage > 0)
+        {
+            return (int)Math.Ceiling(estimate.EstimatedUsage);
+        }
+
+        throw new InvalidOperationException("DANCE_SELL_VIDEO_DURATION_REQUIRED");
+    }
+
+    private static int? ReadInt(string? rawJson, params string[] propertyNames)
+    {
+        if (string.IsNullOrWhiteSpace(rawJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(rawJson);
+            foreach (var propertyName in propertyNames)
+            {
+                if (!document.RootElement.TryGetProperty(propertyName, out var value))
+                {
+                    continue;
+                }
+
+                if (value.TryGetInt32(out var integer))
+                {
+                    return integer;
+                }
+
+                if (value.ValueKind == JsonValueKind.String
+                    && int.TryParse(value.GetString(), out integer))
+                {
+                    return integer;
+                }
+            }
+        }
+        catch (JsonException)
+        {
+        }
+
+        return null;
     }
 }
 

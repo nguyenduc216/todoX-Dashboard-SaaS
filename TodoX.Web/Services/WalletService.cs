@@ -46,16 +46,16 @@ public sealed class WalletService
     }
 
     public async Task<WalletMutationResult> TopUpAsync(Guid customerId, decimal amount, string? description, string? note, Guid? actorUserId)
-        => await MutateAsync(customerId, amount, "topup", description, note, actorUserId);
+        => await MutateAsync(customerId, amount, "topup", description, note, RequireAdmin(actorUserId));
 
     public async Task<WalletMutationResult> AdjustPlusAsync(Guid customerId, decimal amount, string? description, string? note, Guid? actorUserId)
-        => await MutateAsync(customerId, amount, "adjust_plus", description, note, actorUserId);
+        => await MutateAsync(customerId, amount, "adjust_plus", description, note, RequireAdmin(actorUserId));
 
     public async Task<WalletMutationResult> AdjustMinusAsync(Guid customerId, decimal amount, string? description, string? note, Guid? actorUserId)
-        => await MutateAsync(customerId, -Math.Abs(amount), "adjust_minus", description, note, actorUserId);
+        => await MutateAsync(customerId, -Math.Abs(amount), "adjust_minus", description, note, RequireAdmin(actorUserId));
 
     public async Task<WalletMutationResult> RefundAsync(Guid customerId, decimal amount, string? description, string? note, Guid? actorUserId, Guid? referenceId = null)
-        => await MutateAsync(customerId, amount, "refund", description, note, actorUserId, referenceId);
+        => await MutateAsync(customerId, amount, "refund", description, note, RequireAdmin(actorUserId), referenceId);
 
     public async Task<VoucherCreateResult> CreateVoucherAsync(
         string voucherCode,
@@ -66,6 +66,7 @@ public sealed class WalletService
         string? description,
         Guid? actorUserId)
     {
+        RequireAdmin(actorUserId);
         if (string.IsNullOrWhiteSpace(voucherCode))
         {
             return new(false, null, null, "Voucher code is required.");
@@ -131,6 +132,9 @@ public sealed class WalletService
         tx.Commit();
         return new(true, voucherId, normalized, null);
     }
+
+    private static Guid RequireAdmin(Guid? actorUserId)
+        => actorUserId ?? throw new UnauthorizedAccessException("Administrator authorization is required.");
 
     public async Task<WalletMutationResult> RedeemVoucherAsync(Guid customerId, string voucherCode, Guid? actorUserId)
     {

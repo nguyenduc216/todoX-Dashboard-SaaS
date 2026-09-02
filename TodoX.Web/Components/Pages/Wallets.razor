@@ -13,6 +13,8 @@
     </div>
 
     <MudTabs Rounded="true" Class="pt-4">
+        @if (!IsCustomer)
+        {
         <MudTabPanel Text="POINT CONFIGURATION">
             <MudPaper Class="pa-4 mb-4">
                 <MudGrid Spacing="2">
@@ -54,6 +56,7 @@
                 </RowTemplate>
             </MudTable>
         </MudTabPanel>
+        }
 
         <MudTabPanel Text="CUSTOMER WALLETS">
             @if (!IsCustomer)
@@ -127,6 +130,8 @@
             </MudTable>
         </MudTabPanel>
 
+        @if (!IsCustomer)
+        {
         <MudTabPanel Text="VOUCHERS">
             <MudGrid>
                 <MudItem xs="12" md="5">
@@ -156,6 +161,7 @@
                 </MudItem>
             </MudGrid>
         </MudTabPanel>
+        }
     </MudTabs>
 </MudStack>
 
@@ -182,10 +188,10 @@
     private async Task ReloadAsync()
     {
         var cid = AuthState.CurrentUser?.IsCustomer == true ? AuthState.CurrentUser.CustomerId : null;
-        _rates = await Billing.GetPointRatesAsync();
+        _rates = IsCustomer ? Array.Empty<PointRateConfigView>() : await Billing.GetPointRatesAsync();
         _wallets = await Billing.GetWalletsAsync(cid);
         _transactions = await Billing.GetRecentTransactionsAsync(cid);
-        _vouchers = await Billing.GetPointVouchersAsync();
+        _vouchers = IsCustomer ? Array.Empty<PointVoucherView>() : await Billing.GetPointVouchersAsync();
         _selectedCustomerId ??= _wallets.FirstOrDefault()?.CustomerId;
     }
 

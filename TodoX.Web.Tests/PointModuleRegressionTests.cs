@@ -39,6 +39,47 @@ public sealed class PointModuleRegressionTests
     }
 
     [Fact]
+    public void PreRenderUsagePlanSumsExplicitSceneDurations()
+    {
+        var plan = new PreRenderUsagePlan(
+            null,
+            4,
+            ServiceSellPriceQualityTiers.Standard,
+            new[]
+            {
+                new PreRenderVideoScene(1, 5),
+                new PreRenderVideoScene(2, 7),
+                new PreRenderVideoScene(3, 6),
+                new PreRenderVideoScene(4, 8),
+                new PreRenderVideoScene(5, 5),
+                new PreRenderVideoScene(6, 9)
+            },
+            ServiceSellPriceQualityTiers.Standard,
+            6,
+            ServiceSellPriceQualityTiers.Standard,
+            true).Validate();
+
+        Assert.Equal(40, plan.VideoSeconds);
+        Assert.Equal(4, plan.ImageCount);
+        Assert.Equal(6, plan.VoiceCount);
+        Assert.Equal(40, plan.ToPricingRequest().VideoSeconds);
+    }
+
+    [Fact]
+    public void PreRenderUsagePlanRejectsMissingSceneDuration()
+    {
+        var plan = new PreRenderUsagePlan(
+            null, 0, ServiceSellPriceQualityTiers.Standard,
+            new[] { new PreRenderVideoScene(1, 0) },
+            ServiceSellPriceQualityTiers.Standard, 0,
+            ServiceSellPriceQualityTiers.Standard, false);
+
+        var exception = Assert.Throws<InvalidOperationException>(() => plan.Validate());
+
+        Assert.Equal("VIDEO_SCENE_DURATION_REQUIRED", exception.Message);
+    }
+
+    [Fact]
     public void CoreBillingUsesPointPricingService()
     {
         var source = File.ReadAllText(Path.Combine(RepoRoot, "TodoX.Web", "Services", "Platform", "CoreBillingService.cs"));

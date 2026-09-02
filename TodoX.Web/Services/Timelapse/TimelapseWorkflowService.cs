@@ -959,7 +959,7 @@ public sealed class TimelapseWorkflowService : ITimelapseWorkflowService
                     clipIndex = clip.ClipIndex,
                     start = clip.StartProgressPercent,
                     end = clip.EndProgressPercent,
-                    duration = TimelapseRequestRules.RuntimeClipDurationSeconds,
+                    duration = clip.DurationSeconds,
                     mode = snapshot.VideoMode,
                     ratio = snapshot.Ratio
                 }, tx);

@@ -190,7 +190,8 @@ public sealed class TimelapseJobService : ITimelapseJobService
             Title = NormalizeTitle(request.Title),
             RequireVideoConfirmation = request.RequireVideoConfirmation && !request.AutoFinish,
             AutoFinish = request.AutoFinish,
-            SellPrice = TimelapseSellPriceSnapshot.FromPointEstimate(pointEstimate, request.SceneCount),
+            SellPrice = TimelapseSellPriceSnapshot.FromPointEstimate(pointEstimate, request.SceneCount,
+                TimelapseStageGraphBuilder.Build(request.SceneCount, startImage is not null).VideoClips.Select(x => x.DurationSeconds).ToArray()),
             OriginalImage = new TimelapseOriginalImageSnapshot
             {
                 MediaId = media.Id,
@@ -454,7 +455,8 @@ public sealed class TimelapseJobService : ITimelapseJobService
             RequireVideoConfirmation = request.RequireVideoConfirmation && !request.AutoFinish,
             AutoFinish = request.AutoFinish,
             VideoRenderConfirmed = request.AutoFinish,
-            SellPrice = TimelapseSellPriceSnapshot.FromPointEstimate(pointEstimate, request.SceneCount),
+            SellPrice = TimelapseSellPriceSnapshot.FromPointEstimate(pointEstimate, request.SceneCount,
+                TimelapseStageGraphBuilder.Build(request.SceneCount, startImage is not null).VideoClips.Select(x => x.DurationSeconds).ToArray()),
             OriginalImage = original,
             StartImage = startImage
         };
@@ -511,6 +513,12 @@ public sealed class TimelapseJobService : ITimelapseJobService
     public async Task<TimelapseJobView> StartOrResumeAsync(Guid jobId, CurrentUserSession currentUser, CancellationToken ct = default)
     {
         var view = await RequireOwnedAsync(jobId, currentUser, ct);
+        var clipDurations = view.Snapshot.SellPrice?.ClipDurationsSeconds ?? Array.Empty<int>();
+        if (clipDurations.Count == 0 || clipDurations.Any(x => x <= 0))
+        {
+            await MarkBillingBlockedAsync(jobId, "VIDEO_SCENE_DURATION_REQUIRED", ct);
+            throw new InvalidOperationException("VIDEO_SCENE_DURATION_REQUIRED");
+        }
         var required = view.Snapshot.SellPrice?.TotalPoints ?? 0m;
         if (required > 0)
         {
@@ -669,16 +677,13 @@ public sealed class TimelapseJobService : ITimelapseJobService
     private Task<PointPricingEstimate> EstimatePointsAsync(Guid serviceId, int sceneCount, string videoMode, bool hasStartImage, CancellationToken ct)
     {
         var quality = TimelapseSellPricing.QualityTierForMode(videoMode);
-        var generatedImageCount = TimelapseStageGraphBuilder.Build(sceneCount, hasStartImage).GeneratedImageOrder.Count;
-        return _pointPricing.EstimateAsync(new PointPricingEstimateRequest(
-            serviceId,
-            ImageCount: generatedImageCount,
-            ImageQuality: quality,
-            VideoSeconds: sceneCount * TimelapseRequestRules.RuntimeClipDurationSeconds,
-            VideoQuality: quality,
-            VoiceCount: 0,
-            VoiceQuality: quality,
-            VoiceEnabled: false), ct);
+        // The default plan duration is defined by TimelapseRequestRules.RuntimeClipDurationSeconds.
+        var graph = TimelapseStageGraphBuilder.Build(sceneCount, hasStartImage);
+        var plan = new PreRenderUsagePlan(serviceId, graph.GeneratedImageOrder.Count, quality,
+            graph.VideoClips.Select(x => new PreRenderVideoScene(x.ClipIndex, x.DurationSeconds)).ToArray(),
+            quality, 0, quality, false).Validate();
+        PointPricingEstimateRequest pricingRequest = plan.ToPricingRequest();
+        return _pointPricing.EstimateAsync(pricingRequest, ct);
     }
 
     private async Task MarkBillingBlockedAsync(Guid jobId, string message, CancellationToken ct)

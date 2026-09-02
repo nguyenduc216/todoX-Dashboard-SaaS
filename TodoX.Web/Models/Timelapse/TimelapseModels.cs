@@ -173,8 +173,9 @@ public sealed class TimelapseSellPriceSnapshot
     public decimal VoiceSubtotal { get; set; }
     public decimal TotalPoints { get; set; }
     public PointPricingEstimate? Pricing { get; set; }
+    public IReadOnlyList<int> ClipDurationsSeconds { get; set; } = Array.Empty<int>();
 
-    public static TimelapseSellPriceSnapshot FromPointEstimate(PointPricingEstimate estimate, int sceneCount)
+    public static TimelapseSellPriceSnapshot FromPointEstimate(PointPricingEstimate estimate, int sceneCount, IReadOnlyList<int>? clipDurations = null)
         => new()
         {
             QualityTier = estimate.Video.Quality,
@@ -192,6 +193,7 @@ public sealed class TimelapseSellPriceSnapshot
             VoiceSubtotal = estimate.Voice.Points,
             TotalPoints = estimate.TotalPoints,
             Pricing = estimate
+            ,ClipDurationsSeconds = clipDurations ?? Array.Empty<int>()
         };
 }
 
@@ -290,6 +292,7 @@ public sealed class TimelapseVideoClip
     public int ClipIndex { get; set; }
     public int StartProgressPercent { get; set; }
     public int EndProgressPercent { get; set; }
+    public int DurationSeconds { get; set; }
     public string Status { get; set; } = TimelapseOperationStatuses.Waiting;
     public int Attempt { get; set; }
     public Guid? MediaId { get; set; }
@@ -592,7 +595,7 @@ public sealed record TimelapseStageGraph(
     IReadOnlyList<TimelapseVideoEdge> VideoClips,
     IReadOnlyList<int> GeneratedImageOrder);
 
-public sealed record TimelapseVideoEdge(int ClipIndex, int StartProgressPercent, int EndProgressPercent);
+public sealed record TimelapseVideoEdge(int ClipIndex, int StartProgressPercent, int EndProgressPercent, int DurationSeconds = TimelapseRequestRules.RuntimeClipDurationSeconds);
 
 public sealed record TimelapseInvalidationPlan(
     IReadOnlyList<int> ImageProgressions,
@@ -616,7 +619,7 @@ public static class TimelapseStageGraphBuilder
     {
         var images = TimelapseRequestRules.GetProgressMapping(sceneCount).ToArray();
         var clips = images.Zip(images.Skip(1), (start, end) => new { start, end })
-            .Select((x, index) => new TimelapseVideoEdge(index + 1, x.start, x.end))
+            .Select((x, index) => new TimelapseVideoEdge(index + 1, x.start, x.end, TimelapseRequestRules.RuntimeClipDurationSeconds))
             .ToArray();
         var generatedOrder = images
             .Where(x => x < 100)

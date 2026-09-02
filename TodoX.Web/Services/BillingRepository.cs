@@ -66,6 +66,14 @@ public sealed class BillingRepository
         return rows.ToList();
     }
 
+    private static void EnsureAdmin(Guid? actorUserId)
+    {
+        if (actorUserId is null)
+        {
+            throw new UnauthorizedAccessException("Administrator authorization is required.");
+        }
+    }
+
     public async Task<IReadOnlyList<TransactionView>> GetRecentTransactionsAsync(Guid? customerId = null, int limit = 20)
     {
         await _tenant.EnsureLoadedAsync();
@@ -153,6 +161,7 @@ public sealed class BillingRepository
 
     public async Task UpsertPointRateAsync(string resourceType, string qualityTier, decimal rate, Guid? actorUserId)
     {
+        EnsureAdmin(actorUserId);
         if (rate < 0)
         {
             throw new InvalidOperationException("Point rate cannot be negative.");
@@ -221,6 +230,7 @@ public sealed class BillingRepository
 
     public async Task UpsertServicePointOverrideAsync(Guid serviceId, string resourceType, string qualityTier, decimal rate, Guid? actorUserId)
     {
+        EnsureAdmin(actorUserId);
         if (rate < 0)
         {
             throw new InvalidOperationException("Point override cannot be negative.");
@@ -250,6 +260,7 @@ public sealed class BillingRepository
 
     public async Task RemoveServicePointOverrideAsync(Guid serviceId, string resourceType, string qualityTier, Guid? actorUserId)
     {
+        EnsureAdmin(actorUserId);
         await _tenant.EnsureLoadedAsync();
         using var conn = await _factory.OpenAsync();
         await conn.ExecuteAsync(

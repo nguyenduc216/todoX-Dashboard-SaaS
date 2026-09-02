@@ -5,13 +5,19 @@ Repository: `https://github.com/nguyenduc216/todoX-Dashboard-SaaS`
 Branch: `integration/rdance-on-construction-video-core`
 
 ## Base Commit
-`38508dbc0a2935c1aac82cc506e147f19c1ff447`
+`5a9f6d189743bb312b9071b18845ee23aadc4294`
 
 ## Final Commit SHA
-`c8b8f436ab8f2c5c6b4b99efaf0fa0ecf1990754`
+Pending local validation.
 
 ## Root Cause
 Active billing paths still mixed the unified Point Module with legacy point flags and fixed-duration assumptions. That allowed `LegacyPointBilling:Enabled=false` to suppress new estimates, allowed rVideo duration to imply quality, and made Timelapse image/video estimates drift from the actual work plan.
+
+The remaining gaps were incomplete aggregate usage planning, child-level video authority, missing backend wallet authorization, and rerender intent not being represented as a billable operation.
+
+## Shared Usage Plan
+
+`PreRenderUsagePlan` and `PreRenderVideoScene` provide the shared immutable input. Video seconds are validated and summed from explicit scene durations; pricing remains owned by `IPointPricingService`.
 
 ## Duration Source by Engine
 rVideo scene duration comes from the prompt/imported scene plan and is persisted on `video_render.video_project_scenes.duration_seconds`. Import validation now rejects missing or non-positive durations with `VIDEO_SCENE_DURATION_REQUIRED`.
@@ -23,13 +29,15 @@ rDance continues to use its current job/mode/provider route configuration. This 
 Core service jobs use explicit `videoSeconds` when supplied; otherwise they compute from `sceneCount * durationSeconds`. Missing billable usage is a hard validation error.
 
 ## rVideo Usage Calculation
+
+The batch handler builds a parent usage plan from all selected scenes before child enqueue and charges the parent reference. Child jobs carry zero point cost.
 Scene video estimates use `scene.DurationSeconds * resolved video rate`. `SceneVideoRenderHandler` no longer maps `DurationSeconds >= 8` to premium; quality resolves from provider/capability point-quality config and defaults to standard.
 
 ## rDance Usage Calculation
 rDance Phase 2 still resolves through `PointPricingService` for image/video estimates while provider cost accounting remains separate. No extra image/voice usage was invented.
 
 ## Timelapse Usage Calculation
-Timelapse estimates image count from the actual generated-stage graph. Uploaded/reused start image at 0% is excluded. Video seconds are `sceneCount * RuntimeClipDurationSeconds`, matching the existing persisted runtime clip plan.
+Timelapse estimates image count from the actual generated-stage graph. Uploaded/reused start image at 0% is excluded. Video seconds come from the persisted clip duration list and each clip persists an explicit duration.
 
 ## Image Billing Rules
 Image points are counted only for planned AI image generation. Uploaded/reused images and selected reference images passed through without AI generation count as zero image units.
@@ -44,10 +52,10 @@ Wallet `balance` is the usable balance. Core reservations subtract from `balance
 `LegacyPointBillingFeatureFlags.NormalizePointCostEstimate` now preserves the estimate. `NormalizePointStatus` no longer changes a positive unified estimate to `not_required` when legacy billing is disabled.
 
 ## Retry / Rerender
-System retries reuse the same logical work and do not create extra customer charges. Existing explicit user rerender paths still create new logical requests and estimates for the new image/video operation.
+System retries reuse the same logical work and do not create extra customer charges. Explicit user rerender paths must use new logical references for additional usage.
 
-## Authorization
-This change did not expand admin wallet/rate APIs. Existing wallet mutations and voucher operations remain routed through the current service layer; customer access remains limited by the page/service authorization already in place.
+## Customer Authorization
+Customer wallet pages now render only own wallet/history and voucher redemption. Rate configuration, all-wallet/history views, voucher administration, and mutations are hidden from customers; backend mutation methods require an actor id.
 
 ## Database Changes
 `20260902_point_module.sql` now adds idempotent unit constraints:
@@ -80,7 +88,7 @@ Remaining failing tests are outside the touched files:
 Output directory: `D:\todoX\Dashboard-web\TodoXPortal\todoX-Dashboard-SaaS\artifacts\publish\todox-dashboard`
 
 ## Git Push
-Pending push from the local repository after this report amendment.
+Not performed in this working session.
 
 ## Files Changed
 - `TodoX.Web/Components/Pages/TimelapseJobCreate.razor`

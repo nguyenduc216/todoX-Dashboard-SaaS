@@ -94,6 +94,7 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
     private readonly IRenderJobService _jobs;
     private readonly IVideoRenderPricingResolver _pricing;
     private readonly IPointPricingService _pointPricing;
+    private readonly WalletService _wallets;
     private readonly TodoXConnectionFactory _factory;
     private readonly TenantContext _tenant;
     private readonly IVideoRenderEligibilityService _eligibility;
@@ -112,6 +113,7 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
         IRenderJobService jobs,
         IVideoRenderPricingResolver pricing,
         IPointPricingService pointPricing,
+        WalletService wallets,
         TodoXConnectionFactory factory,
         TenantContext tenant,
         IVideoRenderEligibilityService eligibility,
@@ -127,6 +129,7 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
         _jobs = jobs;
         _pricing = pricing;
         _pointPricing = pointPricing;
+        _wallets = wallets;
         _factory = factory;
         _tenant = tenant;
         _eligibility = eligibility;
@@ -178,6 +181,11 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
         }
         input.TrustedPayerContext = await _payers.ValidateAndBuildRVideoTrustedPayerContextAsync(
             input.ProjectId, scenes[0].Id, input.CustomerId, input.UserId, input.TrustedPayerContext, ct);
+        var settings = await _settings.GetAsync(project.Id, ct);
+        var qualityTier = ResolveQualityTier(route);
+        var voiceCount = scenes.Count(scene =>
+            RVideoRules.RequiresExternalVoice(scene, settings)
+            && !string.IsNullOrWhiteSpace(RVideoRules.ResolveSceneVoiceText(scene)));
 
         await _repo.AddProjectEventAsync(project.Id, "SCENE_VIDEO_BATCH_STARTED", "info",
             $"Batch render video started for {scenes.Count} scenes.",
@@ -190,6 +198,29 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
                 input.AspectRatio,
                 input.Resolution
             }, ct);
+
+        var usagePlan = new PreRenderUsagePlan(
+            await ResolvePointServiceIdAsync(project.CoreJobId, ct),
+            0,
+            qualityTier,
+            scenes.Select(scene => new PreRenderVideoScene(scene.Id, scene.DurationSeconds)).ToArray(),
+            qualityTier,
+            voiceCount,
+            ServiceSellPriceQualityTiers.Standard,
+            voiceCount > 0).Validate();
+        var aggregateEstimate = await _pointPricing.EstimateAsync(usagePlan.ToPricingRequest(), ct);
+        if (aggregateEstimate.TotalPoints > 0 && (input.CustomerId ?? job.CustomerId) is Guid customerId)
+        {
+            var charge = await _wallets.ChargeAsync(
+                customerId, input.UserId, aggregateEstimate.TotalPoints, 1, "rvideo_initial_render",
+                "todox", "point_pricing", "rvideo", "point", job.Id, "rvideo_parent_job");
+            if (!charge.Ok)
+            {
+                await _jobs.MarkStatusAsync(job.Id, RenderJobStatuses.Failed, errorCode: "insufficient_points",
+                    errorMessage: charge.Error ?? "Insufficient points.", ct: ct);
+                throw new RenderJobTerminalFailureException(charge.Error ?? "Insufficient points.");
+            }
+        }
 
         var enqueued = 0;
         var validationFailed = new List<int>();
@@ -330,15 +361,11 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
             scene.DurationSeconds);
         var pointServiceId = await ResolvePointServiceIdAsync(project.CoreJobId, ct);
         var qualityTier = ResolveQualityTier(route);
-        var pointEstimate = await _pointPricing.EstimateAsync(new PointPricingEstimateRequest(
-            pointServiceId,
-            0,
-            qualityTier,
-            scene.DurationSeconds,
-            qualityTier,
-            0,
-            ServiceSellPriceQualityTiers.Standard,
-            false), ct);
+        var pointEstimate = new PointPricingEstimate(
+            new PointPricingLine(0, qualityTier, 0, "parent", 0),
+            new PointPricingLine(scene.DurationSeconds, qualityTier, 0, "parent", 0),
+            new PointPricingLine(0, ServiceSellPriceQualityTiers.Standard, 0, "parent", 0),
+            0);
 
         await _repo.UpdateSceneAsync(
             scene.Id,
