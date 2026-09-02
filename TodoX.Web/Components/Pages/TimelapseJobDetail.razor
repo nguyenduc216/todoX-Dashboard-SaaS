@@ -1322,7 +1322,7 @@
 
         await RunActionAsync(async () =>
         {
-            _job = await Jobs.RetryImageAsync(JobId, image.ProgressPercent, AuthState.CurrentUser);
+            _job = await Jobs.RetryImageAsync(JobId, image.ProgressPercent, AuthState.CurrentUser, Guid.NewGuid());
             _activeTabIndex = 1;
             Snackbar.Add("Đã bắt đầu render lại chuỗi ảnh và video phụ thuộc.", Severity.Success);
         });
@@ -1364,7 +1364,7 @@
 
         await RunActionAsync(async () =>
         {
-            _job = await Jobs.RetryVideoAsync(JobId, clipIndex, AuthState.CurrentUser);
+            _job = await Jobs.RetryVideoAsync(JobId, clipIndex, AuthState.CurrentUser, Guid.NewGuid());
             _activeTabIndex = 1;
         });
     }

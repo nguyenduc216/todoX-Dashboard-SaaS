@@ -19,6 +19,8 @@ public sealed class SceneImageRenderWorkItemHandler : IRenderJobHandler
     private readonly IRVideoJobService _rvideoJobs;
     private readonly IPointPricingService _pointPricing;
     private readonly WalletService _wallets;
+    private readonly TodoXConnectionFactory _factory;
+    private readonly TenantContext _tenant;
     private readonly ILogger<SceneImageRenderWorkItemHandler> _logger;
 
     public SceneImageRenderWorkItemHandler(
@@ -30,6 +32,8 @@ public sealed class SceneImageRenderWorkItemHandler : IRenderJobHandler
         IRVideoJobService rvideoJobs,
         IPointPricingService pointPricing,
         WalletService wallets,
+        TodoXConnectionFactory factory,
+        TenantContext tenant,
         ILogger<SceneImageRenderWorkItemHandler> logger)
     {
         _repo = repo;
@@ -40,6 +44,8 @@ public sealed class SceneImageRenderWorkItemHandler : IRenderJobHandler
         _rvideoJobs = rvideoJobs;
         _pointPricing = pointPricing;
         _wallets = wallets;
+        _factory = factory;
+        _tenant = tenant;
         _logger = logger;
     }
 
@@ -72,8 +78,9 @@ public sealed class SceneImageRenderWorkItemHandler : IRenderJobHandler
                 var quality = string.Equals(model.Mode, "vip", StringComparison.OrdinalIgnoreCase)
                     ? ServiceSellPriceQualityTiers.Premium
                     : ServiceSellPriceQualityTiers.Standard;
+                var serviceId = await ResolvePointServiceIdAsync(input.ProjectId, ct);
                 var rate = await _pointPricing.ResolveRateAsync(
-                    null, PointPricingResourceTypes.Image, quality, ct);
+                    serviceId, PointPricingResourceTypes.Image, quality, ct);
                 var referenceId = input.BillingReferenceId ?? job.Id;
                 var charge = await _wallets.ChargeAsync(
                     input.CustomerId, input.UserId, rate.Rate, 1,
@@ -175,6 +182,27 @@ public sealed class SceneImageRenderWorkItemHandler : IRenderJobHandler
                 "Temporary 79AI poll failure; the same task ID will be retried.", CancellationToken.None);
             throw new RenderJobDeferredException("Temporary 79AI poll failure; retry scheduled.");
         }
+    }
+
+    private async Task<Guid?> ResolvePointServiceIdAsync(long projectId, CancellationToken ct)
+    {
+        var project = await _repo.GetProjectAsync(projectId, ct);
+        if (project?.CoreJobId is not Guid coreJobId)
+        {
+            return null;
+        }
+
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        return await conn.ExecuteScalarAsync<Guid?>(
+            """
+            SELECT service_id
+              FROM render.render_jobs
+             WHERE id=@jobId
+               AND tenant_id=@tenant
+             LIMIT 1;
+            """,
+            new { jobId = coreJobId, tenant = _tenant.TenantId });
     }
 
     private async Task EnqueueFallbackAsync(

@@ -18,14 +18,17 @@ public sealed class WalletService
     private readonly TenantContext _tenant;
     private readonly TokenSettingsService _tokenSettings;
     private readonly ILogger<WalletService> _logger;
+    private readonly IPointBalanceChangeNotifier _balanceChanges;
 
     public WalletService(TodoXConnectionFactory factory, TenantContext tenant,
-        TokenSettingsService tokenSettings, ILogger<WalletService> logger)
+        TokenSettingsService tokenSettings, ILogger<WalletService> logger,
+        IPointBalanceChangeNotifier balanceChanges)
     {
         _factory = factory;
         _tenant = tenant;
         _tokenSettings = tokenSettings;
         _logger = logger;
+        _balanceChanges = balanceChanges;
     }
 
     public async Task<decimal> GetBalanceAsync(Guid customerId)
@@ -315,6 +318,7 @@ public sealed class WalletService
 
         tx.Commit();
         _logger.LogInformation("Charged {Amount} points to customer {Cid} for {Op}; balance {After}", amount, customerId, operation, after);
+        _balanceChanges.NotifyChanged();
         return new ChargeResult(true, amount, after, null);
     }
 
@@ -341,6 +345,10 @@ public sealed class WalletService
         using var tx = conn.BeginTransaction();
         var result = await MutateAsync(conn, tx, customerId, signedAmount, transactionType, description, note, actorUserId, referenceId);
         tx.Commit();
+        if (result.Ok)
+        {
+            _balanceChanges.NotifyChanged();
+        }
         return result;
     }
 

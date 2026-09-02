@@ -4,6 +4,7 @@
 @inject AccountService Accounts
 @inject NavigationMenuRepository NavigationMenus
 @inject WalletService Wallets
+@inject IPointBalanceChangeNotifier PointBalanceChanges
 @inject NavigationManager Navigation
 @inject ISnackbar Snackbar
 
@@ -188,6 +189,7 @@
     protected override void OnInitialized()
     {
         AuthState.OnChange += HandleAuthChange;
+        PointBalanceChanges.Changed += HandlePointBalanceChanged;
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -226,7 +228,17 @@
         StateHasChanged();
     });
 
-    public void Dispose() => AuthState.OnChange -= HandleAuthChange;
+    public void Dispose()
+    {
+        AuthState.OnChange -= HandleAuthChange;
+        PointBalanceChanges.Changed -= HandlePointBalanceChanged;
+    }
+
+    private void HandlePointBalanceChanged() => InvokeAsync(async () =>
+    {
+        await LoadBalanceAsync();
+        StateHasChanged();
+    });
 
     private string RoleLabel => AuthState.CurrentUser?.Role switch
     {

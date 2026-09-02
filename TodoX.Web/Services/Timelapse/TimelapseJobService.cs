@@ -42,9 +42,9 @@ public interface ITimelapseJobService
         bool removeStartImage = false,
         CancellationToken ct = default);
     Task<TimelapseJobView> StartOrResumeAsync(Guid jobId, CurrentUserSession currentUser, CancellationToken ct = default);
-    Task<TimelapseJobView> RetryImageAsync(Guid jobId, int progressPercent, CurrentUserSession currentUser, CancellationToken ct = default);
-    Task<TimelapseJobView> UpdateImagePromptAsync(Guid jobId, Guid imageStageId, string prompt, bool rerender, CurrentUserSession currentUser, CancellationToken ct = default);
-    Task<TimelapseJobView> RetryVideoAsync(Guid jobId, int clipIndex, CurrentUserSession currentUser, CancellationToken ct = default);
+    Task<TimelapseJobView> RetryImageAsync(Guid jobId, int progressPercent, CurrentUserSession currentUser, Guid? rerenderOperationId = null, CancellationToken ct = default);
+    Task<TimelapseJobView> UpdateImagePromptAsync(Guid jobId, Guid imageStageId, string prompt, bool rerender, CurrentUserSession currentUser, Guid? rerenderOperationId = null, CancellationToken ct = default);
+    Task<TimelapseJobView> RetryVideoAsync(Guid jobId, int clipIndex, CurrentUserSession currentUser, Guid? rerenderOperationId = null, CancellationToken ct = default);
     Task<TimelapseJobView> CancelJobAsync(Guid jobId, CurrentUserSession currentUser, CancellationToken ct = default);
     Task<TimelapseJobView> CancelImageAsync(Guid jobId, int progressPercent, CurrentUserSession currentUser, CancellationToken ct = default);
     Task<TimelapseJobView> CancelVideoAsync(Guid jobId, int clipIndex, CurrentUserSession currentUser, CancellationToken ct = default);
@@ -548,7 +548,7 @@ public sealed class TimelapseJobService : ITimelapseJobService
         return view;
     }
 
-    public async Task<TimelapseJobView> RetryImageAsync(Guid jobId, int progressPercent, CurrentUserSession currentUser, CancellationToken ct = default)
+    public async Task<TimelapseJobView> RetryImageAsync(Guid jobId, int progressPercent, CurrentUserSession currentUser, Guid? rerenderOperationId = null, CancellationToken ct = default)
     {
         var view = await RequireOwnedAsync(jobId, currentUser, ct);
         var rate = await _pointPricing.ResolveRateAsync(view.Snapshot.ServiceId,
@@ -557,7 +557,7 @@ public sealed class TimelapseJobService : ITimelapseJobService
         var charge = await _wallets.ChargeAsync(
             currentUser.CustomerId, currentUser.UserId, rate.Rate, 1,
             "timelapse_user_rerender_image", "todox", "point_pricing", "timelapse",
-            "point", PointBillingReference.ForRerender(jobId, "image", progressPercent.ToString()),
+            "point", PointBillingReference.ForRerender(jobId, "image", progressPercent.ToString(), rerenderOperationId ?? Guid.NewGuid()),
             "timelapse_user_rerender");
         if (!charge.Ok) throw new InvalidOperationException(charge.Error ?? "Insufficient points.");
         view.Workflow = await _workflow.RetryImageAsync(jobId, progressPercent, view.Snapshot, currentUser, ct);
@@ -572,6 +572,7 @@ public sealed class TimelapseJobService : ITimelapseJobService
         string prompt,
         bool rerender,
         CurrentUserSession currentUser,
+        Guid? rerenderOperationId = null,
         CancellationToken ct = default)
     {
         var view = await RequireOwnedAsync(jobId, currentUser, ct);
@@ -583,7 +584,7 @@ public sealed class TimelapseJobService : ITimelapseJobService
             var charge = await _wallets.ChargeAsync(
                 currentUser.CustomerId, currentUser.UserId, rate.Rate, 1,
                 "timelapse_user_rerender_image", "todox", "point_pricing", "timelapse",
-                "point", PointBillingReference.ForRerender(jobId, "image", imageStageId.ToString("N")),
+                "point", PointBillingReference.ForRerender(jobId, "image", imageStageId.ToString("N"), rerenderOperationId ?? Guid.NewGuid()),
                 "timelapse_user_rerender");
             if (!charge.Ok) throw new InvalidOperationException(charge.Error ?? "Insufficient points.");
         }
@@ -600,7 +601,7 @@ public sealed class TimelapseJobService : ITimelapseJobService
         return view;
     }
 
-    public async Task<TimelapseJobView> RetryVideoAsync(Guid jobId, int clipIndex, CurrentUserSession currentUser, CancellationToken ct = default)
+    public async Task<TimelapseJobView> RetryVideoAsync(Guid jobId, int clipIndex, CurrentUserSession currentUser, Guid? rerenderOperationId = null, CancellationToken ct = default)
     {
         var view = await RequireOwnedAsync(jobId, currentUser, ct);
         var duration = view.Snapshot.SellPrice?.ClipDurationsSeconds.ElementAtOrDefault(clipIndex - 1);
@@ -611,7 +612,7 @@ public sealed class TimelapseJobService : ITimelapseJobService
         var charge = await _wallets.ChargeAsync(
             currentUser.CustomerId, currentUser.UserId, duration.Value * rate.Rate, 1,
             "timelapse_user_rerender_video", "todox", "point_pricing", "timelapse",
-            "point", PointBillingReference.ForRerender(jobId, "video", clipIndex.ToString()),
+            "point", PointBillingReference.ForRerender(jobId, "video", clipIndex.ToString(), rerenderOperationId ?? Guid.NewGuid()),
             "timelapse_user_rerender");
         if (!charge.Ok) throw new InvalidOperationException(charge.Error ?? "Insufficient points.");
         view.Workflow = await _workflow.RetryVideoAsync(jobId, clipIndex, view.Snapshot, currentUser, ct);

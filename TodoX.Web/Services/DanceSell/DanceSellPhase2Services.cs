@@ -1755,7 +1755,9 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
         var alreadyChargedImage = referenceOperation?.BillingStatus == DanceSellBillingStatuses.Charged
             ? referenceOperation.TodoxPointsCharged ?? 0m
             : 0m;
-        var remainingPoints = Math.Max(0m, pointEstimate.TotalPoints - alreadyChargedImage);
+        // The reference image was consumed and billed in a prior operation. Its historical
+        // component is immutable; this render can bill only newly consumed components.
+        var remainingPoints = pointEstimate.Video.Points + pointEstimate.Voice.Points;
         var charge = await _wallets.ChargeAsync(
             user.CustomerId,
             user.UserId,
@@ -1801,7 +1803,7 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
             {
                 image = new
                 {
-                    planned_points = pointEstimate.Image.Points,
+                    planned_points = alreadyChargedImage,
                     charged_points = alreadyChargedImage,
                     charge_reference = referenceOperation?.Id
                 },
@@ -1817,7 +1819,7 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
                     charged_points = 0m,
                     charge_reference = (Guid?)null
                 },
-                total_planned_points = pointEstimate.TotalPoints,
+                total_planned_points = alreadyChargedImage + pointEstimate.Video.Points + pointEstimate.Voice.Points,
                 total_charged_points = alreadyChargedImage + remainingPoints,
                 remaining_points_to_charge = 0m
             }),

@@ -25,9 +25,13 @@ public enum PointBillingIntent
 public static class PointBillingReference
 {
     public static Guid ForRerender(Guid jobId, string assetType, string assetId)
+        => ForRerender(jobId, assetType, assetId, null);
+
+    public static Guid ForRerender(Guid jobId, string assetType, string assetId, Guid? rerenderOperationId)
     {
         var bytes = System.Security.Cryptography.SHA256.HashData(
-            System.Text.Encoding.UTF8.GetBytes($"{jobId:N}|{assetType}|{assetId}|{PointBillingIntent.UserRerender}"));
+            System.Text.Encoding.UTF8.GetBytes(
+                $"{jobId:N}|{assetType}|{assetId}|{rerenderOperationId?.ToString("N") ?? "legacy"}|{PointBillingIntent.UserRerender}"));
         return new Guid(bytes[..16]);
     }
 }

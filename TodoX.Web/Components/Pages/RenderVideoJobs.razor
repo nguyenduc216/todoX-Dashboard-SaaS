@@ -3059,7 +3059,8 @@ else
         input.CustomerId = AuthState.CurrentUser.CustomerId;
         input.TrustedPayerContext = TodoX.Web.Services.AiProviders.AiBillingPayerResolver.CreateTrustedBackgroundContext(AuthState.CurrentUser);
         input.OnlyMissingOrFailed = onlyMissingOrFailed;
-        input.ParentJobBilled = true;
+        // Initial child billing is enabled only after the parent render charge succeeds.
+        input.ParentJobBilled = false;
 
         var (job, alreadyActive) = await RenderJobs.EnqueueForProjectIfNoneActiveAsync(new RenderJobCreateModel
         {
