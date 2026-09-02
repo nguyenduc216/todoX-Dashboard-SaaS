@@ -513,6 +513,7 @@ public interface IDanceSellOperationRepository
     Task<DanceSellProviderOperationDto?> GetLatestActiveOperationAsync(Guid danceSellJobId, string operationType, CancellationToken ct = default);
     Task<bool> HasActiveOperationAsync(Guid danceSellJobId, string operationType, CancellationToken ct = default);
     Task MarkSubmittedAsync(Guid operationId, string providerTaskId, string responseJson, CancellationToken ct = default);
+    Task MarkBillingAsync(Guid operationId, decimal estimatedPoints, decimal chargedPoints, decimal balanceBefore, decimal balanceAfter, string billingStatus, string pricingSnapshotJson, CancellationToken ct = default);
     Task<int> BeginMotionSubmitAttemptAsync(Guid operationId, string requestJson, CancellationToken ct = default);
     Task ResetMotionForRetryAsync(Guid operationId, Guid renderJobId, CancellationToken ct = default);
     Task MarkCompletedAsync(Guid operationId, string providerStatus, string responseJson, decimal? creditsConsumed, string? resultUrl, CancellationToken ct = default);
@@ -771,6 +772,41 @@ public sealed class DanceSellOperationRepository : IDanceSellOperationRepository
              WHERE id=@operationId AND status NOT IN ('completed','failed','timeout','cancelled');
             """,
             new { operationId, providerStatus, responseJson = KieJsonRedactor.Redact(responseJson) ?? "{}", errorCode, errorMessage },
+            ct);
+    }
+
+    public async Task MarkBillingAsync(
+        Guid operationId,
+        decimal estimatedPoints,
+        decimal chargedPoints,
+        decimal balanceBefore,
+        decimal balanceAfter,
+        string billingStatus,
+        string pricingSnapshotJson,
+        CancellationToken ct = default)
+    {
+        await ExecuteOptionalAsync(
+            """
+            UPDATE dance_sell.dance_sell_provider_operations
+               SET todox_points_estimated=@estimatedPoints,
+                   todox_points_charged=@chargedPoints,
+                   balance_before=@balanceBefore,
+                   balance_after=@balanceAfter,
+                   billing_status=@billingStatus,
+                   pricing_snapshot_json=CAST(@pricingSnapshotJson AS jsonb),
+                   updated_at=now()
+             WHERE id=@operationId;
+            """,
+            new
+            {
+                operationId,
+                estimatedPoints,
+                chargedPoints,
+                balanceBefore,
+                balanceAfter,
+                billingStatus,
+                pricingSnapshotJson = KieJsonRedactor.Redact(pricingSnapshotJson) ?? "{}"
+            },
             ct);
     }
 

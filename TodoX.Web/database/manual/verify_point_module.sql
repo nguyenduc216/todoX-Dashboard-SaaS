@@ -1,5 +1,69 @@
 -- BEFORE / AFTER verification for point module
 
+WITH required(module, action) AS (
+    VALUES
+        ('point_config','view'), ('point_config','manage'), ('wallet','view_all'),
+        ('wallet','topup'), ('wallet','adjust'), ('wallet','refund'),
+        ('voucher','view'), ('voucher','manage'), ('service_point_override','manage')
+)
+SELECT r.module || '.' || r.action AS permission,
+       (p.id IS NOT NULL) AS exists_in_auth_permissions,
+       COALESCE(string_agg(DISTINCT ar.code, ', ' ORDER BY ar.code), '') AS assigned_roles,
+       CASE WHEN r.module IN ('point_config','wallet','voucher','service_point_override')
+                 AND r.action IN ('view','view_all','manage','topup','adjust','refund')
+            THEN 'root bypass is code-level; explicit role assignment is still listed'
+            ELSE '' END AS inherited_or_wildcard
+  FROM required r
+  LEFT JOIN auth.permissions p
+    ON p.module = r.module AND p.action = r.action AND p.is_active
+  LEFT JOIN auth.role_permissions rp ON rp.permission_id = p.id
+  LEFT JOIN auth.roles ar ON ar.id = rp.role_id
+ GROUP BY r.module, r.action, p.id
+ ORDER BY permission;
+
+SELECT r.code AS role_code,
+       p.module || '.' || p.action AS permission
+  FROM auth.roles r
+ CROSS JOIN auth.permissions p
+ WHERE lower(r.code) IN ('support', 'admin', 'administrator_root', 'root', 'administrator')
+   AND p.module || '.' || p.action IN (
+       'point_config.view', 'point_config.manage', 'wallet.view_all', 'wallet.topup',
+       'wallet.adjust', 'wallet.refund', 'voucher.view', 'voucher.manage',
+       'service_point_override.manage')
+ ORDER BY r.code, permission;
+
+SELECT r.code AS customer_role_code,
+       p.module || '.' || p.action AS accidental_permission
+  FROM auth.roles r
+  JOIN auth.role_permissions rp ON rp.role_id = r.id
+  JOIN auth.permissions p ON p.id = rp.permission_id
+ WHERE lower(r.code) IN ('customer', 'customer_owner', 'customer_user')
+   AND p.module || '.' || p.action IN (
+       'point_config.view', 'point_config.manage', 'wallet.view_all', 'wallet.topup',
+       'wallet.adjust', 'wallet.refund', 'voucher.view', 'voucher.manage',
+       'service_point_override.manage')
+ ORDER BY r.code, accidental_permission;
+
+WITH required(code) AS (
+    VALUES
+        ('point_config.view'), ('point_config.manage'), ('wallet.view_all'),
+        ('wallet.topup'), ('wallet.adjust'), ('wallet.refund'),
+        ('voucher.view'), ('voucher.manage'), ('service_point_override.manage')
+)
+SELECT r.code AS role_code, required.code AS missing_permission
+  FROM auth.roles r
+ CROSS JOIN required
+ WHERE lower(r.code) IN ('support', 'admin', 'administrator_root', 'root', 'administrator')
+   AND NOT EXISTS (
+       SELECT 1
+         FROM auth.role_permissions rp
+         JOIN auth.permissions p ON p.id = rp.permission_id
+        WHERE rp.role_id = r.id
+          AND p.is_active
+          AND p.module || '.' || p.action = required.code
+   )
+ ORDER BY r.code, missing_permission;
+
 SELECT tenant_id, resource_type, quality_tier, rate, unit, is_active
   FROM billing.point_rate_config
  ORDER BY tenant_id, resource_type, quality_tier;
@@ -108,6 +172,23 @@ SELECT reference_type, reference_id, COUNT(*) AS rerender_charge_count
    AND reference_type ILIKE '%rerender%'
  GROUP BY reference_type, reference_id
  HAVING COUNT(*) > 1;
+
+SELECT reference_type, reference_id, COUNT(*) AS rdance_reference_charge_count,
+       SUM(amount) AS charged_points
+  FROM billing.token_transactions
+ WHERE transaction_type IN ('debit','charge')
+   AND reference_type = 'dance_sell_reference_image'
+ GROUP BY reference_type, reference_id
+ HAVING COUNT(*) > 1;
+
+SELECT t.reference_type, t.reference_id, t.amount AS remaining_charge,
+       j.input_json #>> '{usagePlan,totalPoints}' AS logical_total,
+       j.input_json #>> '{usagePlan,imageCount}' AS logical_image_count
+  FROM billing.token_transactions t
+  JOIN render.render_jobs j ON j.id = t.reference_id
+ WHERE t.reference_type = 'dance_sell_job'
+ ORDER BY t.created_at DESC
+ LIMIT 50;
 
 SELECT reference_type, reference_id, COUNT(*) AS system_retry_charge_count
   FROM billing.token_transactions

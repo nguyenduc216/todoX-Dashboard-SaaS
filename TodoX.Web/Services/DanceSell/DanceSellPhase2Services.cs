@@ -1,5 +1,7 @@
-using System.Text.Json;
 using System.Collections.Concurrent;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using Microsoft.Extensions.Options;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Formats.Png;
@@ -188,6 +190,7 @@ public interface IDanceSellReferenceComparisonService
 public sealed class DanceSellReferenceImageService : IDanceSellReferenceImageService
 {
     private static readonly ConcurrentDictionary<Guid, SemaphoreSlim> ReferenceLocks = new();
+    private static readonly ConcurrentDictionary<Guid, SemaphoreSlim> GenerateLocks = new();
     private static readonly TimeSpan StaleReferenceGenerationThreshold = TimeSpan.FromMinutes(10);
 
     private readonly IDanceSellRepository _repo;
@@ -197,6 +200,9 @@ public sealed class DanceSellReferenceImageService : IDanceSellReferenceImageSer
     private readonly IDanceSellReferenceProviderFactory _referenceProviders;
     private readonly IDanceSellOperationRepository _operations;
     private readonly IDanceSellCostEstimator _costs;
+    private readonly IPointPricingService _pointPricing;
+    private readonly ICoreServiceCatalogService _coreCatalog;
+    private readonly WalletService _wallets;
     private readonly TenantContext _tenant;
     private readonly ILogger<DanceSellReferenceImageService> _logger;
 
@@ -208,6 +214,9 @@ public sealed class DanceSellReferenceImageService : IDanceSellReferenceImageSer
         IDanceSellReferenceProviderFactory referenceProviders,
         IDanceSellOperationRepository operations,
         IDanceSellCostEstimator costs,
+        IPointPricingService pointPricing,
+        ICoreServiceCatalogService coreCatalog,
+        WalletService wallets,
         TenantContext tenant,
         ILogger<DanceSellReferenceImageService> logger)
     {
@@ -218,20 +227,27 @@ public sealed class DanceSellReferenceImageService : IDanceSellReferenceImageSer
         _referenceProviders = referenceProviders;
         _operations = operations;
         _costs = costs;
+        _pointPricing = pointPricing;
+        _coreCatalog = coreCatalog;
+        _wallets = wallets;
         _tenant = tenant;
         _logger = logger;
     }
 
     public async Task<DanceSellReferenceVersionDto> GenerateAsync(Guid jobId, CurrentUserSession user, CancellationToken ct = default)
     {
-        var job = await RequireOwnedJobAsync(jobId, user, ct);
-        if (job.ReferenceMode == DanceSellReferenceModes.DirectReference)
+        var gate = GenerateLocks.GetOrAdd(jobId, _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(ct);
+        try
         {
-            throw new InvalidOperationException("DANCE_SELL_REFERENCE_GENERATION_NOT_REQUIRED");
-        }
+            var job = await RequireOwnedJobAsync(jobId, user, ct);
+            if (job.ReferenceMode == DanceSellReferenceModes.DirectReference)
+            {
+                throw new InvalidOperationException("DANCE_SELL_REFERENCE_GENERATION_NOT_REQUIRED");
+            }
 
-        if (job.CharacterMediaId is null || string.IsNullOrWhiteSpace(job.CharacterImageUrl)) throw new InvalidOperationException("DANCE_SELL_INVALID_CHARACTER");
-        // Product input is optional; Person Only uses the character image as its reference.
+            if (job.CharacterMediaId is null || string.IsNullOrWhiteSpace(job.CharacterImageUrl)) throw new InvalidOperationException("DANCE_SELL_INVALID_CHARACTER");
+            // Product input is optional; Person Only uses the character image as its reference.
 
         await _repo.UpdateReferenceStatusAsync(job.Id, DanceSellReferenceStatuses.Generating, ct: ct);
         var stage = "resolve_route";
@@ -279,10 +295,60 @@ public sealed class DanceSellReferenceImageService : IDanceSellReferenceImageSer
 
             stage = "estimate_cost";
             estimate = await _costs.EstimateAsync(route, job.Mode, null, ct);
+            var quality = job.Mode.Equals("premium", StringComparison.OrdinalIgnoreCase)
+                ? ServiceSellPriceQualityTiers.Premium
+                : ServiceSellPriceQualityTiers.Standard;
+            var catalogService = await _coreCatalog.GetByCodeAsync(FixedTodoXServiceCatalog.RDance, ct);
+            var pointEstimate = await _pointPricing.EstimateAsync(new PointPricingEstimateRequest(
+                catalogService?.Id,
+                1,
+                quality,
+                0,
+                quality,
+                0,
+                ServiceSellPriceQualityTiers.Standard,
+                false), ct);
             stage = "next_attempt";
             var attemptNo = await _operations.GetNextAttemptNoAsync(job.Id, DanceSellOperationTypes.ReferenceImage, ct);
             stage = "create_operation";
-            operation = await CreateOperationAsync(job, route, estimate, attemptNo, requestJson, ct);
+            operation = await CreateOperationAsync(job, route, estimate, attemptNo, requestJson, ct)
+                ?? throw new InvalidOperationException("DANCE_SELL_REFERENCE_OPERATION_REQUIRED");
+            var chargeReference = BuildReferenceChargeReference(job.Id, versionNo);
+            var charge = await _wallets.ChargeAsync(
+                user.CustomerId,
+                user.UserId,
+                pointEstimate.Image.Points,
+                1,
+                "dance_sell_reference_image",
+                route.ProviderCode,
+                route.ModelName,
+                "dance_sell",
+                "image",
+                chargeReference,
+                "dance_sell_reference_image");
+            if (!charge.Ok)
+            {
+                await _operations.MarkBillingAsync(
+                    operation.Id,
+                    pointEstimate.TotalPoints,
+                    0,
+                    charge.BalanceAfter,
+                    charge.BalanceAfter,
+                    DanceSellBillingStatuses.ChargeFailed,
+                    BuildReferencePricingSnapshot(pointEstimate, chargeReference, 0),
+                    ct);
+                throw new InvalidOperationException($"INSUFFICIENT_POINTS: {charge.Error ?? "Không đủ điểm để tạo hình tham chiếu AI."}");
+            }
+
+            await _operations.MarkBillingAsync(
+                operation.Id,
+                pointEstimate.TotalPoints,
+                charge.Charged,
+                charge.BalanceAfter + charge.Charged,
+                charge.BalanceAfter,
+                DanceSellBillingStatuses.Charged,
+                BuildReferencePricingSnapshot(pointEstimate, chargeReference, charge.Charged),
+                ct);
 
             stage = "provider_submit";
             var provider = _referenceProviders.Resolve(route);
@@ -343,6 +409,15 @@ public sealed class DanceSellReferenceImageService : IDanceSellReferenceImageSer
 
             throw;
         }
+        }
+        finally
+        {
+            gate.Release();
+            if (gate.CurrentCount == 1)
+            {
+                GenerateLocks.TryRemove(new KeyValuePair<Guid, SemaphoreSlim>(jobId, gate));
+            }
+        }
     }
 
     private async Task<DanceSellProviderOperationDto?> TryCreateOperationMetadataAsync(DanceSellJobDto job, DanceSellProviderRouteDto route, string requestJson, string stagePrefix, CancellationToken ct)
@@ -396,6 +471,31 @@ public sealed class DanceSellReferenceImageService : IDanceSellReferenceImageSer
             CreatedAt = DateTime.UtcNow,
             StartedAt = DateTime.UtcNow
         }, ct);
+
+    private static Guid BuildReferenceChargeReference(Guid jobId, int versionNo)
+    {
+        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes($"{jobId:N}:reference_image:initial_render:v{versionNo}"));
+        return new Guid(bytes.AsSpan(0, 16));
+    }
+
+    private static string BuildReferencePricingSnapshot(
+        PointPricingEstimate estimate,
+        Guid chargeReference,
+        decimal chargedPoints)
+        => DanceSellRepository.ToJson(new
+        {
+            image = new
+            {
+                planned_points = estimate.Image.Points,
+                charged_points = chargedPoints,
+                charge_reference = chargeReference
+            },
+            video = new { planned_points = estimate.Video.Points, charged_points = 0m, charge_reference = (Guid?)null },
+            voice = new { planned_points = estimate.Voice.Points, charged_points = 0m, charge_reference = (Guid?)null },
+            total_planned_points = estimate.TotalPoints,
+            total_charged_points = chargedPoints,
+            remaining_points_to_charge = Math.Max(0m, estimate.TotalPoints - chargedPoints)
+        });
 
     private async Task TryCreateFailedReferenceVersionAsync(
         DanceSellJobDto job,
@@ -1649,10 +1749,17 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
             0,
             ServiceSellPriceQualityTiers.Standard,
             false), ct);
+        var referenceOperation = job.ReferenceMode == DanceSellReferenceModes.DirectReference
+            ? null
+            : await _operations.GetLatestOperationAsync(job.Id, DanceSellOperationTypes.ReferenceImage, ct);
+        var alreadyChargedImage = referenceOperation?.BillingStatus == DanceSellBillingStatuses.Charged
+            ? referenceOperation.TodoxPointsCharged ?? 0m
+            : 0m;
+        var remainingPoints = Math.Max(0m, pointEstimate.TotalPoints - alreadyChargedImage);
         var charge = await _wallets.ChargeAsync(
             user.CustomerId,
             user.UserId,
-            pointEstimate.TotalPoints,
+            remainingPoints,
             1,
             "dance_sell_initial_render",
             motionRoute.ProviderCode,
@@ -1678,7 +1785,7 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
             ProviderAccountId = motionRoute.ProviderAccountId,
             ProviderModel = motionRoute.ModelName,
             Status = DanceSellOperationStatuses.Queued,
-            BillingStatus = estimate.EstimatedTodoxPoints is null ? DanceSellBillingStatuses.Reconciliation : DanceSellBillingStatuses.Estimated,
+            BillingStatus = pointEstimate.TotalPoints > 0 ? DanceSellBillingStatuses.Charged : DanceSellBillingStatuses.NotRequired,
             RefundStatus = DanceSellRefundStatuses.NotCharged,
             RequestJson = DanceSellRepository.ToJson(new { job.Id, job.PreparedReferenceUrl, job.MotionVideoUrl, job.Prompt, businessMode = job.Mode, providerMode, job.CharacterOrientation, job.Ratio }),
             UsageUnit = estimate.UsageUnit,
@@ -1687,8 +1794,33 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
             ProviderCurrency = estimate.Currency,
             ProviderCostVnd = estimate.ProviderCostVnd,
             TodoxPointsEstimated = estimate.EstimatedTodoxPoints,
+            TodoxPointsCharged = remainingPoints,
+            BalanceAfter = charge.BalanceAfter,
             CostSource = estimate.PricingSource,
-            PricingSnapshotJson = DanceSellRepository.ToJson(estimate),
+            PricingSnapshotJson = DanceSellRepository.ToJson(new
+            {
+                image = new
+                {
+                    planned_points = pointEstimate.Image.Points,
+                    charged_points = alreadyChargedImage,
+                    charge_reference = referenceOperation?.Id
+                },
+                video = new
+                {
+                    planned_points = pointEstimate.Video.Points,
+                    charged_points = remainingPoints,
+                    charge_reference = job.Id
+                },
+                voice = new
+                {
+                    planned_points = pointEstimate.Voice.Points,
+                    charged_points = 0m,
+                    charge_reference = (Guid?)null
+                },
+                total_planned_points = pointEstimate.TotalPoints,
+                total_charged_points = alreadyChargedImage + remainingPoints,
+                remaining_points_to_charge = 0m
+            }),
             CreatedAt = DateTime.UtcNow
         }, ct);
         if (operation is not null && job.ReferenceMode == DanceSellReferenceModes.DirectReference)

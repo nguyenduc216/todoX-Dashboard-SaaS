@@ -279,6 +279,7 @@ public sealed class DanceSellRenderHandlerTests
             => Task.FromResult(false);
 
         public Task MarkSubmittedAsync(Guid operationId, string providerTaskId, string responseJson, CancellationToken ct = default) => Task.CompletedTask;
+        public Task MarkBillingAsync(Guid operationId, decimal estimatedPoints, decimal chargedPoints, decimal balanceBefore, decimal balanceAfter, string billingStatus, string pricingSnapshotJson, CancellationToken ct = default) => Task.CompletedTask;
         public Task<int> BeginMotionSubmitAttemptAsync(Guid operationId, string requestJson, CancellationToken ct = default) => Task.FromResult(1);
         public Task ResetMotionForRetryAsync(Guid operationId, Guid renderJobId, CancellationToken ct = default) => Task.CompletedTask;
         public Task MarkCompletedAsync(Guid operationId, string providerStatus, string responseJson, decimal? creditsConsumed, string? resultUrl, CancellationToken ct = default) => Task.CompletedTask;
