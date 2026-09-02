@@ -610,7 +610,7 @@
         {
             var estimate = await PointPricing.EstimateAsync(new PointPricingEstimateRequest(
                 _selectedService.Id,
-                Math.Max(0, _request.SceneCount - 1),
+                Math.Max(0, _request.SceneCount - (_selectedStartFile is not null ? 1 : 0)),
                 TimelapseSellPricing.QualityTierForMode(_request.VideoMode),
                 _request.SceneCount * TimelapseRequestRules.RuntimeClipDurationSeconds,
                 TimelapseSellPricing.QualityTierForMode(_request.VideoMode),

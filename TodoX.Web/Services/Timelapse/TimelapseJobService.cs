@@ -144,7 +144,7 @@ public sealed class TimelapseJobService : ITimelapseJobService
             ? definition
             : null;
 
-        var pointEstimate = await EstimatePointsAsync(service.Id, request.SceneCount, request.VideoMode, ct);
+        var pointEstimate = await EstimatePointsAsync(service.Id, request.SceneCount, request.VideoMode, startImageContent is not null, ct);
 
         var profile = serviceDefinition is null
             ? await _profiles.GetEnabledProfileAsync(request.ProfileCode, ct)
@@ -190,7 +190,7 @@ public sealed class TimelapseJobService : ITimelapseJobService
             Title = NormalizeTitle(request.Title),
             RequireVideoConfirmation = request.RequireVideoConfirmation && !request.AutoFinish,
             AutoFinish = request.AutoFinish,
-            SellPrice = TimelapseSellPriceSnapshot.FromPointEstimate(pointEstimate, request.SceneCount, TimelapseRequestRules.RuntimeClipDurationSeconds),
+            SellPrice = TimelapseSellPriceSnapshot.FromPointEstimate(pointEstimate, request.SceneCount),
             OriginalImage = new TimelapseOriginalImageSnapshot
             {
                 MediaId = media.Id,
@@ -400,7 +400,6 @@ public sealed class TimelapseJobService : ITimelapseJobService
         {
             throw new InvalidOperationException("TIMELAPSE_PROFILE_SERVICE_MISMATCH: Cấu hình Timelapse không phù hợp với loại dịch vụ đã chọn.");
         }
-        var pointEstimate = await EstimatePointsAsync(service.Id, request.SceneCount, request.VideoMode, ct);
 
         var original = current.Snapshot.OriginalImage;
         if (hasReplacementImage)
@@ -437,6 +436,7 @@ public sealed class TimelapseJobService : ITimelapseJobService
         {
             throw new InvalidOperationException("Ảnh ban đầu / 0% phải khác ảnh thành phẩm / 100%.");
         }
+        var pointEstimate = await EstimatePointsAsync(service.Id, request.SceneCount, request.VideoMode, startImage is not null, ct);
 
         var snapshot = new TimelapseJobSnapshot
         {
@@ -454,7 +454,7 @@ public sealed class TimelapseJobService : ITimelapseJobService
             RequireVideoConfirmation = request.RequireVideoConfirmation && !request.AutoFinish,
             AutoFinish = request.AutoFinish,
             VideoRenderConfirmed = request.AutoFinish,
-            SellPrice = TimelapseSellPriceSnapshot.FromPointEstimate(pointEstimate, request.SceneCount, TimelapseRequestRules.RuntimeClipDurationSeconds),
+            SellPrice = TimelapseSellPriceSnapshot.FromPointEstimate(pointEstimate, request.SceneCount),
             OriginalImage = original,
             StartImage = startImage
         };
@@ -666,12 +666,13 @@ public sealed class TimelapseJobService : ITimelapseJobService
     private static string NormalizeTitle(string? title)
         => string.IsNullOrWhiteSpace(title) ? "Video Timelapse" : title.Trim();
 
-    private Task<PointPricingEstimate> EstimatePointsAsync(Guid serviceId, int sceneCount, string videoMode, CancellationToken ct)
+    private Task<PointPricingEstimate> EstimatePointsAsync(Guid serviceId, int sceneCount, string videoMode, bool hasStartImage, CancellationToken ct)
     {
         var quality = TimelapseSellPricing.QualityTierForMode(videoMode);
+        var generatedImageCount = TimelapseStageGraphBuilder.Build(sceneCount, hasStartImage).GeneratedImageOrder.Count;
         return _pointPricing.EstimateAsync(new PointPricingEstimateRequest(
             serviceId,
-            ImageCount: Math.Max(0, sceneCount - 1),
+            ImageCount: generatedImageCount,
             ImageQuality: quality,
             VideoSeconds: sceneCount * TimelapseRequestRules.RuntimeClipDurationSeconds,
             VideoQuality: quality,

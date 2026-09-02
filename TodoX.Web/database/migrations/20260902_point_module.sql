@@ -37,6 +37,16 @@ BEGIN
         ALTER TABLE billing.point_rate_config
             ADD CONSTRAINT chk_point_rate_config_rate_nonnegative CHECK (rate >= 0);
     END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'chk_point_rate_config_resource_unit'
+    ) THEN
+        ALTER TABLE billing.point_rate_config
+            ADD CONSTRAINT chk_point_rate_config_resource_unit CHECK (
+                (lower(resource_type) = 'video' AND lower(unit) = 'per_second') OR
+                (lower(resource_type) = 'image' AND lower(unit) = 'per_render') OR
+                (lower(resource_type) = 'voice' AND lower(unit) = 'per_render')
+            );
+    END IF;
 END $$;
 
 CREATE UNIQUE INDEX IF NOT EXISTS ux_point_rate_config_tenant_resource_quality
@@ -76,6 +86,16 @@ BEGIN
     ) THEN
         ALTER TABLE billing.service_point_rate_override
             ADD CONSTRAINT chk_service_point_rate_override_rate_nonnegative CHECK (rate >= 0);
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'chk_service_point_rate_override_resource_unit'
+    ) THEN
+        ALTER TABLE billing.service_point_rate_override
+            ADD CONSTRAINT chk_service_point_rate_override_resource_unit CHECK (
+                (lower(resource_type) = 'video' AND lower(unit) = 'per_second') OR
+                (lower(resource_type) = 'image' AND lower(unit) = 'per_render') OR
+                (lower(resource_type) = 'voice' AND lower(unit) = 'per_render')
+            );
     END IF;
 END $$;
 
@@ -143,12 +163,12 @@ INSERT INTO billing.point_rate_config (
 )
 SELECT gen_random_uuid(), tenant_id, resource_type, quality_tier, rate, unit, true, description, now()
 FROM (
-    SELECT DISTINCT tenant_id, 'image' AS resource_type, 'standard' AS quality_tier, 3000::numeric AS rate, 'per_render' AS unit, 'Image standard' AS description FROM crm.customers
-    UNION ALL SELECT DISTINCT tenant_id, 'image', 'premium', 5000, 'per_render', 'Image premium' FROM crm.customers
-    UNION ALL SELECT DISTINCT tenant_id, 'video', 'standard', 1500, 'per_second', 'Video standard' FROM crm.customers
-    UNION ALL SELECT DISTINCT tenant_id, 'video', 'premium', 2500, 'per_second', 'Video premium' FROM crm.customers
-    UNION ALL SELECT DISTINCT tenant_id, 'voice', 'standard', 500, 'per_render', 'Voice standard' FROM crm.customers
-    UNION ALL SELECT DISTINCT tenant_id, 'voice', 'premium', 800, 'per_render', 'Voice premium' FROM crm.customers
+    SELECT id AS tenant_id, 'image' AS resource_type, 'standard' AS quality_tier, 3000::numeric AS rate, 'per_render' AS unit, 'Image standard' AS description FROM system.tenants
+    UNION ALL SELECT id, 'image', 'premium', 5000, 'per_render', 'Image premium' FROM system.tenants
+    UNION ALL SELECT id, 'video', 'standard', 1500, 'per_second', 'Video standard' FROM system.tenants
+    UNION ALL SELECT id, 'video', 'premium', 2500, 'per_second', 'Video premium' FROM system.tenants
+    UNION ALL SELECT id, 'voice', 'standard', 500, 'per_render', 'Voice standard' FROM system.tenants
+    UNION ALL SELECT id, 'voice', 'premium', 800, 'per_render', 'Voice premium' FROM system.tenants
 ) seed
 WHERE NOT EXISTS (
     SELECT 1

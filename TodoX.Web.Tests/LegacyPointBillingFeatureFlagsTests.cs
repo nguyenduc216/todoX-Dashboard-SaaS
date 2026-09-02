@@ -14,8 +14,8 @@ public sealed class LegacyPointBillingFeatureFlagsTests
 
         Assert.False(LegacyPointBillingFeatureFlags.IsEnabled(configuration));
         Assert.True(LegacyPointBillingFeatureFlags.IsDisabled(configuration));
-        Assert.Equal(0, LegacyPointBillingFeatureFlags.NormalizePointCostEstimate(configuration, 123m));
-        Assert.Equal(RenderPointStatuses.NotRequired, LegacyPointBillingFeatureFlags.NormalizePointStatus(configuration, RenderPointStatuses.Pending, 123m));
+        Assert.Equal(123m, LegacyPointBillingFeatureFlags.NormalizePointCostEstimate(configuration, 123m));
+        Assert.Equal(RenderPointStatuses.Pending, LegacyPointBillingFeatureFlags.NormalizePointStatus(configuration, RenderPointStatuses.Pending, 123m));
     }
 
     [Fact]

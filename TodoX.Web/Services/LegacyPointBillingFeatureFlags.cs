@@ -14,10 +14,10 @@ public static class LegacyPointBillingFeatureFlags
         => !IsEnabled(configuration);
 
     public static decimal NormalizePointCostEstimate(IConfiguration configuration, decimal pointCostEstimate)
-        => IsDisabled(configuration) ? 0m : pointCostEstimate;
+        => pointCostEstimate;
 
     public static string NormalizePointStatus(IConfiguration configuration, string? pointStatus, decimal pointCostEstimate)
-        => IsDisabled(configuration) || pointCostEstimate <= 0
+        => pointCostEstimate <= 0
             ? RenderPointStatuses.NotRequired
             : (string.IsNullOrWhiteSpace(pointStatus) ? RenderPointStatuses.Pending : pointStatus);
 

@@ -565,7 +565,7 @@ public static class RVideoRules
 
     public static void ValidateScene(RVideoSceneEditorItem scene)
     {
-        if (!SupportedDurations.Contains(scene.DurationSeconds)) throw new InvalidOperationException("RVVIDEO_DURATION_UNSUPPORTED");
+        if (scene.DurationSeconds <= 0) throw new InvalidOperationException("VIDEO_SCENE_DURATION_REQUIRED");
         if (string.IsNullOrWhiteSpace(scene.ImagePrompt)) throw new InvalidOperationException("RVVIDEO_IMAGE_PROMPT_REQUIRED");
     }
 

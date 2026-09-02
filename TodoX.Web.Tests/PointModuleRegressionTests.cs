@@ -30,7 +30,7 @@ public sealed class PointModuleRegressionTests
         var voiceRate = new PointPricingRate(PointPricingResourceTypes.Voice, ServiceSellPriceQualityTiers.Standard, 500, "per_render", "global");
         var estimate = PointPricingCalculator.Estimate(5, imageRate, 36, videoRate, 0, voiceRate);
 
-        var snapshot = TimelapseSellPriceSnapshot.FromPointEstimate(estimate, 6, TimelapseRequestRules.RuntimeClipDurationSeconds);
+        var snapshot = TimelapseSellPriceSnapshot.FromPointEstimate(estimate, 6);
 
         Assert.Equal(15000, snapshot.ImageSubtotal);
         Assert.Equal(54000, snapshot.VideoSubtotal);
@@ -46,6 +46,27 @@ public sealed class PointModuleRegressionTests
         Assert.Contains("IPointPricingService", source);
         Assert.Contains("PointPricingEstimateRequest", source);
         Assert.Contains("PointPricingEstimate?", source);
+    }
+
+    [Fact]
+    public void PointModuleMigrationSeedsRatesForEveryTenant()
+    {
+        var sql = File.ReadAllText(Path.Combine(RepoRoot, "TodoX.Web", "database", "migrations", "20260902_point_module.sql"));
+
+        Assert.Contains("FROM system.tenants", sql, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("FROM crm.customers", sql, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void PointModuleMigrationConstrainsResourceUnitPairs()
+    {
+        var sql = File.ReadAllText(Path.Combine(RepoRoot, "TodoX.Web", "database", "migrations", "20260902_point_module.sql"));
+
+        Assert.Contains("chk_point_rate_config_resource_unit", sql, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("chk_service_point_rate_override_resource_unit", sql, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("lower(resource_type) = 'video' AND lower(unit) = 'per_second'", sql, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("lower(resource_type) = 'image' AND lower(unit) = 'per_render'", sql, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("lower(resource_type) = 'voice' AND lower(unit) = 'per_render'", sql, StringComparison.OrdinalIgnoreCase);
     }
 
     private static string RepoRoot

@@ -242,6 +242,43 @@ public sealed class TodoXVideoPromptParserTests
         Assert.Null(result.ErrorMessage);
         Assert.Contains(result.Warnings, warning => warning.Contains("Metadata thiếu", StringComparison.Ordinal));
     }
+
+    [Fact]
+    public void MissingSceneDurationBlocksSchemaValidation()
+    {
+        var result = new TodoXVideoPromptParser().Parse("""
+        {
+          "scenes": [
+            {
+              "scene": 1,
+              "image_prompt": "A real scene",
+              "motion_prompt": "slow pan"
+            }
+          ]
+        }
+        """);
+
+        Assert.True(result.IsJsonValid);
+        Assert.False(result.IsTodoXSchemaValid);
+        Assert.Contains(result.Warnings, warning => warning.Contains("thiếu duration_seconds hợp lệ", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void ParsesSceneDurationsIntoTotalSeconds()
+    {
+        var result = new TodoXVideoPromptParser().Parse("""
+        {
+          "scenes": [
+            { "scene": 1, "duration_seconds": 5, "image_prompt": "a", "motion_prompt": "a" },
+            { "scene": 2, "duration_seconds": 7, "image_prompt": "b", "motion_prompt": "b" },
+            { "scene": 3, "duration_seconds": 4, "image_prompt": "c", "motion_prompt": "c" },
+            { "scene": 4, "duration_seconds": 9, "image_prompt": "d", "motion_prompt": "d" }
+          ]
+        }
+        """);
+
+        Assert.Equal(25, result.Summary.SceneDurationTotal);
+    }
     [Fact]
     public void PreservesBomAndUnknownSceneFields()
     {

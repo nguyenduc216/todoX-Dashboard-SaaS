@@ -329,12 +329,13 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
             input.Resolution,
             scene.DurationSeconds);
         var pointServiceId = await ResolvePointServiceIdAsync(project.CoreJobId, ct);
+        var qualityTier = ResolveQualityTier(route);
         var pointEstimate = await _pointPricing.EstimateAsync(new PointPricingEstimateRequest(
             pointServiceId,
             0,
-            scene.DurationSeconds >= 8 ? ServiceSellPriceQualityTiers.Premium : ServiceSellPriceQualityTiers.Standard,
+            qualityTier,
             scene.DurationSeconds,
-            scene.DurationSeconds >= 8 ? ServiceSellPriceQualityTiers.Premium : ServiceSellPriceQualityTiers.Standard,
+            qualityTier,
             0,
             ServiceSellPriceQualityTiers.Standard,
             false), ct);
@@ -496,5 +497,41 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
              LIMIT 1;
             """,
             new { jobId, tenant = _tenant.TenantId });
+    }
+
+    private static string ResolveQualityTier(VideoProviderRoute route)
+    {
+        return ResolveConfiguredQualityTier(route.CapabilityConfigJson)
+            ?? ResolveConfiguredQualityTier(route.ProviderConfigJson)
+            ?? ServiceSellPriceQualityTiers.Standard;
+    }
+
+    private static string? ResolveConfiguredQualityTier(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            foreach (var key in new[] { "quality_tier", "qualityTier", "sell_quality_tier", "sellQualityTier", "point_quality_tier", "pointQualityTier" })
+            {
+                if (doc.RootElement.TryGetProperty(key, out var value) && value.ValueKind == JsonValueKind.String)
+                {
+                    var tier = value.GetString()?.Trim().ToLowerInvariant();
+                    if (ServiceSellPriceQualityTiers.IsValid(tier))
+                    {
+                        return tier;
+                    }
+                }
+            }
+        }
+        catch (JsonException)
+        {
+        }
+
+        return null;
     }
 }

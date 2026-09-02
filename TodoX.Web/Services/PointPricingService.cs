@@ -56,7 +56,7 @@ public sealed class PointPricingService : IPointPricingService
             }
         }
 
-        var row = await conn.QuerySingleAsync<PointPricingRateRow>(
+        var row = await conn.QuerySingleOrDefaultAsync<PointPricingRateRow>(
             new CommandDefinition(
                 """
                 SELECT resource_type AS ResourceType,
@@ -74,6 +74,11 @@ public sealed class PointPricingService : IPointPricingService
                 """,
                 new { tenant = _tenant.TenantId, resourceType = normalizedResource, qualityTier = normalizedQuality },
                 cancellationToken: ct));
+
+        if (row is null)
+        {
+            throw new InvalidOperationException($"POINT_RATE_NOT_CONFIGURED: {normalizedResource}/{normalizedQuality}");
+        }
 
         return row.ToRate();
     }

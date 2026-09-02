@@ -29,7 +29,7 @@ public sealed class RVideoSceneJsonService
             var voiceInstruction = GetFirst(item, "voice_instruction", "voiceInstruction") ?? scene.VoiceInstruction;
             var negativePrompt = GetFirst(item, "negative_prompt", "negativePrompt") ?? scene.NegativePrompt;
             var dialogue = GetFirst(item, "voice", "dialogue", "dialogue_text", "tts_text", "narration", "narration_text", "voice_over", "voiceover", "script");
-            var duration = GetInt(item, "duration_seconds", "durationSeconds") ?? scene.DurationSeconds ?? 8;
+            var duration = GetInt(item, "duration_seconds", "durationSeconds") ?? scene.DurationSeconds ?? 0;
             var rate = GetDecimal(item, "tts_rate", "ttsRate") ?? scene.TtsRate;
             RVideoRules.ValidateScene(new RVideoSceneEditorItem(index, purpose, duration, imagePrompt, motionPrompt, dialogue, voiceInstruction, negativePrompt, rate));
             result.Add(new(index++, purpose, duration, imagePrompt, motionPrompt, dialogue, voiceInstruction, negativePrompt, rate));

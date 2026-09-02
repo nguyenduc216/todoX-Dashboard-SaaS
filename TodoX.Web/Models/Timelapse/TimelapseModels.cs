@@ -174,13 +174,13 @@ public sealed class TimelapseSellPriceSnapshot
     public decimal TotalPoints { get; set; }
     public PointPricingEstimate? Pricing { get; set; }
 
-    public static TimelapseSellPriceSnapshot FromPointEstimate(PointPricingEstimate estimate, int sceneCount, int clipDurationSeconds)
+    public static TimelapseSellPriceSnapshot FromPointEstimate(PointPricingEstimate estimate, int sceneCount)
         => new()
         {
             QualityTier = estimate.Video.Quality,
-            RuntimeClipDurationSeconds = clipDurationSeconds,
+            RuntimeClipDurationSeconds = estimate.Video.Count > 0 ? estimate.Video.Count / Math.Max(1, sceneCount) : 0,
             SceneCount = sceneCount,
-            VideoSceneSellPoints = estimate.Video.Rate * clipDurationSeconds,
+            VideoSceneSellPoints = estimate.Video.Points,
             ImageCount = estimate.Image.Count,
             ImageRate = estimate.Image.Rate,
             ImageSubtotal = estimate.Image.Points,

@@ -499,7 +499,8 @@ public sealed class RVideoFoundationTests
     public void SceneDurationAndLibraryVoiceAreValidated()
     {
         Assert.Throws<InvalidOperationException>(() => RVideoRules.ValidateScene(
-            new RVideoSceneEditorItem(1, "Hook", 5, "prompt", null, null, null, null, null)));
+            new RVideoSceneEditorItem(1, "Hook", 0, "prompt", null, null, null, null, null)));
+        RVideoRules.ValidateScene(new RVideoSceneEditorItem(1, "Hook", 12, "prompt", null, null, null, null, null));
         Assert.Throws<InvalidOperationException>(() => RVideoRules.ValidateSettings(new RVideoJobSettingsRequest
         {
             SkipCharacter = true,

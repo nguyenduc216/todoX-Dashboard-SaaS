@@ -124,22 +124,6 @@ public sealed class CoreBillingService : ICoreBillingService
         var voiceEnabled = ReadBool(input, "voiceEnabled", "voice_enabled") ?? true;
         var voiceCount = ReadInt(input, "voiceCount", "voice_count") ?? 0;
 
-        if (LegacyPointBillingFeatureFlags.IsDisabled(_configuration))
-        {
-            return new CoreBillingEstimate(
-                0,
-                false,
-                qualityTier,
-                imageCount,
-                sceneCount,
-                durationSeconds,
-                "Legacy point billing is disabled.",
-                null,
-                videoSeconds,
-                voiceEnabled ? voiceCount : 0,
-                voiceEnabled);
-        }
-
         if (imageCount <= 0 && videoSeconds <= 0 && (!voiceEnabled || voiceCount <= 0))
         {
             throw new InvalidOperationException(
