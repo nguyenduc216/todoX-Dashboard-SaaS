@@ -3,57 +3,80 @@
 - Branch: `integration/rdance-on-construction-video-core`
 
 ## Base Commit
-- `11ef5a32e1b050c353edf9a3d234967628b465a0`
+- `d4dc8c8f39df00dfeaec3678bd1646b712ca11bd`
 
-## Final Commit SHA
-- Implementation commit: `d85293e`
+## Final Pushed Commit SHA
+- Implementation commit: `a7f9681`
+- Documentation commit: pending until this report is committed and pushed.
 
-## Authorization
-- Permission service used: existing `CurrentUserSession.Can(...)` permission model.
-- Enforced permissions: `point_config.view`, `point_config.manage`, `wallet.view_all`, `wallet.topup`, `wallet.adjust`, `wallet.refund`, `voucher.view`, `voucher.manage`, `service_point_override.manage`.
-- Customer-owned reads are limited to the authenticated customer; customer accounts cannot administer rates, overrides, wallets, or vouchers.
+## rDance Reference Billing
+- `DIRECT_REFERENCE` does not generate or charge an AI reference image.
+- AI reference generation resolves the `rDance` catalog service id and Standard/Premium image quality, estimates exactly one image unit, and charges the customer before `provider.SubmitAsync`.
+- Insufficient balance raises `INSUFFICIENT_POINTS`; provider submission is not reached.
+- Billing is stored on the existing provider operation, including estimate, charge, balances, billing status, and component snapshot.
+- The image charge reference is deterministic from dance job id, `reference_image`, `initial_render`, and reference version.
+- The per-job generation lock prevents concurrent duplicate submissions. Provider/system retries do not create another customer image debit.
 
-## rVideo Full Usage
-- Service id: resolved from the existing rVideo core job service linkage.
-- Image count source: effective scene image source; only scenes without usable input are `AI_GENERATE`.
-- Video seconds: sum of persisted scene durations.
-- Voice count: count of scenes requiring external paid voice generation.
-- Parent total: calculated by `PreRenderUsagePlan` and `PointPricingService`.
-- Child charge behavior: parent-billed image batches set `SkipCustomerCharge`; explicit image rerenders use `USER_RERENDER` and a deterministic wallet reference.
+## rDance QueueRender
+- The displayed logical total remains `IMAGE + VIDEO + VOICE`.
+- `QueueRenderAsync` reads the charged reference operation and subtracts its charged IMAGE points.
+- Only the remaining job amount is charged with the existing `dance_sell_job` wallet reference.
+- The persisted snapshot records planned and charged image/video/voice components, total planned points, total charged points, and remaining points.
+- Direct reference jobs keep `image_count = 0`.
 
-## rDance Full Usage
-- Service id source: existing `FixedTodoXServiceCatalog.RDance` catalog lookup.
-- Image usage source: `DirectReference` is zero; generated reference/composite path is one.
-- Video duration: resolved from persisted job/route configuration or provider estimate.
-- Service override result: `PointPricingService` receives the resolved catalog service id, allowing service override before global fallback.
-- Parent total: includes image and duration-driven video usage.
+## Point Permissions
 
-## SYSTEM_RETRY
-Automatic provider/worker retry paths reuse the existing logical request and do not create an additional customer point debit. rDance retry metadata now uses the real service id and resolved duration while remaining free.
+| Permission | Exists | Role Assignment | Verification |
+|---|---|---|---|
+| `point_config.view` | Seeded idempotently | `support`, `admin`, existing system aliases | `verify_point_module.sql` |
+| `point_config.manage` | Seeded idempotently | `support`, `admin`, existing system aliases | `verify_point_module.sql` |
+| `wallet.view_all` | Seeded idempotently | `support`, `admin`, existing system aliases | `verify_point_module.sql` |
+| `wallet.topup` | Seeded idempotently | `support`, `admin`, existing system aliases | `verify_point_module.sql` |
+| `wallet.adjust` | Seeded idempotently | `support`, `admin`, existing system aliases | `verify_point_module.sql` |
+| `wallet.refund` | Seeded idempotently | `support`, `admin`, existing system aliases | `verify_point_module.sql` |
+| `voucher.view` | Seeded idempotently | `support`, `admin`, existing system aliases | `verify_point_module.sql` |
+| `voucher.manage` | Seeded idempotently | `support`, `admin`, existing system aliases | `verify_point_module.sql` |
+| `service_point_override.manage` | Seeded idempotently | `support`, `admin`, existing system aliases | `verify_point_module.sql` |
 
-## USER_RERENDER
-- Image: one additional image unit, charged before provider submission.
-- Video: Timelapse rerender uses the exact persisted clip duration.
-- Voice: no new external voice rerender path was present in this branch.
-- Idempotency: deterministic SHA-256-derived rerender references are used for wallet debits.
+The migration resolves role codes instead of hard-coded ids and does not assign point-admin permissions to customer roles. Root users retain the existing code-level wildcard behavior.
+
+## rVideo USER_RERENDER
+- Image: existing `USER_RERENDER` path charges one deterministic IMAGE unit and remains idempotent.
+- Video: no separate customer-facing scene-video `USER_RERENDER` or “render again” service exists in this branch. Current scene-video retry/enqueue actions are lifecycle/system retry behavior, not customer rerender billing.
+- Result: scene-video `USER_RERENDER` is N/A in the current branch; no new UI feature was added.
 
 ## Tests
-- `PointModuleRegressionTests`: 11 passed in the targeted run.
-- Full suite: 855 passed, 5 pre-existing unrelated failures.
+- Targeted staged-billing regression tests: 4 passed.
+- Full test suite: 859 passed, 5 unrelated pre-existing failures.
+- `git diff --check`: passed.
 
 ## Build
-- `dotnet build TodoX.Dashboard.sln -c Release --no-restore`: passed with pre-existing generated Razor nullable warnings.
+- `dotnet build TodoX.Dashboard.sln -c Release --no-restore`: passed.
+- Build emitted existing generated Razor nullable warnings.
 
 ## Publish
 - `dotnet publish TodoX.Web\TodoX.Web.csproj -c Release --no-restore -o artifacts\publish\todox-dashboard`: passed.
 - Output: `artifacts\publish\todox-dashboard`
 
+## SQL
+- Added idempotent permission seed: `database/migrations/20260902_point_module_permissions.sql`.
+- Updated verification queries: `database/manual/verify_point_module.sql`.
+- No migration was executed and no production database was changed.
+
 ## Git Push
-- Implementation commit `d85293e` is ready to push on `integration/rdance-on-construction-video-core`.
+- Implementation commit `a7f9681`: pushed successfully.
+- Documentation update is being committed and pushed now.
 
 ## Files Changed
-- Authorization, wallet/billing services, rVideo image/video aggregation and rerender worker, rDance pricing aggregation, Timelapse rerender billing, regression tests, manual verification SQL, and this report.
+- `TodoX.Web/Services/DanceSell/DanceSellAiOperations.cs`
+- `TodoX.Web/Services/DanceSell/DanceSellPhase2Services.cs`
+- `TodoX.Web/database/migrations/20260902_point_module_permissions.sql`
+- `TodoX.Web/database/manual/verify_point_module.sql`
+- `TodoX.Web.Tests/DanceSellRenderHandlerTests.cs`
+- `TodoX.Web.Tests/RDanceStagedBillingRegressionTests.cs`
+- `TodoX.Web/docs/unified-point-module-report.md`
 
 ## Remaining Limitations
-- No database schema or migration was added or executed.
-- No separate rVideo scene-video rerender method exists in the current UI/service path.
+- Database SQL remains manual by design.
+- The five full-suite failures are pre-existing and outside this task's scope.
+- `dotnet format --verify-no-changes` remains blocked by widespread pre-existing whitespace diagnostics outside the changed files.
