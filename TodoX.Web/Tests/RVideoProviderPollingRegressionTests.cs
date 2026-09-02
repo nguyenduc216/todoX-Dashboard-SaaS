@@ -54,6 +54,17 @@ public sealed class RVideoProviderPollingRegressionTests
     }
 
     [Fact]
+    public void ProviderPollClaimMarkerDoesNotConsumeRetryBudget()
+    {
+        var source = ReadRepoFile("Services", "Render", "RenderJobService.cs");
+
+        Assert.Contains("providerPoll", source);
+        Assert.Contains("attempt_count=attempt_count + CASE", source);
+        Assert.Contains("input_json=input_json - 'providerPoll'", source);
+        Assert.Contains("input_json=COALESCE(input_json, '{}'::jsonb) || '{\"providerPoll\": true}'::jsonb", source);
+    }
+
+    [Fact]
     public void PendingPollReusesSameProviderTaskIdWithoutSubmitOrReserve()
     {
         var source = ReadRepoFile("Services", "VideoRender", "SceneVideoWorkerHandler.cs");
@@ -77,6 +88,17 @@ public sealed class RVideoProviderPollingRegressionTests
         Assert.True(reuseIndex >= 0);
         Assert.True(submitIndex > reuseIndex);
         Assert.True(reserveIndex < reuseIndex);
+    }
+
+    [Fact]
+    public void SceneVideoSubmitUsesResolvedProviderDuration()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "SceneVideoWorkerHandler.cs");
+
+        Assert.Contains("EnrichCatalogDurationsAsync", source);
+        Assert.Contains("GetModelByCodeAsync", source);
+        Assert.Contains("candidate.ProviderDurationSeconds", source);
+        Assert.DoesNotContain("input.DurationSeconds,\n                        sourceImageAsset", source);
     }
 
     [Fact]

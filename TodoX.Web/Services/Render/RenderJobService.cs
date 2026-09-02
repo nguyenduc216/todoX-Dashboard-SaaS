@@ -539,7 +539,11 @@ public sealed class RenderJobService : IRenderJobService
                    worker_key=@workerKey,
                    lock_owner=@workerKey,
                    lock_until=now() + (@lockSeconds || ' seconds')::interval,
-                   attempt_count=attempt_count + 1,
+                   input_json=input_json - 'providerPoll',
+                   attempt_count=attempt_count + CASE
+                       WHEN COALESCE(input_json->>'providerPoll', 'false') = 'true' THEN 0
+                       ELSE 1
+                   END,
                    started_at=COALESCE(started_at, now()),
                    updated_at=now()
              WHERE id=@id;
@@ -680,6 +684,7 @@ public sealed class RenderJobService : IRenderJobService
             """
             UPDATE render.render_jobs
                SET status='queued',
+                   input_json=COALESCE(input_json, '{}'::jsonb) || '{"providerPoll": true}'::jsonb,
                    retry_after=now() + (@delaySeconds || ' seconds')::interval,
                    error_code=@reasonCode,
                    error_message=@reasonMessage,

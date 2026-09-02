@@ -158,6 +158,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
     private readonly ISceneMediaVersioningService _versions;
     private readonly IAiImageBillingService _billing;
     private readonly IAiProviderService _providers;
+    private readonly IAiProviderModelService _models;
     private readonly IVideoGenerationProviderAdapterResolver _providerAdapters;
     private readonly IMediaFileService _media;
     private readonly IVideoPromptValidator _promptValidator;
@@ -178,6 +179,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         ISceneMediaVersioningService versions,
         IAiImageBillingService billing,
         IAiProviderService providers,
+        IAiProviderModelService models,
         IVideoGenerationProviderAdapterResolver providerAdapters,
         IMediaFileService media,
         IVideoPromptValidator promptValidator,
@@ -195,6 +197,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         _versions = versions;
         _billing = billing;
         _providers = providers;
+        _models = models;
         _providerAdapters = providerAdapters;
         _media = media;
         _promptValidator = promptValidator;
@@ -357,17 +360,36 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
             return;
         }
 
+        var catalogModels = (await _models.GetModelsAsync(
+            input.ProviderCode,
+            mediaType: "video",
+            enabled: true,
+            ct: ct))
+            .Where(x => !x.IsDeprecated)
+            .ToList();
+        await EnrichCatalogDurationsAsync(input.ProviderId, catalogModels, ct);
+        var candidates = ResolveFallbackCandidates(input, catalogModels);
         var attemptIndex = ResolveNextAttemptIndex(input.LogicalRequestId, attemptVersions);
-        while (attemptIndex < RVideoVideoModelPolicy.Models.Count)
+        while (attemptIndex < candidates.Count)
         {
-            var policy = GetAttemptPolicy(input, attemptIndex)
-                ?? throw new InvalidOperationException("SCENE_VIDEO_PROVIDER_POLICY_MISSING");
+            var candidate = candidates[attemptIndex];
+            var policy = candidate.Policy;
             var attemptLogicalRequestId = BuildAttemptLogicalRequestId(input.LogicalRequestId, attemptIndex);
             var version = await _versions.GetRecoverableSceneVideoVersionAsync(
                 scene.Id,
                 attemptLogicalRequestId,
-                ct)
-                ?? await _versions.CreateQueuedSceneVideoVersionAsync(new SceneVideoVersionCreateRequest(
+                ct);
+            if (version is not null && !IsCompatibleVersion(version, input, policy))
+            {
+                await _versions.FailSceneVideoVersionAsync(
+                    version.Id,
+                    "RVIDEO_VIDEO_INVALID_FALLBACK_VERSION",
+                    "Existing scene-video version has no valid provider/model/task contract.",
+                    ct);
+                version = null;
+            }
+
+            version ??= await _versions.CreateQueuedSceneVideoVersionAsync(new SceneVideoVersionCreateRequest(
                     input.ProjectId,
                     input.SceneId,
                     sourceImageVersionId,
@@ -389,7 +411,9 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                         sourceVersion.PublicUrl,
                         sourceVersion.StorageKey,
                         input.SourceImageType,
-                        attemptIndex
+                        attemptIndex,
+                        sceneDurationSeconds = input.DurationSeconds,
+                        providerDurationSeconds = candidate.ProviderDurationSeconds
                     },
                     RenderConfigSnapshot: new
                     {
@@ -397,6 +421,8 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                         attemptIndex,
                         policy.Model,
                         policy.Mode,
+                        sceneDurationSeconds = input.DurationSeconds,
+                        providerDurationSeconds = candidate.ProviderDurationSeconds,
                         provider = input.ProviderCode,
                         capability = input.CapabilityCode
                     }), ct);
@@ -475,7 +501,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                         projectId = input.ProjectId,
                         sceneId = input.SceneId,
                         input.SceneIndex,
-                        input.DurationSeconds,
+                        candidate.ProviderDurationSeconds,
                         input.Resolution,
                         input.AspectRatio,
                         attemptIndex
@@ -588,7 +614,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                         providerPrompt,
                         input.AspectRatio,
                         input.Resolution,
-                        input.DurationSeconds,
+                        candidate.ProviderDurationSeconds,
                         sourceImageAsset,
                         referenceImages), ct);
                     taskId = string.IsNullOrWhiteSpace(submit.ProviderTaskId) ? null : submit.ProviderTaskId.Trim();
@@ -693,7 +719,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                     }
                     await LogUsageAsync(input, job, attemptLogicalRequestId, reservation.ChargedPoints, status.SanitizedResponseJson, false, failure, taskId, ct);
                     await _versions.FailSceneVideoVersionAsync(version.Id, status.ErrorCode ?? "provider_failure", failure, ct);
-                    if (GetAttemptPolicy(input, attemptIndex + 1) is not null)
+                    if (attemptIndex + 1 < candidates.Count)
                     {
                         attemptIndex++;
                         continue;
@@ -773,8 +799,10 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
             }
         }
 
-        await FailAsync(project.Id, scene, Guid.Empty, "provider_failure", "Configured provider fallback attempts exhausted.", ct);
-        throw new RenderJobTerminalFailureException("Configured provider fallback attempts exhausted.");
+        const string exhaustedCode = "RVIDEO_VIDEO_FALLBACK_EXHAUSTED";
+        await FailAsync(project.Id, scene, Guid.Empty, exhaustedCode,
+            "No valid 79AI video fallback candidate remains.", ct);
+        throw new RenderJobTerminalFailureException(exhaustedCode);
     }
 
     private async Task HandleReconciliationFailureAsync(
@@ -1222,18 +1250,133 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         return Math.Max(0, maxAttempt + 1);
     }
 
-    private static RVideoVideoModelPolicyEntry? GetAttemptPolicy(SceneVideoRenderWorkItemInput input, int attemptIndex)
+    private sealed record ResolvedFallbackCandidate(
+        RVideoVideoModelPolicyEntry Policy,
+        int ProviderDurationSeconds);
+
+    private async Task EnrichCatalogDurationsAsync(
+        long providerId,
+        List<AiProviderModelListItemDto> catalogModels,
+        CancellationToken ct)
     {
-        if (RVideoVideoModelPolicy.Is79AiProvider(input.ProviderCode)
-            && string.Equals(input.CapabilityCode, RVideoVideoModelPolicy.CapabilityCode, StringComparison.OrdinalIgnoreCase))
+        foreach (var model in catalogModels.Where(x => x.MediaType.Equals("video", StringComparison.OrdinalIgnoreCase)))
         {
-            return RVideoVideoModelPolicy.GetByAttemptIndex(attemptIndex);
+            if (model.SupportedDurations.Count > 0)
+            {
+                continue;
+            }
+
+            var detail = await _models.GetModelByCodeAsync(providerId, model.ProviderModelCode, ct);
+            if (detail is null || detail.IsDeprecated || !detail.Enabled)
+            {
+                continue;
+            }
+
+            var durations = detail.SupportedDurations
+                .Where(duration => duration > 0)
+                .ToList();
+            if (durations.Count == 0)
+            {
+                durations = detail.Prices
+                    .Where(price => price.Active && price.DurationSeconds is not null && price.DurationSeconds > 0)
+                    .Select(price => price.DurationSeconds!.Value)
+                    .Distinct()
+                    .OrderBy(duration => duration)
+                    .ToList();
+            }
+
+            if (durations.Count > 0)
+            {
+                model.SupportedDurations = durations;
+            }
+        }
+    }
+
+    private static IReadOnlyList<ResolvedFallbackCandidate> ResolveFallbackCandidates(
+        SceneVideoRenderWorkItemInput input,
+        IReadOnlyList<AiProviderModelListItemDto> catalogModels)
+    {
+        var resolved = new List<(RVideoVideoModelPolicyEntry Policy, AiProviderModelListItemDto Model)>();
+        foreach (var policy in RVideoVideoModelPolicy.Models)
+        {
+            if (!string.Equals(policy.ProviderCode, input.ProviderCode, StringComparison.OrdinalIgnoreCase)
+                || string.IsNullOrWhiteSpace(policy.Model))
+            {
+                continue;
+            }
+
+            var model = catalogModels.FirstOrDefault(x =>
+                string.Equals(x.ProviderModelCode, policy.Model, StringComparison.OrdinalIgnoreCase));
+            if (model is null
+                || !string.Equals(model.ProviderCode, input.ProviderCode, StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(model.MediaType, "video", StringComparison.OrdinalIgnoreCase)
+                || !model.Enabled
+                || model.IsDeprecated)
+            {
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(policy.Mode)
+                || model.SupportedModes.Count == 0
+                || !model.SupportedModes.Contains(policy.Mode, StringComparer.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            resolved.Add((policy, model));
         }
 
-        return attemptIndex == 0
-            ? new RVideoVideoModelPolicyEntry(0, input.ProviderCode, input.ModelName ?? string.Empty, null)
-            : null;
+        if (resolved.Count == 0)
+        {
+            return Array.Empty<ResolvedFallbackCandidate>();
+        }
+
+        var durationIntersection = resolved
+            .Select(x => x.Model.SupportedDurations.Where(duration => duration > 0).ToHashSet())
+            .Where(set => set.Count > 0)
+            .Aggregate((HashSet<int>?)null, (current, next) =>
+            {
+                if (current is null) return next;
+                current.IntersectWith(next);
+                return current;
+            });
+
+        var candidates = new List<ResolvedFallbackCandidate>();
+        foreach (var item in resolved)
+        {
+            var providerDuration = ResolveProviderDuration(input.DurationSeconds, durationIntersection);
+            if (providerDuration is int duration)
+            {
+                candidates.Add(new ResolvedFallbackCandidate(item.Policy, duration));
+            }
+        }
+
+        return candidates;
     }
+
+    private static int? ResolveProviderDuration(int sceneDurationSeconds, HashSet<int>? safeDurations)
+    {
+        if (safeDurations is null || safeDurations.Count == 0)
+        {
+            return null;
+        }
+
+        var resolved = safeDurations
+            .Where(duration => duration >= sceneDurationSeconds)
+            .OrderBy(duration => duration)
+            .FirstOrDefault();
+        return resolved > 0 ? resolved : null;
+    }
+
+    private static bool IsCompatibleVersion(
+        SceneVideoVersionDto version,
+        SceneVideoRenderWorkItemInput input,
+        RVideoVideoModelPolicyEntry policy)
+        => !string.IsNullOrWhiteSpace(version.ProviderCode)
+           && string.Equals(version.ProviderCode, input.ProviderCode, StringComparison.OrdinalIgnoreCase)
+           && version.ProviderCapabilityId == input.ProviderCapabilityId
+           && !string.IsNullOrWhiteSpace(version.ModelName)
+           && string.Equals(version.ModelName, policy.Model, StringComparison.OrdinalIgnoreCase);
 
     private static bool IsMatchingLogicalRequestId(string value, string logicalRequestId)
         => string.Equals(value, logicalRequestId, StringComparison.OrdinalIgnoreCase)

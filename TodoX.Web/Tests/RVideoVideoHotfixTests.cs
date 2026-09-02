@@ -132,6 +132,71 @@ public sealed class RVideoVideoHotfixTests
     }
 
     [Fact]
+    public void ResolveFallbackCandidatesDropsCatalogRowsWithoutMode()
+    {
+        var method = typeof(SceneVideoWorkerHandler).GetMethod("ResolveFallbackCandidates", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var input = new SceneVideoRenderWorkItemInput
+        {
+            ProviderCode = "79ai",
+            DurationSeconds = 4
+        };
+        var catalog = new[]
+        {
+            new AiProviderModelListItemDto
+            {
+                ProviderCode = "79ai",
+                ProviderModelCode = "veo_omni",
+                MediaType = "video",
+                Enabled = true,
+                IsDeprecated = false,
+                SupportedModes = ["flash"],
+                SupportedDurations = [4, 6, 8, 10]
+            },
+            new AiProviderModelListItemDto
+            {
+                ProviderCode = "79ai",
+                ProviderModelCode = "veo_3_1",
+                MediaType = "video",
+                Enabled = true,
+                IsDeprecated = false,
+                SupportedModes = ["fast", "lite", "quality"],
+                SupportedDurations = []
+            },
+            new AiProviderModelListItemDto
+            {
+                ProviderCode = "79ai",
+                ProviderModelCode = "grok_video_heavy",
+                MediaType = "video",
+                Enabled = true,
+                IsDeprecated = false,
+                SupportedModes = []
+            }
+        };
+
+        var resolved = (System.Collections.IEnumerable)method!.Invoke(null, new object[] { input, catalog })!;
+        var policies = resolved.Cast<object>()
+            .Select(item => item.GetType().GetProperty("Policy")!.GetValue(item)!)
+            .Select(policy => (string)policy.GetType().GetProperty("Model")!.GetValue(policy)!)
+            .ToArray();
+
+        Assert.Equal(["veo_omni", "veo_3_1"], policies);
+    }
+
+    [Fact]
+    public void ResolveProviderDurationRoundsUpWithinSafeIntersection()
+    {
+        var method = typeof(SceneVideoWorkerHandler).GetMethod("ResolveProviderDuration", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var safeDurations = new HashSet<int> { 6, 10 };
+        var resolved = method!.Invoke(null, new object[] { 4, safeDurations });
+
+        Assert.Equal(6, resolved);
+    }
+
+    [Fact]
     public void SelectedCompletedImageVersionIsAcceptedAndGuidEmptyIsRejected()
     {
         var method = typeof(SceneVideoRenderHandler).GetMethod("IsCompletedSelectedImageVersion", BindingFlags.NonPublic | BindingFlags.Static);
