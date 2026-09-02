@@ -7,7 +7,8 @@
 
 ## Final Pushed Commit SHA
 - Implementation commit: `a7f9681`
-- Documentation commit: pending until this report is committed and pushed.
+- Documentation commit: `9567b77`
+- Final pushed branch state recorded here: `9567b77`
 
 ## rDance Reference Billing
 - `DIRECT_REFERENCE` does not generate or charge an AI reference image.
@@ -65,7 +66,7 @@ The migration resolves role codes instead of hard-coded ids and does not assign 
 
 ## Git Push
 - Implementation commit `a7f9681`: pushed successfully.
-- Documentation update is being committed and pushed now.
+- Documentation commit `9567b77`: pushed successfully.
 
 ## Files Changed
 - `TodoX.Web/Services/DanceSell/DanceSellAiOperations.cs`
