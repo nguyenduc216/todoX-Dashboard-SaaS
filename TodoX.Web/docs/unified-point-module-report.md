@@ -6,7 +6,7 @@
 - `11ef5a32e1b050c353edf9a3d234967628b465a0`
 
 ## Final Commit SHA
-- Recorded after the implementation commit is created.
+- Implementation commit: `d85293e`
 
 ## Authorization
 - Permission service used: existing `CurrentUserSession.Can(...)` permission model.
@@ -38,16 +38,18 @@ Automatic provider/worker retry paths reuse the existing logical request and do 
 - Idempotency: deterministic SHA-256-derived rerender references are used for wallet debits.
 
 ## Tests
-- `PointModuleRegressionTests`: 10 passed in the targeted run.
+- `PointModuleRegressionTests`: 11 passed in the targeted run.
+- Full suite: 855 passed, 5 pre-existing unrelated failures.
 
 ## Build
 - `dotnet build TodoX.Dashboard.sln -c Release --no-restore`: passed with pre-existing generated Razor nullable warnings.
 
 ## Publish
-- Pending final validation.
+- `dotnet publish TodoX.Web\TodoX.Web.csproj -c Release --no-restore -o artifacts\publish\todox-dashboard`: passed.
+- Output: `artifacts\publish\todox-dashboard`
 
 ## Git Push
-- Pending final commit and push.
+- Implementation commit `d85293e` is ready to push on `integration/rdance-on-construction-video-core`.
 
 ## Files Changed
 - Authorization, wallet/billing services, rVideo image/video aggregation and rerender worker, rDance pricing aggregation, Timelapse rerender billing, regression tests, manual verification SQL, and this report.
