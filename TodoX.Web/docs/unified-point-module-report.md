@@ -8,7 +8,7 @@ Branch: `integration/rdance-on-construction-video-core`
 `38508dbc0a2935c1aac82cc506e147f19c1ff447`
 
 ## Final Commit SHA
-Pending final commit
+`c8b8f436ab8f2c5c6b4b99efaf0fa0ecf1990754`
 
 ## Root Cause
 Active billing paths still mixed the unified Point Module with legacy point flags and fixed-duration assumptions. That allowed `LegacyPointBilling:Enabled=false` to suppress new estimates, allowed rVideo duration to imply quality, and made Timelapse image/video estimates drift from the actual work plan.
@@ -80,7 +80,7 @@ Remaining failing tests are outside the touched files:
 Output directory: `D:\todoX\Dashboard-web\TodoXPortal\todoX-Dashboard-SaaS\artifacts\publish\todox-dashboard`
 
 ## Git Push
-Pending final commit and push.
+Pending push from the local repository after this report amendment.
 
 ## Files Changed
 - `TodoX.Web/Components/Pages/TimelapseJobCreate.razor`
