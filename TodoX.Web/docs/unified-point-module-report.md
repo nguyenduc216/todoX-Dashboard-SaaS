@@ -13,7 +13,7 @@
 
 ## Final Branch HEAD
 
-- `202fe444460b14cb34b6be5df1e4f66e91f9871f`
+- `5c931125b2b73a68ae80d2ed27d1add76ff047b7`
 
 ## Billing Scene Scope
 
@@ -84,7 +84,7 @@
 
 ## Git Push
 
-- `git push origin integration/rdance-on-construction-video-core`: PASS. The final pushed HEAD is `202fe444460b14cb34b6be5df1e4f66e91f9871f`; implementation commit is `39197e12eb64579f16f8b270e7d154d3097475e1`.
+- `git push origin integration/rdance-on-construction-video-core`: PASS. The final pushed HEAD is `5c931125b2b73a68ae80d2ed27d1add76ff047b7`; implementation commit is `39197e12eb64579f16f8b270e7d154d3097475e1`.
 
 ## Files Changed
 
