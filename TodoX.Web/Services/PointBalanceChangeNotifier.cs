@@ -8,6 +8,13 @@ public interface IPointBalanceChangeNotifier
 
 public sealed class PointBalanceChangeNotifier : IPointBalanceChangeNotifier
 {
+    private readonly ILogger<PointBalanceChangeNotifier> _logger;
+
+    public PointBalanceChangeNotifier(ILogger<PointBalanceChangeNotifier> logger)
+    {
+        _logger = logger;
+    }
+
     public event Action<Guid>? Changed;
 
     public void NotifyChanged(Guid customerId)
@@ -18,9 +25,9 @@ public sealed class PointBalanceChangeNotifier : IPointBalanceChangeNotifier
             {
                 handler.DynamicInvoke(customerId);
             }
-            catch
+            catch (Exception ex)
             {
-                // A subscriber must not be able to terminate the caller's request or circuit.
+                _logger.LogWarning(ex, "Point balance subscriber failed for customer {CustomerId}.", customerId);
             }
         }
     }

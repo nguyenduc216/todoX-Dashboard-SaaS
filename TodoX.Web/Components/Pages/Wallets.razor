@@ -98,13 +98,16 @@
                 </MudPaper>
             }
 
-            <MudPaper Class="pa-4 mb-4">
-                <MudText Typo="Typo.h6">Sử dụng voucher</MudText>
-                <MudStack Row="true" Spacing="2" Class="flex-wrap">
-                    <MudTextField @bind-Value="_redeemCode" Label="Mã voucher" />
-                    <MudButton StartIcon="@Icons.Material.Filled.Redeem" OnClick="RedeemVoucherAsync">Sử dụng voucher</MudButton>
-                </MudStack>
-            </MudPaper>
+            @if (IsCustomer)
+            {
+                <MudPaper Class="pa-4 mb-4">
+                    <MudText Typo="Typo.h6">Sử dụng voucher</MudText>
+                    <MudStack Row="true" Spacing="2" Class="flex-wrap">
+                        <MudTextField @bind-Value="_redeemCode" Label="Mã voucher" />
+                        <MudButton StartIcon="@Icons.Material.Filled.Redeem" OnClick="RedeemVoucherAsync">Sử dụng voucher</MudButton>
+                    </MudStack>
+                </MudPaper>
+            }
             <MudTable Items="_wallets" Dense="true" Hover="true">
                 <HeaderContent>
                     <MudTh>Khách hàng</MudTh>
@@ -243,6 +246,7 @@
 
     private void SyncSelectedGlobalRate()
     {
+        _rateValue = 0;
         var row = _rates.FirstOrDefault(x =>
             string.Equals(x.ResourceType, _rateResource, StringComparison.OrdinalIgnoreCase) &&
             string.Equals(x.QualityTier, _rateQuality, StringComparison.OrdinalIgnoreCase));
@@ -369,15 +373,34 @@
         "voucher" => "Nhận voucher",
         "adjust_plus" => "Điều chỉnh tăng",
         "adjust_minus" => "Điều chỉnh giảm",
+        "credit" => "Ghi có",
+        "purchase" => "Mua điểm",
         _ => value
     };
 
-    private static string WalletStatusLabel(string value) => value.ToLowerInvariant() == "active" ? "Đang hoạt động" : value;
-    private static string VoucherStatusLabel(string value) => value.ToLowerInvariant() == "active" ? "Đang hoạt động" : value;
+    private static string WalletStatusLabel(string value) => StatusLabel(value);
+    private static string VoucherStatusLabel(string value) => StatusLabel(value);
     private static string DisplayEmail(WalletView wallet) => string.IsNullOrWhiteSpace(wallet.Email) ? "Chưa có email" : wallet.Email;
+
+    private static string StatusLabel(string value) => value.ToLowerInvariant() switch
+    {
+        "active" => "Đang hoạt động",
+        "inactive" => "Tạm ngưng",
+        "disabled" => "Đã vô hiệu hóa",
+        "expired" => "Hết hạn",
+        "used_up" => "Đã sử dụng hết",
+        "cancelled" => "Đã hủy",
+        "pending" => "Đang chờ",
+        "completed" => "Hoàn tất",
+        "failed" => "Thất bại",
+        "locked" => "Đang khóa",
+        _ => value
+    };
 
     private static string LocalizeError(string message) => message switch
     {
+        "Point rate cannot be negative." => "Mức điểm không được nhỏ hơn 0.",
+        "Point override cannot be negative." => "Giá điểm riêng không được nhỏ hơn 0.",
         "Voucher code is required." => "Vui lòng nhập mã voucher.",
         "Voucher points must be greater than zero." => "Số điểm voucher phải lớn hơn 0.",
         "Voucher code already exists." => "Mã voucher đã tồn tại.",

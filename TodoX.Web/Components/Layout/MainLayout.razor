@@ -7,6 +7,7 @@
 @inject IPointBalanceChangeNotifier PointBalanceChanges
 @inject NavigationManager Navigation
 @inject ISnackbar Snackbar
+@inject ILogger<MainLayout> Logger
 
 <MudThemeProvider Theme="_theme" IsDarkMode="true" />
 <MudPopoverProvider />
@@ -158,6 +159,7 @@
     private IReadOnlyList<NavigationMenuGroupDto> _menuGroups = Array.Empty<NavigationMenuGroupDto>();
     private bool _menuLoaded;
     private decimal? _balance;
+    private bool _disposed;
 
     private readonly MudTheme _theme = new()
     {
@@ -222,14 +224,30 @@
 
     private void HandleAuthChange() => InvokeAsync(async () =>
     {
-        _menuLoaded = false;
-        await LoadNavigationMenuAsync();
-        await LoadBalanceAsync();
-        StateHasChanged();
+        try
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            _menuLoaded = false;
+            await LoadNavigationMenuAsync();
+            await LoadBalanceAsync();
+            if (!_disposed)
+            {
+                StateHasChanged();
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Auth change refresh failed.");
+        }
     });
 
     public void Dispose()
     {
+        _disposed = true;
         AuthState.OnChange -= HandleAuthChange;
         PointBalanceChanges.Changed -= HandlePointBalanceChanged;
     }
@@ -240,6 +258,11 @@
     {
         try
         {
+            if (_disposed)
+            {
+                return;
+            }
+
             if (AuthState.CurrentUser?.CustomerId != customerId)
             {
                 return;
@@ -247,13 +270,21 @@
 
             await InvokeAsync(async () =>
             {
+                if (_disposed)
+                {
+                    return;
+                }
+
                 await LoadBalanceAsync();
-                StateHasChanged();
+                if (!_disposed)
+                {
+                    StateHasChanged();
+                }
             });
         }
-        catch
+        catch (Exception ex)
         {
-            // Balance refresh is auxiliary UI work and must not break the active circuit.
+            Logger.LogWarning(ex, "Auxiliary point balance refresh failed for customer {CustomerId}.", customerId);
         }
     }
 
@@ -321,8 +352,9 @@
                     : ApplyMenuVisibility(MergeSupplementalMenu(fallback)).ToList();
             }
         }
-        catch
+        catch (Exception ex)
         {
+            Logger.LogWarning(ex, "Navigation menu load failed; using fallback menu.");
             var fallback = BuildFallbackMenu();
             _menuGroups = AuthState.CurrentUser?.IsCustomer == true
                 ? BuildCustomerMenu(fallback)

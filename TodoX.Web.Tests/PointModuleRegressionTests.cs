@@ -3,6 +3,7 @@ using TodoX.Web.Models.Catalog;
 using TodoX.Web.Models.Timelapse;
 using TodoX.Web.Services;
 using TodoX.Web.Services.VideoRender;
+using Microsoft.Extensions.Logging;
 using Xunit;
 
 namespace TodoX.Web.Tests;
@@ -22,6 +23,15 @@ public sealed class PointModuleRegressionTests
         Assert.Contains("Text=\"Voucher điểm\"", page, StringComparison.Ordinal);
         Assert.Contains("Tạo voucher điểm", page, StringComparison.Ordinal);
         Assert.Contains("Lịch sử điểm", page, StringComparison.Ordinal);
+        Assert.Contains("@if (IsCustomer)", page, StringComparison.Ordinal);
+        Assert.Contains("_rateValue = 0;", page, StringComparison.Ordinal);
+        Assert.Contains("Point rate cannot be negative.", page, StringComparison.Ordinal);
+        Assert.Contains("Point override cannot be negative.", page, StringComparison.Ordinal);
+        Assert.Contains("\"inactive\" =>", page, StringComparison.Ordinal);
+        Assert.Contains("\"locked\" =>", page, StringComparison.Ordinal);
+        Assert.Contains("\"adjust_plus\" =>", page, StringComparison.Ordinal);
+        Assert.Contains("\"credit\" =>", page, StringComparison.Ordinal);
+        Assert.Contains("\"purchase\" =>", page, StringComparison.Ordinal);
         Assert.DoesNotContain("private decimal _rateValue = 3000", page, StringComparison.Ordinal);
     }
 
@@ -42,7 +52,7 @@ public sealed class PointModuleRegressionTests
     [Fact]
     public void PointBalanceNotifierIsolatesSubscriberFailures()
     {
-        var notifier = new PointBalanceChangeNotifier();
+        var notifier = new PointBalanceChangeNotifier(LoggerFactory.Create(builder => { }).CreateLogger<PointBalanceChangeNotifier>());
         var observed = Guid.Empty;
         notifier.Changed += _ => throw new InvalidOperationException("subscriber failure");
         notifier.Changed += customerId => observed = customerId;
@@ -51,6 +61,16 @@ public sealed class PointModuleRegressionTests
         notifier.NotifyChanged(customerId);
 
         Assert.Equal(customerId, observed);
+    }
+
+    [Fact]
+    public void PointBalanceNotifierLogsSubscriberFailures()
+    {
+        var source = File.ReadAllText(Path.Combine(RepoRoot, "TodoX.Web", "Services", "PointBalanceChangeNotifier.cs"));
+
+        Assert.Contains("ILogger<PointBalanceChangeNotifier>", source, StringComparison.Ordinal);
+        Assert.Contains("_logger.LogWarning", source, StringComparison.Ordinal);
+        Assert.Contains("customerId", source, StringComparison.Ordinal);
     }
 
     [Fact]

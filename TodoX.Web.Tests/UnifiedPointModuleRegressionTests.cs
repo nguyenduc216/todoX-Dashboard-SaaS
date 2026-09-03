@@ -1,6 +1,7 @@
 using TodoX.Web.Models;
 using TodoX.Web.Services;
 using TodoX.Web.Services.VideoRender;
+using Microsoft.Extensions.Logging;
 using Xunit;
 
 namespace TodoX.Web.Tests;
@@ -104,7 +105,7 @@ public sealed class UnifiedPointModuleRegressionTests
     [Fact]
     public void PointBalanceNotifier_CarriesCustomerIdentity()
     {
-        var notifier = new PointBalanceChangeNotifier();
+        var notifier = new PointBalanceChangeNotifier(LoggerFactory.Create(builder => { }).CreateLogger<PointBalanceChangeNotifier>());
         var observed = Guid.Empty;
 
         notifier.Changed += customerId => observed = customerId;
