@@ -5,7 +5,7 @@ using TodoX.Web.Models.Catalog;
 
 namespace TodoX.Web.Services;
 
-public sealed record WalletView(Guid Id, Guid CustomerId, string CustomerName,
+public sealed record WalletView(Guid Id, Guid CustomerId, string CustomerName, string Email,
     decimal Balance, decimal LockedBalance, string Status);
 
 public sealed record TransactionView(Guid Id, string CustomerName, string TransactionType,
@@ -66,6 +66,7 @@ public sealed class BillingRepository
             """
             SELECT w.id AS Id, w.customer_id AS CustomerId,
                    COALESCE(NULLIF(c.company_name,''), c.full_name) AS CustomerName,
+                   COALESCE(c.email, '') AS Email,
                    w.balance AS Balance, w.locked_balance AS LockedBalance, w.status AS Status
               FROM billing.token_wallets w
               JOIN crm.customers c ON c.id = w.customer_id

@@ -10,6 +10,50 @@ namespace TodoX.Web.Tests;
 public sealed class PointModuleRegressionTests
 {
     [Fact]
+    public void PointManagementPageBindsInteractiveTabsAndSynchronizesSelectedRate()
+    {
+        var page = File.ReadAllText(Path.Combine(RepoRoot, "TodoX.Web", "Components", "Pages", "Wallets.razor"));
+
+        Assert.Contains("@bind-ActivePanelIndex=\"_activeTabIndex\"", page, StringComparison.Ordinal);
+        Assert.Contains("ValueChanged=\"OnRateResourceChangedAsync\"", page, StringComparison.Ordinal);
+        Assert.Contains("ValueChanged=\"OnRateQualityChangedAsync\"", page, StringComparison.Ordinal);
+        Assert.Contains("SyncSelectedGlobalRate();", page, StringComparison.Ordinal);
+        Assert.Contains("SearchFunc=\"SearchCustomersAsync\"", page, StringComparison.Ordinal);
+        Assert.Contains("Text=\"Voucher điểm\"", page, StringComparison.Ordinal);
+        Assert.Contains("Tạo voucher điểm", page, StringComparison.Ordinal);
+        Assert.Contains("Lịch sử điểm", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("private decimal _rateValue = 3000", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ServicePointRatesPageUsesInlineLocalizedOverrideEditor()
+    {
+        var dialog = File.ReadAllText(Path.Combine(RepoRoot, "TodoX.Web", "Components", "Dialogs", "ServicePointRatesDialog.razor"));
+
+        Assert.Contains("Cấu hình điểm riêng", dialog, StringComparison.Ordinal);
+        Assert.Contains("GetOverrideValue(context)", dialog, StringComparison.Ordinal);
+        Assert.Contains("SaveOverrideAsync(context)", dialog, StringComparison.Ordinal);
+        Assert.Contains("RemoveOverrideAsync(context)", dialog, StringComparison.Ordinal);
+        Assert.Contains("EffectiveRate(context)", dialog, StringComparison.Ordinal);
+        Assert.DoesNotContain("private string _resource", dialog, StringComparison.Ordinal);
+        Assert.DoesNotContain("private decimal _rate = 3000", dialog, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PointBalanceNotifierIsolatesSubscriberFailures()
+    {
+        var notifier = new PointBalanceChangeNotifier();
+        var observed = Guid.Empty;
+        notifier.Changed += _ => throw new InvalidOperationException("subscriber failure");
+        notifier.Changed += customerId => observed = customerId;
+
+        var customerId = Guid.NewGuid();
+        notifier.NotifyChanged(customerId);
+
+        Assert.Equal(customerId, observed);
+    }
+
+    [Fact]
     public void CustomerUserIdDoesNotGrantPointAdminPermission()
     {
         var customer = new CurrentUserSession

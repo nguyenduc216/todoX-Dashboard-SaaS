@@ -5,57 +5,45 @@
 
 <MudDialog>
     <TitleContent>
-        <MudText Typo="Typo.h6">Point rates · @Service.ServiceName</MudText>
+        <MudText Typo="Typo.h6">Cấu hình điểm riêng · @Service.ServiceName</MudText>
     </TitleContent>
     <DialogContent>
+        <MudText Class="mb-4">Nếu không nhập giá riêng, dịch vụ sẽ sử dụng mức điểm mặc định của hệ thống.</MudText>
         <MudTable Items="_rates" Dense="true" Hover="true">
             <HeaderContent>
-                <MudTh>Resource</MudTh>
-                <MudTh>Quality</MudTh>
-                <MudTh Style="text-align:right">Global</MudTh>
-                <MudTh Style="text-align:right">Override</MudTh>
-                <MudTh Style="text-align:right">Effective</MudTh>
-                <MudTh>Source</MudTh>
+                <MudTh>Loại tài nguyên</MudTh>
+                <MudTh>Chất lượng</MudTh>
+                <MudTh Style="text-align:right">Giá mặc định</MudTh>
+                <MudTh Style="text-align:right">Giá riêng dịch vụ</MudTh>
+                <MudTh Style="text-align:right">Giá áp dụng</MudTh>
+                <MudTh>Nguồn giá</MudTh>
+                <MudTh>Thao tác</MudTh>
             </HeaderContent>
             <RowTemplate>
-                <MudTd>@context.ResourceType</MudTd>
-                <MudTd>@context.QualityTier</MudTd>
+                <MudTd>@ResourceLabel(context.ResourceType)</MudTd>
+                <MudTd>@QualityLabel(context.QualityTier)</MudTd>
                 <MudTd Style="text-align:right">@context.GlobalRate.ToString("#,0.##")</MudTd>
-                <MudTd Style="text-align:right">@((context.OverrideRate?.ToString("#,0.##")) ?? "—")</MudTd>
-                <MudTd Style="text-align:right">@context.EffectiveRate.ToString("#,0.##")</MudTd>
-                <MudTd>@context.Source</MudTd>
+                <MudTd Style="min-width:170px">
+                    <MudNumericField T="decimal?" Value="GetOverrideValue(context)"
+                                     ValueChanged="@(value => SetOverrideValue(context, value))"
+                                     Label="Giá riêng" Min="0" />
+                </MudTd>
+                <MudTd Style="text-align:right">@EffectiveRate(context).ToString("#,0.##")</MudTd>
+                <MudTd>@SourceLabel(context, GetOverrideValue(context))</MudTd>
+                <MudTd>
+                    <MudStack Row="true" Spacing="1">
+                        <MudButton Size="Size.Small" StartIcon="@Icons.Material.Filled.Save"
+                                   OnClick="@(() => SaveOverrideAsync(context))">Lưu</MudButton>
+                        <MudButton Size="Size.Small" Color="Color.Error" Variant="Variant.Outlined"
+                                   StartIcon="@Icons.Material.Filled.Delete"
+                                   OnClick="@(() => RemoveOverrideAsync(context))">Xóa giá riêng</MudButton>
+                    </MudStack>
+                </MudTd>
             </RowTemplate>
         </MudTable>
-
-        <MudDivider Class="my-4" />
-
-        <MudGrid Spacing="2">
-            <MudItem xs="12" sm="3">
-                <MudSelect T="string" @bind-Value="_resource" Label="Resource">
-                    <MudSelectItem Value="@("image")">Image</MudSelectItem>
-                    <MudSelectItem Value="@("video")">Video</MudSelectItem>
-                    <MudSelectItem Value="@("voice")">Voice</MudSelectItem>
-                </MudSelect>
-            </MudItem>
-            <MudItem xs="12" sm="3">
-                <MudSelect T="string" @bind-Value="_quality" Label="Quality">
-                    <MudSelectItem Value="@("standard")">Standard</MudSelectItem>
-                    <MudSelectItem Value="@("premium")">Premium</MudSelectItem>
-                </MudSelect>
-            </MudItem>
-            <MudItem xs="12" sm="3">
-                <MudNumericField T="decimal" @bind-Value="_rate" Label="Override rate" Min="0" />
-            </MudItem>
-            <MudItem xs="12" sm="3" Class="d-flex align-end">
-                <MudStack Row="true" Spacing="1">
-                    <MudButton StartIcon="@Icons.Material.Filled.Save" OnClick="SaveOverrideAsync">Save</MudButton>
-                    <MudButton StartIcon="@Icons.Material.Filled.Delete" Color="Color.Error" Variant="Variant.Outlined" OnClick="RemoveOverrideAsync">Remove</MudButton>
-                </MudStack>
-            </MudItem>
-        </MudGrid>
     </DialogContent>
     <DialogActions>
-        <MudButton OnClick="Close">Close</MudButton>
+        <MudButton StartIcon="@Icons.Material.Filled.Close" OnClick="Close">Đóng</MudButton>
     </DialogActions>
 </MudDialog>
 
@@ -64,9 +52,7 @@
     [Parameter] public ServiceDto Service { get; set; } = default!;
 
     private IReadOnlyList<ServicePointRateView> _rates = Array.Empty<ServicePointRateView>();
-    private string _resource = "image";
-    private string _quality = "standard";
-    private decimal _rate = 3000;
+    private readonly Dictionary<string, decimal?> _overrideValues = new(StringComparer.OrdinalIgnoreCase);
 
     protected override async Task OnInitializedAsync() => await ReloadAsync();
 
@@ -74,21 +60,78 @@
     {
         if (AuthState.CurrentUser is null) return;
         _rates = await Billing.GetServicePointRatesAsync(Service.Id, AuthState.CurrentUser);
+        _overrideValues.Clear();
+        foreach (var rate in _rates)
+        {
+            _overrideValues[KeyFor(rate.ResourceType, rate.QualityTier)] = rate.OverrideRate;
+        }
     }
 
-    private async Task SaveOverrideAsync()
+    private decimal? GetOverrideValue(ServicePointRateView rate)
+        => _overrideValues.TryGetValue(KeyFor(rate.ResourceType, rate.QualityTier), out var value) ? value : rate.OverrideRate;
+
+    private void SetOverrideValue(ServicePointRateView rate, decimal? value)
+        => _overrideValues[KeyFor(rate.ResourceType, rate.QualityTier)] = value;
+
+    private decimal EffectiveRate(ServicePointRateView rate)
+        => GetOverrideValue(rate) ?? rate.GlobalRate;
+
+    private async Task SaveOverrideAsync(ServicePointRateView rate)
     {
-        await Billing.UpsertServicePointOverrideAsync(Service.Id, _resource, _quality, _rate, AuthState.CurrentUser!);
-        Snackbar.Add("Override saved.", Severity.Success);
-        await ReloadAsync();
+        var value = GetOverrideValue(rate);
+        if (value is null)
+        {
+            await RemoveOverrideAsync(rate);
+            return;
+        }
+
+        try
+        {
+            await Billing.UpsertServicePointOverrideAsync(Service.Id, rate.ResourceType, rate.QualityTier, value.Value, AuthState.CurrentUser!);
+            Snackbar.Add("Đã lưu giá điểm riêng cho dịch vụ.", Severity.Success);
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(LocalizeError(ex.Message), Severity.Error);
+        }
     }
 
-    private async Task RemoveOverrideAsync()
+    private async Task RemoveOverrideAsync(ServicePointRateView rate)
     {
-        await Billing.RemoveServicePointOverrideAsync(Service.Id, _resource, _quality, AuthState.CurrentUser!);
-        Snackbar.Add("Override removed.", Severity.Success);
-        await ReloadAsync();
+        try
+        {
+            await Billing.RemoveServicePointOverrideAsync(Service.Id, rate.ResourceType, rate.QualityTier, AuthState.CurrentUser!);
+            Snackbar.Add("Đã xóa giá điểm riêng. Dịch vụ sẽ sử dụng giá mặc định.", Severity.Success);
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(LocalizeError(ex.Message), Severity.Error);
+        }
     }
 
     private void Close() => MudDialog.Close();
+
+    private static string KeyFor(string resource, string quality) => $"{resource}:{quality}";
+    private static string ResourceLabel(string value) => value.ToLowerInvariant() switch
+    {
+        "image" => "Hình ảnh",
+        "video" => "Video",
+        "voice" => "Giọng nói",
+        _ => value
+    };
+    private static string QualityLabel(string value) => value.ToLowerInvariant() switch
+    {
+        "standard" => "Tiêu chuẩn",
+        "premium" => "Cao cấp",
+        _ => value
+    };
+    private static string SourceLabel(ServicePointRateView rate, decimal? value)
+        => value is null ? "Mặc định hệ thống" : "Giá riêng dịch vụ";
+    private static string LocalizeError(string message)
+        => message.Contains("not authorized", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("unauthorized", StringComparison.OrdinalIgnoreCase)
+            ? "Không đủ quyền thực hiện thao tác này."
+            : message;
 }

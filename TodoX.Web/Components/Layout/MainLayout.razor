@@ -234,16 +234,28 @@
         PointBalanceChanges.Changed -= HandlePointBalanceChanged;
     }
 
-    private void HandlePointBalanceChanged(Guid customerId) => InvokeAsync(async () =>
-    {
-        if (AuthState.CurrentUser?.CustomerId != customerId)
-        {
-            return;
-        }
+    private void HandlePointBalanceChanged(Guid customerId) => _ = RefreshBalanceAfterChangeAsync(customerId);
 
-        await LoadBalanceAsync();
-        StateHasChanged();
-    });
+    private async Task RefreshBalanceAfterChangeAsync(Guid customerId)
+    {
+        try
+        {
+            if (AuthState.CurrentUser?.CustomerId != customerId)
+            {
+                return;
+            }
+
+            await InvokeAsync(async () =>
+            {
+                await LoadBalanceAsync();
+                StateHasChanged();
+            });
+        }
+        catch
+        {
+            // Balance refresh is auxiliary UI work and must not break the active circuit.
+        }
+    }
 
     private string RoleLabel => AuthState.CurrentUser?.Role switch
     {

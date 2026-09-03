@@ -8,122 +8,134 @@
 
 <MudStack Spacing="3">
     <div>
-        <MudText Typo="Typo.h4" Class="todox-page-title">Points & Wallets</MudText>
+        <MudText Typo="Typo.h4" Class="todox-page-title">Quản lý điểm</MudText>
         <MudText Typo="Typo.body1" Class="todox-page-subtitle">Điểm khả dụng, cấu hình giá và voucher.</MudText>
     </div>
 
-    <MudTabs Rounded="true" Class="pt-4">
+    <MudTabs Rounded="true" Class="pt-4" @bind-ActivePanelIndex="_activeTabIndex">
         @if (!IsCustomer)
         {
-        <MudTabPanel Text="POINT CONFIGURATION">
-            <MudPaper Class="pa-4 mb-4">
-                <MudGrid Spacing="2">
-                    <MudItem xs="12" sm="3">
-                        <MudSelect T="string" @bind-Value="_rateResource" Label="Resource">
-                            <MudSelectItem Value="@("image")">Image</MudSelectItem>
-                            <MudSelectItem Value="@("video")">Video</MudSelectItem>
-                            <MudSelectItem Value="@("voice")">Voice</MudSelectItem>
-                        </MudSelect>
-                    </MudItem>
-                    <MudItem xs="12" sm="3">
-                        <MudSelect T="string" @bind-Value="_rateQuality" Label="Quality">
-                            <MudSelectItem Value="@("standard")">Standard</MudSelectItem>
-                            <MudSelectItem Value="@("premium")">Premium</MudSelectItem>
-                        </MudSelect>
-                    </MudItem>
-                    <MudItem xs="12" sm="3">
-                        <MudNumericField T="decimal" @bind-Value="_rateValue" Label="Rate" Min="0" />
-                    </MudItem>
-                    <MudItem xs="12" sm="3" Class="d-flex align-end">
-                        <MudButton StartIcon="@Icons.Material.Filled.Save" OnClick="SaveRateAsync">Save rate</MudButton>
-                    </MudItem>
-                </MudGrid>
-            </MudPaper>
-            <MudTable Items="_rates" Dense="true" Hover="true">
-                <HeaderContent>
-                    <MudTh>Resource</MudTh>
-                    <MudTh>Quality</MudTh>
-                    <MudTh>Rate</MudTh>
-                    <MudTh>Unit</MudTh>
-                    <MudTh>Source</MudTh>
-                </HeaderContent>
-                <RowTemplate>
-                    <MudTd>@context.ResourceType</MudTd>
-                    <MudTd>@context.QualityTier</MudTd>
-                    <MudTd>@context.Rate.ToString("#,0.##")</MudTd>
-                    <MudTd>@context.Unit</MudTd>
-                    <MudTd>@(context.IsActive ? "active" : "inactive")</MudTd>
-                </RowTemplate>
-            </MudTable>
-        </MudTabPanel>
-        }
-
-        <MudTabPanel Text="CUSTOMER WALLETS">
-            @if (!IsCustomer)
-            {
+            <MudTabPanel Text="Cấu hình điểm">
                 <MudPaper Class="pa-4 mb-4">
                     <MudGrid Spacing="2">
-                        <MudItem xs="12" sm="4">
-                            <MudSelect T="Guid?" @bind-Value="_selectedCustomerId" Label="Customer">
-                                @foreach (var wallet in _wallets)
-                                {
-                                    <MudSelectItem T="Guid?" Value="@wallet.CustomerId">@wallet.CustomerName</MudSelectItem>
-                                }
+                        <MudItem xs="12" sm="3">
+                            <MudSelect T="string" Value="_rateResource" ValueChanged="OnRateResourceChangedAsync" Label="Loại tài nguyên">
+                                <MudSelectItem Value="@("image")">Hình ảnh</MudSelectItem>
+                                <MudSelectItem Value="@("video")">Video</MudSelectItem>
+                                <MudSelectItem Value="@("voice")">Giọng nói</MudSelectItem>
                             </MudSelect>
                         </MudItem>
                         <MudItem xs="12" sm="3">
-                            <MudNumericField T="decimal" @bind-Value="_mutationAmount" Label="Points" Min="1" />
+                            <MudSelect T="string" Value="_rateQuality" ValueChanged="OnRateQualityChangedAsync" Label="Chất lượng">
+                                <MudSelectItem Value="@("standard")">Tiêu chuẩn</MudSelectItem>
+                                <MudSelectItem Value="@("premium")">Cao cấp</MudSelectItem>
+                            </MudSelect>
                         </MudItem>
-                        <MudItem xs="12" sm="5">
-                            <MudTextField @bind-Value="_mutationNote" Label="Note" />
+                        <MudItem xs="12" sm="3">
+                            <MudNumericField T="decimal" @bind-Value="_rateValue" Label="Mức điểm" Min="0" />
                         </MudItem>
-                        <MudItem xs="12">
-                            <MudStack Row="true" Spacing="2" Class="flex-wrap">
-                                <MudButton StartIcon="@Icons.Material.Filled.Add" OnClick="TopUpAsync">Top-up</MudButton>
-                                <MudButton StartIcon="@Icons.Material.Filled.AddCircle" OnClick="AdjustPlusAsync">Adjust plus</MudButton>
-                                <MudButton StartIcon="@Icons.Material.Filled.RemoveCircle" OnClick="AdjustMinusAsync">Adjust minus</MudButton>
-                                <MudButton StartIcon="@Icons.Material.Filled.Replay" OnClick="RefundAsync">Refund</MudButton>
-                            </MudStack>
+                        <MudItem xs="12" sm="3" Class="d-flex align-end">
+                            <MudButton StartIcon="@Icons.Material.Filled.Save" OnClick="SaveRateAsync">Lưu</MudButton>
                         </MudItem>
                     </MudGrid>
                 </MudPaper>
+                <MudTable Items="_rates" Dense="true" Hover="true">
+                    <HeaderContent>
+                        <MudTh>Loại tài nguyên</MudTh>
+                        <MudTh>Chất lượng</MudTh>
+                        <MudTh>Mức điểm</MudTh>
+                        <MudTh>Đơn vị tính</MudTh>
+                        <MudTh>Trạng thái</MudTh>
+                    </HeaderContent>
+                    <RowTemplate>
+                        <MudTd>@ResourceLabel(context.ResourceType)</MudTd>
+                        <MudTd>@QualityLabel(context.QualityTier)</MudTd>
+                        <MudTd>@context.Rate.ToString("#,0.##")</MudTd>
+                        <MudTd>@UnitLabel(context.Unit)</MudTd>
+                        <MudTd>@(context.IsActive ? "Đang hoạt động" : "Tạm ngưng")</MudTd>
+                    </RowTemplate>
+                </MudTable>
+            </MudTabPanel>
+        }
+
+        <MudTabPanel Text="Điểm khách hàng">
+            @if (!IsCustomer)
+            {
+                <MudPaper Class="pa-4 mb-4">
+                    <MudText Typo="Typo.h6">Tìm khách hàng</MudText>
+                    <MudAutocomplete T="WalletView" Value="_selectedWallet" ValueChanged="OnCustomerSelectedAsync"
+                                     SearchFunc="SearchCustomersAsync" ToStringFunc="CustomerDisplay"
+                                     Label="Nhập tên hoặc email..." Variant="Variant.Outlined" Clearable="true"
+                                     ResetValueOnEmptyText="true" CoerceText="true" />
+
+                    @if (_selectedWallet is not null)
+                    {
+                        <MudGrid Spacing="2" Class="mt-2">
+                            <MudItem xs="12" sm="3"><MudText><b>Khách hàng</b><br />@_selectedWallet.CustomerName</MudText></MudItem>
+                            <MudItem xs="12" sm="3"><MudText><b>Email</b><br />@DisplayEmail(_selectedWallet)</MudText></MudItem>
+                            <MudItem xs="12" sm="3"><MudText><b>Điểm khả dụng</b><br />@_selectedWallet.Balance.ToString("#,0")</MudText></MudItem>
+                            <MudItem xs="12" sm="3"><MudText><b>Điểm đang giữ</b><br />@_selectedWallet.LockedBalance.ToString("#,0")</MudText></MudItem>
+                        </MudGrid>
+                        <MudDivider Class="my-4" />
+                        <MudText Typo="Typo.h6">Thao tác điểm</MudText>
+                        <MudGrid Spacing="2">
+                            <MudItem xs="12" sm="3"><MudNumericField T="decimal" @bind-Value="_mutationAmount" Label="Số điểm" Min="1" /></MudItem>
+                            <MudItem xs="12" sm="5"><MudTextField @bind-Value="_mutationNote" Label="Ghi chú" /></MudItem>
+                            <MudItem xs="12">
+                                <MudStack Row="true" Spacing="2" Class="flex-wrap">
+                                    <MudButton StartIcon="@Icons.Material.Filled.Add" OnClick="TopUpAsync">Cộng điểm</MudButton>
+                                    <MudButton StartIcon="@Icons.Material.Filled.AddCircle" OnClick="AdjustPlusAsync">Điều chỉnh tăng</MudButton>
+                                    <MudButton StartIcon="@Icons.Material.Filled.RemoveCircle" OnClick="AdjustMinusAsync">Điều chỉnh giảm</MudButton>
+                                    <MudButton StartIcon="@Icons.Material.Filled.Replay" OnClick="RefundAsync">Hoàn điểm</MudButton>
+                                </MudStack>
+                            </MudItem>
+                        </MudGrid>
+                    }
+                    else
+                    {
+                        <MudText Class="mt-3">Chọn khách hàng để thực hiện thao tác điểm.</MudText>
+                    }
+                </MudPaper>
             }
+
             <MudPaper Class="pa-4 mb-4">
-                <MudText Typo="Typo.h6">Redeem voucher</MudText>
+                <MudText Typo="Typo.h6">Sử dụng voucher</MudText>
                 <MudStack Row="true" Spacing="2" Class="flex-wrap">
-                    <MudTextField @bind-Value="_redeemCode" Label="Voucher code" />
-                    <MudButton StartIcon="@Icons.Material.Filled.Redeem" OnClick="RedeemVoucherAsync">Redeem</MudButton>
+                    <MudTextField @bind-Value="_redeemCode" Label="Mã voucher" />
+                    <MudButton StartIcon="@Icons.Material.Filled.Redeem" OnClick="RedeemVoucherAsync">Sử dụng voucher</MudButton>
                 </MudStack>
             </MudPaper>
             <MudTable Items="_wallets" Dense="true" Hover="true">
                 <HeaderContent>
-                    <MudTh>Customer</MudTh>
-                    <MudTh Style="text-align:right">Usable</MudTh>
-                    <MudTh Style="text-align:right">Locked</MudTh>
-                    <MudTh>Status</MudTh>
+                    <MudTh>Khách hàng</MudTh>
+                    <MudTh>Email</MudTh>
+                    <MudTh Style="text-align:right">Điểm khả dụng</MudTh>
+                    <MudTh Style="text-align:right">Điểm đang giữ</MudTh>
+                    <MudTh>Trạng thái</MudTh>
                 </HeaderContent>
                 <RowTemplate>
                     <MudTd>@context.CustomerName</MudTd>
+                    <MudTd>@DisplayEmail(context)</MudTd>
                     <MudTd Style="text-align:right">@context.Balance.ToString("#,0")</MudTd>
                     <MudTd Style="text-align:right">@context.LockedBalance.ToString("#,0")</MudTd>
-                    <MudTd>@context.Status</MudTd>
+                    <MudTd>@WalletStatusLabel(context.Status)</MudTd>
                 </RowTemplate>
             </MudTable>
         </MudTabPanel>
 
-        <MudTabPanel Text="POINT HISTORY">
+        <MudTabPanel Text="Lịch sử điểm">
             <MudTable Items="_transactions" Dense="true" Hover="true">
                 <HeaderContent>
-                    <MudTh>Time</MudTh>
-                    <MudTh>Customer</MudTh>
-                    <MudTh>Type</MudTh>
-                    <MudTh Style="text-align:right">Amount</MudTh>
-                    <MudTh Style="text-align:right">After</MudTh>
+                    <MudTh>Thời gian</MudTh>
+                    <MudTh>Khách hàng</MudTh>
+                    <MudTh>Loại giao dịch</MudTh>
+                    <MudTh Style="text-align:right">Số điểm</MudTh>
+                    <MudTh Style="text-align:right">Số dư sau giao dịch</MudTh>
                 </HeaderContent>
                 <RowTemplate>
                     <MudTd>@context.CreatedAt.ToString("dd/MM HH:mm")</MudTd>
                     <MudTd>@context.CustomerName</MudTd>
-                    <MudTd>@context.TransactionType</MudTd>
+                    <MudTd>@TransactionTypeLabel(context.TransactionType)</MudTd>
                     <MudTd Style="text-align:right">@context.Amount.ToString("#,0")</MudTd>
                     <MudTd Style="text-align:right">@context.BalanceAfter.ToString("#,0")</MudTd>
                 </RowTemplate>
@@ -132,35 +144,42 @@
 
         @if (!IsCustomer)
         {
-        <MudTabPanel Text="VOUCHERS">
-            <MudGrid>
-                <MudItem xs="12" md="5">
-                    <MudPaper Class="pa-4">
-                        <MudText Typo="Typo.h6">Create voucher</MudText>
-                        <MudTextField @bind-Value="_voucherCode" Label="Code" />
-                        <MudNumericField T="decimal" @bind-Value="_voucherPoints" Label="Points" Min="1" />
-                        <MudNumericField T="int?" @bind-Value="_voucherMaxRedemptions" Label="Max redemptions" />
-                        <MudButton Class="mt-3" StartIcon="@Icons.Material.Filled.Add" OnClick="CreateVoucherAsync">Create</MudButton>
-                    </MudPaper>
-                </MudItem>
-                <MudItem xs="12" md="7">
-                    <MudTable Items="_vouchers" Dense="true" Hover="true">
-                        <HeaderContent>
-                            <MudTh>Code</MudTh>
-                            <MudTh>Points</MudTh>
-                            <MudTh>Status</MudTh>
-                            <MudTh>Redeemed</MudTh>
-                        </HeaderContent>
-                        <RowTemplate>
-                            <MudTd>@context.VoucherCode</MudTd>
-                            <MudTd>@context.PointAmount.ToString("#,0")</MudTd>
-                            <MudTd>@context.Status</MudTd>
-                            <MudTd>@($"{context.RedeemedCount}/{context.MaxRedemptions?.ToString() ?? "∞"}")</MudTd>
-                        </RowTemplate>
-                    </MudTable>
-                </MudItem>
-            </MudGrid>
-        </MudTabPanel>
+            <MudTabPanel Text="Voucher điểm">
+                <MudGrid>
+                    <MudItem xs="12" md="5">
+                        <MudPaper Class="pa-4">
+                            <MudText Typo="Typo.h6">Tạo voucher điểm</MudText>
+                            <MudTextField @bind-Value="_voucherCode" Label="Mã voucher" />
+                            <MudNumericField T="decimal" @bind-Value="_voucherPoints" Label="Số điểm" Min="1" />
+                            <MudNumericField T="int?" @bind-Value="_voucherMaxRedemptions" Label="Số lượt sử dụng tối đa" />
+                            <MudButton Class="mt-3" StartIcon="@Icons.Material.Filled.Add" OnClick="CreateVoucherAsync">Tạo voucher</MudButton>
+                        </MudPaper>
+                    </MudItem>
+                    <MudItem xs="12" md="7">
+                        <MudPaper Class="pa-4">
+                            <MudText Typo="Typo.h6">Danh sách voucher</MudText>
+                            <MudTable Items="_vouchers" Dense="true" Hover="true">
+                                <HeaderContent>
+                                    <MudTh>Mã voucher</MudTh>
+                                    <MudTh>Số điểm</MudTh>
+                                    <MudTh>Trạng thái</MudTh>
+                                    <MudTh>Đã sử dụng</MudTh>
+                                    <MudTh>Số lượt tối đa</MudTh>
+                                    <MudTh>Ngày tạo</MudTh>
+                                </HeaderContent>
+                                <RowTemplate>
+                                    <MudTd>@context.VoucherCode</MudTd>
+                                    <MudTd>@context.PointAmount.ToString("#,0")</MudTd>
+                                    <MudTd>@VoucherStatusLabel(context.Status)</MudTd>
+                                    <MudTd>@context.RedeemedCount</MudTd>
+                                    <MudTd>@(context.MaxRedemptions?.ToString() ?? "Không giới hạn")</MudTd>
+                                    <MudTd>@(context.ValidFrom?.ToString("dd/MM/yyyy") ?? "-")</MudTd>
+                                </RowTemplate>
+                            </MudTable>
+                        </MudPaper>
+                    </MudItem>
+                </MudGrid>
+            </MudTabPanel>
         }
     </MudTabs>
 </MudStack>
@@ -170,12 +189,13 @@
     private IReadOnlyList<WalletView> _wallets = Array.Empty<WalletView>();
     private IReadOnlyList<TransactionView> _transactions = Array.Empty<TransactionView>();
     private IReadOnlyList<PointVoucherView> _vouchers = Array.Empty<PointVoucherView>();
+    private WalletView? _selectedWallet;
+    private int _activeTabIndex;
     private string _voucherCode = string.Empty;
     private string _redeemCode = string.Empty;
     private string _rateResource = "image";
     private string _rateQuality = "standard";
-    private decimal _rateValue = 3000;
-    private Guid? _selectedCustomerId;
+    private decimal _rateValue;
     private decimal _mutationAmount = 1000;
     private string _mutationNote = string.Empty;
     private decimal _voucherPoints = 1000;
@@ -187,52 +207,107 @@
 
     private async Task ReloadAsync()
     {
-        var cid = AuthState.CurrentUser?.IsCustomer == true ? AuthState.CurrentUser.CustomerId : null;
+        var cid = IsCustomer ? AuthState.CurrentUser?.CustomerId : null;
         if (AuthState.CurrentUser is null) return;
+
         _rates = IsCustomer ? Array.Empty<PointRateConfigView>() : await Billing.GetPointRatesAsync(AuthState.CurrentUser);
         _wallets = await Billing.GetWalletsAsync(cid, AuthState.CurrentUser);
         _transactions = await Billing.GetRecentTransactionsAsync(cid, AuthState.CurrentUser);
         _vouchers = IsCustomer ? Array.Empty<PointVoucherView>() : await Billing.GetPointVouchersAsync(AuthState.CurrentUser);
-        _selectedCustomerId ??= _wallets.FirstOrDefault()?.CustomerId;
+
+        if (_selectedWallet is not null)
+        {
+            _selectedWallet = _wallets.FirstOrDefault(x => x.CustomerId == _selectedWallet.CustomerId);
+        }
+        else if (IsCustomer)
+        {
+            _selectedWallet = _wallets.FirstOrDefault();
+        }
+
+        SyncSelectedGlobalRate();
     }
+
+    private Task OnRateResourceChangedAsync(string value)
+    {
+        _rateResource = value;
+        SyncSelectedGlobalRate();
+        return Task.CompletedTask;
+    }
+
+    private Task OnRateQualityChangedAsync(string value)
+    {
+        _rateQuality = value;
+        SyncSelectedGlobalRate();
+        return Task.CompletedTask;
+    }
+
+    private void SyncSelectedGlobalRate()
+    {
+        var row = _rates.FirstOrDefault(x =>
+            string.Equals(x.ResourceType, _rateResource, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(x.QualityTier, _rateQuality, StringComparison.OrdinalIgnoreCase));
+        if (row is not null)
+        {
+            _rateValue = row.Rate;
+        }
+    }
+
+    private async Task<IEnumerable<WalletView>> SearchCustomersAsync(string value, CancellationToken cancellationToken)
+    {
+        await Task.Yield();
+        if (cancellationToken.IsCancellationRequested) return Array.Empty<WalletView>();
+        var query = value?.Trim() ?? string.Empty;
+        return _wallets
+            .Where(x => string.IsNullOrWhiteSpace(query)
+                || x.CustomerName.Contains(query, StringComparison.OrdinalIgnoreCase)
+                || x.Email.Contains(query, StringComparison.OrdinalIgnoreCase))
+            .Take(30);
+    }
+
+    private Task OnCustomerSelectedAsync(WalletView? wallet)
+    {
+        _selectedWallet = wallet;
+        return Task.CompletedTask;
+    }
+
+    private static string CustomerDisplay(WalletView? wallet)
+        => wallet is null ? string.Empty : $"{wallet.CustomerName} — {DisplayEmail(wallet)}";
 
     private async Task SaveRateAsync()
     {
         try
         {
             await Billing.UpsertPointRateAsync(_rateResource, _rateQuality, _rateValue, AuthState.CurrentUser!);
-            Snackbar.Add("Point rate saved.", Severity.Success);
+            Snackbar.Add("Đã lưu mức điểm.", Severity.Success);
             await ReloadAsync();
         }
         catch (Exception ex)
         {
-            Snackbar.Add(ex.Message, Severity.Error);
+            Snackbar.Add(LocalizeError(ex.Message), Severity.Error);
         }
     }
 
     private async Task MutateAsync(string kind)
     {
-        if (_selectedCustomerId is not Guid customerId)
+        if (_selectedWallet is not { } wallet)
         {
-            Snackbar.Add("Select a customer wallet.", Severity.Warning);
+            Snackbar.Add("Chưa chọn khách hàng.", Severity.Warning);
             return;
         }
 
-        var actor = AuthState.CurrentUser?.UserId;
         var result = kind switch
         {
-            "topup" => await WalletService.TopUpAsync(customerId, _mutationAmount, "TOPUP", _mutationNote, AuthState.CurrentUser!),
-            "adjust_plus" => await WalletService.AdjustPlusAsync(customerId, _mutationAmount, "ADJUST_PLUS", _mutationNote, AuthState.CurrentUser!),
-            "adjust_minus" => await WalletService.AdjustMinusAsync(customerId, _mutationAmount, "ADJUST_MINUS", _mutationNote, AuthState.CurrentUser!),
-            "refund" => await WalletService.RefundAsync(customerId, _mutationAmount, "REFUND", _mutationNote, AuthState.CurrentUser!),
+            "topup" => await WalletService.TopUpAsync(wallet.CustomerId, _mutationAmount, "TOPUP", _mutationNote, AuthState.CurrentUser!),
+            "adjust_plus" => await WalletService.AdjustPlusAsync(wallet.CustomerId, _mutationAmount, "ADJUST_PLUS", _mutationNote, AuthState.CurrentUser!),
+            "adjust_minus" => await WalletService.AdjustMinusAsync(wallet.CustomerId, _mutationAmount, "ADJUST_MINUS", _mutationNote, AuthState.CurrentUser!),
+            "refund" => await WalletService.RefundAsync(wallet.CustomerId, _mutationAmount, "REFUND", _mutationNote, AuthState.CurrentUser!),
             _ => new WalletMutationResult(false, null, 0, 0, "Unsupported mutation.")
         };
 
-        Snackbar.Add(result.Error ?? $"Balance updated: {result.BalanceBefore:#,0} -> {result.BalanceAfter:#,0}", result.Ok ? Severity.Success : Severity.Error);
-        if (result.Ok)
-        {
-            await ReloadAsync();
-        }
+        Snackbar.Add(result.Error is null
+            ? $"Đã cập nhật điểm: {result.BalanceBefore:#,0} → {result.BalanceAfter:#,0}."
+            : LocalizeError(result.Error), result.Ok ? Severity.Success : Severity.Error);
+        if (result.Ok) await ReloadAsync();
     }
 
     private Task TopUpAsync() => MutateAsync("topup");
@@ -242,35 +317,78 @@
 
     private async Task CreateVoucherAsync()
     {
-        var result = await WalletService.CreateVoucherAsync(
-            _voucherCode,
-            _voucherPoints,
-            _voucherMaxRedemptions,
-            null,
-            null,
-            "Created from wallet admin page",
-            AuthState.CurrentUser!);
-
-        Snackbar.Add(result.Error ?? $"Voucher {result.VoucherCode} created.", result.Ok ? Severity.Success : Severity.Error);
-        if (result.Ok)
-        {
-            await ReloadAsync();
-        }
+        var result = await WalletService.CreateVoucherAsync(_voucherCode, _voucherPoints, _voucherMaxRedemptions,
+            null, null, "Created from wallet admin page", AuthState.CurrentUser!);
+        Snackbar.Add(result.Error is null ? "Đã tạo voucher điểm." : LocalizeError(result.Error),
+            result.Ok ? Severity.Success : Severity.Error);
+        if (result.Ok) await ReloadAsync();
     }
 
     private async Task RedeemVoucherAsync()
     {
         if (AuthState.CurrentUser?.CustomerId is not Guid customerId)
         {
-            Snackbar.Add("Customer account is required.", Severity.Warning);
+            Snackbar.Add("Tài khoản khách hàng là bắt buộc.", Severity.Warning);
             return;
         }
 
-        var result = await WalletService.RedeemVoucherAsync(customerId, _redeemCode, AuthState.CurrentUser!);
-        Snackbar.Add(result.Error ?? $"Voucher redeemed. New balance: {result.BalanceAfter:#,0}", result.Ok ? Severity.Success : Severity.Error);
-        if (result.Ok)
-        {
-            await ReloadAsync();
-        }
+        var result = await WalletService.RedeemVoucherAsync(customerId, _redeemCode, AuthState.CurrentUser);
+        Snackbar.Add(result.Error is null ? $"Đã sử dụng voucher. Số dư mới: {result.BalanceAfter:#,0}." : LocalizeError(result.Error),
+            result.Ok ? Severity.Success : Severity.Error);
+        if (result.Ok) await ReloadAsync();
     }
+
+    private static string ResourceLabel(string value) => value.ToLowerInvariant() switch
+    {
+        "image" => "Hình ảnh",
+        "video" => "Video",
+        "voice" => "Giọng nói",
+        _ => value
+    };
+
+    private static string QualityLabel(string value) => value.ToLowerInvariant() switch
+    {
+        "standard" => "Tiêu chuẩn",
+        "premium" => "Cao cấp",
+        _ => value
+    };
+
+    private static string UnitLabel(string value) => value.ToLowerInvariant() switch
+    {
+        "per_render" => "điểm / lượt",
+        "per_second" => "điểm / giây",
+        _ => value
+    };
+
+    private static string TransactionTypeLabel(string value) => value.ToLowerInvariant() switch
+    {
+        "topup" => "Cộng điểm",
+        "debit" => "Trừ điểm",
+        "charge" => "Thanh toán dịch vụ",
+        "refund" => "Hoàn điểm",
+        "voucher" => "Nhận voucher",
+        "adjust_plus" => "Điều chỉnh tăng",
+        "adjust_minus" => "Điều chỉnh giảm",
+        _ => value
+    };
+
+    private static string WalletStatusLabel(string value) => value.ToLowerInvariant() == "active" ? "Đang hoạt động" : value;
+    private static string VoucherStatusLabel(string value) => value.ToLowerInvariant() == "active" ? "Đang hoạt động" : value;
+    private static string DisplayEmail(WalletView wallet) => string.IsNullOrWhiteSpace(wallet.Email) ? "Chưa có email" : wallet.Email;
+
+    private static string LocalizeError(string message) => message switch
+    {
+        "Voucher code is required." => "Vui lòng nhập mã voucher.",
+        "Voucher points must be greater than zero." => "Số điểm voucher phải lớn hơn 0.",
+        "Voucher code already exists." => "Mã voucher đã tồn tại.",
+        "Invalid voucher." => "Voucher không hợp lệ hoặc đã hết hiệu lực.",
+        "Voucher is not redeemable." => "Voucher không hợp lệ hoặc đã hết hiệu lực.",
+        "Voucher was already redeemed." => "Voucher đã được sử dụng trước đó.",
+        "Insufficient usable points." => "Không đủ điểm khả dụng.",
+        "Point amount must be greater than zero." => "Số điểm phải lớn hơn 0.",
+        "Unsupported mutation." => "Thao tác không được hỗ trợ.",
+        var value when value.Contains("not authorized", StringComparison.OrdinalIgnoreCase)
+            || value.Contains("unauthorized", StringComparison.OrdinalIgnoreCase) => "Không đủ quyền thực hiện thao tác này.",
+        _ => message
+    };
 }
