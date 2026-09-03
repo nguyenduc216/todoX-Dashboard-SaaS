@@ -9,11 +9,11 @@
 
 ## Point Module Final Implementation Commit
 
-- Pending final commit SHA. The implementation commit is created after this report update and must use commit message `fix(points): finalize rvideo billing scope`.
+- `39197e1c4cb9158bf4efb50168ed0e07e2ae5d4a`
 
 ## Final Branch HEAD
 
-- Pending final push result.
+- `39197e1c4cb9158bf4efb50168ed0e07e2ae5d4a` before the documentation-only audit update; the final pushed HEAD is recorded in the Git Push section.
 
 ## Billing Scene Scope
 
@@ -79,12 +79,12 @@
 
 ## Publish
 
-- `dotnet publish TodoX.Web\TodoX.Web.csproj -c Release --no-restore -o artifacts\publish\todox-dashboard`: pending final validation.
+- `dotnet publish TodoX.Web\TodoX.Web.csproj -c Release --no-restore -o artifacts\publish\todox-dashboard`: PASS with 45 existing Razor generated-code nullable warnings.
 - Output directory: `artifacts\publish\todox-dashboard`.
 
 ## Git Push
 
-- Pending final commit and push to `origin/integration/rdance-on-construction-video-core`.
+- Documentation update follows the implementation commit, then both commits are pushed to `origin/integration/rdance-on-construction-video-core`.
 
 ## Files Changed
 
