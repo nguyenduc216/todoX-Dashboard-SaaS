@@ -1,5 +1,13 @@
--- BEFORE / AFTER verification for point module
+-- Point Module production verification
+-- READ-ONLY: this script contains SELECT statements only.
+-- Run after:
+--   1) 20260902_point_module.sql
+--   2) 20260902_point_module_permissions.sql
+--   3) 20260902_rdance_reference_submit_refund.sql
 
+-- ============================================================
+-- A. PERMISSIONS
+-- ============================================================
 WITH required(module, action) AS (
     VALUES
         ('point_config','view'), ('point_config','manage'), ('wallet','view_all'),
@@ -64,6 +72,9 @@ SELECT r.code AS role_code, required.code AS missing_permission
    )
  ORDER BY r.code, missing_permission;
 
+-- ============================================================
+-- B. POINT RATES / SERVICE OVERRIDES
+-- ============================================================
 SELECT tenant_id, resource_type, quality_tier, rate, unit, is_active
   FROM billing.point_rate_config
  ORDER BY tenant_id, resource_type, quality_tier;
@@ -72,10 +83,11 @@ SELECT tenant_id, service_id, resource_type, quality_tier, rate, unit, is_active
   FROM billing.service_point_rate_override
  ORDER BY tenant_id, service_id, resource_type, quality_tier;
 
-SELECT o.tenant_id,
+-- Global rows must still be visible when no service override exists.
+SELECT g.tenant_id,
        o.service_id,
-       o.resource_type,
-       o.quality_tier,
+       g.resource_type,
+       g.quality_tier,
        o.rate AS override_rate,
        g.rate AS global_rate,
        COALESCE(o.rate, g.rate) AS effective_rate,
@@ -86,13 +98,20 @@ SELECT o.tenant_id,
     ON o.tenant_id = g.tenant_id
    AND lower(o.resource_type) = lower(g.resource_type)
    AND lower(o.quality_tier) = lower(g.quality_tier)
+   AND o.is_active = true
  WHERE g.is_active = true
  ORDER BY g.tenant_id, g.resource_type, g.quality_tier, o.service_id;
 
+-- ============================================================
+-- C. WALLET / LEDGER
+-- ============================================================
+-- WalletService treats balance as the usable customer balance.
+-- locked_balance is shown separately for audit; do not subtract it again here.
 SELECT w.customer_id,
-       w.balance AS usable_balance,
-       w.locked_balance AS locked_balance,
-       w.balance - COALESCE(w.locked_balance, 0) AS available_balance
+       w.balance AS available_balance,
+       w.locked_balance,
+       w.created_at,
+       w.updated_at
   FROM billing.token_wallets w
  ORDER BY w.created_at DESC
  LIMIT 50;
@@ -113,6 +132,27 @@ SELECT *
  ORDER BY created_at DESC
  LIMIT 25;
 
+SELECT w.customer_id, w.balance, w.locked_balance, t.id AS transaction_id,
+       t.transaction_type, t.amount, t.created_at
+  FROM billing.token_wallets w
+  LEFT JOIN billing.token_transactions t ON t.wallet_id = w.id
+ ORDER BY w.customer_id, t.created_at DESC
+ LIMIT 100;
+
+-- Transaction totals are audit totals only; wallet.balance remains authoritative current balance.
+SELECT w.customer_id,
+       MAX(w.balance) AS current_balance,
+       MAX(w.locked_balance) AS current_locked,
+       COALESCE(SUM(t.amount) FILTER (WHERE t.transaction_type IN ('debit', 'charge')), 0) AS debit_amount_total,
+       COALESCE(SUM(t.amount) FILTER (WHERE t.transaction_type IN ('credit', 'topup', 'refund', 'voucher', 'adjust_plus')), 0) AS credit_amount_total
+  FROM billing.token_wallets w
+  LEFT JOIN billing.token_transactions t ON t.wallet_id = w.id
+ GROUP BY w.customer_id
+ ORDER BY w.customer_id;
+
+-- ============================================================
+-- D. VOUCHERS
+-- ============================================================
 SELECT *
   FROM billing.point_vouchers
  ORDER BY created_at DESC;
@@ -121,36 +161,17 @@ SELECT *
   FROM billing.point_voucher_redemptions
  ORDER BY redeemed_at DESC;
 
-SELECT id, point_cost_estimate, point_cost_charged, point_status, input_json, created_at
+SELECT voucher_id, customer_id, points, transaction_id, redeemed_at
+  FROM billing.point_voucher_redemptions
+ ORDER BY redeemed_at DESC
+ LIMIT 50;
+
+-- ============================================================
+-- E. GENERAL RENDER JOB POINT SNAPSHOTS
+-- ============================================================
+SELECT id, job_type, customer_id, point_cost_estimate, point_cost_charged, point_status, input_json, created_at
   FROM render.render_jobs
  WHERE point_cost_estimate > 0
- ORDER BY created_at DESC
- LIMIT 25;
-
-SELECT id AS rvideo_parent_job_id,
-       point_cost_estimate,
-       point_cost_charged,
-       point_status,
-       input_json->'usagePlan' AS usage_plan,
-       (input_json->'usagePlan'->>'videoSeconds')::int AS total_video_seconds
-  FROM render.render_jobs
- WHERE job_type IN ('render_video_batch', 'rvideo')
- ORDER BY created_at DESC
- LIMIT 25;
-
-SELECT job_id, clip_index, start_progress_percent, end_progress_percent, duration_seconds
-  FROM timelapse.timelapse_video_clips
- ORDER BY job_id, clip_index;
-
-SELECT job_id, SUM(duration_seconds) AS timelapse_total_video_seconds
-  FROM timelapse.timelapse_video_clips
- GROUP BY job_id
- ORDER BY job_id;
-
-SELECT id AS rdance_job_id, point_cost_estimate, point_cost_charged, point_status,
-       input_json->'usagePlan' AS usage_plan
-  FROM render.render_jobs
- WHERE job_type = 'dance_sell'
  ORDER BY created_at DESC
  LIMIT 25;
 
@@ -160,59 +181,169 @@ SELECT id, error_code, point_status, point_cost_estimate
  ORDER BY updated_at DESC
  LIMIT 25;
 
-SELECT reference_type, reference_id, COUNT(*) AS charge_count
-  FROM billing.token_transactions
- WHERE transaction_type IN ('debit', 'charge')
- GROUP BY reference_type, reference_id
- HAVING COUNT(*) > 1;
+-- ============================================================
+-- F. rVIDEO PARENT BILLING
+-- ============================================================
+SELECT id AS rvideo_parent_job_id,
+       customer_id,
+       input_json #>> '{billingOperationId}' AS billing_operation_id,
+       input_json #>> '{parentRenderJobId}' AS parent_render_job_id,
+       point_cost_estimate,
+       point_cost_charged,
+       point_status,
+       input_json #>> '{usagePlan,imageCount}' AS image_count,
+       input_json #>> '{usagePlan,videoSeconds}' AS video_seconds,
+       input_json #>> '{usagePlan,voiceCount}' AS voice_count,
+       input_json #>> '{usagePlan,totalPoints}' AS total_points,
+       input_json->'usagePlan' AS usage_plan,
+       created_at
+  FROM render.render_jobs
+ WHERE job_type IN ('render_video_batch', 'rvideo')
+ ORDER BY created_at DESC
+ LIMIT 50;
 
-SELECT reference_type, reference_id, COUNT(*) AS rerender_charge_count
+-- rVideo project events are stored in video_render.video_project_events,
+-- not render.render_job_events.
+SELECT project_id,
+       data_json->>'billingOperationId' AS billing_operation_id,
+       data_json->>'parentRenderJobId' AS parent_render_job_id,
+       data_json->>'projectId' AS project_id_from_json,
+       data_json->>'serviceId' AS service_id,
+       data_json->>'chargeReferenceId' AS charge_reference_id,
+       data_json->>'imageCount' AS image_count,
+       data_json->>'videoSeconds' AS video_seconds,
+       data_json->>'voiceCount' AS voice_count,
+       data_json->>'totalPoints' AS total_points,
+       created_at
+  FROM video_render.video_project_events
+ WHERE event_type = 'RVIDEO_PARENT_BILLED'
+ ORDER BY created_at DESC
+ LIMIT 50;
+
+SELECT reference_type, reference_id, COUNT(*) AS parent_charge_count,
+       SUM(amount) AS charged_points,
+       MAX(created_at) AS last_charge_at
   FROM billing.token_transactions
  WHERE transaction_type IN ('debit', 'charge')
-   AND reference_type ILIKE '%rerender%'
+   AND reference_type = 'rvideo_parent_job'
  GROUP BY reference_type, reference_id
- HAVING COUNT(*) > 1;
+ HAVING COUNT(*) > 1
+ ORDER BY last_charge_at DESC;
+
+-- ============================================================
+-- G. TIMELAPSE
+-- ============================================================
+SELECT job_id, clip_index, start_progress_percent, end_progress_percent, duration_seconds
+  FROM timelapse.timelapse_video_clips
+ ORDER BY job_id, clip_index;
+
+SELECT job_id, SUM(duration_seconds) AS timelapse_total_video_seconds
+  FROM timelapse.timelapse_video_clips
+ GROUP BY job_id
+ ORDER BY job_id;
+
+-- ============================================================
+-- H. rDANCE
+-- ============================================================
+SELECT id AS rdance_parent_job_id,
+       point_cost_estimate,
+       point_cost_charged,
+       point_status,
+       input_json #>> '{usagePlan,serviceId}' AS service_id,
+       input_json #>> '{usagePlan,imageCount}' AS image_count,
+       input_json #>> '{usagePlan,videoSeconds}' AS video_seconds,
+       input_json #>> '{usagePlan,totalPoints}' AS total_points,
+       input_json->'usagePlan' AS usage_plan,
+       created_at
+  FROM render.render_jobs
+ WHERE job_type = 'dance_sell'
+ ORDER BY created_at DESC
+ LIMIT 50;
 
 SELECT reference_type, reference_id, COUNT(*) AS rdance_reference_charge_count,
-       SUM(amount) AS charged_points
+       SUM(amount) AS charged_points,
+       MAX(created_at) AS last_charge_at
   FROM billing.token_transactions
  WHERE transaction_type IN ('debit','charge')
    AND reference_type = 'dance_sell_reference_image'
  GROUP BY reference_type, reference_id
- HAVING COUNT(*) > 1;
+ HAVING COUNT(*) > 1
+ ORDER BY last_charge_at DESC;
 
 SELECT t.reference_type, t.reference_id, t.amount AS remaining_charge,
        j.input_json #>> '{usagePlan,totalPoints}' AS logical_total,
-       j.input_json #>> '{usagePlan,imageCount}' AS logical_image_count
+       j.input_json #>> '{usagePlan,imageCount}' AS logical_image_count,
+       t.created_at
   FROM billing.token_transactions t
   JOIN render.render_jobs j ON j.id = t.reference_id
  WHERE t.reference_type = 'dance_sell_job'
  ORDER BY t.created_at DESC
  LIMIT 50;
 
-SELECT reference_type, reference_id, COUNT(*) AS system_retry_charge_count
+-- ============================================================
+-- I. DUPLICATE / RERENDER / SYSTEM RETRY CHECKS
+-- Empty result sets are expected for duplicate checks.
+-- ============================================================
+SELECT reference_type, reference_id, COUNT(*) AS charge_count,
+       SUM(amount) AS charged_points,
+       MAX(created_at) AS last_charge_at
   FROM billing.token_transactions
  WHERE transaction_type IN ('debit', 'charge')
-   AND reference_type ILIKE '%retry%'
  GROUP BY reference_type, reference_id
- HAVING COUNT(*) > 1;
+ HAVING COUNT(*) > 1
+ ORDER BY last_charge_at DESC;
 
-SELECT w.customer_id, w.balance, w.locked_balance, t.id AS transaction_id,
-       t.transaction_type, t.amount, t.created_at
-  FROM billing.token_wallets w
-  LEFT JOIN billing.token_transactions t ON t.wallet_id = w.id
- ORDER BY w.customer_id, t.created_at DESC
+-- Initial parent charges must not be duplicated by child jobs.
+SELECT reference_type,
+       reference_id,
+       COUNT(*) AS charge_count,
+       SUM(amount) AS charged_points,
+       MAX(created_at) AS last_charge_at
+  FROM billing.token_transactions
+ WHERE transaction_type IN ('debit', 'charge')
+   AND reference_type IN ('rvideo_parent_job', 'dance_sell_job', 'timelapse_job')
+ GROUP BY reference_type, reference_id
+ HAVING COUNT(*) > 1
+ ORDER BY last_charge_at DESC;
+
+-- Explicit USER_RERENDER transactions.
+SELECT id,
+       amount,
+       reference_type,
+       reference_id,
+       description,
+       created_at
+  FROM billing.token_transactions
+ WHERE reference_type ILIKE '%user_rerender%'
+ ORDER BY created_at DESC
  LIMIT 100;
 
-SELECT w.customer_id,
-       SUM(w.balance) AS total_balance,
-       SUM(w.locked_balance) AS total_locked,
-       SUM(t.amount) FILTER (WHERE t.transaction_type IN ('debit', 'charge')) AS debits,
-       SUM(t.amount) FILTER (WHERE t.transaction_type IN ('credit', 'topup', 'refund', 'voucher', 'adjust_plus')) AS credits
-  FROM billing.token_wallets w
-  LEFT JOIN billing.token_transactions t ON t.wallet_id = w.id
- GROUP BY w.customer_id
- ORDER BY w.customer_id;
+-- Duplicate debit for the same rerender operation should return no rows.
+SELECT reference_type,
+       reference_id,
+       COUNT(*) AS duplicate_count,
+       SUM(amount) AS total_points,
+       MAX(created_at) AS last_charge_at
+  FROM billing.token_transactions
+ WHERE reference_type ILIKE '%user_rerender%'
+   AND transaction_type IN ('debit', 'charge')
+ GROUP BY reference_type, reference_id
+ HAVING COUNT(*) > 1
+ ORDER BY last_charge_at DESC;
+
+-- SYSTEM_RETRY should not produce customer debit rows.
+-- This query intentionally shows any retry-related debit/charge as an exception candidate.
+SELECT t.reference_type,
+       t.reference_id,
+       COUNT(*) AS retry_debit_count,
+       SUM(t.amount) AS retry_points,
+       MAX(t.created_at) AS last_retry_charge_at
+  FROM billing.token_transactions t
+ WHERE t.reference_type ILIKE '%retry%'
+   AND t.transaction_type IN ('debit', 'charge')
+ GROUP BY t.reference_type, t.reference_id
+ HAVING COUNT(*) > 0
+ ORDER BY last_retry_charge_at DESC;
 
 SELECT COUNT(*) AS duplicate_charges
   FROM (
@@ -240,117 +371,11 @@ SELECT COUNT(*) AS duplicate_refunds
       HAVING COUNT(*) > 1
   ) x;
 
+-- ============================================================
+-- J. LEGACY ROUTINE AUDIT
+-- ============================================================
 SELECT routine_schema, routine_name
   FROM information_schema.routines
  WHERE routine_schema IN ('billing', 'render', 'catalog')
    AND routine_name ILIKE '%legacy%'
  ORDER BY routine_schema, routine_name;
-
--- rVideo parent image aggregation and persisted pricing snapshot.
-SELECT id AS rvideo_parent_job_id,
-       customer_id,
-       input_json #>> '{billingOperationId}' AS billing_operation_id,
-       input_json #>> '{parentRenderJobId}' AS parent_render_job_id,
-       point_cost_estimate,
-       point_cost_charged,
-       point_status,
-       input_json #>> '{usagePlan,imageCount}' AS image_count,
-       input_json #>> '{usagePlan,videoSeconds}' AS video_seconds,
-       input_json #>> '{usagePlan,voiceCount}' AS voice_count,
-       input_json #>> '{usagePlan,totalPoints}' AS total_points
-  FROM render.render_jobs
- WHERE job_type IN ('render_video_batch', 'rvideo')
- ORDER BY created_at DESC
- LIMIT 50;
-
-SELECT
-    (data_json->>'billingOperationId') AS billing_operation_id,
-    (data_json->>'parentRenderJobId') AS parent_render_job_id,
-    (data_json->>'projectId') AS project_id,
-    (data_json->>'serviceId') AS service_id,
-    (data_json->>'chargeReferenceId') AS charge_reference_id,
-    (data_json->>'totalPoints') AS total_points
-  FROM render.render_job_events
- WHERE event_type = 'RVIDEO_PARENT_BILLED'
- ORDER BY created_at DESC
- LIMIT 50;
-
-SELECT reference_type, reference_id, COUNT(*) AS parent_charge_count
-  FROM billing.token_transactions
- WHERE transaction_type IN ('debit', 'charge')
-   AND reference_type = 'rvideo_parent_job'
- GROUP BY reference_type, reference_id
- HAVING COUNT(*) > 1;
-
-SELECT voucher_id, customer_id, points, transaction_id, redeemed_at
-  FROM billing.point_voucher_redemptions
- ORDER BY redeemed_at DESC
- LIMIT 50;
-
-SELECT w.customer_id, w.balance, SUM(t.amount) AS ledger_balance
-  FROM billing.token_wallets w
-  LEFT JOIN billing.token_transactions t ON t.wallet_id = w.id
- GROUP BY w.customer_id, w.balance
- ORDER BY w.customer_id
- LIMIT 50;
-
--- rDance service and image usage recorded in the render-job input.
-SELECT id AS rdance_parent_job_id,
-       point_cost_estimate,
-       point_cost_charged,
-       point_status,
-       input_json #>> '{usagePlan,serviceId}' AS service_id,
-       input_json #>> '{usagePlan,imageCount}' AS image_count,
-       input_json #>> '{usagePlan,videoSeconds}' AS video_seconds,
-       input_json #>> '{usagePlan,totalPoints}' AS total_points
-  FROM render.render_jobs
- WHERE job_type = 'dance_sell'
- ORDER BY created_at DESC
- LIMIT 50;
-
--- Initial parent charges must not be duplicated by child image/video jobs.
-SELECT reference_type,
-       reference_id,
-       COUNT(*) AS charge_count,
-       SUM(amount) AS charged_points
-  FROM billing.token_transactions
- WHERE transaction_type IN ('debit', 'charge')
-   AND reference_type IN ('rvideo_parent_job', 'dance_sell_job', 'timelapse_job')
- GROUP BY reference_type, reference_id
- HAVING COUNT(*) > 1
- ORDER BY charge_count DESC;
-
--- Explicit USER_RERENDER charges and duplicate deterministic references.
-SELECT id,
-       amount,
-       reference_type,
-       reference_id,
-       description,
-       created_at
-  FROM billing.token_transactions
- WHERE reference_type ILIKE '%user_rerender%'
- ORDER BY created_at DESC
- LIMIT 100;
-
-SELECT reference_type,
-       reference_id,
-       COUNT(*) AS duplicate_count,
-       SUM(amount) AS total_points
-  FROM billing.token_transactions
- WHERE reference_type ILIKE '%user_rerender%'
-   AND transaction_type IN ('debit', 'charge')
- GROUP BY reference_type, reference_id
- HAVING COUNT(*) > 1
- ORDER BY duplicate_count DESC;
-
--- SYSTEM_RETRY should not produce an additional customer debit.
-SELECT t.reference_type,
-       t.reference_id,
-       COUNT(*) AS retry_debit_count,
-       SUM(t.amount) AS retry_points
-  FROM billing.token_transactions t
- WHERE t.reference_type ILIKE '%retry%'
-   AND t.transaction_type IN ('debit', 'charge')
- GROUP BY t.reference_type, t.reference_id
- HAVING SUM(t.amount) <> 0 OR COUNT(*) > 0
- ORDER BY t.created_at DESC;
