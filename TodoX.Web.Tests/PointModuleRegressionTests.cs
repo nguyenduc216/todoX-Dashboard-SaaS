@@ -57,6 +57,42 @@ public sealed class PointModuleRegressionTests
     }
 
     [Fact]
+    public void WalletMutationsAndCustomerVoucherUxAreGuarded()
+    {
+        var page = File.ReadAllText(Path.Combine(RepoRoot, "TodoX.Web", "Components", "Pages", "Wallets.razor"));
+        var layout = File.ReadAllText(Path.Combine(RepoRoot, "TodoX.Web", "Components", "Layout", "MainLayout.razor"));
+        var service = File.ReadAllText(Path.Combine(RepoRoot, "TodoX.Web", "Services", "WalletService.cs"));
+
+        Assert.Contains("Disabled=\"@_mutationBusy\"", page, StringComparison.Ordinal);
+        Assert.Contains("Disabled=\"@_redeemBusy\"", page, StringComparison.Ordinal);
+        Assert.Contains("Logger.LogError(ex, \"Wallet mutation {Kind} failed for customer {CustomerId}.\", kind, wallet.CustomerId)", page, StringComparison.Ordinal);
+        Assert.Contains("Logger.LogError(ex, \"Voucher redemption failed for customer {CustomerId}.\", customerId)", page, StringComparison.Ordinal);
+        Assert.Contains("Point amount must be greater than zero.", page, StringComparison.Ordinal);
+        Assert.Contains("MutationSuccessMessage", page, StringComparison.Ordinal);
+        Assert.Contains("\"topup\" =>", page, StringComparison.Ordinal);
+        Assert.Contains("\"adjust_plus\" =>", page, StringComparison.Ordinal);
+        Assert.Contains("\"adjust_minus\" =>", page, StringComparison.Ordinal);
+        Assert.Contains("\"refund\" =>", page, StringComparison.Ordinal);
+        Assert.Contains("Điểm của tôi", page, StringComparison.Ordinal);
+        Assert.Contains("Nạp voucher", page, StringComparison.Ordinal);
+        Assert.Contains("Nhận điểm", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("SearchCustomersAsync", page[..page.IndexOf("else", StringComparison.Ordinal)], StringComparison.Ordinal);
+        Assert.Contains("Title = \"Điểm của tôi\"", layout, StringComparison.Ordinal);
+        Assert.Contains("Href = \"/wallets\"", layout, StringComparison.Ordinal);
+        Assert.Contains("RequireOwnCustomer(actor, customerId)", service, StringComparison.Ordinal);
+        Assert.Contains("transactionType", service, StringComparison.Ordinal);
+
+        var customer = new CurrentUserSession
+        {
+            UserId = Guid.NewGuid(),
+            CustomerId = Guid.NewGuid(),
+            Role = TodoXUserRole.CustomerOwner,
+            IsAuthenticated = true
+        };
+        Assert.True(NavigationAccessRules.CanAccessPath(customer, "/wallets"));
+    }
+
+    [Fact]
     public void ServicePointRatesPageUsesInlineLocalizedOverrideEditor()
     {
         var dialog = File.ReadAllText(Path.Combine(RepoRoot, "TodoX.Web", "Components", "Dialogs", "ServicePointRatesDialog.razor"));

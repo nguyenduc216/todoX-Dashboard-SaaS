@@ -48,7 +48,6 @@ public static class NavigationAccessRules
             || path.StartsWith("/permissions", StringComparison.OrdinalIgnoreCase)
             || path.StartsWith("/settings", StringComparison.OrdinalIgnoreCase)
             || path.StartsWith("/activity-logs", StringComparison.OrdinalIgnoreCase)
-            || path.StartsWith("/wallets", StringComparison.OrdinalIgnoreCase)
             || path.StartsWith("/services", StringComparison.OrdinalIgnoreCase)
             || path.StartsWith("/render-jobs", StringComparison.OrdinalIgnoreCase)
             || path.StartsWith("/render-job", StringComparison.OrdinalIgnoreCase)

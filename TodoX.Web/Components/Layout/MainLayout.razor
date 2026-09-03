@@ -418,6 +418,13 @@
                     item.VisibilityPolicy = "always";
                     item.MatchAll = true;
                 }
+                else if (string.Equals(code, "wallets", StringComparison.OrdinalIgnoreCase))
+                {
+                    item.Title = "Điểm của tôi";
+                    item.Href = "/wallets";
+                    item.VisibilityPolicy = "customer_only";
+                    item.MatchAll = true;
+                }
 
                 return item;
             }
@@ -428,6 +435,13 @@
                 created.Title = "Trang chủ";
                 created.Href = "/";
                 created.VisibilityPolicy = "always";
+                created.MatchAll = true;
+            }
+            else if (string.Equals(code, "wallets", StringComparison.OrdinalIgnoreCase))
+            {
+                created.Title = "Điểm của tôi";
+                created.Href = "/wallets";
+                created.VisibilityPolicy = "customer_only";
                 created.MatchAll = true;
             }
 
@@ -493,6 +507,18 @@
                     VisibilityPolicy = "customer_only",
                     MatchAll = false,
                     SortOrder = 20
+                }),
+                Item("wallets", () => new NavigationMenuItemDto
+                {
+                    Id = Guid.NewGuid(),
+                    Code = "wallets",
+                    Title = "Điểm của tôi",
+                    Href = "/wallets",
+                    IconKey = "AccountBalanceWallet",
+                    ModuleKeys = Array.Empty<string>(),
+                    VisibilityPolicy = "customer_only",
+                    MatchAll = true,
+                    SortOrder = 30
                 })),
             Group("ai_studio", "AI Studio", "AutoFixHigh", 30, true,
                 Item("ai_characters", () => new NavigationMenuItemDto

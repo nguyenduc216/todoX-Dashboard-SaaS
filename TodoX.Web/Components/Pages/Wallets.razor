@@ -5,14 +5,77 @@
 @inject ISnackbar Snackbar
 @inject ILogger<Wallets> Logger
 
-<PageTitle>Quản lý điểm</PageTitle>
+<PageTitle>@PageTitleText</PageTitle>
 
 <MudStack Spacing="3">
-    <div>
-        <MudText Typo="Typo.h4" Class="todox-page-title">Quản lý điểm</MudText>
-        <MudText Typo="Typo.body1" Class="todox-page-subtitle">Điểm khả dụng, cấu hình giá và voucher.</MudText>
-    </div>
+    @if (IsCustomer)
+    {
+        <MudText Typo="Typo.h4" Class="todox-page-title">Điểm của tôi</MudText>
+    }
+    else
+    {
+        <div>
+            <MudText Typo="Typo.h4" Class="todox-page-title">Quản lý điểm</MudText>
+            <MudText Typo="Typo.body1" Class="todox-page-subtitle">Điểm khả dụng, cấu hình giá và voucher.</MudText>
+        </div>
+    }
 
+    @if (IsCustomer)
+    {
+        <MudPaper Class="pa-4">
+            <MudText Typo="Typo.h6">Điểm khả dụng</MudText>
+            <MudGrid Spacing="2" Class="mt-2">
+                <MudItem xs="12" sm="6">
+                    <MudText Typo="Typo.body2">Điểm khả dụng</MudText>
+                    <MudText Typo="Typo.h4">@(_selectedWallet?.Balance.ToString("#,0") ?? "0")</MudText>
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <MudText Typo="Typo.body2">Điểm đang giữ</MudText>
+                    <MudText Typo="Typo.h4">@(_selectedWallet?.LockedBalance.ToString("#,0") ?? "0")</MudText>
+                </MudItem>
+            </MudGrid>
+        </MudPaper>
+
+        <MudPaper Class="pa-4">
+            <MudText Typo="Typo.h6">Nạp voucher</MudText>
+            <MudStack Row="true" Spacing="2" Class="flex-wrap">
+                <MudTextField T="string" @bind-Value="_redeemCode" Label="Mã voucher" Disabled="_redeemBusy" />
+                <MudButton StartIcon="@Icons.Material.Filled.Redeem"
+                           OnClick="RedeemVoucherAsync"
+                           Disabled="@_redeemBusy">
+                    @if (_redeemBusy)
+                    {
+                        <MudProgressCircular Indeterminate="true" Size="Size.Small" Class="mr-2" />
+                    }
+                    Nhận điểm
+                </MudButton>
+            </MudStack>
+        </MudPaper>
+
+        <MudPaper Class="pa-4">
+            <MudText Typo="Typo.h6">Lịch sử điểm</MudText>
+            @if (!string.IsNullOrWhiteSpace(_historyLoadError))
+            {
+                <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="mb-3">@_historyLoadError</MudAlert>
+            }
+            <MudTable Items="_transactions" Dense="true" Hover="true">
+                <HeaderContent>
+                    <MudTh>Thời gian</MudTh>
+                    <MudTh>Loại giao dịch</MudTh>
+                    <MudTh Style="text-align:right">Số điểm</MudTh>
+                    <MudTh Style="text-align:right">Số dư sau giao dịch</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd>@context.CreatedAt.ToString("dd/MM HH:mm")</MudTd>
+                    <MudTd>@TransactionTypeLabel(context.TransactionType)</MudTd>
+                    <MudTd Style="text-align:right">@context.Amount.ToString("#,0")</MudTd>
+                    <MudTd Style="text-align:right">@context.BalanceAfter.ToString("#,0")</MudTd>
+                </RowTemplate>
+            </MudTable>
+        </MudPaper>
+    }
+    else
+    {
     <MudTabs Rounded="true" Class="pt-4" @bind-ActivePanelIndex="_activeTabIndex">
         @if (!IsCustomer)
         {
@@ -88,10 +151,10 @@
                             <MudItem xs="12" sm="5"><MudTextField @bind-Value="_mutationNote" Label="Ghi chú" /></MudItem>
                             <MudItem xs="12">
                                 <MudStack Row="true" Spacing="2" Class="flex-wrap">
-                                    <MudButton StartIcon="@Icons.Material.Filled.Add" OnClick="TopUpAsync">Cộng điểm</MudButton>
-                                    <MudButton StartIcon="@Icons.Material.Filled.AddCircle" OnClick="AdjustPlusAsync">Điều chỉnh tăng</MudButton>
-                                    <MudButton StartIcon="@Icons.Material.Filled.RemoveCircle" OnClick="AdjustMinusAsync">Điều chỉnh giảm</MudButton>
-                                    <MudButton StartIcon="@Icons.Material.Filled.Replay" OnClick="RefundAsync">Hoàn điểm</MudButton>
+                                    <MudButton StartIcon="@Icons.Material.Filled.Add" OnClick="TopUpAsync" Disabled="@_mutationBusy">Cộng điểm</MudButton>
+                                    <MudButton StartIcon="@Icons.Material.Filled.AddCircle" OnClick="AdjustPlusAsync" Disabled="@_mutationBusy">Điều chỉnh tăng</MudButton>
+                                    <MudButton StartIcon="@Icons.Material.Filled.RemoveCircle" OnClick="AdjustMinusAsync" Disabled="@_mutationBusy">Điều chỉnh giảm</MudButton>
+                                    <MudButton StartIcon="@Icons.Material.Filled.Replay" OnClick="RefundAsync" Disabled="@_mutationBusy">Hoàn điểm</MudButton>
                                 </MudStack>
                             </MudItem>
                         </MudGrid>
@@ -202,6 +265,7 @@
             </MudTabPanel>
         }
     </MudTabs>
+    }
 </MudStack>
 
 @code {
@@ -224,8 +288,11 @@
     private string _mutationNote = string.Empty;
     private decimal _voucherPoints = 1000;
     private int? _voucherMaxRedemptions = 1;
+    private bool _mutationBusy;
+    private bool _redeemBusy;
 
     private bool IsCustomer => AuthState.CurrentUser?.IsCustomer == true;
+    private string PageTitleText => IsCustomer ? "Điểm của tôi" : "Quản lý điểm";
 
     protected override async Task OnInitializedAsync() => await ReloadAsync();
 
@@ -373,25 +440,53 @@
 
     private async Task MutateAsync(string kind)
     {
+        if (_mutationBusy)
+        {
+            return;
+        }
+
         if (_selectedWallet is not { } wallet)
         {
             Snackbar.Add("Chưa chọn khách hàng.", Severity.Warning);
             return;
         }
 
-        var result = kind switch
+        if (_mutationAmount <= 0)
         {
-            "topup" => await WalletService.TopUpAsync(wallet.CustomerId, _mutationAmount, "TOPUP", _mutationNote, AuthState.CurrentUser!),
-            "adjust_plus" => await WalletService.AdjustPlusAsync(wallet.CustomerId, _mutationAmount, "ADJUST_PLUS", _mutationNote, AuthState.CurrentUser!),
-            "adjust_minus" => await WalletService.AdjustMinusAsync(wallet.CustomerId, _mutationAmount, "ADJUST_MINUS", _mutationNote, AuthState.CurrentUser!),
-            "refund" => await WalletService.RefundAsync(wallet.CustomerId, _mutationAmount, "REFUND", _mutationNote, AuthState.CurrentUser!),
-            _ => new WalletMutationResult(false, null, 0, 0, "Unsupported mutation.")
-        };
+            Snackbar.Add(LocalizeError("Point amount must be greater than zero."), Severity.Warning);
+            return;
+        }
 
-        Snackbar.Add(result.Error is null
-            ? $"Đã cập nhật điểm: {result.BalanceBefore:#,0} → {result.BalanceAfter:#,0}."
-            : LocalizeError(result.Error), result.Ok ? Severity.Success : Severity.Error);
-        if (result.Ok) await ReloadAsync();
+        _mutationBusy = true;
+        try
+        {
+            var result = kind switch
+            {
+                "topup" => await WalletService.TopUpAsync(wallet.CustomerId, _mutationAmount, "TOPUP", _mutationNote, AuthState.CurrentUser!),
+                "adjust_plus" => await WalletService.AdjustPlusAsync(wallet.CustomerId, _mutationAmount, "ADJUST_PLUS", _mutationNote, AuthState.CurrentUser!),
+                "adjust_minus" => await WalletService.AdjustMinusAsync(wallet.CustomerId, _mutationAmount, "ADJUST_MINUS", _mutationNote, AuthState.CurrentUser!),
+                "refund" => await WalletService.RefundAsync(wallet.CustomerId, _mutationAmount, "REFUND", _mutationNote, AuthState.CurrentUser!),
+                _ => new WalletMutationResult(false, null, 0, 0, "Unsupported mutation.")
+            };
+
+            var message = result.Error is null
+                ? MutationSuccessMessage(kind, result)
+                : LocalizeError(result.Error);
+            Snackbar.Add(message, result.Ok ? Severity.Success : Severity.Error);
+            if (result.Ok)
+            {
+                await ReloadAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Wallet mutation {Kind} failed for customer {CustomerId}.", kind, wallet.CustomerId);
+            Snackbar.Add(LocalizeError(ex.Message), Severity.Error);
+        }
+        finally
+        {
+            _mutationBusy = false;
+        }
     }
 
     private Task TopUpAsync() => MutateAsync("topup");
@@ -410,17 +505,49 @@
 
     private async Task RedeemVoucherAsync()
     {
+        if (_redeemBusy)
+        {
+            return;
+        }
+
         if (AuthState.CurrentUser?.CustomerId is not Guid customerId)
         {
             Snackbar.Add("Tài khoản khách hàng là bắt buộc.", Severity.Warning);
             return;
         }
 
-        var result = await WalletService.RedeemVoucherAsync(customerId, _redeemCode, AuthState.CurrentUser);
-        Snackbar.Add(result.Error is null ? $"Đã sử dụng voucher. Số dư mới: {result.BalanceAfter:#,0}." : LocalizeError(result.Error),
-            result.Ok ? Severity.Success : Severity.Error);
-        if (result.Ok) await ReloadAsync();
+        _redeemBusy = true;
+        try
+        {
+            var result = await WalletService.RedeemVoucherAsync(customerId, _redeemCode, AuthState.CurrentUser);
+            Snackbar.Add(result.Error is null
+                ? $"Đã nhận {result.BalanceAfter - result.BalanceBefore:#,0} điểm từ voucher."
+                : LocalizeError(result.Error), result.Ok ? Severity.Success : Severity.Error);
+            if (result.Ok)
+            {
+                _redeemCode = string.Empty;
+                await ReloadAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Voucher redemption failed for customer {CustomerId}.", customerId);
+            Snackbar.Add(LocalizeError(ex.Message), Severity.Error);
+        }
+        finally
+        {
+            _redeemBusy = false;
+        }
     }
+
+    private static string MutationSuccessMessage(string kind, WalletMutationResult result) => kind switch
+    {
+        "topup" => $"Đã cộng {result.BalanceAfter - result.BalanceBefore:#,0} điểm. Số dư: {result.BalanceBefore:#,0} → {result.BalanceAfter:#,0}.",
+        "adjust_plus" => $"Đã điều chỉnh tăng {result.BalanceAfter - result.BalanceBefore:#,0} điểm.",
+        "adjust_minus" => $"Đã điều chỉnh giảm {result.BalanceBefore - result.BalanceAfter:#,0} điểm.",
+        "refund" => $"Đã hoàn {result.BalanceAfter - result.BalanceBefore:#,0} điểm.",
+        _ => $"Đã cập nhật điểm: {result.BalanceBefore:#,0} → {result.BalanceAfter:#,0}."
+    };
 
     private static string ResourceLabel(string value) => value.ToLowerInvariant() switch
     {
