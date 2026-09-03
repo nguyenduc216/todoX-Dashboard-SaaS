@@ -11,7 +11,6 @@ public sealed class UnifiedPointModuleRegressionTests
     public void RVideoParentBillingState_RequiresMatchingOperationAndChargeReference()
     {
         var billingOperationId = Guid.NewGuid();
-        var parentRenderJobId = Guid.NewGuid();
         var otherOperationId = Guid.NewGuid();
         var chargeReferenceId = Guid.NewGuid();
 
@@ -24,7 +23,7 @@ public sealed class UnifiedPointModuleRegressionTests
                 DataJson = $$"""
                 {
                   "billingOperationId":"{{otherOperationId}}",
-                  "parentRenderJobId":"{{parentRenderJobId}}",
+                  "parentRenderJobId":"{{Guid.NewGuid()}}",
                   "chargeReferenceId":"{{Guid.NewGuid()}}"
                 }
                 """
@@ -36,23 +35,21 @@ public sealed class UnifiedPointModuleRegressionTests
                 DataJson = $$"""
                 {
                   "billingOperationId":"{{billingOperationId}}",
-                  "parentRenderJobId":"{{parentRenderJobId}}",
+                  "parentRenderJobId":"{{Guid.NewGuid()}}",
                   "chargeReferenceId":"{{chargeReferenceId}}"
                 }
                 """
             }
         };
 
-        Assert.True(RVideoParentBillingState.HasCurrentOperationParentCharge(events, billingOperationId, parentRenderJobId));
-        Assert.False(RVideoParentBillingState.HasCurrentOperationParentCharge(events, Guid.NewGuid(), parentRenderJobId));
+        Assert.True(RVideoParentBillingState.HasCurrentOperationParentCharge(events, billingOperationId));
+        Assert.False(RVideoParentBillingState.HasCurrentOperationParentCharge(events, Guid.NewGuid()));
     }
 
     [Fact]
     public void RVideoParentBillingState_RequiresVoiceChargeForAudioSkip()
     {
         var billingOperationId = Guid.NewGuid();
-        var parentRenderJobId = Guid.NewGuid();
-
         var billedWithoutVoice = new[]
         {
             new VideoProjectEventDto
@@ -62,7 +59,7 @@ public sealed class UnifiedPointModuleRegressionTests
                 DataJson = $$"""
                 {
                   "billingOperationId":"{{billingOperationId}}",
-                  "parentRenderJobId":"{{parentRenderJobId}}",
+                  "parentRenderJobId":"{{Guid.NewGuid()}}",
                   "chargeReferenceId":"{{Guid.NewGuid()}}",
                   "voiceCount":0,
                   "voicePoints":0
@@ -80,7 +77,7 @@ public sealed class UnifiedPointModuleRegressionTests
                 DataJson = $$"""
                 {
                   "billingOperationId":"{{billingOperationId}}",
-                  "parentRenderJobId":"{{parentRenderJobId}}",
+                  "parentRenderJobId":"{{Guid.NewGuid()}}",
                   "chargeReferenceId":"{{Guid.NewGuid()}}",
                   "voiceCount":3,
                   "voicePoints":1500
@@ -89,8 +86,8 @@ public sealed class UnifiedPointModuleRegressionTests
             }
         };
 
-        Assert.False(RVideoParentBillingState.HasCurrentOperationParentVoiceCharge(billedWithoutVoice, billingOperationId, parentRenderJobId));
-        Assert.True(RVideoParentBillingState.HasCurrentOperationParentVoiceCharge(billedWithVoice, billingOperationId, parentRenderJobId));
+        Assert.False(RVideoParentBillingState.HasCurrentOperationParentVoiceCharge(billedWithoutVoice, billingOperationId));
+        Assert.True(RVideoParentBillingState.HasCurrentOperationParentVoiceCharge(billedWithVoice, billingOperationId));
     }
 
     [Fact]
@@ -129,6 +126,8 @@ public sealed class UnifiedPointModuleRegressionTests
         Assert.Contains("Không đủ điểm để thực hiện video này.", razor);
         Assert.Contains("FormatEstimateLine", razor);
         Assert.Contains("FormatPoints", razor);
+        Assert.Contains("ValueChanged=\"OnVoiceModeChangedAsync\"", razor);
+        Assert.Contains("await RefreshInitialEstimateAsync();", razor);
     }
 
     [Fact]
@@ -155,6 +154,9 @@ public sealed class UnifiedPointModuleRegressionTests
         Assert.Contains("ResolveBillingOperationId", imageHandler);
         Assert.Contains("ResolveBillingOperationId", videoHandler);
         Assert.Contains("HasCurrentOperationParentVoiceCharge", audioHandler);
+        Assert.Contains("billingScenes = project.Scenes", imageHandler);
+        Assert.Contains(".Where(x => input.SceneIds is null || input.SceneIds.Contains(x.Id))", imageHandler);
+        Assert.DoesNotContain("billingScenes = project.Scenes.OrderBy(x => x.SceneIndex)\r\n            .Where(x => input.SceneIds", imageHandler);
         Assert.DoesNotContain("project.Events.Any(x => x.EventType == \"RVIDEO_PARENT_BILLED\")", videoHandler);
         Assert.DoesNotContain("project.Events.Any(x => x.EventType == \"RVIDEO_PARENT_BILLED\")", audioHandler);
     }

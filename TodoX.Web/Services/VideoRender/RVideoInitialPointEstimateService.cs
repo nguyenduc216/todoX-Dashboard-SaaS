@@ -196,27 +196,23 @@ public static class RVideoParentBillingState
 
     public static bool HasCurrentOperationParentCharge(
         IEnumerable<VideoProjectEventDto> events,
-        Guid billingOperationId,
-        Guid parentRenderJobId)
-        => TryFindCurrentOperationParentCharge(events, billingOperationId, parentRenderJobId, out _);
+        Guid billingOperationId)
+        => TryFindCurrentOperationParentCharge(events, billingOperationId, out _);
 
     public static bool HasCurrentOperationParentVoiceCharge(
         IEnumerable<VideoProjectEventDto> events,
-        Guid billingOperationId,
-        Guid parentRenderJobId)
-        => TryFindCurrentOperationParentCharge(events, billingOperationId, parentRenderJobId, out _, requireVoice: true);
+        Guid billingOperationId)
+        => TryFindCurrentOperationParentCharge(events, billingOperationId, out _, requireVoice: true);
 
     public static bool TryFindCurrentOperationParentCharge(
         IEnumerable<VideoProjectEventDto> events,
         Guid billingOperationId,
-        Guid parentRenderJobId,
         out Guid chargeReferenceId)
-        => TryFindCurrentOperationParentCharge(events, billingOperationId, parentRenderJobId, out chargeReferenceId, requireVoice: false);
+        => TryFindCurrentOperationParentCharge(events, billingOperationId, out chargeReferenceId, requireVoice: false);
 
     private static bool TryFindCurrentOperationParentCharge(
         IEnumerable<VideoProjectEventDto> events,
         Guid billingOperationId,
-        Guid parentRenderJobId,
         out Guid chargeReferenceId,
         bool requireVoice)
     {

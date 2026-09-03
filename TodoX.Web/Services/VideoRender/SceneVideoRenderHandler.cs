@@ -189,8 +189,7 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
         var billingOperationId = RVideoParentBillingState.ResolveBillingOperationId(project, job.Id);
         var parentJobBilled = RVideoParentBillingState.HasCurrentOperationParentCharge(
             project.Events,
-            billingOperationId,
-            job.Id);
+            billingOperationId);
         var voiceCount = scenes.Count(scene =>
             RVideoRules.RequiresExternalVoice(scene, settings)
             && !string.IsNullOrWhiteSpace(RVideoRules.ResolveSceneVoiceText(scene)));

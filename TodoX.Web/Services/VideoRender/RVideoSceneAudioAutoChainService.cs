@@ -139,8 +139,7 @@ public sealed class RVideoSceneAudioAutoChainService : IRVideoSceneAudioAutoChai
         var billingOperationId = RVideoParentBillingState.ResolveBillingOperationId(project, selectedVideo.RenderJobId ?? Guid.Empty);
         var parentJobBilled = RVideoParentBillingState.HasCurrentOperationParentVoiceCharge(
             project.Events,
-            billingOperationId,
-            selectedVideo.RenderJobId ?? Guid.Empty);
+            billingOperationId);
 
         var version = existing ?? await _versions.CreateQueuedSceneAudioVersionAsync(new SceneAudioVersionCreateRequest(
             ProjectId: project.Id,

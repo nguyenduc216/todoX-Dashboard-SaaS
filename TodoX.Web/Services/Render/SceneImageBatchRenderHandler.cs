@@ -152,10 +152,11 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
             return;
         }
 
-        var billingScenes = project.Scenes.OrderBy(x => x.SceneIndex)
-            .Where(x => input.SceneIds is null || input.SceneIds.Contains(x.Id))
+        var billingScenes = project.Scenes
+            .OrderBy(x => x.SceneIndex)
             .ToList();
         var imageWorkScenes = billingScenes
+            .Where(x => input.SceneIds is null || input.SceneIds.Contains(x.Id))
             .Where(x => ShouldRenderScene(x, input.OnlyMissingOrFailed))
             .ToList();
         var activeSceneIds = new HashSet<long>();
@@ -171,7 +172,7 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
 
         var billingOperationId = RVideoParentBillingState.ResolveBillingOperationId(project, job.Id);
         if (input.BillingIntent == PointBillingIntent.InitialRender
-            && !RVideoParentBillingState.HasCurrentOperationParentCharge(project.Events, billingOperationId, job.Id))
+            && !RVideoParentBillingState.HasCurrentOperationParentCharge(project.Events, billingOperationId))
         {
             await ChargeInitialRenderAsync(job, input, project, billingOperationId, billingScenes, imageWorkScenes, ct);
         }

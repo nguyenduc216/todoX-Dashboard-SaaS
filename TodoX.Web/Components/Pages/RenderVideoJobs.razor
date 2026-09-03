@@ -214,7 +214,7 @@ else
                                     </MudPaper>
                                     <MudPaper Class="pa-3" Outlined="true" rounded="true">
                                         <MudText Typo="Typo.subtitle1">Giọng nói</MudText>
-                                        <MudRadioGroup T="string" @bind-Value="_voiceMode">
+                                        <MudRadioGroup T="string" Value="@_voiceMode" ValueChanged="OnVoiceModeChangedAsync">
                                             <MudRadio T="string" Value="@RVideoVoiceModes.None">Không sử dụng giọng</MudRadio>
                                             <MudRadio T="string" Value="@RVideoVoiceModes.Native">AI Native Voice + Lip-sync</MudRadio>
                                             <MudRadio T="string" Value="@RVideoVoiceModes.Library">Giọng đọc từ Voice Library</MudRadio>
@@ -2425,6 +2425,18 @@ else
             _uploadedMusic = null;
         }
         return InvokeAsync(StateHasChanged);
+    }
+
+    private async Task OnVoiceModeChangedAsync(string mode)
+    {
+        _voiceMode = RVideoRules.NormalizeVoiceMode(mode);
+        if (_voiceMode != RVideoVoiceModes.Library)
+        {
+            _voiceCatalogCode = null;
+        }
+
+        await RefreshInitialEstimateAsync();
+        await InvokeAsync(StateHasChanged);
     }
 
     private async Task UploadMusicAsync(InputFileChangeEventArgs args)

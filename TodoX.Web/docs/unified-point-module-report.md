@@ -1,89 +1,102 @@
-## PROMPT_ID
-- `TODOX-RVIDEO-VIDEO-FALLBACK-LIFECYCLE-019-FIX1`
-
 ## Repository / Branch
+
 - Repository: `TodoX-Dashboard-SaaS`
 - Branch: `integration/rdance-on-construction-video-core`
-- Base Commit: `1782dd1c5e7a53247f32869c339c7b1ae71ca79e`
 
-## Final Commit SHA
-- Updated after the final commit and push.
+## Point Module Base Commit
 
-## Root Cause And Fix
-- `billingScenes` and `imageWorkScenes` had been conflated, so filtering image work could undercount VIDEO seconds and external VOICE.
-- `RVIDEO_PARENT_BILLED` had been treated as a project-wide boolean, allowing an older operation to suppress a new operation.
-- The customer UI had no shared IMAGE + VIDEO + VOICE estimate before the first paid action.
-- The singleton balance notifier carried no customer identity, and voucher success did not reliably notify after commit.
-- The 79AI runtime fallback route is capability/catalog driven. The audit confirms `veo_omni/flash` supports `4,6,8,10`, while `veo_3_1` supports `fast,lite,quality`; `normal`, `extremely-crazy`, `extremely-spicy-or-crazy`, and `custom` do not match those models. Invalid candidates are discarded before version creation or provider submit.
+- `6bac4563f708954510e135f745be1d78e024d441`
 
-## rVideo Billing Scene Scope
-- `billingScenes`: all logical video scenes selected for the initial operation.
-- `imageWorkScenes`: only scenes that still require AI image work after active-image filtering.
-- `image_count`: counted from the AI-generation plan over the image-work subset.
-- `video_seconds`: summed from every `billingScenes` scene.
-- `voice_count`: counted across every `billingScenes` scene when external voice is enabled.
-- Filtering image work can no longer reduce VIDEO or VOICE quantities.
+## Point Module Final Implementation Commit
 
-## rVideo Billing Operation Identity
-- `billingOperationId`: existing `core_job_id`; parent render job id is the fallback for legacy jobs.
-- `parentRenderJobId`: the concrete image-batch or video-batch parent render job id.
-- Parent charge reference: `billingOperationId`, used by existing wallet idempotency.
-- Snapshot: `render_job_snapshots` stores operation identity, IMAGE/VIDEO/VOICE quantities, all scene durations, rates, points, balance check, and post-charge balance.
-- Event metadata: `RVIDEO_PARENT_BILLED` includes `billingOperationId`, `parentRenderJobId`, `projectId`, `serviceId`, `chargeReferenceId`, and usage totals.
-- Retry/idempotency: parent-billed checks require matching operation metadata and a charge reference; project-wide event presence is not sufficient. Existing wallet reference idempotency prevents duplicate debit for the same operation.
-- Child initial IMAGE, VIDEO, and external VOICE work remains zero-point after a successful parent charge.
+- Pending final commit SHA. The implementation commit is created after this report update and must use commit message `fix(points): finalize rvideo billing scope`.
 
-## rVideo Customer Cost Preview
-- Estimate service: `IRVideoInitialPointEstimateService` / `RVideoInitialPointEstimateService`.
-- UI location: `RenderVideoJobs.razor`, immediately below the scene/image toolbar.
-- Sufficient state: shows IMAGE, VIDEO seconds, VOICE, total, available points, and remaining points; initial image action stays enabled.
-- Insufficient state: shows required, available, and missing points and disables the initial image action.
-- Backend revalidation: image-batch and alternate video-batch handlers rebuild the plan, resolve current pricing, read the wallet, and charge immediately before child enqueue.
-- Refresh triggers: reload, committed settings/project reload, character changes, aspect-ratio changes, and resolution changes.
+## Final Branch HEAD
+
+- Pending final push result.
+
+## Billing Scene Scope
+
+- `billingScenes` is the complete logical rVideo scene set for the initial operation, ordered by `SceneIndex`.
+- `imageWorkScenes` is the separate image-generation work set and may be reduced by `input.SceneIds`, `OnlyMissingOrFailed`, `ShouldRenderScene`, and active-image filtering.
+- `SceneIds` now scopes image work only. It cannot reduce initial VIDEO seconds or external VOICE count.
+- `image_count` is calculated only from planned AI image generation scenes, so uploaded, reused, direct-reference, shared-reference, and already-selected images remain non-billable for IMAGE.
+- `video_seconds` is calculated from every scene in `billingScenes`.
+- `voice_count` is calculated from every scene in `billingScenes` when external voice is enabled.
+- The parent billing snapshot keeps all logical video scene durations under `usagePlan.video.scene_durations`.
+
+## Billing Operation Identity
+
+- Chosen contract: `billingOperationId` is the complete logical billing identity for an initial rVideo operation.
+- `billingOperationId` maps to the existing `core_job_id`; legacy flows fall back to the parent render job id only when no core job id exists.
+- `parentRenderJobId` remains audit metadata in snapshots/events, not a matching key.
+- Parent charge matching now requires the same `billingOperationId` and a valid `chargeReferenceId`.
+- `RVIDEO_PARENT_BILLED` metadata remains complete: `billingOperationId`, `parentRenderJobId`, `projectId`, `serviceId`, `chargeReferenceId`, `imageCount`, `videoSeconds`, `voiceCount`, and `totalPoints`.
+- Wallet idempotency continues to use the stable parent charge reference, so a retry of the same operation does not double debit.
+- A later initial operation with a new `billingOperationId` is not suppressed by an older parent-billed event.
+
+## rVideo Customer Point Preview
+
+- Voice Mode now uses an explicit `ValueChanged` handler in `RenderVideoJobs.razor`.
+- The handler normalizes the voice mode, clears the library catalog code when leaving Library mode, refreshes the initial point estimate immediately, and updates the UI.
+- Library to None removes voice points from the preview without a page reload.
+- None to Library recalculates voice count and increases the preview when external voice is configured.
+- Backend revalidation remains authoritative: image-batch/video-batch handlers rebuild usage, resolve current pricing, read the wallet, and charge before child work is enqueued.
 
 ## Balance Notification
-- Customer-scoped notifier: `IPointBalanceChangeNotifier.Changed` carries `Guid customerId`.
-- `CHARGE`: notifies the charged customer once after commit; null-customer and idempotent duplicate paths do not notify.
-- `TOPUP`: notifies the affected customer once after commit.
-- `ADJUST`: notifies the affected customer once after commit.
-- `REFUND`: notifies the affected customer once after commit.
-- `VOUCHER`: notifies after wallet mutation, redemption insert, voucher counter update, and transaction commit.
-- Cross-customer filtering: `MainLayout.razor` reloads only when the notification customer id matches the current session customer id.
+
+- Customer-scoped wallet notification remains in place from prior Point Module work.
+- Wallet mutations notify the affected customer after commit.
+- Voucher redemption still notifies after wallet mutation, redemption insert, voucher counter update, and transaction commit.
+- Header reload remains customer-filtered in `MainLayout.razor`.
+
+## Unrelated Branch Changes Present
+
+- The branch also contains rVideo video fallback lifecycle changes from commit `1782dd1c5e7a53247f32869c339c7b1ae71ca79e`.
+- Those fallback/provider changes were not modified as part of this final Point Module hardening task.
+- This report does not treat provider fallback lifecycle behavior as part of the Point Module implementation.
 
 ## SQL Verification
-- `database/manual/verify_point_module.sql` now includes checks for rVideo operation ids, parent charge event references, duplicate parent charges, voucher redemptions, and wallet/ledger balance comparison.
-- No schema change or migration was created, modified, or executed.
+
+- `TodoX.Web/database/manual/verify_point_module.sql` continues to cover billing operation id, parent charge reference, parent-billed events, `video_seconds`, `image_count`, `voice_count`, duplicate parent charge checks, voucher redemptions, and wallet/ledger balance comparison.
+- No schema change, migration, or direct database execution was required.
 
 ## Tests
-- `dotnet test TodoX.Web.Tests\TodoX.Web.Tests.csproj -c Release --filter "FullyQualifiedName~UnifiedPointModuleRegressionTests"`: PASS, 7 tests.
-- `dotnet test TodoX.Web\TodoX.Web.csproj -c Release --filter "FullyQualifiedName~RVideoProviderPollingRegressionTests|RVideoAutosaveWorkflowTests"`: PASS.
-- Full `TodoX.Web.Tests` run: existing unrelated failures remain in dance-sell prompt/ratio and older UI source assertions; task-specific tests pass.
-- `dotnet test TodoX.Web.Tests\TodoX.Web.Tests.csproj -c Release --filter "FullyQualifiedName~RVideoVideoHotfixTests|FullyQualifiedName~RVideoProviderPollingRegressionTests"`: pending final validation.
+
+- `git diff --check`: PASS. Git reported CRLF conversion warnings only.
+- `dotnet test TodoX.Web.Tests\TodoX.Web.Tests.csproj -c Release --filter "FullyQualifiedName~UnifiedPointModuleRegressionTests"`: PASS, 7 passed.
+- `dotnet test TodoX.Web.Tests\TodoX.Web.Tests.csproj -c Release`: FAIL with 5 existing unrelated failures, 875 passed:
+  - `BillingAndRatioRegressionTests.RequestedRatioOverridesProviderRouteDefaults`
+  - `FavoriteServicesRegressionTests.FavoriteAction_IsRenderedBesidePrimaryAction_NotOverThumbnail`
+  - `DanceSellAi79ReferenceProviderTests.SubmitAsync_UsesVerifiedFashionTryOnFormPayload`
+  - `RVideoAutosaveWorkflowTests.SceneGrid_IsTwoColumnsOnDesktopAndOneColumnNarrow`
+  - `DanceSellPhase2ValidationTests.ReferencePrompt_MatchesTheVerified79AiTryOnPromptExactly`
 
 ## Build
-- `dotnet build TodoX.Dashboard.sln -c Release`: PASS.
+
+- Initial attempt from `TodoX.Web`: `dotnet build TodoX.Dashboard.sln -c Release`: FAIL, solution file not found from that working directory.
+- Correct run from repository root: `dotnet build TodoX.Dashboard.sln -c Release`: PASS with 45 existing Razor generated-code nullable warnings.
 
 ## Publish
+
 - `dotnet publish TodoX.Web\TodoX.Web.csproj -c Release --no-restore -o artifacts\publish\todox-dashboard`: pending final validation.
-- Output: `artifacts/publish/todox-dashboard`
+- Output directory: `artifacts\publish\todox-dashboard`.
 
 ## Git Push
-- Pending final commit and push.
+
+- Pending final commit and push to `origin/integration/rdance-on-construction-video-core`.
 
 ## Files Changed
-- `TodoX.Web/Components/Layout/MainLayout.razor`
+
 - `TodoX.Web/Components/Pages/RenderVideoJobs.razor`
-- `TodoX.Web/Program.cs`
-- `TodoX.Web/Services/PointBalanceChangeNotifier.cs`
 - `TodoX.Web/Services/Render/SceneImageBatchRenderHandler.cs`
 - `TodoX.Web/Services/VideoRender/RVideoInitialPointEstimateService.cs`
 - `TodoX.Web/Services/VideoRender/RVideoSceneAudioAutoChainService.cs`
 - `TodoX.Web/Services/VideoRender/SceneVideoRenderHandler.cs`
-- `TodoX.Web/Services/WalletService.cs`
 - `TodoX.Web.Tests/UnifiedPointModuleRegressionTests.cs`
-- `TodoX.Web/database/manual/verify_point_module.sql`
 - `TodoX.Web/docs/unified-point-module-report.md`
 
 ## Remaining Limitations
-- The estimate is advisory in the UI; backend wallet and pricing revalidation remains authoritative.
-- Existing unrelated full-suite failures were not changed as part of this task.
+
+- The customer point estimate is advisory; backend wallet/pricing validation remains authoritative.
+- The full test suite still has 5 unrelated failures outside this Point Module hardening scope.
