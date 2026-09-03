@@ -190,6 +190,7 @@ public sealed class SceneVideoVersionDto
     public decimal ChargedPoints { get; set; }
     public decimal RefundedPoints { get; set; }
     public string? CostSource { get; set; }
+    public string? RenderConfigJson { get; set; }
     public Guid? VoiceAudioVersionId { get; set; }
     public string? PosterUrl { get; set; }
     public string? ErrorMessage { get; set; }
@@ -2229,6 +2230,7 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
                provider_task_id AS ProviderTaskId, duration_seconds AS DurationSeconds, aspect_ratio AS AspectRatio,
                billing_logical_request_id AS BillingLogicalRequestId, estimated_usd AS EstimatedUsd, actual_usd AS ActualUsd,
                charged_points AS ChargedPoints, refunded_points AS RefundedPoints, cost_source AS CostSource,
+               render_config_json::text AS RenderConfigJson,
                voice_audio_version_id AS VoiceAudioVersionId,
                poster_url AS PosterUrl, error_message AS ErrorMessage, created_at AS CreatedAt
           FROM video_render.scene_video_versions

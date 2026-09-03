@@ -379,7 +379,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                 scene.Id,
                 attemptLogicalRequestId,
                 ct);
-            if (version is not null && !IsCompatibleVersion(version, input, policy))
+            if (version is not null && !IsCompatibleVersion(version, input, policy, candidate.ProviderDurationSeconds))
             {
                 await _versions.FailSceneVideoVersionAsync(
                     version.Id,
@@ -1296,7 +1296,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         SceneVideoRenderWorkItemInput input,
         IReadOnlyList<AiProviderModelListItemDto> catalogModels)
     {
-        var resolved = new List<(RVideoVideoModelPolicyEntry Policy, AiProviderModelListItemDto Model)>();
+        var resolved = new List<(RVideoVideoModelPolicyEntry Policy, HashSet<int> SupportedDurations)>();
         foreach (var policy in RVideoVideoModelPolicy.Models)
         {
             if (!string.Equals(policy.ProviderCode, input.ProviderCode, StringComparison.OrdinalIgnoreCase)
@@ -1323,7 +1323,17 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                 continue;
             }
 
-            resolved.Add((policy, model));
+            var supportedDurations = model.SupportedDurations
+                .Where(duration => duration > 0)
+                .Distinct()
+                .OrderBy(duration => duration)
+                .ToHashSet();
+            if (supportedDurations.Count == 0)
+            {
+                continue;
+            }
+
+            resolved.Add((policy, supportedDurations));
         }
 
         if (resolved.Count == 0)
@@ -1332,14 +1342,18 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         }
 
         var durationIntersection = resolved
-            .Select(x => x.Model.SupportedDurations.Where(duration => duration > 0).ToHashSet())
-            .Where(set => set.Count > 0)
+            .Select(x => x.SupportedDurations)
             .Aggregate((HashSet<int>?)null, (current, next) =>
             {
                 if (current is null) return next;
                 current.IntersectWith(next);
                 return current;
             });
+
+        if (durationIntersection is null || durationIntersection.Count == 0)
+        {
+            return Array.Empty<ResolvedFallbackCandidate>();
+        }
 
         var candidates = new List<ResolvedFallbackCandidate>();
         foreach (var item in resolved)
@@ -1371,12 +1385,41 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
     private static bool IsCompatibleVersion(
         SceneVideoVersionDto version,
         SceneVideoRenderWorkItemInput input,
-        RVideoVideoModelPolicyEntry policy)
+        RVideoVideoModelPolicyEntry policy,
+        int providerDurationSeconds)
         => !string.IsNullOrWhiteSpace(version.ProviderCode)
            && string.Equals(version.ProviderCode, input.ProviderCode, StringComparison.OrdinalIgnoreCase)
            && version.ProviderCapabilityId == input.ProviderCapabilityId
            && !string.IsNullOrWhiteSpace(version.ModelName)
-           && string.Equals(version.ModelName, policy.Model, StringComparison.OrdinalIgnoreCase);
+           && string.Equals(version.ModelName, policy.Model, StringComparison.OrdinalIgnoreCase)
+           && IsCompatibleRenderConfig(version.RenderConfigJson, input, policy, providerDurationSeconds);
+
+    private static bool IsCompatibleRenderConfig(
+        string? renderConfigJson,
+        SceneVideoRenderWorkItemInput input,
+        RVideoVideoModelPolicyEntry policy,
+        int providerDurationSeconds)
+    {
+        if (string.IsNullOrWhiteSpace(renderConfigJson))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(renderConfigJson);
+            var root = doc.RootElement;
+            return string.Equals(ReadJsonString(root, "provider"), input.ProviderCode, StringComparison.OrdinalIgnoreCase)
+                   && string.Equals(ReadJsonString(root, "capability"), input.CapabilityCode, StringComparison.OrdinalIgnoreCase)
+                   && string.Equals(ReadJsonString(root, "model"), policy.Model, StringComparison.OrdinalIgnoreCase)
+                   && string.Equals(ReadJsonString(root, "mode"), policy.Mode, StringComparison.OrdinalIgnoreCase)
+                   && ReadJsonInt(root, "providerDurationSeconds") == providerDurationSeconds;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
 
     private static bool IsMatchingLogicalRequestId(string value, string logicalRequestId)
         => string.Equals(value, logicalRequestId, StringComparison.OrdinalIgnoreCase)
@@ -1397,6 +1440,21 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
 
         return int.TryParse(value[prefix.Length..], out var attempt) ? attempt : -1;
     }
+
+    private static string? ReadJsonString(JsonElement element, string propertyName)
+        => element.ValueKind == JsonValueKind.Object
+           && element.TryGetProperty(propertyName, out var value)
+           && value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : null;
+
+    private static int? ReadJsonInt(JsonElement element, string propertyName)
+        => element.ValueKind == JsonValueKind.Object
+           && element.TryGetProperty(propertyName, out var value)
+           && value.ValueKind == JsonValueKind.Number
+           && value.TryGetInt32(out var number)
+            ? number
+            : null;
 
     private static bool IsActiveSceneVideoStatus(string status)
         => status.Equals("queued", StringComparison.OrdinalIgnoreCase)

@@ -132,7 +132,7 @@ public sealed class RVideoVideoHotfixTests
     }
 
     [Fact]
-    public void ResolveFallbackCandidatesDropsCatalogRowsWithoutMode()
+    public void ResolveFallbackCandidatesDropsCatalogRowsWithoutDurationContract()
     {
         var method = typeof(SceneVideoWorkerHandler).GetMethod("ResolveFallbackCandidates", BindingFlags.NonPublic | BindingFlags.Static);
         Assert.NotNull(method);
@@ -181,7 +181,61 @@ public sealed class RVideoVideoHotfixTests
             .Select(policy => (string)policy.GetType().GetProperty("Model")!.GetValue(policy)!)
             .ToArray();
 
-        Assert.Equal(["veo_omni", "veo_3_1"], policies);
+        Assert.Equal(["veo_omni"], policies);
+    }
+
+    [Fact]
+    public void ResolveFallbackCandidatesUsesSafeIntersectionAcrossKnownDurations()
+    {
+        var method = typeof(SceneVideoWorkerHandler).GetMethod("ResolveFallbackCandidates", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var input = new SceneVideoRenderWorkItemInput
+        {
+            ProviderCode = "79ai",
+            DurationSeconds = 4
+        };
+        var catalog = new[]
+        {
+            new AiProviderModelListItemDto
+            {
+                ProviderCode = "79ai",
+                ProviderModelCode = "veo_omni",
+                MediaType = "video",
+                Enabled = true,
+                IsDeprecated = false,
+                SupportedModes = ["flash"],
+                SupportedDurations = [4, 6, 8, 10]
+            },
+            new AiProviderModelListItemDto
+            {
+                ProviderCode = "79ai",
+                ProviderModelCode = "veo_3_1",
+                MediaType = "video",
+                Enabled = true,
+                IsDeprecated = false,
+                SupportedModes = ["fast", "lite", "quality"],
+                SupportedDurations = [6, 10, 12, 15]
+            }
+        };
+
+        var resolved = ((System.Collections.IEnumerable)method!.Invoke(null, new object[] { input, catalog })!)
+            .Cast<object>()
+            .Select(item =>
+            {
+                var policy = item.GetType().GetProperty("Policy")!.GetValue(item)!;
+                return new
+                {
+                    Model = (string)policy.GetType().GetProperty("Model")!.GetValue(policy)!,
+                    Mode = (string?)policy.GetType().GetProperty("Mode")!.GetValue(policy),
+                    Duration = (int)item.GetType().GetProperty("ProviderDurationSeconds")!.GetValue(item)!
+                };
+            })
+            .ToArray();
+
+        Assert.Equal(3, resolved.Length);
+        Assert.All(resolved, item => Assert.Equal(6, item.Duration));
+        Assert.Equal(["veo_omni", "veo_3_1", "veo_3_1"], resolved.Select(x => x.Model));
     }
 
     [Fact]

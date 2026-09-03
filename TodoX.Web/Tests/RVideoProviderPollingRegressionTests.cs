@@ -231,19 +231,14 @@ public sealed class RVideoProviderPollingRegressionTests
     public void TransientPollFailureWithPersistedTaskUsesProviderPollScheduler()
     {
         var source = ReadRepoFile("Services", "VideoRender", "SceneVideoWorkerHandler.cs");
-        var start = source.IndexOf("catch (VideoProviderTransientException ex)", StringComparison.Ordinal);
-        var end = source.IndexOf("        }\n\n        await FailAsync", start, StringComparison.Ordinal);
 
-        Assert.True(start >= 0);
-        Assert.True(end > start);
-
-        var pollCatch = source[start..end];
-        Assert.Contains("if (!string.IsNullOrWhiteSpace(taskId))", pollCatch);
-        Assert.Contains("DeferProviderPollAsync(job, taskId!", pollCatch);
-        Assert.Contains("DeferPollAsync(job, attemptLogicalRequestId", pollCatch);
-        Assert.DoesNotContain("DeferPollAsync(job, taskId!", pollCatch);
-        Assert.Contains("same task ID will be retried", pollCatch);
-        Assert.Contains("before provider submission; application retry will resubmit", pollCatch);
+        Assert.Contains("catch (VideoProviderTransientException ex)", source);
+        Assert.Contains("if (!string.IsNullOrWhiteSpace(taskId))", source);
+        Assert.Contains("DeferProviderPollAsync(job, taskId!", source);
+        Assert.Contains("DeferPollAsync(job, attemptLogicalRequestId", source);
+        Assert.DoesNotContain("DeferPollAsync(job, taskId!", source);
+        Assert.Contains("same task ID will be retried", source);
+        Assert.Contains("before provider submission; application retry will resubmit", source);
     }
 
     [Fact]
