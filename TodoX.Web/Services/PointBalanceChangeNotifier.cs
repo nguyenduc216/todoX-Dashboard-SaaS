@@ -2,13 +2,13 @@ namespace TodoX.Web.Services;
 
 public interface IPointBalanceChangeNotifier
 {
-    event Action? Changed;
-    void NotifyChanged();
+    event Action<Guid>? Changed;
+    void NotifyChanged(Guid customerId);
 }
 
 public sealed class PointBalanceChangeNotifier : IPointBalanceChangeNotifier
 {
-    public event Action? Changed;
+    public event Action<Guid>? Changed;
 
-    public void NotifyChanged() => Changed?.Invoke();
+    public void NotifyChanged(Guid customerId) => Changed?.Invoke(customerId);
 }

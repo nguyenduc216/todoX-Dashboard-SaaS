@@ -234,8 +234,13 @@
         PointBalanceChanges.Changed -= HandlePointBalanceChanged;
     }
 
-    private void HandlePointBalanceChanged() => InvokeAsync(async () =>
+    private void HandlePointBalanceChanged(Guid customerId) => InvokeAsync(async () =>
     {
+        if (AuthState.CurrentUser?.CustomerId != customerId)
+        {
+            return;
+        }
+
         await LoadBalanceAsync();
         StateHasChanged();
     });

@@ -227,6 +227,7 @@ public sealed class WalletService
             tx);
 
         tx.Commit();
+        _balanceChanges.NotifyChanged(customerId);
         return result;
     }
 
@@ -318,7 +319,7 @@ public sealed class WalletService
 
         tx.Commit();
         _logger.LogInformation("Charged {Amount} points to customer {Cid} for {Op}; balance {After}", amount, customerId, operation, after);
-        _balanceChanges.NotifyChanged();
+        _balanceChanges.NotifyChanged(customerId.Value);
         return new ChargeResult(true, amount, after, null);
     }
 
@@ -347,7 +348,7 @@ public sealed class WalletService
         tx.Commit();
         if (result.Ok)
         {
-            _balanceChanges.NotifyChanged();
+            _balanceChanges.NotifyChanged(customerId);
         }
         return result;
     }

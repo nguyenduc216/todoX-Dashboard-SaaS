@@ -249,6 +249,8 @@ SELECT routine_schema, routine_name
 -- rVideo parent image aggregation and persisted pricing snapshot.
 SELECT id AS rvideo_parent_job_id,
        customer_id,
+       input_json #>> '{billingOperationId}' AS billing_operation_id,
+       input_json #>> '{parentRenderJobId}' AS parent_render_job_id,
        point_cost_estimate,
        point_cost_charged,
        point_status,
@@ -259,6 +261,37 @@ SELECT id AS rvideo_parent_job_id,
   FROM render.render_jobs
  WHERE job_type IN ('render_video_batch', 'rvideo')
  ORDER BY created_at DESC
+ LIMIT 50;
+
+SELECT
+    (data_json->>'billingOperationId') AS billing_operation_id,
+    (data_json->>'parentRenderJobId') AS parent_render_job_id,
+    (data_json->>'projectId') AS project_id,
+    (data_json->>'serviceId') AS service_id,
+    (data_json->>'chargeReferenceId') AS charge_reference_id,
+    (data_json->>'totalPoints') AS total_points
+  FROM render.render_job_events
+ WHERE event_type = 'RVIDEO_PARENT_BILLED'
+ ORDER BY created_at DESC
+ LIMIT 50;
+
+SELECT reference_type, reference_id, COUNT(*) AS parent_charge_count
+  FROM billing.token_transactions
+ WHERE transaction_type IN ('debit', 'charge')
+   AND reference_type = 'rvideo_parent_job'
+ GROUP BY reference_type, reference_id
+ HAVING COUNT(*) > 1;
+
+SELECT voucher_id, customer_id, points, transaction_id, redeemed_at
+  FROM billing.point_voucher_redemptions
+ ORDER BY redeemed_at DESC
+ LIMIT 50;
+
+SELECT w.customer_id, w.balance, SUM(t.amount) AS ledger_balance
+  FROM billing.token_wallets w
+  LEFT JOIN billing.token_transactions t ON t.wallet_id = w.id
+ GROUP BY w.customer_id, w.balance
+ ORDER BY w.customer_id
  LIMIT 50;
 
 -- rDance service and image usage recorded in the render-job input.

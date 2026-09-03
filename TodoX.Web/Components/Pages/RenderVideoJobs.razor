@@ -23,6 +23,7 @@
 @inject TodoX.Web.Services.VideoRender.IRVideoJobService RVideoJobs
 @inject TodoX.Web.Services.VideoRender.IRVideoProjectFinalizationService RVideoFinalization
 @inject TodoX.Web.Services.VideoRender.IRVideoTrustedPayerContextService RVideoPayerContexts
+@inject TodoX.Web.Services.VideoRender.IRVideoInitialPointEstimateService RVideoEstimate
 @inject TodoX.Web.Services.Platform.ICoreServiceCatalogService CoreCatalog
 @inject IOptionsMonitor<TodoX.Web.Services.VideoRender.VideoRenderOptions> VideoOptions
 @inject IDialogService DialogService
@@ -340,7 +341,7 @@ else
                             @if (HasActionableMissingSceneImages)
                             {
                                 <MudTooltip Text="Tạo ảnh tĩnh cho các scene còn thiếu hoặc lỗi">
-                                    <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.AddPhotoAlternate" OnClick="RenderMissingSceneImagesAsync" Disabled="@(_batchActive || _useReferenceImageForAllScenes)">Tạo ảnh còn thiếu</MudButton>
+                                    <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.AddPhotoAlternate" OnClick="RenderMissingSceneImagesAsync" Disabled="@(_batchActive || _useReferenceImageForAllScenes || !CanStartInitialRender)">Tạo ảnh còn thiếu</MudButton>
                                 </MudTooltip>
                             }
                             <MudTooltip Text="Thêm scene thủ công">
@@ -353,6 +354,54 @@ else
                                 <MudIconButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary" Icon="@Icons.Material.Filled.Refresh" OnClick="ReloadAsync" Disabled="@_busy" aria-label="Refresh scene" />
                             </MudTooltip>
                         </div>
+
+                        @if (_initialEstimate is not null)
+                        {
+                            <MudPaper Class="pa-3 mb-3" Outlined="true">
+                                <MudStack Spacing="1">
+                                    <MudText Typo="Typo.subtitle1">CHI PHÍ DỰ KIẾN</MudText>
+                                    <MudGrid Spacing="1">
+                                        <MudItem xs="12" md="6">
+                                            <MudText Typo="Typo.body2">Hình ảnh</MudText>
+                                            <MudText Typo="Typo.body1">@FormatEstimateLine(_initialEstimate.ImageCount, _initialEstimate.ImageRate, _initialEstimate.ImagePoints)</MudText>
+                                        </MudItem>
+                                        <MudItem xs="12" md="6">
+                                            <MudText Typo="Typo.body2">Video</MudText>
+                                            <MudText Typo="Typo.body1">@FormatEstimateLine(_initialEstimate.VideoSeconds, _initialEstimate.VideoRate, _initialEstimate.VideoPoints, "giây")</MudText>
+                                        </MudItem>
+                                        <MudItem xs="12" md="6">
+                                            <MudText Typo="Typo.body2">Voice</MudText>
+                                            <MudText Typo="Typo.body1">@(_initialEstimate.VoiceCount > 0 ? FormatEstimateLine(_initialEstimate.VoiceCount, _initialEstimate.VoiceRate, _initialEstimate.VoicePoints) : "Không sử dụng — 0 điểm")</MudText>
+                                        </MudItem>
+                                        <MudItem xs="12" md="6">
+                                            <MudText Typo="Typo.body2">TỔNG</MudText>
+                                            <MudText Typo="Typo.body1">@FormatPoints(_initialEstimate.TotalPoints)</MudText>
+                                        </MudItem>
+                                        <MudItem xs="12" md="4">
+                                            <MudText Typo="Typo.body2">Điểm khả dụng</MudText>
+                                            <MudText Typo="Typo.body1">@FormatPoints(_initialEstimate.AvailablePoints)</MudText>
+                                        </MudItem>
+                                        <MudItem xs="12" md="4">
+                                            <MudText Typo="Typo.body2">Còn lại sau khi thực hiện</MudText>
+                                            <MudText Typo="Typo.body1">@FormatPoints(_initialEstimate.RemainingPoints)</MudText>
+                                        </MudItem>
+                                        <MudItem xs="12" md="4">
+                                            <MudText Typo="Typo.body2">Thiếu điểm</MudText>
+                                            <MudText Typo="Typo.body1">@(_initialEstimate.MissingPoints > 0 ? FormatPoints(_initialEstimate.MissingPoints) : "0 điểm")</MudText>
+                                        </MudItem>
+                                    </MudGrid>
+                                    @if (!_initialEstimate.CanStart)
+                                    {
+                                        <MudAlert Severity="Severity.Warning" Dense="true">
+                                            Không đủ điểm để thực hiện video này.
+                                            <div>Cần: @FormatPoints(_initialEstimate.TotalPoints)</div>
+                                            <div>Hiện có: @FormatPoints(_initialEstimate.AvailablePoints)</div>
+                                            <div>Thiếu: @FormatPoints(_initialEstimate.MissingPoints)</div>
+                                        </MudAlert>
+                                    }
+                                </MudStack>
+                            </MudPaper>
+                        }
 
                         <div class="scene-list-scroll" tabindex="0">
                         <div class="scene-card-grid">
@@ -700,6 +749,7 @@ else
     private IReadOnlyList<TodoX.Web.Services.VideoRender.FinalVideoVersionDto> _finalVersions = Array.Empty<TodoX.Web.Services.VideoRender.FinalVideoVersionDto>();
     private readonly Dictionary<Guid, IReadOnlyList<TodoX.Web.Services.VideoRender.FinalVideoVersionItemDto>> _finalVersionItems = new();
     private ProviderOptionDto? _defaultImageToVideoProvider;
+    private TodoX.Web.Services.VideoRender.RVideoInitialPointEstimate? _initialEstimate;
     private long? _imageHistorySceneId;
     private long? _videoHistorySceneId;
     private bool _showFinalHistory;
@@ -738,6 +788,7 @@ else
 
     private bool CanMerge => _project is not null && _project.Scenes.Count > 0 && GetFinalMergeReadiness().CanMerge;
     private string FinalMergeReadinessText => GetFinalMergeReadiness().Message;
+    private bool CanStartInitialRender => _initialEstimate?.CanStart ?? true;
     private bool CanClickFinalMerge
         => CanMerge
            && !_busy
@@ -1456,12 +1507,51 @@ else
                     _loadWarning = "Không thể tải cấu hình tạo video. Có thể xem preview hiện có và thử lại sau.";
                 }
                 await ReloadJobsAsync();
+                await RefreshInitialEstimateAsync();
             }
         }
         finally
         {
             _reloadLock.Release();
         }
+    }
+
+    private async Task RefreshInitialEstimateAsync()
+    {
+        if (_project is null || AuthState.CurrentUser is null)
+        {
+            _initialEstimate = null;
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
+        try
+        {
+            var billingScenes = _project.Scenes.OrderBy(x => x.SceneIndex).ToArray();
+            var estimate = await RVideoEstimate.EstimateInitialRVideoPointsAsync(
+                new TodoX.Web.Services.VideoRender.RVideoInitialPointEstimateRequest(
+                    _jobId ?? Guid.Empty,
+                    _jobId ?? Guid.Empty,
+                    _project.Id,
+                    ServiceId,
+                    AuthState.CurrentUser.CustomerId,
+                    _project,
+                    billingScenes,
+                    billingScenes,
+                    await RVideoSettings.GetAsync(_project.Id),
+                    async (scene, ct) => await SceneVersions.GetSelectedImageVersionAsync(scene.Id, ct),
+                    TodoX.Web.Models.Catalog.ServiceSellPriceQualityTiers.Premium,
+                    TodoX.Web.Models.Catalog.ServiceSellPriceQualityTiers.Standard,
+                    TodoX.Web.Models.Catalog.ServiceSellPriceQualityTiers.Standard));
+            _initialEstimate = estimate;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "RVIDEO_INITIAL_ESTIMATE_REFRESH_FAILED projectId={ProjectId}", _project.Id);
+            _initialEstimate = null;
+        }
+
+        await InvokeAsync(StateHasChanged);
     }
 
     private async Task LoadCharactersAsync()
@@ -1523,6 +1613,7 @@ else
             }
         }
         _characterPrompt = _selectedCharacter?.NormalizedPrompt ?? string.Empty;
+        _ = RefreshInitialEstimateAsync();
         await InvokeAsync(StateHasChanged);
     }
 
@@ -1536,6 +1627,7 @@ else
         _characterPrompt = string.Empty;
         _skipCharacter = true;
         _characterMode = RVideoCharacterModes.None;
+        _ = RefreshInitialEstimateAsync();
         return InvokeAsync(StateHasChanged);
     }
 
@@ -1558,6 +1650,7 @@ else
             _characterMode = RVideoCharacterModes.None;
         }
 
+        _ = RefreshInitialEstimateAsync();
         return InvokeAsync(StateHasChanged);
     }
 
@@ -2156,12 +2249,14 @@ else
     private Task OnAspectRatioChangedAsync(string value)
     {
         _aspectRatio = NormalizeAspectRatio(value) ?? string.Empty;
+        _ = RefreshInitialEstimateAsync();
         return InvokeAsync(StateHasChanged);
     }
 
     private Task OnResolutionChangedAsync(string value)
     {
         _resolution = NormalizeResolution(value) ?? string.Empty;
+        _ = RefreshInitialEstimateAsync();
         return InvokeAsync(StateHasChanged);
     }
 
@@ -3104,6 +3199,12 @@ else
             Snackbar.Add("Không còn scene thiếu ảnh để tạo.", Severity.Info);
             return;
         }
+        await RefreshInitialEstimateAsync();
+        if (_initialEstimate is not null && !_initialEstimate.CanStart)
+        {
+            Snackbar.Add($"Không đủ điểm để thực hiện video này. Thiếu {FormatPoints(_initialEstimate.MissingPoints)}.", Severity.Warning);
+            return;
+        }
 
         _batchActive = true;
         await InvokeAsync(StateHasChanged);
@@ -3754,6 +3855,12 @@ else
 
     private static string FormatMoney(decimal? value)
         => value.HasValue ? value.Value.ToString("0.######") : "N/A";
+
+    private static string FormatPoints(decimal value)
+        => value.ToString("#,0");
+
+    private static string FormatEstimateLine(int quantity, decimal rate, decimal points, string unit = "lượt")
+        => $"{quantity:n0} {unit} × {rate:n0} = {FormatPoints(points)} điểm";
 
     private string ProjectCardClass(VideoProjectListItemDto item)
         => $"pa-3 render-project-card {(_projectId == item.Id ? "render-project-card-active" : string.Empty)}";
