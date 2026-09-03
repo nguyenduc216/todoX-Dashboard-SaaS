@@ -3,6 +3,7 @@
 @inject BillingRepository Billing
 @inject WalletService WalletService
 @inject ISnackbar Snackbar
+@inject ILogger<Wallets> Logger
 
 <PageTitle>Quản lý điểm</PageTitle>
 
@@ -39,6 +40,10 @@
                         </MudItem>
                     </MudGrid>
                 </MudPaper>
+                @if (!string.IsNullOrWhiteSpace(_rateLoadError))
+                {
+                    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="mb-3">@_rateLoadError</MudAlert>
+                }
                 <MudTable Items="_rates" Dense="true" Hover="true">
                     <HeaderContent>
                         <MudTh>Loại tài nguyên</MudTh>
@@ -97,6 +102,10 @@
                     }
                 </MudPaper>
             }
+            @if (!string.IsNullOrWhiteSpace(_walletLoadError))
+            {
+                <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="mb-3">@_walletLoadError</MudAlert>
+            }
 
             @if (IsCustomer)
             {
@@ -127,6 +136,10 @@
         </MudTabPanel>
 
         <MudTabPanel Text="Lịch sử điểm">
+            @if (!string.IsNullOrWhiteSpace(_historyLoadError))
+            {
+                <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="mb-3">@_historyLoadError</MudAlert>
+            }
             <MudTable Items="_transactions" Dense="true" Hover="true">
                 <HeaderContent>
                     <MudTh>Thời gian</MudTh>
@@ -148,6 +161,10 @@
         @if (!IsCustomer)
         {
             <MudTabPanel Text="Voucher điểm">
+                @if (!string.IsNullOrWhiteSpace(_voucherLoadError))
+                {
+                    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="mb-3">@_voucherLoadError</MudAlert>
+                }
                 <MudGrid>
                     <MudItem xs="12" md="5">
                         <MudPaper Class="pa-4">
@@ -192,6 +209,10 @@
     private IReadOnlyList<WalletView> _wallets = Array.Empty<WalletView>();
     private IReadOnlyList<TransactionView> _transactions = Array.Empty<TransactionView>();
     private IReadOnlyList<PointVoucherView> _vouchers = Array.Empty<PointVoucherView>();
+    private string? _rateLoadError;
+    private string? _walletLoadError;
+    private string? _historyLoadError;
+    private string? _voucherLoadError;
     private WalletView? _selectedWallet;
     private int _activeTabIndex;
     private string _voucherCode = string.Empty;
@@ -213,10 +234,69 @@
         var cid = IsCustomer ? AuthState.CurrentUser?.CustomerId : null;
         if (AuthState.CurrentUser is null) return;
 
-        _rates = IsCustomer ? Array.Empty<PointRateConfigView>() : await Billing.GetPointRatesAsync(AuthState.CurrentUser);
-        _wallets = await Billing.GetWalletsAsync(cid, AuthState.CurrentUser);
-        _transactions = await Billing.GetRecentTransactionsAsync(cid, AuthState.CurrentUser);
-        _vouchers = IsCustomer ? Array.Empty<PointVoucherView>() : await Billing.GetPointVouchersAsync(AuthState.CurrentUser);
+        _rateLoadError = null;
+        _walletLoadError = null;
+        _historyLoadError = null;
+        _voucherLoadError = null;
+
+        if (IsCustomer)
+        {
+            _rates = Array.Empty<PointRateConfigView>();
+            _vouchers = Array.Empty<PointVoucherView>();
+        }
+        else
+        {
+            try
+            {
+                _rates = await Billing.GetPointRatesAsync(AuthState.CurrentUser);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Failed loading point rate configuration.");
+                _rateLoadError = "Không thể tải cấu hình điểm.";
+                _rates = Array.Empty<PointRateConfigView>();
+            }
+        }
+
+        try
+        {
+            _wallets = await Billing.GetWalletsAsync(cid, AuthState.CurrentUser);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed loading customer wallets.");
+            _walletLoadError = "Không thể tải danh sách điểm khách hàng.";
+            _wallets = Array.Empty<WalletView>();
+        }
+
+        try
+        {
+            _transactions = await Billing.GetRecentTransactionsAsync(cid, AuthState.CurrentUser);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed loading point transaction history.");
+            _historyLoadError = "Không thể tải lịch sử điểm.";
+            _transactions = Array.Empty<TransactionView>();
+        }
+
+        if (IsCustomer)
+        {
+            _vouchers = Array.Empty<PointVoucherView>();
+        }
+        else
+        {
+            try
+            {
+                _vouchers = await Billing.GetPointVouchersAsync(AuthState.CurrentUser);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Failed loading point vouchers.");
+                _voucherLoadError = "Không thể tải danh sách voucher.";
+                _vouchers = Array.Empty<PointVoucherView>();
+            }
+        }
 
         if (_selectedWallet is not null)
         {

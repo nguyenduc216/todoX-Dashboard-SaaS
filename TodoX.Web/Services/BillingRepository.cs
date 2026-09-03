@@ -13,7 +13,7 @@ public sealed record TransactionView(Guid Id, string CustomerName, string Transa
 
 public sealed record TokenSummary(decimal TotalBalance, decimal TotalLocked, int WalletCount, decimal SoldTotal);
 public sealed record PointRateConfigView(string ResourceType, string QualityTier, decimal Rate, string Unit, bool IsActive, string? Description);
-public sealed record PointVoucherView(Guid Id, string VoucherCode, decimal PointAmount, string Status, int? MaxRedemptions, int RedeemedCount, DateTimeOffset? ValidFrom, DateTimeOffset? ValidUntil);
+public sealed record PointVoucherView(Guid Id, string VoucherCode, decimal PointAmount, string Status, int? MaxRedemptions, int RedeemedCount, DateTime? ValidFrom, DateTime? ValidUntil);
 public sealed record PointVoucherRedemptionView(Guid Id, string VoucherCode, string CustomerName, decimal Points, Guid TransactionId, DateTimeOffset RedeemedAt);
 public sealed record ServicePointRateView(string ResourceType, string QualityTier, decimal? OverrideRate, decimal GlobalRate, decimal EffectiveRate, string Unit, string Source);
 

@@ -36,6 +36,27 @@ public sealed class PointModuleRegressionTests
     }
 
     [Fact]
+    public void PointManagementPageIsolatesEachLoadSection()
+    {
+        var page = File.ReadAllText(Path.Combine(RepoRoot, "TodoX.Web", "Components", "Pages", "Wallets.razor"));
+
+        Assert.Contains("@inject ILogger<Wallets> Logger", page, StringComparison.Ordinal);
+        Assert.Contains("private string? _rateLoadError;", page, StringComparison.Ordinal);
+        Assert.Contains("private string? _walletLoadError;", page, StringComparison.Ordinal);
+        Assert.Contains("private string? _historyLoadError;", page, StringComparison.Ordinal);
+        Assert.Contains("private string? _voucherLoadError;", page, StringComparison.Ordinal);
+        Assert.Contains("Logger.LogError(ex, \"Failed loading point rate configuration.\")", page, StringComparison.Ordinal);
+        Assert.Contains("Logger.LogError(ex, \"Failed loading customer wallets.\")", page, StringComparison.Ordinal);
+        Assert.Contains("Logger.LogError(ex, \"Failed loading point transaction history.\")", page, StringComparison.Ordinal);
+        Assert.Contains("Logger.LogError(ex, \"Failed loading point vouchers.\")", page, StringComparison.Ordinal);
+        Assert.Contains("if (!string.IsNullOrWhiteSpace(_rateLoadError))", page, StringComparison.Ordinal);
+        Assert.Contains("if (!string.IsNullOrWhiteSpace(_walletLoadError))", page, StringComparison.Ordinal);
+        Assert.Contains("if (!string.IsNullOrWhiteSpace(_historyLoadError))", page, StringComparison.Ordinal);
+        Assert.Contains("if (!string.IsNullOrWhiteSpace(_voucherLoadError))", page, StringComparison.Ordinal);
+        Assert.Contains("try", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ServicePointRatesPageUsesInlineLocalizedOverrideEditor()
     {
         var dialog = File.ReadAllText(Path.Combine(RepoRoot, "TodoX.Web", "Components", "Dialogs", "ServicePointRatesDialog.razor"));

@@ -179,7 +179,7 @@ public sealed class WalletService
             return new(false, null, 0, 0, "Invalid voucher.");
         }
 
-        var now = DateTimeOffset.UtcNow;
+        var now = DateTime.UtcNow;
         if (!string.Equals(voucher.Status, "active", StringComparison.OrdinalIgnoreCase)
             || (voucher.ValidFrom is not null && voucher.ValidFrom > now)
             || (voucher.ValidUntil is not null && voucher.ValidUntil < now)
@@ -511,7 +511,7 @@ public sealed class WalletService
         public string Status { get; set; } = string.Empty;
         public int? MaxRedemptions { get; set; }
         public int RedeemedCount { get; set; }
-        public DateTimeOffset? ValidFrom { get; set; }
-        public DateTimeOffset? ValidUntil { get; set; }
+        public DateTime? ValidFrom { get; set; }
+        public DateTime? ValidUntil { get; set; }
     }
 }
