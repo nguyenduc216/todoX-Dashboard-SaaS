@@ -568,6 +568,12 @@ public sealed class RenderJobService : IRenderJobService
                    output_json = CASE WHEN @output IS NULL THEN output_json ELSE CAST(@output AS jsonb) END,
                    error_code=@errorCode,
                    error_message=@errorMessage,
+                   point_status = CASE
+                       WHEN job_type='dance_sell'
+                            AND @status='completed'
+                            AND point_status='pending' THEN 'charged'
+                       ELSE point_status
+                   END,
                    completed_at = CASE
                        WHEN @status IN ('completed', 'failed', 'cancelled') THEN now()
                        WHEN @status='pending_reconciliation' THEN NULL

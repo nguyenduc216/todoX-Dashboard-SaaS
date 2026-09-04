@@ -589,19 +589,7 @@
         : "Bạn sẽ xác nhận từng bước trước khi tạo video.";
 
     private string DisplayStatusLabel(DanceSellJobDto job)
-        => IsCoreCancelled ? "Đã dừng" : StatusLabel(job.Status);
-
-    private static string StatusLabel(string status) => status switch
-    {
-        DanceSellJobStatuses.Draft => "Bản nháp",
-        DanceSellJobStatuses.Queued => "Đang chờ",
-        DanceSellJobStatuses.Submitted => "Đã gửi xử lý",
-        DanceSellJobStatuses.Rendering => "Đang tạo video",
-        DanceSellJobStatuses.Completed => "Hoàn thành",
-        DanceSellJobStatuses.Failed => "Thất bại",
-        DanceSellJobStatuses.Timeout => "Quá thời gian",
-        _ => "Không xác định"
-    };
+        => IsCoreCancelled ? "Đã dừng" : DanceSellCustomerStatusText.JobStatusLabel(job.Status);
 
     private static DateTime RenderStartUtc(DanceSellJobDto job)
         => DateTime.SpecifyKind(job.SubmittedAt ?? job.CreatedAt, DateTimeKind.Utc);

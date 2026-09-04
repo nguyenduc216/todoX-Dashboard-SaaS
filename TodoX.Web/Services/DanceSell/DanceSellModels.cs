@@ -97,6 +97,80 @@ public static class DanceSellBillingStatuses
     public const string Refunded = "refunded";
 }
 
+public static class DanceSellCustomerStatusText
+{
+    public static string JobStatusLabel(string? status) => status?.Trim().ToLowerInvariant() switch
+    {
+        DanceSellJobStatuses.Draft => "Bản nháp",
+        "reference_inputs" => "Chuẩn bị dữ liệu",
+        "reference_generation" => "Đang tạo ảnh tham chiếu",
+        "reference_ready" => "Ảnh tham chiếu đã sẵn sàng",
+        "reference_approved" => "Đã duyệt ảnh tham chiếu",
+        DanceSellJobStatuses.Queued => "Đang chờ xử lý",
+        DanceSellJobStatuses.Submitted => "Đã gửi xử lý",
+        DanceSellJobStatuses.Rendering => "Đang tạo video",
+        DanceSellJobStatuses.Completed => "Hoàn thành",
+        DanceSellJobStatuses.Failed => "Lỗi",
+        DanceSellJobStatuses.Timeout => "Quá thời gian xử lý",
+        "cancelled" => "Đã hủy",
+        _ => string.IsNullOrWhiteSpace(status) ? "Chưa bắt đầu" : status!
+    };
+
+    public static string StageLabel(string? stage) => stage?.Trim().ToLowerInvariant() switch
+    {
+        DanceSellCurrentStages.Draft => "Bản nháp",
+        DanceSellCurrentStages.MediaUpload => "Chuẩn bị dữ liệu",
+        "reference_inputs" => "Chuẩn bị dữ liệu",
+        DanceSellCurrentStages.ReferenceGeneration => "Đang tạo ảnh tham chiếu",
+        DanceSellCurrentStages.ReferenceReady => "Ảnh tham chiếu đã sẵn sàng",
+        DanceSellCurrentStages.ReferenceApproved => "Đã duyệt ảnh tham chiếu",
+        DanceSellCurrentStages.MotionQueued => "Đang chờ tạo video",
+        DanceSellCurrentStages.MotionRendering => "Đang tạo video",
+        "motion_submitted" => "Đã gửi xử lý",
+        "output_staging" => "Đang hoàn thiện",
+        DanceSellCurrentStages.Completed => "Hoàn thành",
+        DanceSellCurrentStages.Failed => "Lỗi",
+        "timeout" => "Quá thời gian xử lý",
+        "cancelled" => "Đã hủy",
+        DanceSellOperationStatuses.Queued => "Đang chờ xử lý",
+        DanceSellOperationStatuses.Submitted => "Đã gửi xử lý",
+        DanceSellOperationStatuses.Generating => "Đang tạo video",
+        _ => string.IsNullOrWhiteSpace(stage) ? "Chưa bắt đầu" : stage!
+    };
+
+    public static string BillingStatusLabel(string? status) => status?.Trim().ToLowerInvariant() switch
+    {
+        "pending" => "Đang xử lý điểm",
+        DanceSellBillingStatuses.Charged => "Đã trừ điểm",
+        DanceSellBillingStatuses.Estimated => "Đã ước tính điểm",
+        DanceSellBillingStatuses.Reconciliation => "Chờ đối soát",
+        DanceSellBillingStatuses.NotRequired => "Không cần tính điểm",
+        DanceSellBillingStatuses.Refunded => "Đã hoàn điểm",
+        DanceSellRefundStatuses.NotCharged => "Chưa trừ điểm",
+        DanceSellBillingStatuses.Reserved => "Đang giữ điểm",
+        DanceSellBillingStatuses.ChargeFailed => "Trừ điểm thất bại",
+        DanceSellBillingStatuses.PartiallyRefunded => "Hoàn điểm một phần",
+        _ => string.IsNullOrWhiteSpace(status) ? "Không xác định" : status!
+    };
+
+    public static string ProviderStatusLabel(string? status) => status?.Trim().ToLowerInvariant() switch
+    {
+        "queued" => "Đang chờ",
+        "submitted" => "Đã gửi",
+        "processing" => "Đang xử lý",
+        "rendering" => "Đang xử lý",
+        "completed" => "Hoàn thành",
+        "success" => "Hoàn thành",
+        "failed" => "Lỗi",
+        "error" => "Lỗi",
+        "timeout" => "Quá thời gian",
+        "cancelled" => "Đã hủy",
+        _ => string.IsNullOrWhiteSpace(status) ? "Không xác định" : status!
+    };
+
+    public static string PointStatusLabel(string? status) => BillingStatusLabel(status);
+}
+
 public static class DanceSellRefundStatuses
 {
     public const string NotRequired = "not_required";

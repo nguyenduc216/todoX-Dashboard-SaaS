@@ -231,7 +231,7 @@ public sealed class DanceSellRepository : IDanceSellRepository
         using var conn = await _factory.OpenAsync(ct);
         await conn.ExecuteAsync(
             """
-            UPDATE dance_sell.dance_sell_jobs
+            UPDATE dance_sell.dance_sell_jobs j
                SET status='queued',
                    render_job_id=@renderJobId,
                    logical_request_id=@logicalRequestId,
@@ -243,6 +243,10 @@ public sealed class DanceSellRepository : IDanceSellRepository
                    provider_code=@motionProviderCode,
                    provider_model=@motionProviderModel,
                    current_stage='motion_queued',
+                   billing_status = CASE
+                       WHEN COALESCE(r.point_cost_estimate, 0) > 0 THEN 'charged'
+                       ELSE j.billing_status
+                   END,
                    provider_task_id=NULL,
                    provider_status=NULL,
                    submit_response_json=NULL,
@@ -257,8 +261,10 @@ public sealed class DanceSellRepository : IDanceSellRepository
                    error_message=NULL,
                    error_json=NULL,
                    updated_at=now()
-             WHERE id=@id
-               AND status NOT IN ('submitted','rendering','completed');
+              FROM render.render_jobs r
+             WHERE j.id=@id
+               AND r.id=@renderJobId
+               AND j.status NOT IN ('submitted','rendering','completed');
             """,
             new
             {

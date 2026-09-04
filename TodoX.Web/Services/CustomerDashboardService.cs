@@ -260,7 +260,7 @@ public sealed class CustomerDashboardService : ICustomerDashboardService
                 ? row.Title!
                 : !string.IsNullOrWhiteSpace(row.Prompt) ? row.Prompt! : "Video nhảy quảng cáo thời trang",
             Status = row.Status,
-            StatusLabel = CustomerDashboardStatusRules.Label(row.Status, row.CurrentStage),
+            StatusLabel = DanceSellCustomerStatusText.JobStatusLabel(row.Status),
             ProgressPercent = null,
             CreatedAt = row.CreatedAt,
             UpdatedAt = row.UpdatedAt,

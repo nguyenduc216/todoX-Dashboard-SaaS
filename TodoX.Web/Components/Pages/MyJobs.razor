@@ -7,6 +7,7 @@
 @inject AuthStateService AuthState
 @inject ITimelapseJobService TimelapseJobs
 @inject IDanceSellPhase2Service DanceJobs
+@inject IDanceSellOperationRepository DanceOperations
 @inject IRVideoJobService RVideoJobs
 @inject TodoX.Web.Services.Platform.ICoreJobApplicationService CoreJobs
 @inject TodoX.Web.Services.Platform.ICoreServiceCatalogService ServiceCatalog
@@ -104,6 +105,7 @@
             var catalogTask = ServiceCatalog.ListAsync();
             await Task.WhenAll(timelapseTask, danceTask, coreTask, catalogTask);
             var catalog = catalogTask.Result.ToDictionary(x => x.ServiceCode, StringComparer.OrdinalIgnoreCase);
+            var danceRows = await BuildDanceRowsAsync(danceTask.Result, CancellationToken.None);
 
             var rows = timelapseTask.Result.Select(x => new CustomerJobRow(
                     x.Id,
@@ -114,15 +116,7 @@
                     x.CreatedAt,
                     x.Snapshot.SellPrice?.TotalPoints is decimal points ? $"{points:0.##}" : "—",
                     $"/jobs/timelapse/{x.Id}"))
-                .Concat(danceTask.Result.Select(x => new CustomerJobRow(
-                    x.Id,
-                    x.Title ?? "Video nhảy quảng cáo thời trang",
-                    "Video nhảy quảng cáo thời trang",
-                    x.Status,
-                    x.CurrentStage,
-                    x.CreatedAt,
-                    x.TotalTodoxPointsEstimated is decimal points ? $"{points:0.##}" : "—",
-                    $"/jobs/rdance/{x.Id}")))
+                .Concat(danceRows)
                 .Concat(coreTask.Result.Items
                     .Where(x => string.Equals(x.OperationType, TodoX.Web.Models.Catalog.TodoXServiceEngineTypes.RVideo, StringComparison.OrdinalIgnoreCase))
                     .Select(x => new CustomerJobRow(
@@ -142,6 +136,35 @@
 
         _loading = false;
         await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task<IReadOnlyList<CustomerJobRow>> BuildDanceRowsAsync(IReadOnlyList<DanceSellJobDto> jobs, CancellationToken ct)
+    {
+        var rows = new List<CustomerJobRow>(jobs.Count);
+        foreach (var job in jobs)
+        {
+            rows.Add(new CustomerJobRow(
+                job.Id,
+                job.Title ?? "Video nhảy quảng cáo thời trang",
+                "Video nhảy quảng cáo thời trang",
+                DanceSellCustomerStatusText.JobStatusLabel(job.Status),
+                DanceSellCustomerStatusText.StageLabel(job.CurrentStage),
+                job.CreatedAt,
+                await ResolveDancePointsLabelAsync(job, ct),
+                $"/jobs/rdance/{job.Id}"));
+        }
+
+        return rows;
+    }
+
+    private async Task<string> ResolveDancePointsLabelAsync(DanceSellJobDto job, CancellationToken ct)
+    {
+        var operation = await DanceOperations.GetLatestOperationAsync(job.Id, DanceSellOperationTypes.MotionVideo, ct);
+        var chargedPoints = operation?.BillingStatus == DanceSellBillingStatuses.Charged
+            ? operation.TodoxPointsCharged
+            : null;
+        var points = chargedPoints ?? job.TotalTodoxPointsEstimated;
+        return points.HasValue ? $"{points.Value:0.##}" : "—";
     }
 
     private static string? ReadSnapshotString(System.Text.Json.JsonElement snapshot, string propertyName)
