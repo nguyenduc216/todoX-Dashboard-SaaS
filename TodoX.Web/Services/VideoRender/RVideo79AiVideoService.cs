@@ -218,6 +218,10 @@ public sealed class RVideo79AiVideoService : IRVideo79AiVideoService
         {
             options["mode"] = request.Model.Mode;
         }
+        var imageUrls = providerImages
+            .Select(image => image.Url)
+            .Where(url => !string.IsNullOrWhiteSpace(url))
+            .ToArray();
         var raw = new Ai79TaskSubmitRequest(
             request.Runtime.BaseUrl,
             request.Runtime.SubmitPath,
@@ -225,9 +229,11 @@ public sealed class RVideo79AiVideoService : IRVideo79AiVideoService
             request.Runtime.Domain,
             request.Model.Model,
             request.Prompt,
-            Array.Empty<string>(),
+            imageUrls,
             options,
-            Ai79TaskOperation.Video);
+            Ai79TaskOperation.Video,
+            FirstImageField: "image",
+            SecondImageField: "image_2");
         var sanitizedRequest = JsonSerializer.Serialize(new
         {
             provider = "79ai",

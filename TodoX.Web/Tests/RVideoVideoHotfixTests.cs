@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Runtime.Serialization;
+using System.Net;
 using System.Text.Json;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -392,6 +393,9 @@ public sealed class RVideoVideoHotfixTests
             }));
 
         Assert.NotNull(client.LastSubmit);
+        Assert.Equal(new[] { "https://example.test/reference-character.png" }, client.LastSubmit!.Images);
+        Assert.Equal("image", client.LastSubmit.FirstImageField);
+        Assert.Equal("image_2", client.LastSubmit.SecondImageField);
         Assert.True(client.LastSubmit!.Options.TryGetValue("images", out var imagesJson));
         Assert.Contains("reference-character.png", imagesJson);
         Assert.Contains("Use the supplied image as the fixed visual base for this scene", client.LastSubmit.Prompt);
@@ -449,8 +453,94 @@ public sealed class RVideoVideoHotfixTests
             ReferenceImageAssets: Array.Empty<RVideo79AiProviderImageAsset>()));
 
         Assert.NotNull(client.LastSubmit);
+        Assert.Equal(new[] { "https://example.test/generated-scene.png" }, client.LastSubmit!.Images);
+        Assert.Equal("image", client.LastSubmit.FirstImageField);
         Assert.True(client.LastSubmit!.Options.TryGetValue("images", out var imagesJson));
         Assert.Contains("generated-scene.png", imagesJson);
+    }
+
+    [Fact]
+    public async Task RVideo79AiSubmitFormContainsDirectImageAndDescriptorWithoutSecret()
+    {
+        var handler = new CapturingHttpMessageHandler("""{"task_id":"task-123"}""");
+        var client = new Ai79TaskClient(new HttpClient(handler));
+        var service = Create79AiVideoService(client);
+        var imageUrl = "https://example.test/reference-character.png";
+        var secret = Create79AiRuntime().Credential.Secret;
+
+        await service.SubmitAsync(new RVideo79AiVideoSubmitRequest(
+            Create79AiRuntime(),
+            RVideoVideoModelPolicy.GetInitial(),
+            "Animate the supplied reference.",
+            "9:16",
+            "720p",
+            6,
+            SourceImageAsset: null,
+            ReferenceImageAssets: new[]
+            {
+                new RVideo79AiProviderImageAsset(
+                    "reference-base",
+                    "project-1",
+                    imageUrl,
+                    "reference-character.png",
+                    """{"ok":true}""")
+            }));
+
+        Assert.Equal(imageUrl, handler.Form["image"]);
+        Assert.Contains("reference-base", handler.Form["images"]);
+        Assert.DoesNotContain(secret, handler.Form["images"]);
+    }
+
+    [Fact]
+    public async Task RVideo79AiSubmitKeepsExpectedFastAndLiteModes()
+    {
+        foreach (var model in new[]
+        {
+            new RVideoVideoModelPolicyEntry(1, "79ai", "veo_3_1", "fast"),
+            new RVideoVideoModelPolicyEntry(2, "79ai", "veo_3_1", "lite")
+        })
+        {
+            var client = new CapturingAi79TaskClient();
+            var service = Create79AiVideoService(client);
+
+            await service.SubmitAsync(new RVideo79AiVideoSubmitRequest(
+                Create79AiRuntime(),
+                model,
+                "Animate the scene.",
+                "9:16",
+                "720p",
+                6,
+                new RVideo79AiProviderImageAsset(
+                    "scene-image-base",
+                    "project-1",
+                    "https://example.test/generated-scene.png",
+                    "generated-scene.png",
+                    """{"ok":true}"""),
+                Array.Empty<RVideo79AiProviderImageAsset>()));
+
+            Assert.Equal(model.Mode, client.LastSubmit!.Options["mode"]);
+        }
+    }
+
+    [Fact]
+    public async Task RVideo79AiSubmitFailureRetainsSanitizedResponse()
+    {
+        var handler = new CapturingHttpMessageHandler("""{"error":"bad","access_token":"secret-token"}""", HttpStatusCode.BadRequest);
+        var client = new Ai79TaskClient(new HttpClient(handler));
+
+        var ex = await Assert.ThrowsAsync<Ai79TaskSubmitException>(() => client.SubmitAsync(new Ai79TaskSubmitRequest(
+            "https://example.test/ai",
+            "/create-video",
+            "secret-token",
+            "79ai.net",
+            "veo_omni",
+            "Animate the scene.",
+            new[] { "https://example.test/reference-character.png" },
+            new Dictionary<string, string?> { ["type"] = "video" },
+            Ai79TaskOperation.Video), CancellationToken.None));
+
+        Assert.Contains("***", ex.SanitizedResponseJson);
+        Assert.DoesNotContain("secret-token", ex.SanitizedResponseJson);
     }
 
     [Fact]
@@ -862,7 +952,7 @@ public sealed class RVideoVideoHotfixTests
             }).Build(),
             NullLogger<Gommo79AiImageService>.Instance);
 
-    private static RVideo79AiVideoService Create79AiVideoService(CapturingAi79TaskClient client)
+    private static RVideo79AiVideoService Create79AiVideoService(IAi79TaskClient client)
     {
 #pragma warning disable SYSLIB0050
         var service = (RVideo79AiVideoService)FormatterServices.GetUninitializedObject(typeof(RVideo79AiVideoService));
@@ -980,6 +1070,35 @@ public sealed class RVideoVideoHotfixTests
 
         public Task<Ai79TaskStatusResult> GetStatusAsync(Ai79TaskStatusRequest request, CancellationToken ct = default)
             => throw new NotSupportedException();
+    }
+
+    private sealed class CapturingHttpMessageHandler : HttpMessageHandler
+    {
+        private readonly string _responseJson;
+        private readonly HttpStatusCode _statusCode;
+
+        public CapturingHttpMessageHandler(string responseJson, HttpStatusCode statusCode = HttpStatusCode.OK)
+        {
+            _responseJson = responseJson;
+            _statusCode = statusCode;
+        }
+
+        public Dictionary<string, string> Form { get; } = new(StringComparer.Ordinal);
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var body = await request.Content!.ReadAsStringAsync(cancellationToken);
+            foreach (var pair in body.Split('&', StringSplitOptions.RemoveEmptyEntries))
+            {
+                var parts = pair.Split('=', 2);
+                Form[Uri.UnescapeDataString(parts[0])] = Uri.UnescapeDataString(parts[1].Replace("+", " ", StringComparison.Ordinal));
+            }
+
+            return new HttpResponseMessage(_statusCode)
+            {
+                Content = new StringContent(_responseJson)
+            };
+        }
     }
 
     public class SceneMediaVersioningServiceProxy : DispatchProxy

@@ -17,6 +17,21 @@
 - Do not modify existing migrations after they have been deployed.
 - Never commit secrets or environment-specific values.
 
+## Protected subsystem rule
+
+COMPLETED SUBSYSTEMS ARE FROZEN BY DEFAULT.
+
+- Only modify functionality explicitly requested by the user.
+- Never refactor a completed subsystem merely because nearby code is being edited.
+- Never repair unrelated failing tests by changing unrelated production behavior.
+- Treat IMAGE GENERATION, VIDEO GENERATION, VOICE / AUDIO, and POINT / BILLING as separately protected contracts.
+- A task in one protected area must not change the behavior of another protected area.
+- Provider payload contracts are frozen unless the user explicitly asks to change them.
+- Before coding, list the requested scope, allowed files/behaviors, and frozen areas.
+- After coding, report changed files, changed behaviors, and explicitly untouched protected areas.
+- If a necessary fix crosses into a frozen area, stop and request approval.
+- Prefer minimum-diff fixes over architecture cleanup.
+
 ## Validation
 
 Before declaring completion:
