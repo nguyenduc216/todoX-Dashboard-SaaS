@@ -46,6 +46,12 @@ public sealed class RDanceStagedBillingRegressionTests
         Assert.Contains("logicalTotalPoints", queue);
         Assert.Contains("total_planned_points = chargeNow", queue);
         Assert.Contains("total_charged_points = chargeNow", queue);
+        Assert.Contains("planned_points = imagePointsToChargeNow", queue);
+        Assert.Contains("charged_points = imagePointsToChargeNow", queue);
+        Assert.Contains("planned_points = videoPointsToChargeNow", queue);
+        Assert.Contains("charged_points = videoPointsToChargeNow", queue);
+        Assert.Contains("planned_points = voicePointsToChargeNow", queue);
+        Assert.Contains("charged_points = voicePointsToChargeNow", queue);
         Assert.Contains("PointCostEstimate = chargeNow", queue);
         Assert.Contains("var imageCount = alreadyChargedImage > 0m ? 0 : billableStaticImageCount;", queue);
     }

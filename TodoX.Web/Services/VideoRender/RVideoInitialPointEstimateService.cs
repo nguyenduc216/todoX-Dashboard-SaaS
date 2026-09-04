@@ -1,6 +1,7 @@
 using System.Text.Json;
 using TodoX.Web.Models;
 using TodoX.Web.Models.Catalog;
+using TodoX.Web.Services;
 using TodoX.Web.Services.Render;
 
 namespace TodoX.Web.Services.VideoRender;
@@ -118,22 +119,15 @@ public sealed class RVideoInitialPointEstimateService : IRVideoInitialPointEstim
         var billingScenes = request.BillingScenes
             .OrderBy(x => x.SceneIndex)
             .ToArray();
-        var imageWorkIds = request.ImageWorkScenes
-            .Select(x => x.Id)
-            .ToHashSet();
-
-        var imageCount = 0;
-        foreach (var scene in billingScenes.Where(x => imageWorkIds.Contains(x.Id)))
+        var imageSources = new List<RVideoEffectiveSceneImageSource>();
+        foreach (var scene in request.ImageWorkScenes)
         {
             var selected = request.SelectedImageResolver is null
                 ? null
                 : await request.SelectedImageResolver(scene, ct);
-            if (RVideoEffectiveSceneImageSourceResolver.RequiresAiGeneration(
-                    scene, request.Settings, selected, request.Project))
-            {
-                imageCount++;
-            }
+            imageSources.Add(RVideoEffectiveSceneImageSourceResolver.Resolve(scene, request.Settings, selected, request.Project));
         }
+        var imageCount = StaticImageBillingPolicy.ResolveRVideoStaticInputCount(imageSources);
 
         var videoScenes = billingScenes
             .Select(scene => new PreRenderVideoScene(scene.Id, scene.DurationSeconds))

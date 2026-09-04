@@ -192,17 +192,15 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
         var voiceCount = scenes.Count(scene =>
             RVideoRules.RequiresExternalVoice(scene, settings)
             && !string.IsNullOrWhiteSpace(RVideoRules.ResolveSceneVoiceText(scene)));
-        var imageCount = 0;
+        var imageSources = new List<RVideoEffectiveSceneImageSource>();
         foreach (var scene in scenes)
         {
             var selectedImage = input.UseSharedReferenceImage
                 ? null
                 : await _versions.GetSelectedImageVersionAsync(scene.Id, ct);
-            if (RVideoEffectiveSceneImageSourceResolver.RequiresAiGeneration(scene, settings, selectedImage, project))
-            {
-                imageCount++;
-            }
+            imageSources.Add(RVideoEffectiveSceneImageSourceResolver.Resolve(scene, settings, selectedImage, project));
         }
+        var imageCount = StaticImageBillingPolicy.ResolveRVideoStaticInputCount(imageSources);
 
         await _repo.AddProjectEventAsync(project.Id, "SCENE_VIDEO_BATCH_STARTED", "info",
             $"Batch render video started for {scenes.Count} scenes.",

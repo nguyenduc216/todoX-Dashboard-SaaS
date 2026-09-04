@@ -1,29 +1,57 @@
 using TodoX.Web.Models.Catalog;
 using TodoX.Web.Models.Timelapse;
 using TodoX.Web.Services.DanceSell;
+using TodoX.Web.Services.Render;
+using TodoX.Web.Services.VideoRender;
 
 namespace TodoX.Web.Services;
 
 public static class StaticImageBillingPolicy
 {
     public static int ResolveRdanceStaticInputCount(DanceSellJobDto job)
-        => CountDistinctIfPresent(job.CharacterMediaId, job.ProductMediaId, job.DirectReferenceMediaId);
+        => CountDistinctInputs(
+            BuildInputKey(job.CharacterMediaId, job.CharacterObjectKey, job.CharacterImageUrl),
+            BuildInputKey(job.ProductMediaId, job.ProductObjectKey, job.ProductImageUrl),
+            BuildInputKey(job.DirectReferenceMediaId, job.DirectReferenceObjectKey, job.DirectReferenceUrl));
 
     public static int ResolveTimelapseStaticInputCount(TimelapseJobSnapshot snapshot)
-        => CountIfPresent(snapshot.OriginalImage.MediaId, snapshot.OriginalImage.PublicUrl, snapshot.OriginalImage.ObjectKey)
-           + (snapshot.StartImage is null
-               ? 0
-               : CountIfPresent(snapshot.StartImage.MediaId, snapshot.StartImage.PublicUrl, snapshot.StartImage.ObjectKey));
+        => CountDistinctInputs(
+            BuildInputKey(snapshot.OriginalImage.MediaId, snapshot.OriginalImage.ObjectKey, snapshot.OriginalImage.PublicUrl),
+            snapshot.StartImage is null
+                ? null
+                : BuildInputKey(snapshot.StartImage.MediaId, snapshot.StartImage.ObjectKey, snapshot.StartImage.PublicUrl));
+
+    public static int ResolveRVideoStaticInputCount(IEnumerable<RVideoEffectiveSceneImageSource> sources)
+        => CountDistinctInputs(sources
+            .Where(source => source.HasUsableInput)
+            .Select(source => BuildInputKey(source.SelectedImageVersionId, source.SourceImageObjectKey, source.SourceImageUrl))
+            .ToArray());
 
     public static int ResolveBillableStaticImageCount(int staticInputCount, bool chargeStaticImagePoints)
         => chargeStaticImagePoints ? Math.Max(0, staticInputCount) : 0;
 
-    private static int CountIfPresent(Guid? mediaId, params string?[] values)
-        => mediaId is Guid id && id != Guid.Empty && values.Any(value => !string.IsNullOrWhiteSpace(value)) ? 1 : 0;
-
-    private static int CountDistinctIfPresent(params Guid?[] mediaIds)
-        => mediaIds.Select(mediaId => mediaId.GetValueOrDefault())
-            .Where(mediaId => mediaId != Guid.Empty)
-            .Distinct()
+    private static int CountDistinctInputs(params string?[] keys)
+        => keys.Where(key => !string.IsNullOrWhiteSpace(key))
+            .Distinct(StringComparer.Ordinal)
             .Count();
+
+    private static string? BuildInputKey(Guid? mediaId, string? objectKey, string? url)
+    {
+        if (mediaId is Guid id && id != Guid.Empty)
+        {
+            return $"m:{id:N}";
+        }
+
+        if (!string.IsNullOrWhiteSpace(objectKey))
+        {
+            return $"k:{objectKey.Trim()}";
+        }
+
+        if (!string.IsNullOrWhiteSpace(url))
+        {
+            return $"u:{url.Trim()}";
+        }
+
+        return null;
+    }
 }
