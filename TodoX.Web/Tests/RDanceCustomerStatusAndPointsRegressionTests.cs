@@ -1,5 +1,7 @@
 using System.Text;
+using TodoX.Web.Models.Catalog;
 using TodoX.Web.Services.DanceSell;
+using TodoX.Web.Services;
 using Xunit;
 
 namespace TodoX.Web.Tests;
@@ -43,6 +45,41 @@ public sealed class RDanceCustomerStatusAndPointsRegressionTests
         Assert.Contains("point_status='pending' THEN 'charged'", render);
         Assert.Contains("DanceSellCustomerStatusText.JobStatusLabel(job.Status)", detail);
         Assert.Contains("DanceSellCustomerStatusText.JobStatusLabel(row.Status)", dashboard);
+    }
+
+    [Fact]
+    public void RdancePointPricingUsesVideoSecondsAndMatchesBackendQueueContract()
+    {
+        var imageRate = new PointPricingRate(PointPricingResourceTypes.Image, ServiceSellPriceQualityTiers.Standard, 0.0m, "per_render", "global");
+        var videoRate = new PointPricingRate(PointPricingResourceTypes.Video, ServiceSellPriceQualityTiers.Standard, 0.8m, "per_second", "global");
+        var voiceRate = new PointPricingRate(PointPricingResourceTypes.Voice, ServiceSellPriceQualityTiers.Standard, 0m, "per_render", "global");
+
+        var fourteenSeconds = PointPricingCalculator.Estimate(0, imageRate, 14, videoRate, 0, voiceRate);
+        var fifteenSeconds = PointPricingCalculator.Estimate(0, imageRate, 15, videoRate, 0, voiceRate);
+
+        Assert.Equal(11.2m, fourteenSeconds.Video.Points);
+        Assert.Equal(11.2m, fourteenSeconds.TotalPoints);
+        Assert.Equal(12m, fifteenSeconds.Video.Points);
+        Assert.Equal(12m, fifteenSeconds.TotalPoints);
+    }
+
+    [Fact]
+    public void RdanceDetailUsesUnifiedPointPricingForEstimateAndConfirmation()
+    {
+        var detail = ReadRepoFile("Components", "Pages", "RDanceJobDetail.razor");
+
+        Assert.Contains("@inject CatalogRepository Catalog", detail);
+        Assert.Contains("@inject IPointPricingService PointPricing", detail);
+        Assert.Contains("DanceSellMotionProviderContract.ResolveProviderMode(route, _job.Mode)", detail);
+        Assert.Contains("Catalog.GetActiveCatalogServicesAsync()", detail);
+        Assert.Contains("FixedTodoXServiceCatalog.RDance", detail);
+        Assert.Contains("ResolveMotionDurationSeconds(_job, route)", detail);
+        Assert.Contains("PointPricing.EstimateAsync(new PointPricingEstimateRequest(", detail);
+        Assert.Contains("imageCount = _job.ReferenceMode == DanceSellReferenceModes.DirectReference ? 0 : 1", detail);
+        Assert.Contains("FormatPoints(_pointEstimate?.TotalPoints)", detail);
+        Assert.Contains("var points = FormatPoints(_pointEstimate?.TotalPoints);", detail);
+        Assert.Contains("ReferenceVersionStatusLabel(version?.Status)", detail);
+        Assert.Contains("DanceSellCustomerStatusText.ProviderStatusLabel(x.Status)", detail);
     }
 
     private static string ReadRepoFile(params string[] parts)

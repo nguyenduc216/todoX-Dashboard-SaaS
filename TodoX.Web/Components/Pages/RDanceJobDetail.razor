@@ -1,7 +1,9 @@
 @page "/jobs/rdance/{JobId:guid}"
+@using System.Text.Json
 @using Microsoft.AspNetCore.Components.Forms
 @using Microsoft.AspNetCore.Components.Web
 @using Microsoft.Extensions.Options
+@using TodoX.Web.Models.Catalog
 @using TodoX.Web.Services.DanceSell
 @using TodoX.Web.Services.Render
 @using TodoX.Web.Components.Dialogs
@@ -13,6 +15,8 @@
 @inject IDanceSellOperationRepository DanceOperations
 @inject IRenderJobService RenderJobs
 @inject IDanceSellCostEstimator Costs
+@inject CatalogRepository Catalog
+@inject IPointPricingService PointPricing
 @inject IDanceSellProviderCatalog ProviderCatalog
 @inject IOptionsMonitor<DanceSellPhase2Options> DanceOptions
 @inject IDialogService DialogService
@@ -293,7 +297,7 @@
                                             <MudStack Spacing="2">
                                                 <MudText Typo="Typo.subtitle2">@candidate.DisplayName</MudText>
                                                 <MudText Typo="Typo.caption">79ai / @candidate.ModelName</MudText>
-                                                <MudChip T="string" Size="Size.Small" Color="@ComparisonStatusColor(version)">@(version?.Status ?? "not_created")</MudChip>
+                                                <MudChip T="string" Size="Size.Small" Color="@ComparisonStatusColor(version)">@ReferenceVersionStatusLabel(version?.Status)</MudChip>
                                                 @Preview(version?.PublicUrl, candidate.DisplayName)
                                                 @if (version?.Status == DanceSellReferenceStatuses.Generating)
                                                 {
@@ -366,7 +370,7 @@
                                 <MudListItem T="string">Dịch vụ: Video nhảy quảng cáo thời trang</MudListItem>
                                 <MudListItem T="string">Trạng thái: @DisplayStatusLabel(_job!)</MudListItem>
                                 <MudListItem T="string">Tỷ lệ: @_ratio</MudListItem>
-                                <MudListItem T="string">Ước tính: @(_estimate?.EstimatedTodoxPoints?.ToString("0.##") ?? "chưa cấu hình") điểm</MudListItem>
+                                <MudListItem T="string">Ước tính: @FormatPoints(_pointEstimate?.TotalPoints) điểm</MudListItem>
                                 <MudListItem T="string">Tự động hoàn thành: @(_autoFinish ? "Bật" : "Tắt")</MudListItem>
                                 @if (_balance is not null)
                                 {
@@ -517,6 +521,7 @@
     private IReadOnlyList<DanceSellReferenceVersionDto> _referenceVersions = Array.Empty<DanceSellReferenceVersionDto>();
     private IReadOnlyList<DanceSellProviderRouteDto> _motionRoutes = Array.Empty<DanceSellProviderRouteDto>();
     private DanceSellCostEstimate? _estimate;
+    private PointPricingEstimate? _pointEstimate;
     private decimal? _balance;
     private string? _referenceReadinessError;
     private string? _motionReadinessError;
@@ -590,6 +595,19 @@
 
     private string DisplayStatusLabel(DanceSellJobDto job)
         => IsCoreCancelled ? "Đã dừng" : DanceSellCustomerStatusText.JobStatusLabel(job.Status);
+
+    private static string FormatPoints(decimal? points)
+        => points?.ToString("0.##") ?? "chưa cấu hình";
+
+    private static string ReferenceVersionStatusLabel(string? status) => status?.Trim().ToLowerInvariant() switch
+    {
+        DanceSellReferenceStatuses.NotCreated => "Chưa có",
+        DanceSellReferenceStatuses.Generating => "Đang tạo ảnh tham chiếu",
+        DanceSellReferenceStatuses.Ready => "Ảnh tham chiếu đã sẵn sàng",
+        DanceSellReferenceStatuses.Approved => "Đã duyệt ảnh tham chiếu",
+        DanceSellReferenceStatuses.Failed => "Lỗi",
+        _ => string.IsNullOrWhiteSpace(status) ? "Chưa có" : status!
+    };
 
     private static DateTime RenderStartUtc(DanceSellJobDto job)
         => DateTime.SpecifyKind(job.SubmittedAt ?? job.CreatedAt, DateTimeKind.Utc);
@@ -987,7 +1005,7 @@
 
         EnsureMotionProviderReady();
         await RefreshEstimateAsync();
-        var points = _estimate?.EstimatedTodoxPoints?.ToString("0.##") ?? "chưa cấu hình";
+        var points = FormatPoints(_pointEstimate?.TotalPoints);
         var confirmed = await DialogService.ShowMessageBoxAsync("Xác nhận tạo video",
             (MarkupString)$"Tạo video <b>{_title}</b>, tỷ lệ <b>{_ratio}</b>, ước tính <b>{points} điểm</b>?",
             yesText: "Xác nhận tạo video", cancelText: "Quay lại chỉnh sửa");
@@ -1062,7 +1080,7 @@
                 Key = x.Id.ToString("N"),
                 VersionLabel = $"v{x.VersionNo}",
                 Title = "Ảnh dùng để tạo video",
-                Status = x.Status,
+                Status = ReferenceVersionStatusLabel(x.Status),
                 StatusColor = x.Status switch
                 {
                     DanceSellReferenceStatuses.Ready => Color.Success,
@@ -1114,7 +1132,7 @@
             Key = x.Id.ToString("N"),
             VersionLabel = $"Lần {x.AttemptNo}",
             Title = "Video render RDance",
-            Status = x.Status,
+            Status = DanceSellCustomerStatusText.ProviderStatusLabel(x.Status),
             StatusColor = x.Status == DanceSellOperationStatuses.Completed ? Color.Success : x.Status == DanceSellOperationStatuses.Failed ? Color.Error : Color.Warning,
             CreatedAt = new DateTimeOffset(DateTime.SpecifyKind(x.CreatedAt, DateTimeKind.Utc)),
             IsSelected = string.Equals(x.ResultUrl, _job.ResultVideoUrl, StringComparison.OrdinalIgnoreCase),
@@ -1351,10 +1369,87 @@
     private async Task RefreshEstimateAsync()
     {
         var route = _motionRoutes.FirstOrDefault(x => x.ProviderCode.Equals(DanceSellConstants.ProviderCode, StringComparison.OrdinalIgnoreCase)) ?? _motionRoutes.FirstOrDefault();
-        if (route is null) return;
-        var providerMode = DanceSellMotionProviderContract.ResolveProviderMode(route, "720p");
+        if (route is null || _job is null) return;
+        var providerMode = DanceSellMotionProviderContract.ResolveProviderMode(route, _job.Mode);
         _estimate = await Costs.EstimateAsync(route, providerMode, null);
+        _pointEstimate = await EstimatePointPricingAsync(route);
         if (AuthState.CurrentUser?.CustomerId is Guid customerId) _balance = await Wallet.GetBalanceAsync(customerId);
+    }
+
+    private async Task<PointPricingEstimate?> EstimatePointPricingAsync(DanceSellProviderRouteDto route)
+    {
+        if (_job is null)
+        {
+            return null;
+        }
+
+        var service = (await Catalog.GetActiveCatalogServicesAsync())
+            .FirstOrDefault(x => string.Equals(x.ServiceCode, FixedTodoXServiceCatalog.RDance, StringComparison.OrdinalIgnoreCase));
+        if (service is null)
+        {
+            return null;
+        }
+
+        var durationSeconds = ResolveMotionDurationSeconds(_job, route);
+        if (durationSeconds is null)
+        {
+            return null;
+        }
+
+        var quality = string.Equals(_job.Mode, "premium", StringComparison.OrdinalIgnoreCase)
+            ? ServiceSellPriceQualityTiers.Premium
+            : ServiceSellPriceQualityTiers.Standard;
+        var imageCount = _job.ReferenceMode == DanceSellReferenceModes.DirectReference ? 0 : 1;
+
+        return await PointPricing.EstimateAsync(new PointPricingEstimateRequest(
+            service.Id,
+            imageCount,
+            quality,
+            durationSeconds.Value,
+            quality,
+            0,
+            ServiceSellPriceQualityTiers.Standard,
+            false));
+    }
+
+    private static int? ResolveMotionDurationSeconds(DanceSellJobDto job, DanceSellProviderRouteDto route)
+        => ReadInt(job.RequestJson, "durationSeconds", "duration_seconds", "videoDurationSeconds", "video_duration_seconds")
+           ?? ReadInt(route.ConfigJson, "durationSeconds", "duration_seconds");
+
+    private static int? ReadInt(string? rawJson, params string[] propertyNames)
+    {
+        if (string.IsNullOrWhiteSpace(rawJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(rawJson);
+            foreach (var propertyName in propertyNames)
+            {
+                if (!document.RootElement.TryGetProperty(propertyName, out var value))
+                {
+                    continue;
+                }
+
+                if (value.TryGetInt32(out var integer))
+                {
+                    return integer;
+                }
+
+                if (value.ValueKind == JsonValueKind.String
+                    && int.TryParse(value.GetString(), out integer))
+                {
+                    return integer;
+                }
+            }
+        }
+        catch (JsonException)
+        {
+        }
+
+        return null;
     }
 
     private async Task RunAsync(Func<Task> action)
