@@ -343,6 +343,7 @@ public interface ISceneMediaVersioningService
     Task<bool> HasActiveAudioVersionAsync(long sceneId, CancellationToken ct = default);
     Task<SceneAudioVersionDto?> GetSelectedAudioVersionAsync(long sceneId, CancellationToken ct = default);
     Task<SceneVideoVersionDto?> GetSelectedVideoVersionAsync(long sceneId, CancellationToken ct = default);
+    Task<decimal> GetProjectActualCustomerPointsConsumedAsync(long projectId, CancellationToken ct = default);
     Task<IReadOnlyList<SceneAudioVersionDto>> ListSceneAudioVersionsAsync(long sceneId, int skip = 0, int take = 20, CancellationToken ct = default);
     Task<IReadOnlyList<SceneAudioVersionDto>> ListSceneAudioVersionsAsync(long sceneId, CurrentUserSession user, int skip = 0, int take = 20, CancellationToken ct = default);
     Task SelectSceneAudioVersionAsync(long sceneId, Guid versionId, Guid? selectedBy, CancellationToken ct = default);
@@ -1412,6 +1413,30 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
              LIMIT 1;
             """,
             new { sceneId, tenant = _tenant.TenantId });
+    }
+
+    public async Task<decimal> GetProjectActualCustomerPointsConsumedAsync(long projectId, CancellationToken ct = default)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        return await conn.ExecuteScalarAsync<decimal>(
+            """
+            SELECT COALESCE(SUM(charged_points), 0)
+              FROM (
+                    SELECT charged_points
+                      FROM video_render.scene_image_versions
+                     WHERE project_id=@projectId AND tenant_id=@tenant AND status='completed'
+                    UNION ALL
+                    SELECT charged_points
+                      FROM video_render.scene_video_versions
+                     WHERE project_id=@projectId AND tenant_id=@tenant AND status='completed'
+                    UNION ALL
+                    SELECT charged_points
+                      FROM video_render.scene_audio_versions
+                     WHERE project_id=@projectId AND tenant_id=@tenant AND status='completed'
+                   ) successful_versions;
+            """,
+            new { projectId, tenant = _tenant.TenantId });
     }
 
     public async Task<IReadOnlyList<SceneAudioVersionDto>> ListSceneAudioVersionsAsync(long sceneId, int skip = 0, int take = 20, CancellationToken ct = default)

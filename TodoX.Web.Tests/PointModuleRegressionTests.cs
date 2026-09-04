@@ -198,14 +198,13 @@ public sealed class PointModuleRegressionTests
     [Fact]
     public void RVideoInitialRenderChargesAndSnapshotsBeforeProviderSubmission()
     {
-        var handler = File.ReadAllText(Path.Combine(RepoRoot, "TodoX.Web", "Services", "Render", "SceneImageBatchRenderHandler.cs"));
+        var handler = File.ReadAllText(Path.Combine(RepoRoot, "TodoX.Web", "Services", "VideoRender", "SceneVideoRenderHandler.cs"));
 
-        Assert.Contains("RVIDEO_PARENT_BILLED", handler, StringComparison.Ordinal);
-        Assert.Contains("ChargeInitialRenderAsync", handler, StringComparison.Ordinal);
-        Assert.Contains("UpsertSnapshotAsync", handler, StringComparison.Ordinal);
-        Assert.Contains("available_points_at_check", handler, StringComparison.Ordinal);
-        Assert.Contains("balance_after_charge", handler, StringComparison.Ordinal);
-        Assert.Contains("SkipCustomerCharge = true", handler, StringComparison.Ordinal);
+        Assert.Contains("CustomerPointRate = pointEstimate.Video.Rate", handler, StringComparison.Ordinal);
+        Assert.Contains("BillingIntent = input.BillingIntent", handler, StringComparison.Ordinal);
+        Assert.Contains("BillingOperationId = input.BillingOperationId ?? RVideoParentBillingState.ResolveBillingOperationId", handler, StringComparison.Ordinal);
+        Assert.Contains("PointCostEstimate = 0", handler, StringComparison.Ordinal);
+        Assert.Contains("PointStatus = RenderPointStatuses.Pending", handler, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -255,10 +254,27 @@ public sealed class PointModuleRegressionTests
         var handler = File.ReadAllText(Path.Combine(RepoRoot, "TodoX.Web", "Services", "VideoRender", "SceneVideoRenderHandler.cs"));
         var audio = File.ReadAllText(Path.Combine(RepoRoot, "TodoX.Web", "Services", "VideoRender", "RVideoSceneAudioAutoChainService.cs"));
 
-        Assert.Contains("RVIDEO_PARENT_BILLED", handler, StringComparison.Ordinal);
-        Assert.Contains("!parentJobBilled", handler, StringComparison.Ordinal);
+        Assert.Contains("CustomerPointRate = pointEstimate.Video.Rate", handler, StringComparison.Ordinal);
+        Assert.Contains("CustomerPointRate = customerPointRate", audio, StringComparison.Ordinal);
+        Assert.Contains("customerPointRate = pointEstimate.Voice.Rate", audio, StringComparison.Ordinal);
+        Assert.Contains("billingOperationId = billingOperationId", audio, StringComparison.Ordinal);
         Assert.Contains("PointCostEstimate = parentJobBilled ? 0", audio, StringComparison.Ordinal);
         Assert.Contains("PointStatus = parentJobBilled", audio, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RVideoVideoCompletionCalculatesActualPointsFromDurationAndRate()
+    {
+        var method = typeof(RVideoSceneVideoCompletionService).GetMethod(
+            "CalculateActualVideoPoints",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+
+        Assert.NotNull(method);
+        var first = (decimal)method!.Invoke(null, new object[] { 6m, 2.5m })!;
+        var second = (decimal)method.Invoke(null, new object[] { 5.5m, 2m })!;
+
+        Assert.Equal(15m, first);
+        Assert.Equal(11m, second);
     }
 
     [Fact]

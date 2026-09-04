@@ -121,7 +121,7 @@ public sealed class UnifiedPointModuleRegressionTests
     {
         var razor = File.ReadAllText(Path.Combine(RepoRoot, "TodoX.Web", "Components", "Pages", "RenderVideoJobs.razor"));
 
-        Assert.Contains("CHI PHÍ DỰ KIẾN", razor);
+        Assert.Contains("Dự kiến sử dụng:", razor);
         Assert.Contains("CanStartInitialRender", razor);
         Assert.Contains("RefreshInitialEstimateAsync", razor);
         Assert.Contains("Không đủ điểm để thực hiện video này.", razor);

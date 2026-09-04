@@ -136,6 +136,7 @@ public sealed class RVideoSceneAudioAutoChainService : IRVideoSceneAudioAutoChai
             1,
             ServiceSellPriceQualityTiers.Standard,
             true), ct);
+        var customerPointRate = pointEstimate.Voice.Rate;
         var billingOperationId = RVideoParentBillingState.ResolveBillingOperationId(project, selectedVideo.RenderJobId ?? Guid.Empty);
         var parentJobBilled = RVideoParentBillingState.HasCurrentOperationParentVoiceCharge(
             project.Events,
@@ -178,6 +179,8 @@ public sealed class RVideoSceneAudioAutoChainService : IRVideoSceneAudioAutoChai
                 voiceCatalogCode = settings?.VoiceCatalogCode,
                 voiceCode,
                 defaultTtsRate = settings?.DefaultTtsRate,
+                customerPointRate,
+                customerPointQuality = ServiceSellPriceQualityTiers.Standard,
                 vbeeDefaults = new
                 {
                     options.DefaultSampleRate,
@@ -208,6 +211,8 @@ public sealed class RVideoSceneAudioAutoChainService : IRVideoSceneAudioAutoChai
                 VoiceInstruction = voiceInstruction,
                 TtsRate = ttsRate,
                 DefaultTtsRate = settings?.DefaultTtsRate,
+                CustomerPointRate = customerPointRate,
+                CustomerPointQuality = ServiceSellPriceQualityTiers.Standard,
                 SampleRate = options.ResolveSampleRate(voiceCode),
                 Bitrate = options.DefaultBitrate,
                 SpeedRate = options.DefaultSpeedRate,
@@ -223,6 +228,8 @@ public sealed class RVideoSceneAudioAutoChainService : IRVideoSceneAudioAutoChai
                     voiceCatalogCode = settings?.VoiceCatalogCode,
                     voiceCode,
                     logicalRequestId,
+                    customerPointRate,
+                    customerPointQuality = ServiceSellPriceQualityTiers.Standard,
                     billingIntent = PointBillingIntent.InitialRender,
                     billingOperationId = billingOperationId
                 }
@@ -438,6 +445,8 @@ public sealed class SceneAudioRenderWorkItemInput
     public string? VoiceInstruction { get; set; }
     public decimal TtsRate { get; set; }
     public decimal? DefaultTtsRate { get; set; }
+    public decimal CustomerPointRate { get; set; }
+    public string CustomerPointQuality { get; set; } = ServiceSellPriceQualityTiers.Standard;
     public int SampleRate { get; set; }
     public int Bitrate { get; set; }
     public decimal SpeedRate { get; set; }

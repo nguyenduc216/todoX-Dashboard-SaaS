@@ -774,7 +774,10 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                         input.BillingIntent,
                         input.BillingOperationId,
                         IsRecovery: !string.IsNullOrWhiteSpace(existingTaskId)), ct);
-                    await LogUsageAsync(input, job, attemptLogicalRequestId, reservation.ChargedPoints, status.SanitizedResponseJson, true, null, taskId, ct);
+                    var actualVideoPoints = RVideoSceneVideoCompletionService.CalculateActualVideoPoints(
+                        input.DurationSeconds,
+                        input.CustomerPointRate);
+                    await LogUsageAsync(input, job, attemptLogicalRequestId, actualVideoPoints, status.SanitizedResponseJson, true, null, taskId, ct);
                     return;
                 }
                 catch (VideoReconciliationException ex)

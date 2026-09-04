@@ -135,6 +135,8 @@ public sealed class RVideoSceneVideoCompletionService : IRVideoSceneVideoComplet
             new { request.SceneId, request.SceneIndex, request.SceneVideoVersionId, request.ProviderTaskId, mediaId = saved.Id, objectKey },
             ct);
 
+        var durationSeconds = ResolveBillableDurationSeconds(request.DurationSeconds);
+        var actualVideoPoints = CalculateActualVideoPoints(durationSeconds, request.CustomerPointRate);
         var chargedPoints = 0m;
         if (request.BillingIntent != PointBillingIntent.SystemRetry)
         {
@@ -145,7 +147,7 @@ public sealed class RVideoSceneVideoCompletionService : IRVideoSceneVideoComplet
                 request.BillingIntent,
                 request.BillingOperationId);
             var charge = await _wallets.ChargeAsync(
-                request.CustomerId, request.UserId, request.CustomerPointRate, (int)Math.Max(1, request.DurationSeconds ?? 1),
+                request.CustomerId, request.UserId, actualVideoPoints, ToAuditQuantity(durationSeconds),
                 request.BillingIntent == PointBillingIntent.UserRerender ? "rvideo_user_rerender_video" : "rvideo_initial_render_video",
                 request.ProviderCode ?? "todox", request.ModelName ?? "video", "rvideo", "second",
                 referenceId, "rvideo_scene_video_success");
@@ -153,17 +155,17 @@ public sealed class RVideoSceneVideoCompletionService : IRVideoSceneVideoComplet
             {
                 await _projects.AddProjectEventAsync(request.ProjectId, "RVIDEO_VIDEO_BILLING_ANOMALY", "error",
                     "Video result was accepted but the success charge could not be completed.",
-                    new { request.SceneId, request.SceneIndex, request.SceneVideoVersionId, request.ProviderTaskId, requiredPoints = request.CustomerPointRate, charge.Error }, ct);
+                    new { request.SceneId, request.SceneIndex, request.SceneVideoVersionId, request.ProviderTaskId, durationSeconds, ratePerSecond = request.CustomerPointRate, requiredPoints = actualVideoPoints, charge.Error }, ct);
                 throw new InvalidOperationException(charge.Error ?? "Insufficient points after provider success.");
             }
 
-            chargedPoints = charge.Charged == 0 ? request.CustomerPointRate : charge.Charged;
+            chargedPoints = charge.Charged == 0 ? actualVideoPoints : charge.Charged;
         }
         else
         {
             await _wallets.LogUsageOnlyAsync(request.CustomerId, request.UserId,
                 request.ProviderCode ?? "todox", request.ModelName ?? "video",
-                "rvideo_system_retry_video", (int)Math.Max(1, request.DurationSeconds ?? 1), request.CustomerPointRate,
+                "rvideo_system_retry_video", ToAuditQuantity(durationSeconds), actualVideoPoints,
                 "rvideo", "second", request.SceneVideoVersionId, "rvideo_system_retry", "success");
         }
 
@@ -233,7 +235,7 @@ public sealed class RVideoSceneVideoCompletionService : IRVideoSceneVideoComplet
             "RVIDEO_VIDEO_BILLING_COMPLETED",
             "info",
             "Scene-video billing was completed after local provider output persistence.",
-            new { request.SceneId, request.SceneIndex, request.SceneVideoVersionId, request.ProviderTaskId, chargedPoints },
+            new { request.SceneId, request.SceneIndex, request.SceneVideoVersionId, request.ProviderTaskId, durationSeconds, ratePerSecond = request.CustomerPointRate, chargedPoints },
             ct);
 
         try
@@ -337,6 +339,15 @@ public sealed class RVideoSceneVideoCompletionService : IRVideoSceneVideoComplet
 
         return saved;
     }
+
+    internal static decimal CalculateActualVideoPoints(decimal durationSeconds, decimal ratePerSecond)
+        => Math.Max(0m, durationSeconds) * Math.Max(0m, ratePerSecond);
+
+    private static decimal ResolveBillableDurationSeconds(decimal? durationSeconds)
+        => durationSeconds is decimal value && value > 0m ? value : 1m;
+
+    private static int ToAuditQuantity(decimal durationSeconds)
+        => (int)Math.Ceiling(Math.Max(1m, durationSeconds));
 
     private async Task RecordPostCompletionFailureAsync(
         RVideoSceneVideoCompletionRequest request,

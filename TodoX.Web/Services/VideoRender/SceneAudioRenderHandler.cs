@@ -256,7 +256,7 @@ public sealed class SceneAudioRenderHandler : IRenderJobHandler
             throw;
         }
 
-        await ChargeAudioIfNeededAsync(project, scene, version, input, saved, ct);
+        var chargedPoints = await ChargeAudioIfNeededAsync(project, scene, version, input, saved, ct);
 
         await _versions.CompleteSceneAudioVersionAsync(version.Id, new SceneAudioVersionCompleteRequest(
             saved.PublicUrl ?? saved.FileUrl,
@@ -268,7 +268,7 @@ public sealed class SceneAudioRenderHandler : IRenderJobHandler
             BillingLogicalRequestId: input.LogicalRequestId,
             EstimatedUsd: null,
             ActualUsd: null,
-            ChargedPoints: 0,
+            ChargedPoints: chargedPoints,
             RefundedPoints: 0,
             CostSource: "configured_tariff",
             ResultMediaId: saved.Id,
@@ -368,7 +368,7 @@ public sealed class SceneAudioRenderHandler : IRenderJobHandler
     private static bool IsHttp400(InvalidOperationException ex)
         => ex.Message.Contains("HTTP 400", StringComparison.OrdinalIgnoreCase);
 
-    private async Task ChargeAudioIfNeededAsync(
+    private async Task<decimal> ChargeAudioIfNeededAsync(
         VideoProjectDto project,
         VideoProjectSceneDto scene,
         SceneAudioVersionDto version,
@@ -377,7 +377,23 @@ public sealed class SceneAudioRenderHandler : IRenderJobHandler
         CancellationToken ct)
     {
         var (intent, billingOperationId) = ResolveBillingIntent(version.RenderConfigJson);
-        var customerPointRate = input.TtsRate > 0 ? input.TtsRate : input.DefaultTtsRate ?? 1m;
+        var customerPointRate = input.CustomerPointRate > 0
+            ? input.CustomerPointRate
+            : ResolveCustomerPointRate(version.RenderConfigJson);
+        if (customerPointRate <= 0)
+        {
+            await _repo.AddProjectEventAsync(project.Id, "RVIDEO_AUDIO_BILLING_ANOMALY", "error",
+                "Voice result was accepted but the snapshotted customer point rate is missing.",
+                new
+                {
+                    projectId = project.Id,
+                    sceneId = scene.Id,
+                    scene.SceneIndex,
+                    versionId = version.Id,
+                    input.LogicalRequestId
+                }, ct);
+            throw new RenderJobTerminalFailureException("RVIDEO_AUDIO_CUSTOMER_POINT_RATE_MISSING");
+        }
 
         if (intent == PointBillingIntent.SystemRetry)
         {
@@ -396,7 +412,7 @@ public sealed class SceneAudioRenderHandler : IRenderJobHandler
                     customerPointRate,
                     mediaId = saved.Id
                 }, ct);
-            return;
+            return 0m;
         }
 
         var referenceId = PointBillingReference.ForOperation(
@@ -425,10 +441,14 @@ public sealed class SceneAudioRenderHandler : IRenderJobHandler
                     scene.SceneIndex,
                     versionId = version.Id,
                     requiredPoints = customerPointRate,
+                    billingOperationId,
+                    providerTaskId = version.ProviderTaskId,
                     error = charge.Error
                 }, ct);
             throw new RenderJobTerminalFailureException(charge.Error ?? "Insufficient points after provider success.");
         }
+
+        return charge.Charged == 0 ? customerPointRate : charge.Charged;
     }
 
     private static (PointBillingIntent Intent, Guid? BillingOperationId) ResolveBillingIntent(string? renderConfigJson)
@@ -465,6 +485,32 @@ public sealed class SceneAudioRenderHandler : IRenderJobHandler
         }
 
         return (PointBillingIntent.InitialRender, null);
+    }
+
+    private static decimal ResolveCustomerPointRate(string? renderConfigJson)
+    {
+        if (string.IsNullOrWhiteSpace(renderConfigJson))
+        {
+            return 0m;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(renderConfigJson);
+            var root = doc.RootElement;
+            if (root.ValueKind == JsonValueKind.Object
+                && root.TryGetProperty("customerPointRate", out var rate)
+                && rate.ValueKind == JsonValueKind.Number
+                && rate.TryGetDecimal(out var parsed))
+            {
+                return parsed;
+            }
+        }
+        catch (JsonException)
+        {
+        }
+
+        return 0m;
     }
 
     internal static bool IsEligibleForVbeeRecovery(SceneAudioVersionDto version, DateTimeOffset utcNow)

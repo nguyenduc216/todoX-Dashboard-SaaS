@@ -360,17 +360,15 @@ else
                             <MudPaper Class="pa-3 mb-3" Outlined="true" Style="cursor:pointer" @onclick="OpenInitialEstimateDetailAsync">
                                 <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
                                     <MudStack Spacing="0">
-                                        <MudText Typo="Typo.subtitle1">CHI PHÍ DỰ KIẾN</MudText>
-                                        <MudText Typo="Typo.body2">@FormatInitialEstimateSummary(_initialEstimate)</MudText>
+                                        <MudText Typo="Typo.subtitle1">Dự kiến sử dụng: @FormatPoints(_initialEstimate.TotalPoints) điểm</MudText>
+                                        @if (!_initialEstimate.CanStart)
+                                        {
+                                            <MudText Typo="Typo.caption" Color="Color.Warning">Thiếu @FormatPoints(_initialEstimate.MissingPoints) điểm</MudText>
+                                        }
                                     </MudStack>
-                                    <MudStack Row="true" Spacing="1" Class="flex-wrap gap-1">
-                                        <MudChip T="string" Color="Color.Primary">Tổng: @FormatPoints(_initialEstimate.TotalPoints)</MudChip>
-                                        <MudChip T="string" Color="Color.Info">Có: @FormatPoints(_initialEstimate.AvailablePoints)</MudChip>
-                                        <MudChip T="string" Color="@(_initialEstimate.CanStart ? Color.Success : Color.Warning)">
-                                            @(_initialEstimate.CanStart ? "Đủ điểm" : $"Thiếu {FormatPoints(_initialEstimate.MissingPoints)}")
-                                        </MudChip>
-                                        <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Info" OnClick="OpenInitialEstimateDetailAsync">Chi tiết</MudButton>
-                                    </MudStack>
+                                    <MudTooltip Text="Xem chi tiết điểm">
+                                        <MudIconButton Size="Size.Small" Color="Color.Primary" Icon="@Icons.Material.Filled.Info" OnClick="OpenInitialEstimateDetailAsync" aria-label="Chi tiết điểm dự kiến" />
+                                    </MudTooltip>
                                 </MudStack>
                                 @if (!_initialEstimate.CanStart)
                                 {
@@ -379,6 +377,10 @@ else
                                     </MudAlert>
                                 }
                             </MudPaper>
+                        }
+                        @if (_actualCustomerPointsConsumed > 0)
+                        {
+                            <MudText Typo="Typo.caption" Class="mb-3">Đã sử dụng: @FormatPoints(_actualCustomerPointsConsumed) điểm</MudText>
                         }
 
                         <div class="scene-card-grid">
@@ -446,7 +448,7 @@ else
                                                                   EmptyText="Chưa render video"
                                                                   FailedText="Lỗi render video"
                                                                   RetryDisabled="@_sceneVideoRetrying.Contains(scene.Id)"
-                                                                  OnRetry="@(() => EnqueueSceneVideoAsync(scene))"
+                                                                  OnRetry="@(() => RenderSceneVideoAsync(scene))"
                                                                   OnClick="@(() => OpenSceneVideoPreview(scene))" />
                                                 <div class="scene-media-actions">
                                                 <MudStack Row="true" Spacing="1" Class="flex-wrap gap-1">
@@ -726,6 +728,7 @@ else
     private readonly Dictionary<Guid, IReadOnlyList<TodoX.Web.Services.VideoRender.FinalVideoVersionItemDto>> _finalVersionItems = new();
     private ProviderOptionDto? _defaultImageToVideoProvider;
     private TodoX.Web.Services.VideoRender.RVideoInitialPointEstimate? _initialEstimate;
+    private decimal _actualCustomerPointsConsumed;
     private long? _imageHistorySceneId;
     private long? _videoHistorySceneId;
     private bool _showFinalHistory;
@@ -1484,6 +1487,7 @@ else
                 }
                 await ReloadJobsAsync();
                 await RefreshInitialEstimateAsync();
+                _actualCustomerPointsConsumed = await SceneVersions.GetProjectActualCustomerPointsConsumedAsync(_project.Id);
             }
         }
         finally
@@ -3413,14 +3417,22 @@ else
             return;
         }
 
+        await RefreshInitialEstimateAsync();
+        var imageRate = _initialEstimate?.ImageRate ?? 0m;
+        var available = _initialEstimate?.AvailablePoints ?? 0m;
+        var estimated = imageRate;
+        var remaining = Math.Max(0m, available - estimated);
+        var missing = Math.Max(0m, estimated - available);
         var draft = GetSceneDraft(scene);
         var title = string.IsNullOrWhiteSpace(ResolveDraftImageUrl(scene, draft))
-            ? $"Tạo ảnh scene {scene.SceneIndex:00}"
-            : $"Render lại ảnh scene {scene.SceneIndex:00}";
+            ? $"Render lại hình"
+            : $"Render lại hình";
+        var message = $"Scene {scene.SceneIndex:00}\nSố ảnh: 1\nDự kiến: {FormatPoints(estimated)} điểm\nĐiểm hiện có: {FormatPoints(available)}\nCòn lại dự kiến: {FormatPoints(remaining)} điểm"
+            + (missing > 0 ? $"\nThiếu: {FormatPoints(missing)} điểm" : string.Empty);
         var confirmed = await DialogService.ShowMessageBoxAsync(
             title,
-            $"Tiếp tục sẽ enqueue lại ảnh cho scene {scene.SceneIndex:00}.",
-            yesText: "Tiếp tục",
+            message,
+            yesText: "Xác nhận render lại",
             cancelText: "Hủy");
         if (confirmed == true)
         {
@@ -4302,7 +4314,7 @@ else
 
     private Task RenderSceneVideoAsync(VideoProjectSceneDto scene)
     {
-        return EnqueueSceneVideoAsync(scene);
+        return ConfirmAndRenderSceneVideoAsync(scene);
     }
 
     private async Task EnqueueRenderAllScenesAsync()
@@ -4355,6 +4367,12 @@ else
             await LogProjectEvent("SCENE_VIDEO_BATCH_ENQUEUE_FAILED", "error", "Không thể tạo trusted payer context cho batch render scene video.",
             new { projectId = _project.Id, sceneIds, error = ex.Message });
             Snackbar.Add(ex.Message, Severity.Error);
+            return;
+        }
+
+        var selectedScenes = _project.Scenes.Where(scene => sceneIds.Contains(scene.Id)).ToArray();
+        if (!await ConfirmVideoBatchRerenderAsync(selectedScenes))
+        {
             return;
         }
 
@@ -4529,6 +4547,70 @@ else
             _sceneVideoRetrying.Remove(scene.Id);
             await InvokeAsync(StateHasChanged);
         }
+    }
+
+    private async Task ConfirmAndRenderSceneVideoAsync(VideoProjectSceneDto scene)
+    {
+        if (_project is null || AuthState.CurrentUser is null)
+        {
+            return;
+        }
+
+        if (!await ConfirmVideoSceneAsync(scene))
+        {
+            return;
+        }
+
+        await EnqueueSceneVideoAsync(scene);
+    }
+
+    private async Task<bool> ConfirmVideoSceneAsync(VideoProjectSceneDto scene)
+    {
+        await RefreshInitialEstimateAsync();
+        if (_initialEstimate is null)
+        {
+            Snackbar.Add("Không thể tính điểm render video.", Severity.Warning);
+            return false;
+        }
+
+        var duration = (decimal)scene.DurationSeconds;
+        var points = duration * _initialEstimate.VideoRate;
+        var available = _initialEstimate.AvailablePoints;
+        var remaining = Math.Max(0m, available - points);
+        var missing = Math.Max(0m, points - available);
+        var message = $"Scene {scene.SceneIndex:00}\nThời lượng: {duration:0.##} giây\nDự kiến: {FormatPoints(points)} điểm\nĐiểm hiện có: {FormatPoints(available)}\nCòn lại: {FormatPoints(remaining)} điểm"
+            + (missing > 0 ? $"\nThiếu: {FormatPoints(missing)} điểm" : string.Empty);
+        var confirmed = await DialogService.ShowMessageBoxAsync(
+            "Render lại video",
+            message,
+            yesText: "Xác nhận render lại",
+            cancelText: "Hủy");
+        return confirmed == true;
+    }
+
+    private async Task<bool> ConfirmVideoBatchRerenderAsync(IReadOnlyList<VideoProjectSceneDto> scenes)
+    {
+        await RefreshInitialEstimateAsync();
+        if (_initialEstimate is null)
+        {
+            Snackbar.Add("Không thể tính điểm render video.", Severity.Warning);
+            return false;
+        }
+
+        var duration = scenes.Sum(scene => (decimal)scene.DurationSeconds);
+        var points = duration * _initialEstimate.VideoRate;
+        var available = _initialEstimate.AvailablePoints;
+        var remaining = Math.Max(0m, available - points);
+        var missing = Math.Max(0m, points - available);
+        var sceneList = string.Join(", ", scenes.Select(scene => $"Scene {scene.SceneIndex:00}"));
+        var message = $"Số scene: {scenes.Count}\n{sceneList}\nTổng thời lượng: {duration:0.##} giây\nDự kiến: {FormatPoints(points)} điểm\nĐiểm hiện có: {FormatPoints(available)}\nCòn lại: {FormatPoints(remaining)} điểm"
+            + (missing > 0 ? $"\nThiếu: {FormatPoints(missing)} điểm" : string.Empty);
+        var confirmed = await DialogService.ShowMessageBoxAsync(
+            "Render lại video",
+            message,
+            yesText: "Xác nhận render lại",
+            cancelText: "Hủy");
+        return confirmed == true;
     }
 
     private void OpenUrl(string url) => JS.InvokeVoidAsync("open", url);

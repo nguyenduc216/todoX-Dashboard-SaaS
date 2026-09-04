@@ -133,16 +133,16 @@ public sealed class SceneImageRenderWorkItemHandler : IRenderJobHandler
             }
 
             var chargedPoints = 0m;
+            var model = RVideoImageModelPolicy.GetByAttemptIndex(input.ModelAttemptIndex)
+                ?? RVideoImageModelPolicy.GetInitial();
+            var quality = string.Equals(model.Mode, "vip", StringComparison.OrdinalIgnoreCase)
+                ? ServiceSellPriceQualityTiers.Premium
+                : ServiceSellPriceQualityTiers.Standard;
+            var serviceId = await ResolvePointServiceIdAsync(input.ProjectId, ct);
+            var rate = await _pointPricing.ResolveRateAsync(
+                serviceId, PointPricingResourceTypes.Image, quality, ct);
             if (input.BillingIntent != PointBillingIntent.SystemRetry)
             {
-                var model = RVideoImageModelPolicy.GetByAttemptIndex(input.ModelAttemptIndex)
-                    ?? RVideoImageModelPolicy.GetInitial();
-                var quality = string.Equals(model.Mode, "vip", StringComparison.OrdinalIgnoreCase)
-                    ? ServiceSellPriceQualityTiers.Premium
-                    : ServiceSellPriceQualityTiers.Standard;
-                var serviceId = await ResolvePointServiceIdAsync(input.ProjectId, ct);
-                var rate = await _pointPricing.ResolveRateAsync(
-                    serviceId, PointPricingResourceTypes.Image, quality, ct);
                 var referenceId = PointBillingReference.ForOperation(
                     input.ParentJobId,
                     "rvideo_scene_image",
@@ -174,7 +174,7 @@ public sealed class SceneImageRenderWorkItemHandler : IRenderJobHandler
             {
                 await _wallets.LogUsageOnlyAsync(input.CustomerId, input.UserId,
                     outcome.ProviderCode ?? "todox", outcome.ModelName ?? "image",
-                    "rvideo_system_retry_image", 1, 0, "rvideo", "image",
+                    "rvideo_system_retry_image", 1, rate.Rate, "rvideo", "image",
                     version.Id, "rvideo_system_retry", "success");
             }
 
