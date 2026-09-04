@@ -228,8 +228,9 @@ public sealed class DanceSellRenderHandlerTests
         public Task ClearProductAsync(Guid id, CancellationToken ct = default) => throw new NotImplementedException();
         public Task RemoveProductAndUseCharacterReferenceAsync(Guid id, CancellationToken ct = default) => throw new NotImplementedException();
         public Task UpdateDirectReferenceAsync(Guid id, Guid mediaId, string objectKey, string publicUrl, CancellationToken ct = default) => throw new NotImplementedException();
-        public Task UpdateMotionUploadAsync(Guid id, Guid mediaId, string objectKey, string publicUrl, CancellationToken ct = default) => throw new NotImplementedException();
-        public Task UpdateMotionTikTokAsync(Guid id, string sourceUrl, Guid mediaId, string objectKey, string publicUrl, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task UpdateMotionUploadAsync(Guid id, Guid mediaId, string objectKey, string publicUrl, int durationSeconds, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task UpdateMotionTikTokAsync(Guid id, string sourceUrl, Guid mediaId, string objectKey, string publicUrl, int durationSeconds, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task PersistMotionDurationAsync(Guid id, int durationSeconds, CancellationToken ct = default) => throw new NotImplementedException();
         public Task ResetReferenceAsync(Guid id, string status = DanceSellReferenceStatuses.NotCreated, CancellationToken ct = default) => throw new NotImplementedException();
         public Task UpdateReferenceStatusAsync(Guid id, string status, string? error = null, Guid? mediaId = null, string? objectKey = null, string? publicUrl = null, DateTime? approvedAt = null, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<DanceSellReferenceVersionDto>> ListReferenceVersionsAsync(Guid danceSellJobId, CancellationToken ct = default) => throw new NotImplementedException();

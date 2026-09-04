@@ -20,8 +20,9 @@ public interface IDanceSellRepository
     Task ClearProductAsync(Guid id, CancellationToken ct = default);
     Task RemoveProductAndUseCharacterReferenceAsync(Guid id, CancellationToken ct = default);
     Task UpdateDirectReferenceAsync(Guid id, Guid mediaId, string objectKey, string publicUrl, CancellationToken ct = default);
-    Task UpdateMotionUploadAsync(Guid id, Guid mediaId, string objectKey, string publicUrl, CancellationToken ct = default);
-    Task UpdateMotionTikTokAsync(Guid id, string sourceUrl, Guid mediaId, string objectKey, string publicUrl, CancellationToken ct = default);
+    Task UpdateMotionUploadAsync(Guid id, Guid mediaId, string objectKey, string publicUrl, int durationSeconds, CancellationToken ct = default);
+    Task UpdateMotionTikTokAsync(Guid id, string sourceUrl, Guid mediaId, string objectKey, string publicUrl, int durationSeconds, CancellationToken ct = default);
+    Task PersistMotionDurationAsync(Guid id, int durationSeconds, CancellationToken ct = default);
     Task ResetReferenceAsync(Guid id, string status = DanceSellReferenceStatuses.NotCreated, CancellationToken ct = default);
     Task UpdateReferenceStatusAsync(Guid id, string status, string? error = null, Guid? mediaId = null, string? objectKey = null, string? publicUrl = null, DateTime? approvedAt = null, CancellationToken ct = default);
     Task<IReadOnlyList<DanceSellReferenceVersionDto>> ListReferenceVersionsAsync(Guid danceSellJobId, CancellationToken ct = default);
@@ -316,8 +317,8 @@ public sealed class DanceSellRepository : IDanceSellRepository
                    image_prompt=@imagePrompt,
                    reference_provider_code=@referenceProviderCode,
                    reference_provider_model=@referenceProviderModel,
-                   motion_provider_code=@motionProviderCode,
-                   motion_provider_model=@motionProviderModel,
+                   motion_provider_code=COALESCE(@motionProviderCode, motion_provider_code),
+                   motion_provider_model=COALESCE(@motionProviderModel, motion_provider_model),
                    mode=@mode,
                    orientation=@orientation,
                    request_json=jsonb_set(
@@ -438,11 +439,24 @@ public sealed class DanceSellRepository : IDanceSellRepository
             new { id, mediaId, objectKey, publicUrl });
     }
 
-    public async Task UpdateMotionUploadAsync(Guid id, Guid mediaId, string objectKey, string publicUrl, CancellationToken ct = default)
-        => await UpdateMotionAsync(id, DanceSellMotionSourceTypes.Upload, publicUrl, mediaId, objectKey, publicUrl, ct);
+    public async Task UpdateMotionUploadAsync(Guid id, Guid mediaId, string objectKey, string publicUrl, int durationSeconds, CancellationToken ct = default)
+        => await UpdateMotionAsync(id, DanceSellMotionSourceTypes.Upload, publicUrl, mediaId, objectKey, publicUrl, durationSeconds, ct);
 
-    public async Task UpdateMotionTikTokAsync(Guid id, string sourceUrl, Guid mediaId, string objectKey, string publicUrl, CancellationToken ct = default)
-        => await UpdateMotionAsync(id, DanceSellMotionSourceTypes.TikTok, sourceUrl, mediaId, objectKey, publicUrl, ct);
+    public async Task UpdateMotionTikTokAsync(Guid id, string sourceUrl, Guid mediaId, string objectKey, string publicUrl, int durationSeconds, CancellationToken ct = default)
+        => await UpdateMotionAsync(id, DanceSellMotionSourceTypes.TikTok, sourceUrl, mediaId, objectKey, publicUrl, durationSeconds, ct);
+
+    public async Task PersistMotionDurationAsync(Guid id, int durationSeconds, CancellationToken ct = default)
+    {
+        using var conn = await _factory.OpenAsync(ct);
+        await conn.ExecuteAsync(
+            """
+            UPDATE dance_sell.dance_sell_jobs
+               SET request_json=jsonb_set(COALESCE(request_json, '{}'::jsonb), '{durationSeconds}', to_jsonb(@durationSeconds), true),
+                   updated_at=now()
+             WHERE id=@id;
+            """,
+            new { id, durationSeconds });
+    }
 
     public async Task ResetReferenceAsync(Guid id, string status = DanceSellReferenceStatuses.NotCreated, CancellationToken ct = default)
     {
@@ -779,7 +793,7 @@ public sealed class DanceSellRepository : IDanceSellRepository
             new { providerTaskId, callbackJson, providerStatus, resultVideoUrl, errorCode, errorMessage });
     }
 
-    private async Task UpdateMotionAsync(Guid id, string sourceType, string sourceUrl, Guid mediaId, string objectKey, string publicUrl, CancellationToken ct)
+    private async Task UpdateMotionAsync(Guid id, string sourceType, string sourceUrl, Guid mediaId, string objectKey, string publicUrl, int durationSeconds, CancellationToken ct)
     {
         using var conn = await _factory.OpenAsync(ct);
         await conn.ExecuteAsync(
@@ -792,10 +806,11 @@ public sealed class DanceSellRepository : IDanceSellRepository
                    motion_video_url=@publicUrl,
                    source_stage_status='ready',
                    source_stage_error=NULL,
+                   request_json=jsonb_set(COALESCE(request_json, '{}'::jsonb), '{durationSeconds}', to_jsonb(@durationSeconds), true),
                    updated_at=now()
              WHERE id=@id;
             """,
-            new { id, sourceType, sourceUrl, mediaId, objectKey, publicUrl });
+            new { id, sourceType, sourceUrl, mediaId, objectKey, publicUrl, durationSeconds });
     }
 
     private static string NormalizeTitle(string? title)

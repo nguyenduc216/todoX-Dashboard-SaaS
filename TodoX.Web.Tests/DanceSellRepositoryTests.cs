@@ -38,6 +38,8 @@ public sealed class DanceSellRepositoryTests
 
         Assert.DoesNotContain("character_orientation=@orientation", section, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("orientation=@orientation", section, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("motion_provider_code=COALESCE(@motionProviderCode, motion_provider_code)", section, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("motion_provider_model=COALESCE(@motionProviderModel, motion_provider_model)", section, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -52,6 +54,7 @@ public sealed class DanceSellRepositoryTests
         Assert.Contains("motion_source_type", updateMotion, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("motion_video_media_id", updateMotion, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("motion_video_url", updateMotion, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("request_json=jsonb_set(COALESCE(request_json, '{}'::jsonb), '{durationSeconds}'", updateMotion, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("source_stage_status='ready'", updateMotion, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -65,6 +68,17 @@ public sealed class DanceSellRepositoryTests
         Assert.Contains("UpdateMotionAsync(id, DanceSellMotionSourceTypes.TikTok, sourceUrl", updateTikTok, StringComparison.Ordinal);
         Assert.Contains("motion_source_url=@sourceUrl", updateMotion, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("motion_video_url=@publicUrl", updateMotion, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void PersistMotionDurationSql_MergesDurationWithoutDroppingOtherRequestFields()
+    {
+        var source = ReadRepositorySource();
+        var section = GetMethodSection(source, "PersistMotionDurationAsync");
+
+        Assert.Contains("jsonb_set(COALESCE(request_json, '{}'::jsonb), '{durationSeconds}'", section, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("updated_at=now()", section, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("autoFinish", section, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

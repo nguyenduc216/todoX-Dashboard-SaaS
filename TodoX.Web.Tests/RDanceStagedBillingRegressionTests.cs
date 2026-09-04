@@ -23,7 +23,17 @@ public sealed class RDanceStagedBillingRegressionTests
     {
         var source = ReadRepoFile("Services", "DanceSell", "DanceSellPhase2Services.cs");
         var queue = source[source.IndexOf("public async Task<DanceSellJobDto> QueueRenderAsync", StringComparison.Ordinal)..];
+        var retry = source[source.IndexOf("public async Task<DanceSellJobDto> RetryAsync", StringComparison.Ordinal)..];
 
+        Assert.Equal(1, queue.Split(new[] { "_wallets.ChargeAsync" }, StringSplitOptions.None).Length - 1);
+        Assert.Contains("durationSeconds = await ResolveMotionDurationSecondsAsync(job, motionRoute, estimate, ct)", queue);
+        Assert.Contains("new PointPricingEstimateRequest(", queue);
+        Assert.Contains("durationSeconds,", queue);
+        Assert.Contains("RequestJson = DanceSellRepository.ToJson(new { job.Id, job.PreparedReferenceUrl, job.MotionVideoUrl, job.Prompt, businessMode = job.Mode, providerMode, job.CharacterOrientation, job.Ratio, durationSeconds })", queue);
+        Assert.Contains("await _operations.UpsertOperationAsync", queue);
+        Assert.Contains("await _renderJobs.EnqueueAsync", queue);
+        Assert.Contains("await _repo.QueueForRenderAsync", queue);
+        Assert.Contains("RequestJson = DanceSellRepository.ToJson(new { job.Id, job.PreparedReferenceUrl, job.MotionVideoUrl, job.Prompt, businessMode = job.Mode, providerMode, job.CharacterOrientation, job.Ratio, durationSeconds = retryDurationSeconds })", retry);
         Assert.Contains("alreadyChargedImage", queue);
         Assert.Contains("remainingPoints", queue);
         Assert.Contains("logicalTotalPoints", queue);
@@ -51,6 +61,20 @@ public sealed class RDanceStagedBillingRegressionTests
         Assert.Contains("OnRetry=\"@(() => RenderSceneVideoAsync(scene))\"", page);
         Assert.Contains("=> ConfirmAndRenderSceneVideoAsync(scene, PointBillingIntent.UserRerender);", page);
         Assert.Contains("BillingIntent = input.BillingIntent", handler);
+    }
+
+    [Fact]
+    public void LegacyDurationResolution_UsesPersistedOrDerivableMotionMetadataOnly()
+    {
+        var source = ReadRepoFile("Services", "DanceSell", "DanceSellPhase2Services.cs");
+        var resolver = source[source.IndexOf("private async Task<int> ResolveMotionDurationSecondsAsync", StringComparison.Ordinal)..];
+
+        Assert.Contains("ReadInt(job.RequestJson, \"durationSeconds\"", resolver);
+        Assert.Contains("ReadInt(route.ConfigJson, \"durationSeconds\"", resolver);
+        Assert.Contains("job.MotionVideoMediaId is Guid mediaId", resolver);
+        Assert.Contains("_repo.PersistMotionDurationAsync(job.Id, derived.Value, ct)", resolver);
+        Assert.Contains("throw new InvalidOperationException(\"DANCE_SELL_VIDEO_DURATION_REQUIRED\")", resolver);
+        Assert.DoesNotContain("EstimateAsync", resolver);
     }
 
     private static string ReadRepoFile(params string[] parts)
