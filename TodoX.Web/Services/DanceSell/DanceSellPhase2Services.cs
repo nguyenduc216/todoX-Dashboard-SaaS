@@ -1544,6 +1544,7 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
     private readonly IPointPricingService _pointPricing;
     private readonly ICoreServiceCatalogService _coreCatalog;
     private readonly WalletService _wallets;
+    private readonly TokenSettingsService _tokenSettings;
     private readonly IRDanceDownloadTicketService _downloadTickets;
     private readonly IOptionsMonitor<KieOptions> _kie;
     private readonly IOptionsMonitor<DanceSellPhase2Options> _options;
@@ -1560,6 +1561,7 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
         IPointPricingService pointPricing,
         ICoreServiceCatalogService coreCatalog,
         WalletService wallets,
+        TokenSettingsService tokenSettings,
         IRDanceDownloadTicketService downloadTickets,
         IOptionsMonitor<KieOptions> kie,
         IOptionsMonitor<DanceSellPhase2Options> options,
@@ -1575,6 +1577,7 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
         _pointPricing = pointPricing;
         _coreCatalog = coreCatalog;
         _wallets = wallets;
+        _tokenSettings = tokenSettings;
         _downloadTickets = downloadTickets;
         _kie = kie;
         _options = options;
@@ -1765,7 +1768,9 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
         var durationSeconds = await ResolveMotionDurationSecondsAsync(job, motionRoute, estimate, ct);
         var catalogService = await _coreCatalog.GetByCodeAsync(FixedTodoXServiceCatalog.RDance, ct);
         var serviceId = catalogService?.Id;
-        var imageCount = job.ReferenceMode == DanceSellReferenceModes.DirectReference ? 0 : 1;
+        var chargeStaticImagePoints = await _tokenSettings.GetChargeStaticImagePointsAsync();
+        var staticInputCount = StaticImageBillingPolicy.ResolveRdanceStaticInputCount(job);
+        var imageCount = StaticImageBillingPolicy.ResolveBillableStaticImageCount(staticInputCount, chargeStaticImagePoints);
         var pointEstimate = await _pointPricing.EstimateAsync(new PointPricingEstimateRequest(
             serviceId,
             imageCount,
@@ -1783,7 +1788,7 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
             : 0m;
         // The reference image was consumed and billed in a prior operation. Its historical
         // component is immutable; this render can bill only newly consumed components.
-        var remainingPoints = pointEstimate.Video.Points + pointEstimate.Voice.Points;
+        var remainingPoints = pointEstimate.TotalPoints;
         var logicalTotalPoints = alreadyChargedImage + remainingPoints;
         var charge = await _wallets.ChargeAsync(
             user.CustomerId,

@@ -7,15 +7,7 @@ namespace TodoX.Web.Services;
 public static class StaticImageBillingPolicy
 {
     public static int ResolveRdanceStaticInputCount(DanceSellJobDto job)
-    {
-        if (job.ReferenceMode == DanceSellReferenceModes.DirectReference)
-        {
-            return 0;
-        }
-
-        return CountIfPresent(job.CharacterMediaId, job.CharacterImageUrl)
-            + CountIfPresent(job.ProductMediaId, job.ProductImageUrl);
-    }
+        => CountDistinctIfPresent(job.CharacterMediaId, job.ProductMediaId, job.DirectReferenceMediaId);
 
     public static int ResolveTimelapseStaticInputCount(TimelapseJobSnapshot snapshot)
         => CountIfPresent(snapshot.OriginalImage.MediaId, snapshot.OriginalImage.PublicUrl, snapshot.OriginalImage.ObjectKey)
@@ -28,4 +20,10 @@ public static class StaticImageBillingPolicy
 
     private static int CountIfPresent(Guid? mediaId, params string?[] values)
         => mediaId is Guid id && id != Guid.Empty && values.Any(value => !string.IsNullOrWhiteSpace(value)) ? 1 : 0;
+
+    private static int CountDistinctIfPresent(params Guid?[] mediaIds)
+        => mediaIds.Select(mediaId => mediaId.GetValueOrDefault())
+            .Where(mediaId => mediaId != Guid.Empty)
+            .Distinct()
+            .Count();
 }

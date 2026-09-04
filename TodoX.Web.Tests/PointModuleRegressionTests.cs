@@ -301,7 +301,7 @@ public sealed class PointModuleRegressionTests
         Assert.Contains("logicalTotalPoints", source, StringComparison.Ordinal);
         Assert.Contains("total_planned_points = logicalTotalPoints", source, StringComparison.Ordinal);
         Assert.Contains("PointCostEstimate = logicalTotalPoints", source, StringComparison.Ordinal);
-        Assert.Contains("remainingPoints = pointEstimate.Video.Points + pointEstimate.Voice.Points", source, StringComparison.Ordinal);
+        Assert.Contains("remainingPoints = pointEstimate.TotalPoints", source, StringComparison.Ordinal);
     }
 
     [Fact]

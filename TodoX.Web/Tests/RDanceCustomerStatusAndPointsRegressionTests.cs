@@ -93,7 +93,7 @@ public sealed class RDanceCustomerStatusAndPointsRegressionTests
         };
         var chargedOperation = new DanceSellProviderOperationDto
         {
-            BillingStatus = DanceSellBillingStatuses.Pending,
+            BillingStatus = DanceSellBillingStatuses.Charged,
             TodoxPointsCharged = 12m
         };
 
@@ -102,19 +102,33 @@ public sealed class RDanceCustomerStatusAndPointsRegressionTests
     }
 
     [Fact]
-    public void StaticImageBillingPolicySkipsDirectReferenceAndCanDisableBilling()
+    public void StaticImageBillingPolicyCountsConfiguredRdanceInputsAndCanDisableBilling()
     {
-        var job = new DanceSellJobDto
+        var directReferenceJob = new DanceSellJobDto
         {
             ReferenceMode = DanceSellReferenceModes.DirectReference,
+            DirectReferenceMediaId = Guid.NewGuid(),
+            DirectReferenceUrl = "direct.png"
+        };
+
+        var job = new DanceSellJobDto
+        {
             CharacterMediaId = Guid.NewGuid(),
             CharacterImageUrl = "character.png",
             ProductMediaId = Guid.NewGuid(),
             ProductImageUrl = "product.png"
         };
 
-        Assert.Equal(0, StaticImageBillingPolicy.ResolveRdanceStaticInputCount(job));
+        var imageRate = new PointPricingRate(PointPricingResourceTypes.Image, ServiceSellPriceQualityTiers.Standard, 0.5m, "per_render", "global");
+        var videoRate = new PointPricingRate(PointPricingResourceTypes.Video, ServiceSellPriceQualityTiers.Standard, 0.8m, "per_second", "global");
+        var voiceRate = new PointPricingRate(PointPricingResourceTypes.Voice, ServiceSellPriceQualityTiers.Standard, 0m, "per_render", "global");
+
+        Assert.Equal(1, StaticImageBillingPolicy.ResolveRdanceStaticInputCount(directReferenceJob));
+        Assert.Equal(2, StaticImageBillingPolicy.ResolveRdanceStaticInputCount(job));
+        Assert.Equal(2, StaticImageBillingPolicy.ResolveBillableStaticImageCount(2, true));
         Assert.Equal(0, StaticImageBillingPolicy.ResolveBillableStaticImageCount(2, false));
+        Assert.Equal(12.2m, PointPricingCalculator.Estimate(2, imageRate, 14, videoRate, 0, voiceRate).TotalPoints);
+        Assert.Equal(11.2m, PointPricingCalculator.Estimate(0, imageRate, 14, videoRate, 0, voiceRate).TotalPoints);
     }
 
     private static string ReadRepoFile(params string[] parts)

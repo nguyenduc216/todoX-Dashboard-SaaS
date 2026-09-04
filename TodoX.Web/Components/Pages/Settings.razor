@@ -7,23 +7,23 @@
 @inject TokenSettingsService TokenSettings
 @inject ISnackbar Snackbar
 
-<PageTitle>CÃ i Ä‘áº·t há»‡ thá»‘ng</PageTitle>
+<PageTitle>Cài đặt hệ thống</PageTitle>
 
 <MudStack Spacing="3">
     <div>
-        <MudText Typo="Typo.h4" Class="todox-page-title">CÃ i Ä‘áº·t há»‡ thá»‘ng</MudText>
-        <MudText Typo="Typo.body1" Class="todox-page-subtitle">Cáº¥u hÃ¬nh SaaS, LLM provider/router, nháº­n diá»‡n TodoX vÃ  thÃ´ng tin triá»ƒn khai.</MudText>
+        <MudText Typo="Typo.h4" Class="todox-page-title">Cài đặt hệ thống</MudText>
+        <MudText Typo="Typo.body1" Class="todox-page-subtitle">Cấu hình SaaS, LLM provider/router, nhận diện TodoX và thông tin triển khai.</MudText>
     </div>
 
     <MudGrid>
         <MudItem xs="12" md="6">
             <MudPaper Class="todox-card pa-5" rounded="true">
-                <MudText Typo="Typo.h6">ThÃ´ng tin há»‡ thá»‘ng</MudText>
+                <MudText Typo="Typo.h6">Thông tin hệ thống</MudText>
                 <MudDivider Class="my-3" />
                 <MudSimpleTable Dense="true" Bordered="false" Class="todox-kv-table">
                     <tbody>
-                        <tr><td>Sáº£n pháº©m</td><td>TodoX SaaS Dashboard</td></tr>
-                        <tr><td>Giao diá»‡n</td><td>Dark + Gold (nháº­n diá»‡n TodoX)</td></tr>
+                        <tr><td>Sản phẩm</td><td>TodoX SaaS Dashboard</td></tr>
+                        <tr><td>Giao diện</td><td>Dark + Gold (nhận diện TodoX)</td></tr>
                         <tr><td>Database</td><td>PostgreSQL - Foundation V2</td></tr>
                         <tr><td>Automation API</td><td>V9 API-first (/api/v9, /api/llm)</td></tr>
                     </tbody>
@@ -48,7 +48,7 @@
                     </RowTemplate>
                 </MudTable>
                 <MudText Typo="Typo.caption" Class="todox-page-subtitle mt-2">
-                    Hiá»ƒn thá»‹ theo DatabaseContract. Chá»‰nh sá»­a provider náº±m trong nhÃ³m cÃ i Ä‘áº·t API.
+                    Hiển thị theo DatabaseContract. Chỉnh sửa provider nằm trong nhóm cài đặt API.
                 </MudText>
             </MudPaper>
         </MudItem>
@@ -57,9 +57,9 @@
             <MudPaper Class="todox-card pa-5" rounded="true">
                 <MudStack Spacing="3">
                     <div>
-                        <MudText Typo="Typo.h6">HÃ¬nh áº£nh Ä‘áº¡i diá»‡n TodoX / Mr. todoX</MudText>
+                        <MudText Typo="Typo.h6">Hình ảnh đại diện TodoX / Mr. todoX</MudText>
                         <MudText Typo="Typo.body2" Class="todox-page-subtitle">
-                            áº¢nh nÃ y Ä‘Æ°á»£c dÃ¹ng lÃ m nhÃ¢n váº­t Ä‘áº¡i diá»‡n trong cÃ¡c thumbnail dá»‹ch vá»¥ render báº±ng AI.
+                            Ảnh này được dùng làm nhân vật đại diện trong các thumbnail dịch vụ render bằng AI.
                         </MudText>
                     </div>
 
@@ -73,20 +73,20 @@
                             {
                                 <div class="todox-mr-avatar-empty">
                                     <MudIcon Icon="@Icons.Material.Filled.SmartToy" Size="Size.Large" />
-                                    <span>ChÆ°a cÃ³ áº£nh Mr. todoX</span>
+                                    <span>Chưa có ảnh Mr. todoX</span>
                                 </div>
                             }
                         </div>
 
                         <MudStack Spacing="2" Class="todox-mr-avatar-form">
                             <MudTextField T="string"
-                                          Label="URL áº£nh Mr. todoX"
+                                          Label="URL ảnh Mr. todoX"
                                           @bind-Value="_mrTodoXAvatarUrl"
                                           Variant="Variant.Outlined"
                                           Margin="Margin.Dense" />
 
                             <MudTextField T="string"
-                                          Label="MÃ´ táº£ Mr. todoX dÃ¹ng khi render"
+                                          Label="Mô tả Mr. todoX dùng khi render"
                                           @bind-Value="_mrTodoXPrompt"
                                           Variant="Variant.Outlined"
                                           Lines="4" />
@@ -94,7 +94,7 @@
                             <MudStack Row="true" Spacing="2" Class="flex-wrap">
                                 <label class="@($"profile-avatar-upload {(_mrTodoXBusy ? "is-disabled" : string.Empty)}")">
                                     <MudIcon Icon="@Icons.Material.Filled.Upload" Size="Size.Small" />
-                                    <span>Upload áº£nh Mr. todoX</span>
+                                    <span>Upload ảnh Mr. todoX</span>
                                     <InputFile OnChange="UploadMrTodoXAvatar" accept="image/png,image/jpeg,image/webp" disabled="@_mrTodoXBusy" />
                                 </label>
 
@@ -103,7 +103,7 @@
                                            StartIcon="@Icons.Material.Filled.Save"
                                            OnClick="SaveMrTodoXSettings"
                                            Disabled="@_mrTodoXBusy">
-                                    LÆ°u cÃ i Ä‘áº·t
+                                    Lưu cài đặt
                                 </MudButton>
 
                                 <MudButton Variant="Variant.Text"
@@ -111,7 +111,7 @@
                                            StartIcon="@Icons.Material.Filled.Delete"
                                            OnClick="ClearMrTodoXAvatar"
                                            Disabled="@_mrTodoXBusy">
-                                    XÃ³a áº£nh
+                                    Xóa ảnh
                                 </MudButton>
                             </MudStack>
 
@@ -127,37 +127,37 @@
 
         <MudItem xs="12">
             <MudPaper Class="todox-card pa-5" rounded="true">
-                <MudText Typo="Typo.h6">GÃ³i dá»‹ch vá»¥ &amp; báº£ng giÃ¡ Ä‘iá»ƒm</MudText>
+                <MudText Typo="Typo.h6">Gói dịch vụ &amp; bảng giá điểm</MudText>
                 <MudDivider Class="my-3" />
                 <MudTable Items="@_packages" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Class="todox-table">
                     <HeaderContent>
-                        <MudTh>MÃ£ gÃ³i</MudTh>
-                        <MudTh>TÃªn</MudTh>
-                        <MudTh>Loáº¡i</MudTh>
-                        <MudTh Style="text-align:right">Äiá»ƒm cÆ¡ báº£n</MudTh>
-                        <MudTh Style="text-align:right">Äiá»ƒm/giÃ¢y</MudTh>
+                        <MudTh>Mã gói</MudTh>
+                        <MudTh>Tên</MudTh>
+                        <MudTh>Loại</MudTh>
+                        <MudTh Style="text-align:right">Điểm cơ bản</MudTh>
+                        <MudTh Style="text-align:right">Điểm/giây</MudTh>
                         <MudTh Style="text-align:right">Voice</MudTh>
                         <MudTh Style="text-align:right">Caption</MudTh>
-                        <MudTh>Tráº¡ng thÃ¡i</MudTh>
+                        <MudTh>Trạng thái</MudTh>
                     </HeaderContent>
                     <RowTemplate>
-                        <MudTd DataLabel="MÃ£ gÃ³i"><span class="todox-badge">@context.Code</span></MudTd>
-                        <MudTd DataLabel="TÃªn">@context.Name</MudTd>
-                        <MudTd DataLabel="Loáº¡i">@context.ServiceType</MudTd>
-                        <MudTd DataLabel="Äiá»ƒm cÆ¡ báº£n" Style="text-align:right">@context.BaseTokens.ToString("#,0.##")</MudTd>
-                        <MudTd DataLabel="Äiá»ƒm/giÃ¢y" Style="text-align:right">@context.TokenPerSecond.ToString("#,0.##")</MudTd>
+                        <MudTd DataLabel="Mã gói"><span class="todox-badge">@context.Code</span></MudTd>
+                        <MudTd DataLabel="Tên">@context.Name</MudTd>
+                        <MudTd DataLabel="Loại">@context.ServiceType</MudTd>
+                        <MudTd DataLabel="Điểm cơ bản" Style="text-align:right">@context.BaseTokens.ToString("#,0.##")</MudTd>
+                        <MudTd DataLabel="Điểm/giây" Style="text-align:right">@context.TokenPerSecond.ToString("#,0.##")</MudTd>
                         <MudTd DataLabel="Voice" Style="text-align:right">@context.VoiceTokens.ToString("#,0.##")</MudTd>
                         <MudTd DataLabel="Caption" Style="text-align:right">@context.CaptionTokens.ToString("#,0.##")</MudTd>
-                        <MudTd DataLabel="Tráº¡ng thÃ¡i">
-                            <MudChip T="string" Size="Size.Small" Color="@(context.IsActive ? Color.Success : Color.Default)">@(context.IsActive ? "Báº­t" : "Táº¯t")</MudChip>
+                        <MudTd DataLabel="Trạng thái">
+                            <MudChip T="string" Size="Size.Small" Color="@(context.IsActive ? Color.Success : Color.Default)">@(context.IsActive ? "Bật" : "Tắt")</MudChip>
                         </MudTd>
                     </RowTemplate>
                     <NoRecordsContent>
-                        <MudText Class="pa-4 todox-page-subtitle">ChÆ°a cÃ³ gÃ³i dá»‹ch vá»¥ nÃ o.</MudText>
+                        <MudText Class="pa-4 todox-page-subtitle">Chưa có gói dịch vụ nào.</MudText>
                     </NoRecordsContent>
                 </MudTable>
                 <MudText Typo="Typo.caption" Class="todox-page-subtitle mt-2">
-                    Dá»¯ liá»‡u Ä‘á»c trá»±c tiáº¿p tá»« public.service_packages.
+                    Dữ liệu đọc trực tiếp từ public.service_packages.
                 </MudText>
             </MudPaper>
         </MudItem>
@@ -233,11 +233,11 @@
             var url = await SystemImageStorage.SaveMrTodoXAvatarAsync(file);
             _mrTodoXAvatarUrl = url;
             await MrTodoXAvatar.SaveAvatarUrlAsync(url);
-            Snackbar.Add("ÄÃ£ upload áº£nh Mr. todoX.", Severity.Success);
+            Snackbar.Add("Đã upload ảnh Mr. todoX.", Severity.Success);
         }
         catch (Exception ex)
         {
-            Snackbar.Add($"Upload áº£nh Mr. todoX lá»—i: {ex.Message}", Severity.Error);
+            Snackbar.Add($"Upload ảnh Mr. todoX lỗi: {ex.Message}", Severity.Error);
         }
         finally
         {
@@ -252,11 +252,11 @@
         {
             await MrTodoXAvatar.SaveAvatarUrlAsync(_mrTodoXAvatarUrl);
             await MrTodoXAvatar.SavePromptAsync(_mrTodoXPrompt);
-            Snackbar.Add("ÄÃ£ lÆ°u cÃ i Ä‘áº·t Mr. todoX.", Severity.Success);
+            Snackbar.Add("Đã lưu cài đặt Mr. todoX.", Severity.Success);
         }
         catch (Exception ex)
         {
-            Snackbar.Add($"LÆ°u cÃ i Ä‘áº·t Mr. todoX lá»—i: {ex.Message}", Severity.Error);
+            Snackbar.Add($"Lưu cài đặt Mr. todoX lỗi: {ex.Message}", Severity.Error);
         }
         finally
         {
@@ -271,7 +271,7 @@
         {
             _mrTodoXAvatarUrl = null;
             await MrTodoXAvatar.SaveAvatarUrlAsync(null);
-            Snackbar.Add("ÄÃ£ xÃ³a URL áº£nh Mr. todoX.", Severity.Success);
+            Snackbar.Add("Đã xóa URL ảnh Mr. todoX.", Severity.Success);
         }
         finally
         {
@@ -299,13 +299,13 @@
                 TokenSettingsService.KeyChargeStaticImagePoints,
                 _chargeStaticImagePoints,
                 "billing",
-                "Trá»« Ä‘iá»ƒm áº£nh tÄ©nh cho RDance vÃ  Timelapse");
+                "Trừ điểm ảnh tĩnh cho RDance và Timelapse");
             _settingsLoaded = true;
-            Snackbar.Add("ÄÃ£ lÆ°u cÃ i Ä‘áº·t trá»« Ä‘iá»ƒm áº£nh tÄ©nh.", Severity.Success);
+            Snackbar.Add("Đã lưu cài đặt trừ điểm ảnh tĩnh.", Severity.Success);
         }
         catch (Exception ex)
         {
-            Snackbar.Add($"LÆ°u cÃ i Ä‘áº·t trá»« Ä‘iá»ƒm áº£nh tÄ©nh lá»—i: {ex.Message}", Severity.Error);
+            Snackbar.Add($"Lưu cài đặt trừ điểm ảnh tĩnh lỗi: {ex.Message}", Severity.Error);
         }
         finally
         {

@@ -26,6 +26,9 @@ public sealed class RDanceStagedBillingRegressionTests
         var retry = source[source.IndexOf("public async Task<DanceSellJobDto> RetryAsync", StringComparison.Ordinal)..];
 
         Assert.Equal(1, queue.Split(new[] { "_wallets.ChargeAsync" }, StringSplitOptions.None).Length - 1);
+        Assert.Contains("var chargeStaticImagePoints = await _tokenSettings.GetChargeStaticImagePointsAsync();", queue);
+        Assert.Contains("var staticInputCount = StaticImageBillingPolicy.ResolveRdanceStaticInputCount(job);", queue);
+        Assert.Contains("var imageCount = StaticImageBillingPolicy.ResolveBillableStaticImageCount(staticInputCount, chargeStaticImagePoints);", queue);
         Assert.Contains("durationSeconds = await ResolveMotionDurationSecondsAsync(job, motionRoute, estimate, ct)", queue);
         Assert.Contains("new PointPricingEstimateRequest(", queue);
         Assert.Contains("durationSeconds,", queue);
