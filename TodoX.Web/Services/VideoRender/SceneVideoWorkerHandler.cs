@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.Extensions.Options;
 using TodoX.Web.Models;
+using TodoX.Web.Models.Catalog;
 using TodoX.Web.Services.AiProviders;
 using TodoX.Web.Services.Media;
 using TodoX.Web.Services.Render;
@@ -42,6 +43,10 @@ public sealed class SceneVideoRenderWorkItemInput
     public string AspectRatio { get; set; } = "9:16";
     public string Resolution { get; set; } = "720P";
     public int DurationSeconds { get; set; }
+    public decimal CustomerPointRate { get; set; }
+    public string CustomerPointQuality { get; set; } = ServiceSellPriceQualityTiers.Standard;
+    public PointBillingIntent BillingIntent { get; set; } = PointBillingIntent.InitialRender;
+    public Guid? BillingOperationId { get; set; }
     public decimal? EstimatedUsd { get; set; }
     public decimal EstimatedPoints { get; set; }
     public string? PricingMode { get; set; }
@@ -463,7 +468,9 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
             AiImageBillingReservation reservation;
             if (string.IsNullOrWhiteSpace(taskId))
             {
-                var billingCost = _billing.BuildConfiguredCost(input.EstimatedPoints, 1);
+                // Provider reconciliation still needs a durable record, but customer points are
+                // charged only after TodoX has accepted the final provider result.
+                var billingCost = _billing.BuildConfiguredCost(0, 1);
                 await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_BILLING_RESERVE_BEGIN", "info",
                     "Scene-video billing reservation started.",
                     new
@@ -756,7 +763,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                         input.ProviderCapabilityId,
                         status.SanitizedResponseJson,
                         tariffSnapshot,
-                        reservation.ChargedPoints,
+                        input.CustomerPointRate,
                         input.EstimatedUsd,
                         input.CostSource,
                         input.AspectRatio,
@@ -764,6 +771,8 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                         input.DurationSeconds,
                         input.UserId,
                         input.CustomerId,
+                        input.BillingIntent,
+                        input.BillingOperationId,
                         IsRecovery: !string.IsNullOrWhiteSpace(existingTaskId)), ct);
                     await LogUsageAsync(input, job, attemptLogicalRequestId, reservation.ChargedPoints, status.SanitizedResponseJson, true, null, taskId, ct);
                     return;

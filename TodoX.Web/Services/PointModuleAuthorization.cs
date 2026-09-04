@@ -29,9 +29,19 @@ public static class PointBillingReference
 
     public static Guid ForRerender(Guid jobId, string assetType, string assetId, Guid? rerenderOperationId)
     {
+        return ForOperation(jobId, assetType, assetId, PointBillingIntent.UserRerender, rerenderOperationId);
+    }
+
+    public static Guid ForOperation(
+        Guid jobId,
+        string assetType,
+        string assetId,
+        PointBillingIntent intent,
+        Guid? operationId = null)
+    {
         var bytes = System.Security.Cryptography.SHA256.HashData(
             System.Text.Encoding.UTF8.GetBytes(
-                $"{jobId:N}|{assetType}|{assetId}|{rerenderOperationId?.ToString("N") ?? "legacy"}|{PointBillingIntent.UserRerender}"));
+                $"{jobId:N}|{assetType}|{assetId}|{operationId?.ToString("N") ?? "legacy"}|{intent}"));
         return new Guid(bytes[..16]);
     }
 }

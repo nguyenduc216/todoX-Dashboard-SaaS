@@ -26,6 +26,8 @@ public sealed class SceneVideoRenderInput
     public AiBillingTrustedPayerContext? TrustedPayerContext { get; set; }
     public string? ProviderConfigJson { get; set; }
     public string? CapabilityConfigJson { get; set; }
+    public PointBillingIntent BillingIntent { get; set; } = PointBillingIntent.InitialRender;
+    public Guid? BillingOperationId { get; set; }
 
     public void ApplySharedReferenceImage(RVideoSceneImageReferenceSelection reference)
     {
@@ -187,9 +189,6 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
         var settings = await _settings.GetAsync(project.Id, ct);
         var qualityTier = ResolveQualityTier(route);
         var billingOperationId = RVideoParentBillingState.ResolveBillingOperationId(project, job.Id);
-        var parentJobBilled = RVideoParentBillingState.HasCurrentOperationParentCharge(
-            project.Events,
-            billingOperationId);
         var voiceCount = scenes.Count(scene =>
             RVideoRules.RequiresExternalVoice(scene, settings)
             && !string.IsNullOrWhiteSpace(RVideoRules.ResolveSceneVoiceText(scene)));
@@ -238,61 +237,14 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
                 qualityTier,
                 ServiceSellPriceQualityTiers.Standard),
             ct);
-        if (!parentJobBilled && aggregateEstimate.TotalPoints > 0 && (input.CustomerId ?? job.CustomerId) is Guid customerId)
+        if (!aggregateEstimate.CanStart)
         {
-            var charge = await _wallets.ChargeAsync(
-                customerId, input.UserId, aggregateEstimate.TotalPoints, 1, "rvideo_initial_render",
-                "todox", "point_pricing", "rvideo", "point", billingOperationId, "rvideo_parent_job");
-            if (!charge.Ok)
-            {
-                await _jobs.MarkStatusAsync(job.Id, RenderJobStatuses.Failed, errorCode: "insufficient_points",
-                    errorMessage: charge.Error ?? "Insufficient points.", ct: ct);
-                await _repo.AddProjectEventAsync(project.Id, "RVIDEO_PARENT_BILLING_FAILED", "error",
-                    "Initial rVideo render was blocked before provider submission.",
-                    new { billingOperationId, parentRenderJobId = job.Id, projectId = project.Id, serviceId = aggregateEstimate.ServiceId, available_points_at_check = aggregateEstimate.AvailablePoints, required_points = aggregateEstimate.TotalPoints }, ct);
-                throw new RenderJobTerminalFailureException(charge.Error ?? "Insufficient points.");
-            }
-
-            await _jobs.UpsertSnapshotAsync(job.Id,
-                new
-                {
-                    billing_operation_id = billingOperationId,
-                    billingOperationId,
-                    parent_render_job_id = job.Id,
-                    parentRenderJobId = job.Id,
-                    projectId = project.Id,
-                    serviceId = aggregateEstimate.ServiceId,
-                    usagePlan = aggregateEstimate.ToSnapshot(),
-                    imageCount = aggregateEstimate.ImageCount,
-                    imageQuality = qualityTier,
-                    videoSeconds = aggregateEstimate.VideoSeconds,
-                    videoQuality = qualityTier,
-                    voiceCount = aggregateEstimate.VoiceCount,
-                    voiceQuality = ServiceSellPriceQualityTiers.Standard,
-                    voiceEnabled = aggregateEstimate.VoiceCount > 0,
-                    imagePoints = aggregateEstimate.ImagePoints,
-                    videoPoints = aggregateEstimate.VideoPoints,
-                    voicePoints = aggregateEstimate.VoicePoints,
-                    totalPoints = aggregateEstimate.TotalPoints,
-                    available_points_at_check = aggregateEstimate.AvailablePoints,
-                    balance_after_charge = charge.BalanceAfter
-                },
-                scenes.Select(scene => new { scene.Id, scene.SceneIndex, scene.DurationSeconds }).ToArray(), ct);
-            await _repo.AddProjectEventAsync(project.Id, "RVIDEO_PARENT_BILLED", "info",
-                "Initial IMAGE + VIDEO + VOICE points were charged before provider submission.",
-                new
-                {
-                    billingOperationId,
-                    parentRenderJobId = job.Id,
-                    projectId = project.Id,
-                    serviceId = aggregateEstimate.ServiceId,
-                    chargeReferenceId = billingOperationId,
-                    totalPoints = aggregateEstimate.TotalPoints,
-                    imageCount = aggregateEstimate.ImageCount,
-                    videoSeconds = aggregateEstimate.VideoSeconds,
-                    voiceCount = aggregateEstimate.VoiceCount,
-                    balance_after_charge = charge.BalanceAfter
-                }, ct);
+            await _jobs.MarkStatusAsync(job.Id, RenderJobStatuses.Failed, errorCode: "insufficient_points",
+                errorMessage: "Insufficient points.", ct: ct);
+            await _repo.AddProjectEventAsync(project.Id, "RVIDEO_PARENT_BILLING_FAILED", "error",
+                "Initial rVideo render was blocked before provider submission.",
+                new { billingOperationId, parentRenderJobId = job.Id, projectId = project.Id, serviceId = aggregateEstimate.ServiceId, available_points_at_check = aggregateEstimate.AvailablePoints, required_points = aggregateEstimate.TotalPoints }, ct);
+            throw new RenderJobTerminalFailureException("Insufficient points.");
         }
 
         var enqueued = 0;
@@ -434,11 +386,15 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
             scene.DurationSeconds);
         var pointServiceId = await ResolvePointServiceIdAsync(project.CoreJobId, ct);
         var qualityTier = ResolveQualityTier(route);
-        var pointEstimate = new PointPricingEstimate(
-            new PointPricingLine(0, qualityTier, 0, "parent", 0),
-            new PointPricingLine(scene.DurationSeconds, qualityTier, 0, "parent", 0),
-            new PointPricingLine(0, ServiceSellPriceQualityTiers.Standard, 0, "parent", 0),
-            0);
+        var pointEstimate = await _pointPricing.EstimateAsync(new PointPricingEstimateRequest(
+            pointServiceId,
+            0,
+            qualityTier,
+            scene.DurationSeconds,
+            qualityTier,
+            0,
+            ServiceSellPriceQualityTiers.Standard,
+            false), ct);
 
         await _repo.UpdateSceneAsync(
             scene.Id,
@@ -488,8 +444,12 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
             AspectRatio = input.AspectRatio,
             Resolution = input.Resolution,
             DurationSeconds = scene.DurationSeconds,
+            CustomerPointRate = pointEstimate.Video.Rate,
+            CustomerPointQuality = qualityTier,
+            BillingIntent = input.BillingIntent,
+            BillingOperationId = input.BillingOperationId ?? RVideoParentBillingState.ResolveBillingOperationId(project, parentJob.Id),
             EstimatedUsd = resolvedPrice.ProviderEstimatedCostUsd,
-            EstimatedPoints = pointEstimate.TotalPoints,
+            EstimatedPoints = 0,
             PricingMode = resolvedPrice.Mode,
             PricingRuleKey = resolvedPrice.RuleKey,
             TariffSnapshotJson = resolvedPrice.TariffSnapshotJson,

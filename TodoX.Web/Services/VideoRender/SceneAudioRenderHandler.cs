@@ -19,6 +19,7 @@ public sealed class SceneAudioRenderHandler : IRenderJobHandler
     private readonly IVbeeVoiceClient _vbee;
     private readonly IRenderJobService _jobs;
     private readonly IRVideoSceneMediaFinalizerService _finalizer;
+    private readonly WalletService _wallets;
     private readonly TenantContext _tenant;
     private readonly IVbeeRuntimeConfigProvider _runtimeConfig;
     private readonly ILogger<SceneAudioRenderHandler> _logger;
@@ -33,6 +34,7 @@ public sealed class SceneAudioRenderHandler : IRenderJobHandler
         IVbeeVoiceClient vbee,
         IRenderJobService jobs,
         IRVideoSceneMediaFinalizerService finalizer,
+        WalletService wallets,
         TenantContext tenant,
         IVbeeRuntimeConfigProvider runtimeConfig,
         ILogger<SceneAudioRenderHandler> logger)
@@ -44,6 +46,7 @@ public sealed class SceneAudioRenderHandler : IRenderJobHandler
         _vbee = vbee;
         _jobs = jobs;
         _finalizer = finalizer;
+        _wallets = wallets;
         _tenant = tenant;
         _runtimeConfig = runtimeConfig;
         _logger = logger;
@@ -253,6 +256,8 @@ public sealed class SceneAudioRenderHandler : IRenderJobHandler
             throw;
         }
 
+        await ChargeAudioIfNeededAsync(project, scene, version, input, saved, ct);
+
         await _versions.CompleteSceneAudioVersionAsync(version.Id, new SceneAudioVersionCompleteRequest(
             saved.PublicUrl ?? saved.FileUrl,
             saved.ObjectKey,
@@ -362,6 +367,105 @@ public sealed class SceneAudioRenderHandler : IRenderJobHandler
 
     private static bool IsHttp400(InvalidOperationException ex)
         => ex.Message.Contains("HTTP 400", StringComparison.OrdinalIgnoreCase);
+
+    private async Task ChargeAudioIfNeededAsync(
+        VideoProjectDto project,
+        VideoProjectSceneDto scene,
+        SceneAudioVersionDto version,
+        SceneAudioRenderWorkItemInput input,
+        MediaFileDto saved,
+        CancellationToken ct)
+    {
+        var (intent, billingOperationId) = ResolveBillingIntent(version.RenderConfigJson);
+        var customerPointRate = input.TtsRate > 0 ? input.TtsRate : input.DefaultTtsRate ?? 1m;
+
+        if (intent == PointBillingIntent.SystemRetry)
+        {
+            await _wallets.LogUsageOnlyAsync(input.CustomerId, input.UserId,
+                "vbee", input.VoiceCode,
+                "rvideo_system_retry_voice", 1, customerPointRate,
+                "rvideo", "voice", version.Id, "rvideo_system_retry", "success");
+            await _repo.AddProjectEventAsync(project.Id, "RVIDEO_AUDIO_SYSTEM_RETRY_RECORDED", "info",
+                "Voice result was accepted after a system retry and recorded without a customer debit.",
+                new
+                {
+                    projectId = project.Id,
+                    sceneId = scene.Id,
+                    scene.SceneIndex,
+                    versionId = version.Id,
+                    customerPointRate,
+                    mediaId = saved.Id
+                }, ct);
+            return;
+        }
+
+        var referenceId = PointBillingReference.ForOperation(
+            version.RenderJobId ?? version.Id,
+            "rvideo_scene_audio",
+            version.Id.ToString("N"),
+            intent,
+            billingOperationId);
+        var charge = await _wallets.ChargeAsync(
+            input.CustomerId, input.UserId, customerPointRate, 1,
+            intent == PointBillingIntent.UserRerender ? "rvideo_user_rerender_voice" : "rvideo_initial_render_voice",
+            "vbee",
+            input.VoiceCode,
+            "rvideo",
+            "voice",
+            referenceId,
+            "rvideo_scene_audio_success");
+        if (!charge.Ok)
+        {
+            await _repo.AddProjectEventAsync(project.Id, "RVIDEO_AUDIO_BILLING_ANOMALY", "error",
+                "Voice result was accepted but the success charge could not be completed.",
+                new
+                {
+                    projectId = project.Id,
+                    sceneId = scene.Id,
+                    scene.SceneIndex,
+                    versionId = version.Id,
+                    requiredPoints = customerPointRate,
+                    error = charge.Error
+                }, ct);
+            throw new RenderJobTerminalFailureException(charge.Error ?? "Insufficient points after provider success.");
+        }
+    }
+
+    private static (PointBillingIntent Intent, Guid? BillingOperationId) ResolveBillingIntent(string? renderConfigJson)
+    {
+        if (!string.IsNullOrWhiteSpace(renderConfigJson))
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(renderConfigJson);
+                var root = doc.RootElement;
+                var intent = PointBillingIntent.InitialRender;
+                if (root.ValueKind == JsonValueKind.Object
+                    && root.TryGetProperty("billingIntent", out var billingIntent)
+                    && billingIntent.ValueKind == JsonValueKind.String
+                    && Enum.TryParse<PointBillingIntent>(billingIntent.GetString(), true, out var parsedIntent))
+                {
+                    intent = parsedIntent;
+                }
+
+                Guid? billingOperationId = null;
+                if (root.ValueKind == JsonValueKind.Object
+                    && root.TryGetProperty("billingOperationId", out var billingOperationIdValue)
+                    && billingOperationIdValue.ValueKind == JsonValueKind.String
+                    && Guid.TryParse(billingOperationIdValue.GetString(), out var parsedOperationId))
+                {
+                    billingOperationId = parsedOperationId;
+                }
+
+                return (intent, billingOperationId);
+            }
+            catch (JsonException)
+            {
+            }
+        }
+
+        return (PointBillingIntent.InitialRender, null);
+    }
 
     internal static bool IsEligibleForVbeeRecovery(SceneAudioVersionDto version, DateTimeOffset utcNow)
         => version.SubmittedAt is DateTimeOffset submittedAt

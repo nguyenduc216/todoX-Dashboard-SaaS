@@ -2,6 +2,7 @@ using System.Text.Json;
 using Npgsql;
 using TodoX.Web.Services.Media;
 using TodoX.Web.Services.VideoRender;
+using TodoX.Web.Models;
 
 namespace TodoX.Web.Services.AiProviders;
 
@@ -303,7 +304,9 @@ public sealed class AiImageBillingReconciliationWorker : BackgroundService
             item.ProviderCapabilityId,
             poll.SanitizedResponseJson,
             item.TariffSnapshotJson,
-            item.CustomerChargedPoints,
+            CustomerPointRate: version.DurationSeconds is decimal duration && duration > 0
+                ? item.CustomerChargedPoints / duration
+                : item.CustomerChargedPoints,
             version.EstimatedUsd,
             version.CostSource,
             version.AspectRatio,
@@ -311,6 +314,8 @@ public sealed class AiImageBillingReconciliationWorker : BackgroundService
             version.DurationSeconds,
             UserId: null,
             CustomerId: null,
+            BillingIntent: PointBillingIntent.SystemRetry,
+            BillingOperationId: version.RenderJobId,
             IsRecovery: true), ct);
         _logger.LogInformation("AI_IMAGE_RECONCILIATION_COMPLETED logicalRequestId={LogicalRequestId} taskId={TaskId}", item.LogicalRequestId, item.ProviderTaskId);
     }

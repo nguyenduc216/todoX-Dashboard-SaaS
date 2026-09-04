@@ -222,7 +222,9 @@ public sealed class RVideoSceneAudioAutoChainService : IRVideoSceneAudioAutoChai
                     triggerSource,
                     voiceCatalogCode = settings?.VoiceCatalogCode,
                     voiceCode,
-                    logicalRequestId
+                    logicalRequestId,
+                    billingIntent = PointBillingIntent.InitialRender,
+                    billingOperationId = billingOperationId
                 }
             },
             Prompt = new
@@ -441,6 +443,8 @@ public sealed class SceneAudioRenderWorkItemInput
     public decimal SpeedRate { get; set; }
     public string? CallbackUrl { get; set; }
     public string? AppId { get; set; }
+    public PointBillingIntent BillingIntent { get; set; } = PointBillingIntent.InitialRender;
+    public Guid? BillingOperationId { get; set; }
     public AiStudioVoiceDto? VoiceSnapshot { get; set; }
     public object SceneSnapshot { get; set; } = new { };
     public object RenderConfigSnapshot { get; set; } = new { };

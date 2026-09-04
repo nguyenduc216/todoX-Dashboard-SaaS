@@ -73,33 +73,9 @@ public sealed class SceneImageRenderWorkItemHandler : IRenderJobHandler
 
         try
         {
-            if (input.BillingIntent == PointBillingIntent.UserRerender && !input.SkipCustomerCharge)
-            {
-                var model = RVideoImageModelPolicy.GetByAttemptIndex(input.ModelAttemptIndex)
-                    ?? RVideoImageModelPolicy.GetInitial();
-                var quality = string.Equals(model.Mode, "vip", StringComparison.OrdinalIgnoreCase)
-                    ? ServiceSellPriceQualityTiers.Premium
-                    : ServiceSellPriceQualityTiers.Standard;
-                var serviceId = await ResolvePointServiceIdAsync(input.ProjectId, ct);
-                var rate = await _pointPricing.ResolveRateAsync(
-                    serviceId, PointPricingResourceTypes.Image, quality, ct);
-                var referenceId = input.BillingReferenceId ?? job.Id;
-                var charge = await _wallets.ChargeAsync(
-                    input.CustomerId, input.UserId, rate.Rate, 1,
-                    "rvideo_user_rerender_image", "todox", "point_pricing", "rvideo",
-                    "point", PointBillingReference.ForRerender(
-                        input.ParentJobId, "image", referenceId.ToString("N")),
-                    "rvideo_user_rerender");
-                if (!charge.Ok)
-                {
-                    await _versions.FailImageVersionAsync(
-                        version.Id, "insufficient_points", charge.Error, CancellationToken.None);
-                    throw new RenderJobTerminalFailureException(
-                        charge.Error ?? "Insufficient points.");
-                }
-
-                input.SkipCustomerCharge = true;
-            }
+            // Provider submission must never consume customer points. RVIDEO charges only after
+            // a valid image result has been received and persisted by the provider path.
+            input.SkipCustomerCharge = true;
 
             var outcome = await _images.RenderSceneImageAsync(new SceneImageRenderContext
             {
@@ -156,6 +132,53 @@ public sealed class SceneImageRenderWorkItemHandler : IRenderJobHandler
                 throw new RenderJobTerminalFailureException(outcome.Error ?? "Scene image render failed.");
             }
 
+            var chargedPoints = 0m;
+            if (input.BillingIntent != PointBillingIntent.SystemRetry)
+            {
+                var model = RVideoImageModelPolicy.GetByAttemptIndex(input.ModelAttemptIndex)
+                    ?? RVideoImageModelPolicy.GetInitial();
+                var quality = string.Equals(model.Mode, "vip", StringComparison.OrdinalIgnoreCase)
+                    ? ServiceSellPriceQualityTiers.Premium
+                    : ServiceSellPriceQualityTiers.Standard;
+                var serviceId = await ResolvePointServiceIdAsync(input.ProjectId, ct);
+                var rate = await _pointPricing.ResolveRateAsync(
+                    serviceId, PointPricingResourceTypes.Image, quality, ct);
+                var referenceId = PointBillingReference.ForOperation(
+                    input.ParentJobId,
+                    "rvideo_scene_image",
+                    version.Id.ToString("N"),
+                    input.BillingIntent,
+                    input.BillingReferenceId);
+                var charge = await _wallets.ChargeAsync(
+                    input.CustomerId, input.UserId, rate.Rate, 1,
+                    input.BillingIntent == PointBillingIntent.UserRerender
+                        ? "rvideo_user_rerender_image"
+                        : "rvideo_initial_render_image",
+                    outcome.ProviderCode ?? "todox",
+                    outcome.ModelName ?? model.Model,
+                    "rvideo",
+                    "image",
+                    referenceId,
+                    "rvideo_scene_image_success");
+                if (!charge.Ok)
+                {
+                    await _repo.AddProjectEventAsync(input.ProjectId, "RVIDEO_IMAGE_BILLING_ANOMALY", "error",
+                        "Image result was accepted but the success charge could not be completed.",
+                        new { jobId = job.Id, input.ProjectId, input.SceneId, input.SceneIndex, versionId = version.Id, requiredPoints = rate.Rate, charge.Error }, ct);
+                    throw new RenderJobTerminalFailureException(charge.Error ?? "Insufficient points after provider success.");
+                }
+
+                chargedPoints = charge.Charged == 0 ? rate.Rate : charge.Charged;
+            }
+            else
+            {
+                await _wallets.LogUsageOnlyAsync(input.CustomerId, input.UserId,
+                    outcome.ProviderCode ?? "todox", outcome.ModelName ?? "image",
+                    "rvideo_system_retry_image", 1, 0, "rvideo", "image",
+                    version.Id, "rvideo_system_retry", "success");
+            }
+
+            outcome = outcome with { ChargedPoints = chargedPoints };
             var completed = await _versions.TryCompleteImageVersionAsync(version.Id, new SceneImageVersionCompleteRequest(
                 outcome.ImageUrl, outcome.ObjectKey, outcome.ProviderCode, outcome.ModelName,
                 outcome.ProviderCapabilityId, outcome.ProviderTaskId, outcome.ResultMediaId,

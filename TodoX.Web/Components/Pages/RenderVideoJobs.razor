@@ -357,53 +357,30 @@ else
 
                         @if (_initialEstimate is not null)
                         {
-                            <MudPaper Class="pa-3 mb-3" Outlined="true">
-                                <MudStack Spacing="1">
-                                    <MudText Typo="Typo.subtitle1">CHI PHÍ DỰ KIẾN</MudText>
-                                    <MudGrid Spacing="1">
-                                        <MudItem xs="12" md="6">
-                                            <MudText Typo="Typo.body2">Hình ảnh</MudText>
-                                            <MudText Typo="Typo.body1">@FormatEstimateLine(_initialEstimate.ImageCount, _initialEstimate.ImageRate, _initialEstimate.ImagePoints)</MudText>
-                                        </MudItem>
-                                        <MudItem xs="12" md="6">
-                                            <MudText Typo="Typo.body2">Video</MudText>
-                                            <MudText Typo="Typo.body1">@FormatEstimateLine(_initialEstimate.VideoSeconds, _initialEstimate.VideoRate, _initialEstimate.VideoPoints, "giây")</MudText>
-                                        </MudItem>
-                                        <MudItem xs="12" md="6">
-                                            <MudText Typo="Typo.body2">Voice</MudText>
-                                            <MudText Typo="Typo.body1">@(_initialEstimate.VoiceCount > 0 ? FormatEstimateLine(_initialEstimate.VoiceCount, _initialEstimate.VoiceRate, _initialEstimate.VoicePoints) : "Không sử dụng — 0 điểm")</MudText>
-                                        </MudItem>
-                                        <MudItem xs="12" md="6">
-                                            <MudText Typo="Typo.body2">TỔNG</MudText>
-                                            <MudText Typo="Typo.body1">@FormatPoints(_initialEstimate.TotalPoints)</MudText>
-                                        </MudItem>
-                                        <MudItem xs="12" md="4">
-                                            <MudText Typo="Typo.body2">Điểm khả dụng</MudText>
-                                            <MudText Typo="Typo.body1">@FormatPoints(_initialEstimate.AvailablePoints)</MudText>
-                                        </MudItem>
-                                        <MudItem xs="12" md="4">
-                                            <MudText Typo="Typo.body2">Còn lại sau khi thực hiện</MudText>
-                                            <MudText Typo="Typo.body1">@FormatPoints(_initialEstimate.RemainingPoints)</MudText>
-                                        </MudItem>
-                                        <MudItem xs="12" md="4">
-                                            <MudText Typo="Typo.body2">Thiếu điểm</MudText>
-                                            <MudText Typo="Typo.body1">@(_initialEstimate.MissingPoints > 0 ? FormatPoints(_initialEstimate.MissingPoints) : "0 điểm")</MudText>
-                                        </MudItem>
-                                    </MudGrid>
-                                    @if (!_initialEstimate.CanStart)
-                                    {
-                                        <MudAlert Severity="Severity.Warning" Dense="true">
-                                            Không đủ điểm để thực hiện video này.
-                                            <div>Cần: @FormatPoints(_initialEstimate.TotalPoints)</div>
-                                            <div>Hiện có: @FormatPoints(_initialEstimate.AvailablePoints)</div>
-                                            <div>Thiếu: @FormatPoints(_initialEstimate.MissingPoints)</div>
-                                        </MudAlert>
-                                    }
+                            <MudPaper Class="pa-3 mb-3" Outlined="true" Style="cursor:pointer" @onclick="OpenInitialEstimateDetailAsync">
+                                <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-2">
+                                    <MudStack Spacing="0">
+                                        <MudText Typo="Typo.subtitle1">CHI PHÍ DỰ KIẾN</MudText>
+                                        <MudText Typo="Typo.body2">@FormatInitialEstimateSummary(_initialEstimate)</MudText>
+                                    </MudStack>
+                                    <MudStack Row="true" Spacing="1" Class="flex-wrap gap-1">
+                                        <MudChip T="string" Color="Color.Primary">Tổng: @FormatPoints(_initialEstimate.TotalPoints)</MudChip>
+                                        <MudChip T="string" Color="Color.Info">Có: @FormatPoints(_initialEstimate.AvailablePoints)</MudChip>
+                                        <MudChip T="string" Color="@(_initialEstimate.CanStart ? Color.Success : Color.Warning)">
+                                            @(_initialEstimate.CanStart ? "Đủ điểm" : $"Thiếu {FormatPoints(_initialEstimate.MissingPoints)}")
+                                        </MudChip>
+                                        <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Info" OnClick="OpenInitialEstimateDetailAsync">Chi tiết</MudButton>
+                                    </MudStack>
                                 </MudStack>
+                                @if (!_initialEstimate.CanStart)
+                                {
+                                    <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2">
+                                        Không đủ điểm để thực hiện video này.
+                                    </MudAlert>
+                                }
                             </MudPaper>
                         }
 
-                        <div class="scene-list-scroll" tabindex="0">
                         <div class="scene-card-grid">
                         @foreach (var scene in _project.Scenes.OrderBy(x => x.SceneIndex))
                         {
@@ -419,9 +396,9 @@ else
                                         <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center" Class="scene-card-meta flex-wrap gap-1">
                                             <MudChip T="string" Size="Size.Small" Color="Color.Info">@ProjectAspectRatio</MudChip>
                                             @RenderSceneStatusBadge(scene, "image")
-                                            <MudMenu Dense="true" Icon="@Icons.Material.Filled.MoreVert">
-                                                <MudMenuItem Icon="@Icons.Material.Filled.Save" Disabled="@_busy" OnClick="@(async () => await SaveSceneAsync(scene))">Lưu scene</MudMenuItem>
-                                                <MudMenuItem Icon="@Icons.Material.Filled.AddPhotoAlternate" Disabled="@(_useReferenceImageForAllScenes || IsSceneRendering(scene))" OnClick="@(() => RerenderSceneImageAsync(scene))">@(string.IsNullOrWhiteSpace(ResolveDraftImageUrl(scene, draft)) ? "Tạo ảnh" : "Render lại ảnh")</MudMenuItem>
+                                                <MudMenu Dense="true" Icon="@Icons.Material.Filled.MoreVert">
+                                                    <MudMenuItem Icon="@Icons.Material.Filled.Save" Disabled="@_busy" OnClick="@(async () => await SaveSceneAsync(scene))">Lưu scene</MudMenuItem>
+                                                <MudMenuItem Icon="@Icons.Material.Filled.AddPhotoAlternate" Disabled="@(_useReferenceImageForAllScenes || IsSceneRendering(scene))" OnClick="@(() => ConfirmAndRerenderSceneImageAsync(scene))">@(string.IsNullOrWhiteSpace(ResolveDraftImageUrl(scene, draft)) ? "Tạo ảnh" : "Render lại ảnh")</MudMenuItem>
                                                 <MudMenuItem Icon="@Icons.Material.Filled.Edit" OnClick="@(() => EditScenePromptsAsync(scene))">Chỉnh sửa prompt ảnh</MudMenuItem>
                                                 <MudMenuItem Icon="@Icons.Material.Filled.History" OnClick="@(() => OpenImageHistoryAsync(scene))">Lịch sử ảnh</MudMenuItem>
                                                 <MudDivider />
@@ -444,7 +421,7 @@ else
                                                                   EmptyText="Chưa render ảnh"
                                                                   FailedText="Lỗi render ảnh"
                                                                   RetryDisabled="@_sceneRerendering.Contains(scene.Id)"
-                                                                  OnRetry="@(() => RerenderSceneImageAsync(scene))"
+                                                                  OnRetry="@(() => ConfirmAndRerenderSceneImageAsync(scene))"
                                                                   OnClick="@(() => OpenScenePreview(scene))" />
                                                 <MudText Typo="Typo.caption" Color="Color.Secondary">@ProjectAspectRatio · @ProjectResolution</MudText>
                                                 <div class="scene-media-actions">
@@ -512,7 +489,6 @@ else
                                 </MudStack>
                             </MudPaper>
                         }
-                        </div>
                         </div>
                     }
                 </div>
@@ -1553,6 +1529,41 @@ else
 
         await InvokeAsync(StateHasChanged);
     }
+
+    private async Task OpenInitialEstimateDetailAsync()
+    {
+        if (_initialEstimate is null)
+        {
+            return;
+        }
+
+        var message = BuildInitialEstimateDetailText(_initialEstimate);
+
+        await DialogService.ShowMessageBoxAsync("Chi tiết điểm dự kiến", message, yesText: "Đóng");
+    }
+
+    private static string BuildInitialEstimateDetailText(TodoX.Web.Services.VideoRender.RVideoInitialPointEstimate estimate)
+    {
+        var videoLine = FormatEstimateLine(estimate.VideoSeconds, estimate.VideoRate, estimate.VideoPoints, "giây");
+        var voiceLine = estimate.VoiceCount > 0
+            ? FormatEstimateLine(estimate.VoiceCount, estimate.VoiceRate, estimate.VoicePoints)
+            : "Không sử dụng - 0 điểm";
+        return string.Join(Environment.NewLine, new[]
+        {
+            $"Hình ảnh: {FormatEstimateLine(estimate.ImageCount, estimate.ImageRate, estimate.ImagePoints)}",
+            $"Video: {videoLine}",
+            $"Voice: {voiceLine}",
+            $"Tổng: {FormatPoints(estimate.TotalPoints)}",
+            $"Điểm khả dụng: {FormatPoints(estimate.AvailablePoints)}",
+            $"Còn lại: {FormatPoints(estimate.RemainingPoints)}",
+            $"Thiếu: {FormatPoints(estimate.MissingPoints)}"
+        });
+    }
+
+    private static string FormatInitialEstimateSummary(TodoX.Web.Services.VideoRender.RVideoInitialPointEstimate estimate)
+        => estimate.CanStart
+            ? $"Đủ điểm để chạy - cần {FormatPoints(estimate.TotalPoints)} / có {FormatPoints(estimate.AvailablePoints)}"
+            : $"Thiếu {FormatPoints(estimate.MissingPoints)} điểm - cần {FormatPoints(estimate.TotalPoints)} / có {FormatPoints(estimate.AvailablePoints)}";
 
     private async Task LoadCharactersAsync()
     {
@@ -3392,6 +3403,28 @@ else
         {
             _sceneRerendering.Remove(scene.Id);
             await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task ConfirmAndRerenderSceneImageAsync(VideoProjectSceneDto scene)
+    {
+        if (_project is null || AuthState.CurrentUser is null)
+        {
+            return;
+        }
+
+        var draft = GetSceneDraft(scene);
+        var title = string.IsNullOrWhiteSpace(ResolveDraftImageUrl(scene, draft))
+            ? $"Tạo ảnh scene {scene.SceneIndex:00}"
+            : $"Render lại ảnh scene {scene.SceneIndex:00}";
+        var confirmed = await DialogService.ShowMessageBoxAsync(
+            title,
+            $"Tiếp tục sẽ enqueue lại ảnh cho scene {scene.SceneIndex:00}.",
+            yesText: "Tiếp tục",
+            cancelText: "Hủy");
+        if (confirmed == true)
+        {
+            await RerenderSceneImageAsync(scene);
         }
     }
 

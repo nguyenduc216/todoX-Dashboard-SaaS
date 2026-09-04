@@ -2,6 +2,7 @@ using TodoX.Web.Services.AiProviders;
 using TodoX.Web.Models;
 using TodoX.Web.Services.Media;
 using TodoX.Web.Services.Render;
+using TodoX.Web.Services;
 
 namespace TodoX.Web.Services.VideoRender;
 
@@ -20,7 +21,7 @@ public sealed record RVideoSceneVideoCompletionRequest(
     long? ProviderCapabilityId,
     string? ProviderUsageJson,
     string? TariffSnapshotJson,
-    decimal ChargedPoints,
+    decimal CustomerPointRate,
     decimal? EstimatedUsd,
     string? CostSource,
     string? AspectRatio,
@@ -28,6 +29,8 @@ public sealed record RVideoSceneVideoCompletionRequest(
     decimal? DurationSeconds,
     Guid? UserId,
     Guid? CustomerId,
+    PointBillingIntent BillingIntent,
+    Guid? BillingOperationId,
     bool IsRecovery);
 
 public interface IRVideoSceneVideoCompletionService
@@ -44,6 +47,7 @@ public sealed class RVideoSceneVideoCompletionService : IRVideoSceneVideoComplet
     private readonly IRVideoJobService _rvideoJobs;
     private readonly IRVideoProjectFinalizationService _finalization;
     private readonly IAiImageBillingService _billing;
+    private readonly WalletService _wallets;
     private readonly IRenderJobService _jobs;
     private readonly VideoRenderRepository _projects;
     private readonly TenantContext _tenant;
@@ -58,6 +62,7 @@ public sealed class RVideoSceneVideoCompletionService : IRVideoSceneVideoComplet
         IRVideoJobService rvideoJobs,
         IRVideoProjectFinalizationService finalization,
         IAiImageBillingService billing,
+        WalletService wallets,
         IRenderJobService jobs,
         VideoRenderRepository projects,
         TenantContext tenant,
@@ -71,6 +76,7 @@ public sealed class RVideoSceneVideoCompletionService : IRVideoSceneVideoComplet
         _rvideoJobs = rvideoJobs;
         _finalization = finalization;
         _billing = billing;
+        _wallets = wallets;
         _jobs = jobs;
         _projects = projects;
         _tenant = tenant;
@@ -129,6 +135,38 @@ public sealed class RVideoSceneVideoCompletionService : IRVideoSceneVideoComplet
             new { request.SceneId, request.SceneIndex, request.SceneVideoVersionId, request.ProviderTaskId, mediaId = saved.Id, objectKey },
             ct);
 
+        var chargedPoints = 0m;
+        if (request.BillingIntent != PointBillingIntent.SystemRetry)
+        {
+            var referenceId = PointBillingReference.ForOperation(
+                request.RenderJobId ?? request.SceneVideoVersionId,
+                "rvideo_scene_video",
+                request.SceneVideoVersionId.ToString("N"),
+                request.BillingIntent,
+                request.BillingOperationId);
+            var charge = await _wallets.ChargeAsync(
+                request.CustomerId, request.UserId, request.CustomerPointRate, (int)Math.Max(1, request.DurationSeconds ?? 1),
+                request.BillingIntent == PointBillingIntent.UserRerender ? "rvideo_user_rerender_video" : "rvideo_initial_render_video",
+                request.ProviderCode ?? "todox", request.ModelName ?? "video", "rvideo", "second",
+                referenceId, "rvideo_scene_video_success");
+            if (!charge.Ok)
+            {
+                await _projects.AddProjectEventAsync(request.ProjectId, "RVIDEO_VIDEO_BILLING_ANOMALY", "error",
+                    "Video result was accepted but the success charge could not be completed.",
+                    new { request.SceneId, request.SceneIndex, request.SceneVideoVersionId, request.ProviderTaskId, requiredPoints = request.CustomerPointRate, charge.Error }, ct);
+                throw new InvalidOperationException(charge.Error ?? "Insufficient points after provider success.");
+            }
+
+            chargedPoints = charge.Charged == 0 ? request.CustomerPointRate : charge.Charged;
+        }
+        else
+        {
+            await _wallets.LogUsageOnlyAsync(request.CustomerId, request.UserId,
+                request.ProviderCode ?? "todox", request.ModelName ?? "video",
+                "rvideo_system_retry_video", (int)Math.Max(1, request.DurationSeconds ?? 1), request.CustomerPointRate,
+                "rvideo", "second", request.SceneVideoVersionId, "rvideo_system_retry", "success");
+        }
+
         await _versions.CompleteSceneVideoVersionAsync(
             request.SceneVideoVersionId,
             new SceneVideoVersionCompleteRequest(
@@ -144,7 +182,7 @@ public sealed class RVideoSceneVideoCompletionService : IRVideoSceneVideoComplet
                 BillingLogicalRequestId: request.LogicalRequestId,
                 EstimatedUsd: request.EstimatedUsd,
                 ActualUsd: null,
-                ChargedPoints: request.ChargedPoints,
+                ChargedPoints: chargedPoints,
                 RefundedPoints: 0,
                 CostSource: request.CostSource ?? "configured_tariff",
                 AspectRatio: request.AspectRatio,
@@ -195,7 +233,7 @@ public sealed class RVideoSceneVideoCompletionService : IRVideoSceneVideoComplet
             "RVIDEO_VIDEO_BILLING_COMPLETED",
             "info",
             "Scene-video billing was completed after local provider output persistence.",
-            new { request.SceneId, request.SceneIndex, request.SceneVideoVersionId, request.ProviderTaskId, request.ChargedPoints },
+            new { request.SceneId, request.SceneIndex, request.SceneVideoVersionId, request.ProviderTaskId, chargedPoints },
             ct);
 
         try

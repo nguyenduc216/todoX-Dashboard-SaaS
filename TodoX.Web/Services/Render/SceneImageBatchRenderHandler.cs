@@ -171,10 +171,9 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
         if (billingScenes.Count == 0) return;
 
         var billingOperationId = RVideoParentBillingState.ResolveBillingOperationId(project, job.Id);
-        if (input.BillingIntent == PointBillingIntent.InitialRender
-            && !RVideoParentBillingState.HasCurrentOperationParentCharge(project.Events, billingOperationId))
+        if (input.BillingIntent == PointBillingIntent.InitialRender)
         {
-            await ChargeInitialRenderAsync(job, input, project, billingOperationId, billingScenes, imageWorkScenes, ct);
+            await EnsureInitialBalanceAsync(job, input, project, billingOperationId, billingScenes, imageWorkScenes, ct);
         }
 
         var (referenceMediaId, referenceUrl, referenceObjectKey, characterPrompt) =
@@ -199,7 +198,7 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
            || string.IsNullOrWhiteSpace(scene.StaticImageUrl)
            || string.Equals(scene.Status, VideoSceneStatuses.Failed, StringComparison.OrdinalIgnoreCase);
 
-    private async Task ChargeInitialRenderAsync(
+    private async Task EnsureInitialBalanceAsync(
         RenderJobDto job,
         SceneImageBatchInput input,
         VideoProjectDto project,
@@ -229,17 +228,14 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
                 ServiceSellPriceQualityTiers.Standard,
                 ServiceSellPriceQualityTiers.Standard),
             ct);
-        var charge = await _wallets.ChargeAsync(
-            customerId, input.UserId, estimate.TotalPoints, 1, "rvideo_initial_render",
-            "todox", "point_pricing", "rvideo", "point", billingOperationId, "rvideo_parent_job");
-        if (!charge.Ok)
+        if (!estimate.CanStart)
         {
             await _jobs.MarkStatusAsync(job.Id, RenderJobStatuses.Failed,
-                errorCode: "insufficient_points", errorMessage: charge.Error, ct: ct);
+                errorCode: "insufficient_points", errorMessage: "Insufficient points.", ct: ct);
             await _repo.AddProjectEventAsync(project.Id, "RVIDEO_PARENT_BILLING_FAILED", "error",
                 "Initial rVideo render was blocked before provider submission.",
                 new { billingOperationId, parentRenderJobId = job.Id, projectId = project.Id, serviceId = estimate.ServiceId, available_points_at_check = estimate.AvailablePoints, required_points = estimate.TotalPoints }, ct);
-            throw new RenderJobTerminalFailureException(charge.Error ?? "Insufficient points.");
+            throw new RenderJobTerminalFailureException("Insufficient points.");
         }
 
         await _jobs.UpsertSnapshotAsync(job.Id,
@@ -264,25 +260,23 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
                 voicePoints = estimate.VoicePoints,
                 totalPoints = estimate.TotalPoints,
                 available_points_at_check = estimate.AvailablePoints,
-                balance_after_charge = charge.BalanceAfter
+                balance_after_check = estimate.AvailablePoints
             },
             billingScenes.Select(scene => new { scene.Id, scene.SceneIndex, scene.DurationSeconds }).ToArray(), ct);
-        await _repo.AddProjectEventAsync(project.Id, "RVIDEO_PARENT_BILLED", "info",
-            "Initial IMAGE + VIDEO + VOICE points were charged before provider submission.",
+        await _repo.AddProjectEventAsync(project.Id, "RVIDEO_PARENT_PREFLIGHT_APPROVED", "info",
+            "Initial rVideo point estimate passed without a customer debit.",
             new
             {
                 billingOperationId,
                 parentRenderJobId = job.Id,
                 projectId = project.Id,
                 serviceId = estimate.ServiceId,
-                chargeReferenceId = billingOperationId,
                 totalPoints = estimate.TotalPoints,
                 imageCount = estimate.ImageCount,
                 videoSeconds = estimate.VideoSeconds,
                 voiceCount = estimate.VoiceCount,
-                balance_after_charge = charge.BalanceAfter
+                available_points_at_check = estimate.AvailablePoints
             }, ct);
-        input.ParentJobBilled = true;
         input.SkipCustomerCharge = true;
         input.BillingReferenceId = billingOperationId;
     }
