@@ -29,6 +29,8 @@ public sealed class SceneImageBatchInput
     public bool ParentJobBilled { get; set; }
     public PointBillingIntent BillingIntent { get; set; } = PointBillingIntent.InitialRender;
     public Guid? BillingReferenceId { get; set; }
+    public decimal CustomerPointRate { get; set; }
+    public string CustomerPointQuality { get; set; } = ServiceSellPriceQualityTiers.Standard;
     public bool SkipCustomerCharge
     {
         get => ParentJobBilled;
@@ -41,6 +43,8 @@ public sealed class SceneImageRenderWorkItemInput
     public bool SkipCustomerCharge { get; set; }
     public PointBillingIntent BillingIntent { get; set; } = PointBillingIntent.InitialRender;
     public Guid? BillingReferenceId { get; set; }
+    public decimal CustomerPointRate { get; set; }
+    public string CustomerPointQuality { get; set; } = ServiceSellPriceQualityTiers.Standard;
     public Guid ParentJobId { get; set; }
     public Guid ImageVersionId { get; set; }
     public long ProjectId { get; set; }
@@ -279,6 +283,8 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
             }, ct);
         input.SkipCustomerCharge = true;
         input.BillingReferenceId = billingOperationId;
+        input.CustomerPointRate = estimate.ImageRate;
+        input.CustomerPointQuality = imageQuality;
     }
 
     private async Task<Guid?> ResolvePointServiceIdAsync(Guid? coreJobId, CancellationToken ct)
@@ -329,7 +335,11 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
                 model = model.Model,
                 model.Mode,
                 model.Resolution,
-                modelAttemptIndex = model.AttemptIndex
+                modelAttemptIndex = model.AttemptIndex,
+                customerPointRate = input.CustomerPointRate,
+                customerPointQuality = input.CustomerPointQuality,
+                billingIntent = input.BillingIntent,
+                billingOperationId = input.BillingReferenceId
             }), ct);
 
         await _repo.UpdateSceneAsync(scene.Id, VideoSceneStatuses.Draft, errorMessage: null,
@@ -363,7 +373,9 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
                 ModelAttemptIndex = model.AttemptIndex,
                 SkipCustomerCharge = input.SkipCustomerCharge,
                 BillingIntent = input.BillingIntent,
-                BillingReferenceId = input.BillingReferenceId
+                BillingReferenceId = input.BillingReferenceId,
+                CustomerPointRate = input.CustomerPointRate,
+                CustomerPointQuality = input.CustomerPointQuality
             },
             Prompt = new { projectId = input.ProjectId, sceneId = scene.Id, parentJobId },
             References = Array.Empty<object>(),

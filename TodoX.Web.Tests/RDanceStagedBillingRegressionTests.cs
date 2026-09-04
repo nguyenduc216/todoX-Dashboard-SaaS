@@ -43,14 +43,14 @@ public sealed class RDanceStagedBillingRegressionTests
     }
 
     [Fact]
-    public void SceneVideoRetryIsSystemRetryPathAndHasNoUserRerenderBilling()
+    public void SceneVideoRetryUsesUserRerenderIntentAfterConfirmation()
     {
         var page = ReadRepoFile("Components", "Pages", "RenderVideoJobs.razor");
         var handler = ReadRepoFile("Services", "VideoRender", "SceneVideoRenderHandler.cs");
 
-        Assert.Contains("OnRetry=\"@(() => EnqueueSceneVideoAsync(scene))\"", page);
-        Assert.DoesNotContain("USER_RERENDER", handler);
-        Assert.DoesNotContain("user_rerender", handler, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("OnRetry=\"@(() => RenderSceneVideoAsync(scene))\"", page);
+        Assert.Contains("=> ConfirmAndRenderSceneVideoAsync(scene, PointBillingIntent.UserRerender);", page);
+        Assert.Contains("BillingIntent = input.BillingIntent", handler);
     }
 
     private static string ReadRepoFile(params string[] parts)

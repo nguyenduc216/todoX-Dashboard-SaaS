@@ -919,6 +919,7 @@ else
     private bool TryBuildSceneVideoRenderInput(
         long[] sceneIds,
         TodoX.Web.Services.AiProviders.AiBillingTrustedPayerContext trustedPayerContext,
+        PointBillingIntent billingIntent,
         out TodoX.Web.Services.VideoRender.SceneVideoRenderInput input,
         out string? validationError)
     {
@@ -930,7 +931,8 @@ else
             Resolution = _resolution,
             UserId = AuthState.CurrentUser?.UserId,
             CustomerId = AuthState.CurrentUser?.CustomerId,
-            TrustedPayerContext = trustedPayerContext
+            TrustedPayerContext = trustedPayerContext,
+            BillingIntent = billingIntent
         };
         validationError = null;
         if (!TryApplySharedReferenceImage(input))
@@ -3252,7 +3254,7 @@ else
     // ------------------------------------------------------------------
     // Per-scene re-render - persisted scene image work item.
     // ------------------------------------------------------------------
-    private async Task RerenderSceneImageAsync(VideoProjectSceneDto scene)
+    private async Task RerenderSceneImageAsync(VideoProjectSceneDto scene, decimal customerPointRate)
     {
         if (_project is null || AuthState.CurrentUser is null) return;
         if (_useReferenceImageForAllScenes)
@@ -3341,7 +3343,12 @@ else
                 new { capability = TodoX.Web.Services.Render.SceneImageRenderContext.RVideoCapabilityCode,
                     aspectRatio = TodoX.Web.Services.Render.SceneImageRenderService.NormalizeAspectRatio(_aspectRatio),
                     outputFormat = "png", source = "scene_image_user_rerender", model = model.Model,
-                    model.Mode, model.Resolution, modelAttemptIndex = model.AttemptIndex }));
+                    model.Mode, model.Resolution, modelAttemptIndex = model.AttemptIndex,
+                    customerPointRate, customerPointQuality = model.Mode.Equals("vip", StringComparison.OrdinalIgnoreCase)
+                        ? TodoX.Web.Models.Catalog.ServiceSellPriceQualityTiers.Premium
+                        : TodoX.Web.Models.Catalog.ServiceSellPriceQualityTiers.Standard,
+                    billingIntent = TodoX.Web.Services.PointBillingIntent.UserRerender,
+                    billingOperationId = operationId }));
 
             await VideoRepo.UpdateSceneAsync(scene.Id, VideoSceneStatuses.Draft, errorMessage: null,
                 title: scene.Title, scenePrompt: scene.ScenePrompt, imagePrompt: scene.ImagePrompt,
@@ -3374,7 +3381,11 @@ else
                     RequestedModel = model.Model,
                     ModelAttemptIndex = model.AttemptIndex,
                     BillingIntent = TodoX.Web.Services.PointBillingIntent.UserRerender,
-                    BillingReferenceId = operationId
+                    BillingReferenceId = operationId,
+                    CustomerPointRate = customerPointRate,
+                    CustomerPointQuality = model.Mode.Equals("vip", StringComparison.OrdinalIgnoreCase)
+                        ? TodoX.Web.Models.Catalog.ServiceSellPriceQualityTiers.Premium
+                        : TodoX.Web.Models.Catalog.ServiceSellPriceQualityTiers.Standard
                 },
                 Prompt = new { projectId = _project.Id, sceneId = scene.Id, imageVersionId = version.Id },
                 References = Array.Empty<object>(),
@@ -3424,11 +3435,16 @@ else
         var remaining = Math.Max(0m, available - estimated);
         var missing = Math.Max(0m, estimated - available);
         var draft = GetSceneDraft(scene);
-        var title = string.IsNullOrWhiteSpace(ResolveDraftImageUrl(scene, draft))
-            ? $"Render lại hình"
-            : $"Render lại hình";
-        var message = $"Scene {scene.SceneIndex:00}\nSố ảnh: 1\nDự kiến: {FormatPoints(estimated)} điểm\nĐiểm hiện có: {FormatPoints(available)}\nCòn lại dự kiến: {FormatPoints(remaining)} điểm"
-            + (missing > 0 ? $"\nThiếu: {FormatPoints(missing)} điểm" : string.Empty);
+        var title = "Render lại hình";
+        var message = $"Scene {scene.SceneIndex:00}\nSố ảnh: 1\nDự kiến: {FormatPoints(estimated)} điểm\nĐiểm hiện có: {FormatPoints(available)} điểm";
+        if (missing > 0)
+        {
+            message += $"\nThiếu: {FormatPoints(missing)} điểm\n\nKhông đủ điểm để thực hiện.";
+            await DialogService.ShowMessageBoxAsync(title, message, cancelText: "Đóng");
+            return;
+        }
+
+        message += $"\nCòn lại dự kiến: {FormatPoints(remaining)} điểm";
         var confirmed = await DialogService.ShowMessageBoxAsync(
             title,
             message,
@@ -3436,7 +3452,7 @@ else
             cancelText: "Hủy");
         if (confirmed == true)
         {
-            await RerenderSceneImageAsync(scene);
+            await RerenderSceneImageAsync(scene, estimated);
         }
     }
 
@@ -4313,9 +4329,7 @@ else
     }
 
     private Task RenderSceneVideoAsync(VideoProjectSceneDto scene)
-    {
-        return ConfirmAndRenderSceneVideoAsync(scene);
-    }
+        => ConfirmAndRenderSceneVideoAsync(scene, PointBillingIntent.UserRerender);
 
     private async Task EnqueueRenderAllScenesAsync()
     {
@@ -4371,12 +4385,12 @@ else
         }
 
         var selectedScenes = _project.Scenes.Where(scene => sceneIds.Contains(scene.Id)).ToArray();
-        if (!await ConfirmVideoBatchRerenderAsync(selectedScenes))
+        if (!await ConfirmVideoBatchAsync(selectedScenes, PointBillingIntent.InitialRender))
         {
             return;
         }
 
-        if (!TryBuildSceneVideoRenderInput(sceneIds, trustedPayerContext, out var input, out var validationError))
+        if (!TryBuildSceneVideoRenderInput(sceneIds, trustedPayerContext, PointBillingIntent.InitialRender, out var input, out var validationError))
         {
             await LogProjectEvent("SCENE_VIDEO_SHARED_REFERENCE_VALIDATION_FAILED", "error", "Không thể enqueue video vì chưa có ảnh tham chiếu dùng chung.",
                 new { projectId = _project.Id, sceneIds, errorCode = "RVIDEO_SHARED_REFERENCE_IMAGE_REQUIRED" });
@@ -4472,7 +4486,7 @@ else
         }
     }
 
-    private async Task EnqueueSceneVideoAsync(VideoProjectSceneDto scene)
+    private async Task EnqueueSceneVideoAsync(VideoProjectSceneDto scene, PointBillingIntent billingIntent)
     {
         if (_project is null || AuthState.CurrentUser is null) return;
         if (!EnsureAspectRatioSelected() || !EnsureResolutionSelected())
@@ -4503,7 +4517,7 @@ else
             }
 
             var trustedPayerContext = await RVideoPayerContexts.BuildRVideoTrustedPayerContextAsync(_project.Id, scene.Id);
-            if (!TryBuildSceneVideoRenderInput(new[] { scene.Id }, trustedPayerContext, out var input, out var validationError))
+            if (!TryBuildSceneVideoRenderInput(new[] { scene.Id }, trustedPayerContext, billingIntent, out var input, out var validationError))
             {
                 await LogProjectEvent("SCENE_VIDEO_SHARED_REFERENCE_VALIDATION_FAILED", "error", "Không thể enqueue video vì chưa có ảnh tham chiếu dùng chung.",
                     new { projectId = _project.Id, sceneId = scene.Id, scene.SceneIndex, errorCode = "RVIDEO_SHARED_REFERENCE_IMAGE_REQUIRED" });
@@ -4549,22 +4563,22 @@ else
         }
     }
 
-    private async Task ConfirmAndRenderSceneVideoAsync(VideoProjectSceneDto scene)
+    private async Task ConfirmAndRenderSceneVideoAsync(VideoProjectSceneDto scene, PointBillingIntent billingIntent)
     {
         if (_project is null || AuthState.CurrentUser is null)
         {
             return;
         }
 
-        if (!await ConfirmVideoSceneAsync(scene))
+        if (!await ConfirmVideoSceneAsync(scene, billingIntent))
         {
             return;
         }
 
-        await EnqueueSceneVideoAsync(scene);
+        await EnqueueSceneVideoAsync(scene, billingIntent);
     }
 
-    private async Task<bool> ConfirmVideoSceneAsync(VideoProjectSceneDto scene)
+    private async Task<bool> ConfirmVideoSceneAsync(VideoProjectSceneDto scene, PointBillingIntent billingIntent)
     {
         await RefreshInitialEstimateAsync();
         if (_initialEstimate is null)
@@ -4578,17 +4592,26 @@ else
         var available = _initialEstimate.AvailablePoints;
         var remaining = Math.Max(0m, available - points);
         var missing = Math.Max(0m, points - available);
-        var message = $"Scene {scene.SceneIndex:00}\nThời lượng: {duration:0.##} giây\nDự kiến: {FormatPoints(points)} điểm\nĐiểm hiện có: {FormatPoints(available)}\nCòn lại: {FormatPoints(remaining)} điểm"
-            + (missing > 0 ? $"\nThiếu: {FormatPoints(missing)} điểm" : string.Empty);
+        var title = billingIntent == PointBillingIntent.UserRerender ? "Render lại video" : "Tạo video";
+        var confirmText = billingIntent == PointBillingIntent.UserRerender ? "Xác nhận render lại" : "Xác nhận tạo video";
+        var message = $"Scene {scene.SceneIndex:00}\nThời lượng: {duration:0.##} giây\nDự kiến: {FormatPoints(points)} điểm\nĐiểm hiện có: {FormatPoints(available)} điểm";
+        if (missing > 0)
+        {
+            message += $"\nThiếu: {FormatPoints(missing)} điểm\n\nKhông đủ điểm để thực hiện.";
+            await DialogService.ShowMessageBoxAsync(title, message, cancelText: "Đóng");
+            return false;
+        }
+
+        message += $"\nCòn lại dự kiến: {FormatPoints(remaining)} điểm";
         var confirmed = await DialogService.ShowMessageBoxAsync(
-            "Render lại video",
+            title,
             message,
-            yesText: "Xác nhận render lại",
+            yesText: confirmText,
             cancelText: "Hủy");
         return confirmed == true;
     }
 
-    private async Task<bool> ConfirmVideoBatchRerenderAsync(IReadOnlyList<VideoProjectSceneDto> scenes)
+    private async Task<bool> ConfirmVideoBatchAsync(IReadOnlyList<VideoProjectSceneDto> scenes, PointBillingIntent billingIntent)
     {
         await RefreshInitialEstimateAsync();
         if (_initialEstimate is null)
@@ -4603,12 +4626,21 @@ else
         var remaining = Math.Max(0m, available - points);
         var missing = Math.Max(0m, points - available);
         var sceneList = string.Join(", ", scenes.Select(scene => $"Scene {scene.SceneIndex:00}"));
-        var message = $"Số scene: {scenes.Count}\n{sceneList}\nTổng thời lượng: {duration:0.##} giây\nDự kiến: {FormatPoints(points)} điểm\nĐiểm hiện có: {FormatPoints(available)}\nCòn lại: {FormatPoints(remaining)} điểm"
-            + (missing > 0 ? $"\nThiếu: {FormatPoints(missing)} điểm" : string.Empty);
+        var title = billingIntent == PointBillingIntent.UserRerender ? "Render lại video" : "Tạo video";
+        var confirmText = billingIntent == PointBillingIntent.UserRerender ? "Xác nhận render lại" : "Xác nhận tạo video";
+        var message = $"Số scene: {scenes.Count}\n{sceneList}\nTổng thời lượng: {duration:0.##} giây\nDự kiến: {FormatPoints(points)} điểm\nĐiểm hiện có: {FormatPoints(available)} điểm";
+        if (missing > 0)
+        {
+            message += $"\nThiếu: {FormatPoints(missing)} điểm\n\nKhông đủ điểm để thực hiện.";
+            await DialogService.ShowMessageBoxAsync(title, message, cancelText: "Đóng");
+            return false;
+        }
+
+        message += $"\nCòn lại dự kiến: {FormatPoints(remaining)} điểm";
         var confirmed = await DialogService.ShowMessageBoxAsync(
-            "Render lại video",
+            title,
             message,
-            yesText: "Xác nhận render lại",
+            yesText: confirmText,
             cancelText: "Hủy");
         return confirmed == true;
     }

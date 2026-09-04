@@ -19,7 +19,6 @@ public sealed class SceneImageRenderWorkItemHandler : IRenderJobHandler
     private readonly IRenderJobService _jobs;
     private readonly IRVideoSceneVideoAutoChainService _autoChain;
     private readonly IRVideoJobService _rvideoJobs;
-    private readonly IPointPricingService _pointPricing;
     private readonly WalletService _wallets;
     private readonly TodoXConnectionFactory _factory;
     private readonly TenantContext _tenant;
@@ -32,7 +31,6 @@ public sealed class SceneImageRenderWorkItemHandler : IRenderJobHandler
         IRenderJobService jobs,
         IRVideoSceneVideoAutoChainService autoChain,
         IRVideoJobService rvideoJobs,
-        IPointPricingService pointPricing,
         WalletService wallets,
         TodoXConnectionFactory factory,
         TenantContext tenant,
@@ -44,7 +42,6 @@ public sealed class SceneImageRenderWorkItemHandler : IRenderJobHandler
         _jobs = jobs;
         _autoChain = autoChain;
         _rvideoJobs = rvideoJobs;
-        _pointPricing = pointPricing;
         _wallets = wallets;
         _factory = factory;
         _tenant = tenant;
@@ -135,12 +132,14 @@ public sealed class SceneImageRenderWorkItemHandler : IRenderJobHandler
             var chargedPoints = 0m;
             var model = RVideoImageModelPolicy.GetByAttemptIndex(input.ModelAttemptIndex)
                 ?? RVideoImageModelPolicy.GetInitial();
-            var quality = string.Equals(model.Mode, "vip", StringComparison.OrdinalIgnoreCase)
-                ? ServiceSellPriceQualityTiers.Premium
-                : ServiceSellPriceQualityTiers.Standard;
-            var serviceId = await ResolvePointServiceIdAsync(input.ProjectId, ct);
-            var rate = await _pointPricing.ResolveRateAsync(
-                serviceId, PointPricingResourceTypes.Image, quality, ct);
+            var rate = input.CustomerPointRate;
+            if (rate <= 0)
+            {
+                await _repo.AddProjectEventAsync(input.ProjectId, "RVIDEO_IMAGE_BILLING_ANOMALY", "error",
+                    "Image result was accepted but the snapshotted customer point rate is missing.",
+                    new { jobId = job.Id, input.ProjectId, input.SceneId, input.SceneIndex, versionId = version.Id }, ct);
+                throw new RenderJobTerminalFailureException("RVIDEO_IMAGE_CUSTOMER_POINT_RATE_MISSING");
+            }
             if (input.BillingIntent != PointBillingIntent.SystemRetry)
             {
                 var referenceId = PointBillingReference.ForOperation(
@@ -150,7 +149,7 @@ public sealed class SceneImageRenderWorkItemHandler : IRenderJobHandler
                     input.BillingIntent,
                     input.BillingReferenceId);
                 var charge = await _wallets.ChargeAsync(
-                    input.CustomerId, input.UserId, rate.Rate, 1,
+                    input.CustomerId, input.UserId, rate, 1,
                     input.BillingIntent == PointBillingIntent.UserRerender
                         ? "rvideo_user_rerender_image"
                         : "rvideo_initial_render_image",
@@ -164,17 +163,17 @@ public sealed class SceneImageRenderWorkItemHandler : IRenderJobHandler
                 {
                     await _repo.AddProjectEventAsync(input.ProjectId, "RVIDEO_IMAGE_BILLING_ANOMALY", "error",
                         "Image result was accepted but the success charge could not be completed.",
-                        new { jobId = job.Id, input.ProjectId, input.SceneId, input.SceneIndex, versionId = version.Id, requiredPoints = rate.Rate, charge.Error }, ct);
+                        new { jobId = job.Id, input.ProjectId, input.SceneId, input.SceneIndex, versionId = version.Id, requiredPoints = rate, charge.Error }, ct);
                     throw new RenderJobTerminalFailureException(charge.Error ?? "Insufficient points after provider success.");
                 }
 
-                chargedPoints = charge.Charged == 0 ? rate.Rate : charge.Charged;
+                chargedPoints = charge.Charged == 0 ? rate : charge.Charged;
             }
             else
             {
                 await _wallets.LogUsageOnlyAsync(input.CustomerId, input.UserId,
                     outcome.ProviderCode ?? "todox", outcome.ModelName ?? "image",
-                    "rvideo_system_retry_image", 1, rate.Rate, "rvideo", "image",
+                    "rvideo_system_retry_image", 1, rate, "rvideo", "image",
                     version.Id, "rvideo_system_retry", "success");
             }
 
@@ -280,6 +279,8 @@ public sealed class SceneImageRenderWorkItemHandler : IRenderJobHandler
                 LogicalRequestId = logicalRequestId,
                 RequestedModel = nextModel.Model,
                 ModelAttemptIndex = nextModel.AttemptIndex,
+                CustomerPointRate = input.CustomerPointRate,
+                CustomerPointQuality = input.CustomerPointQuality,
                 SkipCustomerCharge = input.SkipCustomerCharge,
                 BillingIntent = input.BillingIntent,
                 BillingReferenceId = input.BillingReferenceId
