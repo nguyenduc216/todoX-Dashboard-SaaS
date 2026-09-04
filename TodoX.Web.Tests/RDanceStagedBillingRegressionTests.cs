@@ -28,7 +28,7 @@ public sealed class RDanceStagedBillingRegressionTests
         Assert.Equal(1, queue.Split(new[] { "_wallets.ChargeAsync" }, StringSplitOptions.None).Length - 1);
         Assert.Contains("var chargeStaticImagePoints = await _tokenSettings.GetChargeStaticImagePointsAsync();", queue);
         Assert.Contains("var staticInputCount = StaticImageBillingPolicy.ResolveRdanceStaticInputCount(job);", queue);
-        Assert.Contains("var imageCount = StaticImageBillingPolicy.ResolveBillableStaticImageCount(staticInputCount, chargeStaticImagePoints);", queue);
+        Assert.Contains("var billableStaticImageCount = StaticImageBillingPolicy.ResolveBillableStaticImageCount(staticInputCount, chargeStaticImagePoints);", queue);
         Assert.Contains("durationSeconds = await ResolveMotionDurationSecondsAsync(job, motionRoute, estimate, ct)", queue);
         Assert.Contains("new PointPricingEstimateRequest(", queue);
         Assert.Contains("durationSeconds,", queue);
@@ -37,11 +37,17 @@ public sealed class RDanceStagedBillingRegressionTests
         Assert.Contains("await _renderJobs.EnqueueAsync", queue);
         Assert.Contains("await _repo.QueueForRenderAsync", queue);
         Assert.Contains("RequestJson = DanceSellRepository.ToJson(new { job.Id, job.PreparedReferenceUrl, job.MotionVideoUrl, job.Prompt, businessMode = job.Mode, providerMode, job.CharacterOrientation, job.Ratio, durationSeconds = retryDurationSeconds })", retry);
+        Assert.DoesNotContain("_wallets.ChargeAsync", retry);
         Assert.Contains("alreadyChargedImage", queue);
-        Assert.Contains("remainingPoints", queue);
+        Assert.Contains("imagePointsToChargeNow", queue);
+        Assert.Contains("videoPointsToChargeNow", queue);
+        Assert.Contains("voicePointsToChargeNow", queue);
+        Assert.Contains("chargeNow", queue);
         Assert.Contains("logicalTotalPoints", queue);
-        Assert.Contains("total_planned_points = logicalTotalPoints", queue);
-        Assert.Contains("PointCostEstimate = logicalTotalPoints", queue);
+        Assert.Contains("total_planned_points = chargeNow", queue);
+        Assert.Contains("total_charged_points = chargeNow", queue);
+        Assert.Contains("PointCostEstimate = chargeNow", queue);
+        Assert.Contains("var imageCount = alreadyChargedImage > 0m ? 0 : billableStaticImageCount;", queue);
     }
 
     [Fact]

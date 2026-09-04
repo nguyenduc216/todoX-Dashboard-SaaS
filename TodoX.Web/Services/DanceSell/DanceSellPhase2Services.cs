@@ -1770,7 +1770,14 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
         var serviceId = catalogService?.Id;
         var chargeStaticImagePoints = await _tokenSettings.GetChargeStaticImagePointsAsync();
         var staticInputCount = StaticImageBillingPolicy.ResolveRdanceStaticInputCount(job);
-        var imageCount = StaticImageBillingPolicy.ResolveBillableStaticImageCount(staticInputCount, chargeStaticImagePoints);
+        var billableStaticImageCount = StaticImageBillingPolicy.ResolveBillableStaticImageCount(staticInputCount, chargeStaticImagePoints);
+        var referenceOperation = job.ReferenceMode == DanceSellReferenceModes.DirectReference
+            ? null
+            : await _operations.GetLatestOperationAsync(job.Id, DanceSellOperationTypes.ReferenceImage, ct);
+        var alreadyChargedImage = referenceOperation?.BillingStatus == DanceSellBillingStatuses.Charged
+            ? referenceOperation.TodoxPointsCharged ?? 0m
+            : 0m;
+        var imageCount = alreadyChargedImage > 0m ? 0 : billableStaticImageCount;
         var pointEstimate = await _pointPricing.EstimateAsync(new PointPricingEstimateRequest(
             serviceId,
             imageCount,
@@ -1780,20 +1787,17 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
             0,
             ServiceSellPriceQualityTiers.Standard,
             false), ct);
-        var referenceOperation = job.ReferenceMode == DanceSellReferenceModes.DirectReference
-            ? null
-            : await _operations.GetLatestOperationAsync(job.Id, DanceSellOperationTypes.ReferenceImage, ct);
-        var alreadyChargedImage = referenceOperation?.BillingStatus == DanceSellBillingStatuses.Charged
-            ? referenceOperation.TodoxPointsCharged ?? 0m
-            : 0m;
-        // The reference image was consumed and billed in a prior operation. Its historical
-        // component is immutable; this render can bill only newly consumed components.
-        var remainingPoints = pointEstimate.TotalPoints;
-        var logicalTotalPoints = alreadyChargedImage + remainingPoints;
+        var imagePointsToChargeNow = pointEstimate.Image.Points;
+        var videoPointsToChargeNow = pointEstimate.Video.Points;
+        var voicePointsToChargeNow = pointEstimate.Voice.Points;
+        var chargeNow = imagePointsToChargeNow + videoPointsToChargeNow + voicePointsToChargeNow;
+        // The reference image may already have been billed in an earlier operation.
+        // This render charges only the components still due now.
+        var logicalTotalPoints = alreadyChargedImage + chargeNow;
         var charge = await _wallets.ChargeAsync(
             user.CustomerId,
             user.UserId,
-            remainingPoints,
+            chargeNow,
             1,
             "dance_sell_initial_render",
             motionRoute.ProviderCode,
@@ -1828,31 +1832,31 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
             ProviderCurrency = estimate.Currency,
             ProviderCostVnd = estimate.ProviderCostVnd,
             TodoxPointsEstimated = estimate.EstimatedTodoxPoints,
-            TodoxPointsCharged = remainingPoints,
+            TodoxPointsCharged = chargeNow,
             BalanceAfter = charge.BalanceAfter,
             CostSource = estimate.PricingSource,
             PricingSnapshotJson = DanceSellRepository.ToJson(new
             {
                 image = new
                 {
-                    planned_points = alreadyChargedImage,
-                    charged_points = alreadyChargedImage,
+                    planned_points = imagePointsToChargeNow,
+                    charged_points = imagePointsToChargeNow,
                     charge_reference = referenceOperation?.Id
                 },
                 video = new
                 {
-                    planned_points = pointEstimate.Video.Points,
-                    charged_points = remainingPoints,
+                    planned_points = videoPointsToChargeNow,
+                    charged_points = videoPointsToChargeNow,
                     charge_reference = job.Id
                 },
                 voice = new
                 {
-                    planned_points = pointEstimate.Voice.Points,
-                    charged_points = 0m,
+                    planned_points = voicePointsToChargeNow,
+                    charged_points = voicePointsToChargeNow,
                     charge_reference = (Guid?)null
                 },
-                total_planned_points = logicalTotalPoints,
-                total_charged_points = alreadyChargedImage + remainingPoints,
+                total_planned_points = chargeNow,
+                total_charged_points = chargeNow,
                 remaining_points_to_charge = 0m
             }),
             CreatedAt = DateTime.UtcNow
@@ -1882,8 +1886,8 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
             References = new { referenceUrl = job.PreparedReferenceUrl!, motionVideoUrl = job.MotionVideoUrl, operationId = operation?.Id },
             ProviderCode = motionRoute.ProviderCode,
             ModelCode = motionRoute.ModelName,
-            PointCostEstimate = logicalTotalPoints,
-            PointStatus = logicalTotalPoints > 0 ? RenderPointStatuses.Pending : RenderPointStatuses.NotRequired,
+            PointCostEstimate = chargeNow,
+            PointStatus = chargeNow > 0 ? RenderPointStatuses.Pending : RenderPointStatuses.NotRequired,
             MaxAttempts = Math.Max(3, _kie.CurrentValue.MaxPollCount + _kie.CurrentValue.SubmitMaxRetry + 5)
         }, ct);
 

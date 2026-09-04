@@ -299,9 +299,11 @@ public sealed class PointModuleRegressionTests
         var source = File.ReadAllText(Path.Combine(RepoRoot, "TodoX.Web", "Services", "DanceSell", "DanceSellPhase2Services.cs"));
 
         Assert.Contains("logicalTotalPoints", source, StringComparison.Ordinal);
-        Assert.Contains("total_planned_points = logicalTotalPoints", source, StringComparison.Ordinal);
-        Assert.Contains("PointCostEstimate = logicalTotalPoints", source, StringComparison.Ordinal);
-        Assert.Contains("remainingPoints = pointEstimate.TotalPoints", source, StringComparison.Ordinal);
+        Assert.Contains("total_planned_points = chargeNow", source, StringComparison.Ordinal);
+        Assert.Contains("total_charged_points = chargeNow", source, StringComparison.Ordinal);
+        Assert.Contains("PointCostEstimate = chargeNow", source, StringComparison.Ordinal);
+        Assert.Contains("chargeNow", source, StringComparison.Ordinal);
+        Assert.Contains("var imageCount = alreadyChargedImage > 0m ? 0 : billableStaticImageCount;", source, StringComparison.Ordinal);
     }
 
     [Fact]
