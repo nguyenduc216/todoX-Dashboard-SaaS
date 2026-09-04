@@ -160,10 +160,7 @@
     private async Task<string> ResolveDancePointsLabelAsync(DanceSellJobDto job, CancellationToken ct)
     {
         var operation = await DanceOperations.GetLatestOperationAsync(job.Id, DanceSellOperationTypes.MotionVideo, ct);
-        var chargedPoints = operation?.BillingStatus == DanceSellBillingStatuses.Charged
-            ? operation.TodoxPointsCharged
-            : null;
-        var points = chargedPoints ?? job.TotalTodoxPointsEstimated;
+        var points = DanceSellPointDisplay.ResolveDisplayPoints(job, operation);
         return points.HasValue ? $"{points.Value:0.##}" : "—";
     }
 

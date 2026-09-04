@@ -64,6 +64,7 @@ public sealed class TimelapseJobService : ITimelapseJobService
     private readonly IMediaFileService _media;
     private readonly IRenderJobService _renderJobs;
     private readonly IPointPricingService _pointPricing;
+    private readonly TokenSettingsService _tokenSettings;
     private readonly WalletService _wallets;
     private readonly ITimelapseWorkflowService _workflow;
     private readonly TodoXConnectionFactory _factory;
@@ -76,6 +77,7 @@ public sealed class TimelapseJobService : ITimelapseJobService
         IMediaFileService media,
         IRenderJobService renderJobs,
         IPointPricingService pointPricing,
+        TokenSettingsService tokenSettings,
         WalletService wallets,
         ITimelapseWorkflowService workflow,
         TodoXConnectionFactory factory,
@@ -87,6 +89,7 @@ public sealed class TimelapseJobService : ITimelapseJobService
         _media = media;
         _renderJobs = renderJobs;
         _pointPricing = pointPricing;
+        _tokenSettings = tokenSettings;
         _wallets = wallets;
         _workflow = workflow;
         _factory = factory;
@@ -712,11 +715,19 @@ public sealed class TimelapseJobService : ITimelapseJobService
         var quality = TimelapseSellPricing.QualityTierForMode(videoMode);
         // The default plan duration is defined by TimelapseRequestRules.RuntimeClipDurationSeconds.
         var graph = TimelapseStageGraphBuilder.Build(sceneCount, hasStartImage);
+        var staticInputCount = 1 + (hasStartImage ? 1 : 0);
         var plan = new PreRenderUsagePlan(serviceId, graph.GeneratedImageOrder.Count, quality,
             graph.VideoClips.Select(x => new PreRenderVideoScene(x.ClipIndex, x.DurationSeconds)).ToArray(),
             quality, 0, quality, false).Validate();
         PointPricingEstimateRequest pricingRequest = plan.ToPricingRequest();
-        return _pointPricing.EstimateAsync(pricingRequest, ct);
+        return ApplyStaticImageBillingAsync(pricingRequest, staticInputCount, ct);
+    }
+
+    private async Task<PointPricingEstimate> ApplyStaticImageBillingAsync(PointPricingEstimateRequest request, int staticInputCount, CancellationToken ct)
+    {
+        var chargeStaticImagePoints = await _tokenSettings.GetChargeStaticImagePointsAsync();
+        var imageCount = StaticImageBillingPolicy.ResolveBillableStaticImageCount(staticInputCount, chargeStaticImagePoints);
+        return await _pointPricing.EstimateAsync(request with { ImageCount = imageCount }, ct);
     }
 
     private async Task MarkBillingBlockedAsync(Guid jobId, string message, CancellationToken ct)

@@ -68,18 +68,53 @@ public sealed class RDanceCustomerStatusAndPointsRegressionTests
     {
         var detail = ReadRepoFile("Components", "Pages", "RDanceJobDetail.razor");
 
-        Assert.Contains("@inject CatalogRepository Catalog", detail);
+        Assert.Contains("@using TodoX.Web.Services.Platform", detail);
+        Assert.Contains("@inject ICoreServiceCatalogService CoreCatalog", detail);
         Assert.Contains("@inject IPointPricingService PointPricing", detail);
         Assert.Contains("DanceSellMotionProviderContract.ResolveProviderMode(route, _job.Mode)", detail);
-        Assert.Contains("Catalog.GetActiveCatalogServicesAsync()", detail);
+        Assert.Contains("CoreCatalog.GetByCodeAsync(FixedTodoXServiceCatalog.RDance", detail);
         Assert.Contains("FixedTodoXServiceCatalog.RDance", detail);
         Assert.Contains("ResolveMotionDurationSeconds(_job, route)", detail);
         Assert.Contains("PointPricing.EstimateAsync(new PointPricingEstimateRequest(", detail);
-        Assert.Contains("imageCount = _job.ReferenceMode == DanceSellReferenceModes.DirectReference ? 0 : 1", detail);
+        Assert.Contains("StaticImageBillingPolicy.ResolveRdanceStaticInputCount(_job)", detail);
+        Assert.Contains("StaticImageBillingPolicy.ResolveBillableStaticImageCount(staticImageCount, chargeStaticImagePoints)", detail);
         Assert.Contains("FormatPoints(_pointEstimate?.TotalPoints)", detail);
         Assert.Contains("var points = FormatPoints(_pointEstimate?.TotalPoints);", detail);
         Assert.Contains("ReferenceVersionStatusLabel(version?.Status)", detail);
         Assert.Contains("DanceSellCustomerStatusText.ProviderStatusLabel(x.Status)", detail);
+    }
+
+    [Fact]
+    public void RdancePointDisplayPrefersChargedOperationPoints()
+    {
+        var job = new DanceSellJobDto
+        {
+            TotalTodoxPointsEstimated = 11.2m
+        };
+        var chargedOperation = new DanceSellProviderOperationDto
+        {
+            BillingStatus = DanceSellBillingStatuses.Pending,
+            TodoxPointsCharged = 12m
+        };
+
+        Assert.Equal(12m, DanceSellPointDisplay.ResolveDisplayPoints(job, chargedOperation));
+        Assert.Equal(11.2m, DanceSellPointDisplay.ResolveDisplayPoints(job, null));
+    }
+
+    [Fact]
+    public void StaticImageBillingPolicySkipsDirectReferenceAndCanDisableBilling()
+    {
+        var job = new DanceSellJobDto
+        {
+            ReferenceMode = DanceSellReferenceModes.DirectReference,
+            CharacterMediaId = Guid.NewGuid(),
+            CharacterImageUrl = "character.png",
+            ProductMediaId = Guid.NewGuid(),
+            ProductImageUrl = "product.png"
+        };
+
+        Assert.Equal(0, StaticImageBillingPolicy.ResolveRdanceStaticInputCount(job));
+        Assert.Equal(0, StaticImageBillingPolicy.ResolveBillableStaticImageCount(2, false));
     }
 
     private static string ReadRepoFile(params string[] parts)

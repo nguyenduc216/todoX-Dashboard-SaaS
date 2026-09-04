@@ -5,6 +5,7 @@
 @using Microsoft.Extensions.Options
 @using TodoX.Web.Models.Catalog
 @using TodoX.Web.Services.DanceSell
+@using TodoX.Web.Services.Platform
 @using TodoX.Web.Services.Render
 @using TodoX.Web.Components.Dialogs
 @inject AuthStateService AuthState
@@ -15,8 +16,9 @@
 @inject IDanceSellOperationRepository DanceOperations
 @inject IRenderJobService RenderJobs
 @inject IDanceSellCostEstimator Costs
-@inject CatalogRepository Catalog
 @inject IPointPricingService PointPricing
+@inject TokenSettingsService TokenSettings
+@inject ICoreServiceCatalogService CoreCatalog
 @inject IDanceSellProviderCatalog ProviderCatalog
 @inject IOptionsMonitor<DanceSellPhase2Options> DanceOptions
 @inject IDialogService DialogService
@@ -370,7 +372,7 @@
                                 <MudListItem T="string">Dịch vụ: Video nhảy quảng cáo thời trang</MudListItem>
                                 <MudListItem T="string">Trạng thái: @DisplayStatusLabel(_job!)</MudListItem>
                                 <MudListItem T="string">Tỷ lệ: @_ratio</MudListItem>
-                                <MudListItem T="string">Ước tính: @FormatPoints(_pointEstimate?.TotalPoints) điểm</MudListItem>
+                                <MudListItem T="string">Ước tính: @FormatPoints(_displayPoints) điểm</MudListItem>
                                 <MudListItem T="string">Tự động hoàn thành: @(_autoFinish ? "Bật" : "Tắt")</MudListItem>
                                 @if (_balance is not null)
                                 {
@@ -522,6 +524,7 @@
     private IReadOnlyList<DanceSellProviderRouteDto> _motionRoutes = Array.Empty<DanceSellProviderRouteDto>();
     private DanceSellCostEstimate? _estimate;
     private PointPricingEstimate? _pointEstimate;
+    private decimal? _displayPoints;
     private decimal? _balance;
     private string? _referenceReadinessError;
     private string? _motionReadinessError;
@@ -1373,6 +1376,8 @@
         var providerMode = DanceSellMotionProviderContract.ResolveProviderMode(route, _job.Mode);
         _estimate = await Costs.EstimateAsync(route, providerMode, null);
         _pointEstimate = await EstimatePointPricingAsync(route);
+        var latestOperation = await DanceOperations.GetLatestOperationAsync(_job.Id, DanceSellOperationTypes.MotionVideo, CancellationToken.None);
+        _displayPoints = DanceSellPointDisplay.ResolveDisplayPoints(_job, latestOperation) ?? _pointEstimate?.TotalPoints;
         if (AuthState.CurrentUser?.CustomerId is Guid customerId) _balance = await Wallet.GetBalanceAsync(customerId);
     }
 
@@ -1383,8 +1388,7 @@
             return null;
         }
 
-        var service = (await Catalog.GetActiveCatalogServicesAsync())
-            .FirstOrDefault(x => string.Equals(x.ServiceCode, FixedTodoXServiceCatalog.RDance, StringComparison.OrdinalIgnoreCase));
+        var service = await CoreCatalog.GetByCodeAsync(FixedTodoXServiceCatalog.RDance, CancellationToken.None);
         if (service is null)
         {
             return null;
@@ -1399,7 +1403,9 @@
         var quality = string.Equals(_job.Mode, "premium", StringComparison.OrdinalIgnoreCase)
             ? ServiceSellPriceQualityTiers.Premium
             : ServiceSellPriceQualityTiers.Standard;
-        var imageCount = _job.ReferenceMode == DanceSellReferenceModes.DirectReference ? 0 : 1;
+        var chargeStaticImagePoints = await TokenSettings.GetChargeStaticImagePointsAsync();
+        var staticImageCount = StaticImageBillingPolicy.ResolveRdanceStaticInputCount(_job);
+        var imageCount = StaticImageBillingPolicy.ResolveBillableStaticImageCount(staticImageCount, chargeStaticImagePoints);
 
         return await PointPricing.EstimateAsync(new PointPricingEstimateRequest(
             service.Id,

@@ -202,6 +202,7 @@ public sealed class DanceSellReferenceImageService : IDanceSellReferenceImageSer
     private readonly IDanceSellCostEstimator _costs;
     private readonly IPointPricingService _pointPricing;
     private readonly ICoreServiceCatalogService _coreCatalog;
+    private readonly TokenSettingsService _tokenSettings;
     private readonly WalletService _wallets;
     private readonly TenantContext _tenant;
     private readonly ILogger<DanceSellReferenceImageService> _logger;
@@ -216,6 +217,7 @@ public sealed class DanceSellReferenceImageService : IDanceSellReferenceImageSer
         IDanceSellCostEstimator costs,
         IPointPricingService pointPricing,
         ICoreServiceCatalogService coreCatalog,
+        TokenSettingsService tokenSettings,
         WalletService wallets,
         TenantContext tenant,
         ILogger<DanceSellReferenceImageService> logger)
@@ -229,6 +231,7 @@ public sealed class DanceSellReferenceImageService : IDanceSellReferenceImageSer
         _costs = costs;
         _pointPricing = pointPricing;
         _coreCatalog = coreCatalog;
+        _tokenSettings = tokenSettings;
         _wallets = wallets;
         _tenant = tenant;
         _logger = logger;
@@ -299,9 +302,12 @@ public sealed class DanceSellReferenceImageService : IDanceSellReferenceImageSer
                     ? ServiceSellPriceQualityTiers.Premium
                     : ServiceSellPriceQualityTiers.Standard;
                 var catalogService = await _coreCatalog.GetByCodeAsync(FixedTodoXServiceCatalog.RDance, ct);
+                var chargeStaticImagePoints = await _tokenSettings.GetChargeStaticImagePointsAsync();
+                var staticImageCount = StaticImageBillingPolicy.ResolveRdanceStaticInputCount(job);
+                var billableStaticImageCount = StaticImageBillingPolicy.ResolveBillableStaticImageCount(staticImageCount, chargeStaticImagePoints);
                 var pointEstimate = await _pointPricing.EstimateAsync(new PointPricingEstimateRequest(
                     catalogService?.Id,
-                    1,
+                    billableStaticImageCount,
                     quality,
                     0,
                     quality,
@@ -314,7 +320,9 @@ public sealed class DanceSellReferenceImageService : IDanceSellReferenceImageSer
                 operation = await CreateOperationAsync(job, route, estimate, attemptNo, requestJson, ct)
                     ?? throw new InvalidOperationException("DANCE_SELL_REFERENCE_OPERATION_REQUIRED");
                 var chargeReference = BuildReferenceChargeReference(job.Id, versionNo);
-                var charge = await _wallets.ChargeAsync(
+                if (pointEstimate.TotalPoints > 0)
+                {
+                    var charge = await _wallets.ChargeAsync(
                     user.CustomerId,
                     user.UserId,
                     pointEstimate.Image.Points,
@@ -349,6 +357,19 @@ public sealed class DanceSellReferenceImageService : IDanceSellReferenceImageSer
                     DanceSellBillingStatuses.Charged,
                     BuildReferencePricingSnapshot(pointEstimate, chargeReference, charge.Charged),
                     ct);
+                }
+                else
+                {
+                    await _operations.MarkBillingAsync(
+                        operation.Id,
+                        0,
+                        0,
+                        0,
+                        0,
+                        DanceSellBillingStatuses.NotRequired,
+                        BuildReferencePricingSnapshot(pointEstimate, chargeReference, 0),
+                        ct);
+                }
 
                 stage = "provider_submit";
                 var provider = _referenceProviders.Resolve(route);
