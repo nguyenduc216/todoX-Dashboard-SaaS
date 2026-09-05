@@ -97,6 +97,7 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
     private readonly IVideoRenderPricingResolver _pricing;
     private readonly IPointPricingService _pointPricing;
     private readonly WalletService _wallets;
+    private readonly TokenSettingsService _tokenSettings;
     private readonly IRVideoInitialPointEstimateService _initialEstimate;
     private readonly TodoXConnectionFactory _factory;
     private readonly TenantContext _tenant;
@@ -117,6 +118,7 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
         IVideoRenderPricingResolver pricing,
         IPointPricingService pointPricing,
         WalletService wallets,
+        TokenSettingsService tokenSettings,
         IRVideoInitialPointEstimateService initialEstimate,
         TodoXConnectionFactory factory,
         TenantContext tenant,
@@ -134,6 +136,7 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
         _pricing = pricing;
         _pointPricing = pointPricing;
         _wallets = wallets;
+        _tokenSettings = tokenSettings;
         _initialEstimate = initialEstimate;
         _factory = factory;
         _tenant = tenant;
@@ -559,7 +562,9 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
         IReadOnlyList<RVideoEffectiveSceneImageSource> imageSources,
         CancellationToken ct)
     {
-        var staticDirectSceneCount = Math.Max(0, estimate.ImageCount);
+        var staticDirectSceneCount = RVideoInitialStaticImageDebit.ResolveStaticDirectSceneCount(
+            await _tokenSettings.GetChargeStaticImagePointsAsync(),
+            imageSources);
         var staticDirectPoints = RVideoInitialStaticImageDebit.ResolveStaticDirectPoints(
             estimate.ImageRate,
             staticDirectSceneCount);

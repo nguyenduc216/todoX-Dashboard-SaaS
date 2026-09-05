@@ -107,6 +107,7 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
     private readonly RVideoJobSettingsRepository _settings;
     private readonly IPointPricingService _pointPricing;
     private readonly WalletService _wallets;
+    private readonly TokenSettingsService _tokenSettings;
     private readonly IRVideoInitialPointEstimateService _initialEstimate;
     private readonly TodoXConnectionFactory _factory;
     private readonly TenantContext _tenant;
@@ -121,6 +122,7 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
         RVideoJobSettingsRepository settings,
         IPointPricingService pointPricing,
         WalletService wallets,
+        TokenSettingsService tokenSettings,
         IRVideoInitialPointEstimateService initialEstimate,
         TodoXConnectionFactory factory,
         TenantContext tenant,
@@ -135,6 +137,7 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
         _settings = settings;
         _pointPricing = pointPricing;
         _wallets = wallets;
+        _tokenSettings = tokenSettings;
         _initialEstimate = initialEstimate;
         _factory = factory;
         _tenant = tenant;
@@ -268,7 +271,8 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
                 balance_after_check = estimate.AvailablePoints
             },
             billingScenes.Select(scene => new { scene.Id, scene.SceneIndex, scene.DurationSeconds }).ToArray(), ct);
-        await ChargeInitialStaticDirectImagesAsync(job, input, project, billingOperationId, estimate, ct);
+        var imageSources = await ResolveEffectiveImageSourcesAsync(project, imageWorkScenes, settings, ct);
+        await ChargeInitialStaticDirectImagesAsync(job, input, project, billingOperationId, estimate, imageSources, ct);
         await _repo.AddProjectEventAsync(project.Id, "RVIDEO_PARENT_PREFLIGHT_APPROVED", "info",
             "Initial rVideo point estimate passed; static direct images were debited when applicable.",
             new
@@ -295,9 +299,12 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
         VideoProjectDto project,
         Guid billingOperationId,
         RVideoInitialPointEstimate estimate,
+        IReadOnlyList<RVideoEffectiveSceneImageSource> imageSources,
         CancellationToken ct)
     {
-        var staticDirectSceneCount = Math.Max(0, estimate.ImageCount);
+        var staticDirectSceneCount = RVideoInitialStaticImageDebit.ResolveStaticDirectSceneCount(
+            await _tokenSettings.GetChargeStaticImagePointsAsync(),
+            imageSources);
         var staticDirectPoints = RVideoInitialStaticImageDebit.ResolveStaticDirectPoints(
             estimate.ImageRate,
             staticDirectSceneCount);
@@ -340,6 +347,22 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
                 requestedPoints = staticDirectPoints,
                 chargedPoints = charge.Charged
             }, ct);
+    }
+
+    private async Task<IReadOnlyList<RVideoEffectiveSceneImageSource>> ResolveEffectiveImageSourcesAsync(
+        VideoProjectDto project,
+        IReadOnlyList<VideoProjectSceneDto> imageWorkScenes,
+        RVideoJobSettingsDto? settings,
+        CancellationToken ct)
+    {
+        var imageSources = new List<RVideoEffectiveSceneImageSource>(imageWorkScenes.Count);
+        foreach (var scene in imageWorkScenes)
+        {
+            var selectedImage = await _versions.GetSelectedImageVersionAsync(scene.Id, ct);
+            imageSources.Add(RVideoEffectiveSceneImageSourceResolver.Resolve(scene, settings, selectedImage, project));
+        }
+
+        return imageSources;
     }
 
     private async Task<Guid?> ResolvePointServiceIdAsync(Guid? coreJobId, CancellationToken ct)

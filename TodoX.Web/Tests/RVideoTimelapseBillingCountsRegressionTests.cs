@@ -14,19 +14,19 @@ public sealed class RVideoTimelapseBillingCountsRegressionTests
     [Fact]
     public void RVideoInitialSettingOnBillsEveryStaticInputScene()
     {
+        var billingScenes = Enumerable.Range(1, 6).Select(index => CreateScene(index)).ToArray();
         var imageWorkSources = new[]
         {
-            StaticSource("https://example.test/static-1.png"),
-            StaticSource("https://example.test/static-2.png"),
             MissingSource(),
             MissingSource()
         };
 
         var imageCount = RVideoInitialPointEstimateService.ResolveInitialImageCount(
+            billingScenes,
             imageWorkSources,
             chargeStaticImagePoints: true);
 
-        Assert.Equal(2, imageCount);
+        Assert.Equal(6, imageCount);
     }
 
     [Fact]
@@ -40,6 +40,7 @@ public sealed class RVideoTimelapseBillingCountsRegressionTests
             .ToArray();
 
         var imageCount = RVideoInitialPointEstimateService.ResolveInitialImageCount(
+            billingScenes,
             imageWorkSources,
             chargeStaticImagePoints: true);
 
@@ -47,21 +48,25 @@ public sealed class RVideoTimelapseBillingCountsRegressionTests
     }
 
     [Fact]
-    public void RVideoInitialSettingOffBillsZeroEvenWithMixedStaticAndAiScenes()
+    public void RVideoInitialSettingOffBillsOnlyAiGeneratedImageScenesEvenWithMixedStatic()
     {
+        var billingScenes = Enumerable.Range(1, 6).Select(index => CreateScene(index)).ToArray();
         var imageWorkSources = new[]
         {
             StaticSource("https://example.test/static-1.png"),
             StaticSource("https://example.test/static-2.png"),
+            StaticSource("https://example.test/static-3.png"),
+            StaticSource("https://example.test/static-4.png"),
             MissingSource(),
             MissingSource()
         };
 
         var imageCount = RVideoInitialPointEstimateService.ResolveInitialImageCount(
+            billingScenes,
             imageWorkSources,
             chargeStaticImagePoints: false);
 
-        Assert.Equal(0, imageCount);
+        Assert.Equal(2, imageCount);
     }
 
     [Fact]
