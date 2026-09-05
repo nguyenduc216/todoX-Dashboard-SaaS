@@ -268,8 +268,9 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
                 balance_after_check = estimate.AvailablePoints
             },
             billingScenes.Select(scene => new { scene.Id, scene.SceneIndex, scene.DurationSeconds }).ToArray(), ct);
+        await ChargeInitialStaticDirectImagesAsync(job, input, project, billingOperationId, estimate, imageWorkScenes.Count, ct);
         await _repo.AddProjectEventAsync(project.Id, "RVIDEO_PARENT_PREFLIGHT_APPROVED", "info",
-            "Initial rVideo point estimate passed without a customer debit.",
+            "Initial rVideo point estimate passed; static direct images were debited when applicable.",
             new
             {
                 billingOperationId,
@@ -286,6 +287,62 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
         input.BillingReferenceId = billingOperationId;
         input.CustomerPointRate = estimate.ImageRate;
         input.CustomerPointQuality = imageQuality;
+    }
+
+    private async Task ChargeInitialStaticDirectImagesAsync(
+        RenderJobDto job,
+        SceneImageBatchInput input,
+        VideoProjectDto project,
+        Guid billingOperationId,
+        RVideoInitialPointEstimate estimate,
+        int aiImageWorkSceneCount,
+        CancellationToken ct)
+    {
+        var staticDirectSceneCount = RVideoInitialStaticImageDebit.ResolveStaticDirectSceneCount(
+            estimate.ImageCount,
+            aiImageWorkSceneCount);
+        var staticDirectPoints = RVideoInitialStaticImageDebit.ResolveStaticDirectPoints(
+            estimate.ImageRate,
+            staticDirectSceneCount);
+        if (staticDirectSceneCount <= 0 || staticDirectPoints <= 0)
+        {
+            return;
+        }
+
+        var referenceId = RVideoInitialStaticImageDebit.BuildReferenceId(billingOperationId);
+        var charge = await _wallets.ChargeAsync(
+            input.CustomerId ?? job.CustomerId,
+            input.UserId,
+            staticDirectPoints,
+            staticDirectSceneCount,
+            "rvideo_initial_render_static_image",
+            "todox",
+            "static_direct",
+            "rvideo",
+            "image",
+            referenceId,
+            "rvideo_initial_static_image");
+        if (!charge.Ok)
+        {
+            await _repo.AddProjectEventAsync(project.Id, "RVIDEO_STATIC_IMAGE_BILLING_FAILED", "error",
+                "Initial rVideo static image debit could not be completed.",
+                new { billingOperationId, parentRenderJobId = job.Id, projectId = project.Id, staticDirectSceneCount, requiredPoints = staticDirectPoints, charge.Error }, ct);
+            throw new RenderJobTerminalFailureException(charge.Error ?? "Insufficient points for static image billing.");
+        }
+
+        await _repo.AddProjectEventAsync(project.Id, "RVIDEO_STATIC_IMAGE_BILLED", "info",
+            "Initial rVideo static direct image points were debited.",
+            new
+            {
+                billingOperationId,
+                chargeReferenceId = referenceId,
+                parentRenderJobId = job.Id,
+                projectId = project.Id,
+                staticDirectSceneCount,
+                imageRate = estimate.ImageRate,
+                requestedPoints = staticDirectPoints,
+                chargedPoints = charge.Charged
+            }, ct);
     }
 
     private async Task<Guid?> ResolvePointServiceIdAsync(Guid? coreJobId, CancellationToken ct)

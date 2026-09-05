@@ -79,6 +79,105 @@ public sealed class RVideoTimelapseBillingCountsRegressionTests
     }
 
     [Fact]
+    public void RVideoInitialStaticDebitAllStaticSettingOnMatchesEstimate()
+    {
+        var staticDirectSceneCount = RVideoInitialStaticImageDebit.ResolveStaticDirectSceneCount(
+            estimatedImageCount: 6,
+            aiImageWorkSceneCount: 0);
+        var points = RVideoInitialStaticImageDebit.ResolveStaticDirectPoints(
+            imageRate: 0.5m,
+            staticDirectSceneCount);
+
+        Assert.Equal(6, staticDirectSceneCount);
+        Assert.Equal(3.0m, points);
+    }
+
+    [Fact]
+    public void RVideoInitialStaticDebitSettingOffDoesNotChargeStaticDirectScenes()
+    {
+        var sources = Enumerable.Range(1, 6)
+            .Select(_ => StaticSource("https://example.test/static.png"))
+            .ToArray();
+
+        var staticDirectSceneCount = RVideoInitialStaticImageDebit.ResolveStaticDirectSceneCount(
+            estimatedImageCount: 0,
+            sources);
+        var points = RVideoInitialStaticImageDebit.ResolveStaticDirectPoints(
+            imageRate: 0.5m,
+            staticDirectSceneCount);
+
+        Assert.Equal(0, staticDirectSceneCount);
+        Assert.Equal(0m, points);
+    }
+
+    [Fact]
+    public void RVideoInitialStaticDebitMixedStaticAndAiChargesOnlyStaticDirectNow()
+    {
+        var imageBatchStaticCount = RVideoInitialStaticImageDebit.ResolveStaticDirectSceneCount(
+            estimatedImageCount: 6,
+            aiImageWorkSceneCount: 2);
+        var videoBatchStaticCount = RVideoInitialStaticImageDebit.ResolveStaticDirectSceneCount(
+            estimatedImageCount: 6,
+            new[]
+            {
+                StaticSource("https://example.test/static-1.png"),
+                StaticSource("https://example.test/static-2.png"),
+                StaticSource("https://example.test/static-3.png"),
+                StaticSource("https://example.test/static-4.png"),
+                SceneImageVersionSource(),
+                SceneImageVersionSource()
+            });
+
+        Assert.Equal(4, imageBatchStaticCount);
+        Assert.Equal(4, videoBatchStaticCount);
+        Assert.Equal(2.0m, RVideoInitialStaticImageDebit.ResolveStaticDirectPoints(0.5m, imageBatchStaticCount));
+    }
+
+    [Fact]
+    public void RVideoInitialStaticDebitSharedStaticImageStillChargesPerScene()
+    {
+        var sources = Enumerable.Range(1, 5)
+            .Select(_ => StaticSource("https://example.test/shared.png"))
+            .ToArray();
+
+        var staticDirectSceneCount = RVideoInitialStaticImageDebit.ResolveStaticDirectSceneCount(
+            estimatedImageCount: 5,
+            sources);
+
+        Assert.Equal(5, staticDirectSceneCount);
+    }
+
+    [Fact]
+    public void RVideoInitialStaticDebitReferenceIsStableForSameBillingOperation()
+    {
+        var operationId = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+        var sameReference = RVideoInitialStaticImageDebit.BuildReferenceId(operationId);
+        var repeatedReference = RVideoInitialStaticImageDebit.BuildReferenceId(operationId);
+        var differentReference = RVideoInitialStaticImageDebit.BuildReferenceId(Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"));
+
+        Assert.Equal(sameReference, repeatedReference);
+        Assert.NotEqual(sameReference, differentReference);
+    }
+
+    [Fact]
+    public void RVideoInitialStaticDebitUsesQuantityRateAndStableReferenceInWalletCharge()
+    {
+        var imageBatch = ReadRepoFile("Services", "Render", "SceneImageBatchRenderHandler.cs");
+        var videoBatch = ReadRepoFile("Services", "VideoRender", "SceneVideoRenderHandler.cs");
+        var normalizedImageBatch = imageBatch.Replace("\r\n", "\n", StringComparison.Ordinal);
+        var normalizedVideoBatch = videoBatch.Replace("\r\n", "\n", StringComparison.Ordinal);
+
+        Assert.Contains("RVideoInitialStaticImageDebit.BuildReferenceId(billingOperationId)", imageBatch);
+        Assert.Contains("RVideoInitialStaticImageDebit.BuildReferenceId(billingOperationId)", videoBatch);
+        Assert.Contains("staticDirectPoints,\n            staticDirectSceneCount", normalizedImageBatch);
+        Assert.Contains("staticDirectPoints,\n            staticDirectSceneCount", normalizedVideoBatch);
+        Assert.Contains("\"rvideo_initial_render_static_image\"", imageBatch);
+        Assert.Contains("\"rvideo_initial_static_image\"", imageBatch);
+        Assert.Contains("\"rvideo_initial_render_static_image\"", videoBatch);
+        Assert.Contains("\"rvideo_initial_static_image\"", videoBatch);
+    }
+
+    [Fact]
     public void RVideoUserRerenderImageBillsOneImagePerSuccessfulSceneVersion()
     {
         var imageRate = new PointPricingRate(
@@ -178,6 +277,9 @@ public sealed class RVideoTimelapseBillingCountsRegressionTests
 
     private static RVideoEffectiveSceneImageSource StaticSource(string url)
         => new(false, null, url, null, RVideoEffectiveSceneImageSourceResolver.SceneStaticImage);
+
+    private static RVideoEffectiveSceneImageSource SceneImageVersionSource()
+        => new(false, Guid.NewGuid(), "https://example.test/generated.png", "generated.png", RVideoEffectiveSceneImageSourceResolver.SceneImageVersion);
 
     private static string ReadRepoFile(params string[] parts)
         => File.ReadAllText(
