@@ -130,7 +130,7 @@ public sealed class RVideoInitialPointEstimateService : IRVideoInitialPointEstim
             imageSources.Add(RVideoEffectiveSceneImageSourceResolver.Resolve(scene, request.Settings, selected, request.Project));
         }
         var chargeStaticImagePoints = await _tokenSettings.GetChargeStaticImagePointsAsync();
-        var imageCount = StaticImageBillingPolicy.ResolveRVideoStaticInputCount(imageSources, chargeStaticImagePoints);
+        var imageCount = ResolveInitialImageCount(billingScenes, imageSources, chargeStaticImagePoints);
 
         var videoScenes = billingScenes
             .Select(scene => new PreRenderVideoScene(scene.Id, scene.DurationSeconds))
@@ -179,6 +179,14 @@ public sealed class RVideoInitialPointEstimateService : IRVideoInitialPointEstim
             videoScenes,
             pricing);
     }
+
+    internal static int ResolveInitialImageCount(
+        IReadOnlyList<VideoProjectSceneDto> billingScenes,
+        IReadOnlyList<RVideoEffectiveSceneImageSource> imageSources,
+        bool chargeStaticImagePoints)
+        => chargeStaticImagePoints
+            ? Math.Max(0, billingScenes.Count)
+            : StaticImageBillingPolicy.ResolveRVideoStaticInputCount(imageSources, false);
 }
 
 public static class RVideoParentBillingState

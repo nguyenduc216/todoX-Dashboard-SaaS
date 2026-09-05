@@ -201,24 +201,26 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
             imageSources.Add(RVideoEffectiveSceneImageSourceResolver.Resolve(scene, settings, selectedImage, project));
         }
 
-        var aggregateEstimate = await _initialEstimate.EstimateInitialRVideoPointsAsync(
-            new RVideoInitialPointEstimateRequest(
-                billingOperationId,
-                job.Id,
-                project.Id,
-                await ResolvePointServiceIdAsync(project.CoreJobId, ct),
-                input.CustomerId ?? job.CustomerId,
-                project,
-                scenes,
-                scenes,
-                settings,
-                (scene, token) => input.UseSharedReferenceImage
-                    ? Task.FromResult<SceneImageVersionDto?>(null)
-                    : _versions.GetSelectedImageVersionAsync(scene.Id, token),
-                qualityTier,
-                qualityTier,
-                ServiceSellPriceQualityTiers.Standard),
-            ct);
+        var aggregateEstimate = input.BillingIntent == PointBillingIntent.InitialRender
+            ? await _initialEstimate.EstimateInitialRVideoPointsAsync(
+                new RVideoInitialPointEstimateRequest(
+                    billingOperationId,
+                    job.Id,
+                    project.Id,
+                    await ResolvePointServiceIdAsync(project.CoreJobId, ct),
+                    input.CustomerId ?? job.CustomerId,
+                    project,
+                    scenes,
+                    scenes,
+                    settings,
+                    (scene, token) => input.UseSharedReferenceImage
+                        ? Task.FromResult<SceneImageVersionDto?>(null)
+                        : _versions.GetSelectedImageVersionAsync(scene.Id, token),
+                    qualityTier,
+                    qualityTier,
+                    ServiceSellPriceQualityTiers.Standard),
+                ct)
+            : await EstimateSceneVideoRerenderPointsAsync(job, input, project, scenes, qualityTier, billingOperationId, ct);
         await _repo.AddProjectEventAsync(project.Id, "SCENE_VIDEO_BATCH_STARTED", "info",
             $"Batch render video started for {scenes.Count} scenes.",
             new
@@ -489,6 +491,59 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
             }, ct);
 
         return true;
+    }
+
+    private async Task<RVideoInitialPointEstimate> EstimateSceneVideoRerenderPointsAsync(
+        RenderJobDto job,
+        SceneVideoRenderInput input,
+        VideoProjectDto project,
+        IReadOnlyList<VideoProjectSceneDto> scenes,
+        string qualityTier,
+        Guid billingOperationId,
+        CancellationToken ct)
+    {
+        var serviceId = await ResolvePointServiceIdAsync(project.CoreJobId, ct);
+        var videoScenes = scenes
+            .Select(scene => new PreRenderVideoScene(scene.Id, scene.DurationSeconds))
+            .ToArray();
+        var plan = new PreRenderUsagePlan(
+            serviceId,
+            0,
+            qualityTier,
+            videoScenes,
+            qualityTier,
+            0,
+            ServiceSellPriceQualityTiers.Standard,
+            false).Validate();
+        var pricing = await _pointPricing.EstimateAsync(plan.ToPricingRequest(), ct);
+        var customerId = input.CustomerId ?? job.CustomerId;
+        var available = customerId is Guid id
+            ? await _wallets.GetBalanceAsync(id)
+            : 0m;
+        var remaining = Math.Max(0m, available - pricing.TotalPoints);
+        var missing = Math.Max(0m, pricing.TotalPoints - available);
+
+        return new RVideoInitialPointEstimate(
+            billingOperationId,
+            job.Id,
+            project.Id,
+            serviceId,
+            plan.ImageCount,
+            pricing.Image.Rate,
+            pricing.Image.Points,
+            plan.VideoSeconds,
+            pricing.Video.Rate,
+            pricing.Video.Points,
+            plan.VoiceCount,
+            pricing.Voice.Rate,
+            pricing.Voice.Points,
+            pricing.TotalPoints,
+            available,
+            remaining,
+            missing,
+            customerId is null || available >= pricing.TotalPoints,
+            videoScenes,
+            pricing);
     }
 
     private async Task<string> ResolveVoiceModeAsync(long projectId, CancellationToken ct)

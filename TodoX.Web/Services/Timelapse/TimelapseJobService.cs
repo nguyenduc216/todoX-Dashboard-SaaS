@@ -557,8 +557,10 @@ public sealed class TimelapseJobService : ITimelapseJobService
         var rate = await _pointPricing.ResolveRateAsync(view.Snapshot.ServiceId,
             PointPricingResourceTypes.Image,
             TimelapseSellPricing.QualityTierForMode(view.Snapshot.VideoMode), ct);
+        var imageCount = ResolveImageRerenderBillingCount(view.Snapshot.SceneCount, progressPercent);
+        var requiredPoints = ResolveImageRerenderPoints(rate.Rate, imageCount);
         var charge = await _wallets.ChargeAsync(
-            currentUser.CustomerId, currentUser.UserId, rate.Rate, 1,
+            currentUser.CustomerId, currentUser.UserId, requiredPoints, imageCount,
             "timelapse_user_rerender_image", "todox", "point_pricing", "timelapse",
             "point", PointBillingReference.ForRerender(jobId, "image", progressPercent.ToString(), rerenderOperationId ?? Guid.NewGuid()),
             "timelapse_user_rerender");
@@ -584,8 +586,12 @@ public sealed class TimelapseJobService : ITimelapseJobService
             var rate = await _pointPricing.ResolveRateAsync(view.Snapshot.ServiceId,
                 PointPricingResourceTypes.Image,
                 TimelapseSellPricing.QualityTierForMode(view.Snapshot.VideoMode), ct);
+            var stage = view.Workflow.Images.FirstOrDefault(x => x.Id == imageStageId)
+                ?? throw new InvalidOperationException("Không tìm thấy ảnh Timelapse thuộc job này.");
+            var imageCount = ResolveImageRerenderBillingCount(view.Snapshot.SceneCount, stage.ProgressPercent);
+            var requiredPoints = ResolveImageRerenderPoints(rate.Rate, imageCount);
             var charge = await _wallets.ChargeAsync(
-                currentUser.CustomerId, currentUser.UserId, rate.Rate, 1,
+                currentUser.CustomerId, currentUser.UserId, requiredPoints, imageCount,
                 "timelapse_user_rerender_image", "todox", "point_pricing", "timelapse",
                 "point", PointBillingReference.ForRerender(jobId, "image", imageStageId.ToString("N"), rerenderOperationId ?? Guid.NewGuid()),
                 "timelapse_user_rerender");
@@ -722,6 +728,12 @@ public sealed class TimelapseJobService : ITimelapseJobService
             quality, 0, quality, false).Validate();
         return await _pointPricing.EstimateAsync(plan.ToPricingRequest(), ct);
     }
+
+    internal static int ResolveImageRerenderBillingCount(int sceneCount, int progressPercent)
+        => TimelapseRerenderImpactPlanner.Plan(sceneCount, progressPercent).ImageProgressesToInvalidate.Count;
+
+    internal static decimal ResolveImageRerenderPoints(decimal imageRate, int imageCount)
+        => Math.Max(0m, imageRate) * Math.Max(0, imageCount);
 
     private async Task MarkBillingBlockedAsync(Guid jobId, string message, CancellationToken ct)
     {
