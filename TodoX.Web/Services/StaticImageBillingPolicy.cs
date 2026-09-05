@@ -15,17 +15,20 @@ public static class StaticImageBillingPolicy
             BuildInputKey(job.DirectReferenceMediaId, job.DirectReferenceObjectKey, job.DirectReferenceUrl));
 
     public static int ResolveTimelapseStaticInputCount(TimelapseJobSnapshot snapshot)
-        => CountDistinctInputs(
-            BuildInputKey(snapshot.OriginalImage.MediaId, snapshot.OriginalImage.ObjectKey, snapshot.OriginalImage.PublicUrl),
-            snapshot.StartImage is null
-                ? null
-                : BuildInputKey(snapshot.StartImage.MediaId, snapshot.StartImage.ObjectKey, snapshot.StartImage.PublicUrl));
+        => snapshot.SceneCount;
+
+    public static int ResolveTimelapseStaticInputCount(TimelapseJobSnapshot snapshot, bool chargeStaticImagePoints)
+        => chargeStaticImagePoints
+            ? snapshot.SceneCount
+            : TimelapseStageGraphBuilder.Build(snapshot.SceneCount, snapshot.HasStartImage).GeneratedImageOrder.Count;
 
     public static int ResolveRVideoStaticInputCount(IEnumerable<RVideoEffectiveSceneImageSource> sources)
-        => CountDistinctInputs(sources
-            .Where(source => source.HasUsableInput)
-            .Select(source => BuildInputKey(source.SelectedImageVersionId, source.SourceImageObjectKey, source.SourceImageUrl))
-            .ToArray());
+        => sources.Count();
+
+    public static int ResolveRVideoStaticInputCount(IEnumerable<RVideoEffectiveSceneImageSource> sources, bool chargeStaticImagePoints)
+        => chargeStaticImagePoints
+            ? sources.Count()
+            : sources.Count(source => !source.HasUsableInput);
 
     public static int ResolveBillableStaticImageCount(int staticInputCount, bool chargeStaticImagePoints)
         => chargeStaticImagePoints ? Math.Max(0, staticInputCount) : 0;

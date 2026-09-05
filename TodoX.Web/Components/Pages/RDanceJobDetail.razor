@@ -1405,7 +1405,9 @@
             : ServiceSellPriceQualityTiers.Standard;
         var chargeStaticImagePoints = await TokenSettings.GetChargeStaticImagePointsAsync();
         var staticImageCount = StaticImageBillingPolicy.ResolveRdanceStaticInputCount(_job);
-        var imageCount = StaticImageBillingPolicy.ResolveBillableStaticImageCount(staticImageCount, chargeStaticImagePoints);
+        var imageCount = string.Equals(_job.ReferenceMode, DanceSellReferenceModes.DirectReference, StringComparison.OrdinalIgnoreCase)
+            ? StaticImageBillingPolicy.ResolveBillableStaticImageCount(staticImageCount, chargeStaticImagePoints)
+            : 0;
 
         return await PointPricing.EstimateAsync(new PointPricingEstimateRequest(
             service.Id,

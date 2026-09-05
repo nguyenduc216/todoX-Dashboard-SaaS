@@ -33,11 +33,12 @@ public sealed class StaticImageBillingPolicyRegressionTests
     }
 
     [Fact]
-    public void TimelapseStaticInputsDeduplicateSharedMediaAcrossAnchors()
+    public void TimelapseStaticInputsFollowSceneCountAndCanDisableBilling()
     {
         var mediaId = Guid.NewGuid();
         var snapshot = new TimelapseJobSnapshot
         {
+            SceneCount = 4,
             OriginalImage = new TimelapseOriginalImageSnapshot
             {
                 MediaId = mediaId,
@@ -52,12 +53,14 @@ public sealed class StaticImageBillingPolicyRegressionTests
             }
         };
 
-        Assert.Equal(1, StaticImageBillingPolicy.ResolveTimelapseStaticInputCount(snapshot));
-        Assert.Equal(0, StaticImageBillingPolicy.ResolveBillableStaticImageCount(1, false));
+        Assert.Equal(4, StaticImageBillingPolicy.ResolveTimelapseStaticInputCount(snapshot));
+        Assert.Equal(4, StaticImageBillingPolicy.ResolveTimelapseStaticInputCount(snapshot, true));
+        Assert.Equal(TimelapseStageGraphBuilder.Build(4, true).GeneratedImageOrder.Count,
+            StaticImageBillingPolicy.ResolveTimelapseStaticInputCount(snapshot, false));
     }
 
     [Fact]
-    public void RVideoStaticInputsDeduplicateResolvedSharedSources()
+    public void RVideoStaticInputsFollowSceneCountAndAISceneFallback()
     {
         var selectedVersionId = Guid.NewGuid();
         var shared = new[]
@@ -69,9 +72,9 @@ public sealed class StaticImageBillingPolicyRegressionTests
             new RVideoEffectiveSceneImageSource(false, null, null, null, RVideoEffectiveSceneImageSourceResolver.Missing)
         };
 
-        Assert.Equal(2, StaticImageBillingPolicy.ResolveRVideoStaticInputCount(shared));
-        Assert.Equal(2, StaticImageBillingPolicy.ResolveBillableStaticImageCount(2, true));
-        Assert.Equal(0, StaticImageBillingPolicy.ResolveBillableStaticImageCount(2, false));
+        Assert.Equal(5, StaticImageBillingPolicy.ResolveRVideoStaticInputCount(shared));
+        Assert.Equal(5, StaticImageBillingPolicy.ResolveRVideoStaticInputCount(shared, true));
+        Assert.Equal(1, StaticImageBillingPolicy.ResolveRVideoStaticInputCount(shared, false));
     }
 
     [Fact]
@@ -83,7 +86,6 @@ public sealed class StaticImageBillingPolicyRegressionTests
             "Services", "VideoRender", "RVideoInitialPointEstimateService.cs"));
 
         Assert.Contains("GetChargeStaticImagePointsAsync", source);
-        Assert.Contains("var staticInputCount = StaticImageBillingPolicy.ResolveRVideoStaticInputCount(imageSources);", source);
-        Assert.Contains("var imageCount = StaticImageBillingPolicy.ResolveBillableStaticImageCount(staticInputCount, chargeStaticImagePoints);", source);
+        Assert.Contains("var imageCount = StaticImageBillingPolicy.ResolveRVideoStaticInputCount(imageSources, chargeStaticImagePoints);", source);
     }
 }

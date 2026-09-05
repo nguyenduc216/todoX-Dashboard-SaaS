@@ -710,24 +710,17 @@ public sealed class TimelapseJobService : ITimelapseJobService
     private static string NormalizeTitle(string? title)
         => string.IsNullOrWhiteSpace(title) ? "Video Timelapse" : title.Trim();
 
-    private Task<PointPricingEstimate> EstimatePointsAsync(Guid serviceId, int sceneCount, string videoMode, bool hasStartImage, CancellationToken ct)
+    private async Task<PointPricingEstimate> EstimatePointsAsync(Guid serviceId, int sceneCount, string videoMode, bool hasStartImage, CancellationToken ct)
     {
         var quality = TimelapseSellPricing.QualityTierForMode(videoMode);
-        // The default plan duration is defined by TimelapseRequestRules.RuntimeClipDurationSeconds.
         var graph = TimelapseStageGraphBuilder.Build(sceneCount, hasStartImage);
-        var staticInputCount = 1 + (hasStartImage ? 1 : 0);
-        var plan = new PreRenderUsagePlan(serviceId, graph.GeneratedImageOrder.Count, quality,
+        var imageCount = await _tokenSettings.GetChargeStaticImagePointsAsync()
+            ? sceneCount
+            : graph.GeneratedImageOrder.Count;
+        var plan = new PreRenderUsagePlan(serviceId, imageCount, quality,
             graph.VideoClips.Select(x => new PreRenderVideoScene(x.ClipIndex, x.DurationSeconds)).ToArray(),
             quality, 0, quality, false).Validate();
-        PointPricingEstimateRequest pricingRequest = plan.ToPricingRequest();
-        return ApplyStaticImageBillingAsync(pricingRequest, staticInputCount, ct);
-    }
-
-    private async Task<PointPricingEstimate> ApplyStaticImageBillingAsync(PointPricingEstimateRequest request, int staticInputCount, CancellationToken ct)
-    {
-        var chargeStaticImagePoints = await _tokenSettings.GetChargeStaticImagePointsAsync();
-        var imageCount = StaticImageBillingPolicy.ResolveBillableStaticImageCount(staticInputCount, chargeStaticImagePoints);
-        return await _pointPricing.EstimateAsync(request with { ImageCount = imageCount }, ct);
+        return await _pointPricing.EstimateAsync(plan.ToPricingRequest(), ct);
     }
 
     private async Task MarkBillingBlockedAsync(Guid jobId, string message, CancellationToken ct)

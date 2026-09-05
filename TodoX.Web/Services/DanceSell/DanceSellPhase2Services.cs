@@ -302,12 +302,9 @@ public sealed class DanceSellReferenceImageService : IDanceSellReferenceImageSer
                     ? ServiceSellPriceQualityTiers.Premium
                     : ServiceSellPriceQualityTiers.Standard;
                 var catalogService = await _coreCatalog.GetByCodeAsync(FixedTodoXServiceCatalog.RDance, ct);
-                var chargeStaticImagePoints = await _tokenSettings.GetChargeStaticImagePointsAsync();
-                var staticImageCount = StaticImageBillingPolicy.ResolveRdanceStaticInputCount(job);
-                var billableStaticImageCount = StaticImageBillingPolicy.ResolveBillableStaticImageCount(staticImageCount, chargeStaticImagePoints);
                 var pointEstimate = await _pointPricing.EstimateAsync(new PointPricingEstimateRequest(
                     catalogService?.Id,
-                    billableStaticImageCount,
+                    1,
                     quality,
                     0,
                     quality,
@@ -1771,7 +1768,8 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
         var chargeStaticImagePoints = await _tokenSettings.GetChargeStaticImagePointsAsync();
         var staticInputCount = StaticImageBillingPolicy.ResolveRdanceStaticInputCount(job);
         var billableStaticImageCount = StaticImageBillingPolicy.ResolveBillableStaticImageCount(staticInputCount, chargeStaticImagePoints);
-        var imageCount = billableStaticImageCount;
+        var isDirectReference = string.Equals(job.ReferenceMode, DanceSellReferenceModes.DirectReference, StringComparison.OrdinalIgnoreCase);
+        var imageCount = isDirectReference ? billableStaticImageCount : 1;
         var pointEstimate = await _pointPricing.EstimateAsync(new PointPricingEstimateRequest(
             serviceId,
             imageCount,
@@ -1781,11 +1779,11 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
             0,
             ServiceSellPriceQualityTiers.Standard,
             false), ct);
-        var imagePointsToChargeNow = pointEstimate.Image.Points;
+        var imagePointsToChargeNow = isDirectReference ? pointEstimate.Image.Points : 0m;
         var videoPointsToChargeNow = pointEstimate.Video.Points;
         var voicePointsToChargeNow = pointEstimate.Voice.Points;
         var chargeNow = imagePointsToChargeNow + videoPointsToChargeNow + voicePointsToChargeNow;
-        var logicalTotalPoints = chargeNow;
+        var logicalTotalPoints = pointEstimate.TotalPoints;
         var charge = await _wallets.ChargeAsync(
             user.CustomerId,
             user.UserId,
@@ -1831,23 +1829,23 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
             {
                 image = new
                 {
-                    planned_points = imagePointsToChargeNow,
+                    planned_points = pointEstimate.Image.Points,
                     charged_points = imagePointsToChargeNow,
                     charge_reference = job.Id
                 },
                 video = new
                 {
-                    planned_points = videoPointsToChargeNow,
+                    planned_points = pointEstimate.Video.Points,
                     charged_points = videoPointsToChargeNow,
                     charge_reference = job.Id
                 },
                 voice = new
                 {
-                    planned_points = voicePointsToChargeNow,
+                    planned_points = pointEstimate.Voice.Points,
                     charged_points = voicePointsToChargeNow,
                     charge_reference = (Guid?)null
                 },
-                total_planned_points = chargeNow,
+                total_planned_points = pointEstimate.TotalPoints,
                 total_charged_points = chargeNow,
                 remaining_points_to_charge = 0m
             }),

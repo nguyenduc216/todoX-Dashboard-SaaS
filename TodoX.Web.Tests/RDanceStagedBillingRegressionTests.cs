@@ -8,12 +8,16 @@ public sealed class RDanceStagedBillingRegressionTests
     public void ReferenceGenerationChargesImageBeforeProviderSubmission()
     {
         var source = ReadRepoFile("Services", "DanceSell", "DanceSellPhase2Services.cs");
-        var generate = source[source.IndexOf("public async Task<DanceSellReferenceVersionDto> GenerateAsync", StringComparison.Ordinal)..];
+        var generateStart = source.IndexOf("public async Task<DanceSellReferenceVersionDto> GenerateAsync", StringComparison.Ordinal);
+        var generateEnd = source.IndexOf("public async Task<DanceSellJobDto> AutoPrepareAsync", StringComparison.Ordinal);
+        var generate = source[generateStart..generateEnd];
         var charge = generate.IndexOf("_wallets.ChargeAsync", StringComparison.Ordinal);
         var submit = generate.IndexOf("provider.SubmitAsync", StringComparison.Ordinal);
 
         Assert.True(charge >= 0 && charge < submit);
-        Assert.Contains("imageCount", generate);
+        Assert.DoesNotContain("ResolveRdanceStaticInputCount", generate);
+        Assert.DoesNotContain("ResolveBillableStaticImageCount", generate);
+        Assert.Contains("pointEstimate.Image.Points", generate);
         Assert.Contains("INSUFFICIENT_POINTS", generate);
         Assert.Contains("dance_sell_reference_image", generate);
     }
@@ -29,6 +33,8 @@ public sealed class RDanceStagedBillingRegressionTests
         Assert.Contains("var chargeStaticImagePoints = await _tokenSettings.GetChargeStaticImagePointsAsync();", queue);
         Assert.Contains("var staticInputCount = StaticImageBillingPolicy.ResolveRdanceStaticInputCount(job);", queue);
         Assert.Contains("var billableStaticImageCount = StaticImageBillingPolicy.ResolveBillableStaticImageCount(staticInputCount, chargeStaticImagePoints);", queue);
+        Assert.Contains("var isDirectReference = string.Equals(job.ReferenceMode, DanceSellReferenceModes.DirectReference, StringComparison.OrdinalIgnoreCase);", queue);
+        Assert.Contains("var imageCount = isDirectReference ? billableStaticImageCount : 1;", queue);
         Assert.Contains("durationSeconds = await ResolveMotionDurationSecondsAsync(job, motionRoute, estimate, ct)", queue);
         Assert.Contains("new PointPricingEstimateRequest(", queue);
         Assert.Contains("durationSeconds,", queue);
@@ -45,19 +51,18 @@ public sealed class RDanceStagedBillingRegressionTests
         Assert.Contains("voicePointsToChargeNow", queue);
         Assert.Contains("chargeNow", queue);
         Assert.Contains("logicalTotalPoints", queue);
-        Assert.Contains("total_planned_points = chargeNow", queue);
+        Assert.Contains("total_planned_points = pointEstimate.TotalPoints", queue);
         Assert.Contains("total_charged_points = chargeNow", queue);
-        Assert.Contains("planned_points = imagePointsToChargeNow", queue);
+        Assert.Contains("planned_points = pointEstimate.Image.Points", queue);
         Assert.Contains("charged_points = imagePointsToChargeNow", queue);
-        Assert.Contains("planned_points = videoPointsToChargeNow", queue);
+        Assert.Contains("planned_points = pointEstimate.Video.Points", queue);
         Assert.Contains("charged_points = videoPointsToChargeNow", queue);
-        Assert.Contains("planned_points = voicePointsToChargeNow", queue);
+        Assert.Contains("planned_points = pointEstimate.Voice.Points", queue);
         Assert.Contains("charged_points = voicePointsToChargeNow", queue);
         Assert.Contains("PointCostEstimate = chargeNow", queue);
-        Assert.Contains("var imageCount = billableStaticImageCount;", queue);
         var detail = ReadRepoFile("Components", "Pages", "RDanceJobDetail.razor");
         Assert.DoesNotContain("DanceOperations.GetLatestOperationAsync(_job.Id, DanceSellOperationTypes.ReferenceImage", detail);
-        Assert.Contains("var imageCount = StaticImageBillingPolicy.ResolveBillableStaticImageCount(staticImageCount, chargeStaticImagePoints);", detail);
+        Assert.Contains("var imageCount = string.Equals(_job.ReferenceMode, DanceSellReferenceModes.DirectReference, StringComparison.OrdinalIgnoreCase)", detail);
     }
 
     [Fact]

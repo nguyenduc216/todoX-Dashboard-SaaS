@@ -200,22 +200,6 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
                 : await _versions.GetSelectedImageVersionAsync(scene.Id, ct);
             imageSources.Add(RVideoEffectiveSceneImageSourceResolver.Resolve(scene, settings, selectedImage, project));
         }
-        var imageCount = StaticImageBillingPolicy.ResolveRVideoStaticInputCount(imageSources);
-
-        await _repo.AddProjectEventAsync(project.Id, "SCENE_VIDEO_BATCH_STARTED", "info",
-            $"Batch render video started for {scenes.Count} scenes.",
-            new
-            {
-                batchJobId = job.Id,
-                sceneCount = scenes.Count,
-                imageCount,
-                videoSeconds = scenes.Sum(x => x.DurationSeconds),
-                voiceCount,
-                route.ProviderCode,
-                route.ModelName,
-                input.AspectRatio,
-                input.Resolution
-            }, ct);
 
         var aggregateEstimate = await _initialEstimate.EstimateInitialRVideoPointsAsync(
             new RVideoInitialPointEstimateRequest(
@@ -235,6 +219,20 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
                 qualityTier,
                 ServiceSellPriceQualityTiers.Standard),
             ct);
+        await _repo.AddProjectEventAsync(project.Id, "SCENE_VIDEO_BATCH_STARTED", "info",
+            $"Batch render video started for {scenes.Count} scenes.",
+            new
+            {
+                batchJobId = job.Id,
+                sceneCount = scenes.Count,
+                imageCount = aggregateEstimate.ImageCount,
+                videoSeconds = scenes.Sum(x => x.DurationSeconds),
+                voiceCount,
+                route.ProviderCode,
+                route.ModelName,
+                input.AspectRatio,
+                input.Resolution
+            }, ct);
         if (!aggregateEstimate.CanStart)
         {
             await _jobs.MarkStatusAsync(job.Id, RenderJobStatuses.Failed, errorCode: "insufficient_points",

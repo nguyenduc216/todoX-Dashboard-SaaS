@@ -78,8 +78,7 @@ public sealed class RDanceCustomerStatusAndPointsRegressionTests
         Assert.Contains("PointPricing.EstimateAsync(new PointPricingEstimateRequest(", detail);
         Assert.Contains("StaticImageBillingPolicy.ResolveRdanceStaticInputCount(_job)", detail);
         Assert.Contains("StaticImageBillingPolicy.ResolveBillableStaticImageCount(staticImageCount, chargeStaticImagePoints)", detail);
-        Assert.Contains("DanceOperations.GetLatestOperationAsync(_job.Id, DanceSellOperationTypes.ReferenceImage", detail);
-        Assert.Contains("var imageCount = alreadyChargedImage > 0m ? 0 : billableStaticImageCount;", detail);
+        Assert.Contains("var imageCount = string.Equals(_job.ReferenceMode, DanceSellReferenceModes.DirectReference, StringComparison.OrdinalIgnoreCase)", detail);
         Assert.Contains("FormatPoints(_pointEstimate?.TotalPoints)", detail);
         Assert.Contains("var points = FormatPoints(_pointEstimate?.TotalPoints);", detail);
         Assert.Contains("ReferenceVersionStatusLabel(version?.Status)", detail);

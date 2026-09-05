@@ -129,9 +129,8 @@ public sealed class RVideoInitialPointEstimateService : IRVideoInitialPointEstim
                 : await request.SelectedImageResolver(scene, ct);
             imageSources.Add(RVideoEffectiveSceneImageSourceResolver.Resolve(scene, request.Settings, selected, request.Project));
         }
-        var staticInputCount = StaticImageBillingPolicy.ResolveRVideoStaticInputCount(imageSources);
         var chargeStaticImagePoints = await _tokenSettings.GetChargeStaticImagePointsAsync();
-        var imageCount = StaticImageBillingPolicy.ResolveBillableStaticImageCount(staticInputCount, chargeStaticImagePoints);
+        var imageCount = StaticImageBillingPolicy.ResolveRVideoStaticInputCount(imageSources, chargeStaticImagePoints);
 
         var videoScenes = billingScenes
             .Select(scene => new PreRenderVideoScene(scene.Id, scene.DurationSeconds))
