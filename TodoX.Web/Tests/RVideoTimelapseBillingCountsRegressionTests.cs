@@ -12,21 +12,21 @@ namespace TodoX.Web.Tests;
 public sealed class RVideoTimelapseBillingCountsRegressionTests
 {
     [Fact]
-    public void RVideoInitialSettingOnBillsEveryBillingSceneEvenWhenOnlyTwoNeedImageWork()
+    public void RVideoInitialSettingOnBillsEveryStaticInputScene()
     {
-        var billingScenes = Enumerable.Range(1, 6).Select(index => CreateScene(index)).ToArray();
         var imageWorkSources = new[]
         {
+            StaticSource("https://example.test/static-1.png"),
+            StaticSource("https://example.test/static-2.png"),
             MissingSource(),
             MissingSource()
         };
 
         var imageCount = RVideoInitialPointEstimateService.ResolveInitialImageCount(
-            billingScenes,
             imageWorkSources,
             chargeStaticImagePoints: true);
 
-        Assert.Equal(6, imageCount);
+        Assert.Equal(2, imageCount);
     }
 
     [Fact]
@@ -40,7 +40,6 @@ public sealed class RVideoTimelapseBillingCountsRegressionTests
             .ToArray();
 
         var imageCount = RVideoInitialPointEstimateService.ResolveInitialImageCount(
-            billingScenes,
             imageWorkSources,
             chargeStaticImagePoints: true);
 
@@ -48,9 +47,8 @@ public sealed class RVideoTimelapseBillingCountsRegressionTests
     }
 
     [Fact]
-    public void RVideoInitialSettingOffBillsOnlyAiGeneratedImageScenes()
+    public void RVideoInitialSettingOffBillsZeroEvenWithMixedStaticAndAiScenes()
     {
-        var billingScenes = Enumerable.Range(1, 6).Select(index => CreateScene(index)).ToArray();
         var imageWorkSources = new[]
         {
             StaticSource("https://example.test/static-1.png"),
@@ -60,11 +58,10 @@ public sealed class RVideoTimelapseBillingCountsRegressionTests
         };
 
         var imageCount = RVideoInitialPointEstimateService.ResolveInitialImageCount(
-            billingScenes,
             imageWorkSources,
             chargeStaticImagePoints: false);
 
-        Assert.Equal(2, imageCount);
+        Assert.Equal(0, imageCount);
     }
 
     [Fact]
@@ -81,9 +78,13 @@ public sealed class RVideoTimelapseBillingCountsRegressionTests
     [Fact]
     public void RVideoInitialStaticDebitAllStaticSettingOnMatchesEstimate()
     {
+        var sources = Enumerable.Range(1, 6)
+            .Select(index => StaticSource($"https://example.test/static-{index}.png"))
+            .ToArray();
+
         var staticDirectSceneCount = RVideoInitialStaticImageDebit.ResolveStaticDirectSceneCount(
-            estimatedImageCount: 6,
-            aiImageWorkSceneCount: 0);
+            chargeStaticImagePoints: true,
+            sources);
         var points = RVideoInitialStaticImageDebit.ResolveStaticDirectPoints(
             imageRate: 0.5m,
             staticDirectSceneCount);
@@ -100,7 +101,7 @@ public sealed class RVideoTimelapseBillingCountsRegressionTests
             .ToArray();
 
         var staticDirectSceneCount = RVideoInitialStaticImageDebit.ResolveStaticDirectSceneCount(
-            estimatedImageCount: 0,
+            chargeStaticImagePoints: false,
             sources);
         var points = RVideoInitialStaticImageDebit.ResolveStaticDirectPoints(
             imageRate: 0.5m,
@@ -113,23 +114,25 @@ public sealed class RVideoTimelapseBillingCountsRegressionTests
     [Fact]
     public void RVideoInitialStaticDebitMixedStaticAndAiChargesOnlyStaticDirectNow()
     {
+        var sources = new[]
+        {
+            StaticSource("https://example.test/static-1.png"),
+            StaticSource("https://example.test/static-2.png"),
+            StaticSource("https://example.test/static-3.png"),
+            StaticSource("https://example.test/static-4.png"),
+            SceneImageVersionSource(),
+            SceneImageVersionSource()
+        };
+
         var imageBatchStaticCount = RVideoInitialStaticImageDebit.ResolveStaticDirectSceneCount(
-            estimatedImageCount: 6,
-            aiImageWorkSceneCount: 2);
+            chargeStaticImagePoints: true,
+            sources);
         var videoBatchStaticCount = RVideoInitialStaticImageDebit.ResolveStaticDirectSceneCount(
-            estimatedImageCount: 6,
-            new[]
-            {
-                StaticSource("https://example.test/static-1.png"),
-                StaticSource("https://example.test/static-2.png"),
-                StaticSource("https://example.test/static-3.png"),
-                StaticSource("https://example.test/static-4.png"),
-                SceneImageVersionSource(),
-                SceneImageVersionSource()
-            });
+            chargeStaticImagePoints: false,
+            sources);
 
         Assert.Equal(4, imageBatchStaticCount);
-        Assert.Equal(4, videoBatchStaticCount);
+        Assert.Equal(0, videoBatchStaticCount);
         Assert.Equal(2.0m, RVideoInitialStaticImageDebit.ResolveStaticDirectPoints(0.5m, imageBatchStaticCount));
     }
 
@@ -141,7 +144,7 @@ public sealed class RVideoTimelapseBillingCountsRegressionTests
             .ToArray();
 
         var staticDirectSceneCount = RVideoInitialStaticImageDebit.ResolveStaticDirectSceneCount(
-            estimatedImageCount: 5,
+            chargeStaticImagePoints: true,
             sources);
 
         Assert.Equal(5, staticDirectSceneCount);

@@ -4,15 +4,23 @@ namespace TodoX.Web.Services.VideoRender;
 
 public static class RVideoInitialStaticImageDebit
 {
-    public static int ResolveStaticDirectSceneCount(int estimatedImageCount, int aiImageWorkSceneCount)
-        => Math.Max(0, estimatedImageCount - Math.Max(0, aiImageWorkSceneCount));
+    public static int ResolveStaticDirectSceneCount(
+        bool chargeStaticImagePoints,
+        int staticDirectSceneCount)
+        => chargeStaticImagePoints
+            ? Math.Max(0, staticDirectSceneCount)
+            : 0;
 
     public static int ResolveStaticDirectSceneCount(
-        int estimatedImageCount,
+        bool chargeStaticImagePoints,
         IReadOnlyList<RVideoEffectiveSceneImageSource> imageSources)
     {
-        var staticDirectScenes = imageSources.Count(IsStaticDirectInput);
-        return Math.Min(Math.Max(0, estimatedImageCount), staticDirectScenes);
+        if (!chargeStaticImagePoints)
+        {
+            return 0;
+        }
+
+        return imageSources.Count(IsStaticDirectInput);
     }
 
     public static decimal ResolveStaticDirectPoints(decimal imageRate, int staticDirectSceneCount)

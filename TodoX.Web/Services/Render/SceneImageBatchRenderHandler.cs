@@ -268,7 +268,7 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
                 balance_after_check = estimate.AvailablePoints
             },
             billingScenes.Select(scene => new { scene.Id, scene.SceneIndex, scene.DurationSeconds }).ToArray(), ct);
-        await ChargeInitialStaticDirectImagesAsync(job, input, project, billingOperationId, estimate, imageWorkScenes.Count, ct);
+        await ChargeInitialStaticDirectImagesAsync(job, input, project, billingOperationId, estimate, ct);
         await _repo.AddProjectEventAsync(project.Id, "RVIDEO_PARENT_PREFLIGHT_APPROVED", "info",
             "Initial rVideo point estimate passed; static direct images were debited when applicable.",
             new
@@ -295,12 +295,9 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
         VideoProjectDto project,
         Guid billingOperationId,
         RVideoInitialPointEstimate estimate,
-        int aiImageWorkSceneCount,
         CancellationToken ct)
     {
-        var staticDirectSceneCount = RVideoInitialStaticImageDebit.ResolveStaticDirectSceneCount(
-            estimate.ImageCount,
-            aiImageWorkSceneCount);
+        var staticDirectSceneCount = Math.Max(0, estimate.ImageCount);
         var staticDirectPoints = RVideoInitialStaticImageDebit.ResolveStaticDirectPoints(
             estimate.ImageRate,
             staticDirectSceneCount);

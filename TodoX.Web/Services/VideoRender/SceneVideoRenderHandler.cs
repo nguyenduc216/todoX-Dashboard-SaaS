@@ -559,9 +559,7 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
         IReadOnlyList<RVideoEffectiveSceneImageSource> imageSources,
         CancellationToken ct)
     {
-        var staticDirectSceneCount = RVideoInitialStaticImageDebit.ResolveStaticDirectSceneCount(
-            estimate.ImageCount,
-            imageSources);
+        var staticDirectSceneCount = Math.Max(0, estimate.ImageCount);
         var staticDirectPoints = RVideoInitialStaticImageDebit.ResolveStaticDirectPoints(
             estimate.ImageRate,
             staticDirectSceneCount);
