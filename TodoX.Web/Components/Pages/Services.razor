@@ -1,7 +1,9 @@
 ﻿@page "/services"
 @using TodoX.Web.Components.Dialogs
+@using TodoX.Web.Models
 @using TodoX.Web.Models.Catalog
 @inject CatalogAdminRepository Catalog
+@inject AuthStateService AuthState
 @inject IDialogService DialogService
 @inject ISnackbar Snackbar
 
@@ -13,6 +15,14 @@
             <MudText Typo="Typo.h4" Class="todox-page-title">Quản lý dịch vụ</MudText>
             <MudText Typo="Typo.body1" Class="todox-page-subtitle">Dịch vụ thương mại, ảnh minh họa, engine và giá bán.</MudText>
         </div>
+        @if (CanManageServices)
+        {
+            <MudButton Class="todox-primary-btn"
+                       StartIcon="@Icons.Material.Filled.Add"
+                       OnClick="OpenAdd">
+                Thêm dịch vụ
+            </MudButton>
+        }
     </MudStack>
 
     @if (_loading)
@@ -88,6 +98,10 @@
     private IReadOnlyList<ServiceDto> _services = new List<ServiceDto>();
     private IReadOnlyList<ServiceCategoryDto> _categories = new List<ServiceCategoryDto>();
 
+    private bool CanManageServices
+        => AuthState.CurrentUser?.IsRoot == true
+           || AuthState.CurrentUser?.Role is TodoXUserRole.Admin or TodoXUserRole.SystemOperator;
+
     protected override async Task OnInitializedAsync() => await Reload();
 
     private async Task Reload()
@@ -116,6 +130,28 @@
         }
 
         return $"Từ {svc.MinSellPoints:0} điểm";
+    }
+
+    private async Task OpenAdd()
+    {
+        if (!CanManageServices)
+        {
+            Snackbar.Add("Bạn không có quyền thêm dịch vụ.", Severity.Error);
+            return;
+        }
+
+        var parameters = new DialogParameters<ServiceDialog>
+        {
+            { x => x.Categories, _categories }
+        };
+        var dialog = await DialogService.ShowAsync<ServiceDialog>("Thêm dịch vụ", parameters);
+        var result = await dialog.Result;
+        if (result is not null && !result.Canceled && result.Data is ServiceDto model)
+        {
+            await Catalog.InsertServiceAsync(model);
+            Snackbar.Add("Đã thêm dịch vụ.", Severity.Success);
+            await Reload();
+        }
     }
 
     private async Task OpenEdit(ServiceDto svc)
