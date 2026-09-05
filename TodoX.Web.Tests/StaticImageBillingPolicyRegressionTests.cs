@@ -73,4 +73,17 @@ public sealed class StaticImageBillingPolicyRegressionTests
         Assert.Equal(2, StaticImageBillingPolicy.ResolveBillableStaticImageCount(2, true));
         Assert.Equal(0, StaticImageBillingPolicy.ResolveBillableStaticImageCount(2, false));
     }
+
+    [Fact]
+    public void RVideoInitialEstimateWiresStaticImageBillingSetting()
+    {
+        var source = File.ReadAllText(Path.Combine(
+            AppContext.BaseDirectory,
+            "..", "..", "..", "..", "TodoX.Web",
+            "Services", "VideoRender", "RVideoInitialPointEstimateService.cs"));
+
+        Assert.Contains("GetChargeStaticImagePointsAsync", source);
+        Assert.Contains("var staticInputCount = StaticImageBillingPolicy.ResolveRVideoStaticInputCount(imageSources);", source);
+        Assert.Contains("var imageCount = StaticImageBillingPolicy.ResolveBillableStaticImageCount(staticInputCount, chargeStaticImagePoints);", source);
+    }
 }

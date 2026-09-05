@@ -217,13 +217,6 @@ public sealed class SceneImageBatchRenderHandler : IRenderJobHandler
                 ? ServiceSellPriceQualityTiers.Premium
                 : ServiceSellPriceQualityTiers.Standard;
         var customerId = input.CustomerId ?? job.CustomerId;
-        var imageSources = new List<RVideoEffectiveSceneImageSource>();
-        foreach (var scene in imageWorkScenes)
-        {
-            var selected = await _versions.GetSelectedImageVersionAsync(scene.Id, ct);
-            imageSources.Add(RVideoEffectiveSceneImageSourceResolver.Resolve(scene, settings, selected, project));
-        }
-        var imageCount = StaticImageBillingPolicy.ResolveRVideoStaticInputCount(imageSources);
         var estimate = await _initialEstimate.EstimateInitialRVideoPointsAsync(
             new RVideoInitialPointEstimateRequest(
                 billingOperationId,

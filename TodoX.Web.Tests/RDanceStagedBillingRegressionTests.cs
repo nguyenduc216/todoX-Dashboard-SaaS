@@ -19,7 +19,7 @@ public sealed class RDanceStagedBillingRegressionTests
     }
 
     [Fact]
-    public void QueueRenderSubtractsAlreadyChargedReferenceImage()
+    public void QueueRenderUsesStaticInputCountWithoutReferenceChargeGating()
     {
         var source = ReadRepoFile("Services", "DanceSell", "DanceSellPhase2Services.cs");
         var queue = source[source.IndexOf("public async Task<DanceSellJobDto> QueueRenderAsync", StringComparison.Ordinal)..];
@@ -38,7 +38,8 @@ public sealed class RDanceStagedBillingRegressionTests
         Assert.Contains("await _repo.QueueForRenderAsync", queue);
         Assert.Contains("RequestJson = DanceSellRepository.ToJson(new { job.Id, job.PreparedReferenceUrl, job.MotionVideoUrl, job.Prompt, businessMode = job.Mode, providerMode, job.CharacterOrientation, job.Ratio, durationSeconds = retryDurationSeconds })", retry);
         Assert.DoesNotContain("_wallets.ChargeAsync", retry);
-        Assert.Contains("alreadyChargedImage", queue);
+        Assert.DoesNotContain("alreadyChargedImage", queue);
+        Assert.DoesNotContain("referenceOperation", queue);
         Assert.Contains("imagePointsToChargeNow", queue);
         Assert.Contains("videoPointsToChargeNow", queue);
         Assert.Contains("voicePointsToChargeNow", queue);
@@ -53,7 +54,10 @@ public sealed class RDanceStagedBillingRegressionTests
         Assert.Contains("planned_points = voicePointsToChargeNow", queue);
         Assert.Contains("charged_points = voicePointsToChargeNow", queue);
         Assert.Contains("PointCostEstimate = chargeNow", queue);
-        Assert.Contains("var imageCount = alreadyChargedImage > 0m ? 0 : billableStaticImageCount;", queue);
+        Assert.Contains("var imageCount = billableStaticImageCount;", queue);
+        var detail = ReadRepoFile("Components", "Pages", "RDanceJobDetail.razor");
+        Assert.DoesNotContain("DanceOperations.GetLatestOperationAsync(_job.Id, DanceSellOperationTypes.ReferenceImage", detail);
+        Assert.Contains("var imageCount = StaticImageBillingPolicy.ResolveBillableStaticImageCount(staticImageCount, chargeStaticImagePoints);", detail);
     }
 
     [Fact]

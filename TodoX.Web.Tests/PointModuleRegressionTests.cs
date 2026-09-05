@@ -303,7 +303,7 @@ public sealed class PointModuleRegressionTests
         Assert.Contains("total_charged_points = chargeNow", source, StringComparison.Ordinal);
         Assert.Contains("PointCostEstimate = chargeNow", source, StringComparison.Ordinal);
         Assert.Contains("chargeNow", source, StringComparison.Ordinal);
-        Assert.Contains("var imageCount = alreadyChargedImage > 0m ? 0 : billableStaticImageCount;", source, StringComparison.Ordinal);
+        Assert.Contains("var imageCount = billableStaticImageCount;", source, StringComparison.Ordinal);
     }
 
     [Fact]

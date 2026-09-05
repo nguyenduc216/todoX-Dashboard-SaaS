@@ -105,11 +105,13 @@ public sealed class RVideoInitialPointEstimateService : IRVideoInitialPointEstim
 {
     private readonly IPointPricingService _pointPricing;
     private readonly WalletService _wallets;
+    private readonly TokenSettingsService _tokenSettings;
 
-    public RVideoInitialPointEstimateService(IPointPricingService pointPricing, WalletService wallets)
+    public RVideoInitialPointEstimateService(IPointPricingService pointPricing, WalletService wallets, TokenSettingsService tokenSettings)
     {
         _pointPricing = pointPricing;
         _wallets = wallets;
+        _tokenSettings = tokenSettings;
     }
 
     public async Task<RVideoInitialPointEstimate> EstimateInitialRVideoPointsAsync(
@@ -127,7 +129,9 @@ public sealed class RVideoInitialPointEstimateService : IRVideoInitialPointEstim
                 : await request.SelectedImageResolver(scene, ct);
             imageSources.Add(RVideoEffectiveSceneImageSourceResolver.Resolve(scene, request.Settings, selected, request.Project));
         }
-        var imageCount = StaticImageBillingPolicy.ResolveRVideoStaticInputCount(imageSources);
+        var staticInputCount = StaticImageBillingPolicy.ResolveRVideoStaticInputCount(imageSources);
+        var chargeStaticImagePoints = await _tokenSettings.GetChargeStaticImagePointsAsync();
+        var imageCount = StaticImageBillingPolicy.ResolveBillableStaticImageCount(staticInputCount, chargeStaticImagePoints);
 
         var videoScenes = billingScenes
             .Select(scene => new PreRenderVideoScene(scene.Id, scene.DurationSeconds))

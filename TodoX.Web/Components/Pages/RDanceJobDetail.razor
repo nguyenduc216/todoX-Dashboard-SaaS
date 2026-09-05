@@ -1405,14 +1405,7 @@
             : ServiceSellPriceQualityTiers.Standard;
         var chargeStaticImagePoints = await TokenSettings.GetChargeStaticImagePointsAsync();
         var staticImageCount = StaticImageBillingPolicy.ResolveRdanceStaticInputCount(_job);
-        var billableStaticImageCount = StaticImageBillingPolicy.ResolveBillableStaticImageCount(staticImageCount, chargeStaticImagePoints);
-        var referenceOperation = _job.ReferenceMode == DanceSellReferenceModes.DirectReference
-            ? null
-            : await DanceOperations.GetLatestOperationAsync(_job.Id, DanceSellOperationTypes.ReferenceImage, CancellationToken.None);
-        var alreadyChargedImage = referenceOperation?.BillingStatus == DanceSellBillingStatuses.Charged
-            ? referenceOperation.TodoxPointsCharged ?? 0m
-            : 0m;
-        var imageCount = alreadyChargedImage > 0m ? 0 : billableStaticImageCount;
+        var imageCount = StaticImageBillingPolicy.ResolveBillableStaticImageCount(staticImageCount, chargeStaticImagePoints);
 
         return await PointPricing.EstimateAsync(new PointPricingEstimateRequest(
             service.Id,

@@ -1771,13 +1771,7 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
         var chargeStaticImagePoints = await _tokenSettings.GetChargeStaticImagePointsAsync();
         var staticInputCount = StaticImageBillingPolicy.ResolveRdanceStaticInputCount(job);
         var billableStaticImageCount = StaticImageBillingPolicy.ResolveBillableStaticImageCount(staticInputCount, chargeStaticImagePoints);
-        var referenceOperation = job.ReferenceMode == DanceSellReferenceModes.DirectReference
-            ? null
-            : await _operations.GetLatestOperationAsync(job.Id, DanceSellOperationTypes.ReferenceImage, ct);
-        var alreadyChargedImage = referenceOperation?.BillingStatus == DanceSellBillingStatuses.Charged
-            ? referenceOperation.TodoxPointsCharged ?? 0m
-            : 0m;
-        var imageCount = alreadyChargedImage > 0m ? 0 : billableStaticImageCount;
+        var imageCount = billableStaticImageCount;
         var pointEstimate = await _pointPricing.EstimateAsync(new PointPricingEstimateRequest(
             serviceId,
             imageCount,
@@ -1791,9 +1785,7 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
         var videoPointsToChargeNow = pointEstimate.Video.Points;
         var voicePointsToChargeNow = pointEstimate.Voice.Points;
         var chargeNow = imagePointsToChargeNow + videoPointsToChargeNow + voicePointsToChargeNow;
-        // The reference image may already have been billed in an earlier operation.
-        // This render charges only the components still due now.
-        var logicalTotalPoints = alreadyChargedImage + chargeNow;
+        var logicalTotalPoints = chargeNow;
         var charge = await _wallets.ChargeAsync(
             user.CustomerId,
             user.UserId,
@@ -1841,7 +1833,7 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
                 {
                     planned_points = imagePointsToChargeNow,
                     charged_points = imagePointsToChargeNow,
-                    charge_reference = referenceOperation?.Id
+                    charge_reference = job.Id
                 },
                 video = new
                 {
