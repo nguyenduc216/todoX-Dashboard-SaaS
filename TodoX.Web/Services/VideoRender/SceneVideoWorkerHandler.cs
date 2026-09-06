@@ -1665,7 +1665,14 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
 
     private static object? BuildSubmitFailureDiagnostics(Exception exception)
     {
-        if (exception is not VideoProviderTransientException transient || transient.InnerException is not Ai79TaskSubmitException ai79)
+        var ai79 = exception switch
+        {
+            Ai79TaskSubmitException direct => direct,
+            VideoProviderTransientException { InnerException: Ai79TaskSubmitException inner } => inner,
+            _ => null
+        };
+
+        if (ai79 is null)
         {
             return null;
         }

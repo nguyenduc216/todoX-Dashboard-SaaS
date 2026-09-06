@@ -3,6 +3,7 @@ using System.Runtime.Serialization;
 using System.Net;
 using System.Text.Json;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using TodoX.Web.Services.AiCharacters;
 using TodoX.Web.Data;
@@ -568,8 +569,109 @@ public sealed class RVideoVideoHotfixTests
         Assert.Equal("79ai.net", metadata.RootElement.GetProperty("domain").GetString());
         Assert.Equal("veo_omni", metadata.RootElement.GetProperty("model").GetString());
         Assert.Equal("video", metadata.RootElement.GetProperty("operation").GetString());
-        Assert.Equal(1, metadata.RootElement.GetProperty("fileCount").GetInt32());
+        Assert.Equal("flash", metadata.RootElement.GetProperty("mode").GetString());
+        Assert.Equal("6", metadata.RootElement.GetProperty("duration").GetString());
+        Assert.Equal("9:16", metadata.RootElement.GetProperty("ratio").GetString());
+        Assert.Equal("9:16", metadata.RootElement.GetProperty("aspect_ratio").GetString());
+        Assert.Equal("720p", metadata.RootElement.GetProperty("resolution").GetString());
+        Assert.Equal("video", metadata.RootElement.GetProperty("type").GetString());
+        Assert.Equal("project-1", metadata.RootElement.GetProperty("project_id").GetString());
+        Assert.Equal(JsonValueKind.Null, metadata.RootElement.GetProperty("privacy").ValueKind);
+        Assert.Equal("false", metadata.RootElement.GetProperty("translate_to_en").GetString());
+        Assert.Equal(2, metadata.RootElement.GetProperty("imageCount").GetInt32());
+        Assert.Equal(0, metadata.RootElement.GetProperty("fileCount").GetInt32());
+        var images = metadata.RootElement.GetProperty("images");
+        Assert.Equal(2, images.GetArrayLength());
+        Assert.Equal("image", images[0].GetProperty("fieldName").GetString());
+        Assert.True(images[0].GetProperty("present").GetBoolean());
+        Assert.Equal("example.test", images[0].GetProperty("urlHost").GetString());
+        Assert.Equal("/reference-character.png", images[0].GetProperty("urlPath").GetString());
+        Assert.Equal("https://example.test/reference-character.png", images[0].GetProperty("sanitizedUrl").GetString());
+        Assert.Equal("image_2", images[1].GetProperty("fieldName").GetString());
+        Assert.True(images[1].GetProperty("isImage2").GetBoolean());
+        Assert.False(images[1].GetProperty("duplicateOfPrevious").GetBoolean());
         Assert.DoesNotContain("secret-token", ex.SanitizedRequestMetadataJson);
+    }
+
+    [Fact]
+    public void RVideo79AiSubmitFailureCapturesWrappedTransientDiagnostics()
+    {
+        var direct = new Ai79TaskSubmitException(
+            "79AI submit failed",
+            """{"error":"bad"}""",
+            HttpStatusCode.BadRequest,
+            "bad_request",
+            sanitizedRequestMetadataJson: """{"mode":"flash"}""");
+        var wrapped = new VideoProviderTransientException("submit transient", "submit_transient", direct);
+
+        var method = typeof(SceneVideoWorkerHandler).GetMethod("BuildSubmitFailureDiagnostics", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var diagnostics = method!.Invoke(null, new object[] { wrapped });
+        Assert.NotNull(diagnostics);
+
+        var json = JsonSerializer.Serialize(diagnostics);
+        using var doc = JsonDocument.Parse(json);
+        Assert.Equal(400, doc.RootElement.GetProperty("httpStatus").GetInt32());
+        Assert.Equal("bad_request", doc.RootElement.GetProperty("providerErrorCode").GetString());
+        Assert.Equal("79AI submit failed", doc.RootElement.GetProperty("providerErrorMessage").GetString());
+        Assert.Equal("""{"error":"bad"}""", doc.RootElement.GetProperty("sanitizedResponse").GetString());
+        Assert.Equal("""{"mode":"flash"}""", doc.RootElement.GetProperty("sanitizedRequestMetadata").GetString());
+    }
+
+    [Fact]
+    public void RVideo79AiSubmitFailureCapturesDirectDiagnostics()
+    {
+        var direct = new Ai79TaskSubmitException(
+            "79AI submit failed",
+            """{"error":"bad"}""",
+            HttpStatusCode.BadRequest,
+            "bad_request",
+            sanitizedRequestMetadataJson: """{"mode":"flash"}""");
+
+        var method = typeof(SceneVideoWorkerHandler).GetMethod("BuildSubmitFailureDiagnostics", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var diagnostics = method!.Invoke(null, new object[] { direct });
+        Assert.NotNull(diagnostics);
+
+        var json = JsonSerializer.Serialize(diagnostics);
+        using var doc = JsonDocument.Parse(json);
+        Assert.Equal(400, doc.RootElement.GetProperty("httpStatus").GetInt32());
+        Assert.Equal("bad_request", doc.RootElement.GetProperty("providerErrorCode").GetString());
+        Assert.Equal("79AI submit failed", doc.RootElement.GetProperty("providerErrorMessage").GetString());
+        Assert.Equal("""{"error":"bad"}""", doc.RootElement.GetProperty("sanitizedResponse").GetString());
+        Assert.Equal("""{"mode":"flash"}""", doc.RootElement.GetProperty("sanitizedRequestMetadata").GetString());
+    }
+
+    [Fact]
+    public async Task SceneVideoJobWorkerTerminalFallbackFailsVersionWithoutTaskId()
+    {
+        var versionsProxy = DispatchProxy.Create<ISceneMediaVersioningService, SceneMediaVersioningSyncProxy>();
+        var proxy = (SceneMediaVersioningSyncProxy)(object)versionsProxy;
+        proxy.Version = new SceneVideoVersionDto
+        {
+            Id = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+            LogicalRequestId = "logical-1",
+            ProviderTaskId = null
+        };
+
+        var scope = new FakeServiceScope(new FakeServiceProvider(versionsProxy));
+        var job = new RenderJobDto
+        {
+            InputJson = JsonSerializer.Serialize(new SceneVideoRenderWorkItemInput
+            {
+                LogicalRequestId = "logical-1"
+            })
+        };
+        var method = typeof(SceneVideoJobWorker).GetMethod("SyncTerminalSceneVideoVersionAsync", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        await (Task)method!.Invoke(null, new object[] { scope, job, new InvalidOperationException("boom"), CancellationToken.None })!;
+
+        Assert.Equal(Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"), proxy.FailedVersionId);
+        Assert.Equal("InvalidOperationException", proxy.FailedErrorCode);
+        Assert.Equal("boom", proxy.FailedErrorMessage);
     }
 
     [Fact]
@@ -580,7 +682,8 @@ public sealed class RVideoVideoHotfixTests
         Assert.Contains("SyncTerminalSceneVideoVersionAsync", source);
         Assert.Contains("GetSceneVideoVersionByLogicalRequestIdAsync", source);
         Assert.Contains("FailSceneVideoVersionAsync", source);
-        Assert.Contains("RenderJobTerminalFailureException", source);
+        Assert.Contains("job.AttemptCount < job.MaxAttempts", source);
+        Assert.Contains("await SyncTerminalSceneVideoVersionAsync(scope, job, ex, stoppingToken);", source);
     }
 
     [Fact]
@@ -1138,6 +1241,73 @@ public sealed class RVideoVideoHotfixTests
             {
                 Content = new StringContent(_responseJson)
             };
+        }
+    }
+
+    private sealed class FakeServiceScope : IServiceScope
+    {
+        public FakeServiceScope(IServiceProvider serviceProvider)
+        {
+            ServiceProvider = serviceProvider;
+        }
+
+        public IServiceProvider ServiceProvider { get; }
+
+        public void Dispose()
+        {
+        }
+    }
+
+    private sealed class FakeServiceProvider : IServiceProvider
+    {
+        private readonly IServiceScopeFactory _scopeFactory;
+
+        public FakeServiceProvider(IServiceScopeFactory scopeFactory)
+        {
+            _scopeFactory = scopeFactory;
+        }
+
+        public object? GetService(Type serviceType)
+            => serviceType == typeof(IServiceScopeFactory) ? _scopeFactory : null;
+    }
+
+    private sealed class FakeServiceScopeFactory : IServiceScopeFactory
+    {
+        private readonly IServiceProvider _provider;
+
+        public FakeServiceScopeFactory(IServiceProvider provider)
+        {
+            _provider = provider;
+        }
+
+        public IServiceScope CreateScope()
+            => new FakeServiceScope(_provider);
+    }
+
+    private sealed class SceneMediaVersioningSyncProxy : DispatchProxy
+    {
+        public SceneVideoVersionDto? Version { get; set; }
+        public Guid? FailedVersionId { get; private set; }
+        public string? FailedErrorCode { get; private set; }
+        public string? FailedErrorMessage { get; private set; }
+
+        protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
+        {
+            if (targetMethod?.Name == nameof(ISceneMediaVersioningService.GetSceneVideoVersionByLogicalRequestIdAsync))
+            {
+                var logicalRequestId = (string)args![0]!;
+                return Task.FromResult(Version?.LogicalRequestId == logicalRequestId ? Version : null);
+            }
+
+            if (targetMethod?.Name == nameof(ISceneMediaVersioningService.FailSceneVideoVersionAsync))
+            {
+                FailedVersionId = (Guid)args![0]!;
+                FailedErrorCode = (string?)args[1];
+                FailedErrorMessage = (string?)args[2];
+                return Task.CompletedTask;
+            }
+
+            throw new NotSupportedException(targetMethod?.Name);
         }
     }
 

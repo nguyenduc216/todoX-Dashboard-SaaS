@@ -95,6 +95,7 @@ public sealed class SceneVideoJobWorker : BackgroundService
                     }
                     else
                     {
+                        await SyncTerminalSceneVideoVersionAsync(scope, job, ex, stoppingToken);
                         await jobs.AddEventAsync(job.Id, "JOB_FAILED", ex.Message,
                             new { ex.GetType().Name, job.AttemptCount, job.MaxAttempts }, "error", stoppingToken);
                         await jobs.MarkStatusAsync(job.Id, RenderJobStatuses.Failed, errorCode: ex.GetType().Name, errorMessage: ex.Message, ct: stoppingToken);

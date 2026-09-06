@@ -235,8 +235,10 @@ public sealed class Ai79TaskClient : IAi79TaskClient
             request.Domain,
             request.Model,
             request.Operation,
-            request.Options,
-            request.Images.Count);
+            fields: request.Options,
+            images: request.Images,
+            firstImageField: request.FirstImageField,
+            secondImageField: request.SecondImageField);
 
         var form = new Dictionary<string, string>
         {
@@ -283,8 +285,8 @@ public sealed class Ai79TaskClient : IAi79TaskClient
             request.Domain,
             request.Model,
             request.Operation,
-            request.Fields,
-            request.Files.Count);
+            fields: request.Fields,
+            fileCount: request.Files.Count);
         using var body = new MultipartFormDataContent();
         var form = new Dictionary<string, string?>
         {
@@ -556,8 +558,14 @@ public sealed class Ai79TaskClient : IAi79TaskClient
                 request.Domain,
                 request.Model,
                 Ai79TaskOperation.Video,
-                new Dictionary<string, string?>(),
-                1),
+                mode: request.Mode,
+                ratio: request.Ratio,
+                type: request.SubType,
+                projectId: request.ProjectId,
+                fields: new Dictionary<string, string?>
+                {
+                    ["background_source"] = request.BackgroundSource
+                }),
             timeoutCts.Token);
     }
 
@@ -651,9 +659,33 @@ public sealed class Ai79TaskClient : IAi79TaskClient
         string domain,
         string model,
         Ai79TaskOperation operation,
+        string? mode = null,
+        string? duration = null,
+        string? ratio = null,
+        string? aspectRatio = null,
+        string? resolution = null,
+        string? type = null,
+        string? projectId = null,
+        string? privacy = null,
+        string? translateToEn = null,
+        IReadOnlyList<string>? images = null,
+        string? firstImageField = null,
+        string? secondImageField = null,
         IReadOnlyDictionary<string, string?>? fields = null,
         int fileCount = 0)
-        => JsonSerializer.Serialize(new
+    {
+        var effectiveFields = fields ?? new Dictionary<string, string?>();
+        var effectiveMode = FirstNonBlank(mode, GetFieldValue(effectiveFields, "mode"));
+        var effectiveDuration = FirstNonBlank(duration, GetFieldValue(effectiveFields, "duration", "duration_seconds", "durationSeconds"));
+        var effectiveRatio = FirstNonBlank(ratio, GetFieldValue(effectiveFields, "ratio"));
+        var effectiveAspectRatio = FirstNonBlank(aspectRatio, GetFieldValue(effectiveFields, "aspect_ratio", "aspectRatio"));
+        var effectiveResolution = FirstNonBlank(resolution, GetFieldValue(effectiveFields, "resolution"));
+        var effectiveType = FirstNonBlank(type, GetFieldValue(effectiveFields, "type"));
+        var effectiveProjectId = FirstNonBlank(projectId, GetFieldValue(effectiveFields, "project_id", "projectId"));
+        var effectivePrivacy = FirstNonBlank(privacy, GetFieldValue(effectiveFields, "privacy"));
+        var effectiveTranslateToEn = FirstNonBlank(translateToEn, GetFieldValue(effectiveFields, "translate_to_en", "translateToEn"));
+
+        return JsonSerializer.Serialize(new
         {
             baseUrl,
             endpointPath,
@@ -661,8 +693,81 @@ public sealed class Ai79TaskClient : IAi79TaskClient
             model,
             operation = operation.ToString().ToLowerInvariant(),
             fileCount,
-            extraFieldNames = fields?.Keys.Where(key => !string.IsNullOrWhiteSpace(key)).OrderBy(key => key).ToArray() ?? Array.Empty<string>()
+            mode = effectiveMode,
+            duration = effectiveDuration,
+            ratio = effectiveRatio,
+            aspect_ratio = effectiveAspectRatio,
+            resolution = effectiveResolution,
+            type = effectiveType,
+            project_id = effectiveProjectId,
+            privacy = effectivePrivacy,
+            translate_to_en = effectiveTranslateToEn,
+            imageCount = images?.Count ?? 0,
+            images = BuildImageMetadata(images, firstImageField, secondImageField),
+            extraFieldNames = effectiveFields.Keys.Where(key => !string.IsNullOrWhiteSpace(key)).OrderBy(key => key).ToArray()
         }, JsonOptions);
+    }
+
+    private static string? GetFieldValue(IReadOnlyDictionary<string, string?> fields, params string[] names)
+    {
+        foreach (var name in names)
+        {
+            if (fields.TryGetValue(name, out var value) && !string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+        }
+
+        return null;
+    }
+
+    private static object[] BuildImageMetadata(IReadOnlyList<string>? images, string? firstImageField, string? secondImageField)
+    {
+        if (images is null || images.Count == 0)
+        {
+            return Array.Empty<object>();
+        }
+
+        var metadata = new object[images.Count];
+        for (var i = 0; i < images.Count; i++)
+        {
+            var url = images[i];
+            var fieldName = i switch
+            {
+                0 => firstImageField ?? "image",
+                1 => secondImageField ?? "image_2",
+                _ => $"image_{i + 1}"
+            };
+            metadata[i] = BuildImageMetadata(fieldName, url, i > 0 && string.Equals(url, images[i - 1], StringComparison.Ordinal));
+        }
+
+        return metadata;
+    }
+
+    private static object BuildImageMetadata(string fieldName, string? url, bool duplicateOfPrevious)
+    {
+        string? sanitizedUrl = null;
+        string? urlHost = null;
+        string? urlPath = null;
+        if (Uri.TryCreate(url, UriKind.Absolute, out var absolute)
+            && (absolute.Scheme == Uri.UriSchemeHttp || absolute.Scheme == Uri.UriSchemeHttps))
+        {
+            urlHost = absolute.Host;
+            urlPath = absolute.AbsolutePath;
+            sanitizedUrl = $"{absolute.Scheme}://{absolute.Host}{absolute.AbsolutePath}";
+        }
+
+        return new
+        {
+            fieldName,
+            present = !string.IsNullOrWhiteSpace(url),
+            isImage2 = string.Equals(fieldName, "image_2", StringComparison.Ordinal),
+            duplicateOfPrevious,
+            urlHost,
+            urlPath,
+            sanitizedUrl
+        };
+    }
 
     public async Task<Ai79ImageUploadResult> UploadImageAsync(Ai79ImageUploadRequest request, CancellationToken ct = default)
     {
