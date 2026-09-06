@@ -136,21 +136,26 @@ public sealed record Ai79ImageUploadResult(
 
 public sealed class Ai79TaskSubmitException : InvalidOperationException
 {
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
     public Ai79TaskSubmitException(
         string errorMessage,
         string sanitizedResponseJson,
         HttpStatusCode? httpStatusCode = null,
         string? errorCode = null,
-        Exception? innerException = null)
+        Exception? innerException = null,
+        string? sanitizedRequestMetadataJson = null)
         : base(errorMessage, innerException)
     {
         ErrorMessage = errorMessage;
         SanitizedResponseJson = sanitizedResponseJson;
+        SanitizedRequestMetadataJson = sanitizedRequestMetadataJson ?? JsonSerializer.Serialize(string.Empty, JsonOptions);
         HttpStatusCode = httpStatusCode;
         ErrorCode = errorCode;
     }
 
     public string SanitizedResponseJson { get; }
+    public string SanitizedRequestMetadataJson { get; }
     public HttpStatusCode? HttpStatusCode { get; }
     public string? ErrorCode { get; }
     public string ErrorMessage { get; }
@@ -224,6 +229,14 @@ public sealed class Ai79TaskClient : IAi79TaskClient
     public async Task<Ai79TaskSubmitResult> SubmitAsync(Ai79TaskSubmitRequest request, CancellationToken ct = default)
     {
         EnsureGenerateImageContract(request);
+        var sanitizedRequestMetadata = BuildSubmitRequestMetadata(
+            request.BaseUrl,
+            request.EndpointPath,
+            request.Domain,
+            request.Model,
+            request.Operation,
+            request.Options,
+            request.Images.Count);
 
         var form = new Dictionary<string, string>
         {
@@ -259,11 +272,19 @@ public sealed class Ai79TaskClient : IAi79TaskClient
 
         using var body = new FormUrlEncodedContent(form);
         using var response = await _httpClient.PostAsync(BuildUri(request.BaseUrl, request.EndpointPath), body, ct);
-        return await ReadSubmitResultAsync(response, request.AccessToken, request.EndpointPath, request.Operation, ct);
+        return await ReadSubmitResultAsync(response, request.AccessToken, request.EndpointPath, request.Operation, sanitizedRequestMetadata, ct);
     }
 
     public async Task<Ai79TaskSubmitResult> SubmitMultipartAsync(Ai79MultipartTaskSubmitRequest request, CancellationToken ct = default)
     {
+        var sanitizedRequestMetadata = BuildSubmitRequestMetadata(
+            request.BaseUrl,
+            request.EndpointPath,
+            request.Domain,
+            request.Model,
+            request.Operation,
+            request.Fields,
+            request.Files.Count);
         using var body = new MultipartFormDataContent();
         var form = new Dictionary<string, string?>
         {
@@ -299,7 +320,7 @@ public sealed class Ai79TaskClient : IAi79TaskClient
         }
 
         using var response = await _httpClient.PostAsync(BuildUri(request.BaseUrl, request.EndpointPath), body, ct);
-        return await ReadSubmitResultAsync(response, request.AccessToken, request.EndpointPath, request.Operation, ct);
+        return await ReadSubmitResultAsync(response, request.AccessToken, request.EndpointPath, request.Operation, sanitizedRequestMetadata, ct);
     }
 
     public async Task<Ai79MediaUploadResult> UploadMediaAsync(Ai79MediaUploadRequest request, CancellationToken ct = default)
@@ -524,7 +545,20 @@ public sealed class Ai79TaskClient : IAi79TaskClient
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeoutCts.CancelAfter(_motionControlSubmitTimeout);
         using var response = await _httpClient.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, timeoutCts.Token);
-        return await ReadSubmitResultAsync(response, request.AccessToken, request.EndpointPath, Ai79TaskOperation.Video, timeoutCts.Token);
+        return await ReadSubmitResultAsync(
+            response,
+            request.AccessToken,
+            request.EndpointPath,
+            Ai79TaskOperation.Video,
+            BuildSubmitRequestMetadata(
+                request.BaseUrl,
+                request.EndpointPath,
+                request.Domain,
+                request.Model,
+                Ai79TaskOperation.Video,
+                new Dictionary<string, string?>(),
+                1),
+            timeoutCts.Token);
     }
 
     private static async Task<Ai79TaskSubmitResult> ReadSubmitResultAsync(
@@ -532,6 +566,7 @@ public sealed class Ai79TaskClient : IAi79TaskClient
         string accessToken,
         string endpointPath,
         Ai79TaskOperation operation,
+        string sanitizedRequestMetadataJson,
         CancellationToken ct)
     {
         var json = await response.Content.ReadAsStringAsync(ct);
@@ -541,7 +576,8 @@ public sealed class Ai79TaskClient : IAi79TaskClient
                 "79AI submit response was empty.",
                 JsonSerializer.Serialize(string.Empty, JsonOptions),
                 response.StatusCode,
-                response.IsSuccessStatusCode ? "empty_response" : $"http_{(int)response.StatusCode}");
+                response.IsSuccessStatusCode ? "empty_response" : $"http_{(int)response.StatusCode}",
+                sanitizedRequestMetadataJson: sanitizedRequestMetadataJson);
         }
 
         JsonDocument document;
@@ -558,7 +594,8 @@ public sealed class Ai79TaskClient : IAi79TaskClient
                     JsonSerializer.Serialize(SanitizeText(json, accessToken), JsonOptions),
                     response.StatusCode,
                     $"http_{(int)response.StatusCode}",
-                    ex);
+                    ex,
+                    sanitizedRequestMetadataJson);
             }
 
             throw new Ai79TaskSubmitException(
@@ -566,7 +603,8 @@ public sealed class Ai79TaskClient : IAi79TaskClient
                 JsonSerializer.Serialize(SanitizeText(json, accessToken), JsonOptions),
                 response.StatusCode,
                 "invalid_json",
-                ex);
+                ex,
+                sanitizedRequestMetadataJson);
         }
 
         using (document)
@@ -580,7 +618,7 @@ public sealed class Ai79TaskClient : IAi79TaskClient
                 var errorCode = providerError?.ErrorCode ?? $"http_{(int)response.StatusCode}";
                 var errorMessage = providerError?.ErrorMessage
                     ?? $"79AI submit returned HTTP {(int)response.StatusCode}.";
-                throw new Ai79TaskSubmitException(errorMessage, sanitized, response.StatusCode, errorCode);
+                throw new Ai79TaskSubmitException(errorMessage, sanitized, response.StatusCode, errorCode, sanitizedRequestMetadataJson: sanitizedRequestMetadataJson);
             }
 
             if (providerError is not null)
@@ -589,7 +627,8 @@ public sealed class Ai79TaskClient : IAi79TaskClient
                     $"79AI {ResolveOperationName(endpointPath)} submit failed: {providerError.ErrorMessage}",
                     sanitized,
                     response.StatusCode,
-                    providerError.ErrorCode ?? "provider_error");
+                    providerError.ErrorCode ?? "provider_error",
+                    sanitizedRequestMetadataJson: sanitizedRequestMetadataJson);
             }
 
             if (string.IsNullOrWhiteSpace(taskId))
@@ -598,12 +637,32 @@ public sealed class Ai79TaskClient : IAi79TaskClient
                     "79AI submit response missing async task identifier.",
                     sanitized,
                     response.StatusCode,
-                    "missing_task_id");
+                    "missing_task_id",
+                    sanitizedRequestMetadataJson: sanitizedRequestMetadataJson);
             }
 
             return new Ai79TaskSubmitResult(taskId!, sanitized);
         }
     }
+
+    private static string BuildSubmitRequestMetadata(
+        string baseUrl,
+        string endpointPath,
+        string domain,
+        string model,
+        Ai79TaskOperation operation,
+        IReadOnlyDictionary<string, string?>? fields = null,
+        int fileCount = 0)
+        => JsonSerializer.Serialize(new
+        {
+            baseUrl,
+            endpointPath,
+            domain,
+            model,
+            operation = operation.ToString().ToLowerInvariant(),
+            fileCount,
+            extraFieldNames = fields?.Keys.Where(key => !string.IsNullOrWhiteSpace(key)).OrderBy(key => key).ToArray() ?? Array.Empty<string>()
+        }, JsonOptions);
 
     public async Task<Ai79ImageUploadResult> UploadImageAsync(Ai79ImageUploadRequest request, CancellationToken ct = default)
     {

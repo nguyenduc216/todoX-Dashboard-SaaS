@@ -1,7 +1,12 @@
+using System.Text.Json;
+using TodoX.Web.Services.VideoRender;
+
 namespace TodoX.Web.Services.Render;
 
 public sealed class SceneVideoJobWorker : BackgroundService
 {
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IConfiguration _config;
     private readonly ILogger<SceneVideoJobWorker> _logger;
@@ -71,6 +76,7 @@ public sealed class SceneVideoJobWorker : BackgroundService
                 }
                 catch (RenderJobTerminalFailureException ex)
                 {
+                    await SyncTerminalSceneVideoVersionAsync(scope, job, ex, stoppingToken);
                     await jobs.AddEventAsync(job.Id, "JOB_FAILED", ex.Message,
                         new { ex.GetType().Name, job.AttemptCount, job.MaxAttempts }, "error", stoppingToken);
                     await jobs.MarkStatusAsync(job.Id, RenderJobStatuses.Failed, errorCode: ex.GetType().Name, errorMessage: ex.Message, ct: stoppingToken);
@@ -105,5 +111,23 @@ public sealed class SceneVideoJobWorker : BackgroundService
                 await Task.Delay(idleDelay, stoppingToken);
             }
         }
+    }
+
+    private static async Task SyncTerminalSceneVideoVersionAsync(IServiceScope scope, RenderJobDto job, Exception failure, CancellationToken ct)
+    {
+        var versions = scope.ServiceProvider.GetRequiredService<ISceneMediaVersioningService>();
+        var input = JsonSerializer.Deserialize<SceneVideoRenderWorkItemInput>(job.InputJson, JsonOptions);
+        if (input is null || string.IsNullOrWhiteSpace(input.LogicalRequestId))
+        {
+            return;
+        }
+
+        var version = await versions.GetSceneVideoVersionByLogicalRequestIdAsync(input.LogicalRequestId, ct);
+        if (version is null || version.ProviderTaskId is not null && !string.IsNullOrWhiteSpace(version.ProviderTaskId))
+        {
+            return;
+        }
+
+        await versions.FailSceneVideoVersionAsync(version.Id, failure.GetType().Name, failure.Message, ct);
     }
 }

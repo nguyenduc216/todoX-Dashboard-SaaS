@@ -643,9 +643,18 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                 }
                 catch (VideoProviderTransientException ex)
                 {
+                    var diagnostics = BuildSubmitFailureDiagnostics(ex);
                     await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_SUBMIT_FAILED", "warning",
                         "Scene-video provider submit did not complete.",
-                        new { jobId = job.Id, input.ProjectId, input.SceneId, input.SceneIndex, errorCode = ex.ErrorCode }, CancellationToken.None);
+                        new
+                        {
+                            jobId = job.Id,
+                            input.ProjectId,
+                            input.SceneId,
+                            input.SceneIndex,
+                            errorCode = ex.ErrorCode,
+                            diagnostics
+                        }, CancellationToken.None);
                     await MarkPendingReconciliationAsync(input, version.Id, attemptLogicalRequestId, tariffSnapshot, ex.ErrorCode ?? "submit_transient", ex.Message, CancellationToken.None, null);
                     await DeferPollAsync(job, attemptLogicalRequestId, TimeSpan.FromSeconds(Math.Max(1, _options.PollIntervalSeconds)),
                         "SCENE_VIDEO_POLL_SCHEDULED", "Video provider submit transient; retry will reuse the same task flow.", CancellationToken.None);
@@ -658,7 +667,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                         new { jobId = job.Id, input.ProjectId, input.SceneId, input.SceneIndex, errorCode = ex.GetType().Name, imageInputMode = ResolveImageInputMode(input).ToString() }, CancellationToken.None);
                     await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_SUBMIT_FAILED", "error",
                         "Scene-video provider submit failed.",
-                        new { jobId = job.Id, input.ProjectId, input.SceneId, input.SceneIndex, errorCode = ex.GetType().Name }, CancellationToken.None);
+                        new { jobId = job.Id, input.ProjectId, input.SceneId, input.SceneIndex, errorCode = ex.GetType().Name, diagnostics = BuildSubmitFailureDiagnostics(ex) }, CancellationToken.None);
                     throw;
                 }
             }
@@ -1652,6 +1661,23 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         await _repo.AddProjectEventAsync(projectId, "SCENE_VIDEO_RENDER_FAILED", "error",
             $"Scene video render failed for scene {scene.SceneIndex}.",
             new { sceneId = scene.Id, scene.SceneIndex, errorCode, error = errorMessage }, ct);
+    }
+
+    private static object? BuildSubmitFailureDiagnostics(Exception exception)
+    {
+        if (exception is not VideoProviderTransientException transient || transient.InnerException is not Ai79TaskSubmitException ai79)
+        {
+            return null;
+        }
+
+        return new
+        {
+            httpStatus = (int?)ai79.HttpStatusCode,
+            providerErrorCode = ai79.ErrorCode,
+            providerErrorMessage = ai79.ErrorMessage,
+            sanitizedResponse = ai79.SanitizedResponseJson,
+            sanitizedRequestMetadata = ai79.SanitizedRequestMetadataJson
+        };
     }
 
 #if false

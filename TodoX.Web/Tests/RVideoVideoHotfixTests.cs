@@ -541,6 +541,46 @@ public sealed class RVideoVideoHotfixTests
 
         Assert.Contains("***", ex.SanitizedResponseJson);
         Assert.DoesNotContain("secret-token", ex.SanitizedResponseJson);
+        Assert.Contains("/create-video", ex.SanitizedRequestMetadataJson);
+        Assert.DoesNotContain("secret-token", ex.SanitizedRequestMetadataJson);
+    }
+
+    [Fact]
+    public async Task RVideo79AiSubmitFailureCapturesSafeRequestMetadata()
+    {
+        var handler = new CapturingHttpMessageHandler("""{"error":"bad"}""", HttpStatusCode.ServiceUnavailable);
+        var client = new Ai79TaskClient(new HttpClient(handler));
+
+        var ex = await Assert.ThrowsAsync<Ai79TaskSubmitException>(() => client.SubmitAsync(new Ai79TaskSubmitRequest(
+            "https://example.test/ai",
+            "/create-video",
+            "secret-token",
+            "79ai.net",
+            "veo_omni",
+            "Animate the scene.",
+            new[] { "https://example.test/reference-character.png" },
+            new Dictionary<string, string?> { ["type"] = "video", ["translate_to_en"] = "false" },
+            Ai79TaskOperation.Video), CancellationToken.None));
+
+        using var metadata = JsonDocument.Parse(ex.SanitizedRequestMetadataJson);
+        Assert.Equal("https://example.test/ai", metadata.RootElement.GetProperty("baseUrl").GetString());
+        Assert.Equal("/create-video", metadata.RootElement.GetProperty("endpointPath").GetString());
+        Assert.Equal("79ai.net", metadata.RootElement.GetProperty("domain").GetString());
+        Assert.Equal("veo_omni", metadata.RootElement.GetProperty("model").GetString());
+        Assert.Equal("video", metadata.RootElement.GetProperty("operation").GetString());
+        Assert.Equal(1, metadata.RootElement.GetProperty("fileCount").GetInt32());
+        Assert.DoesNotContain("secret-token", ex.SanitizedRequestMetadataJson);
+    }
+
+    [Fact]
+    public void SceneVideoJobWorkerSyncsTerminalFailedVersions()
+    {
+        var source = ReadRepoFile("Services", "Render", "SceneVideoJobWorker.cs");
+
+        Assert.Contains("SyncTerminalSceneVideoVersionAsync", source);
+        Assert.Contains("GetSceneVideoVersionByLogicalRequestIdAsync", source);
+        Assert.Contains("FailSceneVideoVersionAsync", source);
+        Assert.Contains("RenderJobTerminalFailureException", source);
     }
 
     [Fact]
