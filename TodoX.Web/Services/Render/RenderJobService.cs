@@ -19,6 +19,7 @@ public interface IRenderJobService
     Task<(RenderJobDto Job, bool AlreadyActive)> EnqueueForProjectIfNoneActiveAsync(RenderJobCreateModel model, long projectId, CancellationToken ct = default);
 
     Task<(RenderJobDto Job, bool AlreadyActive)> EnqueueForLogCodeIfNoneActiveAsync(RenderJobCreateModel model, string logCode, CancellationToken ct = default);
+    Task<(RenderJobDto Job, bool AlreadyActive)> EnqueueForSceneIfNoneActiveAsync(RenderJobCreateModel model, long sceneId, string? logicalRequestId = null, CancellationToken ct = default);
 
     Task<RenderJobDto?> GetAsync(Guid jobId, CancellationToken ct = default);
     Task<RenderJobDto?> GetByLogCodeAsync(string logCode, CancellationToken ct = default);
@@ -325,6 +326,105 @@ public sealed class RenderJobService : IRenderJobService
         return (job, false);
     }
 
+    public async Task<(RenderJobDto Job, bool AlreadyActive)> EnqueueForSceneIfNoneActiveAsync(RenderJobCreateModel model, long sceneId, string? logicalRequestId = null, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(model.JobType))
+        {
+            throw new ArgumentException("Job type is required.", nameof(model));
+        }
+
+        await _tenant.EnsureLoadedAsync(ct);
+        var jobType = model.JobType.Trim();
+        var requestId = logicalRequestId?.Trim();
+        var initialStatus = NormalizeInitialStatus(model.InitialStatus);
+        var pointCostEstimate = LegacyPointBillingFeatureFlags.NormalizePointCostEstimate(_configuration, model.PointCostEstimate);
+        var pointStatus = LegacyPointBillingFeatureFlags.NormalizePointStatus(_configuration, model.PointStatus, pointCostEstimate);
+
+        using var conn = await _factory.OpenAsync(ct);
+        using var tx = conn.BeginTransaction();
+        await conn.ExecuteAsync(
+            "SELECT pg_advisory_xact_lock(hashtextextended(@lockName, 0));",
+            new { lockName = BuildSceneJobLockName(jobType, sceneId, requestId) },
+            tx);
+
+        var active = await conn.QuerySingleOrDefaultAsync<RenderJobDto>(
+            SelectJobSql +
+            """
+             WHERE job_type = @jobType
+               AND status IN ('queued', 'preparing', 'rendering', 'processing', 'post_processing', 'pending_reconciliation')
+               AND COALESCE(input_json->>'sceneId', input_json->>'scene_id') = @sceneId
+               AND (@logicalRequestId IS NULL
+                    OR COALESCE(input_json->>'logicalRequestId', input_json->>'logical_request_id') = @logicalRequestId)
+             ORDER BY queued_at DESC, created_at DESC
+             LIMIT 1;
+            """,
+            new { jobType, sceneId = sceneId.ToString(), logicalRequestId = requestId }, tx);
+
+        if (active is not null)
+        {
+            tx.Commit();
+            return (active, true);
+        }
+
+        var inputJson = ToJson(model.Input ?? new { });
+        var promptJson = ToJson(model.Prompt ?? new { });
+        var referenceJson = ToJson(model.References ?? Array.Empty<object>());
+        var customerScope = model.CustomerId is null ? "system" : "customer";
+
+        RenderJobDto job;
+        try
+        {
+            job = await conn.QuerySingleAsync<RenderJobDto>(
+                InsertJobSql,
+                new
+                {
+                    tenant = _tenant.TenantId,
+                    user = model.UserId,
+                    customer = model.CustomerId,
+                    type = jobType,
+                    status = initialStatus,
+                    priority = model.Priority,
+                    input = inputJson,
+                    prompt = promptJson,
+                    refs = referenceJson,
+                    logCode = model.LogCode,
+                    pointCost = pointCostEstimate,
+                    pointStatus,
+                    provider = model.ProviderCode,
+                    model = model.ModelCode,
+                    maxAttempts = Math.Max(1, model.MaxAttempts)
+                }, tx);
+        }
+        catch (PostgresException ex) when (IsRenderJobsCustomerIdNotNullViolation(ex))
+        {
+            tx.Rollback();
+            _logger.LogError(ex,
+                "RENDER_JOB_ENQUEUE_SCHEMA_MISMATCH jobType={JobType} userId={UserId} customerId={CustomerId} tenantId={TenantId} customerScope={CustomerScope} logCode={LogCode} sceneId={SceneId} logicalRequestId={LogicalRequestId} sqlState={SqlState} schema={Schema} table={Table} column={Column}",
+                jobType, model.UserId, model.CustomerId, _tenant.TenantId, customerScope, model.LogCode, sceneId, requestId,
+                ex.SqlState, ex.SchemaName, ex.TableName, ex.ColumnName);
+            throw new InvalidOperationException(
+                "Database render_jobs chưa đồng bộ: customer_id đang NOT NULL trong khi system/admin job không có customer. "
+                + "Vui lòng chạy file SQL đồng bộ database do quản trị viên cung cấp.", ex);
+        }
+
+        tx.Commit();
+
+        var eventType = initialStatus == RenderJobStatuses.Draft ? "JOB_CREATED" : "JOB_QUEUED";
+        var eventMessage = initialStatus == RenderJobStatuses.Draft ? "Render job draft saved." : "Render job queued.";
+        await AddEventAsync(job.Id, eventType, eventMessage, new
+        {
+            job.JobType,
+            job.Status,
+            job.Priority,
+            job.PointCostEstimate,
+            job.PointStatus,
+            sceneId,
+            logicalRequestId = requestId
+        }, ct: ct);
+
+        return (job, false);
+    }
+
     public async Task UpsertSnapshotAsync(Guid jobId, object projectSnapshot, object sceneSnapshots, CancellationToken ct = default)
     {
         await _tenant.EnsureLoadedAsync(ct);
@@ -616,6 +716,11 @@ public sealed class RenderJobService : IRenderJobService
 
     public static string BuildLogCodeJobLockName(string jobType, string logCode)
         => $"render.render_jobs:{jobType.Trim().ToLowerInvariant()}:log:{logCode.Trim().ToLowerInvariant()}";
+
+    public static string BuildSceneJobLockName(string jobType, long sceneId, string? logicalRequestId = null)
+        => logicalRequestId is null
+            ? $"render.render_jobs:{jobType.Trim().ToLowerInvariant()}:scene:{sceneId}"
+            : $"render.render_jobs:{jobType.Trim().ToLowerInvariant()}:scene:{sceneId}:logical:{logicalRequestId.Trim().ToLowerInvariant()}";
 
     public static bool IsRenderJobsCustomerIdNotNullViolation(PostgresException ex)
         => ex.SqlState == PostgresErrorCodes.NotNullViolation

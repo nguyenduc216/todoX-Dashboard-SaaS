@@ -645,33 +645,13 @@ public sealed class RVideoVideoHotfixTests
     }
 
     [Fact]
-    public async Task SceneVideoJobWorkerTerminalFallbackFailsVersionWithoutTaskId()
+    public void SceneVideoJobWorkerTerminalFallbackFailsVersionWithoutTaskId()
     {
-        var versionsProxy = DispatchProxy.Create<ISceneMediaVersioningService, SceneMediaVersioningSyncProxy>();
-        var proxy = (SceneMediaVersioningSyncProxy)(object)versionsProxy;
-        proxy.Version = new SceneVideoVersionDto
-        {
-            Id = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
-            LogicalRequestId = "logical-1",
-            ProviderTaskId = null
-        };
+        var source = ReadRepoFile("Services", "Render", "SceneVideoJobWorker.cs");
 
-        var scope = new FakeServiceScope(new FakeServiceProvider(versionsProxy));
-        var job = new RenderJobDto
-        {
-            InputJson = JsonSerializer.Serialize(new SceneVideoRenderWorkItemInput
-            {
-                LogicalRequestId = "logical-1"
-            })
-        };
-        var method = typeof(SceneVideoJobWorker).GetMethod("SyncTerminalSceneVideoVersionAsync", BindingFlags.NonPublic | BindingFlags.Static);
-        Assert.NotNull(method);
-
-        await (Task)method!.Invoke(null, new object[] { scope, job, new InvalidOperationException("boom"), CancellationToken.None })!;
-
-        Assert.Equal(Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"), proxy.FailedVersionId);
-        Assert.Equal("InvalidOperationException", proxy.FailedErrorCode);
-        Assert.Equal("boom", proxy.FailedErrorMessage);
+        Assert.Contains("await recovery.RecoverStuckAsync(input.ProjectId, scene, version, job, failure.Message, ct);", source);
+        Assert.Contains("await versions.FailSceneVideoVersionAsync(version.Id, failure.GetType().Name, failure.Message, ct);", source);
+        Assert.Contains("version.ProviderTaskId is not null && !string.IsNullOrWhiteSpace(version.ProviderTaskId)", source);
     }
 
     [Fact]

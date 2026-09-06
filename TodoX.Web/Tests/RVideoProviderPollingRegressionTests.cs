@@ -592,6 +592,41 @@ public sealed class RVideoProviderPollingRegressionTests
     }
 
     [Fact]
+    public void SceneVideoRetryUsesSceneScopedDuplicateProtection()
+    {
+        var source = ReadRepoFile("Services", "Render", "RenderJobService.cs");
+
+        Assert.Contains("EnqueueForSceneIfNoneActiveAsync", source);
+        Assert.Contains("BuildSceneJobLockName", source);
+        Assert.Contains("COALESCE(input_json->>'sceneId', input_json->>'scene_id')", source);
+        Assert.Contains("COALESCE(input_json->>'logicalRequestId', input_json->>'logical_request_id')", source);
+        Assert.Contains("processing", source);
+    }
+
+    [Fact]
+    public void SceneVideoStatusResolutionFallsBackToLatestFailedJob()
+    {
+        var source = ReadRepoFile("Components", "Pages", "RenderVideoJobs.razor");
+
+        Assert.Contains("ResolveSceneVideoJob(scene.Id, version.LogicalRequestId)", source);
+        Assert.Contains("HasActiveSceneVideoJob(scene.Id, version.LogicalRequestId)", source);
+        Assert.Contains("job.Status, RenderJobStatuses.Failed", source);
+        Assert.Contains("IsStuckSceneVideo(scene, latest)", source);
+    }
+
+    [Fact]
+    public void SceneVideoRecoveryServiceSupportsDryRunAndBulkExecute()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "RVideoSceneVideoRecoveryService.cs");
+
+        Assert.Contains("ListRecoverableStuckAsync", source);
+        Assert.Contains("RecoverRecoverableStuckAsync", source);
+        Assert.Contains("RVideoSceneVideoRecoveryCandidate", source);
+        Assert.Contains("RVIDEO_STUCK_VIDEO_RECOVERED", source);
+        Assert.DoesNotContain("Enqueue", source);
+    }
+
+    [Fact]
     public void _79AiReconciliationUses79AiVideoServiceAndNotYescalePoll()
     {
         var source = ReadRepoFile("Services", "AiProviders", "AiImageBillingReconciliationWorker.cs");
@@ -801,8 +836,8 @@ public sealed class RVideoProviderPollingRegressionTests
         var page = ReadRepoFile("Components", "Pages", "RenderVideoJobs.razor");
         var renderAll = page[
             page.IndexOf("private async Task EnqueueRenderAllScenesAsync()", StringComparison.Ordinal)..page.IndexOf("private async Task EnqueueMergeAsync()", StringComparison.Ordinal)];
-        var renderOne = page[
-            page.IndexOf("private async Task EnqueueSceneVideoAsync(VideoProjectSceneDto scene)", StringComparison.Ordinal)..page.IndexOf("private void OpenUrl", StringComparison.Ordinal)];
+        var renderOneStart = page.IndexOf("private async Task EnqueueSceneVideoAsync(", StringComparison.Ordinal);
+        var renderOne = page[renderOneStart..page.IndexOf("private void OpenUrl", StringComparison.Ordinal)];
         var inputHelper = page[
             page.IndexOf("private bool TryApplySharedReferenceImage", StringComparison.Ordinal)..page.IndexOf("private string ProjectAspectRatio", StringComparison.Ordinal)];
 

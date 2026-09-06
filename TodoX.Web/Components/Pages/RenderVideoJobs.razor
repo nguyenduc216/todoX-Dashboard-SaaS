@@ -1896,14 +1896,21 @@ else
                 || (TryExtractLogicalRequestId(job.InputJson, out var jobLogicalRequestId)
                     && string.Equals(jobLogicalRequestId, logicalRequestId, StringComparison.OrdinalIgnoreCase))));
 
+    private TodoX.Web.Services.Render.RenderJobDto? ResolveSceneVideoJob(long sceneId, string? logicalRequestId = null)
+        => _jobs.Where(job =>
+                string.Equals(job.JobType, TodoX.Web.Services.Render.RenderJobTypes.RenderSceneVideo, StringComparison.OrdinalIgnoreCase)
+                && TryExtractSceneId(job.InputJson, out var jobSceneId)
+                && jobSceneId == sceneId
+                && (string.IsNullOrWhiteSpace(logicalRequestId)
+                    || (TryExtractLogicalRequestId(job.InputJson, out var jobLogicalRequestId)
+                        && string.Equals(jobLogicalRequestId, logicalRequestId, StringComparison.OrdinalIgnoreCase))))
+            .OrderByDescending(job => job.CreatedAt)
+            .ThenByDescending(job => job.QueuedAt)
+            .FirstOrDefault();
+
     private bool IsStuckSceneVideo(VideoProjectSceneDto scene, TodoX.Web.Services.VideoRender.SceneVideoVersionDto version)
     {
-        if (version.RenderJobId is not Guid renderJobId)
-        {
-            return false;
-        }
-
-        var job = _jobs.FirstOrDefault(x => x.Id == renderJobId);
+        var job = ResolveSceneVideoJob(scene.Id, version.LogicalRequestId);
         return job is not null
                && string.Equals(job.JobType, TodoX.Web.Services.Render.RenderJobTypes.RenderSceneVideo, StringComparison.OrdinalIgnoreCase)
                && string.Equals(job.Status, RenderJobStatuses.Failed, StringComparison.OrdinalIgnoreCase)
@@ -2118,7 +2125,7 @@ else
         return version is not null
                && string.IsNullOrWhiteSpace(version.ProviderTaskId)
                && string.Equals(ResolveVideoSceneStatus(scene), VideoSceneStatuses.Failed, StringComparison.OrdinalIgnoreCase)
-               && !HasActiveSceneVideoJob(scene.Id);
+               && !HasActiveSceneVideoJob(scene.Id, version.LogicalRequestId);
     }
 
     private string SceneVideoDisabledReason(VideoProjectSceneDto scene, SceneEditorState draft)
@@ -4555,14 +4562,16 @@ else
             return;
         }
 
-        if (version.RenderJobId is Guid renderJobId
-            && _jobs.FirstOrDefault(x => x.Id == renderJobId) is { } job
+        var job = version.RenderJobId is Guid renderJobId
+            ? _jobs.FirstOrDefault(x => x.Id == renderJobId) ?? ResolveSceneVideoJob(scene.Id, version.LogicalRequestId)
+            : ResolveSceneVideoJob(scene.Id, version.LogicalRequestId);
+        if (job is not null
             && RVideoSceneVideoRecovery.IsRecoverableStuck(version, job))
         {
             await RVideoSceneVideoRecovery.RecoverStuckAsync(_project.Id, scene, version, job, job.ErrorMessage, CancellationToken.None);
         }
 
-        if (HasActiveSceneVideoJob(scene.Id))
+        if (HasActiveSceneVideoJob(scene.Id, version.LogicalRequestId))
         {
             Snackbar.Add("Scene này đang có job render video khác đang chạy.", Severity.Info);
             return;
@@ -4625,7 +4634,7 @@ else
                 input.ReuseExistingSceneVideoVersion = reuseExistingVersion;
             }
 
-            var job = await RenderJobs.EnqueueAsync(new RenderJobCreateModel
+            var (job, alreadyActive) = await RenderJobs.EnqueueForSceneIfNoneActiveAsync(new RenderJobCreateModel
             {
                 JobType = TodoX.Web.Services.VideoRender.SceneVideoRenderHandler.JobTypeName,
                 UserId = AuthState.CurrentUser.UserId,
@@ -4638,7 +4647,13 @@ else
                 MaxAttempts = 1,
                 PointCostEstimate = 0,
                 PointStatus = RenderPointStatuses.Pending
-            });
+            }, scene.Id, logicalRequestOverride);
+
+            if (alreadyActive)
+            {
+                Snackbar.Add("Scene này đang có job render video khác đang chạy.", Severity.Info);
+                return;
+            }
 
             scene.Status = VideoSceneStatuses.VideoQueued;
             scene.ErrorMessage = null;
