@@ -170,7 +170,7 @@ public sealed class VideoRenderEligibilityService : IVideoRenderEligibilityServi
             }
 
             var activeVersion = versions.FirstOrDefault(x => x.Status is not null && ActiveVideoStatuses.Contains(x.Status));
-            if (activeVersion is not null || activeJobIds.Contains(scene.Id))
+            if (IsSceneVideoVersionActivelyRunning(activeVersion, activeJobIds.Contains(scene.Id)))
             {
                 eligible.Add(new VideoRenderEligibilityResult(
                     scene.Id,
@@ -196,6 +196,10 @@ public sealed class VideoRenderEligibilityService : IVideoRenderEligibilityServi
 
         return new VideoRenderEligibilityReport(projectId, eligible);
     }
+
+    private static bool IsSceneVideoVersionActivelyRunning(SceneVideoVersionDto? version, bool hasActiveRenderJob)
+        => hasActiveRenderJob
+           || (version is not null && !string.IsNullOrWhiteSpace(version.ProviderTaskId));
 
     private async Task<HashSet<long>> LoadActiveRenderJobIdsAsync(long projectId, IReadOnlyCollection<long> requestedSceneIds, CancellationToken ct)
     {

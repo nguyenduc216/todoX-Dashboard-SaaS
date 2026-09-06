@@ -70,6 +70,30 @@ public sealed class RVideoVideoHotfixTests
     }
 
     [Fact]
+    public void SceneVideoEligibilityTreatsBlankTaskFailedVersionsAsRecoverableNotActive()
+    {
+        var method = typeof(VideoRenderEligibilityService).GetMethod(
+            "IsSceneVideoVersionActivelyRunning",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var staleQueued = new SceneVideoVersionDto
+        {
+            Status = "queued",
+            ProviderTaskId = null
+        };
+        var taskBackedQueued = new SceneVideoVersionDto
+        {
+            Status = "queued",
+            ProviderTaskId = "task-123"
+        };
+
+        Assert.False((bool)method!.Invoke(null, new object[] { staleQueued, false })!);
+        Assert.True((bool)method.Invoke(null, new object[] { staleQueued, true })!);
+        Assert.True((bool)method.Invoke(null, new object[] { taskBackedQueued, false })!);
+    }
+
+    [Fact]
     public void BuildUsageMetadataCarriesAttemptLogicalRequestId()
     {
         var method = typeof(SceneVideoWorkerHandler).GetMethod("BuildUsageMetadata", BindingFlags.NonPublic | BindingFlags.Static);
