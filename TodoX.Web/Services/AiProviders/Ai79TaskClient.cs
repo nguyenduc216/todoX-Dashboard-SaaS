@@ -704,9 +704,18 @@ public sealed class Ai79TaskClient : IAi79TaskClient
             translate_to_en = effectiveTranslateToEn,
             imageCount = images?.Count ?? 0,
             images = BuildImageMetadata(images, firstImageField, secondImageField),
-            extraFieldNames = effectiveFields.Keys.Where(key => !string.IsNullOrWhiteSpace(key)).OrderBy(key => key).ToArray()
+            extraFieldNames = effectiveFields.Keys
+                .Where(key => !string.IsNullOrWhiteSpace(key) && !IsSensitiveRequestField(key))
+                .OrderBy(key => key)
+                .ToArray()
         }, JsonOptions);
     }
+
+    private static bool IsSensitiveRequestField(string key)
+        => key.Equals("access_token", StringComparison.OrdinalIgnoreCase)
+           || key.Equals("authorization", StringComparison.OrdinalIgnoreCase)
+           || key.Equals("credential", StringComparison.OrdinalIgnoreCase)
+           || key.Equals("ciphertext", StringComparison.OrdinalIgnoreCase);
 
     private static string? GetFieldValue(IReadOnlyDictionary<string, string?> fields, params string[] names)
     {

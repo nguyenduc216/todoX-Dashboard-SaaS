@@ -117,6 +117,8 @@ public sealed class SceneVideoJobWorker : BackgroundService
     private static async Task SyncTerminalSceneVideoVersionAsync(IServiceScope scope, RenderJobDto job, Exception failure, CancellationToken ct)
     {
         var versions = scope.ServiceProvider.GetRequiredService<ISceneMediaVersioningService>();
+        var recovery = scope.ServiceProvider.GetRequiredService<IRVideoSceneVideoRecoveryService>();
+        var repository = scope.ServiceProvider.GetRequiredService<VideoRenderRepository>();
         var input = JsonSerializer.Deserialize<SceneVideoRenderWorkItemInput>(job.InputJson, JsonOptions);
         if (input is null || string.IsNullOrWhiteSpace(input.LogicalRequestId))
         {
@@ -129,6 +131,15 @@ public sealed class SceneVideoJobWorker : BackgroundService
             return;
         }
 
-        await versions.FailSceneVideoVersionAsync(version.Id, failure.GetType().Name, failure.Message, ct);
+        var project = await repository.GetProjectAsync(input.ProjectId, ct);
+        var scene = project?.Scenes.FirstOrDefault(x => x.Id == input.SceneId);
+        if (scene is not null)
+        {
+            await recovery.RecoverStuckAsync(input.ProjectId, scene, version, job, failure.Message, ct);
+        }
+        else
+        {
+            await versions.FailSceneVideoVersionAsync(version.Id, failure.GetType().Name, failure.Message, ct);
+        }
     }
 }

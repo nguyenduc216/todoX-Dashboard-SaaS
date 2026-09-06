@@ -28,6 +28,9 @@ public sealed class SceneVideoRenderInput
     public string? CapabilityConfigJson { get; set; }
     public PointBillingIntent BillingIntent { get; set; } = PointBillingIntent.InitialRender;
     public Guid? BillingOperationId { get; set; }
+    public string? ExistingLogicalRequestId { get; set; }
+    public Guid? ExistingSceneVideoVersionId { get; set; }
+    public bool ReuseExistingSceneVideoVersion { get; set; }
 
     public void ApplySharedReferenceImage(RVideoSceneImageReferenceSelection reference)
     {
@@ -459,7 +462,9 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
             PricingRuleKey = resolvedPrice.RuleKey,
             TariffSnapshotJson = resolvedPrice.TariffSnapshotJson,
             CostSource = resolvedPrice.CostSource,
-            LogicalRequestId = BuildLogicalRequestId(parentJob.Id, scene.Id),
+            LogicalRequestId = string.IsNullOrWhiteSpace(input.ExistingLogicalRequestId)
+                ? BuildLogicalRequestId(parentJob.Id, scene.Id)
+                : input.ExistingLogicalRequestId.Trim(),
             CreatedAtUtc = DateTimeOffset.UtcNow
         };
 
@@ -478,6 +483,11 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
             PointCostEstimate = 0,
             PointStatus = RenderPointStatuses.Pending
         }, ct);
+
+        if (input.ExistingSceneVideoVersionId is Guid existingVersionId)
+        {
+            await _versions.TryBindSceneVideoVersionRenderJobAsync(existingVersionId, childJob.Id, ct);
+        }
 
         await _repo.AddProjectEventAsync(project.Id, "SCENE_VIDEO_CHILD_JOB_ENQUEUED", "info",
             $"Scene {scene.SceneIndex} was enqueued as an independent scene-video child job.",

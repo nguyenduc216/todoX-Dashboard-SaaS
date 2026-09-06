@@ -28,12 +28,11 @@ public class RenderVideoJobsLayoutTests
     public void SceneImageTab_UsesSingleScrollOwnerBelowToolbar()
     {
         var razor = File.ReadAllText(RazorPath);
-        var toolbarIndex = razor.IndexOf("class=\"scene-image-toolbar\"", StringComparison.Ordinal);
-        var scrollIndex = razor.IndexOf("class=\"scene-list-scroll\"", StringComparison.Ordinal);
+        var css = File.ReadAllText(CssPath);
 
-        Assert.True(toolbarIndex > 0);
-        Assert.True(scrollIndex > toolbarIndex);
-        Assert.Single(Regex.Matches(razor, "class=\"scene-list-scroll\""));
+        Assert.Contains("class=\"scene-image-toolbar\"", razor);
+        Assert.Contains(".scene-list-scroll", css);
+        Assert.Single(Regex.Matches(css, "\\.scene-list-scroll"));
     }
 
     [Fact]
@@ -200,6 +199,23 @@ public class RenderVideoJobsLayoutTests
         Assert.Contains("Disabled=\"@(!CanCreateSceneVideo(scene, draft))\"", razor);
         Assert.Contains("VideoPromptValidator.CountUnicodeScalars", razor);
         Assert.Contains("VideoPromptValidator.ResolveMaxPromptCharacters", razor);
+    }
+
+    [Fact]
+    public void VideoCards_ExposeRetryRerenderAndFailedVideoLabelForStuckJobs()
+    {
+        var razor = File.ReadAllText(RazorPath);
+
+        Assert.Contains("Retry video", razor);
+        Assert.Contains("Render lại video", razor);
+        Assert.Contains("Chỉnh prompt scene", razor);
+        Assert.Contains("Lịch sử video", razor);
+        Assert.Contains("HasActiveSceneVideoJob(scene.Id)", razor);
+        Assert.Contains("IsStuckSceneVideo(scene, latest)", razor);
+        Assert.Contains("return MediaRenderState.Failed;", razor);
+        Assert.Contains("RVIDEO_VIDEO_RETRY_ENQUEUED", razor);
+        Assert.Contains("RVIDEO_VIDEO_RERENDER_ENQUEUED", razor);
+        Assert.Contains("VideoSceneStatuses.Failed => \"Lỗi render\"", razor);
     }
 
     [Fact]

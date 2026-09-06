@@ -323,6 +323,8 @@ public interface ISceneMediaVersioningService
     Task<IReadOnlyList<SceneVideoVersionDto>> ListSceneVideoVersionsAsync(long sceneId, int skip = 0, int take = 20, CancellationToken ct = default);
     Task<SceneVideoVersionDto?> GetSceneVideoVersionByLogicalRequestIdAsync(string logicalRequestId, CancellationToken ct = default);
     Task<SceneVideoVersionDto?> GetRecoverableSceneVideoVersionAsync(long sceneId, string logicalRequestId, CancellationToken ct = default);
+    Task<bool> TryBindSceneVideoVersionRenderJobAsync(Guid versionId, Guid renderJobId, CancellationToken ct = default);
+    Task<bool> TryRebindSceneVideoVersionRenderJobAsync(Guid versionId, Guid expectedOldJobId, Guid newJobId, CancellationToken ct = default);
     Task<IReadOnlyList<SceneVideoVersionDto>> ListSceneVideoVersionsAsync(long sceneId, CurrentUserSession user, int skip = 0, int take = 20, CancellationToken ct = default);
     Task SelectSceneVideoVersionAsync(long sceneId, Guid versionId, Guid? selectedBy, CancellationToken ct = default);
     Task SelectSceneVideoVersionAsync(long sceneId, Guid versionId, CurrentUserSession user, CancellationToken ct = default);
@@ -1069,6 +1071,41 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
              WHERE id=@versionId AND tenant_id=@tenant;
             """,
             new { versionId, tenant = _tenant.TenantId, errorCode, errorMessage });
+    }
+
+    public async Task<bool> TryRebindSceneVideoVersionRenderJobAsync(Guid versionId, Guid expectedOldJobId, Guid newJobId, CancellationToken ct = default)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        var changed = await conn.ExecuteAsync(
+            """
+            UPDATE video_render.scene_video_versions
+               SET render_job_id=@newJobId,
+                   updated_at=now()
+             WHERE id=@versionId
+               AND tenant_id=@tenant
+               AND render_job_id=@expectedOldJobId
+               AND provider_task_id IS NULL;
+            """,
+            new { versionId, expectedOldJobId, newJobId, tenant = _tenant.TenantId });
+        return changed > 0;
+    }
+
+    public async Task<bool> TryBindSceneVideoVersionRenderJobAsync(Guid versionId, Guid renderJobId, CancellationToken ct = default)
+    {
+        await _tenant.EnsureLoadedAsync(ct);
+        using var conn = await _factory.OpenAsync(ct);
+        var changed = await conn.ExecuteAsync(
+            """
+            UPDATE video_render.scene_video_versions
+               SET render_job_id=@renderJobId,
+                   updated_at=now()
+             WHERE id=@versionId
+               AND tenant_id=@tenant
+               AND provider_task_id IS NULL;
+            """,
+            new { versionId, renderJobId, tenant = _tenant.TenantId });
+        return changed > 0;
     }
 
     public async Task<SceneAudioVersionDto> CreateQueuedSceneAudioVersionAsync(SceneAudioVersionCreateRequest request, CancellationToken ct = default)

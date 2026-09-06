@@ -1,0 +1,164 @@
+using System.Net;
+using System.Reflection;
+using System.Runtime.Serialization;
+using System.Text.Json;
+using TodoX.Web.Services.AiProviders;
+using TodoX.Web.Services.Render;
+using TodoX.Web.Services.VideoRender;
+using Xunit;
+
+namespace TodoX.Web.Tests;
+
+public sealed class RVideoSceneVideoRecoveryAndDiagnosticsTests
+{
+    private static readonly BindingFlags NonPublicStatic = BindingFlags.NonPublic | BindingFlags.Static;
+
+    [Fact]
+    public void BuildSubmitRequestMetadata_IncludesSafeEffectiveFieldsAndImageMetadata()
+    {
+        var method = typeof(Ai79TaskClient).GetMethod("BuildSubmitRequestMetadata", NonPublicStatic);
+        Assert.NotNull(method);
+
+        var metadata = (string)method!.Invoke(null, new object?[]
+        {
+            "https://api.example.com/base",
+            "/submitVideo",
+            "79ai.net",
+            "seedream_5_0",
+            Ai79TaskOperation.Video,
+            "vip",
+            "12",
+            "16:9",
+            "16:9",
+            "1080p",
+            "motion",
+            "project-1",
+            "private",
+            "yes",
+            new[] { "https://cdn.example/video.jpg", "https://cdn.example/video.jpg" },
+            "image",
+            "image_2",
+            new Dictionary<string, string?>
+            {
+                ["custom_flag"] = "on",
+                ["access_token"] = "secret",
+                ["Authorization"] = "Bearer token",
+                ["credential"] = "hidden",
+                ["ciphertext"] = "blocked"
+            },
+            2
+        })!;
+
+        using var doc = JsonDocument.Parse(metadata);
+        Assert.Equal("vip", doc.RootElement.GetProperty("mode").GetString());
+        Assert.Equal("12", doc.RootElement.GetProperty("duration").GetString());
+        Assert.Equal("16:9", doc.RootElement.GetProperty("ratio").GetString());
+        Assert.Equal("16:9", doc.RootElement.GetProperty("aspect_ratio").GetString());
+        Assert.Equal("1080p", doc.RootElement.GetProperty("resolution").GetString());
+        Assert.Equal("motion", doc.RootElement.GetProperty("type").GetString());
+        Assert.Equal("project-1", doc.RootElement.GetProperty("project_id").GetString());
+        Assert.Equal("private", doc.RootElement.GetProperty("privacy").GetString());
+        Assert.Equal("yes", doc.RootElement.GetProperty("translate_to_en").GetString());
+        Assert.Equal(2, doc.RootElement.GetProperty("imageCount").GetInt32());
+        Assert.Equal("custom_flag", Assert.Single(doc.RootElement.GetProperty("extraFieldNames").EnumerateArray()).GetString());
+
+        var images = doc.RootElement.GetProperty("images");
+        Assert.True(images[0].GetProperty("present").GetBoolean());
+        Assert.Equal("cdn.example", images[0].GetProperty("urlHost").GetString());
+        Assert.Equal("/video.jpg", images[0].GetProperty("urlPath").GetString());
+        Assert.Equal("https://cdn.example/video.jpg", images[0].GetProperty("sanitizedUrl").GetString());
+        Assert.True(images[1].GetProperty("isImage2").GetBoolean());
+        Assert.True(images[1].GetProperty("duplicateOfPrevious").GetBoolean());
+        Assert.DoesNotContain("access_token", metadata, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Authorization", metadata, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("credential", metadata, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("ciphertext", metadata, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void BuildSubmitFailureDiagnostics_HandlesDirectAndWrappedSubmitExceptions(bool wrapped)
+    {
+        var metadataMethod = typeof(Ai79TaskClient).GetMethod("BuildSubmitRequestMetadata", NonPublicStatic);
+        Assert.NotNull(metadataMethod);
+
+        var metadata = (string)metadataMethod!.Invoke(null, new object?[]
+        {
+            "https://api.example.com/base",
+            "/submitVideo",
+            "79ai.net",
+            "seedream_5_0",
+            Ai79TaskOperation.Video,
+            "vip",
+            "12",
+            "16:9",
+            "16:9",
+            "1080p",
+            "motion",
+            "project-1",
+            "private",
+            "yes",
+            Array.Empty<string>(),
+            null,
+            null,
+            new Dictionary<string, string?>(),
+            0
+        })!;
+
+        var submitException = new Ai79TaskSubmitException(
+            "79AI submit failed.",
+            """{"ok":false}""",
+            HttpStatusCode.BadRequest,
+            "submit_failed",
+            sanitizedRequestMetadataJson: metadata);
+
+        Exception exception = wrapped
+            ? new VideoProviderTransientException("wrapped", "submit_transient", submitException)
+            : submitException;
+
+        var diagnosticsMethod = typeof(SceneVideoWorkerHandler).GetMethod("BuildSubmitFailureDiagnostics", NonPublicStatic);
+        Assert.NotNull(diagnosticsMethod);
+
+        var diagnostics = diagnosticsMethod!.Invoke(null, new object?[] { exception });
+        Assert.NotNull(diagnostics);
+
+        using var doc = JsonDocument.Parse(JsonSerializer.Serialize(diagnostics));
+        Assert.Equal("submit_failed", doc.RootElement.GetProperty("providerErrorCode").GetString());
+        Assert.Equal("79AI submit failed.", doc.RootElement.GetProperty("providerErrorMessage").GetString());
+        var requestMetadata = doc.RootElement.GetProperty("sanitizedRequestMetadata").GetString();
+        Assert.NotNull(requestMetadata);
+        using var metadataDoc = JsonDocument.Parse(requestMetadata!);
+        Assert.Equal("vip", metadataDoc.RootElement.GetProperty("mode").GetString());
+    }
+
+    [Fact]
+    public void RecoverableStuckDetection_RequiresFailedJobAndBlankProviderTask()
+    {
+        var service = (RVideoSceneVideoRecoveryService)FormatterServices.GetUninitializedObject(typeof(RVideoSceneVideoRecoveryService));
+
+        var version = new SceneVideoVersionDto
+        {
+            Status = "queued",
+            ProviderTaskId = null
+        };
+        var job = new RenderJobDto
+        {
+            JobType = RenderJobTypes.RenderSceneVideo,
+            Status = RenderJobStatuses.Failed
+        };
+
+        Assert.True(service.IsRecoverableStuck(version, job));
+
+        version.ProviderTaskId = "task-1";
+        Assert.False(service.IsRecoverableStuck(version, job));
+
+        version.ProviderTaskId = null;
+        job.Status = RenderJobStatuses.Rendering;
+        Assert.False(service.IsRecoverableStuck(version, job));
+
+        job.Status = RenderJobStatuses.Failed;
+        version.Status = "completed";
+        Assert.False(service.IsRecoverableStuck(version, job));
+    }
+}

@@ -56,6 +56,8 @@ public sealed class SceneVideoRenderWorkItemInput
     public string LogicalRequestId { get; set; } = string.Empty;
     public DateTimeOffset CreatedAtUtc { get; set; }
     public VideoSceneImageInputMode ImageInputMode { get; set; } = VideoSceneImageInputMode.LegacySelectedSource;
+    public Guid? ExistingSceneVideoVersionId { get; set; }
+    public bool ReuseExistingSceneVideoVersion { get; set; }
 }
 
 public enum VideoSceneImageInputMode
@@ -380,10 +382,13 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
             var candidate = candidates[attemptIndex];
             var policy = candidate.Policy;
             var attemptLogicalRequestId = BuildAttemptLogicalRequestId(input.LogicalRequestId, attemptIndex);
-            var version = await _versions.GetRecoverableSceneVideoVersionAsync(
-                scene.Id,
-                attemptLogicalRequestId,
-                ct);
+            var version = input.ReuseExistingSceneVideoVersion
+                ? await _versions.GetSceneVideoVersionByLogicalRequestIdAsync(attemptLogicalRequestId, ct)
+                : await _versions.GetRecoverableSceneVideoVersionAsync(scene.Id, attemptLogicalRequestId, ct);
+            if (input.ExistingSceneVideoVersionId is Guid expectedVersionId && version?.Id != expectedVersionId)
+            {
+                version = null;
+            }
             if (version is not null && !IsCompatibleVersion(version, input, policy, candidate.ProviderDurationSeconds))
             {
                 await _versions.FailSceneVideoVersionAsync(
