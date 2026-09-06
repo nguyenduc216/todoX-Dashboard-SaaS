@@ -331,9 +331,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
             await FailAsync(project.Id, scene, Guid.Empty, errorCode, message, ct);
             throw new RenderJobTerminalFailureException(errorCode);
         }
-        var sourceImageVersionId = input.UseSharedReferenceImage
-            ? null
-            : requestedSourceImageVersionId ?? (sourceVersion.Id == Guid.Empty ? null : sourceVersion.Id);
+        var sourceImageVersionId = ResolvePersistedSourceImageVersionId(input.UseSharedReferenceImage, sourceVersion);
 
         var validation = _promptValidator.Validate(
             input.VideoPrompt,
@@ -1167,7 +1165,24 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                 version.Id == explicitVersionId
                 && version.Status.Equals("completed", StringComparison.OrdinalIgnoreCase));
 
-            return explicitVersion;
+            if (explicitVersion is not null)
+            {
+                return explicitVersion;
+            }
+
+            if (!string.IsNullOrWhiteSpace(sourceImageUrl) || !string.IsNullOrWhiteSpace(sourceImageObjectKey))
+            {
+                return new SceneImageVersionDto
+                {
+                    Id = Guid.Empty,
+                    PublicUrl = sourceImageUrl,
+                    StorageKey = sourceImageObjectKey,
+                    Status = "completed",
+                    IsSelected = false
+                };
+            }
+
+            return null;
         }
 
         var selected = await _versions.GetSelectedImageVersionAsync(sceneId, ct);
@@ -1190,6 +1205,13 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
 
         return null;
     }
+
+    private static Guid? ResolvePersistedSourceImageVersionId(
+        bool useSharedReferenceImage,
+        SceneImageVersionDto sourceVersion)
+        => useSharedReferenceImage || sourceVersion.Id == Guid.Empty
+            ? null
+            : sourceVersion.Id;
 
     private static bool IsCompletedSelectedImageVersion(SceneImageVersionDto? version)
         => version is not null

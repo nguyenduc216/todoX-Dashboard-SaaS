@@ -845,6 +845,158 @@ public sealed class RVideoVideoHotfixTests
     }
 
     [Fact]
+    public async Task StaleExplicitSourceImageVersionFallsBackToDirectSourceImage()
+    {
+        var worker = CreateWorker(
+            new SceneImageVersionDto
+            {
+                Id = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
+                IsSelected = true,
+                Status = "completed",
+                PublicUrl = "https://example.test/current.png",
+                StorageKey = "scene/current.png"
+            },
+            new[]
+            {
+                new SceneImageVersionDto
+                {
+                    Id = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
+                    IsSelected = true,
+                    Status = "completed",
+                    PublicUrl = "https://example.test/current.png",
+                    StorageKey = "scene/current.png"
+                }
+            });
+
+        var method = typeof(SceneVideoWorkerHandler).GetMethod("ResolveSourceImageVersionAsync", BindingFlags.NonPublic | BindingFlags.Instance);
+        Assert.NotNull(method);
+
+        var task = (Task<SceneImageVersionDto?>)method!.Invoke(worker, new object?[]
+        {
+            7L,
+            Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+            false,
+            "https://example.test/direct-source.png",
+            null,
+            null,
+            CancellationToken.None
+        })!;
+
+        var version = await task;
+        Assert.NotNull(version);
+        Assert.Equal(Guid.Empty, version!.Id);
+        Assert.Equal("https://example.test/direct-source.png", version.PublicUrl);
+        Assert.False(version.IsSelected);
+    }
+
+    [Fact]
+    public async Task StaleExplicitSourceImageVersionFallsBackToDirectSourceObjectKey()
+    {
+        var worker = CreateWorker(null, Array.Empty<SceneImageVersionDto>());
+
+        var method = typeof(SceneVideoWorkerHandler).GetMethod("ResolveSourceImageVersionAsync", BindingFlags.NonPublic | BindingFlags.Instance);
+        Assert.NotNull(method);
+
+        var task = (Task<SceneImageVersionDto?>)method!.Invoke(worker, new object?[]
+        {
+            99L,
+            Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+            false,
+            null,
+            "rvideo_character/202608/c636140d5922493d97b1b8401a3ab06b.jpg",
+            null,
+            CancellationToken.None
+        })!;
+
+        var version = await task;
+        Assert.NotNull(version);
+        Assert.Equal(Guid.Empty, version!.Id);
+        Assert.Equal("rvideo_character/202608/c636140d5922493d97b1b8401a3ab06b.jpg", version.StorageKey);
+    }
+
+    [Fact]
+    public void DirectSourceImagePersistsNullSourceImageVersionId()
+    {
+        var method = typeof(SceneVideoWorkerHandler).GetMethod("ResolvePersistedSourceImageVersionId", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var directSource = new SceneImageVersionDto
+        {
+            Id = Guid.Empty,
+            PublicUrl = "https://example.test/direct-source.png",
+            Status = "completed"
+        };
+
+        var resolved = (Guid?)method!.Invoke(null, new object[] { false, directSource })!;
+
+        Assert.Null(resolved);
+    }
+
+    [Fact]
+    public void ModernCompletedImageVersionPreservesSourceImageVersionId()
+    {
+        var method = typeof(SceneVideoWorkerHandler).GetMethod("ResolvePersistedSourceImageVersionId", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+        var imageVersionId = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+
+        var resolved = (Guid?)method!.Invoke(null, new object[]
+        {
+            false,
+            new SceneImageVersionDto
+            {
+                Id = imageVersionId,
+                PublicUrl = "https://example.test/current.png",
+                Status = "completed"
+            }
+        })!;
+
+        Assert.Equal(imageVersionId, resolved);
+    }
+
+    [Fact]
+    public void SharedReferenceImagePersistsNullSourceImageVersionId()
+    {
+        var method = typeof(SceneVideoWorkerHandler).GetMethod("ResolvePersistedSourceImageVersionId", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var resolved = (Guid?)method!.Invoke(null, new object[]
+        {
+            true,
+            new SceneImageVersionDto
+            {
+                Id = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
+                PublicUrl = "https://example.test/shared.png",
+                Status = "completed"
+            }
+        })!;
+
+        Assert.Null(resolved);
+    }
+
+    [Fact]
+    public async Task ForeignSceneImageVersionIdIsNotAcceptedAsLineage()
+    {
+        var worker = CreateWorker(null, Array.Empty<SceneImageVersionDto>());
+
+        var method = typeof(SceneVideoWorkerHandler).GetMethod("ResolveSourceImageVersionAsync", BindingFlags.NonPublic | BindingFlags.Instance);
+        Assert.NotNull(method);
+
+        var task = (Task<SceneImageVersionDto?>)method!.Invoke(worker, new object?[]
+        {
+            99L,
+            Guid.Parse("ffffffff-ffff-ffff-ffff-ffffffffffff"),
+            false,
+            null,
+            null,
+            null,
+            CancellationToken.None
+        })!;
+
+        var version = await task;
+        Assert.Null(version);
+    }
+
+    [Fact]
     public async Task ExplicitVersionMustBeCompleted()
     {
         var worker = CreateWorker(
@@ -964,6 +1116,49 @@ public sealed class RVideoVideoHotfixTests
         Assert.Contains("@sourceImageVersionId", source);
         Assert.Contains("request.SourceImageVersionId", source);
         Assert.DoesNotContain("request.SourceImageVersionId == Guid.Empty", source);
+    }
+
+    [Fact]
+    public void SceneVideoWorkerCreatesVersionFromResolvedImageVersionIdOnly()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "SceneVideoWorkerHandler.cs");
+        var method = source[source.IndexOf("private async Task HandleProviderVideoAsync", StringComparison.Ordinal)..];
+
+        Assert.Contains("ResolvePersistedSourceImageVersionId(input.UseSharedReferenceImage, sourceVersion)", method);
+        Assert.DoesNotContain("requestedSourceImageVersionId ?? (sourceVersion.Id == Guid.Empty ? null : sourceVersion.Id)", method);
+    }
+
+    [Fact]
+    public void Project19LegacyUploadedCharacterImageIsUsableWithoutSceneImageVersion()
+    {
+        var project = new VideoProjectDto
+        {
+            Id = 19,
+            UploadedCharacterUrl = "/uploads/rvideo_character/202608/c636140d5922493d97b1b8401a3ab06b.jpg"
+        };
+        var scene = new VideoProjectSceneDto
+        {
+            Id = 99,
+            ProjectId = 19,
+            SceneIndex = 1
+        };
+
+        var source = RVideoEffectiveSceneImageSourceResolver.Resolve(scene, settings: null, selectedImageVersion: null, project);
+
+        Assert.True(source.HasUsableInput);
+        Assert.Null(source.SelectedImageVersionId);
+        Assert.Equal(RVideoEffectiveSceneImageSourceResolver.LegacyUploadedCharacter, source.SourceLabel);
+        Assert.Equal(project.UploadedCharacterUrl, source.SourceImageUrl);
+    }
+
+    [Fact]
+    public void VideoRenderEligibilityUsesUsableImageInputInsteadOfMandatoryImageVersion()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "VideoRenderEligibilityService.cs");
+
+        Assert.Contains("RVideoEffectiveSceneImageSourceResolver.Resolve(scene, settings, imageVersion, project)", source);
+        Assert.Contains("var hasSourceImage = effectiveSource.HasUsableInput", source);
+        Assert.DoesNotContain("imageVersion is null", source);
     }
 
     [Fact]
