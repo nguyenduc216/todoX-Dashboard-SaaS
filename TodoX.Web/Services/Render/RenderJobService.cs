@@ -619,11 +619,7 @@ public sealed class RenderJobService : IRenderJobService
             parameters = new { };
         }
 
-        sql += """
-                ORDER BY priority ASC, queued_at ASC
-                FOR UPDATE SKIP LOCKED
-                LIMIT 1;
-               """;
+        sql += ResolveClaimOrderSql(includeJobTypes);
 
         var job = await conn.QuerySingleOrDefaultAsync<RenderJobDto>(sql, parameters, tx);
 
@@ -656,6 +652,42 @@ public sealed class RenderJobService : IRenderJobService
         await AddEventAsync(job.Id, "WORKER_CLAIMED", "Worker claimed render job.", new { workerKey }, ct: ct);
         return await GetAsync(job.Id, ct);
     }
+
+    internal static string ResolveClaimOrderSql(IReadOnlyCollection<string>? includeJobTypes)
+        => IsSceneVideoOnlyClaim(includeJobTypes)
+            ? """
+                   ORDER BY
+                       priority ASC,
+                       CASE
+                           WHEN retry_after IS NULL THEN queued_at
+                           ELSE GREATEST(queued_at, retry_after)
+                       END ASC,
+                       queued_at ASC
+                   FOR UPDATE SKIP LOCKED
+                   LIMIT 1;
+                  """
+            : """
+                   ORDER BY priority ASC, queued_at ASC
+                   FOR UPDATE SKIP LOCKED
+                   LIMIT 1;
+                  """;
+
+    internal static DateTime ResolveEffectiveClaimReadyTime(RenderJobDto job)
+        => job.RetryAfter is null || job.RetryAfter <= job.QueuedAt
+            ? job.QueuedAt
+            : job.RetryAfter.Value;
+
+    internal static IReadOnlyList<RenderJobDto> OrderForSceneVideoClaimFairness(IEnumerable<RenderJobDto> jobs)
+        => jobs
+            .OrderBy(job => job.Priority)
+            .ThenBy(ResolveEffectiveClaimReadyTime)
+            .ThenBy(job => job.QueuedAt)
+            .ToArray();
+
+    private static bool IsSceneVideoOnlyClaim(IReadOnlyCollection<string>? includeJobTypes)
+        => includeJobTypes is not null
+           && includeJobTypes.Count == 1
+           && includeJobTypes.Any(jobType => string.Equals(jobType, RenderJobTypes.RenderSceneVideo, StringComparison.OrdinalIgnoreCase));
 
     public async Task MarkStatusAsync(Guid jobId, string status, object? output = null, string? errorCode = null, string? errorMessage = null, CancellationToken ct = default)
     {
