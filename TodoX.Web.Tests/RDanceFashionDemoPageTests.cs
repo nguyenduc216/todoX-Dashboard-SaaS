@@ -124,6 +124,28 @@ public sealed class RDanceFashionDemoPageTests
     }
 
     [Fact]
+    public void RDanceDetailPageKeepsLegacyTabsAndAddsFeatureFlaggedOnePageBranch()
+    {
+        var page = ReadStrictUtf8(Path.Combine(FindRepoRoot(), "TodoX.Web", "Components", "Pages", "RDanceJobDetail.razor"));
+        var appsettings = ReadStrictUtf8(Path.Combine(FindRepoRoot(), "TodoX.Web", "appsettings.json"));
+
+        Assert.Contains("\"RdnOnePageUiEnabled\": false", appsettings, StringComparison.Ordinal);
+        Assert.Contains("IsOnePageUiEnabled", page, StringComparison.Ordinal);
+        Assert.Contains("Features:RdnOnePageUiEnabled", page, StringComparison.Ordinal);
+        Assert.Contains("Tiêu đề video", page, StringComparison.Ordinal);
+        Assert.Contains("Bước 1. Video tham chiếu", page, StringComparison.Ordinal);
+        Assert.Contains("Bước 2. Tạo ảnh tham chiếu", page, StringComparison.Ordinal);
+        Assert.Contains("Bước 3. Video kết quả", page, StringComparison.Ordinal);
+        Assert.Contains("Tạo ảnh ghép", page, StringComparison.Ordinal);
+        Assert.Contains("Trạng thái job", page, StringComparison.Ordinal);
+        Assert.Contains("Kết quả", page, StringComparison.Ordinal);
+        Assert.Contains("Xem browser", page, StringComparison.Ordinal);
+        Assert.Contains("Lưu thay đổi", page, StringComparison.Ordinal);
+        Assert.Contains("Tải video", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("No tabs.", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void MyJobsIncludesRDanceJobsAndRoutesToDetail()
     {
         var page = ReadStrictUtf8(Path.Combine(FindRepoRoot(), "TodoX.Web", "Components", "Pages", "MyJobs.razor"));
@@ -133,7 +155,7 @@ public sealed class RDanceFashionDemoPageTests
             "IDanceSellPhase2Service DanceJobs",
             "DanceJobs.ListAsync(currentUser, 100)",
             "Video nhảy quảng cáo thời trang",
-            "$\"/jobs/rdance/{x.Id}\"",
+            "$\"/jobs/rdance/{job.Id}\"",
             "Navigation.NavigateTo(context.Route)"
         })
         {
@@ -700,7 +722,7 @@ public sealed class RDanceFashionDemoPageTests
 
         Assert.Contains("var providerMode = DanceSellMotionProviderContract.ResolveProviderMode(motionRoute, job.Mode)", service, StringComparison.Ordinal);
         Assert.Contains("EstimateAsync(motionRoute, providerMode", service, StringComparison.Ordinal);
-        Assert.Contains("ResolveProviderMode(route, \"720p\")", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("ResolveProviderMode(route, \"720p\")", page, StringComparison.Ordinal);
         Assert.Contains("IAiPricingService _pricing", estimator, StringComparison.Ordinal);
         Assert.Contains("ProviderCode = route.ProviderCode", estimator, StringComparison.Ordinal);
         Assert.Contains("ProviderModelCode = route.ModelName", estimator, StringComparison.Ordinal);

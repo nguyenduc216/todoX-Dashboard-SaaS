@@ -316,6 +316,7 @@ public sealed class DanceSellRenderHandlerTests
         public Task<RenderJobDto> EnqueueAsync(RenderJobCreateModel model, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<(RenderJobDto Job, bool AlreadyActive)> EnqueueForProjectIfNoneActiveAsync(RenderJobCreateModel model, long projectId, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<(RenderJobDto Job, bool AlreadyActive)> EnqueueForLogCodeIfNoneActiveAsync(RenderJobCreateModel model, string logCode, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<(RenderJobDto Job, bool AlreadyActive)> EnqueueForSceneIfNoneActiveAsync(RenderJobCreateModel model, long sceneId, string? logicalRequestId = null, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<RenderJobDto?> GetAsync(Guid jobId, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<RenderJobDto?> GetByLogCodeAsync(string logCode, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<RenderJobDto>> ListByLogCodeAsync(string logCode, CancellationToken ct = default) => throw new NotImplementedException();
