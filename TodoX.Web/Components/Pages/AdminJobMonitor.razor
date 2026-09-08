@@ -1,0 +1,258 @@
+@page "/admin/job-monitor"
+@using System.Text.Json
+@using TodoX.Web.Components.Dialogs
+@using TodoX.Web.Models
+@inject IAdminJobMonitorService Monitor
+@inject AccountService Accounts
+@inject AuthStateService AuthState
+@inject NavigationManager Navigation
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+@inject IJSRuntime JS
+
+<PageTitle>Giám sát job hệ thống</PageTitle>
+
+@if (!_initialized)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+}
+else if (!_admin)
+{
+    <MudAlert Severity="Severity.Error">Bạn không có quyền truy cập trang này.</MudAlert>
+}
+else
+{
+    <MudStack Spacing="3" Class="admin-job-monitor">
+        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-3">
+            <div>
+                <MudText Typo="Typo.h4" Class="todox-page-title">Giám sát job hệ thống</MudText>
+                <MudText Class="todox-page-subtitle">Theo dõi toàn bộ job xử lý của tất cả tài khoản.</MudText>
+            </div>
+            <MudStack AlignItems="AlignItems.End" Spacing="1">
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning">Chỉ xem - Quản trị viên</MudChip>
+                <MudText Class="monitor-health"><MudIcon Icon="@Icons.Material.Filled.Circle" Size="Size.Small" /> Hệ thống hoạt động tốt</MudText>
+            </MudStack>
+        </MudStack>
+
+        <MudGrid Spacing="2">
+            <MudItem xs="12" sm="6" md="3">
+                <div class="monitor-stat">
+                    <MudIcon Icon="@Icons.Material.Filled.Description" />
+                    <span>Tổng job<strong>@_page.Stats.Total.ToString("N0")</strong></span>
+                </div>
+            </MudItem>
+            <MudItem xs="12" sm="6" md="3">
+                <div class="monitor-stat processing">
+                    <MudIcon Icon="@Icons.Material.Filled.Autorenew" />
+                    <span>Đang xử lý<strong>@_page.Stats.Processing.ToString("N0")</strong></span>
+                </div>
+            </MudItem>
+            <MudItem xs="12" sm="6" md="3">
+                <div class="monitor-stat complete">
+                    <MudIcon Icon="@Icons.Material.Filled.CheckCircle" />
+                    <span>Hoàn thành<strong>@_page.Stats.Completed.ToString("N0")</strong></span>
+                </div>
+            </MudItem>
+            <MudItem xs="12" sm="6" md="3">
+                <div class="monitor-stat failed">
+                    <MudIcon Icon="@Icons.Material.Filled.Error" />
+                    <span>Thất bại<strong>@_page.Stats.Failed.ToString("N0")</strong></span>
+                </div>
+            </MudItem>
+        </MudGrid>
+
+        <MudPaper Class="monitor-filters" Elevation="0">
+            <MudTextField @bind-Value="_query.Search" Label="Tìm kiếm job, tài khoản hoặc ID..." Variant="Variant.Outlined" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" />
+            <MudSelect T="string" @bind-Value="_query.Service" Label="Dịch vụ" Variant="Variant.Outlined" Dense="true">
+                <MudSelectItem Value="@((string?)null)">Tất cả dịch vụ</MudSelectItem>
+                @foreach (var item in _options.Services) { <MudSelectItem Value="@item.Value">@item.Label</MudSelectItem> }
+            </MudSelect>
+            <MudSelect T="string" @bind-Value="_query.Status" Label="Trạng thái" Variant="Variant.Outlined" Dense="true">
+                <MudSelectItem Value="@((string?)null)">Tất cả trạng thái</MudSelectItem>
+                <MudSelectItem Value="@("processing")">Đang xử lý</MudSelectItem>
+                <MudSelectItem Value="@("completed")">Hoàn thành</MudSelectItem>
+                <MudSelectItem Value="@("failed")">Thất bại</MudSelectItem>
+                <MudSelectItem Value="@("pending")">Đang chờ</MudSelectItem>
+            </MudSelect>
+            <MudDatePicker Date="@FromDate" DateChanged="SetFromDate" Label="Từ ngày" Variant="Variant.Outlined" />
+            <MudDatePicker Date="@ToDate" DateChanged="SetToDate" Label="Đến ngày" Variant="Variant.Outlined" />
+            <MudSelect T="string" @bind-Value="_query.Sort" Label="Sắp xếp" Variant="Variant.Outlined" Dense="true">
+                <MudSelectItem Value="@("newest")">Mới nhất</MudSelectItem>
+                <MudSelectItem Value="@("oldest")">Cũ nhất</MudSelectItem>
+                <MudSelectItem Value="@("updated")">Cập nhật gần nhất</MudSelectItem>
+            </MudSelect>
+            <MudButton Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.Refresh" OnClick="ReloadAsync">Làm mới</MudButton>
+        </MudPaper>
+
+        <MudPaper Class="monitor-table-panel" Elevation="0">
+            <MudTable Items="@_page.Items" Hover="true" Dense="true" Breakpoint="Breakpoint.None" Class="monitor-table">
+                <HeaderContent>
+                    <MudTh>Kết quả</MudTh><MudTh>Thời gian</MudTh><MudTh>Tài khoản</MudTh><MudTh>Dịch vụ</MudTh><MudTh>Trạng thái</MudTh><MudTh>Job ID</MudTh><MudTh>Giai đoạn hiện tại</MudTh><MudTh>Thao tác</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTr @onclick="@(() => OpenDetailsAsync(context))">
+                        <MudTd><button class="monitor-thumb" type="button" @onclick:stopPropagation="true" @onclick="@(() => OpenDetailsAsync(context))"><img src="@Thumb(context)" alt="Kết quả" /></button></MudTd>
+                        <MudTd>@context.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm:ss")</MudTd>
+                        <MudTd><span class="account-name">@context.AccountName</span><small>@context.AccountEmail</small></MudTd>
+                        <MudTd><span class="service-cell"><MudIcon Icon="@Icons.Material.Filled.VideoLibrary" />@DisplayService(context)</span></MudTd>
+                        <MudTd><MudChip T="string" Size="Size.Small" Color="@StatusColor(context.Status)">@StatusText(context.Status)</MudChip></MudTd>
+                        <MudTd><button type="button" class="job-id" @onclick:stopPropagation="true" @onclick="@(() => CopyIdAsync(context.Id))">@ShortId(context.Id) <MudIcon Icon="@Icons.Material.Filled.ContentCopy" Size="Size.Small" /></button></MudTd>
+                        <MudTd><div class="stage-cell">@Stage(context)<MudProgressLinear Value="@context.ProgressPercent" Color="Color.Warning" Size="Size.Small" /></div></MudTd>
+                        <MudTd><MudIconButton Icon="@Icons.Material.Filled.MoreHoriz" aria-label="Mở chi tiết" OnClick="@(() => OpenDetailsAsync(context))" /></MudTd>
+                    </MudTr>
+                </RowTemplate>
+                <NoRecordsContent><MudText Class="pa-6">Không có job phù hợp.</MudText></NoRecordsContent>
+            </MudTable>
+            <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center" Class="monitor-pagination">
+                <MudText Class="todox-page-subtitle">@_page.TotalCount job, trang @_query.Page / @Math.Max(1, _page.TotalPages)</MudText>
+                <MudPagination Count="@Math.Max(1, _page.TotalPages)" Selected="@_query.Page" SelectedChanged="ChangePageAsync" />
+            </MudStack>
+        </MudPaper>
+    </MudStack>
+}
+
+@if (_detail is not null)
+{
+    <div class="monitor-backdrop" @onclick="CloseDetails"></div>
+    <aside class="monitor-drawer">
+        <div class="drawer-header"><MudText Typo="Typo.h5">Chi tiết job</MudText><MudIconButton Icon="@Icons.Material.Filled.Close" aria-label="Đóng" OnClick="CloseDetails" /></div>
+        <div class="drawer-tabs">@foreach (var tab in Tabs) { <button class="@(tab == _tab ? "active" : null)" type="button" @onclick="@(() => _tab = tab)">@tab</button> }</div>
+        @if (_tab == "Tổng quan")
+        {
+            <div class="drawer-content">
+                @if (_detail.InputOutput.OutputLinks.FirstOrDefault(x => x.Kind == "video") is { } video)
+                { <video class="drawer-media" controls poster="@(_detail.Overview.Summary.ThumbnailUrl)" src="@video.Url"></video> }
+                else
+                { <img class="drawer-media" src="@( _detail.Overview.Summary.ThumbnailUrl ?? Placeholder )" alt="Kết quả job" /> }
+                <h3>Thông tin job</h3>
+                <dl class="detail-list">
+                    <dt>Job ID</dt><dd>@_detail.Overview.Summary.Id</dd>
+                    <dt>Thời gian tạo</dt><dd>@_detail.Overview.Summary.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm:ss")</dd>
+                    <dt>Tài khoản</dt><dd>@_detail.Overview.Summary.AccountName</dd>
+                    <dt>Email</dt><dd>@(_detail.Overview.Summary.AccountEmail ?? "-")</dd>
+                    <dt>Dịch vụ</dt><dd>@DisplayService(_detail.Overview.Summary)</dd>
+                    <dt>Trạng thái</dt><dd><MudChip T="string" Size="Size.Small" Color="@StatusColor(_detail.Overview.Summary.Status)">@StatusText(_detail.Overview.Summary.Status)</MudChip></dd>
+                    <dt>Giai đoạn hiện tại</dt><dd>@_detail.Overview.Summary.CurrentStage</dd>
+                    <dt>Tỷ lệ / thời lượng</dt><dd>@(_detail.Overview.AspectRatio ?? "-") / @(_detail.Overview.DurationSeconds?.ToString() ?? "-")s</dd>
+                    <dt>Provider / model</dt><dd>@(_detail.Overview.Summary.ProviderCode ?? "-") / @(_detail.Overview.Summary.ModelCode ?? "-")</dd>
+                    <dt>Điểm dự kiến</dt><dd>@_detail.Overview.Summary.EstimatedPoints.ToString("N0")</dd>
+                    <dt>Điểm đã dùng</dt><dd>@_detail.Overview.Summary.ConsumedPoints.ToString("N0")</dd>
+                    <dt>Cập nhật</dt><dd>@_detail.Overview.Summary.UpdatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm:ss")</dd>
+                    @if (!string.IsNullOrWhiteSpace(_detail.Overview.ErrorMessage)) { <dt>Lỗi</dt><dd class="error-text">@_detail.Overview.ErrorMessage</dd> }
+                </dl>
+                @if (_detail.Overview.Summary.UserId is Guid)
+                { <MudButton FullWidth="true" Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Login" OnClick="ImpersonateAsync">Đăng nhập nhanh &amp; mở job</MudButton> }
+            </div>
+        }
+        else if (_tab == "Timeline")
+        {
+            <div class="drawer-content"><div class="horizontal-timeline">@foreach (var item in _detail.Timeline) { <div class="timeline-item"><span></span><strong>@item.Stage</strong><small>@item.Timestamp.ToLocalTime().ToString("dd/MM HH:mm:ss")</small><small>@item.Status · @(item.Duration?.TotalSeconds.ToString("0") ?? "-")s</small><p>@item.Message</p></div>}</div></div>
+        }
+        else if (_tab == "Input / Output")
+        {
+            <div class="drawer-content json-content">
+                <MudText Typo="Typo.subtitle2">Input</MudText>
+                <div class="io-meta"><span>Tỷ lệ: @_detail.Overview.AspectRatio</span><span>Thời lượng: @(_detail.Overview.DurationSeconds?.ToString() ?? "-")s</span><span>Provider: @_detail.Overview.Summary.ProviderCode</span><span>Model: @_detail.Overview.Summary.ModelCode</span></div>
+                @if (_detail.InputOutput.InputLinks.Count > 0)
+                {
+                    <div class="media-links">
+                        @foreach (var link in _detail.InputOutput.InputLinks)
+                        {
+                            @if (link.Kind == "image") { <img src="@link.Url" alt="Input" /> }
+                            else if (link.Kind == "video") { <video src="@link.Url" controls></video> }
+                            else { <a href="@link.Url" target="_blank" rel="noopener">@link.Url</a> }
+                        }
+                    </div>
+                }
+                <MudText Typo="Typo.caption">Prompt / settings</MudText>
+                <pre>@_detail.InputOutput.PromptJson</pre>
+                <pre>@_detail.InputOutput.OptionsJson</pre>
+                <MudText Typo="Typo.caption">Output</MudText>
+                @if (_detail.InputOutput.OutputLinks.Count > 0)
+                {
+                    <div class="media-links">
+                        @foreach (var link in _detail.InputOutput.OutputLinks)
+                        {
+                            @if (link.Kind == "image") { <img src="@link.Url" alt="Output" /> }
+                            else if (link.Kind == "video") { <video src="@link.Url" controls></video> }
+                            else if (link.Kind == "audio") { <audio src="@link.Url" controls></audio> }
+                            else { <a href="@link.Url" target="_blank" rel="noopener">@link.Url</a> }
+                        }
+                    </div>
+                }
+                <pre>@_detail.InputOutput.OutputJson</pre>
+            </div>
+        }
+        else
+        {
+            <div class="drawer-content json-content"><MudText Typo="Typo.subtitle2">Logs</MudText>@foreach (var log in _detail.Logs) { <pre class="log-@log.Level.ToLowerInvariant()">[@log.Level] @log.Timestamp.ToLocalTime().ToString("O") @log.Service / @(log.ProviderCode ?? "-") / @(log.ModelCode ?? "-") / @log.EventType @log.Message</pre>}</div>
+        }
+    </aside>
+}
+
+@code {
+    private static readonly string[] Tabs = ["Tổng quan", "Timeline", "Input / Output", "Logs"];
+    private const string Placeholder = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='210'%3E%3Crect width='100%25' height='100%25' fill='%23111821'/%3E%3C/svg%3E";
+    private readonly AdminJobMonitorQuery _query = new();
+    private AdminJobMonitorPage _page = new();
+    private AdminJobMonitorFilterOptions _options = new();
+    private AdminJobMonitorDetail? _detail;
+    private string _tab = "Tổng quan";
+    private bool _initialized;
+    private bool _admin;
+    private DateTime? FromDate { get; set; }
+    private DateTime? ToDate { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _admin = AdminEndpointAuthorization.IsAdmin(AuthState.CurrentUser);
+        _initialized = true;
+        if (_admin)
+        {
+            _options = await Monitor.GetFilterOptionsAsync(AuthState.CurrentUser!);
+            await ReloadAsync();
+        }
+    }
+
+    private async Task ReloadAsync()
+    {
+        if (!_admin) return;
+        _query.Page = Math.Clamp(_query.Page, 1, 100000);
+        _page = await Monitor.GetJobsAsync(AuthState.CurrentUser!, _query);
+    }
+
+    private async Task ChangePageAsync(int page) { _query.Page = page; await ReloadAsync(); }
+    private void SetFromDate(DateTime? value) { FromDate = value; _query.FromUtc = value?.Date.ToUniversalTime(); }
+    private void SetToDate(DateTime? value) { ToDate = value; _query.ToUtc = value?.Date.AddDays(1).ToUniversalTime(); }
+    private async Task OpenDetailsAsync(AdminJobMonitorJobSummary job) { _detail = await Monitor.GetDetailAsync(AuthState.CurrentUser!, job.Id); _tab = "Tổng quan"; }
+    private void CloseDetails() => _detail = null;
+
+    private async Task CopyIdAsync(Guid id)
+    {
+        await JS.InvokeVoidAsync("navigator.clipboard.writeText", id.ToString());
+        Snackbar.Add("Đã sao chép Job ID.", Severity.Success);
+    }
+
+    private async Task ImpersonateAsync()
+    {
+        if (_detail?.Overview.Summary.UserId is not Guid userId || AuthState.CurrentUser is not { } actor || actor.IsImpersonating) return;
+        var target = await Accounts.RehydrateSessionAsync(userId);
+        if (target is null) { Snackbar.Add("Tài khoản không còn hoạt động.", Severity.Error); return; }
+        var parameters = new DialogParameters<ImpersonationReasonDialog> { { x => x.TargetDisplay, target.DisplayName } };
+        var dialog = await DialogService.ShowAsync<ImpersonationReasonDialog>("Lý do đăng nhập hộ", parameters, new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true });
+        var result = await dialog.Result;
+        if (result is not { Canceled: false, Data: string reason } || string.IsNullOrWhiteSpace(reason)) return;
+        await Monitor.RecordImpersonationAuditAsync(actor, userId, _detail.Overview.Summary.CustomerId, _detail.Overview.Summary.Id);
+        await AuthState.ImpersonateAsync(target, actor);
+        Navigation.NavigateTo(ResolveRoute(_detail.Overview.Summary), forceLoad: true);
+    }
+
+    private static string ResolveRoute(AdminJobMonitorJobSummary job)
+        => $"/jobs/{job.ServiceCode.ToUpperInvariant() switch { "RDANCE" => "rdance", "TIMELAPSE" => "timelapse", _ => "rvideo" }}/{job.Id}";
+    private static string ShortId(Guid id) => $"job_{id:N}"[..12];
+    private static string DisplayService(AdminJobMonitorJobSummary job) => string.IsNullOrWhiteSpace(job.ServiceName) ? job.ServiceCode : job.ServiceName;
+    private static string Stage(AdminJobMonitorJobSummary job) => string.IsNullOrWhiteSpace(job.CurrentStage) ? StatusText(job.Status) : job.CurrentStage;
+    private static string StatusText(string status) => status.ToLowerInvariant() switch { "queued" or "pending" or "draft" => "Đang chờ", "completed" => "Hoàn thành", "failed" or "timeout" => "Thất bại", "cancelled" => "Đã hủy", _ => "Đang xử lý" };
+    private static Color StatusColor(string status) => status.ToLowerInvariant() switch { "completed" => Color.Success, "failed" or "timeout" => Color.Error, "queued" or "pending" => Color.Warning, _ => Color.Info };
+    private static string Thumb(AdminJobMonitorJobSummary job) => job.ThumbnailUrl ?? Placeholder;
+}

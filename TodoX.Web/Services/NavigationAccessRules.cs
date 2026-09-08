@@ -68,7 +68,7 @@ public static class NavigationAccessRules
             return false;
         }
 
-        if (user.IsCustomer && IsAdminOnlyPath(path))
+        if (IsAdminOnlyPath(path) && !AdminEndpointAuthorization.IsAdmin(user))
         {
             return false;
         }

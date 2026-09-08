@@ -174,6 +174,34 @@ public sealed class RDanceCustomerStatusAndPointsRegressionTests
     }
 
     [Fact]
+    public void RdanceCreateReloadsAfterMotionUploadAndLeavesQueueingToDetailAutoFinish()
+    {
+        var create = ReadRepoFile("Components", "Pages", "RDanceJobCreate.razor");
+        var motionStart = create.IndexOf("private async Task OnMotionSelected", StringComparison.Ordinal);
+        var motionEnd = create.IndexOf("private static bool HasAutoFinishPrerequisites", motionStart, StringComparison.Ordinal);
+        var motionFlow = create[motionStart..motionEnd];
+
+        Assert.Contains("DanceSell.UploadMotionAsync", motionFlow);
+        Assert.Contains("DanceSell.GetAsync(job.Id, AuthState.CurrentUser!)", motionFlow);
+        Assert.Contains("HasAutoFinishPrerequisites(_job)", motionFlow);
+        Assert.Contains("Navigation.NavigateTo($\"/jobs/rdance/{job.Id}\")", motionFlow);
+        Assert.DoesNotContain("QueueRenderAsync", motionFlow);
+
+        var readinessStart = create.IndexOf("private static bool HasAutoFinishPrerequisites", StringComparison.Ordinal);
+        var readinessEnd = create.IndexOf("private async Task<DanceSellJobDto> EnsureDraftAsync", readinessStart, StringComparison.Ordinal);
+        var readiness = create[readinessStart..readinessEnd];
+        Assert.Contains("MotionVideoMediaId is not null", readiness);
+        Assert.Contains("SourceStageStatus == DanceSellSourceStageStatuses.Ready", readiness);
+        Assert.Contains("PreparedReferenceStatus == DanceSellReferenceStatuses.Approved", readiness);
+        Assert.Contains("PreparedReferenceUrl", readiness);
+
+        var detail = ReadRepoFile("Components", "Pages", "RDanceJobDetail.razor");
+        Assert.Contains("await ContinueAutoFinishAsync();", detail);
+        Assert.Contains("MotionStepStatusKey", detail);
+        Assert.Contains("ReferenceStepStatusKey", detail);
+    }
+
+    [Fact]
     public void RdanceTitleIsEditableInHeaderAndAbsentFromStatusPanel()
     {
         var create = ReadRepoFile("Components", "Pages", "RDanceJobCreate.razor");

@@ -201,8 +201,8 @@
                         <MudPaper Class="todox-panel rdance-step-card rdance-step-card--compact">
                             <div class="rdance-step-head"><span class="rdance-step-chip">4</span><MudText Typo="Typo.h6">Trạng thái job</MudText></div>
                             <div class="rdance-status-list">
-                                <div class="rdance-status-item"><div><MudIcon Icon="@StepStatusIcon(StepStatusColor(string.IsNullOrWhiteSpace(_job.PreparedReferenceUrl) ? "gray" : "green"))" Size="Size.Small" /> <span>Hình ảnh tham chiếu</span></div><span>@StepStatusLabel(string.IsNullOrWhiteSpace(_job.PreparedReferenceUrl) ? "gray" : "green")</span></div>
-                                <div class="rdance-status-item"><div><MudIcon Icon="@StepStatusIcon(StepStatusColor(string.IsNullOrWhiteSpace(_job.MotionVideoUrl) ? "gray" : "green"))" Size="Size.Small" /> <span>Video tham chiếu</span></div><span>@StepStatusLabel(string.IsNullOrWhiteSpace(_job.MotionVideoUrl) ? "gray" : "green")</span></div>
+                                <div class="rdance-status-item"><div><MudIcon Icon="@StepStatusIcon(StepStatusColor(ReferenceStepStatusKey))" Size="Size.Small" /> <span>Hình ảnh tham chiếu</span></div><span>@StepStatusLabel(ReferenceStepStatusKey)</span></div>
+                                <div class="rdance-status-item"><div><MudIcon Icon="@StepStatusIcon(StepStatusColor(MotionStepStatusKey))" Size="Size.Small" /> <span>Video tham chiếu</span></div><span>@StepStatusLabel(MotionStepStatusKey)</span></div>
                                 <div class="rdance-status-item"><div><MudIcon Icon="@StepStatusIcon(StepStatusColor(RenderStepStatusKey))" Size="Size.Small" /> <span>Render kết quả</span></div><span>@StepStatusLabel(RenderStepStatusKey)</span></div>
                                 <div class="rdance-status-item"><div><MudIcon Icon="@StepStatusIcon(StepStatusColor(CompletionStepStatusKey))" Size="Size.Small" /> <span>Video kết quả</span></div><span>@StepStatusLabel(CompletionStepStatusKey)</span></div>
                             </div>
@@ -723,7 +723,7 @@
     private IReadOnlyList<OnePageStepView> OnePageSteps => new[]
     {
         new OnePageStepView("Tiếp nhận job", StepStatusColor("green"), "Completed"),
-        new OnePageStepView("Video tham chiếu", StepStatusColor(string.IsNullOrWhiteSpace(_job?.MotionVideoUrl) ? "gray" : "green"), StepStatusLabel(string.IsNullOrWhiteSpace(_job?.MotionVideoUrl) ? "gray" : "green")),
+        new OnePageStepView("Video tham chiếu", StepStatusColor(MotionStepStatusKey), StepStatusLabel(MotionStepStatusKey)),
         new OnePageStepView("Tạo ảnh tham chiếu", StepStatusColor(ReferenceStepStatusKey), StepStatusLabel(ReferenceStepStatusKey)),
         new OnePageStepView("Render video", StepStatusColor(RenderStepStatusKey), StepStatusLabel(RenderStepStatusKey)),
         new OnePageStepView("Hoàn tất", StepStatusColor(CompletionStepStatusKey), StepStatusLabel(CompletionStepStatusKey))
@@ -735,25 +735,82 @@
         _ when !string.IsNullOrWhiteSpace(_job?.MotionVideoUrl) || _job?.CharacterMediaId is not null => 25,
         _ => 10
     };
-    private string ReferenceStepStatusKey => _job?.PreparedReferenceStatus switch
+    private string ReferenceStepStatusKey
     {
-        DanceSellReferenceStatuses.Approved => "green",
-        DanceSellReferenceStatuses.Ready => "yellow",
-        DanceSellReferenceStatuses.Generating => "yellow",
-        DanceSellReferenceStatuses.Failed => "red",
-        _ => "gray"
-    };
+        get
+        {
+            if (_job is null)
+            {
+                return "gray";
+            }
+
+            if (_job.PreparedReferenceStatus == DanceSellReferenceStatuses.Failed)
+            {
+                return "gray";
+            }
+
+            if (_job.PreparedReferenceStatus == DanceSellReferenceStatuses.Approved
+                && !string.IsNullOrWhiteSpace(_job.PreparedReferenceUrl))
+            {
+                return "green";
+            }
+
+            if (_job.PreparedReferenceStatus is DanceSellReferenceStatuses.Generating
+                or DanceSellReferenceStatuses.Ready
+                || !string.IsNullOrWhiteSpace(_job.PreparedReferenceUrl)
+                || _job.CharacterMediaId is not null
+                || _job.ProductMediaId is not null)
+            {
+                return "yellow";
+            }
+
+            return "gray";
+        }
+    }
+    private string MotionStepStatusKey
+    {
+        get
+        {
+            if (_job is null)
+            {
+                return "gray";
+            }
+
+            if (_job.SourceStageStatus == DanceSellSourceStageStatuses.Failed)
+            {
+                return "gray";
+            }
+
+            if (_job.SourceStageStatus == DanceSellSourceStageStatuses.Ready
+                && _job.MotionVideoMediaId is not null
+                && !string.IsNullOrWhiteSpace(_job.MotionVideoUrl))
+            {
+                return "green";
+            }
+
+            if (_job.MotionVideoMediaId is not null
+                || !string.IsNullOrWhiteSpace(_job.MotionVideoUrl)
+                || _job.SourceStageStatus is DanceSellSourceStageStatuses.Resolving
+                    or DanceSellSourceStageStatuses.Downloading
+                    or DanceSellSourceStageStatuses.Staging)
+            {
+                return "yellow";
+            }
+
+            return "gray";
+        }
+    }
     private string RenderStepStatusKey => _job?.Status switch
     {
         DanceSellJobStatuses.Completed => "green",
-        DanceSellJobStatuses.Failed or DanceSellJobStatuses.Timeout => "red",
+        DanceSellJobStatuses.Failed or DanceSellJobStatuses.Timeout => "gray",
         DanceSellJobStatuses.Queued or DanceSellJobStatuses.Submitted or DanceSellJobStatuses.Rendering => "yellow",
         _ => "gray"
     };
     private string CompletionStepStatusKey => _job?.Status switch
     {
         DanceSellJobStatuses.Completed => "green",
-        DanceSellJobStatuses.Failed or DanceSellJobStatuses.Timeout => "red",
+        DanceSellJobStatuses.Failed or DanceSellJobStatuses.Timeout => "gray",
         _ => "gray"
     };
     private bool CanRender => !IsActive

@@ -329,11 +329,12 @@
     private string CreateReferenceStatusKey => _job?.PreparedReferenceStatus switch
     {
         DanceSellReferenceStatuses.Generating => "yellow",
-        DanceSellReferenceStatuses.Ready or DanceSellReferenceStatuses.Approved => "green",
+        DanceSellReferenceStatuses.Ready => "yellow",
+        DanceSellReferenceStatuses.Approved when !string.IsNullOrWhiteSpace(_job?.PreparedReferenceUrl) => "green",
         DanceSellReferenceStatuses.Failed => "gray",
         _ when _job?.PreparedReferenceUrl is not null
             || _job?.CharacterMediaId is not null
-            || _job?.ProductMediaId is not null => "green",
+            || _job?.ProductMediaId is not null => "yellow",
         _ => "gray"
     };
     private string CreateMotionStatusKey => _job?.SourceStageStatus switch
@@ -341,8 +342,11 @@
         DanceSellSourceStageStatuses.Resolving
             or DanceSellSourceStageStatuses.Downloading
             or DanceSellSourceStageStatuses.Staging => "yellow",
-        DanceSellSourceStageStatuses.Ready => "green",
-        _ when !string.IsNullOrWhiteSpace(_job?.MotionVideoUrl) => "green",
+        DanceSellSourceStageStatuses.Failed => "gray",
+        DanceSellSourceStageStatuses.Ready when _job?.MotionVideoMediaId is not null
+            && !string.IsNullOrWhiteSpace(_job.MotionVideoUrl) => "green",
+        _ when _job?.MotionVideoMediaId is not null
+            || !string.IsNullOrWhiteSpace(_job?.MotionVideoUrl) => "yellow",
         _ => "gray"
     };
     private string CreateRenderStatusKey => _job?.Status switch
@@ -530,9 +534,22 @@
             using var buffer = new MemoryStream();
             await input.CopyToAsync(buffer);
             _job = await DanceSell.UploadMotionAsync(job.Id, buffer.ToArray(), file.Name, file.ContentType, AuthState.CurrentUser!);
+            _job = await DanceSell.GetAsync(job.Id, AuthState.CurrentUser!);
+            if (!HasAutoFinishPrerequisites(_job))
+            {
+                return;
+            }
+
             Navigation.NavigateTo($"/jobs/rdance/{job.Id}");
         });
     }
+
+    private static bool HasAutoFinishPrerequisites(DanceSellJobDto job)
+        => job.MotionVideoMediaId is not null
+            && !string.IsNullOrWhiteSpace(job.MotionVideoUrl)
+            && job.SourceStageStatus == DanceSellSourceStageStatuses.Ready
+            && !string.IsNullOrWhiteSpace(job.PreparedReferenceUrl)
+            && job.PreparedReferenceStatus == DanceSellReferenceStatuses.Approved;
 
     private async Task<DanceSellJobDto> EnsureDraftAsync()
     {
