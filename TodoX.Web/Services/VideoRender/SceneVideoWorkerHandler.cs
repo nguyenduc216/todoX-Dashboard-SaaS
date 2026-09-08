@@ -433,7 +433,11 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                         providerDurationSeconds = candidate.ProviderDurationSeconds,
                         provider = input.ProviderCode,
                         capability = input.CapabilityCode
-                    }), ct);
+                    },
+                    ProviderCode: input.ProviderCode,
+                    RequestedModel: policy.Model,
+                    ActualModel: policy.Model,
+                    ProviderCapabilityId: input.ProviderCapabilityId), ct);
 
             if (!string.IsNullOrWhiteSpace(version.ProviderTaskId))
             {

@@ -71,6 +71,12 @@ public sealed class RVideoSceneVideoAutoChainService : IRVideoSceneVideoAutoChai
                     errorCode = result.ErrorCode,
                     triggerSource
                 }, ct);
+            if (result.Status == VideoRenderEligibilityStatus.AlreadyActive)
+            {
+                await _repo.UpdateSceneAsync(sceneId, VideoSceneStatuses.VideoQueued,
+                    errorMessage: null, title: scene.Title, scenePrompt: scene.ScenePrompt,
+                    imagePrompt: scene.ImagePrompt, videoPrompt: scene.VideoPrompt, ct: ct);
+            }
             return false;
         }
 
@@ -187,9 +193,15 @@ public sealed class RVideoSceneVideoAutoChainService : IRVideoSceneVideoAutoChai
                     logicalRequestKey,
                     activeJobId = job.Id
                 }, ct);
+            await _repo.UpdateSceneAsync(sceneId, VideoSceneStatuses.VideoQueued,
+                errorMessage: null, title: scene.Title, scenePrompt: scene.ScenePrompt,
+                imagePrompt: scene.ImagePrompt, videoPrompt: scene.VideoPrompt, ct: ct);
             return false;
         }
 
+        await _repo.UpdateSceneAsync(sceneId, VideoSceneStatuses.VideoQueued,
+            errorMessage: null, title: scene.Title, scenePrompt: scene.ScenePrompt,
+            imagePrompt: scene.ImagePrompt, videoPrompt: scene.VideoPrompt, ct: ct);
         await _repo.AddProjectEventAsync(projectId, "SCENE_VIDEO_AUTO_ENQUEUED", "info",
             $"Scene {scene.SceneIndex} video auto enqueue submitted.",
             new

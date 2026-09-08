@@ -4494,6 +4494,12 @@ else
             Snackbar.Add($"Đã enqueue {sceneIds.Length} scene.{skippedText}", Severity.Success);
         }
 
+        foreach (var scene in selectedScenes)
+        {
+            scene.Status = VideoSceneStatuses.VideoQueued;
+            scene.ErrorMessage = null;
+        }
+        await InvokeAsync(StateHasChanged);
         await StartPolling();
     }
 

@@ -111,6 +111,20 @@ public sealed class RVideoProviderPollingRegressionTests
     }
 
     [Fact]
+    public void SceneVideoVersionIsCreatedWithResolvedProviderMetadata()
+    {
+        var versioning = ReadRepoFile("Services", "VideoRender", "SceneMediaVersioningService.cs");
+        var worker = ReadRepoFile("Services", "VideoRender", "SceneVideoWorkerHandler.cs");
+
+        Assert.Contains("provider_code, requested_model, actual_model, provider_capability_id", versioning);
+        Assert.Contains("@providerCode, @requestedModel, @actualModel, @providerCapabilityId", versioning);
+        Assert.Contains("ProviderCode: input.ProviderCode", worker);
+        Assert.Contains("RequestedModel: policy.Model", worker);
+        Assert.Contains("ActualModel: policy.Model", worker);
+        Assert.Contains("ProviderCapabilityId: input.ProviderCapabilityId", worker);
+    }
+
+    [Fact]
     public void SceneVideoChildEnqueueSkipsCompletedAndActiveScenes()
     {
         var source = ReadRepoFile("Services", "VideoRender", "SceneVideoRenderHandler.cs");
@@ -478,6 +492,17 @@ public sealed class RVideoProviderPollingRegressionTests
         Assert.Contains("SCENE_VIDEO_AUTO_ENQUEUED", source);
         Assert.Contains("BuildRVideoTrustedPayerContextAsync(projectId, sceneId", source);
         Assert.Contains("TrustedPayerContext = payerContext", source);
+    }
+
+    [Fact]
+    public void AutoChainMarksQueuedSceneStateWhenVideoJobIsCreated()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "RVideoSceneVideoAutoChainService.cs");
+
+        Assert.Contains("UpdateSceneAsync(sceneId, VideoSceneStatuses.VideoQueued", source);
+        Assert.Contains("scenePrompt: scene.ScenePrompt", source);
+        Assert.Contains("imagePrompt: scene.ImagePrompt", source);
+        Assert.Contains("videoPrompt: scene.VideoPrompt", source);
     }
 
     [Fact]
@@ -872,6 +897,16 @@ public sealed class RVideoProviderPollingRegressionTests
         Assert.Contains("RetryDisabled=\"@_sceneVideoRetrying.Contains(scene.Id)\"", page);
         Assert.Contains("scene.Status = VideoSceneStatuses.VideoQueued;", page);
         Assert.Contains("_sceneVideoRetrying.Add(scene.Id)", page);
+    }
+
+    [Fact]
+    public void RVideoBatchCreateVideoMarksSelectedScenesQueuedImmediately()
+    {
+        var page = ReadRepoFile("Components", "Pages", "RenderVideoJobs.razor");
+
+        Assert.Contains("foreach (var scene in selectedScenes)", page);
+        Assert.Contains("scene.Status = VideoSceneStatuses.VideoQueued;", page);
+        Assert.Contains("scene.ErrorMessage = null;", page);
     }
 
     [Fact]

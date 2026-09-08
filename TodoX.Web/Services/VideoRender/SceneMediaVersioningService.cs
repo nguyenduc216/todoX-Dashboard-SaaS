@@ -57,7 +57,11 @@ public sealed record SceneVideoVersionCreateRequest(
     string? ImagePromptSnapshot,
     string? VideoPromptSnapshot,
     object SceneSnapshot,
-    object RenderConfigSnapshot);
+    object RenderConfigSnapshot,
+    string? ProviderCode = null,
+    string? RequestedModel = null,
+    string? ActualModel = null,
+    long? ProviderCapabilityId = null);
 
 public sealed record SceneAudioVersionCreateRequest(
     long ProjectId,
@@ -831,11 +835,15 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
             INSERT INTO video_render.scene_video_versions
                 (id, project_id, scene_id, source_image_version_id, tenant_id, customer_id, created_by,
                  version_number, logical_request_id, render_job_id, image_prompt_snapshot, video_prompt_snapshot,
-                 scene_snapshot_json, render_config_json, storage_key, status, created_at, updated_at)
+                 scene_snapshot_json, render_config_json, storage_key, status,
+                 provider_code, requested_model, actual_model, provider_capability_id,
+                 created_at, updated_at)
             VALUES
                 (@id, @projectId, @sceneId, @sourceImageVersionId, @tenant, @customer, @user,
                  @versionNumber, @logicalRequestId, @renderJobId, @imagePrompt, @videoPrompt,
-                 CAST(@sceneSnapshot AS jsonb), CAST(@renderConfig AS jsonb), @storageKey, 'queued', now(), now());
+                 CAST(@sceneSnapshot AS jsonb), CAST(@renderConfig AS jsonb), @storageKey, 'queued',
+                 @providerCode, @requestedModel, @actualModel, @providerCapabilityId,
+                 now(), now());
             """,
             new
             {
@@ -853,7 +861,11 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
                 videoPrompt = request.VideoPromptSnapshot,
                 sceneSnapshot = ToJson(request.SceneSnapshot),
                 renderConfig = ToJson(request.RenderConfigSnapshot),
-                storageKey
+                storageKey,
+                request.ProviderCode,
+                request.RequestedModel,
+                request.ActualModel,
+                request.ProviderCapabilityId
             }, tx);
 
         tx.Commit();
@@ -866,7 +878,10 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
             VersionNumber = versionNumber,
             LogicalRequestId = request.LogicalRequestId,
             Status = "queued",
-            StorageKey = storageKey
+            StorageKey = storageKey,
+            ProviderCode = request.ProviderCode,
+            ModelName = request.ActualModel ?? request.RequestedModel,
+            ProviderCapabilityId = request.ProviderCapabilityId
         };
     }
 
