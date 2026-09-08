@@ -33,8 +33,6 @@
 <PageTitle>Video nhảy quảng cáo thời trang</PageTitle>
 
 <MudStack Spacing="3" Class="rdance-fashion-page">
-    <MudText Typo="Typo.h4" Class="todox-page-title">Video nhảy quảng cáo thời trang</MudText>
-    <MudText Typo="Typo.body1" Class="todox-page-subtitle">Tạo video quảng cáo thời trang từ chuyển động TikTok hoặc video MP4.</MudText>
 
     @if (!AuthState.IsInitialized)
     {
@@ -136,6 +134,21 @@
                                             <MudAlert Severity="Severity.Error" Dense="true">@_motionUploadError</MudAlert>
                                         }
                                         <MudText Typo="Typo.caption" Class="rdance-muted-line">MP4 · tối đa @MaxMotionVideoLabel</MudText>
+                                        <MudPaper Outlined="true" Class="rdance-info-card">
+                                            <MudStack Spacing="1">
+                                                <MudText Typo="Typo.subtitle2">Thông tin video</MudText>
+                                                <MudText Typo="Typo.body2">Duration</MudText>
+                                                <MudText Typo="Typo.body1" Class="rdance-summary-value">@FormatDurationLabel(MotionDurationSeconds)</MudText>
+                                                <MudText Typo="Typo.body2">Ratio</MudText>
+                                                <MudText Typo="Typo.body1" Class="rdance-summary-value">@_ratio</MudText>
+                                                <MudText Typo="Typo.body2">Resolution</MudText>
+                                                <MudText Typo="Typo.body1" Class="rdance-summary-value">@MotionResolutionText</MudText>
+                                                <MudText Typo="Typo.body2">Format</MudText>
+                                                <MudText Typo="Typo.body1" Class="rdance-summary-value">MP4</MudText>
+                                                <MudText Typo="Typo.body2">Size</MudText>
+                                                <MudText Typo="Typo.body1" Class="rdance-summary-value">@FormatBytes(_motionFileSize)</MudText>
+                                            </MudStack>
+                                        </MudPaper>
                                     </MudStack>
                                 </div>
                                 <div class="rdance-step1-preview">
@@ -149,20 +162,6 @@
                                             <RenderMediaFrame IsVideo="true" State="@ResolveDanceMediaState(_job?.Status)" AspectRatio="@_ratio" EmptyText="Video tham chiếu sẽ hiện ở đây." FailedText="Lỗi tải video" />
                                         }
                                     </div>
-                                </div>
-                                <div class="rdance-step1-info">
-                                    <MudPaper Outlined="true" Class="rdance-info-card">
-                                        <MudStack Spacing="1">
-                                            <MudText Typo="Typo.subtitle2">Thông tin video</MudText>
-                                            <MudText Typo="Typo.body2">Thời lượng</MudText>
-                                            <MudText Typo="Typo.body1" Class="rdance-summary-value">@FormatDurationLabel(MotionDurationSeconds)</MudText>
-                                            <MudText Typo="Typo.body2">Tỷ lệ</MudText>
-                                            <MudText Typo="Typo.body1" Class="rdance-summary-value">@_ratio</MudText>
-                                            <MudText Typo="Typo.body2">Độ phân giải</MudText>
-                                            <MudText Typo="Typo.body1" Class="rdance-summary-value">@MotionResolutionText</MudText>
-                                            <MudText Typo="Typo.caption" Class="rdance-muted-line">@ReferenceLabel</MudText>
-                                        </MudStack>
-                                    </MudPaper>
                                 </div>
                             </div>
                         </MudPaper>
@@ -259,10 +258,13 @@
                                 </MudStack>
                                 @foreach (var step in OnePageSteps)
                                 {
-                                    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="rdance-timeline-row">
+                                    <div class="rdance-timeline-row">
                                         <MudText Typo="Typo.body2">@step.Label</MudText>
-                                        <MudChip T="string" Size="Size.Small" Color="@step.Color">@step.StatusLabel</MudChip>
-                                    </MudStack>
+                                        <span class="rdance-status-pill @StepStatusClass(step.Color)">
+                                            <MudIcon Icon="@StepStatusIcon(step.Color)" Size="Size.Small" />
+                                            <span>@step.StatusLabel</span>
+                                        </span>
+                                    </div>
                                 }
                             </MudStack>
                         </MudPaper>
@@ -295,23 +297,38 @@
                                 <div class="rdance-checklist">
                                     <div class="rdance-check-row">
                                         <MudText Typo="Typo.body2">Video tham chiếu</MudText>
-                                        <MudChip T="string" Size="Size.Small" Color="@StepStatusColor(string.IsNullOrWhiteSpace(_job?.MotionVideoUrl) ? "gray" : "green")">@StepStatusLabel(string.IsNullOrWhiteSpace(_job?.MotionVideoUrl) ? "gray" : "green")</MudChip>
+                                        <span class="rdance-status-pill @StepStatusClass(StepStatusColor(string.IsNullOrWhiteSpace(_job?.MotionVideoUrl) ? "gray" : "green"))">
+                                            <MudIcon Icon="@StepStatusIcon(StepStatusColor(string.IsNullOrWhiteSpace(_job?.MotionVideoUrl) ? "gray" : "green"))" Size="Size.Small" />
+                                            <span>@StepStatusLabel(string.IsNullOrWhiteSpace(_job?.MotionVideoUrl) ? "gray" : "green")</span>
+                                        </span>
                                     </div>
                                     <div class="rdance-check-row">
                                         <MudText Typo="Typo.body2">Ảnh người mẫu</MudText>
-                                        <MudChip T="string" Size="Size.Small" Color="@StepStatusColor(string.IsNullOrWhiteSpace(_job?.CharacterImageUrl) ? "gray" : "green")">@StepStatusLabel(string.IsNullOrWhiteSpace(_job?.CharacterImageUrl) ? "gray" : "green")</MudChip>
+                                        <span class="rdance-status-pill @StepStatusClass(StepStatusColor(string.IsNullOrWhiteSpace(_job?.CharacterImageUrl) ? "gray" : "green"))">
+                                            <MudIcon Icon="@StepStatusIcon(StepStatusColor(string.IsNullOrWhiteSpace(_job?.CharacterImageUrl) ? "gray" : "green"))" Size="Size.Small" />
+                                            <span>@StepStatusLabel(string.IsNullOrWhiteSpace(_job?.CharacterImageUrl) ? "gray" : "green")</span>
+                                        </span>
                                     </div>
                                     <div class="rdance-check-row">
                                         <MudText Typo="Typo.body2">Ảnh sản phẩm</MudText>
-                                        <MudChip T="string" Size="Size.Small" Color="@StepStatusColor(string.IsNullOrWhiteSpace(_job?.ProductImageUrl) ? "gray" : "green")">@StepStatusLabel(string.IsNullOrWhiteSpace(_job?.ProductImageUrl) ? "gray" : "green")</MudChip>
+                                        <span class="rdance-status-pill @StepStatusClass(StepStatusColor(string.IsNullOrWhiteSpace(_job?.ProductImageUrl) ? "gray" : "green"))">
+                                            <MudIcon Icon="@StepStatusIcon(StepStatusColor(string.IsNullOrWhiteSpace(_job?.ProductImageUrl) ? "gray" : "green"))" Size="Size.Small" />
+                                            <span>@StepStatusLabel(string.IsNullOrWhiteSpace(_job?.ProductImageUrl) ? "gray" : "green")</span>
+                                        </span>
                                     </div>
                                     <div class="rdance-check-row">
                                         <MudText Typo="Typo.body2">Ảnh kết quả</MudText>
-                                        <MudChip T="string" Size="Size.Small" Color="@StepStatusColor(string.IsNullOrWhiteSpace(_job?.PreparedReferenceUrl) ? "gray" : "green")">@StepStatusLabel(string.IsNullOrWhiteSpace(_job?.PreparedReferenceUrl) ? "gray" : "green")</MudChip>
+                                        <span class="rdance-status-pill @StepStatusClass(StepStatusColor(string.IsNullOrWhiteSpace(_job?.PreparedReferenceUrl) ? "gray" : "green"))">
+                                            <MudIcon Icon="@StepStatusIcon(StepStatusColor(string.IsNullOrWhiteSpace(_job?.PreparedReferenceUrl) ? "gray" : "green"))" Size="Size.Small" />
+                                            <span>@StepStatusLabel(string.IsNullOrWhiteSpace(_job?.PreparedReferenceUrl) ? "gray" : "green")</span>
+                                        </span>
                                     </div>
                                     <div class="rdance-check-row">
                                         <MudText Typo="Typo.body2">Sẵn sàng tạo video</MudText>
-                                        <MudChip T="string" Size="Size.Small" Color="@StepStatusColor(CanRender ? "green" : "gray")">@StepStatusLabel(CanRender ? "green" : "gray")</MudChip>
+                                        <span class="rdance-status-pill @StepStatusClass(StepStatusColor(CanRender ? "green" : "gray"))">
+                                            <MudIcon Icon="@StepStatusIcon(StepStatusColor(CanRender ? "green" : "gray"))" Size="Size.Small" />
+                                            <span>@StepStatusLabel(CanRender ? "green" : "gray")</span>
+                                        </span>
                                     </div>
                                 </div>
                             </MudStack>
@@ -919,6 +936,21 @@
     private static string FormatDurationLabel(int? seconds)
         => seconds is null ? "—" : TimeSpan.FromSeconds(Math.Max(0, seconds.Value)).ToString(@"hh\:mm\:ss");
 
+    private static string StepStatusClass(Color color) => color switch
+    {
+        Color.Success => "is-green",
+        Color.Warning => "is-yellow",
+        Color.Error => "is-red",
+        _ => "is-gray"
+    };
+
+    private static string StepStatusIcon(Color color) => color switch
+    {
+        Color.Success => Icons.Material.Filled.CheckCircle,
+        Color.Warning => Icons.Material.Filled.RadioButtonUnchecked,
+        Color.Error => Icons.Material.Filled.Cancel,
+        _ => Icons.Material.Filled.RadioButtonUnchecked
+    };
     private static Color StepStatusColor(string key) => key switch
     {
         "green" => Color.Success,
@@ -1878,6 +1910,8 @@
     private string BuildPrompt()
         => $"Create a fashion dance video. Category: {_category}. Preserve identity, face, anatomy and product design. Dress the person in the supplied product, keep colors, patterns and logos consistent, follow the staged motion naturally, no text, watermark, extra people or duplicated limbs.";
 
+    private static string FormatBytes(long? bytes)
+        => bytes is null ? "-" : FormatBytes(bytes.Value);
     private static string FormatBytes(long bytes)
     {
         if (bytes >= 1024L * 1024 * 1024)
@@ -2019,7 +2053,7 @@
     .rdance-step3-card { min-height: 100%; }
     .rdance-timeline-row { padding: 4px 0; }
     .rdance-muted-line { color: rgba(255,255,255,.62); }
-    .rdance-result-player { aspect-ratio: 9 / 16; max-height: 310px; max-width: 100%; object-fit: contain; }
+    .rdance-result-player { aspect-ratio: 9 / 16; max-height: 310px; max-width: 100%; object-fit: cover; }
     @@media (min-width: 1280px) {
         .rdance-shell-grid > .mud-grid-item:first-child { flex: 0 0 72% !important; max-width: 72% !important; }
         .rdance-shell-grid > .mud-grid-item:last-child { flex: 0 0 28% !important; max-width: 28% !important; }
@@ -2074,7 +2108,7 @@
     .rdance-result-frame.is-cancelled { border: 1px solid rgba(255,193,7,.35); background: rgba(255,193,7,.08); color: rgba(255,255,255,.58); }
     .rdance-result-frame.is-failed { border: 1px solid rgba(244,67,54,.36); background: rgba(244,67,54,.08); color: rgba(255,255,255,.58); }
     .rdance-media-player, .rdance-result-player { width: 100%; max-height: 520px; border-radius: 8px; background: #090d12; }
-    .rdance-result-player { max-width: 640px; aspect-ratio: 9 / 16; object-fit: contain; }
+    .rdance-result-player { max-width: 640px; aspect-ratio: 9 / 16; object-fit: cover; }
     .rdance-onepage-layout { display: flex; flex-direction: column; gap: 12px; }
     .rdance-hero-shell { padding: 16px 18px; }
     .rdance-hero-title { margin-bottom: 2px; }
@@ -2098,7 +2132,7 @@
     .rdance-muted-line { color: rgba(255,255,255,.62); }
     .rdance-step2-grid .rdance-upload-zone { min-height: 92px; }
     .rdance-step2-grid .rdance-upload-limit { font-size: .8rem; }
-    .rdance-result-player { aspect-ratio: 9 / 16; max-height: 320px; max-width: 100%; object-fit: contain; }
+    .rdance-result-player { aspect-ratio: 9 / 16; max-height: 320px; max-width: 100%; object-fit: cover; }
     @@media (min-width: 1280px) {
         .rdance-summary-grid > .mud-grid-item { flex: 0 0 20% !important; max-width: 20% !important; }
     }
@@ -2236,18 +2270,19 @@
     .rdance-header-actions { display: flex; align-items: center; gap: 10px; flex-wrap: nowrap; }
     .rdance-summary-bar { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
     .rdance-summary-card { min-height: 80px; padding: 12px 14px; display: flex; flex-direction: column; justify-content: space-between; gap: 4px; border-radius: 12px; }
-    .rdance-workspace { display: grid; grid-template-columns: minmax(0, 1fr) 352px; gap: 16px; align-items: start; min-width: 0; }
+    .rdance-workspace { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 16px; align-items: start; min-width: 0; }
     .rdance-main { display: grid; gap: 12px; min-width: 0; }
-    .rdance-sidebar { display: grid; gap: 12px; width: 352px; min-width: 0; max-width: 352px; }
+    .rdance-sidebar { display: grid; gap: 12px; width: 360px; min-width: 300px; max-width: 360px; }
     .rdance-card { padding: 14px; border-radius: 12px; min-width: 0; }
     .rdance-section-head { display: flex; align-items: flex-start; gap: 10px; min-width: 0; }
-    .rdance-step1-content { display: grid; grid-template-columns: minmax(0, 1fr) 248px 304px; gap: 12px; align-items: start; min-width: 0; }
+    .rdance-step1-content { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 12px; align-items: start; min-width: 0; }
     .rdance-step1-left { min-width: 0; }
     .rdance-step1-preview { display: flex; justify-content: center; min-width: 0; }
-    .rdance-step1-preview-frame { width: min(100%, 248px); aspect-ratio: 9 / 16; display: flex; align-items: center; justify-content: center; overflow: hidden; border-radius: 8px; background: rgba(255,255,255,.03); }
-    .rdance-step1-video { width: 100%; height: 100%; object-fit: contain; }
-    .rdance-step1-info { min-width: 0; display: flex; }
+    .rdance-step1-preview-frame { width: min(100%, 360px); aspect-ratio: 9 / 16; display: flex; align-items: center; justify-content: center; overflow: hidden; border-radius: 8px; background: rgba(255,255,255,.03); }
+    .rdance-step1-video { width: 100%; height: 100%; object-fit: cover; }
+
     .rdance-info-card { width: 100%; min-width: 0; }
+    .rdance-info-card .mud-stack { gap: 4px !important; }
     .rdance-step2-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; align-items: stretch; }
     .rdance-stage-card { height: 100%; padding: 12px; border-radius: 12px; min-width: 0; }
     .rdance-stage-stack { gap: 10px !important; height: 100%; }
@@ -2265,13 +2300,19 @@
     .rdance-sidebar-preview .scene-media-square { width: 100%; max-width: none; }
     .rdance-checklist { display: grid; gap: 8px; }
     .rdance-check-row,
-    .rdance-timeline-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; }
+    .rdance-timeline-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
     .rdance-check-row,
     .rdance-timeline-row { padding: 2px 0; }
     .rdance-check-row .mud-text,
     .rdance-timeline-row .mud-text { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .rdance-check-row .mud-chip,
     .rdance-timeline-row .mud-chip { flex-shrink: 0; }
+    .rdance-status-pill { display: inline-flex; align-items: center; justify-content: space-between; gap: 6px; min-width: 108px; padding: 4px 10px; border-radius: 999px; font-size: .8rem; font-weight: 700; line-height: 1; white-space: nowrap; }
+    .rdance-status-pill .mud-icon-root { font-size: 1rem; }
+    .rdance-status-pill.is-green { color: #1f3b26; background: rgba(42,194,177,.9); }
+    .rdance-status-pill.is-yellow { color: #332508; background: rgba(245,181,64,.92); }
+    .rdance-status-pill.is-red { color: #441515; background: rgba(244,67,54,.92); }
+    .rdance-status-pill.is-gray { color: rgba(255,255,255,.72); background: rgba(255,255,255,.08); }
     .rdance-button-row { gap: 8px; flex-wrap: wrap; }
     .rdance-button-row > * { flex: 0 0 auto; }
     @@media (max-width: 1279.98px) {
