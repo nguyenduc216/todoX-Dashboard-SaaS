@@ -8,11 +8,13 @@
 @inject CatalogRepository Catalog
 @inject AuthStateService AuthState
 @inject IDanceSellPhase2Service DanceSell
+@inject IDanceSellReferenceImageService References
 @inject IDanceSellProviderCatalog ProviderCatalog
 @inject IOptionsMonitor<DanceSellPhase2Options> DanceOptions
 @inject IDialogService DialogService
 @inject NavigationManager Navigation
 @inject ISnackbar Snackbar
+@inject IRDanceFeatureService RDanceFeatures
 
 <PageTitle>Video nhảy quảng cáo thời trang</PageTitle>
 
@@ -32,6 +34,8 @@
             <MudAlert Severity="Severity.Error">@_readinessError</MudAlert>
         }
 
+        @if (RDanceFeatures.IsNewUiEnabled)
+        {
         <div class="rdance-page-container rdance-onepage-layout">
             <MudPaper Class="todox-panel rdance-header-card">
                 <div class="rdance-header-row">
@@ -84,38 +88,64 @@
                     </div>
                     <div class="rdance-step1-layout">
                         <div class="rdance-thumbnail-stack">
-                            <div class="rdance-thumbnail" title="Ảnh người mẫu">
+                            <label class="rdance-thumbnail" title="Ảnh người mẫu">
                                 <span class="rdance-thumbnail-inner">
-                                    <span class="rdance-thumbnail-empty">
-                                        <MudIcon Icon="@Icons.Material.Filled.CloudUpload" Size="Size.Small" />
-                                        <span>Ảnh người mẫu</span>
-                                    </span>
+                                    @if (!string.IsNullOrWhiteSpace(_job?.CharacterImageUrl))
+                                    {
+                                        <img src="@_job.CharacterImageUrl" alt="Ảnh người mẫu" class="rdance-thumbnail-image" />
+                                    }
+                                    else
+                                    {
+                                        <span class="rdance-thumbnail-empty"><MudIcon Icon="@Icons.Material.Filled.CloudUpload" Size="Size.Small" /><span>Ảnh người mẫu</span></span>
+                                    }
                                 </span>
-                            </div>
-                            <div class="rdance-thumbnail" title="Ảnh sản phẩm">
+                                <InputFile class="rdance-hidden-file-input" OnChange="OnCharacterSelected" accept="@AcceptedImageTypes" disabled="@_busy" />
+                            </label>
+                            <label class="rdance-thumbnail" title="Ảnh sản phẩm">
                                 <span class="rdance-thumbnail-inner">
-                                    <span class="rdance-thumbnail-empty">
-                                        <MudIcon Icon="@Icons.Material.Filled.CloudUpload" Size="Size.Small" />
-                                        <span>Ảnh sản phẩm</span>
-                                    </span>
+                                    @if (!string.IsNullOrWhiteSpace(_job?.ProductImageUrl))
+                                    {
+                                        <img src="@_job.ProductImageUrl" alt="Ảnh sản phẩm" class="rdance-thumbnail-image" />
+                                    }
+                                    else
+                                    {
+                                        <span class="rdance-thumbnail-empty"><MudIcon Icon="@Icons.Material.Filled.CloudUpload" Size="Size.Small" /><span>Ảnh sản phẩm</span></span>
+                                    }
                                 </span>
-                            </div>
-                            <div class="rdance-thumbnail" title="Ghép ảnh">
+                                <InputFile class="rdance-hidden-file-input" OnChange="OnProductSelected" accept="@AcceptedImageTypes" disabled="@_busy" />
+                            </label>
+                            <button type="button"
+                                    class="rdance-thumbnail rdance-merge-thumbnail"
+                                    title="Ghép ảnh"
+                                    disabled="@(_busy || _job?.CharacterMediaId is null || _job?.ProductMediaId is null)"
+                                    @onclick="GenerateReferenceAsync">
                                 <span class="rdance-thumbnail-inner">
-                                    <span class="rdance-thumbnail-empty">
-                                        <MudIcon Icon="@Icons.Material.Filled.Merge" Size="Size.Small" />
-                                        <span>Ghép ảnh</span>
-                                    </span>
+                                    @if (!string.IsNullOrWhiteSpace(_job?.PreparedReferenceUrl))
+                                    {
+                                        <img src="@_job.PreparedReferenceUrl" alt="Ảnh ghép" class="rdance-thumbnail-image" />
+                                    }
+                                    else
+                                    {
+                                        <span class="rdance-thumbnail-empty"><MudIcon Icon="@Icons.Material.Filled.Merge" Size="Size.Small" /><span>Ghép ảnh</span></span>
+                                    }
                                 </span>
-                            </div>
+                            </button>
                         </div>
                         <div class="rdance-media-frame rdance-main-frame">
-                            <div class="rdance-empty-media">
-                                <MudIcon Icon="@Icons.Material.Filled.Image" Size="Size.Large" />
-                                <span>Ảnh tham chiếu</span>
-                            </div>
+                            @if (!string.IsNullOrWhiteSpace(CreateReferenceImageUrl))
+                            {
+                                <img src="@CreateReferenceImageUrl" alt="Ảnh tham chiếu" class="rdance-frame-media rdance-frame-image" />
+                            }
+                            else
+                            {
+                                <div class="rdance-empty-media"><MudIcon Icon="@Icons.Material.Filled.Image" Size="Size.Large" /><span>Ảnh tham chiếu</span></div>
+                            }
                         </div>
                     </div>
+                    @if (!string.IsNullOrWhiteSpace(_imageUploadError))
+                    {
+                        <MudAlert Severity="Severity.Error" Dense="true">@_imageUploadError</MudAlert>
+                    }
                 </MudPaper>
 
                 <MudPaper Class="todox-panel rdance-step-card">
@@ -127,10 +157,14 @@
                         </div>
                     </div>
                     <div class="rdance-media-frame rdance-video-frame">
-                        <div class="rdance-empty-media">
-                            <MudIcon Icon="@Icons.Material.Filled.Movie" Size="Size.Large" />
-                            <span>Video tham chiếu</span>
-                        </div>
+                        @if (!string.IsNullOrWhiteSpace(_job?.MotionVideoUrl))
+                        {
+                            <video src="@_job.MotionVideoUrl" controls muted playsinline class="rdance-frame-media rdance-frame-video"></video>
+                        }
+                        else
+                        {
+                            <div class="rdance-empty-media"><MudIcon Icon="@Icons.Material.Filled.Movie" Size="Size.Large" /><span>Video tham chiếu</span></div>
+                        }
                         <div class="rdance-overlay-actions">
                             <MudIconButton Icon="@Icons.Custom.Brands.TikTok"
                                            Class="@TikTokOverlayButtonClass"
@@ -175,47 +209,92 @@
                     </div>
                     <div class="rdance-status-list">
                         <div class="rdance-status-item">
-                            <div><MudIcon Icon="@CreateStatusIcon" Color="@CreateStatusColor" Size="Size.Small" /> <span>Hình ảnh tham chiếu</span></div>
-                            <span class="@CreateStatusClass">@CreateStatusLabel</span>
+                            <div><MudIcon Icon="@CreateStatusIcon(CreateReferenceStatusKey)" Color="@CreateStatusColor(CreateReferenceStatusKey)" Size="Size.Small" /> <span>Hình ảnh tham chiếu</span></div>
+                            <span class="@CreateStatusClass(CreateReferenceStatusKey)">@CreateStatusLabel(CreateReferenceStatusKey)</span>
                         </div>
                         <div class="rdance-status-item">
-                            <div><MudIcon Icon="@CreateStatusIcon" Color="@CreateStatusColor" Size="Size.Small" /> <span>Video tham chiếu</span></div>
-                            <span class="@CreateStatusClass">@CreateStatusLabel</span>
+                            <div><MudIcon Icon="@CreateStatusIcon(CreateMotionStatusKey)" Color="@CreateStatusColor(CreateMotionStatusKey)" Size="Size.Small" /> <span>Video tham chiếu</span></div>
+                            <span class="@CreateStatusClass(CreateMotionStatusKey)">@CreateStatusLabel(CreateMotionStatusKey)</span>
                         </div>
                         <div class="rdance-status-item">
-                            <div><MudIcon Icon="@CreateStatusIcon" Color="@CreateStatusColor" Size="Size.Small" /> <span>Render kết quả</span></div>
-                            <span class="@CreateStatusClass">@CreateStatusLabel</span>
+                            <div><MudIcon Icon="@CreateStatusIcon(CreateRenderStatusKey)" Color="@CreateStatusColor(CreateRenderStatusKey)" Size="Size.Small" /> <span>Render kết quả</span></div>
+                            <span class="@CreateStatusClass(CreateRenderStatusKey)">@CreateStatusLabel(CreateRenderStatusKey)</span>
                         </div>
                         <div class="rdance-status-item">
-                            <div><MudIcon Icon="@CreateStatusIcon" Color="@CreateStatusColor" Size="Size.Small" /> <span>Video kết quả</span></div>
-                            <span class="@CreateStatusClass">@CreateStatusLabel</span>
+                            <div><MudIcon Icon="@CreateStatusIcon(CreateResultStatusKey)" Color="@CreateStatusColor(CreateResultStatusKey)" Size="Size.Small" /> <span>Video kết quả</span></div>
+                            <span class="@CreateStatusClass(CreateResultStatusKey)">@CreateStatusLabel(CreateResultStatusKey)</span>
                         </div>
                     </div>
                     <MudDivider />
                     <MudStack Spacing="2">
                         <MudTextField T="string" Label="Tên video" Variant="Variant.Outlined" @bind-Value="_title" Disabled="@_busy" />
-                        <MudSelect T="string" Label="Danh mục thời trang" Variant="Variant.Outlined" @bind-Value="_category" Disabled="@_busy">
-                            <MudSelectItem Value="@("shirt")">Áo</MudSelectItem>
-                            <MudSelectItem Value="@("pants")">Quần</MudSelectItem>
-                            <MudSelectItem Value="@("dress")">Váy</MudSelectItem>
-                            <MudSelectItem Value="@("set")">Set đồ</MudSelectItem>
-                            <MudSelectItem Value="@("outerwear")">Áo khoác</MudSelectItem>
-                            <MudSelectItem Value="@("other")">Khác</MudSelectItem>
-                        </MudSelect>
-                        <MudSelect T="string" Label="Tỷ lệ video" Variant="Variant.Outlined" @bind-Value="_ratio" Disabled="@_busy">
-                            <MudSelectItem Value="@("9:16")">9:16</MudSelectItem>
-                            <MudSelectItem Value="@("16:9")">16:9</MudSelectItem>
-                        </MudSelect>
-                        <MudSwitch T="bool" Color="Color.Warning" @bind-Value="_autoFinish" Disabled="@_busy">Tự động hoàn thành</MudSwitch>
-                        <MudText Typo="Typo.caption" Class="rdance-auto-finish-help">
-                            @(_autoFinish
-                                ? "Hệ thống sẽ tự động chuẩn bị ảnh, duyệt ảnh và tạo video khi dữ liệu đã đầy đủ."
-                                : "Bạn sẽ xác nhận từng bước trước khi tạo video.")
-                        </MudText>
                     </MudStack>
                 </MudPaper>
             </div>
         </div>
+        }
+        else
+        {
+            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="flex-wrap">
+                <MudIconButton Icon="@Icons.Material.Filled.ArrowBack" Color="Color.Default" OnClick="@(() => Navigation.NavigateTo("/create"))" />
+                <div>
+                    <MudText Typo="Typo.h4" Class="todox-page-title">Video nhảy quảng cáo thời trang</MudText>
+                    <MudText Typo="Typo.body1" Class="todox-page-subtitle">Tạo video quảng cáo thời trang từ chuyển động TikTok hoặc video MP4.</MudText>
+                </div>
+            </MudStack>
+            <MudGrid>
+                <MudItem xs="12" lg="7">
+                    <MudPaper Class="todox-card pa-4" rounded="true">
+                        <MudStack Spacing="3">
+                            <MudTextField T="string" Label="Tên video" Variant="Variant.Outlined" @bind-Value="_title" Disabled="@_busy" />
+                            <MudSwitch T="bool" Color="Color.Warning" @bind-Value="_autoFinish" Disabled="@_busy">Tự động hoàn thành</MudSwitch>
+                            <MudSelect T="string" Label="Danh mục thời trang" Variant="Variant.Outlined" @bind-Value="_category" Disabled="@_busy">
+                                <MudSelectItem Value="@("shirt")">Áo</MudSelectItem>
+                                <MudSelectItem Value="@("pants")">Quần</MudSelectItem>
+                                <MudSelectItem Value="@("dress")">Váy</MudSelectItem>
+                                <MudSelectItem Value="@("set")">Set đồ</MudSelectItem>
+                                <MudSelectItem Value="@("outerwear")">Áo khoác</MudSelectItem>
+                                <MudSelectItem Value="@("other")">Khác</MudSelectItem>
+                            </MudSelect>
+                            <MudSelect T="string" Label="Tỷ lệ video" Variant="Variant.Outlined" @bind-Value="_ratio" Disabled="@_busy">
+                                <MudSelectItem Value="@("9:16")">9:16</MudSelectItem>
+                                <MudSelectItem Value="@("16:9")">16:9</MudSelectItem>
+                            </MudSelect>
+                            <MudText Typo="Typo.caption" Class="rdance-auto-finish-help">
+                                @(_autoFinish ? "Hệ thống sẽ tự động chuẩn bị ảnh, duyệt ảnh và tạo video khi dữ liệu đã đầy đủ." : "Bạn sẽ xác nhận từng bước trước khi tạo video.")
+                            </MudText>
+                            <MudTextField T="string" Label="Link TikTok" Variant="Variant.Outlined" @bind-Value="_tiktokUrl" Disabled="@_busy" />
+                            <MudButton Variant="Variant.Outlined" Color="Color.Warning" Disabled="@(_busy || !CanSubmitSource || string.IsNullOrWhiteSpace(_tiktokUrl))" OnClick="StageTikTokAndOpenAsync">Tải và kiểm tra video</MudButton>
+                            <div class="rdance-source-divider"><span>HOẶC</span></div>
+                            <label class="@MotionUploadZoneClass">
+                                <InputFile class="rdance-hidden-file-input" OnChange="OnMotionSelected" accept="video/mp4" disabled="@(_busy || !CanSubmitSource)" />
+                                <MudIcon Icon="@Icons.Material.Filled.CloudUpload" Size="Size.Large" />
+                                <span class="rdance-upload-title">Kéo thả video MP4 vào đây</span>
+                                <span class="rdance-upload-subtitle">hoặc bấm để chọn video</span>
+                                <span class="rdance-upload-limit">MP4 · tối đa @MaxMotionVideoLabel</span>
+                            </label>
+                            @if (!string.IsNullOrWhiteSpace(_motionUploadError))
+                            {
+                                <MudAlert Severity="Severity.Error" Dense="true">@_motionUploadError</MudAlert>
+                            }
+                        </MudStack>
+                    </MudPaper>
+                </MudItem>
+                <MudItem xs="12" lg="5">
+                    <MudPaper Class="todox-card pa-4" rounded="true">
+                        <MudStack Spacing="2">
+                            <MudText Typo="Typo.overline">THÔNG TIN DỊCH VỤ</MudText>
+                            <MudText Typo="Typo.h6">Video nhảy quảng cáo thời trang</MudText>
+                            <MudList T="string" Dense="true">
+                                <MudListItem T="string">Dịch vụ: Video nhảy quảng cáo thời trang</MudListItem>
+                                <MudListItem T="string">Tỷ lệ: @_ratio</MudListItem>
+                            </MudList>
+                            <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.MovieCreation" Disabled="@(_busy || !CanSubmitSource)" OnClick="CreateDraftAndOpenAsync">Tạo video và tiếp tục</MudButton>
+                        </MudStack>
+                    </MudPaper>
+                </MudItem>
+            </MudGrid>
+        }
     }
 </MudStack>
 
@@ -226,23 +305,80 @@
     private string _title = "Video nhảy quảng cáo thời trang";
     private string _category = "shirt";
     private string _tiktokUrl = string.Empty;
+    private DanceSellJobDto? _job;
     private string? _readinessError;
+    private string? _imageUploadError;
     private string? _motionUploadError;
     private bool _motionDragActive;
     private bool _busy;
     private bool _autoFinish = true;
     private string _ratio = "9:16";
 
+    private const string AcceptedImageTypes = "image/png,image/jpeg,image/webp";
     private bool CanSubmitSource => string.IsNullOrWhiteSpace(_readinessError);
+    private string? CreateReferenceImageUrl => _job?.PreparedReferenceUrl ?? _job?.CharacterImageUrl ?? _job?.ProductImageUrl;
     private long MaxMotionVideoBytes => (long)Math.Max(1, DanceOptions.CurrentValue.MaxVideoMb) * 1024 * 1024;
+    private long MaxImageBytes => (long)Math.Max(1, DanceOptions.CurrentValue.MaxImageMb) * 1024 * 1024;
     private string MaxMotionVideoLabel => $"{Math.Max(1, DanceOptions.CurrentValue.MaxVideoMb)}MB";
+    private string MaxImageLabel => $"{Math.Max(1, DanceOptions.CurrentValue.MaxImageMb)}MB";
     private string MotionUploadZoneClass => $"rdance-upload-zone{(_motionDragActive ? " is-dragging" : string.Empty)}{(_busy ? " is-busy" : string.Empty)}";
-    private Color CreateStatusColor => _busy ? Color.Warning : Color.Default;
-    private string CreateStatusClass => $"rdance-status-pill {(_busy ? "is-yellow" : "is-gray")}";
-    private string CreateStatusIcon => Icons.Material.Filled.RadioButtonUnchecked;
-    private string CreateStatusLabel => _busy ? "Đang xử lý" : "Chưa bắt đầu";
-    private string TikTokOverlayButtonClass => $"rdance-overlay-button {(!string.IsNullOrWhiteSpace(_tiktokUrl) ? "is-active" : "is-inactive")}";
-    private string UploadOverlayButtonClass => "rdance-overlay-button is-inactive";
+    private string TikTokOverlayButtonClass => $"rdance-overlay-button {(_job?.MotionSourceType == DanceSellMotionSourceTypes.TikTok || !string.IsNullOrWhiteSpace(_tiktokUrl) ? "is-active" : "is-inactive")}";
+    private string UploadOverlayButtonClass => $"rdance-overlay-button {(_job?.MotionSourceType == DanceSellMotionSourceTypes.Upload || !string.IsNullOrWhiteSpace(_job?.MotionVideoUrl) ? "is-active" : "is-inactive")}";
+    private string CreateReferenceStatusKey => _job?.PreparedReferenceStatus switch
+    {
+        DanceSellReferenceStatuses.Generating => "yellow",
+        DanceSellReferenceStatuses.Ready or DanceSellReferenceStatuses.Approved => "green",
+        DanceSellReferenceStatuses.Failed => "gray",
+        _ when _job?.PreparedReferenceUrl is not null
+            || _job?.CharacterMediaId is not null
+            || _job?.ProductMediaId is not null => "green",
+        _ => "gray"
+    };
+    private string CreateMotionStatusKey => _job?.SourceStageStatus switch
+    {
+        DanceSellSourceStageStatuses.Resolving
+            or DanceSellSourceStageStatuses.Downloading
+            or DanceSellSourceStageStatuses.Staging => "yellow",
+        DanceSellSourceStageStatuses.Ready => "green",
+        _ when !string.IsNullOrWhiteSpace(_job?.MotionVideoUrl) => "green",
+        _ => "gray"
+    };
+    private string CreateRenderStatusKey => _job?.Status switch
+    {
+        DanceSellJobStatuses.Queued
+            or DanceSellJobStatuses.Submitted
+            or DanceSellJobStatuses.Rendering => "yellow",
+        DanceSellJobStatuses.Completed => "green",
+        _ => "gray"
+    };
+    private string CreateResultStatusKey => _job?.Status switch
+    {
+        DanceSellJobStatuses.Queued
+            or DanceSellJobStatuses.Submitted
+            or DanceSellJobStatuses.Rendering => "yellow",
+        DanceSellJobStatuses.Completed when !string.IsNullOrWhiteSpace(_job.ResultVideoUrl) => "green",
+        _ => "gray"
+    };
+    private static Color CreateStatusColor(string key) => key switch
+    {
+        "green" => Color.Success,
+        "yellow" => Color.Warning,
+        _ => Color.Default
+    };
+    private static string CreateStatusClass(string key) => $"rdance-status-pill {key switch
+    {
+        "green" => "is-green",
+        "yellow" => "is-yellow",
+        _ => "is-gray"
+    }}";
+    private static string CreateStatusIcon(string key)
+        => key == "green" ? Icons.Material.Filled.CheckCircle : Icons.Material.Filled.RadioButtonUnchecked;
+    private static string CreateStatusLabel(string key) => key switch
+    {
+        "green" => "Hoàn tất",
+        "yellow" => "Đang xử lý",
+        _ => "Chưa có dữ liệu"
+    };
 
     protected override async Task OnInitializedAsync()
     {
@@ -263,7 +399,7 @@
         var defaults = ServiceJobDefaultsCodec.FromJson(service.JobDefaultsJson);
         if (defaults.Ratio is "9_16" or "16_9")
         {
-            _ratio = defaults.Ratio!;
+            _ratio = defaults.Ratio == "16_9" ? "16:9" : "9:16";
         }
         if (defaults.AutoFinish.HasValue)
         {
@@ -292,15 +428,15 @@
     private async Task CreateDraftAndOpenAsync()
         => await RunAsync(async () =>
         {
-            var job = await CreateDraftAsync();
+            var job = await (RDanceFeatures.IsNewUiEnabled ? EnsureDraftAsync() : CreateDraftAsync());
             Navigation.NavigateTo($"/jobs/rdance/{job.Id}");
         });
 
     private async Task StageTikTokAndOpenAsync()
         => await RunAsync(async () =>
         {
-            var job = await CreateDraftAsync();
-            job = await DanceSell.StageTikTokAsync(job.Id, _tiktokUrl, AuthState.CurrentUser!);
+            var job = await (RDanceFeatures.IsNewUiEnabled ? EnsureDraftAsync() : CreateDraftAsync());
+            _job = await DanceSell.StageTikTokAsync(job.Id, _tiktokUrl.Trim(), AuthState.CurrentUser!);
             Navigation.NavigateTo($"/jobs/rdance/{job.Id}");
         });
 
@@ -326,6 +462,51 @@
         await StageTikTokAndOpenAsync();
     }
 
+    private async Task GenerateReferenceAsync()
+        => await RunAsync(async () =>
+        {
+            var job = await EnsureDraftAsync();
+            if (job.CharacterMediaId is null || job.ProductMediaId is null)
+            {
+                return;
+            }
+
+            _job = await References.AutoPrepareAsync(job.Id, AuthState.CurrentUser!);
+            Snackbar.Add("Đã bắt đầu ghép ảnh.", Severity.Success);
+        });
+
+    private async Task OnCharacterSelected(InputFileChangeEventArgs args)
+        => await OnImageSelectedAsync(args, character: true);
+
+    private async Task OnProductSelected(InputFileChangeEventArgs args)
+        => await OnImageSelectedAsync(args, character: false);
+
+    private async Task OnImageSelectedAsync(InputFileChangeEventArgs args, bool character)
+    {
+        var file = args.File;
+        var error = ValidateImage(file);
+        if (!string.IsNullOrWhiteSpace(error))
+        {
+            _imageUploadError = error;
+            Snackbar.Add(error, Severity.Error);
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
+        _imageUploadError = null;
+        await RunAsync(async () =>
+        {
+            var job = await EnsureDraftAsync();
+            await using var input = file.OpenReadStream(MaxImageBytes);
+            using var buffer = new MemoryStream();
+            await input.CopyToAsync(buffer);
+            _job = character
+                ? await DanceSell.UploadCharacterAsync(job.Id, buffer.ToArray(), file.Name, file.ContentType, AuthState.CurrentUser!)
+                : await DanceSell.UploadProductAsync(job.Id, buffer.ToArray(), file.Name, file.ContentType, AuthState.CurrentUser!);
+            Snackbar.Add("Tải ảnh thành công.", Severity.Success);
+        });
+    }
+
     private async Task OnMotionSelected(InputFileChangeEventArgs args)
     {
         _motionDragActive = false;
@@ -342,13 +523,24 @@
         _motionUploadError = null;
         await RunAsync(async () =>
         {
-            var job = await CreateDraftAsync();
+            var job = await (RDanceFeatures.IsNewUiEnabled ? EnsureDraftAsync() : CreateDraftAsync());
             await using var input = file.OpenReadStream(MaxMotionVideoBytes);
             using var buffer = new MemoryStream();
             await input.CopyToAsync(buffer);
-            job = await DanceSell.UploadMotionAsync(job.Id, buffer.ToArray(), file.Name, file.ContentType, AuthState.CurrentUser!);
+            _job = await DanceSell.UploadMotionAsync(job.Id, buffer.ToArray(), file.Name, file.ContentType, AuthState.CurrentUser!);
             Navigation.NavigateTo($"/jobs/rdance/{job.Id}");
         });
+    }
+
+    private async Task<DanceSellJobDto> EnsureDraftAsync()
+    {
+        if (_job is not null)
+        {
+            return _job;
+        }
+
+        _job = await CreateDraftAsync();
+        return _job;
     }
 
     private async Task<DanceSellJobDto> CreateDraftAsync()
@@ -369,6 +561,31 @@
             CharacterOrientation = "image",
             AutoFinish = _autoFinish
         }, AuthState.CurrentUser!);
+    }
+
+    private string? ValidateImage(IBrowserFile file)
+    {
+        if (file.Size <= 0)
+        {
+            return "Ảnh không hợp lệ.";
+        }
+
+        if (file.Size > MaxImageBytes)
+        {
+            return "Ảnh vượt quá dung lượng cho phép.";
+        }
+
+        var extension = Path.GetExtension(file.Name);
+        if (string.IsNullOrWhiteSpace(file.Name)
+            || (!file.ContentType.Equals("image/png", StringComparison.OrdinalIgnoreCase)
+                && !file.ContentType.Equals("image/jpeg", StringComparison.OrdinalIgnoreCase)
+                && !file.ContentType.Equals("image/webp", StringComparison.OrdinalIgnoreCase)
+                && extension is not ".png" and not ".jpg" and not ".jpeg" and not ".webp"))
+        {
+            return "Chỉ hỗ trợ ảnh PNG, JPG, JPEG hoặc WEBP.";
+        }
+
+        return null;
     }
 
     private string? ValidateMotionVideo(IBrowserFile file)
@@ -417,7 +634,9 @@
     }
 
     private string BuildPrompt()
-        => $"Create a fashion dance advertising video. Category: {_category}. Preserve identity, face, anatomy and product design. Dress the person in the supplied product, keep colors, patterns and logos consistent, follow the staged motion naturally, no text, watermark, extra people or duplicated limbs.";
+        => RDanceFeatures.IsNewUiEnabled
+            ? "Create a fashion dance advertising video. Preserve identity, face, anatomy and product design. Dress the person in the supplied product, keep colors, patterns and logos consistent, follow the staged motion naturally, no text, watermark, extra people or duplicated limbs."
+            : $"Create a fashion dance advertising video. Category: {_category}. Preserve identity, face, anatomy and product design. Dress the person in the supplied product, keep colors, patterns and logos consistent, follow the staged motion naturally, no text, watermark, extra people or duplicated limbs.";
 
     private void OnMotionDragEnter(DragEventArgs _) => _motionDragActive = true;
     private void OnMotionDragLeave(DragEventArgs _) => _motionDragActive = false;
@@ -442,9 +661,11 @@
     .rdance-step-chip { display: inline-grid; place-items: center; flex: 0 0 auto; width: 24px; height: 24px; border-radius: 999px; background: rgba(245,181,64,.18); color: #f5b540; font-weight: 800; font-size: .8rem; }
     .rdance-step1-layout { display: grid; grid-template-columns: minmax(64px, .36fr) minmax(0, 1fr); gap: 8px; align-items: stretch; min-width: 0; }
     .rdance-thumbnail-stack { display: grid; grid-template-rows: repeat(3, minmax(0, auto)); gap: 6px; min-width: 0; align-content: start; }
-    .rdance-thumbnail { position: relative; display: block; min-width: 0; overflow: hidden; border: 1px dashed rgba(255,255,255,.22); border-radius: 8px; background: rgba(255,255,255,.04); color: rgba(255,255,255,.76); aspect-ratio: 1 / 1; }
+    .rdance-thumbnail { position: relative; display: block; min-width: 0; overflow: hidden; border: 1px dashed rgba(255,255,255,.22); border-radius: 8px; background: rgba(255,255,255,.04); color: rgba(255,255,255,.76); aspect-ratio: 1 / 1; cursor: pointer; }
+    .rdance-thumbnail:disabled { cursor: not-allowed; opacity: .72; }
     .rdance-thumbnail-inner { display: grid; place-items: center; width: 100%; height: 100%; }
     .rdance-thumbnail-empty { display: grid; place-items: center; gap: 4px; padding: 6px; text-align: center; font-size: .78rem; line-height: 1.15; }
+    .rdance-thumbnail-image, .rdance-frame-media { display: block; width: 100%; height: 100%; object-fit: cover; }
     .rdance-media-frame { position: relative; width: 100%; aspect-ratio: 9 / 16; display: grid; place-items: center; overflow: hidden; min-width: 0; border-radius: 8px; background: #090d12; color: rgba(255,255,255,.6); }
     .rdance-main-frame, .rdance-video-frame, .rdance-result-frame { height: 100%; }
     .rdance-empty-media { display: grid; place-items: center; gap: 8px; padding: 12px; color: rgba(255,255,255,.48); text-align: center; }
@@ -462,7 +683,6 @@
     .rdance-status-pill.is-yellow { color: #332508; background: rgba(245,181,64,.92); }
     .rdance-status-pill.is-gray { color: rgba(255,255,255,.72); background: rgba(255,255,255,.08); }
     .rdance-muted-line { color: rgba(255,255,255,.62); }
-    .rdance-auto-finish-help { color: rgba(255,255,255,.68); }
     .rdance-upload-zone { position: relative; display: grid; place-items: center; gap: 6px; min-height: 188px; padding: 24px 18px; overflow: hidden; border: 1px dashed rgba(245, 181, 64, .72); border-radius: 8px; background: rgba(245,181,64,.12); color: rgba(255,255,255,.88); text-align: center; cursor: pointer; transition: border-color .18s ease, background .18s ease, box-shadow .18s ease; }
     .rdance-upload-zone:hover, .rdance-upload-zone:focus-within, .rdance-upload-zone.is-dragging { border-color: #f5b540; background: rgba(245,181,64,.2); box-shadow: 0 0 0 1px rgba(245,181,64,.24), 0 18px 44px rgba(0,0,0,.22); }
     .rdance-upload-zone.is-busy { cursor: progress; opacity: .82; }

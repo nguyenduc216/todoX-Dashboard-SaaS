@@ -1,4 +1,5 @@
 using System.Text;
+using Microsoft.Extensions.Configuration;
 using TodoX.Web.Models.Catalog;
 using TodoX.Web.Services.DanceSell;
 using TodoX.Web.Services;
@@ -127,6 +128,52 @@ public sealed class RDanceCustomerStatusAndPointsRegressionTests
     }
 
     [Fact]
+    public void RdanceNewUiFeatureFlagIsSharedAndSupportsLegacyFallback()
+    {
+        var enabled = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Features:EnableRDanceNewUI"] = "true",
+                ["Features:RdnOnePageUiEnabled"] = "false"
+            })
+            .Build();
+        var disabled = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Features:EnableRDanceNewUI"] = "false",
+                ["Features:RdnOnePageUiEnabled"] = "true"
+            })
+            .Build();
+        var legacy = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Features:RdnOnePageUiEnabled"] = "true"
+            })
+            .Build();
+
+        Assert.True(new RDanceFeatureService(enabled).IsNewUiEnabled);
+        Assert.False(new RDanceFeatureService(disabled).IsNewUiEnabled);
+        Assert.True(new RDanceFeatureService(legacy).IsNewUiEnabled);
+    }
+
+    [Fact]
+    public void RdanceCreateUsesSharedUiFlagAndExistingUploadAndTikTokServices()
+    {
+        var create = ReadRepoFile("Components", "Pages", "RDanceJobCreate.razor");
+
+        Assert.Contains("@inject IRDanceFeatureService RDanceFeatures", create);
+        Assert.Contains("@if (RDanceFeatures.IsNewUiEnabled)", create);
+        Assert.Contains("OnChange=\"OnCharacterSelected\"", create);
+        Assert.Contains("OnChange=\"OnProductSelected\"", create);
+        Assert.Contains("DanceSell.UploadCharacterAsync", create);
+        Assert.Contains("DanceSell.UploadProductAsync", create);
+        Assert.Contains("References.AutoPrepareAsync", create);
+        Assert.Contains("ShowAsync<RDanceTikTokUrlDialog>", create);
+        Assert.Contains("DanceSell.StageTikTokAsync", create);
+        Assert.Contains("controls muted playsinline", create);
+    }
+
+    [Fact]
     public void RdancePointDisplayPrefersChargedOperationPoints()
     {
         var job = new DanceSellJobDto
@@ -174,5 +221,5 @@ public sealed class RDanceCustomerStatusAndPointsRegressionTests
     }
 
     private static string ReadRepoFile(params string[] parts)
-        => File.ReadAllText(Path.Combine(new[] { AppContext.BaseDirectory, "..", "..", "..", ".." }.Concat(parts).ToArray()), Encoding.UTF8);
+        => File.ReadAllText(Path.Combine(new[] { AppContext.BaseDirectory, "..", "..", ".." }.Concat(parts).ToArray()), Encoding.UTF8);
 }

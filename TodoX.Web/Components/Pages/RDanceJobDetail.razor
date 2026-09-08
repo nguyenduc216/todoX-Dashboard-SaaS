@@ -27,7 +27,7 @@
 @inject WalletService Wallet
 @inject IJSRuntime JS
 @inject NavigationManager Navigation
-@inject IConfiguration Config
+@inject IRDanceFeatureService RDanceFeatures
 @implements IDisposable
 
 <PageTitle>Video nhảy quảng cáo thời trang</PageTitle>
@@ -705,7 +705,7 @@
     private int _scoreIdentity = 3;
 
     private const string AcceptedImageTypes = "image/png,image/jpeg,image/webp";
-    private bool IsOnePageUiEnabled => Config.GetValue<bool>("Features:RdnOnePageUiEnabled");
+    private bool IsOnePageUiEnabled => RDanceFeatures.IsNewUiEnabled;
     private int? MotionDurationSeconds => ReadInt(_job?.RequestJson, "durationSeconds", "duration_seconds", "videoDurationSeconds", "video_duration_seconds");
     private string MotionResolutionText => _ratio == "16:9" ? "1920x1080" : "1080x1920";
     private string ReferenceImageSourceText => !string.IsNullOrWhiteSpace(_job?.PreparedReferenceUrl)
