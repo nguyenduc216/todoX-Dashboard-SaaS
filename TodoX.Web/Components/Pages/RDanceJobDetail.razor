@@ -59,240 +59,216 @@
             <MudAlert Severity="Severity.Error">@_motionReadinessError</MudAlert>
         }
 
-        @if (IsOnePageUiEnabled)
+                @if (IsOnePageUiEnabled)
         {
-            <MudStack Class="rdance-onepage-layout" Spacing="2">
-                <MudPaper Class="todox-panel rdance-hero-shell pa-4">
-                    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-3">
-                        <MudStack Spacing="1" Class="rdance-hero-copy">
-                            <MudText Typo="Typo.h4" Class="rdance-hero-title">RDN / RDANCE</MudText>
-                            <MudText Typo="Typo.body2" Class="rdance-muted-line">Tạo video nhảy AI từ video tham chiếu và ảnh tham chiếu, video dọc 9:16 phù hợp TikTok / Reels / Shorts.</MudText>
-                        </MudStack>
-                        <MudStack Row="true" Class="flex-wrap gap-2 rdance-onepage-actions">
+            <div class="rdance-studio-layout">
+                <MudPaper Class="todox-panel rdance-studio-header">
+                    <div class="rdance-header-row">
+                        <div class="rdance-header-copy">
+                            <MudText Typo="Typo.h4" Class="rdance-header-title">Video nhảy quảng cáo thời trang</MudText>
+                            <MudText Typo="Typo.body2" Class="rdance-muted-line">Tạo video quảng cáo thời trang từ chuyển động TikTok hoặc video MP4.</MudText>
+                        </div>
+                        <div class="rdance-header-actions">
                             <MudButton Variant="Variant.Outlined" Color="Color.Default" StartIcon="@Icons.Material.Filled.OpenInBrowser" Disabled="@(_job is null)" OnClick="OpenBrowserAsync">Xem browser</MudButton>
                             <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Save" Disabled="@(_busy || _job is null)" OnClick="SaveChangesAsync">Lưu thay đổi</MudButton>
                             <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Download" Disabled="@(_busy || _isDownloadingResult || _job?.Status != DanceSellJobStatuses.Completed || string.IsNullOrWhiteSpace(_job?.ResultVideoUrl))" OnClick="DownloadResultAsync">Tải video</MudButton>
-                        </MudStack>
-                    </MudStack>
+                        </div>
+                    </div>
                 </MudPaper>
-                <MudGrid Class="rdance-summary-grid">
-                    <MudItem xs="12" sm="6" md="4" lg="2">
-                        <MudPaper Class="todox-panel rdance-summary-card">
-                            <MudText Typo="Typo.caption" Class="rdance-summary-label">Job ID</MudText>
-                            <MudText Typo="Typo.body1" Class="rdance-summary-value">@_job?.Id</MudText>
+
+                <div class="rdance-summary-bar">
+                    <MudPaper Class="todox-panel rdance-summary-card">
+                        <MudText Typo="Typo.caption" Class="rdance-summary-label">Job ID</MudText>
+                        <MudText Typo="Typo.body1" Class="rdance-summary-value">@_job?.Id</MudText>
+                    </MudPaper>
+                    <MudPaper Class="todox-panel rdance-summary-card">
+                        <MudText Typo="Typo.caption" Class="rdance-summary-label">Trạng thái</MudText>
+                        <MudText Typo="Typo.body1" Class="rdance-summary-value">@DisplayStatusLabel(_job!)</MudText>
+                    </MudPaper>
+                    <MudPaper Class="todox-panel rdance-summary-card">
+                        <MudText Typo="Typo.caption" Class="rdance-summary-label">Tỷ lệ khung hình</MudText>
+                        <MudText Typo="Typo.body1" Class="rdance-summary-value">@_ratio</MudText>
+                    </MudPaper>
+                    <MudPaper Class="todox-panel rdance-summary-card">
+                        <MudText Typo="Typo.caption" Class="rdance-summary-label">Thời lượng dự kiến</MudText>
+                        <MudText Typo="Typo.body1" Class="rdance-summary-value">@FormatDurationLabel(MotionDurationSeconds)</MudText>
+                    </MudPaper>
+                    <MudPaper Class="todox-panel rdance-summary-card">
+                        <MudText Typo="Typo.caption" Class="rdance-summary-label">Điểm dự kiến</MudText>
+                        <MudText Typo="Typo.body1" Class="rdance-summary-value">@FormatPoints(_pointEstimate?.TotalPoints ?? _displayPoints)</MudText>
+                    </MudPaper>
+                </div>
+
+                <div class="rdance-workspace">
+                    <main class="rdance-main">
+                        <MudPaper Class="todox-panel rdance-card rdance-title-card">
+                            <MudText Typo="Typo.caption" Class="rdance-summary-label">Tiêu đề video</MudText>
+                            <MudTextField T="string" Label="Tiêu đề video" Variant="Variant.Outlined" @bind-Value="_title" Disabled="@_busy" />
                         </MudPaper>
-                    </MudItem>
-                    <MudItem xs="12" sm="6" md="4" lg="2">
-                        <MudPaper Class="todox-panel rdance-summary-card">
-                            <MudText Typo="Typo.caption" Class="rdance-summary-label">Trạng thái</MudText>
-                            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
-                                <MudChip T="string" Size="Size.Small" Color="@StepStatusColor(CompletionStepStatusKey)">@StepStatusLabel(CompletionStepStatusKey)</MudChip>
-                                <MudText Typo="Typo.body1" Class="rdance-summary-value">@StageProgressPercent%</MudText>
-                            </MudStack>
-                        </MudPaper>
-                    </MudItem>
-                    <MudItem xs="12" sm="6" md="4" lg="2">
-                        <MudPaper Class="todox-panel rdance-summary-card">
-                            <MudText Typo="Typo.caption" Class="rdance-summary-label">Tỷ lệ khung hình</MudText>
-                            <MudText Typo="Typo.body1" Class="rdance-summary-value">@_ratio</MudText>
-                        </MudPaper>
-                    </MudItem>
-                    <MudItem xs="12" sm="6" md="4" lg="2">
-                        <MudPaper Class="todox-panel rdance-summary-card">
-                            <MudText Typo="Typo.caption" Class="rdance-summary-label">Thời lượng dự kiến</MudText>
-                            <MudText Typo="Typo.body1" Class="rdance-summary-value">@FormatDurationLabel(MotionDurationSeconds)</MudText>
-                        </MudPaper>
-                    </MudItem>
-                    <MudItem xs="12" sm="6" md="4" lg="2">
-                        <MudPaper Class="todox-panel rdance-summary-card">
-                            <MudText Typo="Typo.caption" Class="rdance-summary-label">Điểm dự kiến</MudText>
-                            <MudText Typo="Typo.body1" Class="rdance-summary-value">@FormatPoints(_pointEstimate?.TotalPoints ?? _displayPoints)</MudText>
-                        </MudPaper>
-                    </MudItem>
-                </MudGrid>
-                <MudGrid Class="rdance-workflow-grid rdance-shell-grid">
-                    <MudItem xs="12" lg="8">
-                        <MudStack Spacing="2" Class="rdance-onepage-main-stack">
-                            <MudPaper Class="todox-panel pa-3 rdance-onepage-title-card">
-                                <MudText Typo="Typo.caption" Class="rdance-summary-label">Tiêu đề video</MudText>
-                                <MudTextField T="string" Label="Tiêu đề video" Variant="Variant.Outlined" @bind-Value="_title" Disabled="@_busy" />
-                            </MudPaper>
-                            <MudPaper Class="todox-panel pa-3 rdance-onepage-step1-card">
-                                <MudStack Spacing="2">
-                                    <MudStack Row="true" AlignItems="AlignItems.Center" Class="flex-wrap gap-2">
-                                        <MudChip T="string" Color="Color.Warning" Size="Size.Small">1</MudChip>
-                                        <MudText Typo="Typo.h6">Bước 1. Video tham chiếu</MudText>
-                                        <MudText Typo="Typo.body2" Class="rdance-muted-line">Nhập link TikTok hoặc tải lên video tham chiếu.</MudText>
-                                    </MudStack>
-                                    <MudGrid Class="rdance-step1-grid">
-                                        <MudItem xs="12" md="5">
-                                            <MudStack Spacing="2">
-                                                <MudTextField T="string" Label="TikTok/video URL" Variant="Variant.Outlined" @bind-Value="_tiktokUrl" Disabled="@_busy" />
-                                                <MudStack Row="true" Class="flex-wrap gap-2">
-                                                    <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Link" Disabled="@(_busy || string.IsNullOrWhiteSpace(_tiktokUrl))" OnClick="StageTikTokAsync">Phân tích video</MudButton>
-                                                    <label class="rdance-file-button-wrapper">
-                                                        <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.CloudUpload" Disabled="@_busy">Tải lên video</MudButton>
-                                                        <InputFile class="rdance-hidden-file-input" OnChange="OnMotionSelected" accept="video/mp4" disabled="@_busy" />
-                                                    </label>
-                                                </MudStack>
-                                                @if (!string.IsNullOrWhiteSpace(_motionUploadError))
-                                                {
-                                                    <MudAlert Severity="Severity.Error" Dense="true">@_motionUploadError</MudAlert>
-                                                }
-                                                <MudText Typo="Typo.caption" Class="rdance-muted-line">MP4 · tối đa @MaxMotionVideoLabel</MudText>
-                                            </MudStack>
-                                        </MudItem>
-                                        <MudItem xs="12" md="4">
-                                            <div class="rdance-media-thumb">
-                                                @if (!string.IsNullOrWhiteSpace(_job?.MotionVideoUrl))
-                                                {
-                                                    <video src="@_job.MotionVideoUrl" controls muted playsinline class="rdance-thumb-video"></video>
-                                                }
-                                                else
-                                                {
-                                                    <RenderMediaFrame IsVideo="true" State="@ResolveDanceMediaState(_job?.Status)" AspectRatio="@_ratio" EmptyText="Video tham chiếu sẽ hiện ở đây." FailedText="Lỗi tải video" />
-                                                }
-                                            </div>
-                                        </MudItem>
-                                        <MudItem xs="12" md="3">
-                                            <MudPaper Outlined="true" Class="rdance-info-card pa-3">
-                                                <MudStack Spacing="1">
-                                                    <MudText Typo="Typo.subtitle2">Thông tin video</MudText>
-                                                    <MudText Typo="Typo.body2">Thời lượng</MudText>
-                                                    <MudText Typo="Typo.body1" Class="rdance-summary-value">@FormatDurationLabel(MotionDurationSeconds)</MudText>
-                                                    <MudText Typo="Typo.body2">Tỷ lệ</MudText>
-                                                    <MudText Typo="Typo.body1" Class="rdance-summary-value">@_ratio</MudText>
-                                                    <MudText Typo="Typo.body2">Độ phân giải</MudText>
-                                                    <MudText Typo="Typo.body1" Class="rdance-summary-value">@MotionResolutionText</MudText>
-                                                    <MudText Typo="Typo.caption" Class="rdance-muted-line">@ReferenceLabel</MudText>
-                                                </MudStack>
-                                            </MudPaper>
-                                        </MudItem>
-                                    </MudGrid>
-                                </MudStack>
-                            </MudPaper>
-                            <MudPaper Class="todox-panel pa-3 rdance-onepage-step2-card">
-                                <MudStack Spacing="2">
-                                    <MudStack Row="true" AlignItems="AlignItems.Center" Class="flex-wrap gap-2">
-                                        <MudChip T="string" Color="Color.Warning" Size="Size.Small">2</MudChip>
-                                        <MudText Typo="Typo.h6">Bước 2. Tạo ảnh tham chiếu</MudText>
-                                        <MudText Typo="Typo.body2" Class="rdance-muted-line">Ba cột ngang cho ảnh người mẫu, ảnh sản phẩm và ảnh kết quả.</MudText>
-                                    </MudStack>
-                                    <MudGrid Class="rdance-step2-grid">
-                                        <MudItem xs="12" md="4">
-                                            <MudPaper Outlined="true" Class="rdance-stage-card pa-3">
-                                                <MudStack Spacing="2">
-                                                    <MudText Typo="Typo.subtitle2">Ảnh người mẫu</MudText>
-                                                    <div class="@CharacterImageUploadZoneClass" @ondragenter="OnCharacterDragEnter" @ondragleave="OnCharacterDragLeave" @ondragover:preventDefault="true" @ondrop:preventDefault="true" @ondrop="OnCharacterDrop">
-                                                        <label class="rdance-file-button-wrapper">
-                                                            <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.CloudUpload" Size="Size.Small" Disabled="@_busy">@(!string.IsNullOrWhiteSpace(_job?.CharacterImageUrl) ? "Thay ảnh" : "Tải ảnh người mẫu")</MudButton>
-                                                            <InputFile class="rdance-hidden-file-input" OnChange="OnCharacterSelected" accept="@AcceptedImageTypes" disabled="@_busy" />
-                                                        </label>
-                                                        <span class="rdance-upload-limit">Ảnh dọc 9:16</span>
-                                                    </div>
-                                                    <div class="rdance-media-thumb">
-                                                        @Preview(_job?.CharacterImageUrl, "Ảnh người mẫu")
-                                                    </div>
-                                                </MudStack>
-                                            </MudPaper>
-                                        </MudItem>
-                                        <MudItem xs="12" md="4">
-                                            <MudPaper Outlined="true" Class="rdance-stage-card pa-3">
-                                                <MudStack Spacing="2">
-                                                    <MudText Typo="Typo.subtitle2">Ảnh sản phẩm</MudText>
-                                                    <div class="@ProductImageUploadZoneClass" @ondragenter="OnProductDragEnter" @ondragleave="OnProductDragLeave" @ondragover:preventDefault="true" @ondrop:preventDefault="true" @ondrop="OnProductDrop">
-                                                        <label class="rdance-file-button-wrapper">
-                                                            <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.CloudUpload" Size="Size.Small" Disabled="@_busy">@(!string.IsNullOrWhiteSpace(_job?.ProductImageUrl) ? "Thay ảnh" : "Tải ảnh sản phẩm")</MudButton>
-                                                            <InputFile class="rdance-hidden-file-input" OnChange="OnProductSelected" accept="@AcceptedImageTypes" disabled="@_busy" />
-                                                        </label>
-                                                        <span class="rdance-upload-limit">Tùy chọn</span>
-                                                    </div>
-                                                    <div class="rdance-media-thumb">
-                                                        @Preview(_job?.ProductImageUrl, "Ảnh sản phẩm")
-                                                    </div>
-                                                </MudStack>
-                                            </MudPaper>
-                                        </MudItem>
-                                        <MudItem xs="12" md="4">
-                                            <MudPaper Outlined="true" Class="rdance-stage-card pa-3">
-                                                <MudStack Spacing="2">
-                                                    <MudText Typo="Typo.subtitle2">Ảnh kết quả</MudText>
-                                                    <div class="rdance-media-thumb">
-                                                        @Preview(_job?.PreparedReferenceUrl ?? _job?.CharacterImageUrl, "Ảnh kết quả")
-                                                        @if (IsReferenceGenerating)
-                                                        {
-                                                            <div class="rdance-processing-overlay" aria-label="Đang tạo ảnh...">
-                                                                <span class="rdance-processing-sweep"></span>
-                                                                <span class="rdance-processing-spinner"></span>
-                                                                <span class="rdance-processing-dots"><i></i><i></i><i></i></span>
-                                                            </div>
-                                                        }
-                                                    </div>
-                                                    @if (!string.IsNullOrWhiteSpace(_job?.ProductImageUrl))
-                                                    {
-                                                        <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Merge" Disabled="@_busy" OnClick="GenerateReferenceAsync">Tạo ảnh ghép</MudButton>
-                                                    }
-                                                </MudStack>
-                                            </MudPaper>
-                                        </MudItem>
-                                    </MudGrid>
-                                </MudStack>
-                            </MudPaper>
-                            <MudPaper Class="todox-panel pa-3 rdance-onepage-step3-card">
-                                <MudStack Spacing="2">
-                                    <MudStack Row="true" AlignItems="AlignItems.Center" Class="flex-wrap gap-2">
-                                        <MudChip T="string" Color="Color.Warning" Size="Size.Small">3</MudChip>
-                                        <MudText Typo="Typo.h6">Bước 3. Video kết quả</MudText>
-                                        <MudText Typo="Typo.body2" Class="rdance-muted-line">Kiểm tra đầu vào, điểm dự kiến và tạo video 9:16.</MudText>
-                                    </MudStack>
-                                    <MudGrid Class="rdance-step3-grid">
-                                        <MudItem xs="12" md="7">
-                                            <MudStack Spacing="1">
-                                                <MudText Typo="Typo.body2">Reference video: @MotionSourceName</MudText>
-                                                <MudText Typo="Typo.body2">Reference image: @ReferenceImageSourceText</MudText>
-                                                <MudText Typo="Typo.body2">Output ratio: @_ratio</MudText>
-                                                <MudText Typo="Typo.body2">Estimated duration: @FormatDurationLabel(MotionDurationSeconds)</MudText>
-                                                <MudText Typo="Typo.body2">Estimated points: @FormatPoints(_pointEstimate?.TotalPoints ?? _displayPoints)</MudText>
-                                            </MudStack>
-                                        </MudItem>
-                                        <MudItem xs="12" md="5">
-                                            <MudStack Spacing="1">
-                                                <MudText Typo="Typo.body2">Điểm hiện có: @FormatPoints(_balance)</MudText>
-                                                <MudText Typo="Typo.body2">Điểm còn lại sau khi thực hiện: @FormatPoints(PreviewRemainingPoints)</MudText>
-                                                <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.MovieCreation" Disabled="@(!CanRender || _busy)" OnClick="ConfirmAndQueueAsync">Tạo video</MudButton>
-                                            </MudStack>
-                                        </MudItem>
-                                    </MudGrid>
-                                </MudStack>
-                            </MudPaper>
-                        </MudStack>
-                    </MudItem>
-                    <MudItem xs="12" lg="4">
-                        <MudStack Spacing="2" Class="rdance-onepage-sidebar-stack">
-                            <MudPaper Class="todox-panel pa-3 rdance-onepage-status-card">
-                                <MudStack Spacing="2">
-                                    <MudStack Row="true" AlignItems="AlignItems.Center" Class="flex-wrap gap-2">
-                                        <MudIcon Icon="@Icons.Material.Filled.Timeline" Color="Color.Warning" />
-                                        <MudText Typo="Typo.h6">Trạng thái job</MudText>
-                                    </MudStack>`r`n                                    @foreach (var step in OnePageSteps)
-                                    {
-                                        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="rdance-timeline-row">
-                                            <MudText Typo="Typo.body2">@step.Label</MudText>
-                                            <MudChip T="string" Size="Size.Small" Color="@step.Color">@step.StatusLabel</MudChip>
+
+                        <MudPaper Class="todox-panel rdance-card">
+                            <div class="rdance-section-head">
+                                <MudChip T="string" Color="Color.Warning" Size="Size.Small">1</MudChip>
+                                <MudText Typo="Typo.h6">Bước 1. Video tham chiếu</MudText>
+                                <MudText Typo="Typo.body2" Class="rdance-muted-line">Nhập link TikTok hoặc tải lên video tham chiếu.</MudText>
+                            </div>
+                            <div class="rdance-step1-content">
+                                <div class="rdance-step1-left">
+                                    <MudStack Spacing="2">
+                                        <MudTextField T="string" Label="TikTok/video URL" Variant="Variant.Outlined" @bind-Value="_tiktokUrl" Disabled="@_busy" />
+                                        <MudStack Row="true" Class="rdance-button-row">
+                                            <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Link" Disabled="@(_busy || string.IsNullOrWhiteSpace(_tiktokUrl))" OnClick="StageTikTokAsync">Phân tích video</MudButton>
+                                            <label class="rdance-file-button-wrapper">
+                                                <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.CloudUpload" Disabled="@_busy">Tải lên video</MudButton>
+                                                <InputFile class="rdance-hidden-file-input" OnChange="OnMotionSelected" accept="video/mp4" disabled="@_busy" />
+                                            </label>
                                         </MudStack>
-                                    }
-                                </MudStack>
-                            </MudPaper>
-                            <MudPaper Class="todox-panel pa-3 rdance-onepage-result-card">
-                                <MudStack Spacing="2">
-                                    <MudStack Row="true" AlignItems="AlignItems.Center" Class="flex-wrap gap-2">
-                                        <MudText Typo="Typo.h6">Kết quả</MudText>
-                                        <MudText Typo="Typo.h6">Xem nhanh video kết quả</MudText>
-                                        @if (_job?.Status == DanceSellJobStatuses.Rendering)
+                                        @if (!string.IsNullOrWhiteSpace(_motionUploadError))
                                         {
-                                            <MudChip T="string" Color="Color.Info" Size="Size.Small">Đang render</MudChip>
+                                            <MudAlert Severity="Severity.Error" Dense="true">@_motionUploadError</MudAlert>
+                                        }
+                                        <MudText Typo="Typo.caption" Class="rdance-muted-line">MP4 · tối đa @MaxMotionVideoLabel</MudText>
+                                    </MudStack>
+                                </div>
+                                <div class="rdance-step1-preview">
+                                    <div class="rdance-step1-preview-frame">
+                                        @if (!string.IsNullOrWhiteSpace(_job?.MotionVideoUrl))
+                                        {
+                                            <video src="@_job.MotionVideoUrl" controls muted playsinline class="rdance-step1-video"></video>
+                                        }
+                                        else
+                                        {
+                                            <RenderMediaFrame IsVideo="true" State="@ResolveDanceMediaState(_job?.Status)" AspectRatio="@_ratio" EmptyText="Video tham chiếu sẽ hiện ở đây." FailedText="Lỗi tải video" />
+                                        }
+                                    </div>
+                                </div>
+                                <div class="rdance-step1-info">
+                                    <MudPaper Outlined="true" Class="rdance-info-card">
+                                        <MudStack Spacing="1">
+                                            <MudText Typo="Typo.subtitle2">Thông tin video</MudText>
+                                            <MudText Typo="Typo.body2">Thời lượng</MudText>
+                                            <MudText Typo="Typo.body1" Class="rdance-summary-value">@FormatDurationLabel(MotionDurationSeconds)</MudText>
+                                            <MudText Typo="Typo.body2">Tỷ lệ</MudText>
+                                            <MudText Typo="Typo.body1" Class="rdance-summary-value">@_ratio</MudText>
+                                            <MudText Typo="Typo.body2">Độ phân giải</MudText>
+                                            <MudText Typo="Typo.body1" Class="rdance-summary-value">@MotionResolutionText</MudText>
+                                            <MudText Typo="Typo.caption" Class="rdance-muted-line">@ReferenceLabel</MudText>
+                                        </MudStack>
+                                    </MudPaper>
+                                </div>
+                            </div>
+                        </MudPaper>
+
+                        <MudPaper Class="todox-panel rdance-card">
+                            <div class="rdance-section-head">
+                                <MudChip T="string" Color="Color.Warning" Size="Size.Small">2</MudChip>
+                                <MudText Typo="Typo.h6">Bước 2. Tạo ảnh tham chiếu</MudText>
+                                <MudText Typo="Typo.body2" Class="rdance-muted-line">Ba cột ngang cho ảnh người mẫu, ảnh sản phẩm và ảnh kết quả.</MudText>
+                            </div>
+                            <div class="rdance-step2-grid">
+                                <MudPaper Outlined="true" Class="rdance-stage-card">
+                                    <MudStack Spacing="2" Class="rdance-stage-stack">
+                                        <MudText Typo="Typo.subtitle2">Ảnh người mẫu</MudText>
+                                        <div class="@CharacterImageUploadZoneClass" @ondragenter="OnCharacterDragEnter" @ondragleave="OnCharacterDragLeave" @ondragover:preventDefault="true" @ondrop:preventDefault="true" @ondrop="OnCharacterDrop">
+                                            <label class="rdance-file-button-wrapper">
+                                                <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.CloudUpload" Size="Size.Small" Disabled="@_busy">@(!string.IsNullOrWhiteSpace(_job?.CharacterImageUrl) ? "Thay ảnh" : "Tải ảnh người mẫu")</MudButton>
+                                                <InputFile class="rdance-hidden-file-input" OnChange="OnCharacterSelected" accept="@AcceptedImageTypes" disabled="@_busy" />
+                                            </label>
+                                            <span class="rdance-upload-limit">Ảnh dọc 9:16</span>
+                                        </div>
+                                        <div class="rdance-stage-preview">
+                                            @Preview(_job?.CharacterImageUrl, "Ảnh người mẫu")
+                                        </div>
+                                    </MudStack>
+                                </MudPaper>
+                                <MudPaper Outlined="true" Class="rdance-stage-card">
+                                    <MudStack Spacing="2" Class="rdance-stage-stack">
+                                        <MudText Typo="Typo.subtitle2">Ảnh sản phẩm</MudText>
+                                        <div class="@ProductImageUploadZoneClass" @ondragenter="OnProductDragEnter" @ondragleave="OnProductDragLeave" @ondragover:preventDefault="true" @ondrop:preventDefault="true" @ondrop="OnProductDrop">
+                                            <label class="rdance-file-button-wrapper">
+                                                <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.CloudUpload" Size="Size.Small" Disabled="@_busy">@(!string.IsNullOrWhiteSpace(_job?.ProductImageUrl) ? "Thay ảnh" : "Tải ảnh sản phẩm")</MudButton>
+                                                <InputFile class="rdance-hidden-file-input" OnChange="OnProductSelected" accept="@AcceptedImageTypes" disabled="@_busy" />
+                                            </label>
+                                            <span class="rdance-upload-limit">Tùy chọn</span>
+                                        </div>
+                                        <div class="rdance-stage-preview">
+                                            @Preview(_job?.ProductImageUrl, "Ảnh sản phẩm")
+                                        </div>
+                                    </MudStack>
+                                </MudPaper>
+                                <MudPaper Outlined="true" Class="rdance-stage-card">
+                                    <MudStack Spacing="2" Class="rdance-stage-stack">
+                                        <MudText Typo="Typo.subtitle2">Ảnh kết quả</MudText>
+                                        <div class="rdance-stage-preview rdance-stage-preview-result">
+                                            @Preview(_job?.PreparedReferenceUrl ?? _job?.CharacterImageUrl, "Ảnh kết quả")
+                                            @if (IsReferenceGenerating)
+                                            {
+                                                <div class="rdance-processing-overlay" aria-label="Đang tạo ảnh...">
+                                                    <span class="rdance-processing-sweep"></span>
+                                                    <span class="rdance-processing-spinner"></span>
+                                                    <span class="rdance-processing-dots"><i></i><i></i><i></i></span>
+                                                </div>
+                                            }
+                                        </div>
+                                        @if (!string.IsNullOrWhiteSpace(_job?.ProductImageUrl))
+                                        {
+                                            <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Merge" Disabled="@_busy" OnClick="GenerateReferenceAsync">Tạo ảnh ghép</MudButton>
                                         }
                                     </MudStack>
+                                </MudPaper>
+                            </div>
+                        </MudPaper>
+
+                        <MudPaper Class="todox-panel rdance-card">
+                            <div class="rdance-section-head">
+                                <MudChip T="string" Color="Color.Warning" Size="Size.Small">3</MudChip>
+                                <MudText Typo="Typo.h6">Bước 3. Video kết quả</MudText>
+                                <MudText Typo="Typo.body2" Class="rdance-muted-line">Kiểm tra đầu vào, điểm dự kiến và tạo video 9:16.</MudText>
+                            </div>
+                            <div class="rdance-step3-grid">
+                                <div class="rdance-step3-copy">
+                                    <MudText Typo="Typo.body2">Reference video: @MotionSourceName</MudText>
+                                    <MudText Typo="Typo.body2">Reference image: @ReferenceImageSourceText</MudText>
+                                    <MudText Typo="Typo.body2">Output ratio: @_ratio</MudText>
+                                    <MudText Typo="Typo.body2">Estimated duration: @FormatDurationLabel(MotionDurationSeconds)</MudText>
+                                    <MudText Typo="Typo.body2">Estimated points: @FormatPoints(_pointEstimate?.TotalPoints ?? _displayPoints)</MudText>
+                                </div>
+                                <div class="rdance-step3-action">
+                                    <MudText Typo="Typo.body2">Điểm hiện có: @FormatPoints(_balance)</MudText>
+                                    <MudText Typo="Typo.body2">Điểm còn lại sau khi thực hiện: @FormatPoints(PreviewRemainingPoints)</MudText>
+                                    <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.MovieCreation" Disabled="@(!CanRender || _busy)" OnClick="ConfirmAndQueueAsync">Tạo video</MudButton>
+                                </div>
+                            </div>
+                        </MudPaper>
+                    </main>
+
+                    <aside class="rdance-sidebar">
+                        <MudPaper Class="todox-panel rdance-sidebar-card">
+                            <MudStack Spacing="2">
+                                <MudStack Row="true" AlignItems="AlignItems.Center" Class="rdance-section-head">
+                                    <MudIcon Icon="@Icons.Material.Filled.Timeline" Color="Color.Warning" />
+                                    <MudText Typo="Typo.h6">Trạng thái job</MudText>
+                                </MudStack>
+                                @foreach (var step in OnePageSteps)
+                                {
+                                    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="rdance-timeline-row">
+                                        <MudText Typo="Typo.body2">@step.Label</MudText>
+                                        <MudChip T="string" Size="Size.Small" Color="@step.Color">@step.StatusLabel</MudChip>
+                                    </MudStack>
+                                }
+                            </MudStack>
+                        </MudPaper>
+
+                        <MudPaper Class="todox-panel rdance-sidebar-card">
+                            <MudStack Spacing="2">
+                                <MudStack Row="true" AlignItems="AlignItems.Center" Class="rdance-section-head">
+                                    <MudText Typo="Typo.h6">Kết quả</MudText>
+                                    @if (_job?.Status == DanceSellJobStatuses.Rendering)
+                                    {
+                                        <MudChip T="string" Color="Color.Info" Size="Size.Small">Đang render</MudChip>
+                                    }
+                                </MudStack>
+                                <div class="rdance-sidebar-preview">
                                     @if (_job?.Status == DanceSellJobStatuses.Completed && !string.IsNullOrWhiteSpace(_job.ResultVideoUrl))
                                     {
                                         <video src="@_job.ResultVideoUrl" controls playsinline class="rdance-result-player"></video>
@@ -301,44 +277,41 @@
                                     {
                                         <RenderMediaFrame IsVideo="true" State="@ResolveDanceMediaState(_job?.Status)" AspectRatio="@_ratio" EmptyText="Kết quả sẽ hiện tại đây." FailedText="Lỗi render video" />
                                     }
-                                </MudStack>
-                            </MudPaper>
-                            <MudPaper Class="todox-panel pa-3 rdance-onepage-checklist-card">
-                                <MudStack Spacing="2">
-                                    <MudStack Row="true" AlignItems="AlignItems.Center" Class="flex-wrap gap-2">
-                                        <MudText Typo="Typo.h6">Kiểm tra đầu vào</MudText>
-                                        <MudText Typo="Typo.h6">Kiểm tra đầu vào</MudText>
-                                    </MudStack>
-                                    <MudStack Spacing="1">
-                                        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
-                                            <MudText Typo="Typo.body2">Video tham chiếu</MudText>
-                                            <MudChip T="string" Size="Size.Small" Color="@StepStatusColor(string.IsNullOrWhiteSpace(_job?.MotionVideoUrl) ? "gray" : "green")">@StepStatusLabel(string.IsNullOrWhiteSpace(_job?.MotionVideoUrl) ? "gray" : "green")</MudChip>
-                                        </MudStack>
-                                        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
-                                            <MudText Typo="Typo.body2">Ảnh người mẫu</MudText>
-                                            <MudChip T="string" Size="Size.Small" Color="@StepStatusColor(string.IsNullOrWhiteSpace(_job?.CharacterImageUrl) ? "gray" : "green")">@StepStatusLabel(string.IsNullOrWhiteSpace(_job?.CharacterImageUrl) ? "gray" : "green")</MudChip>
-                                        </MudStack>
-                                        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
-                                            <MudText Typo="Typo.body2">Ảnh sản phẩm</MudText>
-                                            <MudChip T="string" Size="Size.Small" Color="@StepStatusColor(string.IsNullOrWhiteSpace(_job?.ProductImageUrl) ? "gray" : "green")">@StepStatusLabel(string.IsNullOrWhiteSpace(_job?.ProductImageUrl) ? "gray" : "green")</MudChip>
-                                        </MudStack>
-                                        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
-                                            <MudText Typo="Typo.body2">Ảnh kết quả</MudText>
-                                            <MudChip T="string" Size="Size.Small" Color="@StepStatusColor(string.IsNullOrWhiteSpace(_job?.PreparedReferenceUrl) ? "gray" : "green")">@StepStatusLabel(string.IsNullOrWhiteSpace(_job?.PreparedReferenceUrl) ? "gray" : "green")</MudChip>
-                                        </MudStack>
-                                        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
-                                            <MudText Typo="Typo.body2">Sẵn sàng tạo video</MudText>
-                                            <MudChip T="string" Size="Size.Small" Color="@StepStatusColor(CanRender ? "green" : "gray")">@StepStatusLabel(CanRender ? "green" : "gray")</MudChip>
-                                        </MudStack>
-                                    </MudStack>
-                                </MudStack>
-                            </MudPaper>
-                        </MudStack>
-                    </MudItem>
-                </MudGrid>
-            </MudStack>
-        }
-        else        {
+                                </div>
+                            </MudStack>
+                        </MudPaper>
+
+                        <MudPaper Class="todox-panel rdance-sidebar-card">
+                            <MudStack Spacing="2">
+                                <MudText Typo="Typo.h6">Kiểm tra đầu vào</MudText>
+                                <div class="rdance-checklist">
+                                    <div class="rdance-check-row">
+                                        <MudText Typo="Typo.body2">Video tham chiếu</MudText>
+                                        <MudChip T="string" Size="Size.Small" Color="@StepStatusColor(string.IsNullOrWhiteSpace(_job?.MotionVideoUrl) ? "gray" : "green")">@StepStatusLabel(string.IsNullOrWhiteSpace(_job?.MotionVideoUrl) ? "gray" : "green")</MudChip>
+                                    </div>
+                                    <div class="rdance-check-row">
+                                        <MudText Typo="Typo.body2">Ảnh người mẫu</MudText>
+                                        <MudChip T="string" Size="Size.Small" Color="@StepStatusColor(string.IsNullOrWhiteSpace(_job?.CharacterImageUrl) ? "gray" : "green")">@StepStatusLabel(string.IsNullOrWhiteSpace(_job?.CharacterImageUrl) ? "gray" : "green")</MudChip>
+                                    </div>
+                                    <div class="rdance-check-row">
+                                        <MudText Typo="Typo.body2">Ảnh sản phẩm</MudText>
+                                        <MudChip T="string" Size="Size.Small" Color="@StepStatusColor(string.IsNullOrWhiteSpace(_job?.ProductImageUrl) ? "gray" : "green")">@StepStatusLabel(string.IsNullOrWhiteSpace(_job?.ProductImageUrl) ? "gray" : "green")</MudChip>
+                                    </div>
+                                    <div class="rdance-check-row">
+                                        <MudText Typo="Typo.body2">Ảnh kết quả</MudText>
+                                        <MudChip T="string" Size="Size.Small" Color="@StepStatusColor(string.IsNullOrWhiteSpace(_job?.PreparedReferenceUrl) ? "gray" : "green")">@StepStatusLabel(string.IsNullOrWhiteSpace(_job?.PreparedReferenceUrl) ? "gray" : "green")</MudChip>
+                                    </div>
+                                    <div class="rdance-check-row">
+                                        <MudText Typo="Typo.body2">Sẵn sàng tạo video</MudText>
+                                        <MudChip T="string" Size="Size.Small" Color="@StepStatusColor(CanRender ? "green" : "gray")">@StepStatusLabel(CanRender ? "green" : "gray")</MudChip>
+                                    </div>
+                                </div>
+                            </MudStack>
+                        </MudPaper>
+                    </aside>
+                </div>
+            </div>
+        }        else        {
         <MudTabs Rounded="true" Elevation="0" @bind-ActivePanelIndex="_tabIndex">
             <MudTabPanel Text="Thông tin">
                 <MudGrid Class="mt-4">
@@ -2220,5 +2193,58 @@
     @@media (min-width: 1280px) {
         .rdance-video-tab .mud-grid-item { flex: 0 0 33.333333% !important; max-width: 33.333333% !important; min-width: 0 !important; }
         .rdance-video-tab .rdance-media-player, .rdance-video-tab img { max-width: 100%; box-sizing: border-box; }
+    }
+    .rdance-studio-layout { display: grid; gap: 16px; max-width: 100%; }
+    .rdance-studio-header { padding: 14px 16px; border-radius: 12px; }
+    .rdance-header-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-width: 0; }
+    .rdance-header-copy { min-width: 0; }
+    .rdance-header-title { margin: 0 0 4px; }
+    .rdance-header-actions { display: flex; align-items: center; gap: 10px; flex-wrap: nowrap; }
+    .rdance-summary-bar { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
+    .rdance-summary-card { min-height: 80px; padding: 12px 14px; display: flex; flex-direction: column; justify-content: space-between; gap: 4px; border-radius: 12px; }
+    .rdance-workspace { display: grid; grid-template-columns: minmax(0, 1fr) 352px; gap: 16px; align-items: start; min-width: 0; }
+    .rdance-main { display: grid; gap: 12px; min-width: 0; }
+    .rdance-sidebar { display: grid; gap: 12px; width: 352px; min-width: 0; max-width: 352px; }
+    .rdance-card { padding: 14px; border-radius: 12px; min-width: 0; }
+    .rdance-section-head { display: flex; align-items: flex-start; gap: 10px; min-width: 0; }
+    .rdance-step1-content { display: grid; grid-template-columns: minmax(0, 1fr) 248px 304px; gap: 12px; align-items: start; min-width: 0; }
+    .rdance-step1-left { min-width: 0; }
+    .rdance-step1-preview { display: flex; justify-content: center; min-width: 0; }
+    .rdance-step1-preview-frame { width: min(100%, 248px); aspect-ratio: 9 / 16; display: flex; align-items: center; justify-content: center; overflow: hidden; border-radius: 8px; background: rgba(255,255,255,.03); }
+    .rdance-step1-video { width: 100%; height: 100%; object-fit: contain; }
+    .rdance-step1-info { min-width: 0; display: flex; }
+    .rdance-info-card { width: 100%; min-width: 0; }
+    .rdance-step2-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; align-items: stretch; }
+    .rdance-stage-card { height: 100%; padding: 12px; border-radius: 12px; min-width: 0; }
+    .rdance-stage-stack { gap: 10px !important; height: 100%; }
+    .rdance-stage-preview { height: 178px; display: flex; align-items: center; justify-content: center; overflow: hidden; border-radius: 8px; background: rgba(255,255,255,.03); }
+    .rdance-step2-grid .rdance-upload-zone { min-height: 64px; height: 64px; padding: 8px 10px; }
+    .rdance-step2-grid .rdance-upload-limit { font-size: .8rem; }
+    .rdance-stage-preview .scene-media-square { width: 100%; height: 100%; max-width: none; max-height: none; }
+    .rdance-stage-preview .scene-media-image,
+    .rdance-stage-preview .scene-media-video { width: 100%; height: 100%; object-fit: contain; }
+    .rdance-stage-preview-result { position: relative; }
+    .rdance-step3-grid { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 12px; align-items: start; }
+    .rdance-step3-action { display: grid; gap: 8px; justify-items: start; min-width: 0; }
+    .rdance-sidebar-card { padding: 12px; border-radius: 12px; min-width: 0; }
+    .rdance-sidebar-preview { display: flex; justify-content: center; }
+    .rdance-sidebar-preview .scene-media-square { width: 100%; max-width: none; }
+    .rdance-checklist { display: grid; gap: 8px; }
+    .rdance-check-row,
+    .rdance-timeline-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; }
+    .rdance-check-row,
+    .rdance-timeline-row { padding: 2px 0; }
+    .rdance-check-row .mud-text,
+    .rdance-timeline-row .mud-text { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .rdance-check-row .mud-chip,
+    .rdance-timeline-row .mud-chip { flex-shrink: 0; }
+    .rdance-button-row { gap: 8px; flex-wrap: wrap; }
+    .rdance-button-row > * { flex: 0 0 auto; }
+    @@media (max-width: 1279.98px) {
+        .rdance-workspace,
+        .rdance-summary-bar,
+        .rdance-step1-content,
+        .rdance-step2-grid,
+        .rdance-step3-grid { display: block; }
     }
 </style>
