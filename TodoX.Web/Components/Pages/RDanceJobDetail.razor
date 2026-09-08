@@ -69,7 +69,12 @@
                     <MudPaper Class="todox-panel rdance-header-card">
                         <div class="rdance-header-row">
                             <div class="rdance-header-copy">
-                                <MudText Typo="Typo.h4" Class="rdance-header-title">Video nhảy quảng cáo thời trang</MudText>
+                                <MudTextField T="string"
+                                              Label="Tên video"
+                                              Variant="Variant.Text"
+                                              Class="rdance-header-title-input"
+                                              @bind-Value="_title"
+                                              Disabled="@_busy" />
                                 <MudText Typo="Typo.body2" Class="rdance-muted-line">Tạo video quảng cáo thời trang từ chuyển động TikTok hoặc video MP4.</MudText>
                             </div>
                             <div class="rdance-header-actions">
@@ -674,7 +679,8 @@
     private bool _autoFinishing;
     private bool _autoFinish = true;
     private string _ratio = "9:16";
-    private string _title = "Video nhảy quảng cáo thời trang";
+    private const string DefaultTitle = "Video nhảy quảng cáo thời trang";
+    private string _title = DefaultTitle;
     private string _category = "shirt";
     private string _tiktokUrl = string.Empty;
     private DanceSellJobDto? _job;
@@ -964,6 +970,7 @@
         try
         {
             _job = await DanceSell.GetAsync(JobId, AuthState.CurrentUser);
+            _title = string.IsNullOrWhiteSpace(_job.Title) ? DefaultTitle : _job.Title.Trim();
             _autoFinish = _job.AutoFinish;
             _ratio = string.Equals(_job.Ratio, "16:9", StringComparison.Ordinal) ? "16:9" : "9:16";
             _renderJob = _job.RenderJobId is Guid renderJobId
@@ -1677,6 +1684,7 @@
     private async Task UpdateBusinessAsync()
     {
         var job = _job ?? throw new InvalidOperationException("Không tìm thấy video quảng cáo thời trang.");
+        _title = string.IsNullOrWhiteSpace(_title) ? DefaultTitle : _title.Trim();
         _job = await DanceSell.UpdateBusinessAsync(job.Id, new DanceSellUpdateBusinessRequest
         {
             Title = _title,
@@ -2183,8 +2191,10 @@
     .rdance-studio-layout { display: grid; gap: 24px; max-width: 100%; }
     .rdance-studio-header { padding: 14px 16px; border-radius: 12px; }
     .rdance-header-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-width: 0; flex-wrap: wrap; }
-    .rdance-header-copy { min-width: 0; }
+    .rdance-header-copy { min-width: 0; flex: 1 1 320px; }
     .rdance-header-title { margin: 0 0 4px; font-size: 28px; line-height: 1.1; }
+    .rdance-header-title-input { margin: 0 0 4px; max-width: 620px; }
+    .rdance-header-title-input .mud-input-input { font-size: 28px; font-weight: 600; line-height: 1.12; }
     .rdance-header-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
     .rdance-summary-bar { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
     .rdance-summary-card { min-height: 80px; padding: 12px 14px; display: flex; flex-direction: column; justify-content: space-between; gap: 4px; border-radius: 12px; }
@@ -2268,8 +2278,10 @@
     .rdance-onepage-layout { display: flex; flex-direction: column; gap: 14px; }
     .rdance-header-card { padding: 14px 16px; border-radius: 8px; }
     .rdance-header-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-width: 0; flex-wrap: wrap; }
-    .rdance-header-copy { min-width: 0; }
+    .rdance-header-copy { min-width: 0; flex: 1 1 320px; }
     .rdance-header-title { margin: 0 0 4px; font-size: 28px; line-height: 1.12; }
+    .rdance-header-title-input { margin: 0 0 4px; max-width: 620px; }
+    .rdance-header-title-input .mud-input-input { font-size: 28px; font-weight: 600; line-height: 1.12; }
     .rdance-header-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
     .rdance-workflow-grid { display: grid !important; grid-template-columns: 1fr; gap: 12px; align-items: stretch; margin: 0; min-width: 0; }
     .rdance-step-card { display: flex; flex-direction: column; gap: 12px; min-width: 0; padding: 14px; border-radius: 8px; border: 1px solid rgba(255,255,255,.1); }

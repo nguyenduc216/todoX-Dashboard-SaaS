@@ -45,8 +45,13 @@
                                            Color="Color.Default"
                                            OnClick="@(() => Navigation.NavigateTo("/create"))"
                                            aria-label="Quay lại kho dịch vụ" />
-                            <div>
-                                <MudText Typo="Typo.h4" Class="rdance-header-title">Video nhảy quảng cáo thời trang</MudText>
+                            <div class="rdance-header-title-editor">
+                                <MudTextField T="string"
+                                              Label="Tên video"
+                                              Variant="Variant.Text"
+                                              Class="rdance-header-title-input"
+                                              @bind-Value="_title"
+                                              Disabled="@_busy" />
                                 <MudText Typo="Typo.body2" Class="rdance-muted-line">Tạo video quảng cáo thời trang từ chuyển động TikTok hoặc video MP4.</MudText>
                             </div>
                         </div>
@@ -225,10 +230,6 @@
                             <span class="@CreateStatusClass(CreateResultStatusKey)">@CreateStatusLabel(CreateResultStatusKey)</span>
                         </div>
                     </div>
-                    <MudDivider />
-                    <MudStack Spacing="2">
-                        <MudTextField T="string" Label="Tên video" Variant="Variant.Outlined" @bind-Value="_title" Disabled="@_busy" />
-                    </MudStack>
                 </MudPaper>
             </div>
         </div>
@@ -302,7 +303,8 @@
     [SupplyParameterFromQuery] public Guid? ServiceId { get; set; }
     [SupplyParameterFromQuery] public string? ServiceCode { get; set; }
 
-    private string _title = "Video nhảy quảng cáo thời trang";
+    private const string DefaultTitle = "Video nhảy quảng cáo thời trang";
+    private string _title = DefaultTitle;
     private string _category = "shirt";
     private string _tiktokUrl = string.Empty;
     private DanceSellJobDto? _job;
@@ -550,6 +552,7 @@
             throw new InvalidOperationException(_readinessError);
         }
 
+        _title = string.IsNullOrWhiteSpace(_title) ? DefaultTitle : _title.Trim();
         return await DanceSell.CreateJobAsync(new DanceSellCreateJobRequest
         {
             Title = _title,
@@ -649,9 +652,11 @@
     .rdance-onepage-layout { display: flex; flex-direction: column; gap: 14px; }
     .rdance-header-card { padding: 14px 16px; border-radius: 8px; }
     .rdance-header-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-width: 0; flex-wrap: wrap; }
-    .rdance-header-copy { min-width: 0; }
+    .rdance-header-copy { min-width: 0; flex: 1 1 320px; }
     .rdance-header-title-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
-    .rdance-header-title { margin: 0 0 4px; font-size: 28px; line-height: 1.12; }
+    .rdance-header-title-editor { min-width: 0; }
+    .rdance-header-title-input { margin: 0 0 4px; max-width: 620px; }
+    .rdance-header-title-input .mud-input-input { font-size: 28px; font-weight: 600; line-height: 1.12; }
     .rdance-header-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
     .rdance-workflow-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; align-items: stretch; margin: 0; min-width: 0; }
     .rdance-step-card { display: flex; flex-direction: column; gap: 12px; min-width: 0; padding: 14px; border-radius: 8px; border: 1px solid rgba(255,255,255,.1); }

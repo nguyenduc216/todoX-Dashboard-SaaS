@@ -174,6 +174,34 @@ public sealed class RDanceCustomerStatusAndPointsRegressionTests
     }
 
     [Fact]
+    public void RdanceTitleIsEditableInHeaderAndAbsentFromStatusPanel()
+    {
+        var create = ReadRepoFile("Components", "Pages", "RDanceJobCreate.razor");
+        var detail = ReadRepoFile("Components", "Pages", "RDanceJobDetail.razor");
+
+        Assert.Contains("Label=\"Tên video\"", create);
+        Assert.Contains("Class=\"rdance-header-title-input\"", create);
+        Assert.Contains("@bind-Value=\"_title\"", create);
+        Assert.Contains("private const string DefaultTitle = \"Video nhảy quảng cáo thời trang\";", create);
+        Assert.Contains("Title = _title", create);
+        Assert.True(create.IndexOf("Label=\"Tên video\"", StringComparison.Ordinal)
+            < create.IndexOf("<div class=\"rdance-workflow-grid\"", StringComparison.Ordinal));
+
+        var createStatusStart = create.IndexOf("<MudText Typo=\"Typo.h6\">Trạng thái", StringComparison.Ordinal);
+        var createStatusEnd = create.IndexOf("</MudPaper>", createStatusStart, StringComparison.Ordinal);
+        Assert.True(createStatusStart >= 0 && createStatusEnd > createStatusStart);
+        Assert.DoesNotContain("Tên video", create[createStatusStart..createStatusEnd]);
+
+        Assert.Contains("Class=\"rdance-header-title-input\"", detail);
+        Assert.Contains("@bind-Value=\"_title\"", detail);
+        Assert.Contains("_title = string.IsNullOrWhiteSpace(_job.Title) ? DefaultTitle : _job.Title.Trim();", detail);
+        Assert.Contains("Title = _title", detail);
+        Assert.True(detail.IndexOf("Label=\"Tên video\"", StringComparison.Ordinal)
+            < detail.IndexOf("<div class=\"rdance-workflow-grid\"", StringComparison.Ordinal));
+        Assert.DoesNotContain("Tên video", detail[detail.IndexOf("<MudText Typo=\"Typo.h6\">Trạng thái job", StringComparison.Ordinal)..detail.IndexOf("</MudPaper>", detail.IndexOf("<MudText Typo=\"Typo.h6\">Trạng thái job", StringComparison.Ordinal), StringComparison.Ordinal)]);
+    }
+
+    [Fact]
     public void RdancePointDisplayPrefersChargedOperationPoints()
     {
         var job = new DanceSellJobDto
@@ -221,5 +249,5 @@ public sealed class RDanceCustomerStatusAndPointsRegressionTests
     }
 
     private static string ReadRepoFile(params string[] parts)
-        => File.ReadAllText(Path.Combine(new[] { AppContext.BaseDirectory, "..", "..", ".." }.Concat(parts).ToArray()), Encoding.UTF8);
+        => File.ReadAllText(Path.Combine(new[] { AppContext.BaseDirectory, "..", "..", "..", ".." }.Concat(parts).ToArray()), Encoding.UTF8);
 }
