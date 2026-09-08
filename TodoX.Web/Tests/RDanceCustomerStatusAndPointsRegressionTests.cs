@@ -97,6 +97,36 @@ public sealed class RDanceCustomerStatusAndPointsRegressionTests
     }
 
     [Fact]
+    public void RdanceDetailOnePageUiMatchesMockupStructure()
+    {
+        var detail = ReadRepoFile("Components", "Pages", "RDanceJobDetail.razor");
+        var tiktokDialog = ReadRepoFile("Components", "Dialogs", "RDanceTikTokUrlDialog.razor");
+
+        Assert.Contains("rdance-workflow-grid", detail);
+        Assert.Contains("rdance-step-card", detail);
+        Assert.Contains("rdance-media-frame", detail);
+        Assert.Contains("rdance-overlay-button", detail);
+        Assert.Contains("rdance-thumbnail", detail);
+        Assert.Contains("rdance-status-item", detail);
+        Assert.Contains("Xem Browser", detail);
+        Assert.Contains("Lưu thay đổi", detail);
+        Assert.Contains("Tạo video", detail);
+        Assert.Contains("OnClick=\"OpenBrowserAsync\"", detail);
+        Assert.Contains("OnClick=\"SaveChangesAsync\"", detail);
+        Assert.Contains("OnClick=\"ConfirmAndQueueAsync\"", detail);
+        Assert.Contains("OnClick=\"OpenTikTokEditorAsync\"", detail);
+        Assert.Contains("ShowAsync<RDanceTikTokUrlDialog>", detail);
+        Assert.Contains("OnChange=\"OnCharacterSelected\"", detail);
+        Assert.Contains("OnChange=\"OnProductSelected\"", detail);
+        Assert.Contains("OnClick=\"GenerateReferenceAsync\"", detail);
+        Assert.Contains("OnClick=\"DownloadResultAsync\"", detail);
+        Assert.DoesNotContain("rdance-video-source", detail);
+        Assert.Contains("Current TikTok URL", tiktokDialog);
+        Assert.Contains("Change TikTok URL", tiktokDialog);
+        Assert.Contains("Confirm / Load video", tiktokDialog);
+    }
+
+    [Fact]
     public void RdancePointDisplayPrefersChargedOperationPoints()
     {
         var job = new DanceSellJobDto
