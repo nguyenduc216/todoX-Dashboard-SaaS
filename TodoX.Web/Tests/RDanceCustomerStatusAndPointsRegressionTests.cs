@@ -86,6 +86,17 @@ public sealed class RDanceCustomerStatusAndPointsRegressionTests
     }
 
     [Fact]
+    public void RdanceDetailGuardsRenderBeforeJobLoads()
+    {
+        var detail = ReadRepoFile("Components", "Pages", "RDanceJobDetail.razor");
+
+        Assert.Contains("@if (_job == null)", detail);
+        Assert.Contains("Loading RDANCE job...", detail);
+        Assert.DoesNotContain("@DisplayStatusLabel(_job!)", detail);
+        Assert.Contains("private string DisplayStatusLabel(DanceSellJobDto? job)", detail);
+    }
+
+    [Fact]
     public void RdancePointDisplayPrefersChargedOperationPoints()
     {
         var job = new DanceSellJobDto

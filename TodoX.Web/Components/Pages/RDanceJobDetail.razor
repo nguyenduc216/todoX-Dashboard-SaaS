@@ -61,6 +61,14 @@
 
                 @if (IsOnePageUiEnabled)
         {
+            @if (_job == null)
+            {
+                <div class="rdance-loading-state">
+                    Loading RDANCE job...
+                </div>
+            }
+            else
+            {
             <div class="rdance-studio-layout">
                 <MudPaper Class="todox-panel rdance-studio-header">
                     <div class="rdance-header-row">
@@ -83,7 +91,7 @@
                     </MudPaper>
                     <MudPaper Class="todox-panel rdance-summary-card">
                         <MudText Typo="Typo.caption" Class="rdance-summary-label">Trạng thái</MudText>
-                        <MudText Typo="Typo.body1" Class="rdance-summary-value">@DisplayStatusLabel(_job!)</MudText>
+                        <MudText Typo="Typo.body1" Class="rdance-summary-value">@DisplayStatusLabel(_job)</MudText>
                     </MudPaper>
                     <MudPaper Class="todox-panel rdance-summary-card">
                         <MudText Typo="Typo.caption" Class="rdance-summary-label">Tỷ lệ khung hình</MudText>
@@ -311,7 +319,10 @@
                     </aside>
                 </div>
             </div>
-        }        else        {
+            }
+        }
+        else
+        {
         <MudTabs Rounded="true" Elevation="0" @bind-ActivePanelIndex="_tabIndex">
             <MudTabPanel Text="Thông tin">
                 <MudGrid Class="mt-4">
@@ -625,7 +636,7 @@
                             <MudText Typo="Typo.h6">Tóm tắt render</MudText>
                             <MudList T="string" Dense="true">
                                 <MudListItem T="string">Dịch vụ: Video nhảy quảng cáo thời trang</MudListItem>
-                                <MudListItem T="string">Trạng thái: @DisplayStatusLabel(_job!)</MudListItem>
+                                <MudListItem T="string">Trạng thái: @DisplayStatusLabel(_job)</MudListItem>
                                 <MudListItem T="string">Tỷ lệ: @_ratio</MudListItem>
                                 <MudListItem T="string">Ước tính: @FormatPoints(_displayPoints) điểm</MudListItem>
                                 <MudListItem T="string">Tự động hoàn thành: @(_autoFinish ? "Bật" : "Tắt")</MudListItem>
@@ -727,24 +738,24 @@
                     <MudPaper Class="todox-panel pa-4 rdance-job-summary">
                         <MudText Typo="Typo.h6">Xem nhanh video kết quả</MudText>
                         <MudList T="string" Dense="true">
-                            <MudListItem T="string">Trạng thái: @DisplayStatusLabel(_job!)</MudListItem>
-                            <MudListItem T="string">Bắt đầu: @FormatVietnamTime(RenderStartUtc(_job!))</MudListItem>
+                                <MudListItem T="string">Trạng thái: @DisplayStatusLabel(_job)</MudListItem>
+                                <MudListItem T="string">Bắt đầu: @FormatVietnamTime(RenderStartUtc(_job))</MudListItem>
                             @if (IsActive)
                             {
-                                <MudListItem T="string">Đã thực hiện: @FormatDuration(RenderDuration(_job!))</MudListItem>
+                                <MudListItem T="string">Đã thực hiện: @FormatDuration(RenderDuration(_job))</MudListItem>
                             }
                             else
                             {
-                                <MudListItem T="string">Kết thúc: @FormatVietnamTime(RenderEndUtc(_job!))</MudListItem>
-                                <MudListItem T="string">Thời gian thực hiện: @FormatDuration(RenderDuration(_job!))</MudListItem>
+                                <MudListItem T="string">Kết thúc: @FormatVietnamTime(RenderEndUtc(_job))</MudListItem>
+                                <MudListItem T="string">Thời gian thực hiện: @FormatDuration(RenderDuration(_job))</MudListItem>
                             }
                             @if (IsAdmin)
                             {
-                                <MudListItem T="string">Provider: @_job!.ProviderCode</MudListItem>
+                                <MudListItem T="string">Provider: @_job.ProviderCode</MudListItem>
                                 <MudListItem T="string">Model: @_job.ProviderModel</MudListItem>
                                 <MudListItem T="string">Provider task: @_job.ProviderTaskId</MudListItem>
                             }
-                                @if (IsAdmin && (_job!.Status is DanceSellJobStatuses.Failed or DanceSellJobStatuses.Timeout)
+                                @if (IsAdmin && (_job.Status is DanceSellJobStatuses.Failed or DanceSellJobStatuses.Timeout)
                                  && !string.IsNullOrWhiteSpace(_job.ErrorMessage))
                             {
                                 <MudListItem T="string">Lỗi: @_job.ErrorMessage</MudListItem>
@@ -849,7 +860,7 @@
     private bool CanRender => !IsActive
         && _job?.MotionVideoMediaId is not null
         && _job?.PreparedReferenceStatus == DanceSellReferenceStatuses.Approved
-        && !string.IsNullOrWhiteSpace(_job.PreparedReferenceUrl);
+        && !string.IsNullOrWhiteSpace(_job?.PreparedReferenceUrl);
     private bool IsActive => !IsCoreCancelled
         && (_job?.Status is DanceSellJobStatuses.Queued or DanceSellJobStatuses.Submitted or DanceSellJobStatuses.Rendering);
     private bool IsResultActive => IsActive;
@@ -883,7 +894,7 @@
         _ => "Chưa có"
     };
     private Color ReferenceColor => _job?.PreparedReferenceStatus == DanceSellReferenceStatuses.Approved ? Color.Success : Color.Warning;
-    private bool HasTikTokSource => _job?.MotionSourceType == DanceSellMotionSourceTypes.TikTok && !string.IsNullOrWhiteSpace(_job.MotionSourceUrl);
+    private bool HasTikTokSource => _job?.MotionSourceType == DanceSellMotionSourceTypes.TikTok && !string.IsNullOrWhiteSpace(_job?.MotionSourceUrl);
     private bool CanRunReferenceComparison => AuthState.CurrentUser is not null && DanceSellSecurity.IsAdmin(AuthState.CurrentUser);
     private string ResultProgressText => _job?.Status == DanceSellJobStatuses.Queued
         ? "Đang chuẩn bị render video..."
@@ -897,8 +908,10 @@
         ? "Hệ thống sẽ tự động chuẩn bị ảnh, duyệt ảnh và tạo video khi dữ liệu đã đầy đủ."
         : "Bạn sẽ xác nhận từng bước trước khi tạo video.";
 
-    private string DisplayStatusLabel(DanceSellJobDto job)
-        => IsCoreCancelled ? "Đã dừng" : DanceSellCustomerStatusText.JobStatusLabel(job.Status);
+    private string DisplayStatusLabel(DanceSellJobDto? job)
+        => job is null
+            ? "Đang tải"
+            : IsCoreCancelled ? "Đã dừng" : DanceSellCustomerStatusText.JobStatusLabel(job.Status);
 
     private static string FormatPoints(decimal? points)
         => points?.ToString("0.##") ?? "chưa cấu hình";
@@ -1116,7 +1129,8 @@
     private async Task StageTikTokAsync() => await RunAsync(async () =>
     {
         await EnsureEditableAsync();
-        _job = await DanceSell.StageTikTokAsync(_job!.Id, _tiktokUrl, AuthState.CurrentUser!);
+        var job = _job ?? throw new InvalidOperationException("Không tìm thấy video quảng cáo thời trang.");
+        _job = await DanceSell.StageTikTokAsync(job.Id, _tiktokUrl, AuthState.CurrentUser!);
         _tiktokUrl = _job.MotionSourceUrl ?? _tiktokUrl;
         _motionFileName = "TikTok MP4";
         _motionFileSize = null;
@@ -1151,7 +1165,8 @@
         _motionFileName = file.Name;
         _motionFileSize = file.Size;
         _motionUploadError = null;
-        if (await UploadAsync(args, MaxMotionVideoBytes, (bytes, uploadedFile) => DanceSell.UploadMotionAsync(_job!.Id, bytes, uploadedFile.Name, uploadedFile.ContentType, AuthState.CurrentUser!)))
+        var job = _job ?? throw new InvalidOperationException("Không tìm thấy video quảng cáo thời trang.");
+        if (await UploadAsync(args, MaxMotionVideoBytes, (bytes, uploadedFile) => DanceSell.UploadMotionAsync(job.Id, bytes, uploadedFile.Name, uploadedFile.ContentType, AuthState.CurrentUser!)))
         {
             await ReloadAsync();
         }
@@ -1160,7 +1175,8 @@
     private async Task OnCharacterSelected(InputFileChangeEventArgs args)
     {
         _characterDragActive = false;
-        if (await UploadAsync(args, MaxImageBytes, (bytes, file) => DanceSell.UploadCharacterAsync(_job!.Id, bytes, file.Name, file.ContentType, AuthState.CurrentUser!)))
+        var job = _job ?? throw new InvalidOperationException("Không tìm thấy video quảng cáo thời trang.");
+        if (await UploadAsync(args, MaxImageBytes, (bytes, file) => DanceSell.UploadCharacterAsync(job.Id, bytes, file.Name, file.ContentType, AuthState.CurrentUser!)))
         {
             await ReloadAsync();
             if (_job?.CharacterMediaId is not null && !string.IsNullOrWhiteSpace(_job.CharacterImageUrl))
@@ -1173,7 +1189,8 @@
     private async Task OnProductSelected(InputFileChangeEventArgs args)
     {
         _productDragActive = false;
-        if (await UploadAsync(args, MaxImageBytes, (bytes, file) => DanceSell.UploadProductAsync(_job!.Id, bytes, file.Name, file.ContentType, AuthState.CurrentUser!)))
+        var job = _job ?? throw new InvalidOperationException("Không tìm thấy video quảng cáo thời trang.");
+        if (await UploadAsync(args, MaxImageBytes, (bytes, file) => DanceSell.UploadProductAsync(job.Id, bytes, file.Name, file.ContentType, AuthState.CurrentUser!)))
         {
             await ReloadAsync();
             if (_job?.ProductMediaId is not null && !string.IsNullOrWhiteSpace(_job.ProductImageUrl))
@@ -1186,7 +1203,8 @@
     private async Task RemoveProductAsync() => await RunAsync(async () =>
     {
         await EnsureEditableAsync();
-        _job = await DanceSell.RemoveProductAsync(_job!.Id, AuthState.CurrentUser!);
+        var job = _job ?? throw new InvalidOperationException("Không tìm thấy video quảng cáo thời trang.");
+        _job = await DanceSell.RemoveProductAsync(job.Id, AuthState.CurrentUser!);
         Snackbar.Add("Đã gỡ ảnh sản phẩm.", Severity.Success);
     });
 
@@ -1227,7 +1245,8 @@
                 EnsureReferenceProviderReady();
             }
 
-            _job = await References.AutoPrepareAsync(_job!.Id, AuthState.CurrentUser!);
+            var job = _job ?? throw new InvalidOperationException("Không tìm thấy video quảng cáo thời trang.");
+            _job = await References.AutoPrepareAsync(job.Id, AuthState.CurrentUser!);
             var versions = await DanceRepo.ListReferenceVersionsAsync(_job.Id);
             _latestReference = versions.OrderByDescending(x => x.VersionNo).FirstOrDefault();
             await RefreshEstimateAsync();
@@ -1268,38 +1287,44 @@
 
     private async Task ApproveCharacterAsync() => await RunAsync(async () =>
     {
-        _job = await References.ApproveCharacterAsync(_job!.Id, AuthState.CurrentUser!);
+        var job = _job ?? throw new InvalidOperationException("Không tìm thấy video quảng cáo thời trang.");
+        _job = await References.ApproveCharacterAsync(job.Id, AuthState.CurrentUser!);
         await ReloadAsync();
     });
 
     private async Task ApproveLatestReferenceAsync() => await RunAsync(async () =>
     {
-        _job = await References.ApproveAsync(_job!.Id, _latestReference!.Id, AuthState.CurrentUser!);
+        var job = _job ?? throw new InvalidOperationException("Không tìm thấy video quảng cáo thời trang.");
+        _job = await References.ApproveAsync(job.Id, _latestReference!.Id, AuthState.CurrentUser!);
         await ReloadAsync();
     });
 
     private async Task UnapproveReferenceAsync() => await RunAsync(async () =>
     {
-        _job = await References.UnapproveAsync(_job!.Id, AuthState.CurrentUser!);
+        var job = _job ?? throw new InvalidOperationException("Không tìm thấy video quảng cáo thời trang.");
+        _job = await References.UnapproveAsync(job.Id, AuthState.CurrentUser!);
         await ReloadAsync();
     });
 
     private async Task RunReferenceComparisonAsync() => await RunAsync(async () =>
     {
-        await ReferenceComparison.RunAsync(_job!.Id, AuthState.CurrentUser!);
+        var job = _job ?? throw new InvalidOperationException("Không tìm thấy video quảng cáo thời trang.");
+        await ReferenceComparison.RunAsync(job.Id, AuthState.CurrentUser!);
         Snackbar.Add("A/B reference comparison submitted.", Severity.Success);
         await ReloadAsync();
     });
 
     private async Task PollReferenceComparisonAsync(Guid versionId) => await RunAsync(async () =>
     {
-        await ReferenceComparison.PollAsync(_job!.Id, versionId, AuthState.CurrentUser!);
+        var job = _job ?? throw new InvalidOperationException("Không tìm thấy video quảng cáo thời trang.");
+        await ReferenceComparison.PollAsync(job.Id, versionId, AuthState.CurrentUser!);
         await ReloadAsync();
     });
 
     private async Task ScoreReferenceComparisonAsync(Guid versionId) => await RunAsync(async () =>
     {
-        await ReferenceComparison.ScoreAsync(_job!.Id, versionId, new DanceSellReferenceComparisonScoreRequest
+        var job = _job ?? throw new InvalidOperationException("Không tìm thấy video quảng cáo thời trang.");
+        await ReferenceComparison.ScoreAsync(job.Id, versionId, new DanceSellReferenceComparisonScoreRequest
         {
             ShirtColorFidelity = _scoreShirtColor,
             GarmentShapeFidelity = _scoreGarmentShape,
@@ -1337,14 +1362,15 @@
             await RunAsync(async () =>
             {
                 await UpdateBusinessAsync();
-                _job = await DanceSell.GetAsync(_job!.Id, AuthState.CurrentUser!);
+                var job = _job ?? throw new InvalidOperationException("Không tìm thấy video quảng cáo thời trang.");
+                _job = await DanceSell.GetAsync(job.Id, AuthState.CurrentUser!);
                 if (_job.PreparedReferenceStatus != DanceSellReferenceStatuses.Approved
                     || string.IsNullOrWhiteSpace(_job.PreparedReferenceUrl))
                 {
                     throw new InvalidOperationException("DANCE_SELL_REFERENCE_NOT_APPROVED");
                 }
 
-                _job = await DanceSell.QueueRenderAsync(_job!.Id, AuthState.CurrentUser!);
+                _job = await DanceSell.QueueRenderAsync(job.Id, AuthState.CurrentUser!);
                 _tabIndex = 3;
                 await ReloadAsync();
             });
@@ -1358,7 +1384,8 @@
         {
             await RunAsync(async () =>
             {
-                _job = await DanceSell.CancelAsync(_job!.Id, "Customer requested stop.", AuthState.CurrentUser!);
+                var job = _job ?? throw new InvalidOperationException("Không tìm thấy video quảng cáo thời trang.");
+                _job = await DanceSell.CancelAsync(job.Id, "Customer requested stop.", AuthState.CurrentUser!);
                 await ReloadAsync();
                 Snackbar.Add("Đã dừng tạo video.", Severity.Success);
             });
@@ -1433,7 +1460,8 @@
         {
             await RunAsync(async () =>
             {
-                _job = await References.SelectReferenceVersionAsync(_job.Id, versionId, AuthState.CurrentUser!);
+                var job = _job ?? throw new InvalidOperationException("Không tìm thấy video quảng cáo thời trang.");
+                _job = await References.SelectReferenceVersionAsync(job.Id, versionId, AuthState.CurrentUser!);
                 await ReloadAsync();
                 Snackbar.Add("Đã chọn lại ảnh reference.", Severity.Success);
             });
@@ -1493,7 +1521,8 @@
 
     private async Task SaveReferencePromptAsync(string prompt, bool reload = true)
     {
-        _job = await DanceSell.UpdateBusinessAsync(_job!.Id, new DanceSellUpdateBusinessRequest
+        var job = _job ?? throw new InvalidOperationException("Không tìm thấy video quảng cáo thời trang.");
+        _job = await DanceSell.UpdateBusinessAsync(job.Id, new DanceSellUpdateBusinessRequest
         {
             Title = _title,
             Prompt = BuildPrompt(),
@@ -1514,7 +1543,8 @@
     private async Task GenerateReferenceAsync()
     {
         EnsureReferenceProviderReady();
-        await References.GenerateAsync(_job!.Id, AuthState.CurrentUser!);
+        var job = _job ?? throw new InvalidOperationException("Không tìm thấy video quảng cáo thời trang.");
+        await References.GenerateAsync(job.Id, AuthState.CurrentUser!);
         _referenceVersions = await DanceRepo.ListReferenceVersionsAsync(_job.Id);
         _latestReference = _referenceVersions.OrderByDescending(x => x.VersionNo).FirstOrDefault();
         await ReloadAsync();
@@ -1618,7 +1648,8 @@
 
     private async Task RetryAsync() => await RunAsync(async () =>
     {
-        _job = await DanceSell.RetryAsync(_job!.Id, AuthState.CurrentUser!);
+        var job = _job ?? throw new InvalidOperationException("Không tìm thấy video quảng cáo thời trang.");
+        _job = await DanceSell.RetryAsync(job.Id, AuthState.CurrentUser!);
         _tabIndex = 3;
         await ReloadAsync();
     });
@@ -1695,7 +1726,9 @@
     }
 
     private async Task UpdateBusinessAsync()
-        => _job = await DanceSell.UpdateBusinessAsync(_job!.Id, new DanceSellUpdateBusinessRequest
+    {
+        var job = _job ?? throw new InvalidOperationException("Không tìm thấy video quảng cáo thời trang.");
+        _job = await DanceSell.UpdateBusinessAsync(job.Id, new DanceSellUpdateBusinessRequest
         {
             Title = _title,
             Prompt = BuildPrompt(),
@@ -1704,9 +1737,10 @@
             Mode = "720p",
             Ratio = _ratio,
             CharacterOrientation = "image",
-            ImagePrompt = _job?.ImagePrompt,
+            ImagePrompt = job.ImagePrompt,
             AutoFinish = _autoFinish
         }, AuthState.CurrentUser!);
+    }
 
     private async Task RefreshEstimateAsync()
     {
