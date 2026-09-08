@@ -56,8 +56,24 @@ public sealed class RDanceFashionDemoPageTests
             "OnMotionSelected",
             "Navigation.NavigateTo($\"/jobs/rdance/{job.Id}\")",
             "Video nhảy quảng cáo thời trang",
-            "Tạo video và tiếp tục",
-            "Kéo thả video MP4 vào đây",
+            "rdance-page-container rdance-onepage-layout",
+            "rdance-workflow-grid",
+            "Hình ảnh tham chiếu",
+            "Video tham chiếu",
+            "Kết quả",
+            "Trạng thái",
+            "Xem Browser",
+            "Lưu thay đổi",
+            "Tạo video",
+            "rdance-media-frame rdance-main-frame",
+            "rdance-media-frame rdance-video-frame",
+            "rdance-media-frame rdance-result-frame",
+            "rdance-overlay-button",
+            "OpenTikTokEditorAsync",
+            "RDanceTikTokUrlDialog",
+            "CurrentUrl",
+            "accept=\"video/mp4\"",
+            "UploadMotionAsync",
             "Chỉ hỗ trợ video MP4.",
             "Dịch vụ video nhảy quảng cáo thời trang chưa được cấu hình Motion Control."
         })
@@ -67,6 +83,9 @@ public sealed class RDanceFashionDemoPageTests
 
         Assert.DoesNotContain("/rdance-fashion-demo", page, StringComparison.Ordinal);
         Assert.DoesNotContain("rDance", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("<MudGrid>", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("Label=\"Link TikTok\"", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("Tạo video và tiếp tục", page, StringComparison.Ordinal);
     }
 
     [Fact]

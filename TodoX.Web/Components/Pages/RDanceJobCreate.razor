@@ -2,6 +2,7 @@
 @using Microsoft.AspNetCore.Components.Forms
 @using Microsoft.AspNetCore.Components.Web
 @using Microsoft.Extensions.Options
+@using TodoX.Web.Components.Dialogs
 @using TodoX.Web.Models.Catalog
 @using TodoX.Web.Services.DanceSell
 @inject CatalogRepository Catalog
@@ -9,20 +10,13 @@
 @inject IDanceSellPhase2Service DanceSell
 @inject IDanceSellProviderCatalog ProviderCatalog
 @inject IOptionsMonitor<DanceSellPhase2Options> DanceOptions
+@inject IDialogService DialogService
 @inject NavigationManager Navigation
 @inject ISnackbar Snackbar
 
 <PageTitle>Video nhảy quảng cáo thời trang</PageTitle>
 
 <MudStack Spacing="3" Class="rdance-create-page">
-    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="flex-wrap">
-        <MudIconButton Icon="@Icons.Material.Filled.ArrowBack" Color="Color.Default" OnClick="@(() => Navigation.NavigateTo("/create"))" />
-        <div>
-            <MudText Typo="Typo.h4" Class="todox-page-title">Video nhảy quảng cáo thời trang</MudText>
-            <MudText Typo="Typo.body1" Class="todox-page-subtitle">Tạo video quảng cáo thời trang từ chuyển động TikTok hoặc video MP4.</MudText>
-        </div>
-    </MudStack>
-
     @if (!AuthState.IsInitialized)
     {
         <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
@@ -38,12 +32,168 @@
             <MudAlert Severity="Severity.Error">@_readinessError</MudAlert>
         }
 
-        <MudGrid>
-            <MudItem xs="12" lg="7">
-                <MudPaper Class="todox-card pa-4" rounded="true">
-                    <MudStack Spacing="3">
+        <div class="rdance-page-container rdance-onepage-layout">
+            <MudPaper Class="todox-panel rdance-header-card">
+                <div class="rdance-header-row">
+                    <div class="rdance-header-copy">
+                        <div class="rdance-header-title-row">
+                            <MudIconButton Icon="@Icons.Material.Filled.ArrowBack"
+                                           Color="Color.Default"
+                                           OnClick="@(() => Navigation.NavigateTo("/create"))"
+                                           aria-label="Quay lại kho dịch vụ" />
+                            <div>
+                                <MudText Typo="Typo.h4" Class="rdance-header-title">Video nhảy quảng cáo thời trang</MudText>
+                                <MudText Typo="Typo.body2" Class="rdance-muted-line">Tạo video quảng cáo thời trang từ chuyển động TikTok hoặc video MP4.</MudText>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="rdance-header-actions">
+                        <MudButton Variant="Variant.Outlined"
+                                   Color="Color.Default"
+                                   StartIcon="@Icons.Material.Filled.OpenInBrowser"
+                                   Href="@Navigation.Uri"
+                                   Target="_blank">
+                            Xem Browser
+                        </MudButton>
+                        <MudButton Variant="Variant.Outlined"
+                                   Color="Color.Warning"
+                                   StartIcon="@Icons.Material.Filled.Save"
+                                   Disabled="@_busy"
+                                   OnClick="CreateDraftAndOpenAsync">
+                            Lưu thay đổi
+                        </MudButton>
+                        <MudButton Variant="Variant.Filled"
+                                   Color="Color.Warning"
+                                   StartIcon="@Icons.Material.Filled.MovieCreation"
+                                   Disabled="@(_busy || !CanSubmitSource)"
+                                   OnClick="CreateDraftAndOpenAsync">
+                            Tạo video
+                        </MudButton>
+                    </div>
+                </div>
+            </MudPaper>
+
+            <div class="rdance-workflow-grid">
+                <MudPaper Class="todox-panel rdance-step-card">
+                    <div class="rdance-step-head">
+                        <span class="rdance-step-chip">1</span>
+                        <div>
+                            <MudText Typo="Typo.h6">Hình ảnh tham chiếu</MudText>
+                            <MudText Typo="Typo.body2" Class="rdance-muted-line">Người mẫu, sản phẩm và khung ảnh chính.</MudText>
+                        </div>
+                    </div>
+                    <div class="rdance-step1-layout">
+                        <div class="rdance-thumbnail-stack">
+                            <div class="rdance-thumbnail" title="Ảnh người mẫu">
+                                <span class="rdance-thumbnail-inner">
+                                    <span class="rdance-thumbnail-empty">
+                                        <MudIcon Icon="@Icons.Material.Filled.CloudUpload" Size="Size.Small" />
+                                        <span>Ảnh người mẫu</span>
+                                    </span>
+                                </span>
+                            </div>
+                            <div class="rdance-thumbnail" title="Ảnh sản phẩm">
+                                <span class="rdance-thumbnail-inner">
+                                    <span class="rdance-thumbnail-empty">
+                                        <MudIcon Icon="@Icons.Material.Filled.CloudUpload" Size="Size.Small" />
+                                        <span>Ảnh sản phẩm</span>
+                                    </span>
+                                </span>
+                            </div>
+                            <div class="rdance-thumbnail" title="Ghép ảnh">
+                                <span class="rdance-thumbnail-inner">
+                                    <span class="rdance-thumbnail-empty">
+                                        <MudIcon Icon="@Icons.Material.Filled.Merge" Size="Size.Small" />
+                                        <span>Ghép ảnh</span>
+                                    </span>
+                                </span>
+                            </div>
+                        </div>
+                        <div class="rdance-media-frame rdance-main-frame">
+                            <div class="rdance-empty-media">
+                                <MudIcon Icon="@Icons.Material.Filled.Image" Size="Size.Large" />
+                                <span>Ảnh tham chiếu</span>
+                            </div>
+                        </div>
+                    </div>
+                </MudPaper>
+
+                <MudPaper Class="todox-panel rdance-step-card">
+                    <div class="rdance-step-head">
+                        <span class="rdance-step-chip">2</span>
+                        <div>
+                            <MudText Typo="Typo.h6">Video tham chiếu</MudText>
+                            <MudText Typo="Typo.body2" Class="rdance-muted-line">Nguồn video 9:16.</MudText>
+                        </div>
+                    </div>
+                    <div class="rdance-media-frame rdance-video-frame">
+                        <div class="rdance-empty-media">
+                            <MudIcon Icon="@Icons.Material.Filled.Movie" Size="Size.Large" />
+                            <span>Video tham chiếu</span>
+                        </div>
+                        <div class="rdance-overlay-actions">
+                            <MudIconButton Icon="@Icons.Custom.Brands.TikTok"
+                                           Class="@TikTokOverlayButtonClass"
+                                           Disabled="@_busy"
+                                           aria-label="TikTok"
+                                           OnClick="OpenTikTokEditorAsync" />
+                            <label class="@UploadOverlayButtonClass" title="Tải lên video">
+                                <MudIcon Icon="@Icons.Material.Filled.CloudUpload" Size="Size.Small" />
+                                <InputFile class="rdance-hidden-file-input"
+                                           OnChange="OnMotionSelected"
+                                           accept="video/mp4"
+                                           disabled="@(_busy || !CanSubmitSource)" />
+                            </label>
+                        </div>
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(_motionUploadError))
+                    {
+                        <MudAlert Severity="Severity.Error" Dense="true">@_motionUploadError</MudAlert>
+                    }
+                </MudPaper>
+
+                <MudPaper Class="todox-panel rdance-step-card">
+                    <div class="rdance-step-head">
+                        <span class="rdance-step-chip">3</span>
+                        <div>
+                            <MudText Typo="Typo.h6">Kết quả</MudText>
+                            <MudText Typo="Typo.body2" Class="rdance-muted-line">Video đầu ra 9:16.</MudText>
+                        </div>
+                    </div>
+                    <div class="rdance-media-frame rdance-result-frame">
+                        <div class="rdance-empty-media">
+                            <MudIcon Icon="@Icons.Material.Filled.PlayCircleOutline" Size="Size.Large" />
+                            <span>Video kết quả</span>
+                        </div>
+                    </div>
+                </MudPaper>
+
+                <MudPaper Class="todox-panel rdance-step-card rdance-step-card--compact">
+                    <div class="rdance-step-head">
+                        <span class="rdance-step-chip">4</span>
+                        <MudText Typo="Typo.h6">Trạng thái</MudText>
+                    </div>
+                    <div class="rdance-status-list">
+                        <div class="rdance-status-item">
+                            <div><MudIcon Icon="@CreateStatusIcon" Color="@CreateStatusColor" Size="Size.Small" /> <span>Hình ảnh tham chiếu</span></div>
+                            <span class="@CreateStatusClass">@CreateStatusLabel</span>
+                        </div>
+                        <div class="rdance-status-item">
+                            <div><MudIcon Icon="@CreateStatusIcon" Color="@CreateStatusColor" Size="Size.Small" /> <span>Video tham chiếu</span></div>
+                            <span class="@CreateStatusClass">@CreateStatusLabel</span>
+                        </div>
+                        <div class="rdance-status-item">
+                            <div><MudIcon Icon="@CreateStatusIcon" Color="@CreateStatusColor" Size="Size.Small" /> <span>Render kết quả</span></div>
+                            <span class="@CreateStatusClass">@CreateStatusLabel</span>
+                        </div>
+                        <div class="rdance-status-item">
+                            <div><MudIcon Icon="@CreateStatusIcon" Color="@CreateStatusColor" Size="Size.Small" /> <span>Video kết quả</span></div>
+                            <span class="@CreateStatusClass">@CreateStatusLabel</span>
+                        </div>
+                    </div>
+                    <MudDivider />
+                    <MudStack Spacing="2">
                         <MudTextField T="string" Label="Tên video" Variant="Variant.Outlined" @bind-Value="_title" Disabled="@_busy" />
-                        <MudSwitch T="bool" Color="Color.Warning" @bind-Value="_autoFinish" Disabled="@_busy">Tự động hoàn thành</MudSwitch>
                         <MudSelect T="string" Label="Danh mục thời trang" Variant="Variant.Outlined" @bind-Value="_category" Disabled="@_busy">
                             <MudSelectItem Value="@("shirt")">Áo</MudSelectItem>
                             <MudSelectItem Value="@("pants")">Quần</MudSelectItem>
@@ -56,68 +206,16 @@
                             <MudSelectItem Value="@("9:16")">9:16</MudSelectItem>
                             <MudSelectItem Value="@("16:9")">16:9</MudSelectItem>
                         </MudSelect>
-
+                        <MudSwitch T="bool" Color="Color.Warning" @bind-Value="_autoFinish" Disabled="@_busy">Tự động hoàn thành</MudSwitch>
                         <MudText Typo="Typo.caption" Class="rdance-auto-finish-help">
                             @(_autoFinish
                                 ? "Hệ thống sẽ tự động chuẩn bị ảnh, duyệt ảnh và tạo video khi dữ liệu đã đầy đủ."
                                 : "Bạn sẽ xác nhận từng bước trước khi tạo video.")
                         </MudText>
-                        <MudTextField T="string" Label="Link TikTok" Variant="Variant.Outlined" @bind-Value="_tiktokUrl" Disabled="@_busy" />
-                        <MudButton Variant="Variant.Outlined"
-                                   Color="Color.Warning"
-                                   StartIcon="@Icons.Material.Filled.Link"
-                                   Disabled="@(_busy || !CanSubmitSource || string.IsNullOrWhiteSpace(_tiktokUrl))"
-                                   OnClick="StageTikTokAndOpenAsync">
-                            Tải và kiểm tra video
-                        </MudButton>
-
-                        <div class="rdance-source-divider"><span>HOẶC</span></div>
-
-                        <label class="@MotionUploadZoneClass" @ondragenter="OnMotionDragEnter" @ondragleave="OnMotionDragLeave" @ondragover:preventDefault="true" @ondrop:preventDefault="true" @ondrop="OnMotionDrop">
-                            <InputFile class="rdance-hidden-file-input" OnChange="OnMotionSelected" accept="video/mp4" disabled="@(_busy || !CanSubmitSource)" />
-                            <span class="rdance-upload-icon">
-                                @if (_busy)
-                                {
-                                    <MudProgressCircular Indeterminate="true" Size="Size.Small" Color="Color.Warning" />
-                                }
-                                else
-                                {
-                                    <MudIcon Icon="@Icons.Material.Filled.CloudUpload" Size="Size.Large" />
-                                }
-                            </span>
-                            <span class="rdance-upload-title">Kéo thả video MP4 vào đây</span>
-                            <span class="rdance-upload-subtitle">hoặc bấm để chọn video</span>
-                            <span class="rdance-upload-limit">MP4 · tối đa @MaxMotionVideoLabel</span>
-                        </label>
-
-                        @if (!string.IsNullOrWhiteSpace(_motionUploadError))
-                        {
-                            <MudAlert Severity="Severity.Error" Dense="true">@_motionUploadError</MudAlert>
-                        }
                     </MudStack>
                 </MudPaper>
-            </MudItem>
-
-            <MudItem xs="12" lg="5">
-                <MudPaper Class="todox-card pa-4" rounded="true">
-                    <MudStack Spacing="2">
-                        <MudText Typo="Typo.overline">THÔNG TIN DỊCH VỤ</MudText>
-                        <MudText Typo="Typo.h6">Video nhảy quảng cáo thời trang</MudText>
-                        <MudList T="string" Dense="true">
-                            <MudListItem T="string">Dịch vụ: Video nhảy quảng cáo thời trang</MudListItem>
-                            <MudListItem T="string">Tỷ lệ: @_ratio</MudListItem>
-                        </MudList>
-                        <MudButton Variant="Variant.Filled"
-                                   Color="Color.Warning"
-                                   StartIcon="@Icons.Material.Filled.MovieCreation"
-                                   Disabled="@(_busy || !CanSubmitSource)"
-                                   OnClick="CreateDraftAndOpenAsync">
-                            Tạo video và tiếp tục
-                        </MudButton>
-                    </MudStack>
-                </MudPaper>
-            </MudItem>
-        </MudGrid>
+            </div>
+        </div>
     }
 </MudStack>
 
@@ -139,6 +237,12 @@
     private long MaxMotionVideoBytes => (long)Math.Max(1, DanceOptions.CurrentValue.MaxVideoMb) * 1024 * 1024;
     private string MaxMotionVideoLabel => $"{Math.Max(1, DanceOptions.CurrentValue.MaxVideoMb)}MB";
     private string MotionUploadZoneClass => $"rdance-upload-zone{(_motionDragActive ? " is-dragging" : string.Empty)}{(_busy ? " is-busy" : string.Empty)}";
+    private Color CreateStatusColor => _busy ? Color.Warning : Color.Default;
+    private string CreateStatusClass => $"rdance-status-pill {(_busy ? "is-yellow" : "is-gray")}";
+    private string CreateStatusIcon => Icons.Material.Filled.RadioButtonUnchecked;
+    private string CreateStatusLabel => _busy ? "Đang xử lý" : "Chưa bắt đầu";
+    private string TikTokOverlayButtonClass => $"rdance-overlay-button {(!string.IsNullOrWhiteSpace(_tiktokUrl) ? "is-active" : "is-inactive")}";
+    private string UploadOverlayButtonClass => "rdance-overlay-button is-inactive";
 
     protected override async Task OnInitializedAsync()
     {
@@ -199,6 +303,28 @@
             job = await DanceSell.StageTikTokAsync(job.Id, _tiktokUrl, AuthState.CurrentUser!);
             Navigation.NavigateTo($"/jobs/rdance/{job.Id}");
         });
+
+    private async Task OpenTikTokEditorAsync()
+    {
+        var parameters = new DialogParameters<RDanceTikTokUrlDialog>
+        {
+            { x => x.CurrentUrl, _tiktokUrl }
+        };
+        var options = new DialogOptions
+        {
+            FullWidth = true,
+            MaxWidth = MaxWidth.Small
+        };
+        var dialog = await DialogService.ShowAsync<RDanceTikTokUrlDialog>("TikTok URL", parameters, options);
+        var result = await dialog.Result;
+        if (result?.Canceled != false || result.Data is not string url || string.IsNullOrWhiteSpace(url))
+        {
+            return;
+        }
+
+        _tiktokUrl = url.Trim();
+        await StageTikTokAndOpenAsync();
+    }
 
     private async Task OnMotionSelected(InputFileChangeEventArgs args)
     {
@@ -300,15 +426,57 @@
 
 <style>
     .rdance-create-page { min-width: 0; }
-    .rdance-source-divider { display: flex; align-items: center; gap: 12px; color: rgba(255,255,255,.55); font-size: .75rem; font-weight: 700; letter-spacing: 0; }
-    .rdance-source-divider::before, .rdance-source-divider::after { content: ""; flex: 1; height: 1px; background: rgba(255,255,255,.12); }
-    .rdance-upload-zone { position: relative; display: grid; place-items: center; gap: 6px; min-height: 188px; padding: 24px 18px; overflow: hidden; border: 1px dashed rgba(245, 181, 64, .72); border-radius: 8px; background: linear-gradient(180deg, rgba(245,181,64,.12), rgba(255,255,255,.035)); color: rgba(255,255,255,.88); text-align: center; cursor: pointer; transition: border-color .18s ease, background .18s ease, box-shadow .18s ease; }
-    .rdance-upload-zone:hover, .rdance-upload-zone:focus-within, .rdance-upload-zone.is-dragging { border-color: #f5b540; background: linear-gradient(180deg, rgba(245,181,64,.2), rgba(42,194,177,.08)); box-shadow: 0 0 0 1px rgba(245,181,64,.24), 0 18px 44px rgba(0,0,0,.22); }
+    .rdance-page-container { width: 100%; max-width: 1680px; margin: 0 auto; padding: 20px 18px; box-sizing: border-box; }
+    .rdance-onepage-layout { display: flex; flex-direction: column; gap: 14px; }
+    .rdance-header-card { padding: 14px 16px; border-radius: 8px; }
+    .rdance-header-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-width: 0; flex-wrap: wrap; }
+    .rdance-header-copy { min-width: 0; }
+    .rdance-header-title-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+    .rdance-header-title { margin: 0 0 4px; font-size: 28px; line-height: 1.12; }
+    .rdance-header-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .rdance-workflow-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; align-items: stretch; margin: 0; min-width: 0; }
+    .rdance-step-card { display: flex; flex-direction: column; gap: 12px; min-width: 0; padding: 14px; border-radius: 8px; border: 1px solid rgba(255,255,255,.1); }
+    .rdance-step-card--compact { justify-content: flex-start; }
+    .rdance-step-head { display: flex; align-items: flex-start; gap: 10px; min-width: 0; }
+    .rdance-step-head .mud-typography-h6 { font-size: 1rem; line-height: 1.2; }
+    .rdance-step-chip { display: inline-grid; place-items: center; flex: 0 0 auto; width: 24px; height: 24px; border-radius: 999px; background: rgba(245,181,64,.18); color: #f5b540; font-weight: 800; font-size: .8rem; }
+    .rdance-step1-layout { display: grid; grid-template-columns: minmax(64px, .36fr) minmax(0, 1fr); gap: 8px; align-items: stretch; min-width: 0; }
+    .rdance-thumbnail-stack { display: grid; grid-template-rows: repeat(3, minmax(0, auto)); gap: 6px; min-width: 0; align-content: start; }
+    .rdance-thumbnail { position: relative; display: block; min-width: 0; overflow: hidden; border: 1px dashed rgba(255,255,255,.22); border-radius: 8px; background: rgba(255,255,255,.04); color: rgba(255,255,255,.76); aspect-ratio: 1 / 1; }
+    .rdance-thumbnail-inner { display: grid; place-items: center; width: 100%; height: 100%; }
+    .rdance-thumbnail-empty { display: grid; place-items: center; gap: 4px; padding: 6px; text-align: center; font-size: .78rem; line-height: 1.15; }
+    .rdance-media-frame { position: relative; width: 100%; aspect-ratio: 9 / 16; display: grid; place-items: center; overflow: hidden; min-width: 0; border-radius: 8px; background: #090d12; color: rgba(255,255,255,.6); }
+    .rdance-main-frame, .rdance-video-frame, .rdance-result-frame { height: 100%; }
+    .rdance-empty-media { display: grid; place-items: center; gap: 8px; padding: 12px; color: rgba(255,255,255,.48); text-align: center; }
+    .rdance-overlay-actions { position: absolute; top: 8px; left: 8px; z-index: 3; display: flex; gap: 6px; }
+    .rdance-overlay-button { position: relative; display: inline-grid !important; place-items: center; width: 32px !important; min-width: 32px !important; height: 32px !important; min-height: 32px !important; padding: 0 !important; border-radius: 8px !important; border: 1px solid rgba(255,255,255,.18); background: rgba(7,10,14,.78); color: rgba(255,255,255,.72); overflow: hidden; transition: background-color .15s ease, border-color .15s ease, color .15s ease; }
+    .rdance-overlay-button .mud-icon-root { font-size: 1rem; }
+    .rdance-overlay-button.is-active { background: rgba(245,181,64,.18); border-color: rgba(245,181,64,.45); color: #f5b540; }
+    .rdance-overlay-button.is-inactive { background: rgba(7,10,14,.66); border-color: rgba(255,255,255,.12); color: rgba(255,255,255,.46); }
+    .rdance-status-list { display: grid; gap: 10px; }
+    .rdance-status-item { display: grid; gap: 2px; padding: 2px 0; color: rgba(255,255,255,.72); font-size: .84rem; line-height: 1.25; }
+    .rdance-status-item > div { display: flex; align-items: center; gap: 6px; min-width: 0; }
+    .rdance-status-item > div span { overflow-wrap: normal; word-break: normal; }
+    .rdance-status-item > span { padding-left: 22px; color: rgba(255,255,255,.52); }
+    .rdance-status-pill { display: inline-flex; width: fit-content; min-width: 0; padding: 3px 8px; border-radius: 20px; font-size: .75rem; font-weight: 700; line-height: 1.1; }
+    .rdance-status-pill.is-yellow { color: #332508; background: rgba(245,181,64,.92); }
+    .rdance-status-pill.is-gray { color: rgba(255,255,255,.72); background: rgba(255,255,255,.08); }
+    .rdance-muted-line { color: rgba(255,255,255,.62); }
+    .rdance-auto-finish-help { color: rgba(255,255,255,.68); }
+    .rdance-upload-zone { position: relative; display: grid; place-items: center; gap: 6px; min-height: 188px; padding: 24px 18px; overflow: hidden; border: 1px dashed rgba(245, 181, 64, .72); border-radius: 8px; background: rgba(245,181,64,.12); color: rgba(255,255,255,.88); text-align: center; cursor: pointer; transition: border-color .18s ease, background .18s ease, box-shadow .18s ease; }
+    .rdance-upload-zone:hover, .rdance-upload-zone:focus-within, .rdance-upload-zone.is-dragging { border-color: #f5b540; background: rgba(245,181,64,.2); box-shadow: 0 0 0 1px rgba(245,181,64,.24), 0 18px 44px rgba(0,0,0,.22); }
     .rdance-upload-zone.is-busy { cursor: progress; opacity: .82; }
     .rdance-hidden-file-input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
     .rdance-hidden-file-input:disabled { cursor: not-allowed; }
-    .rdance-upload-icon { display: grid; place-items: center; width: 48px; height: 48px; color: #f5b540; border-radius: 999px; background: rgba(245,181,64,.14); }
-    .rdance-upload-title { font-weight: 700; }
-    .rdance-upload-subtitle, .rdance-upload-limit { color: rgba(255,255,255,.62); font-size: .875rem; }
-    .rdance-auto-finish-help { color: rgba(255,255,255,.68); }
+    @@media (max-width: 1439.98px) {
+        .rdance-workflow-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @@media (max-width: 767.98px) {
+        .rdance-page-container { padding: 16px; }
+        .rdance-header-row, .rdance-header-actions { flex-direction: column; align-items: stretch; }
+        .rdance-header-actions > * { width: 100%; }
+        .rdance-header-title-row { align-items: flex-start; }
+        .rdance-workflow-grid { grid-template-columns: 1fr; }
+        .rdance-step1-layout { grid-template-columns: minmax(72px, .36fr) minmax(0, 1fr); }
+    }
 </style>
