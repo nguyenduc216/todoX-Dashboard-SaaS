@@ -387,7 +387,7 @@ public sealed class Ai79TaskClientTests
         Assert.Contains("background_source=input_video", request.Body, StringComparison.Ordinal);
         Assert.Contains("mode=standard", request.Body, StringComparison.Ordinal);
         Assert.Contains("ratio=default", request.Body, StringComparison.Ordinal);
-        Assert.DoesNotContain("model=", request.Body, StringComparison.Ordinal);
+        Assert.Contains("model=kling_video_motion_3", request.Body, StringComparison.Ordinal);
         Assert.DoesNotContain("localhost", request.Body, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("motion_video=", request.Body, StringComparison.Ordinal);
         Assert.DoesNotContain("character_image=", request.Body, StringComparison.Ordinal);
