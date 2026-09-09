@@ -753,7 +753,8 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                             errorCode = ex.ErrorCode ?? "submit_transient"
                         }, CancellationToken.None);
                     throw new RenderJobPendingReconciliationException(
-                        "Video provider submit outcome is unknown; reconciliation is required before another submit.");
+                        "Video provider submit outcome is unknown; reconciliation is required before another submit.",
+                        ex);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {

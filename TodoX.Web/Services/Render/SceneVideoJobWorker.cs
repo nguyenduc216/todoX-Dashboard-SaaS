@@ -67,8 +67,9 @@ public sealed class SceneVideoJobWorker : BackgroundService
                 }
                 catch (RenderJobPendingReconciliationException ex)
                 {
+                    await AddAi79SubmitDiagnosticsAsync(jobs, job, ex, stoppingToken);
                     await jobs.AddEventAsync(job.Id, "JOB_PENDING_RECONCILIATION", ex.Message,
-                        new { job.AttemptCount, job.MaxAttempts }, "warning", stoppingToken);
+                        BuildJobFailureEventData(job, ex), "warning", stoppingToken);
                     await jobs.MarkStatusAsync(job.Id, RenderJobStatuses.PendingReconciliation, errorCode: ex.GetType().Name, errorMessage: ex.Message, ct: stoppingToken);
                 }
                 catch (RenderJobDeferredException ex)
@@ -148,14 +149,7 @@ public sealed class SceneVideoJobWorker : BackgroundService
 
     private static object? BuildAi79SubmitDiagnostics(RenderJobDto job, Exception exception)
     {
-        var ai79 = exception switch
-        {
-            Ai79TaskSubmitException direct => direct,
-            RenderJobTerminalFailureException { InnerException: Ai79TaskSubmitException inner } => inner,
-            VideoProviderTransientException { InnerException: Ai79TaskSubmitException inner } => inner,
-            _ => null
-        };
-
+        var ai79 = FindAi79SubmitException(exception);
         if (ai79 is null)
         {
             return null;
@@ -173,6 +167,19 @@ public sealed class SceneVideoJobWorker : BackgroundService
             attemptCount = job.AttemptCount,
             maxAttempts = job.MaxAttempts
         };
+    }
+
+    private static Ai79TaskSubmitException? FindAi79SubmitException(Exception exception)
+    {
+        for (var current = exception; current is not null; current = current.InnerException)
+        {
+            if (current is Ai79TaskSubmitException ai79)
+            {
+                return ai79;
+            }
+        }
+
+        return null;
     }
 
     private static string SanitizeDiagnosticJson(string? value)

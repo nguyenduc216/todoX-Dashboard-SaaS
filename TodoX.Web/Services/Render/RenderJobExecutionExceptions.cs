@@ -6,6 +6,11 @@ public sealed class RenderJobPendingReconciliationException : Exception
         : base(message)
     {
     }
+
+    public RenderJobPendingReconciliationException(string message, Exception innerException)
+        : base(message, innerException)
+    {
+    }
 }
 
 public sealed class RenderJobTerminalFailureException : Exception

@@ -225,6 +225,45 @@ public sealed class RVideoSceneVideoRecoveryAndDiagnosticsTests
     }
 
     [Fact]
+    public void SceneVideoPendingReconciliationEventDataKeepsAi79DiagnosticsAndRetryBudget()
+    {
+        var job = new RenderJobDto
+        {
+            ModelCode = "veo_omni",
+            AttemptCount = 3,
+            MaxAttempts = 3
+        };
+        var submitException = new Ai79TaskSubmitException(
+            "79AI video submit failed.",
+            """{"error":"unavailable","access_token":"secret-response"}""",
+            HttpStatusCode.ServiceUnavailable,
+            "provider_unavailable",
+            sanitizedRequestMetadataJson: """{"endpoint":"/create-video","access_token":"secret-request"}""");
+        var exception = new RenderJobPendingReconciliationException(
+            "Video provider submit outcome is unknown.",
+            new VideoProviderTransientException("wrapped", "submit_transient", submitException));
+
+        var method = typeof(SceneVideoJobWorker).GetMethod(
+            "BuildJobFailureEventData",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var eventData = method!.Invoke(null, new object[] { job, exception });
+
+        using var document = JsonDocument.Parse(JsonSerializer.Serialize(eventData));
+        var root = document.RootElement;
+        Assert.Equal("Ai79TaskSubmitException", root.GetProperty("exceptionType").GetString());
+        Assert.Equal("79ai", root.GetProperty("provider").GetString());
+        Assert.Equal("veo_omni", root.GetProperty("model").GetString());
+        Assert.Equal(503, root.GetProperty("httpStatusCode").GetInt32());
+        Assert.Equal("provider_unavailable", root.GetProperty("providerErrorCode").GetString());
+        Assert.Equal(3, root.GetProperty("attemptCount").GetInt32());
+        Assert.Equal(3, root.GetProperty("maxAttempts").GetInt32());
+        Assert.DoesNotContain("secret-response", root.GetProperty("sanitizedResponseJson").GetString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("secret-request", root.GetProperty("sanitizedRequestMetadataJson").GetString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void SceneVideoJobWorkerWritesAi79DiagnosticsBeforeRetryAndKeepsRetryPolicy()
     {
         var source = ReadRepoFile("Services", "Render", "SceneVideoJobWorker.cs");
