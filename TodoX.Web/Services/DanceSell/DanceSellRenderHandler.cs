@@ -922,13 +922,22 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
                     ReadConfigString(asset.MetadataJson, "fileName"),
                     "{}"),
                 ct);
-            if (!string.Equals(verified.IdBase, idBase, StringComparison.OrdinalIgnoreCase))
+            if (!string.Equals(verified.IdBase, idBase, StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(verified.Url, providerUrl, StringComparison.OrdinalIgnoreCase))
             {
                 await _renderJobs.AddEventAsync(
                     renderJob.Id,
                     "AI_PROVIDER_REFERENCE_ASSET_REUSE_REJECTED",
                     "Previous-attempt provider reference identity did not match during live verification.",
-                    new { danceSellJobId = danceJob.Id, renderJobId = renderJob.Id, idBase, verifiedIdBase = verified.IdBase },
+                    new
+                    {
+                        danceSellJobId = danceJob.Id,
+                        renderJobId = renderJob.Id,
+                        idBase,
+                        providerUrl,
+                        verifiedIdBase = verified.IdBase,
+                        verifiedUrl = verified.Url
+                    },
                     level: "warning",
                     ct: ct);
                 return false;

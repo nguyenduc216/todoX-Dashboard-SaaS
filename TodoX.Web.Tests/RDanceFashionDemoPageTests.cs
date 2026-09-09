@@ -465,6 +465,7 @@ public sealed class RDanceFashionDemoPageTests
         Assert.Contains("ReverifyPreviousReferenceAssetAsync", handler, StringComparison.Ordinal);
         Assert.Contains("AI_PROVIDER_REFERENCE_ASSET_REVERIFIED", handler, StringComparison.Ordinal);
         Assert.Contains("AI_PROVIDER_REFERENCE_ASSET_REUSE_REJECTED", handler, StringComparison.Ordinal);
+        Assert.Contains("string.Equals(verified.Url, providerUrl", handler, StringComparison.Ordinal);
         Assert.Contains("AI_PROVIDER_REFERENCE_UPLOAD_STARTED", submit, StringComparison.Ordinal);
         Assert.Contains("AI_PROVIDER_REFERENCE_UPLOAD_FAILED", submit, StringComparison.Ordinal);
         Assert.Contains("AI_PROVIDER_REFERENCE_UPLOAD_COMPLETED", submit, StringComparison.Ordinal);
@@ -706,6 +707,27 @@ public sealed class RDanceFashionDemoPageTests
         Assert.Contains("matchedUrl = verified.Url", handler, StringComparison.Ordinal);
         Assert.Contains("AI_PROVIDER_REFERENCE_VERIFY_COMPLETED", handler, StringComparison.Ordinal);
         Assert.Contains("AI_PROVIDER_MOTION_VERIFY_COMPLETED", handler, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DanceSellPreviousAttemptReferenceMustBeLiveReverifiedBeforeReuse()
+    {
+        var root = FindRepoRoot();
+        var handler = ReadStrictUtf8(Path.Combine(root, "TodoX.Web", "Services", "DanceSell", "DanceSellRenderHandler.cs"));
+        var submit = GetMethodSection(handler, "Submit79AiAsync");
+
+        var currentAttemptLookup = submit.IndexOf("GetLatestAssetForRenderJobAsync", StringComparison.Ordinal);
+        var previousAttemptLookup = submit.IndexOf("GetLatestAssetAsync", currentAttemptLookup, StringComparison.Ordinal);
+        var reverify = submit.IndexOf("ReverifyPreviousReferenceAssetAsync", StringComparison.Ordinal);
+        var freshUpload = submit.IndexOf("UploadMediaAsync(new Ai79MediaUploadRequest", StringComparison.Ordinal);
+
+        Assert.True(currentAttemptLookup >= 0);
+        Assert.True(previousAttemptLookup > currentAttemptLookup);
+        Assert.True(reverify > previousAttemptLookup);
+        Assert.True(freshUpload > reverify);
+        Assert.Contains("!referenceAssetFromPreviousAttempt", submit, StringComparison.Ordinal);
+        Assert.Contains("verified.Url, providerUrl", handler, StringComparison.Ordinal);
+        Assert.Contains("AI_PROVIDER_REFERENCE_ASSET_REUSE_REJECTED", handler, StringComparison.Ordinal);
     }
 
     [Fact]
