@@ -236,12 +236,13 @@ public sealed class SceneVideoJobWorker : BackgroundService
     }
 
     private static bool IsSensitiveDiagnosticProperty(string name)
-        => name.Equals("access_token", StringComparison.OrdinalIgnoreCase)
-           || name.Equals("authorization", StringComparison.OrdinalIgnoreCase)
-           || name.Equals("api_key", StringComparison.OrdinalIgnoreCase)
-           || name.Equals("secret", StringComparison.OrdinalIgnoreCase)
-           || name.Equals("credential", StringComparison.OrdinalIgnoreCase)
-           || name.Equals("password", StringComparison.OrdinalIgnoreCase);
+        => name.Contains("token", StringComparison.OrdinalIgnoreCase)
+           || name.Contains("authorization", StringComparison.OrdinalIgnoreCase)
+           || name.Contains("credential", StringComparison.OrdinalIgnoreCase)
+           || name.Contains("secret", StringComparison.OrdinalIgnoreCase)
+           || name.Contains("password", StringComparison.OrdinalIgnoreCase)
+           || name.Contains("api_key", StringComparison.OrdinalIgnoreCase)
+           || name.Contains("apikey", StringComparison.OrdinalIgnoreCase);
 
     private static async Task SyncTerminalSceneVideoVersionAsync(IServiceScope scope, RenderJobDto job, Exception failure, CancellationToken ct)
     {

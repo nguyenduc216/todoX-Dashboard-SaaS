@@ -143,10 +143,10 @@ public sealed class RVideoSceneVideoRecoveryAndDiagnosticsTests
         };
         var exception = new Ai79TaskSubmitException(
             "79AI video submit failed.",
-            """{"error":"unavailable","access_token":"***","Authorization":"***"}""",
+            """{"error":"unavailable","accessToken":"raw-access-token","apiKey":"raw-api-key","Authorization":"Bearer raw-token"}""",
             HttpStatusCode.ServiceUnavailable,
             "provider_unavailable",
-            sanitizedRequestMetadataJson: """{"endpoint":"/create-video","access_token":"***","Authorization":"***"}""");
+            sanitizedRequestMetadataJson: """{"endpoint":"/create-video","accessToken":"raw-access-token","apiKey":"raw-api-key","Authorization":"Bearer raw-token"}""");
 
         var method = typeof(SceneVideoJobWorker).GetMethod(
             "BuildAi79SubmitDiagnostics",
@@ -165,10 +165,63 @@ public sealed class RVideoSceneVideoRecoveryAndDiagnosticsTests
         Assert.Equal("provider_unavailable", root.GetProperty("providerErrorCode").GetString());
         Assert.Equal(3, root.GetProperty("attemptCount").GetInt32());
         Assert.Equal(3, root.GetProperty("maxAttempts").GetInt32());
-        Assert.DoesNotContain("access_token", root.GetProperty("sanitizedResponseJson").GetString(), StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("raw-access-token", root.GetProperty("sanitizedResponseJson").GetString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("raw-api-key", root.GetProperty("sanitizedResponseJson").GetString(), StringComparison.Ordinal);
         Assert.DoesNotContain("Authorization", root.GetProperty("sanitizedResponseJson").GetString(), StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("access_token", root.GetProperty("sanitizedRequestMetadataJson").GetString(), StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("raw-access-token", root.GetProperty("sanitizedRequestMetadataJson").GetString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("raw-api-key", root.GetProperty("sanitizedRequestMetadataJson").GetString(), StringComparison.Ordinal);
         Assert.DoesNotContain("Authorization", root.GetProperty("sanitizedRequestMetadataJson").GetString(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void SceneVideoJobWorkerFailureEventDataHasCompleteDiagnosticShape()
+    {
+        var job = new RenderJobDto
+        {
+            ModelCode = "veo_omni",
+            AttemptCount = 3,
+            MaxAttempts = 3
+        };
+        var exception = new Ai79TaskSubmitException(
+            "79AI video submit failed.",
+            """{"error":"unavailable"}""",
+            HttpStatusCode.ServiceUnavailable,
+            "provider_unavailable",
+            sanitizedRequestMetadataJson: """{"endpoint":"/create-video"}""");
+
+        var method = typeof(SceneVideoJobWorker).GetMethod(
+            "BuildJobFailureEventData",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var eventData = method!.Invoke(null, new object[] { job, exception });
+        Assert.NotNull(eventData);
+
+        using var document = JsonDocument.Parse(JsonSerializer.Serialize(eventData));
+        var root = document.RootElement;
+        Assert.Equal(
+            new[]
+            {
+                "attemptCount",
+                "exceptionType",
+                "httpStatusCode",
+                "maxAttempts",
+                "model",
+                "provider",
+                "providerErrorCode",
+                "sanitizedRequestMetadataJson",
+                "sanitizedResponseJson"
+            },
+            root.EnumerateObject().Select(property => property.Name).OrderBy(name => name));
+        Assert.Equal("Ai79TaskSubmitException", root.GetProperty("exceptionType").GetString());
+        Assert.Equal("79ai", root.GetProperty("provider").GetString());
+        Assert.Equal("veo_omni", root.GetProperty("model").GetString());
+        Assert.Equal(503, root.GetProperty("httpStatusCode").GetInt32());
+        Assert.Equal("provider_unavailable", root.GetProperty("providerErrorCode").GetString());
+        Assert.Equal(3, root.GetProperty("attemptCount").GetInt32());
+        Assert.Equal(3, root.GetProperty("maxAttempts").GetInt32());
+        Assert.Equal("""{"error":"unavailable"}""", root.GetProperty("sanitizedResponseJson").GetString());
+        Assert.Equal("""{"endpoint":"/create-video"}""", root.GetProperty("sanitizedRequestMetadataJson").GetString());
     }
 
     [Fact]
