@@ -1882,6 +1882,12 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
             return "BILLING_FAILURE";
         }
 
+        if (code.Equals("provider_failure", StringComparison.OrdinalIgnoreCase)
+            || code.Equals("model_provider_failure", StringComparison.OrdinalIgnoreCase))
+        {
+            return "MODEL_PROVIDER_FAILURE";
+        }
+
         if (text.Contains("invalid", StringComparison.Ordinal)
             || text.Contains("prompt", StringComparison.Ordinal)
             || text.Contains("parameter", StringComparison.Ordinal)

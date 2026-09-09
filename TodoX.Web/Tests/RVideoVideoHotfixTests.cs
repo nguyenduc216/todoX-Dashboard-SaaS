@@ -330,6 +330,22 @@ public sealed class RVideoVideoHotfixTests
     }
 
     [Fact]
+    public void ProviderFailureWithPromptMessageStillAllowsModelFallback()
+    {
+        var method = typeof(SceneVideoWorkerHandler).GetMethod("ClassifyProviderFailure", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var result = (string)method!.Invoke(null, new object?[]
+        {
+            "provider_failure",
+            "Provider rejected the request; please check Prompt. #22f",
+            null
+        })!;
+
+        Assert.Equal("MODEL_PROVIDER_FAILURE", result);
+    }
+
+    [Fact]
     public void SceneVideoWorkerEmitsFallbackLifecycleEventsAndKeepsProviderDiagnosticsSanitized()
     {
         var source = ReadRepoFile("Services", "VideoRender", "SceneVideoWorkerHandler.cs");
