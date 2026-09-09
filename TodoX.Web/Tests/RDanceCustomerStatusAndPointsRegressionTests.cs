@@ -122,6 +122,11 @@ public sealed class RDanceCustomerStatusAndPointsRegressionTests
         Assert.Contains("OnClick=\"GenerateReferenceAsync\"", detail);
         Assert.Contains("OnClick=\"DownloadResultAsync\"", detail);
         Assert.DoesNotContain("rdance-video-source", detail);
+        Assert.Contains("_latestMotionOperation", detail);
+        Assert.Contains("ReadInt(_latestMotionOperation?.RequestJson", detail);
+        Assert.DoesNotContain(".rdance-overlay-actions { position: absolute;", detail);
+        Assert.True(detail.IndexOf("class=\"rdance-overlay-actions\"", StringComparison.Ordinal)
+            < detail.IndexOf("class=\"rdance-media-frame rdance-video-frame\"", StringComparison.Ordinal));
         Assert.Contains("Current TikTok URL", tiktokDialog);
         Assert.Contains("Change TikTok URL", tiktokDialog);
         Assert.Contains("Confirm / Load video", tiktokDialog);

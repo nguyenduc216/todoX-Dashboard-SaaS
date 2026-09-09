@@ -141,16 +141,6 @@
                                     <MudText Typo="Typo.h6">Video tham chiếu</MudText>
                                     <MudText Typo="Typo.body2" Class="rdance-muted-line">Nguồn video 9:16.</MudText>
                                 </div>
-                            </div>
-                            <div class="rdance-media-frame rdance-video-frame">
-                                @if (!string.IsNullOrWhiteSpace(_job.MotionVideoUrl))
-                                {
-                                    <video src="@_job.MotionVideoUrl" controls muted playsinline class="rdance-frame-media rdance-frame-video"></video>
-                                }
-                                else
-                                {
-                                    <RenderMediaFrame IsVideo="true" State="@ResolveDanceMediaState(_job.Status)" AspectRatio="9:16" EmptyText="Video tham chiếu" FailedText="Lỗi tải video" />
-                                }
                                 <div class="rdance-overlay-actions">
                                     <MudIconButton Icon="@Icons.Custom.Brands.TikTok"
                                                    Color="@TikTokOverlayColor"
@@ -163,6 +153,16 @@
                                         <InputFile class="rdance-hidden-file-input" OnChange="OnMotionSelected" accept="video/mp4" disabled="@_busy" />
                                     </label>
                                 </div>
+                            </div>
+                            <div class="rdance-media-frame rdance-video-frame">
+                                @if (!string.IsNullOrWhiteSpace(_job.MotionVideoUrl))
+                                {
+                                    <video src="@_job.MotionVideoUrl" controls muted playsinline class="rdance-frame-media rdance-frame-video"></video>
+                                }
+                                else
+                                {
+                                    <RenderMediaFrame IsVideo="true" State="@ResolveDanceMediaState(_job.Status)" AspectRatio="9:16" EmptyText="Video tham chiếu" FailedText="Lỗi tải video" />
+                                }
                             </div>
                             @if (!string.IsNullOrWhiteSpace(_motionUploadError))
                             {
@@ -691,6 +691,7 @@
     private DanceSellCostEstimate? _estimate;
     private PointPricingEstimate? _pointEstimate;
     private decimal? _displayPoints;
+    private DanceSellProviderOperationDto? _latestMotionOperation;
     private decimal? _balance;
     private string? _referenceReadinessError;
     private string? _motionReadinessError;
@@ -712,7 +713,10 @@
 
     private const string AcceptedImageTypes = "image/png,image/jpeg,image/webp";
     private bool IsOnePageUiEnabled => RDanceFeatures.IsNewUiEnabled;
-    private int? MotionDurationSeconds => ReadInt(_job?.RequestJson, "durationSeconds", "duration_seconds", "videoDurationSeconds", "video_duration_seconds");
+    private int? MotionDurationSeconds
+        => _job is null
+            ? null
+            : ResolveMotionDurationSeconds(_job, _motionRoutes.FirstOrDefault());
     private string MotionResolutionText => _ratio == "16:9" ? "1920x1080" : "1080x1920";
     private string ReferenceImageSourceText => !string.IsNullOrWhiteSpace(_job?.PreparedReferenceUrl)
         ? "Ảnh kết quả"
@@ -1079,6 +1083,7 @@
             _job = null;
             _renderJob = null;
             _latestReference = null;
+            _latestMotionOperation = null;
             _referenceVersions = Array.Empty<DanceSellReferenceVersionDto>();
             _loadError = ex.Message == "DANCE_SELL_UNAUTHORIZED"
                 ? "Bạn không có quyền xem video này."
@@ -1889,11 +1894,11 @@
     {
         var route = _motionRoutes.FirstOrDefault(x => x.ProviderCode.Equals(DanceSellConstants.ProviderCode, StringComparison.OrdinalIgnoreCase)) ?? _motionRoutes.FirstOrDefault();
         if (route is null || _job is null) return;
+        _latestMotionOperation = await DanceOperations.GetLatestOperationAsync(_job.Id, DanceSellOperationTypes.MotionVideo, CancellationToken.None);
         var providerMode = DanceSellMotionProviderContract.ResolveProviderMode(route, _job.Mode);
         _estimate = await Costs.EstimateAsync(route, providerMode, null);
         _pointEstimate = await EstimatePointPricingAsync(route);
-        var latestOperation = await DanceOperations.GetLatestOperationAsync(_job.Id, DanceSellOperationTypes.MotionVideo, CancellationToken.None);
-        _displayPoints = DanceSellPointDisplay.ResolveDisplayPoints(_job, latestOperation) ?? _pointEstimate?.TotalPoints;
+        _displayPoints = DanceSellPointDisplay.ResolveDisplayPoints(_job, _latestMotionOperation) ?? _pointEstimate?.TotalPoints;
         if (AuthState.CurrentUser?.CustomerId is Guid customerId) _balance = await Wallet.GetBalanceAsync(customerId);
     }
 
@@ -1936,9 +1941,10 @@
             false));
     }
 
-    private static int? ResolveMotionDurationSeconds(DanceSellJobDto job, DanceSellProviderRouteDto route)
+    private int? ResolveMotionDurationSeconds(DanceSellJobDto job, DanceSellProviderRouteDto? route)
         => ReadInt(job.RequestJson, "durationSeconds", "duration_seconds", "videoDurationSeconds", "video_duration_seconds")
-           ?? ReadInt(route.ConfigJson, "durationSeconds", "duration_seconds");
+           ?? ReadInt(_latestMotionOperation?.RequestJson, "durationSeconds", "duration_seconds", "videoDurationSeconds", "video_duration_seconds")
+           ?? ReadInt(route?.ConfigJson, "durationSeconds", "duration_seconds");
 
     private static int? ReadInt(string? rawJson, params string[] propertyNames)
     {
@@ -2490,7 +2496,7 @@
     .rdance-media-frame .scene-media-image,
     .rdance-media-frame .scene-media-video,
     .rdance-frame-media { width: 100%; height: 100%; object-fit: cover; border-radius: 8px; background: #090d12; }
-    .rdance-overlay-actions { position: absolute; top: 8px; left: 8px; z-index: 3; display: flex; gap: 6px; }
+    .rdance-overlay-actions { margin-left: auto; display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
     .rdance-overlay-button { position: relative; display: inline-grid !important; place-items: center; width: 32px !important; min-width: 32px !important; height: 32px !important; min-height: 32px !important; padding: 0 !important; border-radius: 8px !important; border: 1px solid rgba(255,255,255,.18); background: rgba(7,10,14,.78); color: rgba(255,255,255,.72); overflow: hidden; transition: background-color .15s ease, border-color .15s ease, color .15s ease; }
     .rdance-overlay-button .mud-icon-root { font-size: 1rem; }
     .rdance-overlay-button.is-active { background: rgba(245,181,64,.18); border-color: rgba(245,181,64,.45); color: #f5b540; }
