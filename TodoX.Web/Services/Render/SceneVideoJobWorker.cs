@@ -1,4 +1,6 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
+using TodoX.Web.Services.AiProviders;
 using TodoX.Web.Services.VideoRender;
 
 namespace TodoX.Web.Services.Render;
@@ -77,8 +79,9 @@ public sealed class SceneVideoJobWorker : BackgroundService
                 catch (RenderJobTerminalFailureException ex)
                 {
                     await SyncTerminalSceneVideoVersionAsync(scope, job, ex, stoppingToken);
+                    await AddAi79SubmitDiagnosticsAsync(jobs, job, ex, stoppingToken);
                     await jobs.AddEventAsync(job.Id, "JOB_FAILED", ex.Message,
-                        new { ex.GetType().Name, job.AttemptCount, job.MaxAttempts }, "error", stoppingToken);
+                        BuildJobFailureEventData(job, ex), "error", stoppingToken);
                     await jobs.MarkStatusAsync(job.Id, RenderJobStatuses.Failed, errorCode: ex.GetType().Name, errorMessage: ex.Message, ct: stoppingToken);
                 }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -87,6 +90,7 @@ public sealed class SceneVideoJobWorker : BackgroundService
                 }
                 catch (Exception ex)
                 {
+                    await AddAi79SubmitDiagnosticsAsync(jobs, job, ex, stoppingToken);
                     var shouldRetry = job.AttemptCount < job.MaxAttempts;
                     if (shouldRetry)
                     {
@@ -97,7 +101,7 @@ public sealed class SceneVideoJobWorker : BackgroundService
                     {
                         await SyncTerminalSceneVideoVersionAsync(scope, job, ex, stoppingToken);
                         await jobs.AddEventAsync(job.Id, "JOB_FAILED", ex.Message,
-                            new { ex.GetType().Name, job.AttemptCount, job.MaxAttempts }, "error", stoppingToken);
+                            BuildJobFailureEventData(job, ex), "error", stoppingToken);
                         await jobs.MarkStatusAsync(job.Id, RenderJobStatuses.Failed, errorCode: ex.GetType().Name, errorMessage: ex.Message, ct: stoppingToken);
                     }
                 }
@@ -113,6 +117,131 @@ public sealed class SceneVideoJobWorker : BackgroundService
             }
         }
     }
+
+    private static async Task AddAi79SubmitDiagnosticsAsync(
+        IRenderJobService jobs,
+        RenderJobDto job,
+        Exception exception,
+        CancellationToken ct)
+    {
+        var diagnostics = BuildAi79SubmitDiagnostics(job, exception);
+        if (diagnostics is not null)
+        {
+            await jobs.AddEventAsync(
+                job.Id,
+                "RVIDEO_79AI_SUBMIT_DIAGNOSTICS",
+                "RVideo 79AI submit diagnostics captured.",
+                diagnostics,
+                "error",
+                ct);
+        }
+    }
+
+    private static object BuildJobFailureEventData(RenderJobDto job, Exception exception)
+        => BuildAi79SubmitDiagnostics(job, exception)
+           ?? new
+           {
+               exceptionType = exception.GetType().Name,
+               attemptCount = job.AttemptCount,
+               maxAttempts = job.MaxAttempts
+           };
+
+    private static object? BuildAi79SubmitDiagnostics(RenderJobDto job, Exception exception)
+    {
+        var ai79 = exception switch
+        {
+            Ai79TaskSubmitException direct => direct,
+            RenderJobTerminalFailureException { InnerException: Ai79TaskSubmitException inner } => inner,
+            VideoProviderTransientException { InnerException: Ai79TaskSubmitException inner } => inner,
+            _ => null
+        };
+
+        if (ai79 is null)
+        {
+            return null;
+        }
+
+        return new
+        {
+            exceptionType = nameof(Ai79TaskSubmitException),
+            provider = "79ai",
+            model = job.ModelCode,
+            httpStatusCode = (int?)ai79.HttpStatusCode,
+            providerErrorCode = ai79.ErrorCode,
+            sanitizedResponseJson = SanitizeDiagnosticJson(ai79.SanitizedResponseJson),
+            sanitizedRequestMetadataJson = SanitizeDiagnosticJson(ai79.SanitizedRequestMetadataJson),
+            attemptCount = job.AttemptCount,
+            maxAttempts = job.MaxAttempts
+        };
+    }
+
+    private static string SanitizeDiagnosticJson(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return JsonSerializer.Serialize(string.Empty, JsonOptions);
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(value);
+            var sanitized = SanitizeDiagnosticElement(document.RootElement);
+            return sanitized?.ToJsonString(JsonOptions) ?? JsonSerializer.Serialize(string.Empty, JsonOptions);
+        }
+        catch (JsonException)
+        {
+            return JsonSerializer.Serialize(string.Empty, JsonOptions);
+        }
+    }
+
+    private static JsonNode? SanitizeDiagnosticElement(JsonElement element)
+    {
+        return element.ValueKind switch
+        {
+            JsonValueKind.Object => SanitizeDiagnosticObject(element),
+            JsonValueKind.Array => SanitizeDiagnosticArray(element),
+            JsonValueKind.String => JsonValue.Create(element.GetString()),
+            JsonValueKind.Number => JsonValue.Create(element.GetRawText()),
+            JsonValueKind.True => JsonValue.Create(true),
+            JsonValueKind.False => JsonValue.Create(false),
+            _ => null
+        };
+    }
+
+    private static JsonObject SanitizeDiagnosticObject(JsonElement element)
+    {
+        var result = new JsonObject();
+        foreach (var property in element.EnumerateObject())
+        {
+            if (IsSensitiveDiagnosticProperty(property.Name))
+            {
+                continue;
+            }
+
+            result[property.Name] = SanitizeDiagnosticElement(property.Value);
+        }
+
+        return result;
+    }
+
+    private static JsonArray SanitizeDiagnosticArray(JsonElement element)
+    {
+        var result = new JsonArray();
+        foreach (var item in element.EnumerateArray())
+        {
+            result.Add(SanitizeDiagnosticElement(item));
+        }
+
+        return result;
+    }
+
+    private static bool IsSensitiveDiagnosticProperty(string name)
+        => name.Equals("access_token", StringComparison.OrdinalIgnoreCase)
+           || name.Equals("authorization", StringComparison.OrdinalIgnoreCase)
+           || name.Equals("api_key", StringComparison.OrdinalIgnoreCase)
+           || name.Equals("secret", StringComparison.OrdinalIgnoreCase)
+           || name.Equals("credential", StringComparison.OrdinalIgnoreCase)
+           || name.Equals("password", StringComparison.OrdinalIgnoreCase);
 
     private static async Task SyncTerminalSceneVideoVersionAsync(IServiceScope scope, RenderJobDto job, Exception failure, CancellationToken ct)
     {

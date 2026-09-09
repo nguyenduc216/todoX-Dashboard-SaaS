@@ -133,6 +133,59 @@ public sealed class RVideoSceneVideoRecoveryAndDiagnosticsTests
     }
 
     [Fact]
+    public void SceneVideoJobWorkerPersistsAi79SubmitDiagnosticsWithoutSecrets()
+    {
+        var job = new RenderJobDto
+        {
+            ModelCode = "veo_omni",
+            AttemptCount = 3,
+            MaxAttempts = 3
+        };
+        var exception = new Ai79TaskSubmitException(
+            "79AI video submit failed.",
+            """{"error":"unavailable","access_token":"***","Authorization":"***"}""",
+            HttpStatusCode.ServiceUnavailable,
+            "provider_unavailable",
+            sanitizedRequestMetadataJson: """{"endpoint":"/create-video","access_token":"***","Authorization":"***"}""");
+
+        var method = typeof(SceneVideoJobWorker).GetMethod(
+            "BuildAi79SubmitDiagnostics",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var diagnostics = method!.Invoke(null, new object[] { job, exception });
+        Assert.NotNull(diagnostics);
+
+        using var document = JsonDocument.Parse(JsonSerializer.Serialize(diagnostics));
+        var root = document.RootElement;
+        Assert.Equal("Ai79TaskSubmitException", root.GetProperty("exceptionType").GetString());
+        Assert.Equal("79ai", root.GetProperty("provider").GetString());
+        Assert.Equal("veo_omni", root.GetProperty("model").GetString());
+        Assert.Equal(503, root.GetProperty("httpStatusCode").GetInt32());
+        Assert.Equal("provider_unavailable", root.GetProperty("providerErrorCode").GetString());
+        Assert.Equal(3, root.GetProperty("attemptCount").GetInt32());
+        Assert.Equal(3, root.GetProperty("maxAttempts").GetInt32());
+        Assert.DoesNotContain("access_token", root.GetProperty("sanitizedResponseJson").GetString(), StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Authorization", root.GetProperty("sanitizedResponseJson").GetString(), StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("access_token", root.GetProperty("sanitizedRequestMetadataJson").GetString(), StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Authorization", root.GetProperty("sanitizedRequestMetadataJson").GetString(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void SceneVideoJobWorkerWritesAi79DiagnosticsBeforeRetryAndKeepsRetryPolicy()
+    {
+        var source = ReadRepoFile("Services", "Render", "SceneVideoJobWorker.cs");
+        var diagnosticsIndex = source.IndexOf("AddAi79SubmitDiagnosticsAsync(jobs, job, ex, stoppingToken)", StringComparison.Ordinal);
+        var retryIndex = source.IndexOf("var shouldRetry = job.AttemptCount < job.MaxAttempts;", StringComparison.Ordinal);
+
+        Assert.True(diagnosticsIndex >= 0);
+        Assert.True(retryIndex > diagnosticsIndex);
+        Assert.Contains("await jobs.ScheduleRetryAsync(job.Id, delay, ex.GetType().Name, ex.Message, stoppingToken);", source);
+        Assert.Contains("\"RVIDEO_79AI_SUBMIT_DIAGNOSTICS\"", source);
+        Assert.Contains("BuildJobFailureEventData(job, ex)", source);
+    }
+
+    [Fact]
     public void RecoverableStuckDetection_RequiresFailedJobAndBlankProviderTask()
     {
         var service = (RVideoSceneVideoRecoveryService)FormatterServices.GetUninitializedObject(typeof(RVideoSceneVideoRecoveryService));
@@ -160,5 +213,15 @@ public sealed class RVideoSceneVideoRecoveryAndDiagnosticsTests
         job.Status = RenderJobStatuses.Failed;
         version.Status = "completed";
         Assert.False(service.IsRecoverableStuck(version, job));
+    }
+
+    private static string ReadRepoFile(params string[] parts)
+    {
+        var path = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "..", "..", "..", "..",
+            "TodoX.Web",
+            Path.Combine(parts)));
+        return File.ReadAllText(path);
     }
 }
