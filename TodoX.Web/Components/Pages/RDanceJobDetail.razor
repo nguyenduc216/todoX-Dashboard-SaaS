@@ -1258,13 +1258,38 @@
                 return;
             }
 
-            if (_job.ProductMediaId is not null && !string.IsNullOrWhiteSpace(_job.ProductImageUrl))
+            var job = _job;
+            if (job.PreparedReferenceStatus is DanceSellReferenceStatuses.Approved or DanceSellReferenceStatuses.Ready
+                && !string.IsNullOrWhiteSpace(job.PreparedReferenceUrl))
             {
-                EnsureReferenceProviderReady();
+                return;
             }
 
-            var job = _job ?? throw new InvalidOperationException("Không tìm thấy video quảng cáo thời trang.");
-            _job = await References.AutoPrepareAsync(job.Id, AuthState.CurrentUser!);
+            if (IsReferenceGenerating || job.ReferenceMode == DanceSellReferenceModes.DirectReference)
+            {
+                return;
+            }
+
+            var hasCharacter = job.CharacterMediaId is not null
+                && !string.IsNullOrWhiteSpace(job.CharacterImageUrl);
+            var hasProduct = job.ProductMediaId is not null
+                && !string.IsNullOrWhiteSpace(job.ProductImageUrl);
+
+            if (hasCharacter && !hasProduct)
+            {
+                _job = await References.ApproveCharacterAsync(job.Id, AuthState.CurrentUser!);
+            }
+            else if (hasCharacter && hasProduct)
+            {
+                EnsureReferenceProviderReady();
+                _job = await References.AutoPrepareAsync(job.Id, AuthState.CurrentUser!);
+            }
+
+            if (_job is null)
+            {
+                return;
+            }
+
             var versions = await DanceRepo.ListReferenceVersionsAsync(_job.Id);
             _latestReference = versions.OrderByDescending(x => x.VersionNo).FirstOrDefault();
             await RefreshEstimateAsync();

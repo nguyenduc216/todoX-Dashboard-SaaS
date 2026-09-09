@@ -212,6 +212,33 @@ public sealed class RDanceCustomerStatusAndPointsRegressionTests
     }
 
     [Fact]
+    public void RdanceDetailAutoprepareBranchesByReferenceModeAndGuardsDuplicateWork()
+    {
+        var detail = ReadRepoFile("Components", "Pages", "RDanceJobDetail.razor");
+        var start = detail.IndexOf("private async Task AutoPrepareReferenceAsync", StringComparison.Ordinal);
+        var end = detail.IndexOf("private string? ValidateMotionVideo", start, StringComparison.Ordinal);
+        var method = detail[start..end];
+
+        Assert.Contains("job.PreparedReferenceStatus is DanceSellReferenceStatuses.Approved or DanceSellReferenceStatuses.Ready", method);
+        Assert.Contains("if (IsReferenceGenerating || job.ReferenceMode == DanceSellReferenceModes.DirectReference)", method);
+        Assert.Contains("var hasProduct = job.ProductMediaId is not null", method);
+        Assert.Contains("if (hasCharacter && !hasProduct)", method);
+        Assert.Contains("References.ApproveCharacterAsync(job.Id", method);
+        Assert.Contains("else if (hasCharacter && hasProduct)", method);
+        Assert.Contains("References.AutoPrepareAsync(job.Id", method);
+        Assert.Contains("await ContinueAutoFinishAsync();", method);
+
+        var characterBranch = method.IndexOf("if (hasCharacter && !hasProduct)", StringComparison.Ordinal);
+        var productBranch = method.IndexOf("else if (hasCharacter && hasProduct)", StringComparison.Ordinal);
+        var approveCall = method.IndexOf("References.ApproveCharacterAsync(job.Id", StringComparison.Ordinal);
+        var autoPrepareCall = method.IndexOf("References.AutoPrepareAsync(job.Id", StringComparison.Ordinal);
+        Assert.True(characterBranch >= 0 && productBranch > characterBranch);
+        Assert.True(approveCall > characterBranch && approveCall < productBranch);
+        Assert.True(autoPrepareCall > productBranch);
+        Assert.DoesNotContain("References.AutoPrepareAsync(job.Id", method[..productBranch]);
+    }
+
+    [Fact]
     public void RdanceTitleIsEditableInHeaderAndAbsentFromStatusPanel()
     {
         var create = ReadRepoFile("Components", "Pages", "RDanceJobCreate.razor");
