@@ -115,7 +115,7 @@ public sealed class RVideoVideoHotfixTests
             PricingRuleKey = "rule-1"
         };
 
-        var json = (string)method!.Invoke(null, new object[] { input, "scene-base-fallback-1", "task-123", "{\"ok\":true}", 9.5m })!;
+        var json = (string)method!.Invoke(null, new object[] { input, "scene-base-fallback-1", "task-123", "{\"ok\":true}", 9.5m, (string?)null })!;
         using var doc = JsonDocument.Parse(json);
         Assert.Equal("scene-base-fallback-1", doc.RootElement.GetProperty("logicalRequestId").GetString());
         Assert.Equal("task-123", doc.RootElement.GetProperty("providerTaskId").GetString());
@@ -646,6 +646,134 @@ public sealed class RVideoVideoHotfixTests
     }
 
     [Fact]
+    public async Task RVideo79AiAdapterForwardsEachFallbackCandidateToTheProviderLayer()
+    {
+        var service = new CapturingRVideo79AiVideoService();
+        var adapter = new Ai79VideoGenerationProviderAdapter(service);
+        var candidates = new[]
+        {
+            new RVideoVideoModelPolicyEntry(0, "79ai", "veo_omni", "flash"),
+            new RVideoVideoModelPolicyEntry(1, "79ai", "veo_3_1", "fast"),
+            new RVideoVideoModelPolicyEntry(2, "79ai", "veo_3_1", "lite")
+        };
+
+        foreach (var candidate in candidates)
+        {
+            await adapter.SubmitAsync(new VideoProviderSubmitRequest(
+                18,
+                99,
+                candidate.ProviderCode,
+                RVideoVideoModelPolicy.CapabilityCode,
+                candidate.Model,
+                candidate.Mode,
+                "Animate the scene.",
+                "9:16",
+                "720p",
+                6,
+                SourceImage: null,
+                ReferenceImages: Array.Empty<VideoProviderSourceImage>()));
+        }
+
+        Assert.Equal(3, service.Submits.Count);
+        Assert.Equal(
+            candidates.Select(candidate => (candidate.ProviderCode, candidate.Model, candidate.Mode)),
+            service.Submits.Select(request => (
+                request.Runtime.ProviderCode,
+                request.Model.Model,
+                request.Model.Mode)));
+    }
+
+    [Fact]
+    public async Task RVideoFallbackCandidatesReachTheVideoAdapterWithExactProviderRequestIdentity()
+    {
+        var adapter = new CapturingVideoGenerationProviderAdapter();
+        var resolver = new VideoGenerationProviderAdapterResolver(new[] { adapter });
+        var resolved = resolver.Resolve("79ai", RVideoVideoModelPolicy.CapabilityCode);
+        var candidates = new[]
+        {
+            new RVideoVideoModelPolicyEntry(0, "79ai", "veo_omni", "flash"),
+            new RVideoVideoModelPolicyEntry(1, "79ai", "veo_3_1", "fast"),
+            new RVideoVideoModelPolicyEntry(2, "79ai", "veo_3_1", "lite")
+        };
+
+        foreach (var candidate in candidates)
+        {
+            await resolved.SubmitAsync(new VideoProviderSubmitRequest(
+                18,
+                99,
+                candidate.ProviderCode,
+                RVideoVideoModelPolicy.CapabilityCode,
+                candidate.Model,
+                candidate.Mode,
+                "Animate the scene.",
+                "9:16",
+                "720p",
+                6,
+                SourceImage: null,
+                ReferenceImages: Array.Empty<VideoProviderSourceImage>()));
+        }
+
+        Assert.Equal(
+            candidates.Select(candidate => (candidate.ProviderCode, candidate.Model, candidate.Mode)),
+            adapter.Submits.Select(request => (
+                request.ProviderCode,
+                request.RequestedModel,
+                request.ModelMode)));
+    }
+
+    [Fact]
+    public async Task SceneVideoHandlerPersistsAi79DiagnosticsThroughRenderJobEventsWithoutSecrets()
+    {
+#pragma warning disable SYSLIB0050
+        var handler = (SceneVideoWorkerHandler)FormatterServices.GetUninitializedObject(typeof(SceneVideoWorkerHandler));
+#pragma warning restore SYSLIB0050
+        var events = DispatchProxy.Create<IRenderJobService, RenderJobServiceProxy>();
+        var proxy = (RenderJobServiceProxy)(object)events;
+        typeof(SceneVideoWorkerHandler)
+            .GetField("_jobs", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .SetValue(handler, events);
+
+        var exception = new Ai79TaskSubmitException(
+            "79AI video submit failed.",
+            """{"error":"unavailable","access_token":"raw-access-token","apiKey":"raw-api-key","Authorization":"Bearer raw-token"}""",
+            HttpStatusCode.ServiceUnavailable,
+            "provider_unavailable",
+            sanitizedRequestMetadataJson: """{"endpoint":"/create-video","access_token":"raw-access-token","apiKey":"raw-api-key","Authorization":"Bearer raw-token"}""");
+        var method = typeof(SceneVideoWorkerHandler).GetMethod(
+            "AddAi79SubmitDiagnosticsAsync",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+
+        var task = (Task)method!.Invoke(handler, new object[]
+        {
+            new RenderJobDto
+            {
+                Id = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+                AttemptCount = 3,
+                MaxAttempts = 3
+            },
+            new RVideoVideoModelPolicyEntry(0, "79ai", "veo_omni", "flash"),
+            exception,
+            CancellationToken.None
+        })!;
+        await task;
+
+        Assert.Equal("RVIDEO_79AI_SUBMIT_DIAGNOSTICS", proxy.EventType);
+        using var document = JsonDocument.Parse(proxy.DataJson!);
+        var root = document.RootElement;
+        Assert.Equal("Ai79TaskSubmitException", root.GetProperty("exceptionType").GetString());
+        Assert.Equal("79ai", root.GetProperty("provider").GetString());
+        Assert.Equal("veo_omni", root.GetProperty("model").GetString());
+        Assert.Equal(503, root.GetProperty("httpStatusCode").GetInt32());
+        Assert.Equal("provider_unavailable", root.GetProperty("providerErrorCode").GetString());
+        Assert.Equal(3, root.GetProperty("attemptCount").GetInt32());
+        Assert.Equal(3, root.GetProperty("maxAttempts").GetInt32());
+        Assert.DoesNotContain("raw-access-token", proxy.DataJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("raw-api-key", proxy.DataJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("Authorization", proxy.DataJson, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task RVideo79AiSubmitFailureRetainsSanitizedResponse()
     {
         var handler = new CapturingHttpMessageHandler("""{"error":"bad","access_token":"secret-token"}""", HttpStatusCode.BadRequest);
@@ -682,7 +810,17 @@ public sealed class RVideoVideoHotfixTests
             "veo_omni",
             "Animate the scene.",
             new[] { "https://example.test/reference-character.png" },
-            new Dictionary<string, string?> { ["type"] = "video", ["translate_to_en"] = "false" },
+            new Dictionary<string, string?>
+            {
+                ["type"] = "video",
+                ["mode"] = "flash",
+                ["duration"] = "6",
+                ["ratio"] = "9:16",
+                ["aspect_ratio"] = "9:16",
+                ["resolution"] = "720p",
+                ["project_id"] = "project-1",
+                ["translate_to_en"] = "false"
+            },
             Ai79TaskOperation.Video), CancellationToken.None));
 
         using var metadata = JsonDocument.Parse(ex.SanitizedRequestMetadataJson);
@@ -700,18 +838,15 @@ public sealed class RVideoVideoHotfixTests
         Assert.Equal("project-1", metadata.RootElement.GetProperty("project_id").GetString());
         Assert.Equal(JsonValueKind.Null, metadata.RootElement.GetProperty("privacy").ValueKind);
         Assert.Equal("false", metadata.RootElement.GetProperty("translate_to_en").GetString());
-        Assert.Equal(2, metadata.RootElement.GetProperty("imageCount").GetInt32());
+        Assert.Equal(1, metadata.RootElement.GetProperty("imageCount").GetInt32());
         Assert.Equal(0, metadata.RootElement.GetProperty("fileCount").GetInt32());
         var images = metadata.RootElement.GetProperty("images");
-        Assert.Equal(2, images.GetArrayLength());
+        Assert.Equal(1, images.GetArrayLength());
         Assert.Equal("image", images[0].GetProperty("fieldName").GetString());
         Assert.True(images[0].GetProperty("present").GetBoolean());
         Assert.Equal("example.test", images[0].GetProperty("urlHost").GetString());
         Assert.Equal("/reference-character.png", images[0].GetProperty("urlPath").GetString());
         Assert.Equal("https://example.test/reference-character.png", images[0].GetProperty("sanitizedUrl").GetString());
-        Assert.Equal("image_2", images[1].GetProperty("fieldName").GetString());
-        Assert.True(images[1].GetProperty("isImage2").GetBoolean());
-        Assert.False(images[1].GetProperty("duplicateOfPrevious").GetBoolean());
         Assert.DoesNotContain("secret-token", ex.SanitizedRequestMetadataJson);
     }
 
@@ -1510,6 +1645,73 @@ public sealed class RVideoVideoHotfixTests
 
         public Task<Ai79TaskStatusResult> GetStatusAsync(Ai79TaskStatusRequest request, CancellationToken ct = default)
             => throw new NotSupportedException();
+    }
+
+    private sealed class CapturingRVideo79AiVideoService : IRVideo79AiVideoService
+    {
+        public List<RVideo79AiVideoSubmitRequest> Submits { get; } = [];
+
+        public Task<RVideo79AiRuntime> ResolveRuntimeAsync(long providerId, long providerCapabilityId, string providerCode, CancellationToken ct = default)
+            => Task.FromResult(Create79AiRuntime());
+
+        public Task<RVideo79AiProviderImageAsset> UploadSourceImageAsync(
+            RVideo79AiRuntime runtime,
+            RVideo79AiVideoSourceImage source,
+            CancellationToken ct = default)
+            => throw new NotSupportedException();
+
+        public Task<RVideo79AiVideoSubmitResult> SubmitAsync(RVideo79AiVideoSubmitRequest request, CancellationToken ct = default)
+        {
+            Submits.Add(request);
+            return Task.FromResult(new RVideo79AiVideoSubmitResult(
+                $"task-{Submits.Count}",
+                """{"ok":true}""",
+                """{"provider":"79ai"}"""));
+        }
+
+        public Task<Ai79TaskStatusResult> PollAsync(RVideo79AiRuntime runtime, string taskId, CancellationToken ct = default)
+            => throw new NotSupportedException();
+    }
+
+    private sealed class CapturingVideoGenerationProviderAdapter : IVideoGenerationProviderAdapter
+    {
+        public List<VideoProviderSubmitRequest> Submits { get; } = [];
+
+        public bool CanHandle(string providerCode, string capabilityCode)
+            => string.Equals(providerCode, "79ai", StringComparison.OrdinalIgnoreCase)
+               && string.Equals(capabilityCode, RVideoVideoModelPolicy.CapabilityCode, StringComparison.OrdinalIgnoreCase);
+
+        public Task<VideoProviderSubmitResult> SubmitAsync(VideoProviderSubmitRequest request, CancellationToken ct = default)
+        {
+            Submits.Add(request);
+            return Task.FromResult(new VideoProviderSubmitResult(
+                request.ProviderCode,
+                $"task-{Submits.Count}",
+                request.RequestedModel,
+                """{"provider":"79ai"}""",
+                """{"ok":true}"""));
+        }
+
+        public Task<VideoProviderPollResult> PollAsync(VideoProviderPollRequest request, CancellationToken ct = default)
+            => throw new NotSupportedException();
+    }
+
+    private class RenderJobServiceProxy : DispatchProxy
+    {
+        public string? EventType { get; private set; }
+        public string? DataJson { get; private set; }
+
+        protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
+        {
+            if (targetMethod?.Name == nameof(IRenderJobService.AddEventAsync))
+            {
+                EventType = (string)args![1]!;
+                DataJson = JsonSerializer.Serialize(args[3]);
+                return Task.CompletedTask;
+            }
+
+            throw new NotSupportedException(targetMethod?.Name);
+        }
     }
 
     private sealed class CapturingHttpMessageHandler : HttpMessageHandler

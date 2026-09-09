@@ -599,12 +599,12 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
             }
             await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_BILLING_RESERVED", "info",
                 "Scene-video billing reservation succeeded.",
-                new { jobId = job.Id, input.ProjectId, input.SceneId, input.SceneIndex, input.CustomerId, input.ProviderCode, input.ModelName, input.CapabilityCode, requiredPoints = reservation.ChargedPoints }, ct);
+                new { jobId = job.Id, input.ProjectId, input.SceneId, input.SceneIndex, input.CustomerId, input.ProviderCode, requestedModel = policy.Model, mode = policy.Mode, input.CapabilityCode, requiredPoints = reservation.ChargedPoints }, ct);
 
             if (!reservation.ShouldSubmitProvider && string.IsNullOrWhiteSpace(taskId))
             {
                 await MarkPendingReconciliationAsync(input, version.Id, attemptLogicalRequestId, tariffSnapshot,
-                    "missing_task_id", "Existing billing reservation has no provider_task_id.", ct);
+                    "missing_task_id", "Existing billing reservation has no provider_task_id.", ct, actualModel: policy.Model);
                 throw new RenderJobPendingReconciliationException("Missing provider_task_id for scene video reconciliation.");
             }
 
@@ -719,7 +719,11 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                                 provider = input.ProviderCode,
                                 model = policy.Model,
                                 mode = policy.Mode,
+                                candidateIndex = attemptIndex,
+                                status = "submitted",
                                 providerTaskId = taskId,
+                                errorCode = (string?)null,
+                                errorMessage = (string?)null,
                                 failureClassification = fallbackReason ?? "MODEL_PROVIDER_FAILURE"
                             }, ct);
                     }
@@ -741,7 +745,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                             errorCode = ex.ErrorCode,
                             diagnostics
                         }, CancellationToken.None);
-                    await MarkPendingReconciliationAsync(input, version.Id, attemptLogicalRequestId, tariffSnapshot, ex.ErrorCode ?? "submit_transient", ex.Message, CancellationToken.None, null);
+                    await MarkPendingReconciliationAsync(input, version.Id, attemptLogicalRequestId, tariffSnapshot, ex.ErrorCode ?? "submit_transient", ex.Message, CancellationToken.None, null, policy.Model);
                     await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_SUBMIT_UNKNOWN", "warning",
                         "Scene-video provider submit may have been accepted but no provider task ID was returned.",
                         new
@@ -792,9 +796,12 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                             provider = input.ProviderCode,
                             model = policy.Model,
                             mode = policy.Mode,
+                            candidateIndex = attemptIndex,
+                            status = "failed",
                             providerTaskId = (string?)null,
                             failureClassification,
                             providerErrorCode = ex.ErrorCode,
+                            errorMessage = ex.ErrorMessage,
                             httpStatusCode = (int?)ex.HttpStatusCode,
                             sanitizedResponseJson = SanitizeDiagnosticJson(ex.SanitizedResponseJson),
                             sanitizedRequestMetadataJson = SanitizeDiagnosticJson(ex.SanitizedRequestMetadataJson)
@@ -821,6 +828,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                             failureClassification,
                             ex.ErrorCode,
                             ex.SanitizedResponseJson,
+                            ex.ErrorMessage,
                             CancellationToken.None);
                         await FailAsync(project.Id, scene, version.Id, ex.ErrorCode ?? "provider_failure", ex.ErrorMessage, CancellationToken.None);
                         throw new RenderJobTerminalFailureException(ex.ErrorMessage, ex);
@@ -861,7 +869,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
 
             if (string.IsNullOrWhiteSpace(taskId))
             {
-                await MarkPendingReconciliationAsync(input, version.Id, attemptLogicalRequestId, tariffSnapshot, "missing_task_id", "Missing provider_task_id for scene video reconciliation.", ct);
+                await MarkPendingReconciliationAsync(input, version.Id, attemptLogicalRequestId, tariffSnapshot, "missing_task_id", "Missing provider_task_id for scene video reconciliation.", ct, actualModel: policy.Model);
                 throw new RenderJobPendingReconciliationException("Missing provider_task_id for scene video reconciliation.");
             }
 
@@ -937,7 +945,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                             normalizedStatus = status.Status,
                             providerRawResponse = status.SanitizedResponseJson
                         }, ct);
-                    await MarkPendingReconciliationAsync(input, version.Id, attemptLogicalRequestId, tariffSnapshot, "provider_pending", "Video provider task remains pending.", ct, taskId);
+                    await MarkPendingReconciliationAsync(input, version.Id, attemptLogicalRequestId, tariffSnapshot, "provider_pending", "Video provider task remains pending.", ct, taskId, policy.Model);
                     await DeferProviderPollAsync(job, taskId!, TimeSpan.FromSeconds(Math.Max(1, _options.PollIntervalSeconds)),
                         "SCENE_VIDEO_POLL_SCHEDULED", "Video task remains pending; the same provider task will be polled later.", ct);
                     return;
@@ -948,7 +956,21 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                     var failure = status.ErrorMessage ?? $"Video provider task failed with status {status.Status}.";
                     await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_FAILED", "error",
                         "Scene-video provider reported a terminal failure.",
-                        new { jobId = job.Id, input.ProjectId, input.SceneId, input.SceneIndex, taskId, errorCode = status.ErrorCode }, ct);
+                        new
+                        {
+                            jobId = job.Id,
+                            input.ProjectId,
+                            input.SceneId,
+                            input.SceneIndex,
+                            candidateIndex = attemptIndex,
+                            provider = input.ProviderCode,
+                            requestedModel = policy.Model,
+                            mode = policy.Mode,
+                            taskId,
+                            status = "failed",
+                            errorCode = status.ErrorCode,
+                            errorMessage = failure
+                        }, ct);
                     if (reservation.BillingRecordId is not null)
                     {
                         await _billing.CompleteAsync(new AiImageBillingCompleteRequest
@@ -962,7 +984,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                             ErrorMessage = failure
                         }, ct);
                     }
-                    await LogUsageAsync(input, job, attemptLogicalRequestId, reservation.ChargedPoints, status.SanitizedResponseJson, false, failure, taskId, ct);
+                    await LogUsageAsync(input, job, attemptLogicalRequestId, reservation.ChargedPoints, status.SanitizedResponseJson, false, failure, taskId, ct, policy.Model);
                     await _versions.FailSceneVideoVersionAsync(version.Id, status.ErrorCode ?? "provider_failure", failure, ct);
                     var failureClassification = ClassifyProviderFailure(status.ErrorCode, failure, null);
                     await AddFallbackFailedEventAsync(
@@ -975,6 +997,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                         failureClassification,
                         status.ErrorCode,
                         status.SanitizedResponseJson,
+                        failure,
                         ct);
                     if (attemptIndex + 1 < candidates.Count)
                     {
@@ -1011,6 +1034,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                         failureClassification,
                         status.ErrorCode,
                         status.SanitizedResponseJson,
+                        failure,
                         ct);
                     await FailAsync(project.Id, scene, version.Id, "provider_failure", failure, ct);
                     throw new RenderJobTerminalFailureException(failure);
@@ -1071,7 +1095,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                     var actualVideoPoints = RVideoSceneVideoCompletionService.CalculateActualVideoPoints(
                         input.DurationSeconds,
                         input.CustomerPointRate);
-                    await LogUsageAsync(input, job, attemptLogicalRequestId, actualVideoPoints, status.SanitizedResponseJson, true, null, taskId, ct);
+                    await LogUsageAsync(input, job, attemptLogicalRequestId, actualVideoPoints, status.SanitizedResponseJson, true, null, taskId, ct, status.ActualModel ?? policy.Model);
                     await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_DOWNLOAD_COMPLETED", "info",
                         "Scene-video provider output was downloaded and persisted locally.",
                         new
@@ -1135,7 +1159,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
             }
             catch (VideoProviderTransientException ex)
             {
-                await MarkPendingReconciliationAsync(input, version.Id, attemptLogicalRequestId, tariffSnapshot, "SCENE_VIDEO_POLL_TRANSIENT", ex.Message, CancellationToken.None, taskId);
+                await MarkPendingReconciliationAsync(input, version.Id, attemptLogicalRequestId, tariffSnapshot, "SCENE_VIDEO_POLL_TRANSIENT", ex.Message, CancellationToken.None, taskId, policy.Model);
                 if (!string.IsNullOrWhiteSpace(taskId))
                 {
                     await DeferProviderPollAsync(job, taskId!, TimeSpan.FromSeconds(Math.Max(1, _options.PollIntervalSeconds)),
@@ -2028,9 +2052,12 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                 fromProvider = fromPolicy.ProviderCode,
                 fromModel = fromPolicy.Model,
                 fromMode = fromPolicy.Mode,
+                fromCandidateIndex = fromPolicy.AttemptIndex,
                 toProvider = toPolicy.ProviderCode,
                 toModel = toPolicy.Model,
                 toMode = toPolicy.Mode,
+                candidateIndex = toPolicy.AttemptIndex,
+                status = "selected",
                 providerTaskId,
                 failureClassification,
                 providerErrorCode
@@ -2047,6 +2074,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         string failureClassification,
         string? providerErrorCode,
         string? providerResponseJson,
+        string? errorMessage,
         CancellationToken ct)
     {
         await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_FALLBACK_FAILED", "warning",
@@ -2060,10 +2088,13 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                 provider = policy.ProviderCode,
                 model = policy.Model,
                 mode = policy.Mode,
+                candidateIndex = policy.AttemptIndex,
+                status = "failed",
                 providerTaskId,
                 failureClassification,
                 providerErrorCode,
-                providerResponseJson
+                providerResponseJson,
+                errorMessage
             }, ct);
     }
 
@@ -2077,6 +2108,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         string failureClassification,
         string? providerErrorCode,
         string? providerResponseJson,
+        string? errorMessage,
         CancellationToken ct)
     {
         await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_FALLBACK_EXHAUSTED", "error",
@@ -2090,10 +2122,13 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                 provider = policy.ProviderCode,
                 model = policy.Model,
                 mode = policy.Mode,
+                candidateIndex = policy.AttemptIndex,
+                status = "exhausted",
                 providerTaskId,
                 failureClassification,
                 providerErrorCode,
-                providerResponseJson
+                providerResponseJson,
+                errorMessage
             }, ct);
     }
 
@@ -2144,12 +2179,13 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         string? errorCode,
         string errorMessage,
         CancellationToken ct,
-        string? providerTaskId = null)
+        string? providerTaskId = null,
+        string? actualModel = null)
     {
         await _billing.MarkPendingReconciliationAsync(new AiImageBillingPendingReconciliationRequest
         {
             LogicalRequestId = logicalRequestId,
-            ActualModel = input.ModelName,
+            ActualModel = actualModel ?? input.ModelName,
             ProviderTaskId = providerTaskId,
             TariffSnapshotJson = tariffSnapshot,
             ErrorMessage = errorMessage
@@ -2180,7 +2216,8 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         bool success,
         string? errorMessage,
         string? providerTaskId,
-        CancellationToken ct)
+        CancellationToken ct,
+        string? actualModel = null)
     {
         await _providers.LogUsageAsync(new AiProviderUsageLog
         {
@@ -2190,7 +2227,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
             ProviderCode = input.ProviderCode,
             CapabilityCode = input.CapabilityCode,
             FeatureCode = "render_job_scene_video",
-            ModelName = input.ModelName,
+            ModelName = actualModel ?? input.ModelName,
             RequestId = logicalRequestId,
             JobId = job.Id.ToString("N"),
             Quantity = 1,
@@ -2200,7 +2237,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
             ProviderRawCost = input.EstimatedUsd,
             Status = success ? "success" : "failed",
             ErrorMessage = errorMessage,
-            MetadataJson = BuildUsageMetadata(input, logicalRequestId, providerTaskId, providerUsageJson, chargedPoints),
+            MetadataJson = BuildUsageMetadata(input, logicalRequestId, providerTaskId, providerUsageJson, chargedPoints, actualModel),
         }, ct);
     }
 
@@ -2209,7 +2246,8 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         string logicalRequestId,
         string? providerTaskId,
         string? providerUsageJson,
-        decimal chargedPoints)
+        decimal chargedPoints,
+        string? actualModel = null)
     {
         try
         {
@@ -2223,6 +2261,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                 input.ParentJobId,
                 logicalRequestId,
                 providerTaskId,
+                model = actualModel ?? input.ModelName,
                 input.DurationSeconds,
                 input.AspectRatio,
                 input.Resolution,
