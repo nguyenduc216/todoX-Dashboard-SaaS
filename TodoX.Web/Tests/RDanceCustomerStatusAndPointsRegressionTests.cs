@@ -220,22 +220,36 @@ public sealed class RDanceCustomerStatusAndPointsRegressionTests
         var method = detail[start..end];
 
         Assert.Contains("job.PreparedReferenceStatus is DanceSellReferenceStatuses.Approved or DanceSellReferenceStatuses.Ready", method);
-        Assert.Contains("if (IsReferenceGenerating || job.ReferenceMode == DanceSellReferenceModes.DirectReference)", method);
+        Assert.Contains("if (job.ReferenceMode == DanceSellReferenceModes.DirectReference)", method);
+        Assert.Contains("var isReferenceGenerating = IsReferenceGenerating;", method);
+        Assert.Contains("if (isReferenceGenerating)", method);
         Assert.Contains("var hasProduct = job.ProductMediaId is not null", method);
-        Assert.Contains("if (hasCharacter && !hasProduct)", method);
+        Assert.Contains("if (!isReferenceGenerating && hasCharacter && !hasProduct)", method);
         Assert.Contains("References.ApproveCharacterAsync(job.Id", method);
-        Assert.Contains("else if (hasCharacter && hasProduct)", method);
+        Assert.Contains("else if (!isReferenceGenerating && hasCharacter && hasProduct)", method);
         Assert.Contains("References.AutoPrepareAsync(job.Id", method);
         Assert.Contains("await ContinueAutoFinishAsync();", method);
 
-        var characterBranch = method.IndexOf("if (hasCharacter && !hasProduct)", StringComparison.Ordinal);
-        var productBranch = method.IndexOf("else if (hasCharacter && hasProduct)", StringComparison.Ordinal);
+        var characterBranch = method.IndexOf("if (!isReferenceGenerating && hasCharacter && !hasProduct)", StringComparison.Ordinal);
+        var productBranch = method.IndexOf("else if (!isReferenceGenerating && hasCharacter && hasProduct)", StringComparison.Ordinal);
         var approveCall = method.IndexOf("References.ApproveCharacterAsync(job.Id", StringComparison.Ordinal);
-        var autoPrepareCall = method.IndexOf("References.AutoPrepareAsync(job.Id", StringComparison.Ordinal);
+        var generatingAutoPrepareCall = method.IndexOf("References.AutoPrepareAsync(job.Id", StringComparison.Ordinal);
+        var productAutoPrepareCall = method.IndexOf("References.AutoPrepareAsync(job.Id", generatingAutoPrepareCall + 1, StringComparison.Ordinal);
         Assert.True(characterBranch >= 0 && productBranch > characterBranch);
         Assert.True(approveCall > characterBranch && approveCall < productBranch);
-        Assert.True(autoPrepareCall > productBranch);
-        Assert.DoesNotContain("References.AutoPrepareAsync(job.Id", method[..productBranch]);
+        Assert.True(generatingAutoPrepareCall > 0 && generatingAutoPrepareCall < characterBranch);
+        Assert.True(productAutoPrepareCall > productBranch);
+        Assert.DoesNotContain("References.AutoPrepareAsync(job.Id", method[characterBranch..productBranch]);
+
+        var lifecycle = detail[detail.IndexOf("protected override async Task OnParametersSetAsync", StringComparison.Ordinal)..];
+        Assert.Contains("if (ShouldResumeAutoReference)", lifecycle);
+        Assert.Contains("await AutoPrepareReferenceAsync();", lifecycle);
+        var polling = detail[detail.IndexOf("private async Task PollLoopAsync", StringComparison.Ordinal)..];
+        Assert.Contains("if (ShouldResumeAutoReference)", polling);
+        var autoFinish = detail[detail.IndexOf("private async Task ContinueAutoFinishAsync", StringComparison.Ordinal)..];
+        Assert.Contains("if (IsActive", autoFinish);
+        Assert.Contains("DanceSellJobStatuses.Completed", autoFinish);
+        Assert.Contains("RenderJobStatuses.Cancelled", autoFinish);
     }
 
     [Fact]

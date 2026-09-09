@@ -818,12 +818,33 @@
         && _job?.PreparedReferenceStatus == DanceSellReferenceStatuses.Approved
         && !string.IsNullOrWhiteSpace(_job?.PreparedReferenceUrl);
     private bool IsActive => !IsCoreCancelled
-        && (_job?.Status is DanceSellJobStatuses.Queued or DanceSellJobStatuses.Submitted or DanceSellJobStatuses.Rendering);
+        && (_job?.Status is DanceSellJobStatuses.Queued or DanceSellJobStatuses.Submitted or DanceSellJobStatuses.Rendering
+            || _renderJob?.Status is RenderJobStatuses.Queued
+                or RenderJobStatuses.Preparing
+                or RenderJobStatuses.Rendering
+                or RenderJobStatuses.PostProcessing
+                or RenderJobStatuses.PendingReconciliation
+                or RenderJobStatuses.Processing);
     private bool IsResultActive => IsActive;
     private bool IsCoreCancelled => _renderJob?.Status == RenderJobStatuses.Cancelled;
     private bool IsReferenceGenerating => _job?.PreparedReferenceStatus == DanceSellReferenceStatuses.Generating
         || _latestReference?.Status == DanceSellReferenceStatuses.Generating;
-    private bool IsPersonOnlyReferenceFlow => _job?.ProductMediaId is null && _job?.CharacterMediaId is not null;
+    private bool ShouldResumeAutoReference
+        => _job?.Status == DanceSellJobStatuses.Draft
+            && (_renderJob?.Status is null or RenderJobStatuses.Draft)
+            && _job.ReferenceMode != DanceSellReferenceModes.DirectReference
+            && _job.CharacterMediaId is not null
+            && !string.IsNullOrWhiteSpace(_job.CharacterImageUrl)
+            && _job.MotionVideoMediaId is not null
+            && !string.IsNullOrWhiteSpace(_job.MotionVideoUrl)
+            && _job.SourceStageStatus == DanceSellSourceStageStatuses.Ready
+            && _job.PreparedReferenceStatus is DanceSellReferenceStatuses.NotCreated or DanceSellReferenceStatuses.Generating;
+    private bool IsPersonOnlyReferenceFlow
+        => _job is not null
+            && _job.ReferenceMode != DanceSellReferenceModes.DirectReference
+            && _job.CharacterMediaId is not null
+            && !string.IsNullOrWhiteSpace(_job.CharacterImageUrl)
+            && (_job.ProductMediaId is null || string.IsNullOrWhiteSpace(_job.ProductImageUrl));
     private long MaxImageBytes => (long)Math.Max(1, DanceOptions.CurrentValue.MaxImageMb) * 1024 * 1024;
     private long MaxMotionVideoBytes => (long)Math.Max(1, DanceOptions.CurrentValue.MaxVideoMb) * 1024 * 1024;
     private string MaxImageLabel => $"{Math.Max(1, DanceOptions.CurrentValue.MaxImageMb)}MB";
@@ -982,6 +1003,11 @@
         }
 
         await ReloadAsync();
+        if (ShouldResumeAutoReference)
+        {
+            await AutoPrepareReferenceAsync();
+        }
+
         StartPolling();
     }
 
@@ -1265,9 +1291,15 @@
                 return;
             }
 
-            if (IsReferenceGenerating || job.ReferenceMode == DanceSellReferenceModes.DirectReference)
+            if (job.ReferenceMode == DanceSellReferenceModes.DirectReference)
             {
                 return;
+            }
+
+            var isReferenceGenerating = IsReferenceGenerating;
+            if (isReferenceGenerating)
+            {
+                _job = await References.AutoPrepareAsync(job.Id, AuthState.CurrentUser!);
             }
 
             var hasCharacter = job.CharacterMediaId is not null
@@ -1275,11 +1307,11 @@
             var hasProduct = job.ProductMediaId is not null
                 && !string.IsNullOrWhiteSpace(job.ProductImageUrl);
 
-            if (hasCharacter && !hasProduct)
+            if (!isReferenceGenerating && hasCharacter && !hasProduct)
             {
                 _job = await References.ApproveCharacterAsync(job.Id, AuthState.CurrentUser!);
             }
-            else if (hasCharacter && hasProduct)
+            else if (!isReferenceGenerating && hasCharacter && hasProduct)
             {
                 EnsureReferenceProviderReady();
                 _job = await References.AutoPrepareAsync(job.Id, AuthState.CurrentUser!);
@@ -1646,8 +1678,8 @@
             return;
         }
 
-        if (_job.Status is DanceSellJobStatuses.Queued or DanceSellJobStatuses.Submitted or DanceSellJobStatuses.Rendering
-            || _job.Status is DanceSellJobStatuses.Failed or DanceSellJobStatuses.Timeout
+        if (IsActive
+            || _job.Status is DanceSellJobStatuses.Completed or DanceSellJobStatuses.Failed or DanceSellJobStatuses.Timeout
             || _renderJob?.Status is RenderJobStatuses.Failed or RenderJobStatuses.Cancelled)
         {
             return;
@@ -1663,12 +1695,14 @@
                     ? await References.ApproveCharacterAsync(_job.Id, AuthState.CurrentUser)
                     : await References.ApproveAsync(_job.Id, _latestReference.Id, AuthState.CurrentUser);
                 await ReloadAsync();
-                return;
             }
             finally
             {
                 _autoFinishing = false;
             }
+
+            await ContinueAutoFinishAsync();
+            return;
         }
 
         if (_job.PreparedReferenceStatus == DanceSellReferenceStatuses.Approved
@@ -2007,7 +2041,7 @@
         {
             while (_pollTimer is not null && await _pollTimer.WaitForNextTickAsync(ct))
             {
-                if (IsReferenceGenerating)
+                if (ShouldResumeAutoReference)
                 {
                     await InvokeAsync(AutoPrepareReferenceAsync);
                 }
