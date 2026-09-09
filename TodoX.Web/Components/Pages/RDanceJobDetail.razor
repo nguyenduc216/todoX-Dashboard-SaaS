@@ -1098,18 +1098,22 @@
         }
     }
 
-    private async Task StageTikTokAsync() => await RunAsync(async () =>
+    private async Task StageTikTokAsync()
     {
-        await EnsureEditableAsync();
-        var job = _job ?? throw new InvalidOperationException("Không tìm thấy video quảng cáo thời trang.");
-        _job = await DanceSell.StageTikTokAsync(job.Id, _tiktokUrl, AuthState.CurrentUser!);
-        _tiktokUrl = _job.MotionSourceUrl ?? _tiktokUrl;
-        _motionFileName = "TikTok MP4";
-        _motionFileSize = null;
-        _motionUploadError = null;
-        Snackbar.Add("Đã staging video TikTok.", Severity.Success);
-        await ReloadAsync();
-    });
+        await RunAsync(async () =>
+        {
+            await EnsureEditableAsync();
+            var job = _job ?? throw new InvalidOperationException("Không tìm thấy video quảng cáo thời trang.");
+            _job = await DanceSell.StageTikTokAsync(job.Id, _tiktokUrl, AuthState.CurrentUser!);
+            _tiktokUrl = _job.MotionSourceUrl ?? _tiktokUrl;
+            _motionFileName = "TikTok MP4";
+            _motionFileSize = null;
+            _motionUploadError = null;
+            Snackbar.Add("Đã staging video TikTok.", Severity.Success);
+            await ReloadAsync();
+        });
+        await AutoPrepareReferenceAsync();
+    }
 
     private Color TikTokOverlayColor => _job?.MotionSourceType == DanceSellMotionSourceTypes.TikTok ? Color.Warning : Color.Default;
     private string TikTokOverlayButtonClass => $"rdance-overlay-button {(_job?.MotionSourceType == DanceSellMotionSourceTypes.TikTok ? "is-active" : "is-inactive")}";
@@ -1182,6 +1186,7 @@
         if (await UploadAsync(args, MaxMotionVideoBytes, (bytes, uploadedFile) => DanceSell.UploadMotionAsync(job.Id, bytes, uploadedFile.Name, uploadedFile.ContentType, AuthState.CurrentUser!)))
         {
             await ReloadAsync();
+            await AutoPrepareReferenceAsync();
         }
     }
 
@@ -1264,6 +1269,7 @@
             _latestReference = versions.OrderByDescending(x => x.VersionNo).FirstOrDefault();
             await RefreshEstimateAsync();
         });
+        await ContinueAutoFinishAsync();
     }
 
     private string? ValidateMotionVideo(IBrowserFile file)

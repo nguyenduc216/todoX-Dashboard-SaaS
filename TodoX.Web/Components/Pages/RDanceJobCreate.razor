@@ -443,6 +443,8 @@
         {
             var job = await (RDanceFeatures.IsNewUiEnabled ? EnsureDraftAsync() : CreateDraftAsync());
             _job = await DanceSell.StageTikTokAsync(job.Id, _tiktokUrl.Trim(), AuthState.CurrentUser!);
+            _job = await DanceSell.GetAsync(job.Id, AuthState.CurrentUser!);
+            await ResolveReferenceAfterMotionAsync(_job);
             Navigation.NavigateTo($"/jobs/rdance/{job.Id}");
         });
 
@@ -535,19 +537,44 @@
             await input.CopyToAsync(buffer);
             _job = await DanceSell.UploadMotionAsync(job.Id, buffer.ToArray(), file.Name, file.ContentType, AuthState.CurrentUser!);
             _job = await DanceSell.GetAsync(job.Id, AuthState.CurrentUser!);
-            if (!HasAutoFinishPrerequisites(_job))
+            if (!HasMotionReady(_job))
             {
                 return;
             }
 
+            await ResolveReferenceAfterMotionAsync(_job);
+            _job = await DanceSell.GetAsync(job.Id, AuthState.CurrentUser!);
             Navigation.NavigateTo($"/jobs/rdance/{job.Id}");
         });
     }
 
-    private static bool HasAutoFinishPrerequisites(DanceSellJobDto job)
+    private async Task ResolveReferenceAfterMotionAsync(DanceSellJobDto job)
+    {
+        if (!HasMotionReady(job)
+            || job.ReferenceMode == DanceSellReferenceModes.DirectReference
+            || job.CharacterMediaId is null
+            || string.IsNullOrWhiteSpace(job.CharacterImageUrl)
+            || job.PreparedReferenceStatus == DanceSellReferenceStatuses.Approved)
+        {
+            return;
+        }
+
+        if (job.ProductMediaId is null || string.IsNullOrWhiteSpace(job.ProductImageUrl))
+        {
+            _job = await References.ApproveCharacterAsync(job.Id, AuthState.CurrentUser!);
+            return;
+        }
+
+        _job = await References.AutoPrepareAsync(job.Id, AuthState.CurrentUser!);
+    }
+
+    private static bool HasMotionReady(DanceSellJobDto job)
         => job.MotionVideoMediaId is not null
             && !string.IsNullOrWhiteSpace(job.MotionVideoUrl)
-            && job.SourceStageStatus == DanceSellSourceStageStatuses.Ready
+            && job.SourceStageStatus == DanceSellSourceStageStatuses.Ready;
+
+    private static bool HasAutoFinishPrerequisites(DanceSellJobDto job)
+        => HasMotionReady(job)
             && !string.IsNullOrWhiteSpace(job.PreparedReferenceUrl)
             && job.PreparedReferenceStatus == DanceSellReferenceStatuses.Approved;
 

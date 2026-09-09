@@ -183,22 +183,32 @@ public sealed class RDanceCustomerStatusAndPointsRegressionTests
 
         Assert.Contains("DanceSell.UploadMotionAsync", motionFlow);
         Assert.Contains("DanceSell.GetAsync(job.Id, AuthState.CurrentUser!)", motionFlow);
-        Assert.Contains("HasAutoFinishPrerequisites(_job)", motionFlow);
+        Assert.Contains("HasMotionReady(_job)", motionFlow);
+        Assert.Contains("ResolveReferenceAfterMotionAsync(_job)", motionFlow);
         Assert.Contains("Navigation.NavigateTo($\"/jobs/rdance/{job.Id}\")", motionFlow);
         Assert.DoesNotContain("QueueRenderAsync", motionFlow);
 
-        var readinessStart = create.IndexOf("private static bool HasAutoFinishPrerequisites", StringComparison.Ordinal);
-        var readinessEnd = create.IndexOf("private async Task<DanceSellJobDto> EnsureDraftAsync", readinessStart, StringComparison.Ordinal);
+        var readinessStart = create.IndexOf("private static bool HasMotionReady", StringComparison.Ordinal);
+        var readinessEnd = create.IndexOf("private static bool HasAutoFinishPrerequisites", readinessStart, StringComparison.Ordinal);
         var readiness = create[readinessStart..readinessEnd];
         Assert.Contains("MotionVideoMediaId is not null", readiness);
         Assert.Contains("SourceStageStatus == DanceSellSourceStageStatuses.Ready", readiness);
-        Assert.Contains("PreparedReferenceStatus == DanceSellReferenceStatuses.Approved", readiness);
-        Assert.Contains("PreparedReferenceUrl", readiness);
+        var autoFinish = create[readinessEnd..create.IndexOf("private async Task<DanceSellJobDto> EnsureDraftAsync", readinessEnd, StringComparison.Ordinal)];
+        Assert.Contains("PreparedReferenceStatus == DanceSellReferenceStatuses.Approved", autoFinish);
+        Assert.Contains("PreparedReferenceUrl", autoFinish);
+        Assert.Contains("private async Task ResolveReferenceAfterMotionAsync", create);
+        Assert.Contains("References.ApproveCharacterAsync", create);
+        Assert.Contains("References.AutoPrepareAsync", create);
+        Assert.Contains("private static bool HasMotionReady", create);
+        Assert.Contains("DanceSell.StageTikTokAsync", create);
 
         var detail = ReadRepoFile("Components", "Pages", "RDanceJobDetail.razor");
         Assert.Contains("await ContinueAutoFinishAsync();", detail);
         Assert.Contains("MotionStepStatusKey", detail);
         Assert.Contains("ReferenceStepStatusKey", detail);
+        Assert.Contains("await AutoPrepareReferenceAsync();", detail);
+        Assert.Contains("References.ApproveCharacterAsync(_job.Id", detail);
+        Assert.Contains("DanceSell.QueueRenderAsync(_job.Id", detail);
     }
 
     [Fact]
