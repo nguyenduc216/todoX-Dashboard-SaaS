@@ -731,6 +731,23 @@ public sealed class RDanceFashionDemoPageTests
     }
 
     [Fact]
+    public void RDanceNewUiCreateButtonRoutesTerminalJobsThroughExistingRetryFlow()
+    {
+        var root = FindRepoRoot();
+        var page = ReadStrictUtf8(Path.Combine(root, "TodoX.Web", "Components", "Pages", "RDanceJobDetail.razor"));
+        var confirm = GetMethodSection(page, "ConfirmAndQueueAsync");
+
+        var terminalGuard = confirm.IndexOf("DanceSellJobStatuses.Failed or DanceSellJobStatuses.Timeout", StringComparison.Ordinal);
+        var retry = confirm.IndexOf("await RetryAsync();", StringComparison.Ordinal);
+        var autoFinish = confirm.IndexOf("if (_autoFinish)", StringComparison.Ordinal);
+
+        Assert.True(terminalGuard >= 0);
+        Assert.True(retry > terminalGuard);
+        Assert.True(autoFinish > retry);
+        Assert.Contains("IsCoreCancelled", confirm, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void DanceSellDownloadEndpointUsesOwnedJobUrlAndBlocksArbitraryUrl()
     {
         var root = FindRepoRoot();

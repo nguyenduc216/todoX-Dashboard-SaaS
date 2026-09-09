@@ -1426,6 +1426,14 @@
 
     private async Task ConfirmAndQueueAsync()
     {
+        if (_job is not null
+            && (_job.Status is DanceSellJobStatuses.Failed or DanceSellJobStatuses.Timeout
+                || IsCoreCancelled))
+        {
+            await RetryAsync();
+            return;
+        }
+
         if (_autoFinish)
         {
             await ContinueAutoFinishAsync();
