@@ -1070,7 +1070,7 @@
             }
             var versions = await DanceRepo.ListReferenceVersionsAsync(_job.Id);
             _referenceVersions = versions;
-            _latestReference = versions.OrderByDescending(x => x.VersionNo).FirstOrDefault();
+            _latestReference = ResolveAutoFinishReference(versions);
             await RefreshEstimateAsync();
             await ContinueAutoFinishAsync();
         }
@@ -1098,6 +1098,17 @@
 
         StateHasChanged();
     });
+
+    private static DanceSellReferenceVersionDto? ResolveAutoFinishReference(
+        IReadOnlyList<DanceSellReferenceVersionDto> versions)
+        => versions.FirstOrDefault(version =>
+               version.IsSelected
+               && version.Status is DanceSellReferenceStatuses.Ready or DanceSellReferenceStatuses.Approved
+               && !string.IsNullOrWhiteSpace(version.PublicUrl))
+           ?? versions.FirstOrDefault(version =>
+               version.Status == DanceSellReferenceStatuses.Ready
+               && !string.IsNullOrWhiteSpace(version.PublicUrl))
+           ?? versions.OrderByDescending(version => version.VersionNo).FirstOrDefault();
 
     private async Task EnsureEditableAsync()
     {
@@ -1323,7 +1334,7 @@
             }
 
             var versions = await DanceRepo.ListReferenceVersionsAsync(_job.Id);
-            _latestReference = versions.OrderByDescending(x => x.VersionNo).FirstOrDefault();
+            _latestReference = ResolveAutoFinishReference(versions);
             await RefreshEstimateAsync();
         });
         await ContinueAutoFinishAsync();
@@ -1622,7 +1633,7 @@
         var job = _job ?? throw new InvalidOperationException("Không tìm thấy video quảng cáo thời trang.");
         await References.GenerateAsync(job.Id, AuthState.CurrentUser!);
         _referenceVersions = await DanceRepo.ListReferenceVersionsAsync(_job.Id);
-        _latestReference = _referenceVersions.OrderByDescending(x => x.VersionNo).FirstOrDefault();
+        _latestReference = ResolveAutoFinishReference(_referenceVersions);
         await ReloadAsync();
     }
 

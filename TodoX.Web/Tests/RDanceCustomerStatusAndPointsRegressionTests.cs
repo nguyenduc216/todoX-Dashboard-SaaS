@@ -271,6 +271,21 @@ public sealed class RDanceCustomerStatusAndPointsRegressionTests
     }
 
     [Fact]
+    public void RdanceDetailUsesSelectedUsableReferenceForAutoFinish()
+    {
+        var detail = ReadRepoFile("Components", "Pages", "RDanceJobDetail.razor");
+        var resolverStart = detail.IndexOf("private static DanceSellReferenceVersionDto? ResolveAutoFinishReference", StringComparison.Ordinal);
+        var resolverEnd = detail.IndexOf("private async Task EnsureEditableAsync", resolverStart, StringComparison.Ordinal);
+        var resolver = detail[resolverStart..resolverEnd];
+
+        Assert.Contains("version.IsSelected", resolver);
+        Assert.Contains("version.Status is DanceSellReferenceStatuses.Ready or DanceSellReferenceStatuses.Approved", resolver);
+        Assert.Contains("!string.IsNullOrWhiteSpace(version.PublicUrl)", resolver);
+        Assert.Contains("_latestReference = ResolveAutoFinishReference(versions);", detail);
+        Assert.Contains("_latestReference = ResolveAutoFinishReference(_referenceVersions);", detail);
+    }
+
+    [Fact]
     public void RdanceTitleIsEditableInHeaderAndAbsentFromStatusPanel()
     {
         var create = ReadRepoFile("Components", "Pages", "RDanceJobCreate.razor");
