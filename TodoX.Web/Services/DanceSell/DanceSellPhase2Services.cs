@@ -902,6 +902,35 @@ Photorealistic, product preview quality.
         }
 
         var versions = await _repo.ListReferenceVersionsAsync(job.Id, ct);
+        var reusable = versions.FirstOrDefault(version =>
+                version.IsSelected
+                && version.CharacterMediaId == job.CharacterMediaId
+                && version.ProductMediaId is null
+                && version.Status is DanceSellReferenceStatuses.Ready or DanceSellReferenceStatuses.Approved
+                && version.MediaId is not null
+                && !string.IsNullOrWhiteSpace(version.PublicUrl))
+            ?? versions.FirstOrDefault(version =>
+                version.CharacterMediaId == job.CharacterMediaId
+                && version.ProductMediaId is null
+                && version.Status is DanceSellReferenceStatuses.Ready or DanceSellReferenceStatuses.Approved
+                && version.MediaId is not null
+                && !string.IsNullOrWhiteSpace(version.PublicUrl));
+        if (reusable is not null)
+        {
+            EnsureReferenceVersionRatioMatchesJob(reusable, job);
+            await _repo.SelectReferenceVersionAsync(job.Id, reusable.Id, ct);
+            await _repo.UpdateReferenceStatusAsync(
+                job.Id,
+                DanceSellReferenceStatuses.Approved,
+                null,
+                reusable.MediaId,
+                reusable.ObjectKey,
+                reusable.PublicUrl,
+                DateTime.UtcNow,
+                ct);
+            return await _repo.GetByIdAsync(job.Id, ct) ?? job;
+        }
+
         var ratio = DanceSellRatioNormalizer.NormalizeDanceSellRatio(job.Ratio);
         var version = await _repo.CreateReferenceVersionAsync(new DanceSellReferenceVersionDto
         {

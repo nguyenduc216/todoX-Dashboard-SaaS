@@ -286,6 +286,31 @@ public sealed class RDanceCustomerStatusAndPointsRegressionTests
     }
 
     [Fact]
+    public void RdanceCharacterApprovalReconcilesExistingUsableReferenceBeforeCreatingFallback()
+    {
+        var service = ReadRepoFile("Services", "DanceSell", "DanceSellPhase2Services.cs");
+        var start = service.IndexOf("public async Task<DanceSellJobDto> ApproveCharacterAsync", StringComparison.Ordinal);
+        var end = service.IndexOf("private async Task<DanceSellJobDto> PrepareCharacterReferenceAsync", start, StringComparison.Ordinal);
+        var method = service[start..end];
+
+        Assert.Contains("var reusable = versions.FirstOrDefault(version =>", method);
+        Assert.Contains("version.IsSelected", method);
+        Assert.Contains("version.Status is DanceSellReferenceStatuses.Ready or DanceSellReferenceStatuses.Approved", method);
+        Assert.Contains("version.MediaId is not null", method);
+        Assert.Contains("!string.IsNullOrWhiteSpace(version.PublicUrl)", method);
+        Assert.Contains("EnsureReferenceVersionRatioMatchesJob(reusable, job);", method);
+        Assert.Contains("await _repo.SelectReferenceVersionAsync(job.Id, reusable.Id, ct);", method);
+        Assert.Contains("DanceSellReferenceStatuses.Approved", method);
+        Assert.Contains("reusable.MediaId", method);
+        Assert.Contains("reusable.PublicUrl", method);
+
+        var reuseBranch = method.IndexOf("if (reusable is not null)", StringComparison.Ordinal);
+        var createCall = method.IndexOf("CreateReferenceVersionAsync", StringComparison.Ordinal);
+        Assert.True(reuseBranch >= 0);
+        Assert.True(createCall > reuseBranch);
+    }
+
+    [Fact]
     public void RdanceTitleIsEditableInHeaderAndAbsentFromStatusPanel()
     {
         var create = ReadRepoFile("Components", "Pages", "RDanceJobCreate.razor");
