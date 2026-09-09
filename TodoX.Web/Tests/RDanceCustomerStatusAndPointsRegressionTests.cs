@@ -253,6 +253,24 @@ public sealed class RDanceCustomerStatusAndPointsRegressionTests
     }
 
     [Fact]
+    public void RdanceDetailRetryResumesDraftsWithoutReuploadAndGuardsActiveRenders()
+    {
+        var detail = ReadRepoFile("Components", "Pages", "RDanceJobDetail.razor");
+        var start = detail.IndexOf("private async Task RetryAsync()", StringComparison.Ordinal);
+        var end = detail.IndexOf("private async Task DownloadResultAsync", start, StringComparison.Ordinal);
+        var method = detail[start..end];
+
+        Assert.Contains("await ReloadAsync();", method);
+        Assert.Contains("if (IsActive", method);
+        Assert.Contains("DanceSellJobStatuses.Draft", method);
+        Assert.Contains("MotionVideoMediaId is null", method);
+        Assert.Contains("await AutoPrepareReferenceAsync();", method);
+        Assert.Contains("await ContinueAutoFinishAsync();", method);
+        Assert.Contains("DanceSell.RetryAsync(job.Id", method);
+        Assert.DoesNotContain("UploadMotionAsync", method);
+    }
+
+    [Fact]
     public void RdanceTitleIsEditableInHeaderAndAbsentFromStatusPanel()
     {
         var create = ReadRepoFile("Components", "Pages", "RDanceJobCreate.razor");

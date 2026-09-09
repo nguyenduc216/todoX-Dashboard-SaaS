@@ -1724,13 +1724,58 @@
         }
     }
 
-    private async Task RetryAsync() => await RunAsync(async () =>
+    private async Task RetryAsync()
     {
-        var job = _job ?? throw new InvalidOperationException("Không tìm thấy video quảng cáo thời trang.");
-        _job = await DanceSell.RetryAsync(job.Id, AuthState.CurrentUser!);
-        _tabIndex = 3;
+        if (_job is null || AuthState.CurrentUser is null || _busy)
+        {
+            return;
+        }
+
         await ReloadAsync();
-    });
+        if (_job is null)
+        {
+            return;
+        }
+
+        _tabIndex = 3;
+        if (IsActive
+            || _job.Status == DanceSellJobStatuses.Completed)
+        {
+            return;
+        }
+
+        if (_job.Status == DanceSellJobStatuses.Draft)
+        {
+            if (_job.MotionVideoMediaId is null
+                || string.IsNullOrWhiteSpace(_job.MotionVideoUrl))
+            {
+                return;
+            }
+
+            if (_job.PreparedReferenceStatus is DanceSellReferenceStatuses.NotCreated
+                or DanceSellReferenceStatuses.Generating)
+            {
+                await AutoPrepareReferenceAsync();
+            }
+            else
+            {
+                await ContinueAutoFinishAsync();
+            }
+
+            return;
+        }
+
+        if (_job.Status is DanceSellJobStatuses.Failed or DanceSellJobStatuses.Timeout
+            || IsCoreCancelled)
+        {
+            await RunAsync(async () =>
+            {
+                var job = _job ?? throw new InvalidOperationException("Không tìm thấy video quảng cáo thời trang.");
+                _job = await DanceSell.RetryAsync(job.Id, AuthState.CurrentUser);
+                await ReloadAsync();
+            });
+        }
+    }
 
     private async Task DownloadResultAsync()
     {
