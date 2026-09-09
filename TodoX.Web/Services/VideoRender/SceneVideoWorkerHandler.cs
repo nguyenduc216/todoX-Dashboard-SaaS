@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.Extensions.Options;
 using TodoX.Web.Models;
 using TodoX.Web.Models.Catalog;
@@ -375,6 +376,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         await EnrichCatalogDurationsAsync(input.ProviderId, catalogModels, ct);
         var candidates = ResolveFallbackCandidates(input, catalogModels);
         var attemptIndex = ResolveNextAttemptIndex(input.LogicalRequestId, attemptVersions);
+        string? fallbackReason = null;
         while (attemptIndex < candidates.Count)
         {
             var candidate = candidates[attemptIndex];
@@ -703,6 +705,24 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                             logicalRequestId = attemptLogicalRequestId,
                             providerTaskId = taskId
                         }, ct);
+                    if (attemptIndex > 0)
+                    {
+                        await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_FALLBACK_SUBMITTED", "info",
+                            "Scene-video fallback candidate was submitted to the provider.",
+                            new
+                            {
+                                projectId = input.ProjectId,
+                                sceneId = input.SceneId,
+                                input.SceneIndex,
+                                renderJobId = job.Id,
+                                sceneVideoVersionId = version.Id,
+                                provider = input.ProviderCode,
+                                model = policy.Model,
+                                mode = policy.Mode,
+                                providerTaskId = taskId,
+                                failureClassification = fallbackReason ?? "MODEL_PROVIDER_FAILURE"
+                            }, ct);
+                    }
                     await _repo.AddProjectEventAsync(project.Id, "SCENE_VIDEO_PROVIDER_SUBMITTED", "info",
                         $"Scene {input.SceneIndex} submitted to its configured video provider.",
                         new { jobId = job.Id, input.SceneId, input.SceneIndex, taskId, model = policy.Model, input.ProviderCode, attemptIndex }, ct);
@@ -755,6 +775,72 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                     throw new RenderJobPendingReconciliationException(
                         "Video provider submit outcome is unknown; reconciliation is required before another submit.",
                         ex);
+                }
+                catch (Ai79TaskSubmitException ex)
+                {
+                    var failureClassification = ClassifyProviderFailure(ex.ErrorCode, ex.ErrorMessage, ex.HttpStatusCode);
+                    await AddAi79SubmitDiagnosticsAsync(job, policy, ex, CancellationToken.None);
+                    await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_SUBMIT_FAILED", "warning",
+                        "Scene-video provider submit failed for the current fallback candidate.",
+                        new
+                        {
+                            projectId = input.ProjectId,
+                            sceneId = input.SceneId,
+                            input.SceneIndex,
+                            renderJobId = job.Id,
+                            sceneVideoVersionId = version.Id,
+                            provider = input.ProviderCode,
+                            model = policy.Model,
+                            mode = policy.Mode,
+                            providerTaskId = (string?)null,
+                            failureClassification,
+                            providerErrorCode = ex.ErrorCode,
+                            httpStatusCode = (int?)ex.HttpStatusCode,
+                            sanitizedResponseJson = SanitizeDiagnosticJson(ex.SanitizedResponseJson),
+                            sanitizedRequestMetadataJson = SanitizeDiagnosticJson(ex.SanitizedRequestMetadataJson)
+                        }, CancellationToken.None);
+                    await _versions.FailSceneVideoVersionAsync(
+                        version.Id,
+                        ex.ErrorCode ?? failureClassification,
+                        ex.ErrorMessage,
+                        CancellationToken.None);
+                    if (!ShouldFallback(failureClassification))
+                    {
+                        throw;
+                    }
+
+                    if (attemptIndex + 1 >= candidates.Count)
+                    {
+                        await AddFallbackExhaustedEventAsync(
+                            project,
+                            scene,
+                            job,
+                            input,
+                            policy,
+                            null,
+                            failureClassification,
+                            ex.ErrorCode,
+                            ex.SanitizedResponseJson,
+                            CancellationToken.None);
+                        await FailAsync(project.Id, scene, version.Id, ex.ErrorCode ?? "provider_failure", ex.ErrorMessage, CancellationToken.None);
+                        throw new RenderJobTerminalFailureException(ex.ErrorMessage, ex);
+                    }
+
+                    var nextCandidate = candidates[attemptIndex + 1];
+                    await AddFallbackStartedEventAsync(
+                        project,
+                        scene,
+                        job,
+                        input,
+                        policy,
+                        nextCandidate.Policy,
+                        null,
+                        failureClassification,
+                        ex.ErrorCode,
+                        CancellationToken.None);
+                    fallbackReason = failureClassification;
+                    attemptIndex++;
+                    continue;
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
@@ -878,12 +964,54 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                     }
                     await LogUsageAsync(input, job, attemptLogicalRequestId, reservation.ChargedPoints, status.SanitizedResponseJson, false, failure, taskId, ct);
                     await _versions.FailSceneVideoVersionAsync(version.Id, status.ErrorCode ?? "provider_failure", failure, ct);
+                    var failureClassification = ClassifyProviderFailure(status.ErrorCode, failure, null);
+                    await AddFallbackFailedEventAsync(
+                        project,
+                        scene,
+                        job,
+                        input,
+                        policy,
+                        taskId,
+                        failureClassification,
+                        status.ErrorCode,
+                        status.SanitizedResponseJson,
+                        ct);
                     if (attemptIndex + 1 < candidates.Count)
                     {
+                        if (!ShouldFallback(failureClassification))
+                        {
+                            await FailAsync(project.Id, scene, version.Id, status.ErrorCode ?? "provider_failure", failure, ct);
+                            throw new RenderJobTerminalFailureException(failure);
+                        }
+
+                        var nextCandidate = candidates[attemptIndex + 1];
+                        await AddFallbackStartedEventAsync(
+                            project,
+                            scene,
+                            job,
+                            input,
+                            policy,
+                            nextCandidate.Policy,
+                            taskId,
+                            failureClassification,
+                            status.ErrorCode,
+                            ct);
+                        fallbackReason = failureClassification;
                         attemptIndex++;
                         continue;
                     }
 
+                    await AddFallbackExhaustedEventAsync(
+                        project,
+                        scene,
+                        job,
+                        input,
+                        policy,
+                        taskId,
+                        failureClassification,
+                        status.ErrorCode,
+                        status.SanitizedResponseJson,
+                        ct);
                     await FailAsync(project.Id, scene, version.Id, "provider_failure", failure, ct);
                     throw new RenderJobTerminalFailureException(failure);
                 }
@@ -1023,6 +1151,19 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         }
 
         const string exhaustedCode = "RVIDEO_VIDEO_FALLBACK_EXHAUSTED";
+        await _repo.AddProjectEventAsync(project.Id, exhaustedCode, "error",
+            "No valid scene-video fallback candidate remains.",
+            new
+            {
+                projectId = input.ProjectId,
+                sceneId = input.SceneId,
+                input.SceneIndex,
+                renderJobId = job.Id,
+                provider = input.ProviderCode,
+                model = input.ModelName,
+                providerTaskId = (string?)null,
+                failureClassification = fallbackReason ?? "SYSTEM_FAILURE"
+            }, ct);
         await FailAsync(project.Id, scene, Guid.Empty, exhaustedCode,
             "No valid 79AI video fallback candidate remains.", ct);
         throw new RenderJobTerminalFailureException(exhaustedCode);
@@ -1600,24 +1741,10 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
             return Array.Empty<ResolvedFallbackCandidate>();
         }
 
-        var durationIntersection = resolved
-            .Select(x => x.SupportedDurations)
-            .Aggregate((HashSet<int>?)null, (current, next) =>
-            {
-                if (current is null) return next;
-                current.IntersectWith(next);
-                return current;
-            });
-
-        if (durationIntersection is null || durationIntersection.Count == 0)
-        {
-            return Array.Empty<ResolvedFallbackCandidate>();
-        }
-
         var candidates = new List<ResolvedFallbackCandidate>();
         foreach (var item in resolved)
         {
-            var providerDuration = ResolveProviderDuration(input.DurationSeconds, durationIntersection);
+            var providerDuration = ResolveProviderDuration(input.DurationSeconds, item.SupportedDurations);
             if (providerDuration is int duration)
             {
                 candidates.Add(new ResolvedFallbackCandidate(item.Policy, duration));
@@ -1731,6 +1858,238 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
 
     private static bool IsTransientSubmit(Ai79TaskSubmitException ex)
         => ex.HttpStatusCode is null || (int)ex.HttpStatusCode >= 500 || (int)ex.HttpStatusCode == 429;
+
+    private static string ClassifyProviderFailure(
+        string? errorCode,
+        string? message,
+        System.Net.HttpStatusCode? httpStatusCode)
+    {
+        var code = errorCode ?? string.Empty;
+        var text = $"{code} {message}".ToLowerInvariant();
+        if ((int?)httpStatusCode is 401 or 403
+            || text.Contains("unauthor", StringComparison.Ordinal)
+            || text.Contains("forbidden", StringComparison.Ordinal)
+            || text.Contains("access denied", StringComparison.Ordinal))
+        {
+            return "AUTHENTICATION_FAILURE";
+        }
+
+        if (text.Contains("billing", StringComparison.Ordinal)
+            || text.Contains("insufficient", StringComparison.Ordinal)
+            || text.Contains("balance", StringComparison.Ordinal)
+            || text.Contains("quota", StringComparison.Ordinal))
+        {
+            return "BILLING_FAILURE";
+        }
+
+        if (text.Contains("invalid", StringComparison.Ordinal)
+            || text.Contains("prompt", StringComparison.Ordinal)
+            || text.Contains("parameter", StringComparison.Ordinal)
+            || text.Contains("bad_request", StringComparison.Ordinal)
+            || (int?)httpStatusCode == 400)
+        {
+            return "INVALID_INPUT";
+        }
+
+        if ((int?)httpStatusCode is >= 500 or 429
+            || text.Contains("timeout", StringComparison.Ordinal)
+            || text.Contains("tempor", StringComparison.Ordinal)
+            || text.Contains("unavailable", StringComparison.Ordinal))
+        {
+            return "TRANSIENT_PROVIDER_FAILURE";
+        }
+
+        return "MODEL_PROVIDER_FAILURE";
+    }
+
+    private static bool ShouldFallback(string classification)
+        => classification is "MODEL_PROVIDER_FAILURE" or "TRANSIENT_PROVIDER_FAILURE";
+
+    private async Task AddAi79SubmitDiagnosticsAsync(
+        RenderJobDto job,
+        RVideoVideoModelPolicyEntry policy,
+        Ai79TaskSubmitException exception,
+        CancellationToken ct)
+    {
+        await _jobs.AddEventAsync(
+            job.Id,
+            "RVIDEO_79AI_SUBMIT_DIAGNOSTICS",
+            "RVideo 79AI submit diagnostics captured.",
+            new
+            {
+                exceptionType = nameof(Ai79TaskSubmitException),
+                provider = "79ai",
+                model = policy.Model,
+                httpStatusCode = (int?)exception.HttpStatusCode,
+                providerErrorCode = exception.ErrorCode,
+                sanitizedResponseJson = SanitizeDiagnosticJson(exception.SanitizedResponseJson),
+                sanitizedRequestMetadataJson = SanitizeDiagnosticJson(exception.SanitizedRequestMetadataJson),
+                attemptCount = job.AttemptCount,
+                maxAttempts = job.MaxAttempts
+            },
+            "error",
+            ct);
+    }
+
+    private static string SanitizeDiagnosticJson(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(value);
+            return SanitizeDiagnosticElement(document.RootElement)?.ToJsonString(JsonOptions) ?? string.Empty;
+        }
+        catch (JsonException)
+        {
+            return string.Empty;
+        }
+    }
+
+    private static JsonNode? SanitizeDiagnosticElement(JsonElement element)
+    {
+        return element.ValueKind switch
+        {
+            JsonValueKind.Object => SanitizeDiagnosticObject(element),
+            JsonValueKind.Array => SanitizeDiagnosticArray(element),
+            JsonValueKind.String => JsonValue.Create(element.GetString()),
+            JsonValueKind.Number => JsonValue.Create(element.GetRawText()),
+            JsonValueKind.True => JsonValue.Create(true),
+            JsonValueKind.False => JsonValue.Create(false),
+            _ => null
+        };
+    }
+
+    private static JsonObject SanitizeDiagnosticObject(JsonElement element)
+    {
+        var result = new JsonObject();
+        foreach (var property in element.EnumerateObject())
+        {
+            if (IsSensitiveDiagnosticProperty(property.Name))
+            {
+                continue;
+            }
+
+            result[property.Name] = SanitizeDiagnosticElement(property.Value);
+        }
+
+        return result;
+    }
+
+    private static JsonArray SanitizeDiagnosticArray(JsonElement element)
+    {
+        var result = new JsonArray();
+        foreach (var item in element.EnumerateArray())
+        {
+            result.Add(SanitizeDiagnosticElement(item));
+        }
+
+        return result;
+    }
+
+    private static bool IsSensitiveDiagnosticProperty(string name)
+        => name.Contains("token", StringComparison.OrdinalIgnoreCase)
+           || name.Contains("authorization", StringComparison.OrdinalIgnoreCase)
+           || name.Contains("credential", StringComparison.OrdinalIgnoreCase)
+           || name.Contains("secret", StringComparison.OrdinalIgnoreCase)
+           || name.Contains("password", StringComparison.OrdinalIgnoreCase)
+           || name.Contains("api_key", StringComparison.OrdinalIgnoreCase)
+           || name.Contains("apikey", StringComparison.OrdinalIgnoreCase);
+
+    private async Task AddFallbackStartedEventAsync(
+        VideoProjectDto project,
+        VideoProjectSceneDto scene,
+        RenderJobDto job,
+        SceneVideoRenderWorkItemInput input,
+        RVideoVideoModelPolicyEntry fromPolicy,
+        RVideoVideoModelPolicyEntry toPolicy,
+        string? providerTaskId,
+        string failureClassification,
+        string? providerErrorCode,
+        CancellationToken ct)
+    {
+        await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_FALLBACK_STARTED", "warning",
+            "Scene-video fallback candidate started.",
+            new
+            {
+                projectId = input.ProjectId,
+                sceneId = scene.Id,
+                input.SceneIndex,
+                renderJobId = job.Id,
+                fromProvider = fromPolicy.ProviderCode,
+                fromModel = fromPolicy.Model,
+                fromMode = fromPolicy.Mode,
+                toProvider = toPolicy.ProviderCode,
+                toModel = toPolicy.Model,
+                toMode = toPolicy.Mode,
+                providerTaskId,
+                failureClassification,
+                providerErrorCode
+            }, ct);
+    }
+
+    private async Task AddFallbackFailedEventAsync(
+        VideoProjectDto project,
+        VideoProjectSceneDto scene,
+        RenderJobDto job,
+        SceneVideoRenderWorkItemInput input,
+        RVideoVideoModelPolicyEntry policy,
+        string? providerTaskId,
+        string failureClassification,
+        string? providerErrorCode,
+        string? providerResponseJson,
+        CancellationToken ct)
+    {
+        await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_FALLBACK_FAILED", "warning",
+            "Scene-video fallback candidate failed.",
+            new
+            {
+                projectId = input.ProjectId,
+                sceneId = scene.Id,
+                input.SceneIndex,
+                renderJobId = job.Id,
+                provider = policy.ProviderCode,
+                model = policy.Model,
+                mode = policy.Mode,
+                providerTaskId,
+                failureClassification,
+                providerErrorCode,
+                providerResponseJson
+            }, ct);
+    }
+
+    private async Task AddFallbackExhaustedEventAsync(
+        VideoProjectDto project,
+        VideoProjectSceneDto scene,
+        RenderJobDto job,
+        SceneVideoRenderWorkItemInput input,
+        RVideoVideoModelPolicyEntry policy,
+        string? providerTaskId,
+        string failureClassification,
+        string? providerErrorCode,
+        string? providerResponseJson,
+        CancellationToken ct)
+    {
+        await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_FALLBACK_EXHAUSTED", "error",
+            "All configured scene-video fallback candidates failed.",
+            new
+            {
+                projectId = input.ProjectId,
+                sceneId = scene.Id,
+                input.SceneIndex,
+                renderJobId = job.Id,
+                provider = policy.ProviderCode,
+                model = policy.Model,
+                mode = policy.Mode,
+                providerTaskId,
+                failureClassification,
+                providerErrorCode,
+                providerResponseJson
+            }, ct);
+    }
 
     private async Task DeferPollAsync(
         RenderJobDto job,

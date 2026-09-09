@@ -211,7 +211,7 @@ public sealed class RVideoVideoHotfixTests
     }
 
     [Fact]
-    public void ResolveFallbackCandidatesUsesSafeIntersectionAcrossKnownDurations()
+    public void ResolveFallbackCandidatesResolvesEachCandidateAgainstItsOwnDurationContract()
     {
         var method = typeof(SceneVideoWorkerHandler).GetMethod("ResolveFallbackCandidates", BindingFlags.NonPublic | BindingFlags.Static);
         Assert.NotNull(method);
@@ -260,8 +260,90 @@ public sealed class RVideoVideoHotfixTests
             .ToArray();
 
         Assert.Equal(3, resolved.Length);
-        Assert.All(resolved, item => Assert.Equal(6, item.Duration));
+        Assert.Equal([4, 6, 6], resolved.Select(x => x.Duration));
         Assert.Equal(["veo_omni", "veo_3_1", "veo_3_1"], resolved.Select(x => x.Model));
+    }
+
+    [Fact]
+    public void ResolveFallbackCandidatesKeepsVeoFastAndLiteAsIndependentCandidates()
+    {
+        var method = typeof(SceneVideoWorkerHandler).GetMethod("ResolveFallbackCandidates", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var input = new SceneVideoRenderWorkItemInput
+        {
+            ProviderCode = "79ai",
+            DurationSeconds = 6
+        };
+        var catalog = new[]
+        {
+            new AiProviderModelListItemDto
+            {
+                ProviderCode = "79ai",
+                ProviderModelCode = "veo_omni",
+                MediaType = "video",
+                Enabled = true,
+                SupportedModes = ["flash"],
+                SupportedDurations = [4, 6, 8, 10]
+            },
+            new AiProviderModelListItemDto
+            {
+                ProviderCode = "79ai",
+                ProviderModelCode = "veo_3_1",
+                MediaType = "video",
+                Enabled = true,
+                SupportedModes = ["fast", "lite"],
+                SupportedDurations = [6, 10]
+            }
+        };
+
+        var resolved = ((System.Collections.IEnumerable)method!.Invoke(null, new object[] { input, catalog })!)
+            .Cast<object>()
+            .Select(item =>
+            {
+                var policy = item.GetType().GetProperty("Policy")!.GetValue(item)!;
+                return (
+                    Model: (string)policy.GetType().GetProperty("Model")!.GetValue(policy)!,
+                    Mode: (string?)policy.GetType().GetProperty("Mode")!.GetValue(policy));
+            })
+            .ToArray();
+
+        Assert.Equal(
+            [("veo_omni", "flash"), ("veo_3_1", "fast"), ("veo_3_1", "lite")],
+            resolved);
+    }
+
+    [Theory]
+    [InlineData("provider_failure", "Lỗi Google không thể xử lý đơn này. #22f", "MODEL_PROVIDER_FAILURE")]
+    [InlineData("http_503", "service unavailable", "TRANSIENT_PROVIDER_FAILURE")]
+    [InlineData("unauthorized", "invalid access token", "AUTHENTICATION_FAILURE")]
+    [InlineData("insufficient_balance", "insufficient balance", "BILLING_FAILURE")]
+    [InlineData("bad_request", "invalid prompt", "INVALID_INPUT")]
+    public void ProviderFailureClassificationControlsFallback(string errorCode, string message, string expected)
+    {
+        var method = typeof(SceneVideoWorkerHandler).GetMethod("ClassifyProviderFailure", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var result = (string)method!.Invoke(null, new object?[] { errorCode, message, null })!;
+
+        Assert.Equal(expected, result);
+    }
+
+    [Fact]
+    public void SceneVideoWorkerEmitsFallbackLifecycleEventsAndKeepsProviderDiagnosticsSanitized()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "SceneVideoWorkerHandler.cs");
+
+        Assert.Contains("\"RVIDEO_VIDEO_FALLBACK_STARTED\"", source);
+        Assert.Contains("\"RVIDEO_VIDEO_FALLBACK_SUBMITTED\"", source);
+        Assert.Contains("\"RVIDEO_VIDEO_FALLBACK_FAILED\"", source);
+        Assert.Contains("\"RVIDEO_VIDEO_FALLBACK_EXHAUSTED\"", source);
+        Assert.Contains("providerTaskId", source);
+        Assert.Contains("failureClassification", source);
+        Assert.Contains("sanitizedResponseJson", source);
+        Assert.Contains("sanitizedRequestMetadataJson", source);
+        Assert.DoesNotContain("AccessToken", source);
+        Assert.DoesNotContain("Authorization", source);
     }
 
     [Fact]

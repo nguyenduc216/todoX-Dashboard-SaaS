@@ -278,6 +278,27 @@ public sealed class RVideoSceneVideoRecoveryAndDiagnosticsTests
     }
 
     [Fact]
+    public void SceneVideoSubmitCatchPersistsCompleteAi79DiagnosticsWithoutSecrets()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "SceneVideoWorkerHandler.cs");
+
+        Assert.Contains("AddAi79SubmitDiagnosticsAsync(job, policy, ex, CancellationToken.None)", source);
+        Assert.Contains("exceptionType = nameof(Ai79TaskSubmitException)", source);
+        Assert.Contains("provider = \"79ai\"", source);
+        Assert.Contains("model = policy.Model", source);
+        Assert.Contains("httpStatusCode = (int?)exception.HttpStatusCode", source);
+        Assert.Contains("providerErrorCode = exception.ErrorCode", source);
+        Assert.Contains("sanitizedResponseJson = SanitizeDiagnosticJson(exception.SanitizedResponseJson)", source);
+        Assert.Contains("sanitizedRequestMetadataJson = SanitizeDiagnosticJson(exception.SanitizedRequestMetadataJson)", source);
+        Assert.Contains("attemptCount = job.AttemptCount", source);
+        Assert.Contains("maxAttempts = job.MaxAttempts", source);
+        Assert.Contains("RVIDEO_79AI_SUBMIT_DIAGNOSTICS", source);
+        Assert.DoesNotContain("exception.AccessToken", source, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("exception.Authorization", source, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("exception.Credential", source, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void RecoverableStuckDetection_RequiresFailedJobAndBlankProviderTask()
     {
         var service = (RVideoSceneVideoRecoveryService)FormatterServices.GetUninitializedObject(typeof(RVideoSceneVideoRecoveryService));
