@@ -472,6 +472,41 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
 
             var existingTaskId = await _versions.GetSceneVideoProviderTaskIdAsync(version.Id, ct);
             string? taskId = string.IsNullOrWhiteSpace(existingTaskId) ? null : existingTaskId.Trim();
+            if (IsUnknownSubmission(version, taskId))
+            {
+                await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_RECONCILIATION_STARTED", "warning",
+                    "Scene-video submission outcome is unknown and requires reconciliation before another submit.",
+                    new
+                    {
+                        projectId = input.ProjectId,
+                        sceneId = input.SceneId,
+                        input.SceneIndex,
+                        renderJobId = job.Id,
+                        sceneVideoVersionId = version.Id,
+                        providerCode = input.ProviderCode,
+                        modelCode = policy.Model,
+                        logicalRequestId = attemptLogicalRequestId,
+                        providerTaskId = taskId,
+                        errorCode = version.ErrorMessage
+                    }, ct);
+                await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_PENDING_RECONCILIATION", "warning",
+                    "Scene-video submit is pending reconciliation; no duplicate provider submit will be attempted.",
+                    new
+                    {
+                        projectId = input.ProjectId,
+                        sceneId = input.SceneId,
+                        input.SceneIndex,
+                        renderJobId = job.Id,
+                        sceneVideoVersionId = version.Id,
+                        providerCode = input.ProviderCode,
+                        modelCode = policy.Model,
+                        logicalRequestId = attemptLogicalRequestId,
+                        providerTaskId = taskId,
+                        errorCode = "submit_outcome_unknown"
+                    }, ct);
+                throw new RenderJobPendingReconciliationException(
+                    "Video provider submit outcome is unknown; reconciliation is required before another submit.");
+            }
             AiImageBillingReservation reservation;
             if (string.IsNullOrWhiteSpace(taskId))
             {
@@ -618,6 +653,19 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                     await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_SUBMIT_BEGIN", "info",
                         "Scene-video provider submit started.",
                         new { jobId = job.Id, input.ProjectId, input.SceneId, input.SceneIndex, input.ProviderCode, model = policy.Model, input.CapabilityCode }, ct);
+                    await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_SUBMIT_STARTED", "info",
+                        "Scene-video provider submit started.",
+                        new
+                        {
+                            projectId = input.ProjectId,
+                            sceneId = input.SceneId,
+                            input.SceneIndex,
+                            renderJobId = job.Id,
+                            sceneVideoVersionId = version.Id,
+                            providerCode = input.ProviderCode,
+                            modelCode = policy.Model,
+                            logicalRequestId = attemptLogicalRequestId
+                        }, ct);
                     var submit = await adapter.SubmitAsync(new VideoProviderSubmitRequest(
                         input.ProviderId,
                         input.ProviderCapabilityId,
@@ -643,7 +691,18 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                     await _versions.MarkSceneVideoVersionSubmittedAsync(version.Id, input.ProviderCode, policy.Model, input.ProviderCapabilityId, taskId, ct);
                     await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_SUBMITTED", "info",
                         "Scene-video provider submit completed.",
-                        new { jobId = job.Id, input.ProjectId, input.SceneId, input.SceneIndex, taskId, input.ProviderCode, model = policy.Model, input.CapabilityCode }, ct);
+                        new
+                        {
+                            projectId = input.ProjectId,
+                            sceneId = input.SceneId,
+                            input.SceneIndex,
+                            renderJobId = job.Id,
+                            sceneVideoVersionId = version.Id,
+                            providerCode = input.ProviderCode,
+                            modelCode = policy.Model,
+                            logicalRequestId = attemptLogicalRequestId,
+                            providerTaskId = taskId
+                        }, ct);
                     await _repo.AddProjectEventAsync(project.Id, "SCENE_VIDEO_PROVIDER_SUBMITTED", "info",
                         $"Scene {input.SceneIndex} submitted to its configured video provider.",
                         new { jobId = job.Id, input.SceneId, input.SceneIndex, taskId, model = policy.Model, input.ProviderCode, attemptIndex }, ct);
@@ -663,9 +722,38 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                             diagnostics
                         }, CancellationToken.None);
                     await MarkPendingReconciliationAsync(input, version.Id, attemptLogicalRequestId, tariffSnapshot, ex.ErrorCode ?? "submit_transient", ex.Message, CancellationToken.None, null);
-                    await DeferPollAsync(job, attemptLogicalRequestId, TimeSpan.FromSeconds(Math.Max(1, _options.PollIntervalSeconds)),
-                        "SCENE_VIDEO_POLL_SCHEDULED", "Video provider submit transient; retry will reuse the same task flow.", CancellationToken.None);
-                    return;
+                    await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_SUBMIT_UNKNOWN", "warning",
+                        "Scene-video provider submit may have been accepted but no provider task ID was returned.",
+                        new
+                        {
+                            projectId = input.ProjectId,
+                            sceneId = input.SceneId,
+                            input.SceneIndex,
+                            renderJobId = job.Id,
+                            sceneVideoVersionId = version.Id,
+                            providerCode = input.ProviderCode,
+                            modelCode = policy.Model,
+                            logicalRequestId = attemptLogicalRequestId,
+                            providerTaskId = (string?)null,
+                            errorCode = ex.ErrorCode
+                        }, CancellationToken.None);
+                    await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_PENDING_RECONCILIATION", "warning",
+                        "Scene-video submit is pending reconciliation; no duplicate provider submit will be attempted.",
+                        new
+                        {
+                            projectId = input.ProjectId,
+                            sceneId = input.SceneId,
+                            input.SceneIndex,
+                            renderJobId = job.Id,
+                            sceneVideoVersionId = version.Id,
+                            providerCode = input.ProviderCode,
+                            modelCode = policy.Model,
+                            logicalRequestId = attemptLogicalRequestId,
+                            providerTaskId = (string?)null,
+                            errorCode = ex.ErrorCode ?? "submit_transient"
+                        }, CancellationToken.None);
+                    throw new RenderJobPendingReconciliationException(
+                        "Video provider submit outcome is unknown; reconciliation is required before another submit.");
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
@@ -693,6 +781,37 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
             try
             {
                 var adapter = _providerAdapters.Resolve(input.ProviderCode, input.CapabilityCode);
+                if (!string.IsNullOrWhiteSpace(existingTaskId))
+                {
+                    await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_RECONCILIATION_STARTED", "info",
+                        "Scene-video reconciliation resumed from the persisted provider task.",
+                        new
+                        {
+                            projectId = input.ProjectId,
+                            sceneId = input.SceneId,
+                            input.SceneIndex,
+                            renderJobId = job.Id,
+                            sceneVideoVersionId = version.Id,
+                            providerCode = input.ProviderCode,
+                            modelCode = policy.Model,
+                            logicalRequestId = attemptLogicalRequestId,
+                            providerTaskId = taskId
+                        }, ct);
+                }
+                await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_POLL_STARTED", "info",
+                    "Scene-video provider poll started.",
+                    new
+                    {
+                        projectId = input.ProjectId,
+                        sceneId = input.SceneId,
+                        input.SceneIndex,
+                        renderJobId = job.Id,
+                        sceneVideoVersionId = version.Id,
+                        providerCode = input.ProviderCode,
+                        modelCode = policy.Model,
+                        logicalRequestId = attemptLogicalRequestId,
+                        providerTaskId = taskId
+                    }, ct);
                 var status = await adapter.PollAsync(new VideoProviderPollRequest(
                     input.ProviderId,
                     input.ProviderCapabilityId,
@@ -702,6 +821,22 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                 await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_POLL_RESPONSE", "info",
                     "Scene-video provider poll response received.",
                     new { jobId = job.Id, input.ProjectId, input.SceneId, input.SceneIndex, taskId, provider = input.ProviderCode, normalizedStatus = status.Status }, ct);
+                await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_POLL_COMPLETED", "info",
+                    "Scene-video provider poll completed.",
+                    new
+                    {
+                        projectId = input.ProjectId,
+                        sceneId = input.SceneId,
+                        input.SceneIndex,
+                        renderJobId = job.Id,
+                        sceneVideoVersionId = version.Id,
+                        providerCode = input.ProviderCode,
+                        modelCode = status.ActualModel ?? policy.Model,
+                        logicalRequestId = attemptLogicalRequestId,
+                        providerTaskId = taskId,
+                        errorCode = status.ErrorCode,
+                        providerStatus = status.Status
+                    }, ct);
                 if (status.Status is VideoProviderTaskStatus.Queued or VideoProviderTaskStatus.Processing)
                 {
                     await _repo.AddProjectEventAsync(project.Id, "SCENE_VIDEO_PROVIDER_PROCESSING", "info",
@@ -764,6 +899,20 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                             $"79AI returned SUCCESS without a usable output video URL. task_id={taskId}");
                     }
 
+                    await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_DOWNLOAD_STARTED", "info",
+                        "Scene-video provider output download started.",
+                        new
+                        {
+                            projectId = input.ProjectId,
+                            sceneId = input.SceneId,
+                            input.SceneIndex,
+                            renderJobId = job.Id,
+                            sceneVideoVersionId = version.Id,
+                            providerCode = input.ProviderCode,
+                            modelCode = status.ActualModel ?? policy.Model,
+                            logicalRequestId = attemptLogicalRequestId,
+                            providerTaskId = taskId
+                        }, ct);
                     var saved = await _completion.CompleteProviderVideoAsync(new RVideoSceneVideoCompletionRequest(
                         project.Id,
                         scene.Id,
@@ -794,6 +943,51 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                         input.DurationSeconds,
                         input.CustomerPointRate);
                     await LogUsageAsync(input, job, attemptLogicalRequestId, actualVideoPoints, status.SanitizedResponseJson, true, null, taskId, ct);
+                    await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_DOWNLOAD_COMPLETED", "info",
+                        "Scene-video provider output was downloaded and persisted locally.",
+                        new
+                        {
+                            projectId = input.ProjectId,
+                            sceneId = input.SceneId,
+                            input.SceneIndex,
+                            renderJobId = job.Id,
+                            sceneVideoVersionId = version.Id,
+                            providerCode = input.ProviderCode,
+                            modelCode = status.ActualModel ?? policy.Model,
+                            logicalRequestId = attemptLogicalRequestId,
+                            providerTaskId = taskId
+                        }, ct);
+                    await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_COMPLETED", "info",
+                        "Scene-video completed after local media persistence.",
+                        new
+                        {
+                            projectId = input.ProjectId,
+                            sceneId = input.SceneId,
+                            input.SceneIndex,
+                            renderJobId = job.Id,
+                            sceneVideoVersionId = version.Id,
+                            providerCode = input.ProviderCode,
+                            modelCode = status.ActualModel ?? policy.Model,
+                            logicalRequestId = attemptLogicalRequestId,
+                            providerTaskId = taskId
+                        }, ct);
+                    if (!string.IsNullOrWhiteSpace(existingTaskId))
+                    {
+                        await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_RECONCILIATION_COMPLETED", "info",
+                            "Scene-video reconciliation completed after local media persistence.",
+                            new
+                            {
+                                projectId = input.ProjectId,
+                                sceneId = input.SceneId,
+                                input.SceneIndex,
+                                renderJobId = job.Id,
+                                sceneVideoVersionId = version.Id,
+                                providerCode = input.ProviderCode,
+                                modelCode = status.ActualModel ?? policy.Model,
+                                logicalRequestId = attemptLogicalRequestId,
+                                providerTaskId = taskId
+                            }, ct);
+                    }
                     return;
                 }
                 catch (VideoReconciliationException ex)
@@ -848,6 +1042,23 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
     {
         var retryLimit = Math.Max(1, _config.GetValue("VideoRender:MaxReconciliationRetries", DefaultMaxReconciliationRetries));
         var currentAttempt = await _jobs.GetProviderReconciliationAttemptCountAsync(job.Id, ct) + 1;
+        await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_DOWNLOAD_FAILED", "warning",
+            "Scene-video provider output could not be persisted locally.",
+            new
+            {
+                projectId = input.ProjectId,
+                sceneId = input.SceneId,
+                input.SceneIndex,
+                renderJobId = job.Id,
+                sceneVideoVersionId = versionId,
+                providerCode = input.ProviderCode,
+                modelCode = input.ModelName,
+                logicalRequestId,
+                providerTaskId,
+                errorCode,
+                reconciliationAttempt = currentAttempt,
+                maxReconciliationRetries = retryLimit
+            }, ct);
         if (currentAttempt < retryLimit)
         {
             await MarkPendingReconciliationAsync(input, versionId, logicalRequestId, tariffSnapshot, errorCode, errorMessage, ct, providerTaskId);
@@ -860,31 +1071,26 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
             throw new RenderJobDeferredException(errorMessage);
         }
 
-        var finalCode = errorCode is "PROVIDER_OUTPUT_URL_MISSING"
-            ? errorCode
-            : "RVIDEO_VIDEO_PERSIST_FAILED";
-        await _versions.FailSceneVideoVersionAsync(versionId, finalCode, errorMessage, ct);
-        await _repo.UpdateSceneAsync(scene.Id, VideoSceneStatuses.Failed,
-            errorMessage: errorMessage, title: scene.Title, scenePrompt: scene.ScenePrompt,
-            imagePrompt: scene.ImagePrompt, videoPrompt: scene.VideoPrompt, ct: ct);
-        await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_PERSIST_FAILED", "error",
-            "Provider video succeeded but local persistence did not complete.",
-            new { jobId = job.Id, input.SceneId, input.SceneIndex, versionId, providerTaskId, errorCode = finalCode },
-            ct);
-        await _repo.AddProjectEventAsync(project.Id, "SCENE_VIDEO_FAILED", "error",
-            $"Scene {input.SceneIndex} result reconciliation failed.",
+        await MarkPendingReconciliationAsync(input, versionId, logicalRequestId, tariffSnapshot, errorCode, errorMessage, ct, providerTaskId);
+        await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_PENDING_RECONCILIATION", "warning",
+            "Provider video succeeded but local persistence is pending reconciliation.",
             new
             {
-                jobId = job.Id,
+                projectId = input.ProjectId,
                 sceneId = input.SceneId,
-                sceneIndex = input.SceneIndex,
+                input.SceneIndex,
+                renderJobId = job.Id,
+                sceneVideoVersionId = versionId,
+                providerCode = input.ProviderCode,
+                modelCode = input.ModelName,
+                logicalRequestId,
                 providerTaskId,
-                errorCode = finalCode,
+                errorCode,
                 errorMessage,
                 reconciliationAttempt = currentAttempt,
                 maxReconciliationRetries = retryLimit
             }, ct);
-        throw new RenderJobTerminalFailureException(errorMessage);
+        throw new RenderJobPendingReconciliationException(errorMessage);
     }
 
 #if false
@@ -1514,6 +1720,10 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
            || status.Equals("pending_reconciliation", StringComparison.OrdinalIgnoreCase)
            || status.Equals("video_rendering", StringComparison.OrdinalIgnoreCase)
            || status.Equals("rendering", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsUnknownSubmission(SceneVideoVersionDto version, string? providerTaskId)
+        => string.IsNullOrWhiteSpace(providerTaskId)
+           && version.Status.Equals("pending_reconciliation", StringComparison.OrdinalIgnoreCase);
 
     private static string BuildAttemptLogicalRequestId(string logicalRequestId, int attemptIndex)
         => attemptIndex <= 0 ? logicalRequestId : $"{logicalRequestId}-fallback-{attemptIndex}";

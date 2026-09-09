@@ -268,6 +268,76 @@ public sealed class RVideoSceneVideoRecoveryAndDiagnosticsTests
         Assert.False(service.IsRecoverableStuck(version, job));
     }
 
+    [Fact]
+    public void SceneVideoUnknownSubmitReusesThePendingVersionWithoutBlindResubmission()
+    {
+        var worker = ReadRepoFile("Services", "VideoRender", "SceneVideoWorkerHandler.cs");
+        var versions = ReadRepoFile("Services", "VideoRender", "SceneMediaVersioningService.cs");
+
+        Assert.Contains("IsUnknownSubmission(version, taskId)", worker);
+        Assert.Contains("RVIDEO_VIDEO_SUBMIT_UNKNOWN", worker);
+        Assert.Contains("RVIDEO_VIDEO_PENDING_RECONCILIATION", worker);
+        Assert.Contains("throw new RenderJobPendingReconciliationException", worker);
+        Assert.Contains("lower(status)='pending_reconciliation'", versions);
+        Assert.Contains("provider_task_id IS NULL OR btrim(provider_task_id) = ''", versions);
+    }
+
+    [Fact]
+    public void SceneVideoReconciliationCanRestartKnownTasksAfterTheOriginalJobFailed()
+    {
+        var repository = ReadRepoFile("Services", "VideoRender", "VideoRenderRepository.cs");
+        var jobs = ReadRepoFile("Services", "Render", "RenderJobService.cs");
+
+        Assert.Contains("j.status NOT IN ('completed', 'cancelled')", repository);
+        Assert.Contains("v.status IN ('submitted', 'processing', 'pending_reconciliation', 'rendering')", repository);
+        Assert.Contains("'pending_reconciliation', 'failed'", jobs);
+    }
+
+    [Fact]
+    public void SceneVideoProviderSuccessDownloadsAndCompletesBeforeTheParentCanAdvance()
+    {
+        var worker = ReadRepoFile("Services", "VideoRender", "SceneVideoWorkerHandler.cs");
+        var completion = ReadRepoFile("Services", "VideoRender", "RVideoSceneVideoCompletionService.cs");
+
+        var downloadIndex = worker.IndexOf("\"RVIDEO_VIDEO_DOWNLOAD_STARTED\"", StringComparison.Ordinal);
+        var completeIndex = worker.IndexOf("\"RVIDEO_VIDEO_COMPLETED\"", StringComparison.Ordinal);
+        Assert.True(downloadIndex >= 0);
+        Assert.True(completeIndex > downloadIndex);
+        Assert.Contains("RVIDEO_VIDEO_DOWNLOAD_COMPLETED", worker);
+        Assert.Contains("CompleteSceneVideoVersionAsync", completion);
+        Assert.Contains("selected_video_version_id=@versionId", ReadRepoFile("Services", "VideoRender", "SceneMediaVersioningService.cs"));
+    }
+
+    [Fact]
+    public void SceneVideoProviderEventsCarryPersistentCorrelationFields()
+    {
+        var worker = ReadRepoFile("Services", "VideoRender", "SceneVideoWorkerHandler.cs");
+
+        foreach (var eventName in new[]
+                 {
+                     "RVIDEO_VIDEO_SUBMIT_STARTED",
+                     "RVIDEO_VIDEO_SUBMITTED",
+                     "RVIDEO_VIDEO_SUBMIT_UNKNOWN",
+                     "RVIDEO_VIDEO_PENDING_RECONCILIATION",
+                     "RVIDEO_VIDEO_POLL_STARTED",
+                     "RVIDEO_VIDEO_POLL_COMPLETED",
+                     "RVIDEO_VIDEO_DOWNLOAD_STARTED",
+                     "RVIDEO_VIDEO_DOWNLOAD_COMPLETED",
+                     "RVIDEO_VIDEO_COMPLETED",
+                     "RVIDEO_VIDEO_DOWNLOAD_FAILED",
+                     "RVIDEO_VIDEO_RECONCILIATION_STARTED",
+                     "RVIDEO_VIDEO_RECONCILIATION_COMPLETED"
+                 })
+        {
+            Assert.Contains(eventName, worker);
+        }
+
+        Assert.Contains("logicalRequestId", worker);
+        Assert.Contains("providerCode", worker);
+        Assert.Contains("modelCode", worker);
+        Assert.Contains("providerTaskId", worker);
+    }
+
     private static string ReadRepoFile(params string[] parts)
     {
         var path = Path.GetFullPath(Path.Combine(

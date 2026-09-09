@@ -268,7 +268,7 @@ public sealed class RVideoProviderPollingRegressionTests
     }
 
     [Fact]
-    public void ProviderSuccessReconciliationIsBoundedAndEndsInFailedState()
+    public void ProviderSuccessReconciliationKeepsTheKnownTaskRecoverable()
     {
         var source = ReadRepoFile("Services", "VideoRender", "SceneVideoWorkerHandler.cs");
         var completion = ReadRepoFile("Services", "VideoRender", "RVideoSceneVideoCompletionService.cs");
@@ -276,13 +276,13 @@ public sealed class RVideoProviderPollingRegressionTests
         Assert.Contains("MaxReconciliationRetries", source);
         Assert.Contains("PROVIDER_OUTPUT_URL_MISSING", source);
         Assert.Contains("MEDIA_STORAGE_FAILED", completion);
-        Assert.Contains("RVIDEO_VIDEO_PERSIST_FAILED", source);
         Assert.Contains("PROVIDER_SUCCESS_RECONCILIATION_FAILED", source);
-        Assert.Contains("await _versions.FailSceneVideoVersionAsync", source);
-        Assert.Contains("VideoSceneStatuses.Failed", source);
         Assert.Contains("GetProviderReconciliationAttemptCountAsync", source);
         Assert.Contains("throw new RenderJobDeferredException", source);
-        Assert.Contains("throw new RenderJobTerminalFailureException", source);
+        Assert.Contains("MarkPendingReconciliationAsync(input, versionId", source);
+        Assert.Contains("RVIDEO_VIDEO_DOWNLOAD_FAILED", source);
+        Assert.Contains("RVIDEO_VIDEO_PENDING_RECONCILIATION", source);
+        Assert.Contains("throw new RenderJobPendingReconciliationException", source);
     }
 
     [Fact]

@@ -1542,11 +1542,19 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
              WHERE scene_id=@sceneId
                AND tenant_id=@tenant
                AND logical_request_id=@logicalRequestId
-               AND provider_task_id IS NOT NULL
-               AND btrim(provider_task_id) <> ''
                AND (
-                    lower(status) IN ('queued','submitted','pending','processing','pending_reconciliation','video_rendering','rendering')
-                    OR (lower(status) IN ('failed','failure','error') AND error_code IN ('RVIDEO_VIDEO_PERSIST_FAILED','rvideo_video_persist_failed','PROVIDER_SUCCESS_RECONCILIATION_FAILED','MEDIA_STORAGE_FAILED'))
+                    (
+                        provider_task_id IS NOT NULL
+                        AND btrim(provider_task_id) <> ''
+                        AND (
+                            lower(status) IN ('queued','submitted','pending','processing','pending_reconciliation','video_rendering','rendering')
+                            OR (lower(status) IN ('failed','failure','error') AND error_code IN ('RVIDEO_VIDEO_PERSIST_FAILED','rvideo_video_persist_failed','PROVIDER_SUCCESS_RECONCILIATION_FAILED','MEDIA_STORAGE_FAILED'))
+                        )
+                    )
+                    OR (
+                        lower(status)='pending_reconciliation'
+                        AND (provider_task_id IS NULL OR btrim(provider_task_id) = '')
+                    )
                )
              ORDER BY CASE WHEN lower(status)='pending_reconciliation' THEN 0 ELSE 1 END,
                       version_number DESC

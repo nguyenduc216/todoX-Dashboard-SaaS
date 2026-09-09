@@ -1175,7 +1175,7 @@ public sealed class VideoRenderRepository
                AND btrim(v.provider_task_id) <> ''
                AND v.status IN ('submitted', 'processing', 'pending_reconciliation', 'rendering')
                AND j.job_type='render_scene_video'
-               AND j.status IN ('rendering', 'pending_reconciliation');
+               AND j.status NOT IN ('completed', 'cancelled');
             """,
             new { tenant = _tenant.TenantId });
         return jobs.ToList();

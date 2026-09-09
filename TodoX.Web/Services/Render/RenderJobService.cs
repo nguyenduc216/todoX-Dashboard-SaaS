@@ -836,7 +836,7 @@ public sealed class RenderJobService : IRenderJobService
                    lock_until=NULL,
                    updated_at=now()
              WHERE id=@jobId
-               AND status IN ('queued', 'preparing', 'rendering', 'post_processing', 'pending_reconciliation');
+               AND status IN ('queued', 'preparing', 'rendering', 'post_processing', 'pending_reconciliation', 'failed');
             """,
             new { jobId, delaySeconds, reasonCode, reasonMessage });
 

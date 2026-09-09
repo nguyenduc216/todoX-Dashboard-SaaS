@@ -184,22 +184,49 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
         var submitAttempt = 0;
         try
         {
-            var currentReferenceAsset = await _operations.GetLatestAssetAsync(
-                danceJob.Id,
-                DanceSellOperationTypes.MotionVideo,
+            var currentReferenceAsset = await _operations.GetLatestAssetForRenderJobAsync(
+                renderJob.Id,
                 DanceSellAssetRoles.MotionReferenceProviderUpload,
                 danceJob.PreparedReferenceMediaId,
                 danceJob.PreparedReferenceObjectKey,
                 ct);
+            var referenceAssetFromPreviousAttempt = false;
+            if (currentReferenceAsset is null)
+            {
+                currentReferenceAsset = await _operations.GetLatestAssetAsync(
+                    danceJob.Id,
+                    DanceSellOperationTypes.MotionVideo,
+                    DanceSellAssetRoles.MotionReferenceProviderUpload,
+                    danceJob.PreparedReferenceMediaId,
+                    danceJob.PreparedReferenceObjectKey,
+                    ct);
+                referenceAssetFromPreviousAttempt = currentReferenceAsset is not null;
+            }
+
             if (IsVerifiedProviderAsset(currentReferenceAsset, out var currentReferenceIdBase))
             {
-                referenceUrlUsed = GetCanonicalProviderUploadUrl(currentReferenceAsset!);
-                await _renderJobs.AddEventAsync(renderJob.Id, "AI_PROVIDER_REFERENCE_UPLOAD_REUSED_CURRENT_ATTEMPT",
-                    "Verified reference upload reused for the same render attempt.",
-                    new { danceSellJobId = danceJob.Id, renderJobId = renderJob.Id, canonicalUploadUrl = referenceUrlUsed, idBase = currentReferenceIdBase }, ct: ct);
-                await _operations.UpsertAssetAsync(CloneProviderAsset(currentReferenceAsset!, motionOperationId, renderJob.Id), ct);
+                var canReuseReference = !referenceAssetFromPreviousAttempt
+                    || await ReverifyPreviousReferenceAssetAsync(renderJob, danceJob, runtime, currentReferenceAsset!, ct);
+                if (canReuseReference)
+                {
+                    referenceUrlUsed = GetCanonicalProviderUploadUrl(currentReferenceAsset!);
+                    await _renderJobs.AddEventAsync(renderJob.Id, "AI_PROVIDER_REFERENCE_UPLOAD_REUSED_CURRENT_ATTEMPT",
+                        referenceAssetFromPreviousAttempt
+                            ? "Verified reference upload reused after live provider re-verification."
+                            : "Verified reference upload reused for the same render attempt.",
+                        new
+                        {
+                            danceSellJobId = danceJob.Id,
+                            renderJobId = renderJob.Id,
+                            canonicalUploadUrl = referenceUrlUsed,
+                            idBase = currentReferenceIdBase,
+                            liveReverified = referenceAssetFromPreviousAttempt
+                        }, ct: ct);
+                    await _operations.UpsertAssetAsync(CloneProviderAsset(currentReferenceAsset!, motionOperationId, renderJob.Id), ct);
+                }
             }
-            else
+
+            if (string.IsNullOrWhiteSpace(referenceUrlUsed))
             {
                 providerStage = "reference_upload";
                 await _renderJobs.AddEventAsync(renderJob.Id, "AI_PROVIDER_REFERENCE_UPLOAD_STARTED", "Uploading the current prepared reference image to the motion provider.",
@@ -872,6 +899,67 @@ public sealed class DanceSellRenderHandler : IRenderJobHandler
         => ReadConfigString(asset.MetadataJson, "uploadUrl")
            ?? asset.ProviderUrl
            ?? throw new InvalidOperationException("DANCE_SELL_PROVIDER_MEDIA_URL_REQUIRED");
+
+    private async Task<bool> ReverifyPreviousReferenceAssetAsync(
+        RenderJobDto renderJob,
+        DanceSellJobDto danceJob,
+        Ai79MotionRuntime runtime,
+        AiOperationAssetDto asset,
+        CancellationToken ct)
+    {
+        var providerUrl = GetCanonicalProviderUploadUrl(asset);
+        var idBase = ReadConfigString(asset.MetadataJson, "idBase");
+        try
+        {
+            var verified = await VerifyProviderImageAsync(
+                renderJob,
+                danceJob,
+                runtime,
+                new Ai79MediaUploadResult(
+                    providerUrl,
+                    idBase,
+                    ReadConfigString(asset.MetadataJson, "projectId") ?? runtime.ProjectId,
+                    ReadConfigString(asset.MetadataJson, "fileName"),
+                    "{}"),
+                ct);
+            if (!string.Equals(verified.IdBase, idBase, StringComparison.OrdinalIgnoreCase))
+            {
+                await _renderJobs.AddEventAsync(
+                    renderJob.Id,
+                    "AI_PROVIDER_REFERENCE_ASSET_REUSE_REJECTED",
+                    "Previous-attempt provider reference identity did not match during live verification.",
+                    new { danceSellJobId = danceJob.Id, renderJobId = renderJob.Id, idBase, verifiedIdBase = verified.IdBase },
+                    level: "warning",
+                    ct: ct);
+                return false;
+            }
+
+            await _renderJobs.AddEventAsync(
+                renderJob.Id,
+                "AI_PROVIDER_REFERENCE_ASSET_REVERIFIED",
+                "Previous-attempt provider reference passed live verification.",
+                new { danceSellJobId = danceJob.Id, renderJobId = renderJob.Id, idBase, providerUrl },
+                ct: ct);
+            return true;
+        }
+        catch (Ai79TaskSubmitException ex)
+        {
+            await _renderJobs.AddEventAsync(
+                renderJob.Id,
+                "AI_PROVIDER_REFERENCE_ASSET_REUSE_REJECTED",
+                "Previous-attempt provider reference failed live verification; a fresh binary upload will be performed.",
+                new
+                {
+                    danceSellJobId = danceJob.Id,
+                    renderJobId = renderJob.Id,
+                    idBase,
+                    errorCode = ex.ErrorCode
+                },
+                level: "warning",
+                ct: ct);
+            return false;
+        }
+    }
 
     private static AiOperationAssetDto CloneProviderAsset(AiOperationAssetDto asset, Guid operationId, Guid renderJobId)
     {

@@ -460,6 +460,11 @@ public sealed class RDanceFashionDemoPageTests
         Assert.Contains("danceJob.PreparedReferenceObjectKey", submit, StringComparison.Ordinal);
         Assert.Contains("danceJob.PreparedReferenceUrl", submit, StringComparison.Ordinal);
         Assert.Contains("DanceSellAssetRoles.MotionReferenceProviderUpload", submit, StringComparison.Ordinal);
+        Assert.Contains("GetLatestAssetForRenderJobAsync", submit, StringComparison.Ordinal);
+        Assert.Contains("referenceAssetFromPreviousAttempt", submit, StringComparison.Ordinal);
+        Assert.Contains("ReverifyPreviousReferenceAssetAsync", handler, StringComparison.Ordinal);
+        Assert.Contains("AI_PROVIDER_REFERENCE_ASSET_REVERIFIED", handler, StringComparison.Ordinal);
+        Assert.Contains("AI_PROVIDER_REFERENCE_ASSET_REUSE_REJECTED", handler, StringComparison.Ordinal);
         Assert.Contains("AI_PROVIDER_REFERENCE_UPLOAD_STARTED", submit, StringComparison.Ordinal);
         Assert.Contains("AI_PROVIDER_REFERENCE_UPLOAD_FAILED", submit, StringComparison.Ordinal);
         Assert.Contains("AI_PROVIDER_REFERENCE_UPLOAD_COMPLETED", submit, StringComparison.Ordinal);
@@ -558,7 +563,7 @@ public sealed class RDanceFashionDemoPageTests
         Assert.Contains("[\"video_url\"] = request.VideoUrl", client, StringComparison.Ordinal);
         Assert.Contains("[\"subType\"] = request.SubType", client, StringComparison.Ordinal);
         Assert.Contains("[\"background_source\"] = request.BackgroundSource", client, StringComparison.Ordinal);
-        Assert.DoesNotContain("[\"model\"] = request.Model", motionSubmit, StringComparison.Ordinal);
+        Assert.Contains("[\"model\"] = request.Model", motionSubmit, StringComparison.Ordinal);
         Assert.Contains("MediaTypeHeaderValue.Parse(file.MimeType)", client, StringComparison.Ordinal);
         Assert.Contains("FindUploadAssetUrl", client, StringComparison.Ordinal);
         Assert.Contains("\"download_url\"", client, StringComparison.Ordinal);
