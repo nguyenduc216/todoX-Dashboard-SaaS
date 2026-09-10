@@ -1,6 +1,7 @@
 using System.Text.Json;
 using TodoX.Web.Services.Platform;
 using TodoX.Web.Services.Render;
+using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
 namespace TodoX.Web.Tests;
@@ -90,7 +91,10 @@ public sealed class CoreExecutionLifecycleTests
         CapturingCompletionService completion)
         => new(
             new CoreExecutionRouter(new[] { new FixedAdapter(result) }),
-            completion);
+            new CoreExecutionAdapterResolver(),
+            new FakeCatalog(),
+            completion,
+            NullLogger<CoreServiceJobHandler>.Instance);
 
     private static RenderJobDto CreateJob()
     {
@@ -124,6 +128,35 @@ public sealed class CoreExecutionLifecycleTests
             CoreJobDispatchContext context,
             CancellationToken ct = default)
             => Task.FromResult(_result);
+    }
+
+    private sealed class FakeCatalog : ICoreServiceCatalogService
+    {
+        private readonly Guid _serviceId = Guid.NewGuid();
+
+        public Task<IReadOnlyList<CoreServiceView>> ListAsync(CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyList<CoreServiceView>>(Array.Empty<CoreServiceView>());
+
+        public Task<CoreServiceView?> GetByCodeAsync(string serviceCode, CancellationToken ct = default)
+            => Task.FromResult<CoreServiceView?>(Create(serviceCode, serviceCode == "TEST_SERVICE" ? "timelapse" : "rvideo"));
+
+        public Task<CoreServiceView?> GetByIdAsync(Guid serviceId, CancellationToken ct = default)
+            => Task.FromResult<CoreServiceView?>(Create("TEST_SERVICE", "timelapse", serviceId));
+
+        private CoreServiceView Create(string code, string type, Guid? id = null)
+            => new(
+                id ?? _serviceId,
+                code,
+                code,
+                type,
+                null,
+                null,
+                null,
+                JsonSerializer.SerializeToElement(new { }),
+                JsonSerializer.SerializeToElement(new { }),
+                Array.Empty<CoreServicePriceView>(),
+                true,
+                0);
     }
 
     private sealed class CapturingCompletionService : ICoreJobCompletionService

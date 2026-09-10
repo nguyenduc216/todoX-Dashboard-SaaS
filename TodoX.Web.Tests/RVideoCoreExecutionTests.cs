@@ -2,6 +2,7 @@ using System.Text.Json;
 using TodoX.Web.Services.Platform;
 using TodoX.Web.Services.Render;
 using TodoX.Web.Services.VideoRender;
+using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
 namespace TodoX.Web.Tests;
@@ -17,7 +18,10 @@ public sealed class RVideoCoreExecutionTests
         var completion = new CapturingCompletion();
         var handler = new CoreServiceJobHandler(
             new CoreExecutionRouter(new ICoreJobExecutionAdapter[] { adapter }),
-            completion);
+            new CoreExecutionAdapterResolver(),
+            new FakeCatalog(serviceId, "RVIDEO", "rvideo"),
+            completion,
+            NullLogger<CoreServiceJobHandler>.Instance);
         var input = JsonSerializer.Serialize(new
         {
             engine = "RVIDEO",
@@ -43,6 +47,72 @@ public sealed class RVideoCoreExecutionTests
         Assert.Equal(4, adapter.Context?.Input.GetProperty("sceneIds").GetArrayLength());
         Assert.Equal(1, completion.ProgressCalls);
         Assert.NotNull(completion.Deferred);
+    }
+
+    [Fact]
+    public async Task CoreServiceHandler_PreservesCatalogIdentityAndDispatchesRVideoByServiceType()
+    {
+        var serviceId = Guid.NewGuid();
+        var coreJobId = Guid.NewGuid();
+        var adapter = new CapturingAdapter();
+        var completion = new CapturingCompletion();
+        var handler = new CoreServiceJobHandler(
+            new CoreExecutionRouter(new ICoreJobExecutionAdapter[] { adapter }),
+            new CoreExecutionAdapterResolver(),
+            new FakeCatalog(serviceId, "NUOI_DAY_CON_VIDEO", "rvideo"),
+            completion,
+            NullLogger<CoreServiceJobHandler>.Instance);
+        var input = JsonSerializer.Serialize(new
+        {
+            serviceId,
+            serviceCode = "NUOI_DAY_CON_VIDEO",
+            channel = "dashboard",
+            payload = new
+            {
+                projectId = 64,
+                sceneIds = new[] { 334 }
+            }
+        });
+
+        await Assert.ThrowsAsync<RenderJobDeferredException>(() =>
+            handler.HandleAsync(new RenderJobDto
+            {
+                Id = coreJobId,
+                JobType = RenderJobTypes.CoreService,
+                InputJson = input
+            }, CancellationToken.None));
+
+        Assert.Equal("RVIDEO", adapter.Context?.ServiceCode);
+        Assert.Equal(coreJobId, adapter.Context?.CoreJobId);
+        Assert.NotNull(completion.Deferred);
+    }
+
+    [Fact]
+    public void ExecutionResolverMapsAnyRVideoCatalogServiceToRVideo()
+    {
+        var resolver = new CoreExecutionAdapterResolver();
+
+        Assert.Equal("RVIDEO", resolver.Resolve("NUOI_DAY_CON_VIDEO", "rvideo").ExecutionAdapterCode);
+        Assert.Equal("RVIDEO", resolver.Resolve("ANOTHER_RVIDEO_SERVICE", "rvideo").ExecutionAdapterCode);
+    }
+
+    [Fact]
+    public void ExecutionResolverPreservesConstructionTimelapseDirectMapping()
+    {
+        var resolution = new CoreExecutionAdapterResolver()
+            .Resolve("CONSTRUCTION_VIDEO", "timelapse");
+
+        Assert.Equal("CONSTRUCTION_VIDEO", resolution.ExecutionAdapterCode);
+    }
+
+    [Fact]
+    public void ExecutionResolverRejectsUnknownCatalogServiceType()
+    {
+        var resolution = new CoreExecutionAdapterResolver()
+            .Resolve("UNKNOWN_SERVICE", "unknown");
+
+        Assert.False(resolution.IsResolved);
+        Assert.Contains("no execution-adapter mapping", resolution.FailureReason, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -172,5 +242,36 @@ public sealed class RVideoCoreExecutionTests
 
         public Task<CoreBillingCompletion> FailAsync(CoreExecutionAuthority authority, CoreJobFailRequest request, CancellationToken ct = default)
             => Task.FromResult(new CoreBillingCompletion(true, RenderPointStatuses.Cancelled, 0, null));
+    }
+
+    private sealed class FakeCatalog : ICoreServiceCatalogService
+    {
+        private readonly CoreServiceView _service;
+
+        public FakeCatalog(Guid id, string code, string type)
+        {
+            _service = new(
+                id,
+                code,
+                code,
+                type,
+                null,
+                null,
+                null,
+                JsonSerializer.SerializeToElement(new { }),
+                JsonSerializer.SerializeToElement(new { }),
+                Array.Empty<CoreServicePriceView>(),
+                true,
+                0);
+        }
+
+        public Task<IReadOnlyList<CoreServiceView>> ListAsync(CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyList<CoreServiceView>>(new[] { _service });
+
+        public Task<CoreServiceView?> GetByCodeAsync(string serviceCode, CancellationToken ct = default)
+            => Task.FromResult<CoreServiceView?>(_service);
+
+        public Task<CoreServiceView?> GetByIdAsync(Guid serviceId, CancellationToken ct = default)
+            => Task.FromResult<CoreServiceView?>(serviceId == _service.Id ? _service : null);
     }
 }

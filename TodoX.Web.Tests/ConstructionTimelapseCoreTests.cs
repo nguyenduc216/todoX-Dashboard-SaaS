@@ -25,11 +25,16 @@ public sealed class ConstructionTimelapseCoreTests
         var bridge = new CapturingExecutionBridge(legacyJobId);
         var adapter = new ConstructionTimelapseAdapter(bridge);
         var router = new CoreExecutionRouter(new ICoreJobExecutionAdapter[] { adapter });
+        var resolution = new CoreExecutionAdapterResolution(
+            "CONSTRUCTION_VIDEO",
+            "timelapse",
+            "CONSTRUCTION_VIDEO",
+            null);
         var context = CreateContext();
 
-        Assert.True(router.CanHandle("CONSTRUCTION_VIDEO"));
+        Assert.True(router.CanHandle(resolution));
 
-        var result = await router.DispatchAsync(context);
+        var result = await router.DispatchAsync(context, resolution);
 
         Assert.Equal(CoreExecutionDisposition.Deferred, result.Disposition);
         Assert.Equal("todox", result.ExecutionSystem);

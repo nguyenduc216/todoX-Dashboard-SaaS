@@ -143,19 +143,25 @@ public sealed class CorePlatformContractTests
     {
         var adapter = new CapturingAdapter("TIMELAPSE");
         var router = new CoreExecutionRouter(new[] { adapter });
+        var resolution = new CoreExecutionAdapterResolution(
+            "CONSTRUCTION_VIDEO",
+            "timelapse",
+            "TIMELAPSE",
+            null);
         var payload = JsonSerializer.SerializeToElement(new { sceneCount = 4 });
         var context = new CoreJobDispatchContext(
             Guid.NewGuid(),
             Guid.NewGuid(),
-            "timelapse",
+            "CONSTRUCTION_VIDEO",
             new CoreRequestContext(Guid.NewGuid(), Guid.NewGuid(), CoreChannelCodes.Zalo),
             payload,
             null,
             null);
 
-        var result = await router.DispatchAsync(context);
+        Assert.True(router.CanHandle(resolution));
+        var result = await router.DispatchAsync(context, resolution);
 
-        Assert.Same(context, adapter.LastContext);
+        Assert.Equal(context with { ServiceCode = "TIMELAPSE" }, adapter.LastContext);
         Assert.Equal(CoreExecutionDisposition.Completed, result.Disposition);
     }
 

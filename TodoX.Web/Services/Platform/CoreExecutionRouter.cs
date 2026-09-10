@@ -2,9 +2,12 @@ namespace TodoX.Web.Services.Platform;
 
 public interface ICoreExecutionRouter
 {
-    bool CanHandle(string serviceCode);
+    bool CanHandle(CoreExecutionAdapterResolution resolution);
 
-    Task<CoreExecutionResult> DispatchAsync(CoreJobDispatchContext context, CancellationToken ct = default);
+    Task<CoreExecutionResult> DispatchAsync(
+        CoreJobDispatchContext context,
+        CoreExecutionAdapterResolution resolution,
+        CancellationToken ct = default);
 }
 
 /// <summary>
@@ -35,18 +38,29 @@ public sealed class CoreExecutionRouter : ICoreExecutionRouter
         _adapters = map;
     }
 
-    public bool CanHandle(string serviceCode)
-        => !string.IsNullOrWhiteSpace(serviceCode) && _adapters.ContainsKey(serviceCode.Trim());
+    public bool CanHandle(CoreExecutionAdapterResolution resolution)
+        => resolution.IsResolved
+           && _adapters.ContainsKey(resolution.ExecutionAdapterCode!);
 
-    public Task<CoreExecutionResult> DispatchAsync(CoreJobDispatchContext context, CancellationToken ct = default)
+    public Task<CoreExecutionResult> DispatchAsync(
+        CoreJobDispatchContext context,
+        CoreExecutionAdapterResolution resolution,
+        CancellationToken ct = default)
     {
-        if (!_adapters.TryGetValue(context.ServiceCode.Trim(), out var adapter))
+        if (!resolution.IsResolved)
         {
             throw new InvalidOperationException(
-                $"No TodoX execution adapter is registered for service '{context.ServiceCode}'. " +
-                "The core job must not be dispatched until its service adapter is available.");
+                $"Catalog service '{resolution.CatalogServiceCode}' with type '{resolution.CatalogServiceType}' " +
+                $"could not resolve an execution adapter. Reason: {resolution.FailureReason ?? "unknown"}");
         }
 
-        return adapter.DispatchAsync(context, ct);
+        if (!_adapters.TryGetValue(resolution.ExecutionAdapterCode!, out var adapter))
+        {
+            throw new InvalidOperationException(
+                $"Catalog service '{resolution.CatalogServiceCode}' with type '{resolution.CatalogServiceType}' " +
+                $"resolved execution adapter '{resolution.ExecutionAdapterCode}', but it is not registered.");
+        }
+
+        return adapter.DispatchAsync(context with { ServiceCode = resolution.ExecutionAdapterCode! }, ct);
     }
 }

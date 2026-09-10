@@ -13,14 +13,23 @@ public sealed class CoreServiceJobHandler : IRenderJobHandler
         CoreExecutionAuthority.Trusted(nameof(CoreServiceJobHandler));
 
     private readonly ICoreExecutionRouter _router;
+    private readonly ICoreExecutionAdapterResolver _adapterResolver;
+    private readonly ICoreServiceCatalogService _catalog;
     private readonly ICoreJobCompletionService _completion;
+    private readonly ILogger<CoreServiceJobHandler> _logger;
 
     public CoreServiceJobHandler(
         ICoreExecutionRouter router,
-        ICoreJobCompletionService completion)
+        ICoreExecutionAdapterResolver adapterResolver,
+        ICoreServiceCatalogService catalog,
+        ICoreJobCompletionService completion,
+        ILogger<CoreServiceJobHandler> logger)
     {
         _router = router;
+        _adapterResolver = adapterResolver;
+        _catalog = catalog;
         _completion = completion;
+        _logger = logger;
     }
 
     public string JobType => RenderJobTypes.CoreService;
@@ -39,11 +48,36 @@ public sealed class CoreServiceJobHandler : IRenderJobHandler
             throw new InvalidOperationException("Core service job is missing service identity.");
         }
 
-        var channel = CoreChannelCodes.Normalize(envelope.Channel);
-        if (!_router.CanHandle(envelope.ServiceCode))
+        var catalogService = await _catalog.GetByIdAsync(envelope.ServiceId, ct)
+            ?? throw new InvalidOperationException(
+                $"Core job catalog service '{envelope.ServiceCode}' ({envelope.ServiceId}) no longer exists.");
+        if (!string.Equals(catalogService.ServiceCode, envelope.ServiceCode, StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException(
-                $"Service '{envelope.ServiceCode}' is registered in the catalog but has no execution adapter.");
+                $"Core job catalog identity mismatch: snapshot service '{envelope.ServiceCode}' does not match " +
+                $"catalog service '{catalogService.ServiceCode}' for id '{envelope.ServiceId}'.");
+        }
+
+        var resolution = _adapterResolver.Resolve(catalogService.ServiceCode, catalogService.ServiceType);
+        _logger.LogInformation(
+            "CORE_EXECUTION_ADAPTER_RESOLVED jobId={JobId} catalogServiceCode={CatalogServiceCode} catalogServiceType={CatalogServiceType} executionAdapter={ExecutionAdapter}",
+            job.Id,
+            resolution.CatalogServiceCode,
+            resolution.CatalogServiceType,
+            resolution.ExecutionAdapterCode);
+        if (!resolution.IsResolved)
+        {
+            throw new InvalidOperationException(
+                $"Catalog service '{resolution.CatalogServiceCode}' with type '{resolution.CatalogServiceType}' " +
+                $"could not resolve an execution adapter. Reason: {resolution.FailureReason ?? "unknown"}");
+        }
+
+        var channel = CoreChannelCodes.Normalize(envelope.Channel);
+        if (!_router.CanHandle(resolution))
+        {
+            throw new InvalidOperationException(
+                $"Catalog service '{resolution.CatalogServiceCode}' with type '{resolution.CatalogServiceType}' " +
+                $"resolved execution adapter '{resolution.ExecutionAdapterCode}', but it is not registered.");
         }
 
         var result = await _router.DispatchAsync(new CoreJobDispatchContext(
@@ -58,7 +92,7 @@ public sealed class CoreServiceJobHandler : IRenderJobHandler
                 envelope.ExternalRequestId),
             envelope.Payload,
             envelope.Prompt,
-            envelope.References), ct);
+            envelope.References), resolution, ct);
 
         switch (result.Disposition)
         {

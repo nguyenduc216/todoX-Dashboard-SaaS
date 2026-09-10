@@ -174,6 +174,23 @@ public interface ICoreJobExecutionAdapter
     Task<CoreExecutionResult> DispatchAsync(CoreJobDispatchContext context, CancellationToken ct = default);
 }
 
+/// <summary>
+/// Resolves the execution adapter identity separately from the customer-facing catalog identity.
+/// </summary>
+public interface ICoreExecutionAdapterResolver
+{
+    CoreExecutionAdapterResolution Resolve(string catalogServiceCode, string catalogServiceType);
+}
+
+public sealed record CoreExecutionAdapterResolution(
+    string CatalogServiceCode,
+    string CatalogServiceType,
+    string? ExecutionAdapterCode,
+    string? FailureReason)
+{
+    public bool IsResolved => !string.IsNullOrWhiteSpace(ExecutionAdapterCode);
+}
+
 public enum CoreExecutionDisposition
 {
     Completed,
