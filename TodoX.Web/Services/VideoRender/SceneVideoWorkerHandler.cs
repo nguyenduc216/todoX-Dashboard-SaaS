@@ -811,6 +811,15 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                         ex.ErrorCode ?? failureClassification,
                         ex.ErrorMessage,
                         CancellationToken.None);
+                    await _billing.CompleteAsync(new AiImageBillingCompleteRequest
+                    {
+                        LogicalRequestId = attemptLogicalRequestId,
+                        Success = false,
+                        ActualModel = policy.Model,
+                        ProviderUsageJson = ex.SanitizedResponseJson,
+                        TariffSnapshotJson = tariffSnapshot,
+                        ErrorMessage = ex.ErrorMessage
+                    }, CancellationToken.None);
                     if (!ShouldFallback(failureClassification))
                     {
                         throw;

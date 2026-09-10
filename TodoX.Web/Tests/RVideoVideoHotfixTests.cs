@@ -346,6 +346,26 @@ public sealed class RVideoVideoHotfixTests
     }
 
     [Fact]
+    public void RVideoSubmitFailureReleasesCandidateBillingBeforeFallback()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "SceneVideoWorkerHandler.cs");
+        var failureStart = source.IndexOf("catch (Ai79TaskSubmitException ex)", StringComparison.Ordinal);
+        var failureEnd = source.IndexOf("catch (Exception ex) when (ex is not OperationCanceledException)", failureStart, StringComparison.Ordinal);
+
+        Assert.True(failureStart >= 0);
+        Assert.True(failureEnd > failureStart);
+        var failureBranch = source[failureStart..failureEnd];
+
+        Assert.Contains("Success = false", failureBranch);
+        Assert.Contains("LogicalRequestId = attemptLogicalRequestId", failureBranch);
+        Assert.Contains("ProviderUsageJson = ex.SanitizedResponseJson", failureBranch);
+        Assert.Contains("TariffSnapshotJson = tariffSnapshot", failureBranch);
+        Assert.Contains("await _billing.CompleteAsync", failureBranch);
+        Assert.True(failureBranch.IndexOf("await _billing.CompleteAsync", StringComparison.Ordinal)
+            < failureBranch.IndexOf("if (!ShouldFallback(failureClassification)", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void SceneVideoWorkerEmitsFallbackLifecycleEventsAndKeepsProviderDiagnosticsSanitized()
     {
         var source = ReadRepoFile("Services", "VideoRender", "SceneVideoWorkerHandler.cs");
