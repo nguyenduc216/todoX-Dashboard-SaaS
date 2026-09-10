@@ -163,9 +163,10 @@ Required commit message:
 fix(rdance): harden manual render duration gate
 ```
 
-Implementation commit hash: `4bd7147bf945eff574c4c7b082a3b03f3307befa`
+Implementation commit hash: `715ba3a304df8e6a1377b4f8b441d74d0c5b39c4`
 
 Push:
 
 - branch: `feature/rdn-onepage-ui-revamp`
-- result: `TBD`
+- result: `PASS`, pushed to
+  `origin/feature/rdn-onepage-ui-revamp`
