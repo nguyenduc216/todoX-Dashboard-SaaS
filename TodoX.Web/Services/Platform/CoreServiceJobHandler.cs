@@ -27,17 +27,12 @@ public sealed class CoreServiceJobHandler : IRenderJobHandler
 
     public async Task HandleAsync(RenderJobDto job, CancellationToken ct)
     {
-        CoreServiceJobEnvelope envelope;
-        try
-        {
-            envelope = JsonSerializer.Deserialize<CoreServiceJobEnvelope>(job.InputJson,
-                new JsonSerializerOptions(JsonSerializerDefaults.Web))
-                ?? throw new InvalidOperationException("Core service job input is empty.");
-        }
-        catch (JsonException ex)
-        {
-            throw new InvalidOperationException("Core service job input is not valid JSON.", ex);
-        }
+        var envelope = DeserializeEnvelope(job.InputJson);
+
+        await _completion.MarkProgressAsync(
+            Authority,
+            new CoreJobProgressRequest(job.Id, "core_execution", 1, "Core service execution started."),
+            ct);
 
         if (envelope.ServiceId == Guid.Empty || string.IsNullOrWhiteSpace(envelope.ServiceCode))
         {
@@ -96,6 +91,68 @@ public sealed class CoreServiceJobHandler : IRenderJobHandler
         => string.IsNullOrWhiteSpace(value)
             ? throw new InvalidOperationException($"Core execution result is missing {name}.")
             : value.Trim();
+
+    internal static CoreServiceJobEnvelope DeserializeEnvelope(string inputJson)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(inputJson);
+            var root = document.RootElement;
+            var envelope = JsonSerializer.Deserialize<CoreServiceJobEnvelope>(root.GetRawText(),
+                new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            if (envelope is not null
+                && envelope.ServiceId != Guid.Empty
+                && !string.IsNullOrWhiteSpace(envelope.ServiceCode)
+                && envelope.Payload.ValueKind is not (JsonValueKind.Undefined or JsonValueKind.Null))
+            {
+                return envelope;
+            }
+
+            if (TryReadString(root, "engine")?.Equals("RVIDEO", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                var serviceCode = TryReadString(root, "serviceCode")
+                    ?? throw new InvalidOperationException("RVIDEO Core job is missing serviceCode.");
+                var serviceIdText = TryReadString(root, "serviceId");
+                if (!Guid.TryParse(serviceIdText, out var serviceId) || serviceId == Guid.Empty)
+                {
+                    throw new InvalidOperationException("RVIDEO Core job is missing a valid serviceId.");
+                }
+
+                var payload = root.Clone();
+                var prompt = root.TryGetProperty("prompt", out var promptValue)
+                    ? promptValue.Clone()
+                    : (JsonElement?)null;
+                return new CoreServiceJobEnvelope
+                {
+                    ServiceId = serviceId,
+                    ServiceCode = serviceCode,
+                    Channel = CoreChannelCodes.Dashboard,
+                    Payload = payload,
+                    Prompt = prompt
+                };
+            }
+
+            throw new InvalidOperationException("Core service job is missing service identity.");
+        }
+        catch (JsonException ex)
+        {
+            throw new InvalidOperationException("Core service job input is not valid JSON.", ex);
+        }
+    }
+
+    private static string? TryReadString(JsonElement element, string propertyName)
+    {
+        if (!element.TryGetProperty(propertyName, out var value))
+        {
+            return null;
+        }
+
+        return value.ValueKind switch
+        {
+            JsonValueKind.String => value.GetString(),
+            _ => value.ToString()
+        };
+    }
 }
 
 public sealed class CoreServiceJobEnvelope

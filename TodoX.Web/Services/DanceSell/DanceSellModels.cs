@@ -265,6 +265,8 @@ public sealed class DanceSellDraftCreateRequest
     public Guid? TenantId { get; set; }
     public Guid? CustomerId { get; set; }
     public Guid? UserId { get; set; }
+    public Guid? ServiceId { get; set; }
+    public string? ServiceCode { get; set; }
     public string Title { get; set; } = string.Empty;
     public string ReferenceMode { get; set; } = DanceSellReferenceModes.GenerateReference;
     public string Prompt { get; set; } = string.Empty;
@@ -499,6 +501,8 @@ public sealed class DanceSellReferenceComparisonScoreRequest
 
 public sealed class DanceSellCreateJobRequest
 {
+    public Guid? ServiceId { get; set; }
+    public string? ServiceCode { get; set; }
     public string? Title { get; set; }
     public string ReferenceMode { get; set; } = DanceSellReferenceModes.GenerateReference;
     public string Prompt { get; set; } = string.Empty;

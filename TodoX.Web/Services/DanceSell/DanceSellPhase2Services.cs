@@ -200,8 +200,7 @@ public sealed class DanceSellReferenceImageService : IDanceSellReferenceImageSer
     private readonly IDanceSellReferenceProviderFactory _referenceProviders;
     private readonly IDanceSellOperationRepository _operations;
     private readonly IDanceSellCostEstimator _costs;
-    private readonly IPointPricingService _pointPricing;
-    private readonly ICoreServiceCatalogService _coreCatalog;
+    private readonly IDanceSellCustomerPricing _customerPricing;
     private readonly TokenSettingsService _tokenSettings;
     private readonly WalletService _wallets;
     private readonly TenantContext _tenant;
@@ -215,8 +214,7 @@ public sealed class DanceSellReferenceImageService : IDanceSellReferenceImageSer
         IDanceSellReferenceProviderFactory referenceProviders,
         IDanceSellOperationRepository operations,
         IDanceSellCostEstimator costs,
-        IPointPricingService pointPricing,
-        ICoreServiceCatalogService coreCatalog,
+        IDanceSellCustomerPricing customerPricing,
         TokenSettingsService tokenSettings,
         WalletService wallets,
         TenantContext tenant,
@@ -229,8 +227,7 @@ public sealed class DanceSellReferenceImageService : IDanceSellReferenceImageSer
         _referenceProviders = referenceProviders;
         _operations = operations;
         _costs = costs;
-        _pointPricing = pointPricing;
-        _coreCatalog = coreCatalog;
+        _customerPricing = customerPricing;
         _tokenSettings = tokenSettings;
         _wallets = wallets;
         _tenant = tenant;
@@ -301,16 +298,7 @@ public sealed class DanceSellReferenceImageService : IDanceSellReferenceImageSer
                 var quality = job.Mode.Equals("premium", StringComparison.OrdinalIgnoreCase)
                     ? ServiceSellPriceQualityTiers.Premium
                     : ServiceSellPriceQualityTiers.Standard;
-                var catalogService = await _coreCatalog.GetByCodeAsync(FixedTodoXServiceCatalog.RDance, ct);
-                var pointEstimate = await _pointPricing.EstimateAsync(new PointPricingEstimateRequest(
-                    catalogService?.Id,
-                    1,
-                    quality,
-                    0,
-                    quality,
-                    0,
-                    ServiceSellPriceQualityTiers.Standard,
-                    false), ct);
+                var pointEstimate = await _customerPricing.EstimateAsync(job, 0, quality, 1, ct);
                 stage = "next_attempt";
                 var attemptNo = await _operations.GetNextAttemptNoAsync(job.Id, DanceSellOperationTypes.ReferenceImage, ct);
                 stage = "create_operation";
@@ -1567,7 +1555,7 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
     private readonly IDanceSellProviderCatalog _catalog;
     private readonly IDanceSellOperationRepository _operations;
     private readonly IDanceSellCostEstimator _costs;
-    private readonly IPointPricingService _pointPricing;
+    private readonly IDanceSellCustomerPricing _customerPricing;
     private readonly ICoreServiceCatalogService _coreCatalog;
     private readonly WalletService _wallets;
     private readonly TokenSettingsService _tokenSettings;
@@ -1584,7 +1572,7 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
         IDanceSellProviderCatalog catalog,
         IDanceSellOperationRepository operations,
         IDanceSellCostEstimator costs,
-        IPointPricingService pointPricing,
+        IDanceSellCustomerPricing customerPricing,
         ICoreServiceCatalogService coreCatalog,
         WalletService wallets,
         TokenSettingsService tokenSettings,
@@ -1600,7 +1588,7 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
         _catalog = catalog;
         _operations = operations;
         _costs = costs;
-        _pointPricing = pointPricing;
+        _customerPricing = customerPricing;
         _coreCatalog = coreCatalog;
         _wallets = wallets;
         _tokenSettings = tokenSettings;
@@ -1649,12 +1637,15 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
         var referenceRoute = await _catalog.ResolveAsync(DanceSellOperationTypes.ReferenceImage, request.ReferenceProviderCode, request.ReferenceProviderModel, ct);
         var motionRoute = await _catalog.ResolveAsync(DanceSellOperationTypes.MotionVideo, request.MotionProviderCode, request.MotionProviderModel, ct);
         ValidateCapability(request.Mode, request.CharacterOrientation, motionRoute);
+        var service = await ResolveServiceIdentityAsync(request.ServiceId, request.ServiceCode, ct);
         await _tenant.EnsureLoadedAsync(ct);
         return await _repo.CreateDraftAsync(new DanceSellDraftCreateRequest
         {
             TenantId = _tenant.TenantId,
             CustomerId = user.CustomerId,
             UserId = user.UserId,
+            ServiceId = service?.Id,
+            ServiceCode = service?.ServiceCode,
             Title = request.Title ?? string.Empty,
             ReferenceMode = request.ReferenceMode,
             Prompt = request.Prompt,
@@ -1670,6 +1661,43 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
             MotionProviderModel = motionRoute.ModelName,
             AutoFinish = request.AutoFinish
         }, ct);
+    }
+
+    private async Task<CoreServiceView?> ResolveServiceIdentityAsync(Guid? serviceId, string? serviceCode, CancellationToken ct)
+    {
+        CoreServiceView? service = serviceId is Guid id && id != Guid.Empty
+            ? await _coreCatalog.GetByIdAsync(id, ct)
+            : null;
+        if (service is null && !string.IsNullOrWhiteSpace(serviceCode))
+        {
+            service = await _coreCatalog.GetByCodeAsync(serviceCode.Trim(), ct);
+        }
+
+        if (service is null)
+        {
+            return null;
+        }
+
+        if (!service.Enabled
+            || !string.Equals(service.ServiceType, TodoXServiceEngineTypes.RDance, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("DANCE_SELL_SERVICE_INVALID");
+        }
+
+        if (serviceId is Guid requestedId
+            && requestedId != Guid.Empty
+            && requestedId != service.Id)
+        {
+            throw new InvalidOperationException("DANCE_SELL_SERVICE_ID_MISMATCH");
+        }
+
+        if (!string.IsNullOrWhiteSpace(serviceCode)
+            && !string.Equals(serviceCode.Trim(), service.ServiceCode, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("DANCE_SELL_SERVICE_CODE_MISMATCH");
+        }
+
+        return service;
     }
 
     public async Task<DanceSellJobDto> UpdateBusinessAsync(Guid id, DanceSellUpdateBusinessRequest request, CurrentUserSession user, CancellationToken ct = default)
@@ -1792,22 +1820,12 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
             ? ServiceSellPriceQualityTiers.Premium
             : ServiceSellPriceQualityTiers.Standard;
         var durationSeconds = await ResolveMotionDurationSecondsAsync(job, motionRoute, estimate, ct);
-        var catalogService = await _coreCatalog.GetByCodeAsync(FixedTodoXServiceCatalog.RDance, ct);
-        var serviceId = catalogService?.Id;
         var chargeStaticImagePoints = await _tokenSettings.GetChargeStaticImagePointsAsync();
         var staticInputCount = StaticImageBillingPolicy.ResolveRdanceStaticInputCount(job);
         var billableStaticImageCount = StaticImageBillingPolicy.ResolveBillableStaticImageCount(staticInputCount, chargeStaticImagePoints);
         var isDirectReference = string.Equals(job.ReferenceMode, DanceSellReferenceModes.DirectReference, StringComparison.OrdinalIgnoreCase);
         var imageCount = isDirectReference ? billableStaticImageCount : 1;
-        var pointEstimate = await _pointPricing.EstimateAsync(new PointPricingEstimateRequest(
-            serviceId,
-            imageCount,
-            quality,
-            durationSeconds,
-            quality,
-            0,
-            ServiceSellPriceQualityTiers.Standard,
-            false), ct);
+        var pointEstimate = await _customerPricing.EstimateAsync(job, durationSeconds, quality, imageCount, ct);
         var imagePointsToChargeNow = isDirectReference ? pointEstimate.Image.Points : 0m;
         var videoPointsToChargeNow = pointEstimate.Video.Points;
         var voicePointsToChargeNow = pointEstimate.Voice.Points;
@@ -1947,16 +1965,10 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
             var providerMode = DanceSellMotionProviderContract.ResolveProviderMode(motionRoute, job.Mode);
             var estimate = await _costs.EstimateAsync(motionRoute, providerMode, null, ct);
             var retryDurationSeconds = await ResolveMotionDurationSecondsAsync(job, motionRoute, estimate, ct);
-            var catalogService = await _coreCatalog.GetByCodeAsync(FixedTodoXServiceCatalog.RDance, ct);
-            var pointEstimate = await _pointPricing.EstimateAsync(new PointPricingEstimateRequest(
-                catalogService?.Id,
-                0,
-                job.Mode.Equals("premium", StringComparison.OrdinalIgnoreCase) ? ServiceSellPriceQualityTiers.Premium : ServiceSellPriceQualityTiers.Standard,
-                retryDurationSeconds,
-                job.Mode.Equals("premium", StringComparison.OrdinalIgnoreCase) ? ServiceSellPriceQualityTiers.Premium : ServiceSellPriceQualityTiers.Standard,
-                0,
-                ServiceSellPriceQualityTiers.Standard,
-                false), ct);
+            var retryQuality = job.Mode.Equals("premium", StringComparison.OrdinalIgnoreCase)
+                ? ServiceSellPriceQualityTiers.Premium
+                : ServiceSellPriceQualityTiers.Standard;
+            var pointEstimate = await _customerPricing.EstimateAsync(job, retryDurationSeconds, retryQuality, 0, ct);
             var attemptNo = await _operations.GetNextAttemptNoAsync(job.Id, DanceSellOperationTypes.MotionVideo, ct);
             var logicalRequestId = string.IsNullOrWhiteSpace(job.LogicalRequestId)
                 ? $"dance-sell-{Guid.NewGuid():N}"

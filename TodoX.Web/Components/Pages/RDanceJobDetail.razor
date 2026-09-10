@@ -18,6 +18,7 @@
 @inject IRenderJobService RenderJobs
 @inject IDanceSellCostEstimator Costs
 @inject IPointPricingService PointPricing
+@inject IDanceSellCustomerPricing CustomerPricing
 @inject TokenSettingsService TokenSettings
 @inject ICoreServiceCatalogService CoreCatalog
 @inject IDanceSellProviderCatalog ProviderCatalog
@@ -1909,12 +1910,6 @@
             return null;
         }
 
-        var service = await CoreCatalog.GetByCodeAsync(FixedTodoXServiceCatalog.RDance, CancellationToken.None);
-        if (service is null)
-        {
-            return null;
-        }
-
         var durationSeconds = ResolveMotionDurationSeconds(_job, route);
         if (durationSeconds is null)
         {
@@ -1930,15 +1925,7 @@
             ? StaticImageBillingPolicy.ResolveBillableStaticImageCount(staticImageCount, chargeStaticImagePoints)
             : 0;
 
-        return await PointPricing.EstimateAsync(new PointPricingEstimateRequest(
-            service.Id,
-            imageCount,
-            quality,
-            durationSeconds.Value,
-            quality,
-            0,
-            ServiceSellPriceQualityTiers.Standard,
-            false));
+        return await CustomerPricing.EstimateAsync(_job, durationSeconds.Value, quality, imageCount);
     }
 
     private int? ResolveMotionDurationSeconds(DanceSellJobDto job, DanceSellProviderRouteDto? route)

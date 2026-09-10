@@ -394,8 +394,10 @@
 
     private async Task LoadServiceDefaultsAsync()
     {
-        CatalogServiceView? service = (await Catalog.GetActiveCatalogServicesAsync())
-            .FirstOrDefault(x => string.Equals(x.ServiceCode, FixedTodoXServiceCatalog.RDance, StringComparison.OrdinalIgnoreCase));
+        CatalogServiceView? service = ServiceId is Guid serviceId && serviceId != Guid.Empty
+            ? await Catalog.GetServiceByIdAsync(serviceId)
+            : (await Catalog.GetActiveCatalogServicesAsync())
+                .FirstOrDefault(x => string.Equals(x.ServiceCode, ServiceCode ?? "FASHION_VIDEO", StringComparison.OrdinalIgnoreCase));
 
         if (service is null)
         {
@@ -606,7 +608,9 @@
             Mode = "720p",
             Ratio = _ratio,
             CharacterOrientation = "image",
-            AutoFinish = _autoFinish
+            AutoFinish = _autoFinish,
+            ServiceId = ServiceId,
+            ServiceCode = ServiceCode
         }, AuthState.CurrentUser!);
     }
 

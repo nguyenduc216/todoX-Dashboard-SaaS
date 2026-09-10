@@ -132,14 +132,14 @@ public sealed class CoreJobCompletionService : ICoreJobCompletionService
              WHERE id=@jobId
                AND tenant_id=@tenant
                AND job_type=@jobType
-               AND status NOT IN ('completed','failed','cancelled')
-               AND progress_percent < @progress;
+               AND status NOT IN ('completed','failed','cancelled');
             """,
             new
             {
                 jobId,
                 tenant = _tenant.TenantId,
                 jobType = RenderJobTypes.CoreService,
+                progress = 1,
                 execution = JsonSerializer.Serialize(new
                 {
                     system = correlation.ExecutionSystem.Trim(),

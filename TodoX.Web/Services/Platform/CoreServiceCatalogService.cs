@@ -8,6 +8,7 @@ public interface ICoreServiceCatalogService
 {
     Task<IReadOnlyList<CoreServiceView>> ListAsync(CancellationToken ct = default);
     Task<CoreServiceView?> GetByCodeAsync(string serviceCode, CancellationToken ct = default);
+    Task<CoreServiceView?> GetByIdAsync(Guid serviceId, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -54,6 +55,26 @@ public sealed class CoreServiceCatalogService : ICoreServiceCatalogService
              LIMIT 1;
             """,
             new { serviceCode = serviceCode.Trim() },
+            cancellationToken: ct));
+
+        return row is null ? null : Map(row);
+    }
+
+    public async Task<CoreServiceView?> GetByIdAsync(Guid serviceId, CancellationToken ct = default)
+    {
+        if (serviceId == Guid.Empty)
+        {
+            return null;
+        }
+
+        using var conn = await _factory.OpenAsync(ct);
+        var row = await conn.QuerySingleOrDefaultAsync<CoreServiceRow>(new CommandDefinition(
+            SelectSql +
+            """
+             WHERE s.id = @serviceId
+             LIMIT 1;
+            """,
+            new { serviceId },
             cancellationToken: ct));
 
         return row is null ? null : Map(row);

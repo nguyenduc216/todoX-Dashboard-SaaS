@@ -600,8 +600,18 @@ public sealed class RenderJobService : IRenderJobService
 
         var sql = SelectJobSql +
                   """
-                   WHERE status='queued'
-                     AND (retry_after IS NULL OR retry_after <= now())
+                   WHERE (
+                         (status='queued' AND (retry_after IS NULL OR retry_after <= now()))
+                         OR (
+                              job_type='core_service'
+                              AND status='rendering'
+                              AND attempt_count=0
+                              AND worker_key IS NULL
+                              AND lock_owner IS NULL
+                              AND lock_until IS NULL
+                              AND started_at IS NULL
+                         )
+                   )
                   """;
         object parameters;
         if (includeJobTypes is not null && includeJobTypes.Count > 0)

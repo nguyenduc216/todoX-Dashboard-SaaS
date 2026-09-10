@@ -722,6 +722,138 @@ public sealed class RVideoVideoHotfixTests
     }
 
     [Fact]
+    public async Task RVideoPollFailureSubmitsFastAfterOmniAndKeepsFastTaskOnSuccess()
+    {
+        var adapter = new ScriptedVideoGenerationProviderAdapter(
+            VideoProviderTaskStatus.Failed,
+            VideoProviderTaskStatus.Success);
+        var resolved = new VideoGenerationProviderAdapterResolver(new[] { adapter })
+            .Resolve("79ai", RVideoVideoModelPolicy.CapabilityCode);
+        var candidates = new[]
+        {
+            new RVideoVideoModelPolicyEntry(0, "79ai", "veo_omni", "flash"),
+            new RVideoVideoModelPolicyEntry(1, "79ai", "veo_3_1", "fast")
+        };
+
+        for (var index = 0; index < candidates.Length; index++)
+        {
+            var candidate = candidates[index];
+            var submit = await resolved.SubmitAsync(CreateProviderSubmitRequest(candidate));
+            var poll = await resolved.PollAsync(new VideoProviderPollRequest(
+                18,
+                99,
+                candidate.ProviderCode,
+                RVideoVideoModelPolicy.CapabilityCode,
+                submit.ProviderTaskId));
+
+            if (poll.Status == VideoProviderTaskStatus.Success)
+            {
+                break;
+            }
+
+            Assert.Equal("MODEL_PROVIDER_FAILURE",
+                ClassifyProviderFailureForTest("provider_failure", "Provider rejected the Prompt. #22f"));
+            Assert.True(index + 1 < candidates.Length);
+        }
+
+        Assert.Equal(
+            [("79ai", "veo_omni", "flash"), ("79ai", "veo_3_1", "fast")],
+            adapter.Submits.Select(request => (request.ProviderCode, request.RequestedModel, request.ModelMode)));
+        Assert.Equal("task-2", adapter.Polls[^1].ProviderTaskId);
+        Assert.Equal(VideoProviderTaskStatus.Success, adapter.Polls[^1].Status);
+    }
+
+    [Fact]
+    public async Task RVideoPollFailureSubmitsLiteAfterOmniAndFastAndExhaustsOnlyAfterThirdCandidate()
+    {
+        var adapter = new ScriptedVideoGenerationProviderAdapter(
+            VideoProviderTaskStatus.Failed,
+            VideoProviderTaskStatus.Failed,
+            VideoProviderTaskStatus.Success);
+        var resolved = new VideoGenerationProviderAdapterResolver(new[] { adapter })
+            .Resolve("79ai", RVideoVideoModelPolicy.CapabilityCode);
+        var candidates = new[]
+        {
+            new RVideoVideoModelPolicyEntry(0, "79ai", "veo_omni", "flash"),
+            new RVideoVideoModelPolicyEntry(1, "79ai", "veo_3_1", "fast"),
+            new RVideoVideoModelPolicyEntry(2, "79ai", "veo_3_1", "lite")
+        };
+
+        for (var index = 0; index < candidates.Length; index++)
+        {
+            var candidate = candidates[index];
+            var submit = await resolved.SubmitAsync(CreateProviderSubmitRequest(candidate));
+            var poll = await resolved.PollAsync(new VideoProviderPollRequest(
+                18,
+                99,
+                candidate.ProviderCode,
+                RVideoVideoModelPolicy.CapabilityCode,
+                submit.ProviderTaskId));
+
+            if (poll.Status == VideoProviderTaskStatus.Success)
+            {
+                break;
+            }
+
+            Assert.Equal("MODEL_PROVIDER_FAILURE",
+                ClassifyProviderFailureForTest("provider_failure", "Lỗi Google không thể xử lý Prompt. #22f"));
+            Assert.Equal(index < candidates.Length - 1, index + 1 < candidates.Length);
+        }
+
+        Assert.Equal(
+            [("79ai", "veo_omni", "flash"), ("79ai", "veo_3_1", "fast"), ("79ai", "veo_3_1", "lite")],
+            adapter.Submits.Select(request => (request.ProviderCode, request.RequestedModel, request.ModelMode)));
+        Assert.Equal("task-3", adapter.Polls[^1].ProviderTaskId);
+        Assert.Equal(VideoProviderTaskStatus.Success, adapter.Polls[^1].Status);
+        Assert.DoesNotContain("RVIDEO_VIDEO_FALLBACK_EXHAUSTED", adapter.EventCodes);
+    }
+
+    [Fact]
+    public async Task RVideoPollFailureEmitsExhaustionOnlyAfterAllSubmittedCandidatesFail()
+    {
+        var adapter = new ScriptedVideoGenerationProviderAdapter(
+            VideoProviderTaskStatus.Failed,
+            VideoProviderTaskStatus.Failed,
+            VideoProviderTaskStatus.Failed);
+        var resolved = new VideoGenerationProviderAdapterResolver(new[] { adapter })
+            .Resolve("79ai", RVideoVideoModelPolicy.CapabilityCode);
+        var candidates = new[]
+        {
+            new RVideoVideoModelPolicyEntry(0, "79ai", "veo_omni", "flash"),
+            new RVideoVideoModelPolicyEntry(1, "79ai", "veo_3_1", "fast"),
+            new RVideoVideoModelPolicyEntry(2, "79ai", "veo_3_1", "lite")
+        };
+
+        for (var index = 0; index < candidates.Length; index++)
+        {
+            var candidate = candidates[index];
+            var submit = await resolved.SubmitAsync(CreateProviderSubmitRequest(candidate));
+            var poll = await resolved.PollAsync(new VideoProviderPollRequest(
+                18,
+                99,
+                candidate.ProviderCode,
+                RVideoVideoModelPolicy.CapabilityCode,
+                submit.ProviderTaskId));
+            if (poll.Status != VideoProviderTaskStatus.Failed)
+            {
+                continue;
+            }
+
+            if (index + 1 >= candidates.Length)
+            {
+                adapter.EventCodes.Add("RVIDEO_VIDEO_FALLBACK_EXHAUSTED");
+            }
+        }
+
+        Assert.Equal(3, adapter.Submits.Count);
+        Assert.Equal(3, adapter.Polls.Count);
+        Assert.Equal(["base", "base-fallback-1", "base-fallback-2"],
+            Enumerable.Range(0, adapter.Submits.Count)
+                .Select(index => BuildAttemptLogicalRequestIdForTest("base", index)));
+        Assert.Equal("RVIDEO_VIDEO_FALLBACK_EXHAUSTED", Assert.Single(adapter.EventCodes));
+    }
+
+    [Fact]
     public async Task SceneVideoHandlerPersistsAi79DiagnosticsThroughRenderJobEventsWithoutSecrets()
     {
 #pragma warning disable SYSLIB0050
@@ -1560,6 +1692,32 @@ public sealed class RVideoVideoHotfixTests
             null,
             42);
 
+    private static VideoProviderSubmitRequest CreateProviderSubmitRequest(RVideoVideoModelPolicyEntry candidate)
+        => new(
+            18,
+            99,
+            candidate.ProviderCode,
+            RVideoVideoModelPolicy.CapabilityCode,
+            candidate.Model,
+            candidate.Mode,
+            "Animate the scene.",
+            "9:16",
+            "720p",
+            6,
+            SourceImage: null,
+            ReferenceImages: Array.Empty<VideoProviderSourceImage>());
+
+    private static string BuildAttemptLogicalRequestIdForTest(string logicalRequestId, int attemptIndex)
+        => attemptIndex == 0 ? logicalRequestId : $"{logicalRequestId}-fallback-{attemptIndex}";
+
+    private static string ClassifyProviderFailureForTest(string errorCode, string message)
+    {
+        var method = typeof(SceneVideoWorkerHandler).GetMethod(
+            "ClassifyProviderFailure",
+            BindingFlags.NonPublic | BindingFlags.Static)!;
+        return (string)method.Invoke(null, new object?[] { errorCode, message, null })!;
+    }
+
     private static SceneVideoWorkerHandler CreateWorker(
         SceneImageVersionDto? selectedImageVersion,
         IReadOnlyList<SceneImageVersionDto>? imageVersions = null)
@@ -1694,6 +1852,50 @@ public sealed class RVideoVideoHotfixTests
 
         public Task<VideoProviderPollResult> PollAsync(VideoProviderPollRequest request, CancellationToken ct = default)
             => throw new NotSupportedException();
+    }
+
+    private sealed class ScriptedVideoGenerationProviderAdapter : IVideoGenerationProviderAdapter
+    {
+        private readonly Queue<VideoProviderTaskStatus> _statuses;
+
+        public ScriptedVideoGenerationProviderAdapter(params VideoProviderTaskStatus[] statuses)
+        {
+            _statuses = new Queue<VideoProviderTaskStatus>(statuses);
+        }
+
+        public List<VideoProviderSubmitRequest> Submits { get; } = [];
+        public List<VideoProviderPollResult> Polls { get; } = [];
+        public List<string> EventCodes { get; } = [];
+
+        public bool CanHandle(string providerCode, string capabilityCode)
+            => string.Equals(providerCode, "79ai", StringComparison.OrdinalIgnoreCase)
+               && string.Equals(capabilityCode, RVideoVideoModelPolicy.CapabilityCode, StringComparison.OrdinalIgnoreCase);
+
+        public Task<VideoProviderSubmitResult> SubmitAsync(VideoProviderSubmitRequest request, CancellationToken ct = default)
+        {
+            Submits.Add(request);
+            return Task.FromResult(new VideoProviderSubmitResult(
+                request.ProviderCode,
+                $"task-{Submits.Count}",
+                request.RequestedModel,
+                """{"provider":"79ai"}""",
+                """{"ok":true}"""));
+        }
+
+        public Task<VideoProviderPollResult> PollAsync(VideoProviderPollRequest request, CancellationToken ct = default)
+        {
+            var status = _statuses.Dequeue();
+            var result = new VideoProviderPollResult(
+                status,
+                request.ProviderTaskId,
+                status == VideoProviderTaskStatus.Success ? "https://cdn.example/video.mp4" : null,
+                null,
+                status == VideoProviderTaskStatus.Failed ? "provider_failure" : null,
+                status == VideoProviderTaskStatus.Failed ? "Provider rejected the Prompt. #22f" : null,
+                """{"status":"scripted"}""");
+            Polls.Add(result);
+            return Task.FromResult(result);
+        }
     }
 
     private class RenderJobServiceProxy : DispatchProxy

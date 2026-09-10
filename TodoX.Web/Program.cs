@@ -70,6 +70,7 @@ builder.Services.AddScoped<IConstructionTimelapseExecutionBridge, ConstructionTi
 builder.Services.AddScoped<ICoreJobExecutionAdapter, ConstructionTimelapseAdapter>();
 builder.Services.AddScoped<ITimelapseProviderRuntime, TimelapseProviderRuntime>();
 builder.Services.AddScoped<ITimelapseFinalizerRuntime, TimelapseFinalizerRuntime>();
+builder.Services.AddScoped<ICoreJobExecutionAdapter, TodoX.Web.Services.VideoRender.RVideoCoreExecutionAdapter>();
 builder.Services.AddHttpClient<TodoX.Web.Services.AiProviders.IAi79TaskClient, TodoX.Web.Services.AiProviders.Ai79TaskClient>(client =>
 {
     client.Timeout = TimeSpan.FromMinutes(3);
@@ -223,6 +224,7 @@ builder.Services.AddScoped<IRDanceFeatureService, RDanceFeatureService>();
 builder.Services.AddScoped<IDanceSellReferenceImageService, DanceSellReferenceImageService>();
 builder.Services.AddScoped<IDanceSellReferenceComparisonService, DanceSellReferenceComparisonService>();
 builder.Services.AddScoped<IDanceSellPhase2Service, DanceSellPhase2Service>();
+builder.Services.AddScoped<IDanceSellCustomerPricing, DanceSellCustomerPricing>();
 builder.Services.AddScoped<IDanceSellProviderCatalog, DanceSellProviderCatalog>();
 builder.Services.AddScoped<IDanceSellOperationRepository, DanceSellOperationRepository>();
 builder.Services.AddScoped<IDanceSellCostEstimator, DanceSellCostEstimator>();

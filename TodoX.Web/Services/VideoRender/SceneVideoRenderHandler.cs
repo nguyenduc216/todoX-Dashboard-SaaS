@@ -11,6 +11,7 @@ namespace TodoX.Web.Services.VideoRender;
 
 public sealed class SceneVideoRenderInput
 {
+    public Guid? CoreJobId { get; set; }
     public long ProjectId { get; set; }
     public long[] SceneIds { get; set; } = Array.Empty<long>();
     public string AspectRatio { get; set; } = "9:16";
@@ -282,6 +283,26 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
                 model = route.ModelName,
                 capability = route.CapabilityCode
             }, ct);
+
+        if (input.CoreJobId is Guid coreJobId)
+        {
+            await _jobs.AddEventAsync(
+                coreJobId,
+                "CORE_RVIDEO_SCENE_JOBS_CREATED",
+                "RVIDEO scene-video child jobs were created by the Core batch execution.",
+                new
+                {
+                    coreJobId,
+                    projectId = project.Id,
+                    sceneIds = scenes.Select(scene => scene.Id).ToArray(),
+                    childJobCount = enqueued,
+                    skippedSceneCount = validationFailed.Count,
+                    jobType = RenderJobTypes.RenderSceneVideo,
+                    service = RVideoCoreExecutionAdapter.RVideoServiceCode
+                },
+                "info",
+                ct);
+        }
     }
 
     private async Task<bool> EnqueueSceneChildJobAsync(
