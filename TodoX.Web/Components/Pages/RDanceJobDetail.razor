@@ -55,6 +55,10 @@
         {
             <MudAlert Severity="Severity.Error">@_motionReadinessError</MudAlert>
         }
+        @if (HasMotionVideoWithoutValidDuration)
+        {
+            <MudAlert Severity="Severity.Warning" Dense="true">@MotionDurationNotReadyMessage</MudAlert>
+        }
 
                 @if (IsOnePageUiEnabled)
         {
@@ -816,10 +820,20 @@
         DanceSellJobStatuses.Failed or DanceSellJobStatuses.Timeout => "gray",
         _ => "gray"
     };
+    private bool HasValidMotionDuration => MotionDurationSeconds is > 0;
+    private bool HasMotionVideoWithoutValidDuration
+        => _job?.MotionVideoMediaId is not null
+            && !string.IsNullOrWhiteSpace(_job.MotionVideoUrl)
+            && !HasValidMotionDuration;
+    private string MotionDurationNotReadyMessage
+        => "Ch\u01b0a x\u00e1c \u0111\u1ecbnh \u0111\u01b0\u1ee3c th\u1eddi l\u01b0\u1ee3ng video. Vui l\u00f2ng t\u1ea3i l\u1ea1i video.";
     private bool CanRender => !IsActive
         && _job?.MotionVideoMediaId is not null
-        && _job?.PreparedReferenceStatus == DanceSellReferenceStatuses.Approved
-        && !string.IsNullOrWhiteSpace(_job?.PreparedReferenceUrl);
+        && !string.IsNullOrWhiteSpace(_job.MotionVideoUrl)
+        && _job.SourceStageStatus == DanceSellSourceStageStatuses.Ready
+        && HasValidMotionDuration
+        && _job.PreparedReferenceStatus == DanceSellReferenceStatuses.Approved
+        && !string.IsNullOrWhiteSpace(_job.PreparedReferenceUrl);
     private bool IsActive => !IsCoreCancelled
         && (_job?.Status is DanceSellJobStatuses.Queued or DanceSellJobStatuses.Submitted or DanceSellJobStatuses.Rendering
             || _renderJob?.Status is RenderJobStatuses.Queued
@@ -885,8 +899,8 @@
     private bool IsAdmin => AuthState.CurrentUser is not null && DanceSellSecurity.IsAdmin(AuthState.CurrentUser);
     private bool CanEditAutoFinish => _job?.Status == DanceSellJobStatuses.Draft && _renderJob?.Status is null or RenderJobStatuses.Draft;
     private string AutoFinishHelpText => _autoFinish
-        ? "Hệ thống sẽ tự động chuẩn bị ảnh, duyệt ảnh và tạo video khi dữ liệu đã đầy đủ."
-        : "Bạn sẽ xác nhận từng bước trước khi tạo video.";
+        ? "B\u1eadt: H\u1ec7 th\u1ed1ng s\u1ebd t\u1ef1 \u0111\u1ed9ng chu\u1ea9n b\u1ecb v\u00e0 duy\u1ec7t \u1ea3nh tham chi\u1ebfu khi d\u1eef li\u1ec7u \u0111\u00e3 \u0111\u1ea7y \u0111\u1ee7. B\u1ea1n v\u1eabn c\u1ea7n b\u1ea5m \"T\u1ea1o video\" \u0111\u1ec3 b\u1eaft \u0111\u1ea7u render."
+        : "T\u1eaft: B\u1ea1n s\u1ebd ch\u1ee7 \u0111\u1ed9ng x\u00e1c nh\u1eadn t\u1eebng b\u01b0\u1edbc tr\u01b0\u1edbc khi t\u1ea1o video.";
 
     private string DisplayStatusLabel(DanceSellJobDto? job)
         => job is null
@@ -1981,6 +1995,12 @@
         if (message.Contains("DANCE_SELL_REFERENCE_NOT_APPROVED", StringComparison.OrdinalIgnoreCase))
         {
             return "Ảnh dùng để tạo video đã thay đổi. Vui lòng tạo và duyệt lại ảnh trước khi render.";
+        }
+
+        if (message.Contains("DANCE_SELL_VIDEO_DURATION_REQUIRED", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("DANCE_SELL_MOTION_DURATION_NOT_READY", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Chưa xác định được thời lượng video. Vui lòng tải lại video.";
         }
 
         if (message.Contains("DANCE_SELL_CHARACTER_REFERENCE_NOT_ALLOWED", StringComparison.OrdinalIgnoreCase)

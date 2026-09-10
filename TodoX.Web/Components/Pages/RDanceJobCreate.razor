@@ -262,7 +262,7 @@
                                 <MudSelectItem Value="@("16:9")">16:9</MudSelectItem>
                             </MudSelect>
                             <MudText Typo="Typo.caption" Class="rdance-auto-finish-help">
-                                @(_autoFinish ? "Hệ thống sẽ tự động chuẩn bị ảnh, duyệt ảnh và tạo video khi dữ liệu đã đầy đủ." : "Bạn sẽ xác nhận từng bước trước khi tạo video.")
+                                @AutoFinishHelpText
                             </MudText>
                             <MudTextField T="string" Label="Link TikTok" Variant="Variant.Outlined" @bind-Value="_tiktokUrl" Disabled="@_busy" />
                             <MudButton Variant="Variant.Outlined" Color="Color.Warning" Disabled="@(_busy || !CanSubmitSource || string.IsNullOrWhiteSpace(_tiktokUrl))" OnClick="StageTikTokAndOpenAsync">Tải và kiểm tra video</MudButton>
@@ -318,6 +318,9 @@
 
     private const string AcceptedImageTypes = "image/png,image/jpeg,image/webp";
     private bool CanSubmitSource => string.IsNullOrWhiteSpace(_readinessError);
+    private string AutoFinishHelpText => _autoFinish
+        ? "Bật: Hệ thống sẽ tự động chuẩn bị và duyệt ảnh tham chiếu khi dữ liệu đã đầy đủ. Bạn vẫn cần bấm \"Tạo video\" để bắt đầu render."
+        : "Tắt: Bạn sẽ chủ động xác nhận từng bước trước khi tạo video.";
     private string? CreateReferenceImageUrl => _job?.PreparedReferenceUrl ?? _job?.CharacterImageUrl ?? _job?.ProductImageUrl;
     private long MaxMotionVideoBytes => (long)Math.Max(1, DanceOptions.CurrentValue.MaxVideoMb) * 1024 * 1024;
     private long MaxImageBytes => (long)Math.Max(1, DanceOptions.CurrentValue.MaxImageMb) * 1024 * 1024;

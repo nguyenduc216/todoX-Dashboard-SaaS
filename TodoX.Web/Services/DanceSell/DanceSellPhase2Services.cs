@@ -2239,11 +2239,26 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
         DanceSellCostEstimate estimate,
         CancellationToken ct)
     {
-        var configured = ReadInt(job.RequestJson, "durationSeconds", "duration_seconds", "videoDurationSeconds", "video_duration_seconds")
-            ?? ReadInt(route.ConfigJson, "durationSeconds", "duration_seconds");
-        if (configured is > 0)
+        var persistedJobDuration = ReadInt(job.RequestJson, "durationSeconds", "duration_seconds", "videoDurationSeconds", "video_duration_seconds");
+        if (persistedJobDuration is > 0)
         {
-            return configured.Value;
+            return persistedJobDuration.Value;
+        }
+
+        var latestMotionOperation = await _operations.GetLatestOperationAsync(
+            job.Id,
+            DanceSellOperationTypes.MotionVideo,
+            ct);
+        var persistedOperationDuration = ReadInt(
+            latestMotionOperation?.RequestJson,
+            "durationSeconds",
+            "duration_seconds",
+            "videoDurationSeconds",
+            "video_duration_seconds");
+        if (persistedOperationDuration is > 0)
+        {
+            await _repo.PersistMotionDurationAsync(job.Id, persistedOperationDuration.Value, ct);
+            return persistedOperationDuration.Value;
         }
 
         if (job.MotionVideoMediaId is Guid mediaId)
@@ -2254,6 +2269,15 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
             {
                 await _repo.PersistMotionDurationAsync(job.Id, derived.Value, ct);
                 return derived.Value;
+            }
+        }
+
+        if (persistedJobDuration is null && persistedOperationDuration is null)
+        {
+            var configured = ReadInt(route.ConfigJson, "durationSeconds", "duration_seconds");
+            if (configured is > 0)
+            {
+                return configured.Value;
             }
         }
 

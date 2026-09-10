@@ -243,6 +243,38 @@ public sealed class RDanceCustomerStatusAndPointsRegressionTests
     }
 
     [Fact]
+    public void RdanceRenderRequiresReadyMotionAndPositiveDuration()
+    {
+        var detail = ReadRepoFile("Components", "Pages", "RDanceJobDetail.razor");
+        var start = detail.IndexOf("private bool HasValidMotionDuration", StringComparison.Ordinal);
+        var end = detail.IndexOf("private bool IsActive", start, StringComparison.Ordinal);
+        var gate = detail[start..end];
+
+        Assert.Contains("MotionDurationSeconds is > 0", gate);
+        Assert.Contains("MotionVideoMediaId is not null", gate);
+        Assert.Contains("!string.IsNullOrWhiteSpace(_job.MotionVideoUrl)", gate);
+        Assert.Contains("SourceStageStatus == DanceSellSourceStageStatuses.Ready", gate);
+        Assert.Contains("PreparedReferenceStatus == DanceSellReferenceStatuses.Approved", gate);
+        Assert.Contains("HasMotionVideoWithoutValidDuration", detail);
+        Assert.Contains("DANCE_SELL_VIDEO_DURATION_REQUIRED", detail);
+        Assert.Contains("Chưa xác định được thời lượng video. Vui lòng tải lại video.", detail);
+    }
+
+    [Fact]
+    public void RdanceAutoFinishTextDoesNotPromiseAutomaticRender()
+    {
+        var create = ReadRepoFile("Components", "Pages", "RDanceJobCreate.razor");
+        var detail = ReadRepoFile("Components", "Pages", "RDanceJobDetail.razor");
+
+        Assert.Contains("@AutoFinishHelpText", create);
+        Assert.Contains("@AutoFinishHelpText", detail);
+        Assert.Contains("Bạn vẫn cần bấm \\\"Tạo video\\\" để bắt đầu render.", create);
+        Assert.Contains("\\u1ea1o video", detail);
+        Assert.DoesNotContain("tự động chuẩn bị ảnh, duyệt ảnh và tạo video khi dữ liệu đã đầy đủ", create);
+        Assert.DoesNotContain("tự động chuẩn bị ảnh, duyệt ảnh và tạo video khi dữ liệu đã đầy đủ", detail);
+    }
+
+    [Fact]
     public void RdanceMotionDurationIsPersistedAndCopiedIntoRenderOperation()
     {
         var service = ReadRepoFile("Services", "DanceSell", "DanceSellPhase2Services.cs");
@@ -255,6 +287,14 @@ public sealed class RDanceCustomerStatusAndPointsRegressionTests
         Assert.Contains("request_json=jsonb_set", repository);
         Assert.Contains("'{durationSeconds}'", repository);
         Assert.Contains("to_jsonb(@durationSeconds)", repository);
+        var resolverStart = service.IndexOf("private async Task<int> ResolveMotionDurationSecondsAsync", StringComparison.Ordinal);
+        var resolver = service[resolverStart..];
+        var jobDuration = resolver.IndexOf("ReadInt(job.RequestJson", StringComparison.Ordinal);
+        var operationDuration = resolver.IndexOf("latestMotionOperation?.RequestJson", StringComparison.Ordinal);
+        var routeDuration = resolver.IndexOf("ReadInt(route.ConfigJson", StringComparison.Ordinal);
+        Assert.True(jobDuration >= 0 && operationDuration > jobDuration && routeDuration > operationDuration);
+        Assert.Contains("GetLatestOperationAsync", resolver);
+        Assert.Contains("PersistMotionDurationAsync(job.Id, persistedOperationDuration.Value", resolver);
     }
 
     [Fact]

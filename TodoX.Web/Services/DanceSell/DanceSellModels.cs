@@ -755,6 +755,7 @@ public static class DanceSellCustomerErrorPolicy
             "DANCE_SELL_INVALID_CHARACTER" => "Ảnh người mẫu chưa hợp lệ. Vui lòng tải lại ảnh.",
             "DANCE_SELL_INVALID_PRODUCT" => "Ảnh sản phẩm chưa hợp lệ. Vui lòng tải lại ảnh.",
             "DANCE_SELL_INVALID_MOTION" or "DANCE_SELL_MOTION_FILE_REQUIRED" => "Video chuyển động chưa hợp lệ. Vui lòng tải lại video.",
+            "DANCE_SELL_VIDEO_DURATION_REQUIRED" or "DANCE_SELL_MOTION_DURATION_NOT_READY" => "Chưa xác định được thời lượng video. Vui lòng tải lại video.",
             "DANCE_SELL_CANCEL_FAILED" => "Không thể dừng video lúc này. Vui lòng thử lại.",
             "DANCE_SELL_REFERENCE_NOT_APPROVED" or "DANCE_SELL_REFERENCE_FILE_REQUIRED" => "Không thể chuẩn bị ảnh để tạo video. Vui lòng thử lại.",
             _ => "Không thể tạo video ở lần xử lý này. Vui lòng thử lại hoặc liên hệ hỗ trợ."
