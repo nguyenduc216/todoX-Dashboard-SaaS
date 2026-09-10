@@ -197,13 +197,13 @@ Required commit message:
 fix(rdance): finalize duration render gate
 ```
 
-Commit hash: `TBD`
+Commit hash: `6d6b62ebf9b7dea8047ab284e07a5940bd013376`
 
 ## Push
 
 - branch: `feature/rdn-onepage-ui-revamp`
 - remote: `origin/feature/rdn-onepage-ui-revamp`
-- result: `TBD`
+- result: `PASS`
 
 ## Runtime Smoke Test
 
