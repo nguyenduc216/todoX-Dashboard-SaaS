@@ -70,13 +70,11 @@ public sealed class RDanceCustomerStatusAndPointsRegressionTests
         var detail = ReadRepoFile("Components", "Pages", "RDanceJobDetail.razor");
 
         Assert.Contains("@using TodoX.Web.Services.Platform", detail);
-        Assert.Contains("@inject ICoreServiceCatalogService CoreCatalog", detail);
-        Assert.Contains("@inject IPointPricingService PointPricing", detail);
+        Assert.Contains("@inject IDanceSellCustomerPricing CustomerPricing", detail);
         Assert.Contains("DanceSellMotionProviderContract.ResolveProviderMode(route, _job.Mode)", detail);
-        Assert.Contains("CoreCatalog.GetByCodeAsync(FixedTodoXServiceCatalog.RDance", detail);
-        Assert.Contains("FixedTodoXServiceCatalog.RDance", detail);
+        Assert.Contains("CustomerPricing.EstimateAsync(_job, durationSeconds.Value, quality, imageCount)", detail);
         Assert.Contains("ResolveMotionDurationSeconds(_job, route)", detail);
-        Assert.Contains("PointPricing.EstimateAsync(new PointPricingEstimateRequest(", detail);
+        Assert.DoesNotContain("PointPricing.EstimateAsync(", detail);
         Assert.Contains("StaticImageBillingPolicy.ResolveRdanceStaticInputCount(_job)", detail);
         Assert.Contains("StaticImageBillingPolicy.ResolveBillableStaticImageCount(staticImageCount, chargeStaticImagePoints)", detail);
         Assert.Contains("var imageCount = string.Equals(_job.ReferenceMode, DanceSellReferenceModes.DirectReference, StringComparison.OrdinalIgnoreCase)", detail);
@@ -179,7 +177,7 @@ public sealed class RDanceCustomerStatusAndPointsRegressionTests
     }
 
     [Fact]
-    public void RdanceCreateReloadsAfterMotionUploadAndLeavesQueueingToDetailAutoFinish()
+    public void RdanceCreateReloadsAfterMotionUploadAndLeavesQueueingToExplicitDetailAction()
     {
         var create = ReadRepoFile("Components", "Pages", "RDanceJobCreate.razor");
         var motionStart = create.IndexOf("private async Task OnMotionSelected", StringComparison.Ordinal);
@@ -213,7 +211,68 @@ public sealed class RDanceCustomerStatusAndPointsRegressionTests
         Assert.Contains("ReferenceStepStatusKey", detail);
         Assert.Contains("await AutoPrepareReferenceAsync();", detail);
         Assert.Contains("References.ApproveCharacterAsync(_job.Id", detail);
-        Assert.Contains("DanceSell.QueueRenderAsync(_job.Id", detail);
+        Assert.Contains("private async Task QueueRenderFromUserActionAsync()", detail);
+        Assert.Contains("DanceSell.QueueRenderAsync(job.Id", detail);
+    }
+
+    [Fact]
+    public void RdanceUploadReferenceAndPollingPathsCannotQueueRender()
+    {
+        var detail = ReadRepoFile("Components", "Pages", "RDanceJobDetail.razor");
+
+        foreach (var methodName in new[]
+        {
+            "private async Task StageTikTokAsync",
+            "private async Task OnMotionSelected",
+            "private async Task AutoPrepareReferenceAsync",
+            "private async Task ContinueAutoFinishAsync",
+            "private async Task ReloadAsync",
+            "private async Task PollLoopAsync"
+        })
+        {
+            var start = detail.IndexOf(methodName, StringComparison.Ordinal);
+            Assert.True(start >= 0, $"Missing method: {methodName}");
+            var next = detail.IndexOf("\n    private ", start + methodName.Length, StringComparison.Ordinal);
+            var method = next < 0 ? detail[start..] : detail[start..next];
+            Assert.DoesNotContain("QueueRenderAsync", method);
+        }
+
+        var explicitStart = detail.IndexOf("private async Task QueueRenderFromUserActionAsync", StringComparison.Ordinal);
+        Assert.True(explicitStart >= 0);
+        Assert.Contains("DanceSell.QueueRenderAsync(job.Id", detail[explicitStart..]);
+    }
+
+    [Fact]
+    public void RdanceMotionDurationIsPersistedAndCopiedIntoRenderOperation()
+    {
+        var service = ReadRepoFile("Services", "DanceSell", "DanceSellPhase2Services.cs");
+        var repository = ReadRepoFile("Services", "DanceSell", "DanceSellRepository.cs");
+
+        Assert.Contains("DanceSellMotionDuration.TryGetBillableSeconds(content)", service);
+        Assert.Contains("UpdateMotionUploadAsync(job.Id", service);
+        Assert.Contains("UpdateMotionTikTokAsync(job.Id", service);
+        Assert.Contains("durationSeconds }", service);
+        Assert.Contains("request_json=jsonb_set", repository);
+        Assert.Contains("'{durationSeconds}'", repository);
+        Assert.Contains("to_jsonb(@durationSeconds)", repository);
+    }
+
+    [Fact]
+    public void RdanceCustomerPricingUsesPersistedServiceIdentityAndKeepsLegacyFallback()
+    {
+        var pricing = ReadRepoFile("Services", "DanceSell", "DanceSellCustomerPricing.cs");
+        var phase2 = ReadRepoFile("Services", "DanceSell", "DanceSellPhase2Services.cs");
+        var create = ReadRepoFile("Components", "Pages", "RDanceJobCreate.razor");
+
+        Assert.Contains("ReadGuid(job.RequestJson, \"serviceId\", \"service_id\")", pricing);
+        Assert.Contains("await _catalog.GetByIdAsync(id, ct)", pricing);
+        Assert.Contains("await _sellPrices.EstimateAsync", pricing);
+        Assert.Contains("FixedTodoXServiceCatalog.RDance", pricing);
+        Assert.Contains("ServiceId = ServiceId", create);
+        Assert.Contains("ServiceCode = ServiceCode", create);
+        Assert.Contains("ServiceId = service?.Id", phase2);
+        Assert.Contains("ServiceCode = service?.ServiceCode", phase2);
+        Assert.Contains("DANCE_SELL_SERVICE_ID_MISMATCH", phase2);
     }
 
     [Fact]

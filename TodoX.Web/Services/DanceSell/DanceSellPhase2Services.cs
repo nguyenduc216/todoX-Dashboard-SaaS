@@ -1673,6 +1673,13 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
             service = await _coreCatalog.GetByCodeAsync(serviceCode.Trim(), ct);
         }
 
+        if (service is null
+            && (serviceId is Guid requestedServiceId && requestedServiceId != Guid.Empty
+                || !string.IsNullOrWhiteSpace(serviceCode)))
+        {
+            throw new InvalidOperationException("DANCE_SELL_SERVICE_INVALID");
+        }
+
         if (service is null)
         {
             return null;

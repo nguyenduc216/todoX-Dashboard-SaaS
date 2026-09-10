@@ -17,10 +17,8 @@
 @inject IDanceSellOperationRepository DanceOperations
 @inject IRenderJobService RenderJobs
 @inject IDanceSellCostEstimator Costs
-@inject IPointPricingService PointPricing
 @inject IDanceSellCustomerPricing CustomerPricing
 @inject TokenSettingsService TokenSettings
-@inject ICoreServiceCatalogService CoreCatalog
 @inject IDanceSellProviderCatalog ProviderCatalog
 @inject IOptionsMonitor<DanceSellPhase2Options> DanceOptions
 @inject IDialogService DialogService
@@ -1443,6 +1441,10 @@
         if (_autoFinish)
         {
             await ContinueAutoFinishAsync();
+            if (_job?.PreparedReferenceStatus == DanceSellReferenceStatuses.Approved)
+            {
+                await RunAsync(QueueRenderFromUserActionAsync);
+            }
             return;
         }
 
@@ -1460,22 +1462,24 @@
             yesText: "Xác nhận tạo video", cancelText: "Quay lại chỉnh sửa");
         if (confirmed == true)
         {
-            await RunAsync(async () =>
-            {
-                await UpdateBusinessAsync();
-                var job = _job ?? throw new InvalidOperationException("Không tìm thấy video quảng cáo thời trang.");
-                _job = await DanceSell.GetAsync(job.Id, AuthState.CurrentUser!);
-                if (_job.PreparedReferenceStatus != DanceSellReferenceStatuses.Approved
-                    || string.IsNullOrWhiteSpace(_job.PreparedReferenceUrl))
-                {
-                    throw new InvalidOperationException("DANCE_SELL_REFERENCE_NOT_APPROVED");
-                }
-
-                _job = await DanceSell.QueueRenderAsync(job.Id, AuthState.CurrentUser!);
-                _tabIndex = 3;
-                await ReloadAsync();
-            });
+            await RunAsync(QueueRenderFromUserActionAsync);
         }
+    }
+
+    private async Task QueueRenderFromUserActionAsync()
+    {
+        await UpdateBusinessAsync();
+        var job = _job ?? throw new InvalidOperationException("Không tìm thấy video quảng cáo thời trang.");
+        _job = await DanceSell.GetAsync(job.Id, AuthState.CurrentUser!);
+        if (_job.PreparedReferenceStatus != DanceSellReferenceStatuses.Approved
+            || string.IsNullOrWhiteSpace(_job.PreparedReferenceUrl))
+        {
+            throw new InvalidOperationException("DANCE_SELL_REFERENCE_NOT_APPROVED");
+        }
+
+        _job = await DanceSell.QueueRenderAsync(job.Id, AuthState.CurrentUser!);
+        _tabIndex = 3;
+        await ReloadAsync();
     }
 
     private async Task CancelAsync()
@@ -1730,23 +1734,6 @@
             return;
         }
 
-        if (_job.PreparedReferenceStatus == DanceSellReferenceStatuses.Approved
-            && _job.MotionVideoMediaId is not null
-            && !_busy)
-        {
-            _autoFinishing = true;
-            try
-            {
-                await UpdateBusinessAsync();
-                _job = await DanceSell.QueueRenderAsync(_job.Id, AuthState.CurrentUser);
-                _tabIndex = 3;
-                await ReloadAsync();
-            }
-            finally
-            {
-                _autoFinishing = false;
-            }
-        }
     }
 
     private async Task RetryAsync()

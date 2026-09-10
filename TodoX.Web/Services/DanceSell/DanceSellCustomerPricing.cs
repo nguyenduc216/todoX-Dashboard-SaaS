@@ -90,12 +90,18 @@ public sealed class DanceSellCustomerPricing : IDanceSellCustomerPricing
     private async Task<CoreServiceView?> ResolveServiceAsync(DanceSellJobDto job, CancellationToken ct)
     {
         var serviceCode = ReadString(job.RequestJson, "serviceCode", "service_code");
-        if (string.IsNullOrWhiteSpace(serviceCode))
+        var serviceId = ReadGuid(job.RequestJson, "serviceId", "service_id");
+        var service = serviceId is Guid id && id != Guid.Empty
+            ? await _catalog.GetByIdAsync(id, ct)
+            : null;
+        service ??= string.IsNullOrWhiteSpace(serviceCode)
+            ? null
+            : await _catalog.GetByCodeAsync(serviceCode, ct);
+        if (service is null && (serviceId is not null || !string.IsNullOrWhiteSpace(serviceCode)))
         {
-            return null;
+            throw new InvalidOperationException("DANCE_SELL_SERVICE_INVALID");
         }
 
-        var service = await _catalog.GetByCodeAsync(serviceCode, ct);
         if (service is null
             || !service.Enabled
             || !string.Equals(service.ServiceType, TodoXServiceEngineTypes.RDance, StringComparison.OrdinalIgnoreCase))
@@ -103,8 +109,7 @@ public sealed class DanceSellCustomerPricing : IDanceSellCustomerPricing
             throw new InvalidOperationException("DANCE_SELL_SERVICE_INVALID");
         }
 
-        var serviceId = ReadGuid(job.RequestJson, "serviceId", "service_id");
-        if (serviceId is Guid id && id != service.Id)
+        if (serviceId is Guid persistedServiceId && persistedServiceId != service.Id)
         {
             throw new InvalidOperationException("DANCE_SELL_SERVICE_ID_MISMATCH");
         }

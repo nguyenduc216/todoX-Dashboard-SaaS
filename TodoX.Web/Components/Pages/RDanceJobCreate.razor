@@ -394,16 +394,26 @@
 
     private async Task LoadServiceDefaultsAsync()
     {
-        CatalogServiceView? service = ServiceId is Guid serviceId && serviceId != Guid.Empty
-            ? await Catalog.GetServiceByIdAsync(serviceId)
+        var hasExplicitService = ServiceId is Guid serviceId && serviceId != Guid.Empty
+            || !string.IsNullOrWhiteSpace(ServiceCode);
+        CatalogServiceView? service = ServiceId is Guid requestedServiceId && requestedServiceId != Guid.Empty
+            ? await Catalog.GetServiceByIdAsync(requestedServiceId)
             : (await Catalog.GetActiveCatalogServicesAsync())
-                .FirstOrDefault(x => string.Equals(x.ServiceCode, ServiceCode ?? "FASHION_VIDEO", StringComparison.OrdinalIgnoreCase));
+                .FirstOrDefault(x => string.Equals(
+                    x.ServiceCode,
+                    hasExplicitService ? ServiceCode : FixedTodoXServiceCatalog.RDance,
+                    StringComparison.OrdinalIgnoreCase));
 
         if (service is null)
         {
             return;
         }
 
+        if (hasExplicitService)
+        {
+            ServiceId = service.Id;
+            ServiceCode = service.ServiceCode;
+        }
         var defaults = ServiceJobDefaultsCodec.FromJson(service.JobDefaultsJson);
         if (defaults.Ratio is "9_16" or "16_9")
         {
