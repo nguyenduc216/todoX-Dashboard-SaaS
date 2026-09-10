@@ -292,7 +292,7 @@ public sealed class RVideoJobService : IRVideoJobService
             UPDATE render.render_jobs
                SET status=@status,current_step=@stage,progress_percent=GREATEST(progress_percent,@progress),updated_at=now()
              WHERE id=@jobId AND tenant_id=@tenant AND job_type=@jobType
-               AND status NOT IN ('completed','failed','cancelled');
+               AND status IN ('preparing','rendering','post_processing','pending_reconciliation');
             """, new { jobId, tenant = _tenant.TenantId, jobType = RenderJobTypes.CoreService, status, stage, progress });
     }
 

@@ -635,9 +635,29 @@ public sealed class RenderJobService : IRenderJobService
 
         if (job is null)
         {
+            _logger.LogDebug(
+                "RENDER_JOB_CLAIM_RESULT workerKey={WorkerKey} claimResult=none includeJobTypes={IncludeJobTypes} excludeJobTypes={ExcludeJobTypes}",
+                workerKey,
+                includeJobTypes is null ? null : string.Join(",", includeJobTypes),
+                excludeJobTypes is null ? null : string.Join(",", excludeJobTypes));
             tx.Commit();
             return null;
         }
+
+        var isCoreServiceRecoveryClaim =
+            string.Equals(job.JobType, RenderJobTypes.CoreService, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(job.Status, RenderJobStatuses.Rendering, StringComparison.OrdinalIgnoreCase)
+            && job.AttemptCount == 0
+            && string.IsNullOrWhiteSpace(job.WorkerKey)
+            && job.StartedAt is null;
+        _logger.LogInformation(
+            "RENDER_JOB_CLAIM_SELECTED jobId={JobId} jobType={JobType} currentStatus={CurrentStatus} attemptCount={AttemptCount} workerKey={CurrentWorkerKey} claimResult=selected coreServiceRecovery={CoreServiceRecovery}",
+            job.Id,
+            job.JobType,
+            job.Status,
+            job.AttemptCount,
+            job.WorkerKey,
+            isCoreServiceRecoveryClaim);
 
         await conn.ExecuteAsync(
             """
@@ -660,7 +680,19 @@ public sealed class RenderJobService : IRenderJobService
 
         tx.Commit();
         await AddEventAsync(job.Id, "WORKER_CLAIMED", "Worker claimed render job.", new { workerKey }, ct: ct);
-        return await GetAsync(job.Id, ct);
+        var claimed = await GetAsync(job.Id, ct);
+        _logger.LogInformation(
+            "RENDER_JOB_CLAIM_RESULT jobId={JobId} jobType={JobType} currentStatus={PreviousStatus} attemptCountBefore={AttemptCountBefore} workerKey={WorkerKey} claimResult={ClaimResult} claimedStatus={ClaimedStatus} attemptCountAfter={AttemptCountAfter} startedAtSet={StartedAtSet}",
+            job.Id,
+            job.JobType,
+            job.Status,
+            job.AttemptCount,
+            workerKey,
+            claimed is null ? "missing_after_update" : "claimed",
+            claimed?.Status,
+            claimed?.AttemptCount,
+            claimed?.StartedAt is not null);
+        return claimed;
     }
 
     internal static string ResolveClaimOrderSql(IReadOnlyCollection<string>? includeJobTypes)
