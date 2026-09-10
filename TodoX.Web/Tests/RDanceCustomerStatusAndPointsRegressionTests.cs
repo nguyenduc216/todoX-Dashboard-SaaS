@@ -73,7 +73,7 @@ public sealed class RDanceCustomerStatusAndPointsRegressionTests
         Assert.Contains("@inject IDanceSellCustomerPricing CustomerPricing", detail);
         Assert.Contains("DanceSellMotionProviderContract.ResolveProviderMode(route, _job.Mode)", detail);
         Assert.Contains("CustomerPricing.EstimateAsync(_job, durationSeconds.Value, quality, imageCount)", detail);
-        Assert.Contains("ResolveMotionDurationSeconds(_job, route)", detail);
+        Assert.Contains("ResolveMotionDurationSeconds(_job)", detail);
         Assert.DoesNotContain("PointPricing.EstimateAsync(", detail);
         Assert.Contains("StaticImageBillingPolicy.ResolveRdanceStaticInputCount(_job)", detail);
         Assert.Contains("StaticImageBillingPolicy.ResolveBillableStaticImageCount(staticImageCount, chargeStaticImagePoints)", detail);
@@ -121,7 +121,7 @@ public sealed class RDanceCustomerStatusAndPointsRegressionTests
         Assert.Contains("OnClick=\"DownloadResultAsync\"", detail);
         Assert.DoesNotContain("rdance-video-source", detail);
         Assert.Contains("_latestMotionOperation", detail);
-        Assert.Contains("ReadInt(_latestMotionOperation?.RequestJson", detail);
+        Assert.Contains("ReadPositiveInt(_latestMotionOperation?.RequestJson", detail);
         Assert.DoesNotContain(".rdance-overlay-actions { position: absolute;", detail);
         Assert.True(detail.IndexOf("class=\"rdance-overlay-actions\"", StringComparison.Ordinal)
             < detail.IndexOf("class=\"rdance-media-frame rdance-video-frame\"", StringComparison.Ordinal));
@@ -291,10 +291,31 @@ public sealed class RDanceCustomerStatusAndPointsRegressionTests
         var resolver = service[resolverStart..];
         var jobDuration = resolver.IndexOf("ReadInt(job.RequestJson", StringComparison.Ordinal);
         var operationDuration = resolver.IndexOf("latestMotionOperation?.RequestJson", StringComparison.Ordinal);
-        var routeDuration = resolver.IndexOf("ReadInt(route.ConfigJson", StringComparison.Ordinal);
-        Assert.True(jobDuration >= 0 && operationDuration > jobDuration && routeDuration > operationDuration);
+        Assert.True(jobDuration >= 0 && operationDuration > jobDuration);
         Assert.Contains("GetLatestOperationAsync", resolver);
         Assert.Contains("PersistMotionDurationAsync(job.Id, persistedOperationDuration.Value", resolver);
+        Assert.DoesNotContain("route.ConfigJson", resolver);
+        Assert.DoesNotContain("DanceSellCostEstimate estimate", resolver);
+        Assert.DoesNotContain("DanceSellProviderRouteDto route", resolver);
+    }
+
+    [Fact]
+    public void RdanceDurationGateRejectsInvalidPersistedValuesAndRouteDefaults()
+    {
+        var service = ReadRepoFile("Services", "DanceSell", "DanceSellPhase2Services.cs");
+        var detail = ReadRepoFile("Components", "Pages", "RDanceJobDetail.razor");
+        var resolverStart = service.IndexOf("private async Task<int> ResolveMotionDurationSecondsAsync", StringComparison.Ordinal);
+        var resolver = service[resolverStart..];
+
+        Assert.Contains("persistedJobDuration is > 0", resolver);
+        Assert.Contains("persistedOperationDuration is > 0", resolver);
+        Assert.Contains("derived is > 0", resolver);
+        Assert.DoesNotContain("ReadInt(route.ConfigJson", resolver);
+        Assert.DoesNotContain("ReadInt(route?.ConfigJson", detail);
+        Assert.Contains("ReadPositiveInt(job.RequestJson", detail);
+        Assert.Contains("ReadPositiveInt(_latestMotionOperation?.RequestJson", detail);
+        Assert.Contains("return value is > 0 ? value : null", detail);
+        Assert.Contains("DANCE_SELL_VIDEO_DURATION_REQUIRED", resolver);
     }
 
     [Fact]

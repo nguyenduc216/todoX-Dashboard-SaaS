@@ -1826,7 +1826,7 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
         var quality = job.Mode.Equals("premium", StringComparison.OrdinalIgnoreCase)
             ? ServiceSellPriceQualityTiers.Premium
             : ServiceSellPriceQualityTiers.Standard;
-        var durationSeconds = await ResolveMotionDurationSecondsAsync(job, motionRoute, estimate, ct);
+        var durationSeconds = await ResolveMotionDurationSecondsAsync(job, ct);
         var chargeStaticImagePoints = await _tokenSettings.GetChargeStaticImagePointsAsync();
         var staticInputCount = StaticImageBillingPolicy.ResolveRdanceStaticInputCount(job);
         var billableStaticImageCount = StaticImageBillingPolicy.ResolveBillableStaticImageCount(staticInputCount, chargeStaticImagePoints);
@@ -1971,7 +1971,7 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
             var motionRoute = await _catalog.ResolveAsync(DanceSellOperationTypes.MotionVideo, job.MotionProviderCode, job.MotionProviderModel, ct);
             var providerMode = DanceSellMotionProviderContract.ResolveProviderMode(motionRoute, job.Mode);
             var estimate = await _costs.EstimateAsync(motionRoute, providerMode, null, ct);
-            var retryDurationSeconds = await ResolveMotionDurationSecondsAsync(job, motionRoute, estimate, ct);
+            var retryDurationSeconds = await ResolveMotionDurationSecondsAsync(job, ct);
             var retryQuality = job.Mode.Equals("premium", StringComparison.OrdinalIgnoreCase)
                 ? ServiceSellPriceQualityTiers.Premium
                 : ServiceSellPriceQualityTiers.Standard;
@@ -2235,8 +2235,6 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
 
     private async Task<int> ResolveMotionDurationSecondsAsync(
         DanceSellJobDto job,
-        DanceSellProviderRouteDto route,
-        DanceSellCostEstimate estimate,
         CancellationToken ct)
     {
         var persistedJobDuration = ReadInt(job.RequestJson, "durationSeconds", "duration_seconds", "videoDurationSeconds", "video_duration_seconds");
@@ -2269,15 +2267,6 @@ public sealed class DanceSellPhase2Service : IDanceSellPhase2Service
             {
                 await _repo.PersistMotionDurationAsync(job.Id, derived.Value, ct);
                 return derived.Value;
-            }
-        }
-
-        if (persistedJobDuration is null && persistedOperationDuration is null)
-        {
-            var configured = ReadInt(route.ConfigJson, "durationSeconds", "duration_seconds");
-            if (configured is > 0)
-            {
-                return configured.Value;
             }
         }
 

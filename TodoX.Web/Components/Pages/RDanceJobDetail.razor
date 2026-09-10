@@ -719,7 +719,7 @@
     private int? MotionDurationSeconds
         => _job is null
             ? null
-            : ResolveMotionDurationSeconds(_job, _motionRoutes.FirstOrDefault());
+            : ResolveMotionDurationSeconds(_job);
     private string MotionResolutionText => _ratio == "16:9" ? "1920x1080" : "1080x1920";
     private string ReferenceImageSourceText => !string.IsNullOrWhiteSpace(_job?.PreparedReferenceUrl)
         ? "Ảnh kết quả"
@@ -1911,7 +1911,7 @@
             return null;
         }
 
-        var durationSeconds = ResolveMotionDurationSeconds(_job, route);
+        var durationSeconds = ResolveMotionDurationSeconds(_job);
         if (durationSeconds is null)
         {
             return null;
@@ -1929,10 +1929,15 @@
         return await CustomerPricing.EstimateAsync(_job, durationSeconds.Value, quality, imageCount);
     }
 
-    private int? ResolveMotionDurationSeconds(DanceSellJobDto job, DanceSellProviderRouteDto? route)
-        => ReadInt(job.RequestJson, "durationSeconds", "duration_seconds", "videoDurationSeconds", "video_duration_seconds")
-           ?? ReadInt(_latestMotionOperation?.RequestJson, "durationSeconds", "duration_seconds", "videoDurationSeconds", "video_duration_seconds")
-           ?? ReadInt(route?.ConfigJson, "durationSeconds", "duration_seconds");
+    private int? ResolveMotionDurationSeconds(DanceSellJobDto job)
+        => ReadPositiveInt(job.RequestJson, "durationSeconds", "duration_seconds", "videoDurationSeconds", "video_duration_seconds")
+           ?? ReadPositiveInt(_latestMotionOperation?.RequestJson, "durationSeconds", "duration_seconds", "videoDurationSeconds", "video_duration_seconds");
+
+    private static int? ReadPositiveInt(string? rawJson, params string[] propertyNames)
+    {
+        var value = ReadInt(rawJson, propertyNames);
+        return value is > 0 ? value : null;
+    }
 
     private static int? ReadInt(string? rawJson, params string[] propertyNames)
     {
