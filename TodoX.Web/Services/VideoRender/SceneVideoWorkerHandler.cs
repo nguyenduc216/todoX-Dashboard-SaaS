@@ -731,8 +731,99 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                         $"Scene {input.SceneIndex} submitted to its configured video provider.",
                         new { jobId = job.Id, input.SceneId, input.SceneIndex, taskId, model = policy.Model, input.ProviderCode, attemptIndex }, ct);
                 }
-                catch (VideoProviderTransientException ex)
+                catch (Exception submitException) when (
+                    submitException is VideoProviderTransientException
+                    || submitException is Ai79TaskSubmitException)
                 {
+                    var structuredException = ExtractAi79SubmitException(submitException);
+                    var canFallback = structuredException is not null
+                        && IsDefinitivelyRejectedSubmit(structuredException);
+                    if (canFallback)
+                    {
+                        var ai79Exception = structuredException!;
+                        var failureClassification = ClassifyProviderFailure(ai79Exception.ErrorCode, ai79Exception.ErrorMessage, ai79Exception.HttpStatusCode);
+                        await AddAi79SubmitDiagnosticsAsync(job, policy, ai79Exception, CancellationToken.None);
+                        await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_SUBMIT_FAILED", "warning",
+                            "Scene-video provider submit failed for the current fallback candidate.",
+                            new
+                            {
+                                projectId = input.ProjectId,
+                                sceneId = input.SceneId,
+                                input.SceneIndex,
+                                renderJobId = job.Id,
+                                sceneVideoVersionId = version.Id,
+                                provider = input.ProviderCode,
+                                model = policy.Model,
+                                mode = policy.Mode,
+                                candidateIndex = attemptIndex,
+                                status = "failed",
+                                providerTaskId = (string?)null,
+                                failureClassification,
+                                providerErrorCode = ai79Exception.ErrorCode,
+                                errorMessage = ai79Exception.ErrorMessage,
+                                httpStatusCode = (int?)ai79Exception.HttpStatusCode,
+                                sanitizedResponseJson = SanitizeDiagnosticJson(ai79Exception.SanitizedResponseJson),
+                                sanitizedRequestMetadataJson = SanitizeDiagnosticJson(ai79Exception.SanitizedRequestMetadataJson)
+                            }, CancellationToken.None);
+                        await _versions.FailSceneVideoVersionAsync(
+                            version.Id,
+                            ai79Exception.ErrorCode ?? failureClassification,
+                            ai79Exception.ErrorMessage,
+                            CancellationToken.None);
+                        await _billing.CompleteAsync(new AiImageBillingCompleteRequest
+                        {
+                            LogicalRequestId = attemptLogicalRequestId,
+                            Success = false,
+                            ActualModel = policy.Model,
+                            ProviderUsageJson = ai79Exception.SanitizedResponseJson,
+                            TariffSnapshotJson = tariffSnapshot,
+                            ErrorMessage = ai79Exception.ErrorMessage
+                        }, CancellationToken.None);
+                        if (!ShouldFallback(failureClassification))
+                        {
+                            throw ai79Exception;
+                        }
+
+                        if (attemptIndex + 1 >= candidates.Count)
+                        {
+                            await AddFallbackExhaustedEventAsync(
+                                project,
+                                scene,
+                                job,
+                                input,
+                                policy,
+                                null,
+                                failureClassification,
+                                ai79Exception.ErrorCode,
+                                ai79Exception.SanitizedResponseJson,
+                                ai79Exception.ErrorMessage,
+                                CancellationToken.None);
+                            await FailAsync(project.Id, scene, version.Id, ai79Exception.ErrorCode ?? "provider_failure", ai79Exception.ErrorMessage, CancellationToken.None);
+                            throw new RenderJobTerminalFailureException(ai79Exception.ErrorMessage, ai79Exception);
+                        }
+
+                        var nextCandidate = candidates[attemptIndex + 1];
+                        await AddFallbackStartedEventAsync(
+                            project,
+                            scene,
+                            job,
+                            input,
+                            policy,
+                            nextCandidate.Policy,
+                            null,
+                            failureClassification,
+                            ai79Exception.ErrorCode,
+                            CancellationToken.None);
+                        fallbackReason = failureClassification;
+                        attemptIndex++;
+                        continue;
+                    }
+
+                    var ex = submitException as VideoProviderTransientException
+                        ?? new VideoProviderTransientException(
+                            submitException.Message,
+                            structuredException?.ErrorCode,
+                            submitException);
                     var diagnostics = BuildSubmitFailureDiagnostics(ex);
                     await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_SUBMIT_FAILED", "warning",
                         "Scene-video provider submit did not complete.",
@@ -779,85 +870,6 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                     throw new RenderJobPendingReconciliationException(
                         "Video provider submit outcome is unknown; reconciliation is required before another submit.",
                         ex);
-                }
-                catch (Ai79TaskSubmitException ex)
-                {
-                    var failureClassification = ClassifyProviderFailure(ex.ErrorCode, ex.ErrorMessage, ex.HttpStatusCode);
-                    await AddAi79SubmitDiagnosticsAsync(job, policy, ex, CancellationToken.None);
-                    await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_SUBMIT_FAILED", "warning",
-                        "Scene-video provider submit failed for the current fallback candidate.",
-                        new
-                        {
-                            projectId = input.ProjectId,
-                            sceneId = input.SceneId,
-                            input.SceneIndex,
-                            renderJobId = job.Id,
-                            sceneVideoVersionId = version.Id,
-                            provider = input.ProviderCode,
-                            model = policy.Model,
-                            mode = policy.Mode,
-                            candidateIndex = attemptIndex,
-                            status = "failed",
-                            providerTaskId = (string?)null,
-                            failureClassification,
-                            providerErrorCode = ex.ErrorCode,
-                            errorMessage = ex.ErrorMessage,
-                            httpStatusCode = (int?)ex.HttpStatusCode,
-                            sanitizedResponseJson = SanitizeDiagnosticJson(ex.SanitizedResponseJson),
-                            sanitizedRequestMetadataJson = SanitizeDiagnosticJson(ex.SanitizedRequestMetadataJson)
-                        }, CancellationToken.None);
-                    await _versions.FailSceneVideoVersionAsync(
-                        version.Id,
-                        ex.ErrorCode ?? failureClassification,
-                        ex.ErrorMessage,
-                        CancellationToken.None);
-                    await _billing.CompleteAsync(new AiImageBillingCompleteRequest
-                    {
-                        LogicalRequestId = attemptLogicalRequestId,
-                        Success = false,
-                        ActualModel = policy.Model,
-                        ProviderUsageJson = ex.SanitizedResponseJson,
-                        TariffSnapshotJson = tariffSnapshot,
-                        ErrorMessage = ex.ErrorMessage
-                    }, CancellationToken.None);
-                    if (!ShouldFallback(failureClassification))
-                    {
-                        throw;
-                    }
-
-                    if (attemptIndex + 1 >= candidates.Count)
-                    {
-                        await AddFallbackExhaustedEventAsync(
-                            project,
-                            scene,
-                            job,
-                            input,
-                            policy,
-                            null,
-                            failureClassification,
-                            ex.ErrorCode,
-                            ex.SanitizedResponseJson,
-                            ex.ErrorMessage,
-                            CancellationToken.None);
-                        await FailAsync(project.Id, scene, version.Id, ex.ErrorCode ?? "provider_failure", ex.ErrorMessage, CancellationToken.None);
-                        throw new RenderJobTerminalFailureException(ex.ErrorMessage, ex);
-                    }
-
-                    var nextCandidate = candidates[attemptIndex + 1];
-                    await AddFallbackStartedEventAsync(
-                        project,
-                        scene,
-                        job,
-                        input,
-                        policy,
-                        nextCandidate.Policy,
-                        null,
-                        failureClassification,
-                        ex.ErrorCode,
-                        CancellationToken.None);
-                    fallbackReason = failureClassification;
-                    attemptIndex++;
-                    continue;
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
@@ -1891,6 +1903,89 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
 
     private static bool IsTransientSubmit(Ai79TaskSubmitException ex)
         => ex.HttpStatusCode is null || (int)ex.HttpStatusCode >= 500 || (int)ex.HttpStatusCode == 429;
+
+    private static Ai79TaskSubmitException? ExtractAi79SubmitException(Exception exception)
+        => exception switch
+        {
+            Ai79TaskSubmitException direct => direct,
+            VideoProviderTransientException { InnerException: Ai79TaskSubmitException inner } => inner,
+            _ => null
+        };
+
+    private static bool IsDefinitivelyRejectedSubmit(Ai79TaskSubmitException exception)
+    {
+        if (exception.HttpStatusCode is null)
+        {
+            return false;
+        }
+
+        var code = exception.ErrorCode ?? string.Empty;
+        if (code.Equals("missing_task_id", StringComparison.OrdinalIgnoreCase)
+            || code.Equals("empty_response", StringComparison.OrdinalIgnoreCase)
+            || code.Equals("invalid_json", StringComparison.OrdinalIgnoreCase)
+            || HasAcceptedTaskId(exception.SanitizedResponseJson))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool HasAcceptedTaskId(string? sanitizedResponseJson)
+    {
+        if (string.IsNullOrWhiteSpace(sanitizedResponseJson))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(sanitizedResponseJson);
+            return HasAcceptedTaskId(document.RootElement);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    private static bool HasAcceptedTaskId(JsonElement element)
+    {
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var property in element.EnumerateObject())
+            {
+                if ((property.NameEquals("task_id")
+                        || property.NameEquals("taskId")
+                        || property.NameEquals("request_id")
+                        || property.NameEquals("requestId"))
+                    && property.Value.ValueKind == JsonValueKind.String
+                    && !string.IsNullOrWhiteSpace(property.Value.GetString()))
+                {
+                    return true;
+                }
+
+                if ((property.Value.ValueKind == JsonValueKind.Object
+                        || property.Value.ValueKind == JsonValueKind.Array)
+                    && HasAcceptedTaskId(property.Value))
+                {
+                    return true;
+                }
+            }
+        }
+        else if (element.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in element.EnumerateArray())
+            {
+                if (HasAcceptedTaskId(item))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
 
     private static string ClassifyProviderFailure(
         string? errorCode,

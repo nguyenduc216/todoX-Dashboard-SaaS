@@ -137,7 +137,7 @@ public sealed class AiProviderModelRepository
     public async Task<AiProviderModelDetailDto?> GetModelByCodeAsync(long providerId, string providerModelCode, CancellationToken ct = default)
     {
         using var conn = await _factory.OpenAsync(ct);
-        return await conn.QuerySingleOrDefaultAsync<AiProviderModelDetailDto>(
+        var model = await conn.QuerySingleOrDefaultAsync<AiProviderModelDetailDto>(
             """
             SELECT m.id AS Id,
                    m.provider_id AS ProviderId,
@@ -169,6 +169,26 @@ public sealed class AiProviderModelRepository
                AND m.provider_model_code = @providerModelCode
              LIMIT 1;
             """, new { providerId, providerModelCode });
+        if (model is null)
+        {
+            return null;
+        }
+
+        model.ModelCapabilities = (await GetCapabilitiesAsync(model.Id, ct)).ToList();
+        model.Prices = (await GetPricesAsync(model.Id, ct)).ToList();
+        model.PriceSummary = await BuildPriceSummaryAsync(conn, model.Id, ct);
+        var options = AiProviderModelOptionsNormalizer.Normalize(
+            model.SupportedModes,
+            model.SupportedDurations,
+            model.SupportedResolutions,
+            model.SupportedRatios,
+            model.Prices,
+            model.RawJson);
+        model.SupportedModes = options.Modes;
+        model.SupportedDurations = options.Durations;
+        model.SupportedResolutions = options.Resolutions;
+        model.SupportedRatios = options.Ratios;
+        return model;
     }
 
     public async Task UpdateAdminFieldsAsync(

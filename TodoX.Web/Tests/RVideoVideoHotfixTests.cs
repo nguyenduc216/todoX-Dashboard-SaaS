@@ -115,7 +115,7 @@ public sealed class RVideoVideoHotfixTests
             PricingRuleKey = "rule-1"
         };
 
-        var json = (string)method!.Invoke(null, new object[] { input, "scene-base-fallback-1", "task-123", "{\"ok\":true}", 9.5m, (string?)null })!;
+        var json = (string)method!.Invoke(null, new object?[] { input, "scene-base-fallback-1", "task-123", "{\"ok\":true}", 9.5m, (string?)null })!;
         using var doc = JsonDocument.Parse(json);
         Assert.Equal("scene-base-fallback-1", doc.RootElement.GetProperty("logicalRequestId").GetString());
         Assert.Equal("task-123", doc.RootElement.GetProperty("providerTaskId").GetString());
@@ -349,7 +349,7 @@ public sealed class RVideoVideoHotfixTests
     public void RVideoSubmitFailureReleasesCandidateBillingBeforeFallback()
     {
         var source = ReadRepoFile("Services", "VideoRender", "SceneVideoWorkerHandler.cs");
-        var failureStart = source.IndexOf("catch (Ai79TaskSubmitException ex)", StringComparison.Ordinal);
+        var failureStart = source.IndexOf("var canFallback = structuredException is not null", StringComparison.Ordinal);
         var failureEnd = source.IndexOf("catch (Exception ex) when (ex is not OperationCanceledException)", failureStart, StringComparison.Ordinal);
 
         Assert.True(failureStart >= 0);
@@ -358,11 +358,110 @@ public sealed class RVideoVideoHotfixTests
 
         Assert.Contains("Success = false", failureBranch);
         Assert.Contains("LogicalRequestId = attemptLogicalRequestId", failureBranch);
-        Assert.Contains("ProviderUsageJson = ex.SanitizedResponseJson", failureBranch);
+        Assert.Contains("ProviderUsageJson = ai79Exception.SanitizedResponseJson", failureBranch);
         Assert.Contains("TariffSnapshotJson = tariffSnapshot", failureBranch);
         Assert.Contains("await _billing.CompleteAsync", failureBranch);
         Assert.True(failureBranch.IndexOf("await _billing.CompleteAsync", StringComparison.Ordinal)
             < failureBranch.IndexOf("if (!ShouldFallback(failureClassification)", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void RVideoWrappedAi79SubmitRejectionIsEligibleForModelFallback()
+    {
+        var exception = new Ai79TaskSubmitException(
+            "Hiện gói dịch vụ Model VEO - Omni không khả dụng. Vui lòng chọn Model khác",
+            """{"error":"model unavailable"}""",
+            HttpStatusCode.ServiceUnavailable,
+            "provider_failure",
+            sanitizedRequestMetadataJson: """{"model":"veo_omni","mode":"flash"}""");
+
+        Assert.True(IsDefinitivelyRejectedSubmitForTest(exception));
+        Assert.Equal("MODEL_PROVIDER_FAILURE",
+            ClassifyProviderFailureForTest(exception.ErrorCode!, exception.ErrorMessage, exception.HttpStatusCode));
+    }
+
+    [Theory]
+    [InlineData(null, "provider_timeout", """{"error":"timeout"}""")]
+    [InlineData(HttpStatusCode.OK, "missing_task_id", """{"status":"ok"}""")]
+    [InlineData(HttpStatusCode.OK, "provider_error", """{"task_id":"task-accepted","error":"late error"}""")]
+    public void RVideoAmbiguousOrAcceptedSubmitIsNotEligibleForModelFallback(
+        HttpStatusCode? statusCode,
+        string errorCode,
+        string sanitizedResponseJson)
+    {
+        var exception = new Ai79TaskSubmitException(
+            "79AI submit outcome is not a definitive rejection.",
+            sanitizedResponseJson,
+            statusCode,
+            errorCode,
+            sanitizedRequestMetadataJson: """{"model":"veo_omni"}""");
+
+        Assert.False(IsDefinitivelyRejectedSubmitForTest(exception));
+    }
+
+    [Theory]
+    [InlineData("unauthorized", "invalid access token", HttpStatusCode.Unauthorized, "AUTHENTICATION_FAILURE", false)]
+    [InlineData("insufficient_balance", "insufficient balance", HttpStatusCode.ServiceUnavailable, "BILLING_FAILURE", false)]
+    [InlineData("bad_request", "invalid prompt", HttpStatusCode.BadRequest, "INVALID_INPUT", false)]
+    [InlineData("provider_failure", "Lỗi Google không thể xử lý đơn này, vui lòng kiểm tra lại Prompt. #22f", HttpStatusCode.ServiceUnavailable, "MODEL_PROVIDER_FAILURE", true)]
+    public void RVideoSubmitFailureClassificationControlsTerminalVsFallback(
+        string errorCode,
+        string message,
+        HttpStatusCode statusCode,
+        string expectedClassification,
+        bool expectedFallback)
+    {
+        var classification = ClassifyProviderFailureForTest(errorCode, message, statusCode);
+
+        Assert.Equal(expectedClassification, classification);
+        Assert.Equal(expectedFallback, ShouldFallbackForTest(classification));
+    }
+
+    [Fact]
+    public void AiProviderModelOptionsNormalizerReadsNestedVeoVariants()
+    {
+        var options = AiProviderModelOptionsNormalizer.Normalize(
+            explicitModes: null,
+            explicitDurations: null,
+            explicitResolutions: null,
+            explicitRatios: null,
+            prices: null,
+            rawJson: """
+            {
+              "provider_model_code": "veo_3_1",
+              "variant_options": [
+                { "mode": "fast", "duration_seconds": 6, "resolution": "720p", "aspect_ratio": "9:16" },
+                { "mode": "quality", "duration": "8", "size": "1080p", "ratio": "16:9" }
+              ],
+              "price_options": [
+                { "mode": "lite", "duration_seconds": 10, "resolution": "720p", "ratio": "9:16" }
+              ]
+            }
+            """);
+
+        Assert.Equal(["fast", "lite", "quality"], options.Modes);
+        Assert.Equal([6, 8, 10], options.Durations);
+        Assert.Contains("720p", options.Resolutions);
+        Assert.Contains("1080p", options.Resolutions);
+        Assert.Contains("9:16", options.Ratios);
+        Assert.Contains("16:9", options.Ratios);
+    }
+
+    [Fact]
+    public void GetModelByCodeHydratesPricesAndNormalizesOptions()
+    {
+        var source = ReadRepoFile("Services", "AiProviders", "AiProviderModelRepository.cs");
+        var methodStart = source.IndexOf("public async Task<AiProviderModelDetailDto?> GetModelByCodeAsync", StringComparison.Ordinal);
+        var methodEnd = source.IndexOf("public async Task UpdateAdminFieldsAsync", methodStart, StringComparison.Ordinal);
+
+        Assert.True(methodStart >= 0);
+        Assert.True(methodEnd > methodStart);
+        var method = source[methodStart..methodEnd];
+
+        Assert.Contains("model.Prices = (await GetPricesAsync(model.Id, ct)).ToList();", method);
+        Assert.Contains("model.ModelCapabilities = (await GetCapabilitiesAsync(model.Id, ct)).ToList();", method);
+        Assert.Contains("AiProviderModelOptionsNormalizer.Normalize", method);
+        Assert.Contains("model.SupportedDurations = options.Durations;", method);
     }
 
     [Fact]
@@ -1731,11 +1830,30 @@ public sealed class RVideoVideoHotfixTests
         => attemptIndex == 0 ? logicalRequestId : $"{logicalRequestId}-fallback-{attemptIndex}";
 
     private static string ClassifyProviderFailureForTest(string errorCode, string message)
+        => ClassifyProviderFailureForTest(errorCode, message, null);
+
+    private static string ClassifyProviderFailureForTest(string errorCode, string message, HttpStatusCode? statusCode)
     {
         var method = typeof(SceneVideoWorkerHandler).GetMethod(
             "ClassifyProviderFailure",
             BindingFlags.NonPublic | BindingFlags.Static)!;
-        return (string)method.Invoke(null, new object?[] { errorCode, message, null })!;
+        return (string)method.Invoke(null, new object?[] { errorCode, message, statusCode })!;
+    }
+
+    private static bool ShouldFallbackForTest(string classification)
+    {
+        var method = typeof(SceneVideoWorkerHandler).GetMethod(
+            "ShouldFallback",
+            BindingFlags.NonPublic | BindingFlags.Static)!;
+        return (bool)method.Invoke(null, new object?[] { classification })!;
+    }
+
+    private static bool IsDefinitivelyRejectedSubmitForTest(Ai79TaskSubmitException exception)
+    {
+        var method = typeof(SceneVideoWorkerHandler).GetMethod(
+            "IsDefinitivelyRejectedSubmit",
+            BindingFlags.NonPublic | BindingFlags.Static)!;
+        return (bool)method.Invoke(null, new object?[] { exception })!;
     }
 
     private static SceneVideoWorkerHandler CreateWorker(

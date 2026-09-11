@@ -84,10 +84,32 @@ public static class AiProviderModelOptionsNormalizer
                 return;
             }
 
-            AddStrings(doc.RootElement, modes, "modes", "mode");
-            AddInts(doc.RootElement, durations, "durations", "duration", "duration_seconds");
-            AddStrings(doc.RootElement, resolutions, "resolutions", "resolution");
-            AddStrings(doc.RootElement, ratios, "ratios", "ratio");
+            AddStrings(doc.RootElement, modes, "modes", "mode", "supported_modes");
+            AddInts(doc.RootElement, durations, "durations", "duration", "duration_seconds", "supported_durations", "duration_options");
+            AddStrings(doc.RootElement, resolutions, "resolutions", "resolution", "supported_resolutions", "size", "sizes");
+            AddStrings(doc.RootElement, ratios, "ratios", "ratio", "aspect_ratio", "aspect_ratios", "supported_ratios");
+
+            foreach (var arrayName in new[] { "variants", "options", "variant_options", "price_options" })
+            {
+                if (!doc.RootElement.TryGetProperty(arrayName, out var variants)
+                    || variants.ValueKind != JsonValueKind.Array)
+                {
+                    continue;
+                }
+
+                foreach (var variant in variants.EnumerateArray())
+                {
+                    if (variant.ValueKind != JsonValueKind.Object)
+                    {
+                        continue;
+                    }
+
+                    AddStrings(variant, modes, "modes", "mode", "supported_modes");
+                    AddInts(variant, durations, "durations", "duration", "duration_seconds", "supported_durations", "duration_options");
+                    AddStrings(variant, resolutions, "resolutions", "resolution", "supported_resolutions", "size", "sizes");
+                    AddStrings(variant, ratios, "ratios", "ratio", "aspect_ratio", "aspect_ratios", "supported_ratios");
+                }
+            }
         }
         catch (JsonException)
         {
