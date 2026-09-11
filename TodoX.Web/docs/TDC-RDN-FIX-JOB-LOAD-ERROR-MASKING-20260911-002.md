@@ -183,7 +183,13 @@ No production smoke test was run. No production database query or update was per
 
 ## 13. Commit
 
-Included in the final pushed commit for this task. The immutable commit SHA is reported after push.
+Code/report commit created and pushed.
+
+Commit SHA:
+
+```text
+72d61df42e99a049e1103636dab925ef389ae3eb
+```
 
 Commit message:
 
@@ -193,8 +199,16 @@ fix(rdance): separate job load errors from detail refresh
 
 ## 14. Push
 
-Pending at report update. Target:
+Result:
+
+```text
+PASS
+```
+
+Target:
 
 ```text
 origin/feature/rdn-onepage-ui-revamp
 ```
+
+Note: this report status correction is pushed as a follow-up docs-only commit so the report file records the completed push state without rewriting remote history.
