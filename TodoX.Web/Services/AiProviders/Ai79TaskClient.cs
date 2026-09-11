@@ -1230,7 +1230,7 @@ public sealed class Ai79TaskClient : IAi79TaskClient
     {
         if (element.ValueKind == JsonValueKind.Object)
         {
-            foreach (var name in new[] { "task_id", "taskId", "request_id", "requestId" })
+            foreach (var name in new[] { "task_id", "taskId", "videoId", "video_id" })
             {
                 if (element.TryGetProperty(name, out var value))
                 {

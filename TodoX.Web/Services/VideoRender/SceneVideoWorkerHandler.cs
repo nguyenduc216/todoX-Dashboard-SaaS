@@ -1914,7 +1914,8 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
 
     private static bool IsDefinitivelyRejectedSubmit(Ai79TaskSubmitException exception)
     {
-        if (exception.HttpStatusCode is null)
+        if (exception.HttpStatusCode is null
+            || HasAcceptedTaskId(exception.SanitizedResponseJson))
         {
             return false;
         }
@@ -1922,13 +1923,37 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         var code = exception.ErrorCode ?? string.Empty;
         if (code.Equals("missing_task_id", StringComparison.OrdinalIgnoreCase)
             || code.Equals("empty_response", StringComparison.OrdinalIgnoreCase)
-            || code.Equals("invalid_json", StringComparison.OrdinalIgnoreCase)
-            || HasAcceptedTaskId(exception.SanitizedResponseJson))
+            || code.Equals("invalid_json", StringComparison.OrdinalIgnoreCase))
         {
             return false;
         }
 
-        return true;
+        var statusCode = (int)exception.HttpStatusCode.Value;
+        if (statusCode == 429 || statusCode >= 500)
+        {
+            return HasExplicitProviderRejection(exception.ErrorCode, exception.ErrorMessage);
+        }
+
+        return statusCode is 400 or 401 or 403 or 404 or 409 or 422
+            && HasExplicitProviderRejection(exception.ErrorCode, exception.ErrorMessage);
+    }
+
+    private static bool HasExplicitProviderRejection(string? errorCode, string? errorMessage)
+    {
+        var text = $"{errorCode} {errorMessage}".ToLowerInvariant();
+        return text.Contains("model unavailable", StringComparison.Ordinal)
+               || text.Contains("model not available", StringComparison.Ordinal)
+               || text.Contains("model_provider_failure", StringComparison.Ordinal)
+               || text.Contains("provider_failure", StringComparison.Ordinal)
+               || text.Contains("rejected", StringComparison.Ordinal)
+               || text.Contains("invalid", StringComparison.Ordinal)
+               || text.Contains("bad_request", StringComparison.Ordinal)
+               || text.Contains("unauthor", StringComparison.Ordinal)
+               || text.Contains("forbidden", StringComparison.Ordinal)
+               || text.Contains("access denied", StringComparison.Ordinal)
+               || text.Contains("quota", StringComparison.Ordinal)
+               || text.Contains("insufficient balance", StringComparison.Ordinal)
+               || text.Contains("billing", StringComparison.Ordinal);
     }
 
     private static bool HasAcceptedTaskId(string? sanitizedResponseJson)
@@ -1955,10 +1980,11 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         {
             foreach (var property in element.EnumerateObject())
             {
-                if ((property.NameEquals("task_id")
+                if ((property.NameEquals("id_base")
+                        || property.NameEquals("task_id")
                         || property.NameEquals("taskId")
-                        || property.NameEquals("request_id")
-                        || property.NameEquals("requestId"))
+                        || property.NameEquals("videoId")
+                        || property.NameEquals("video_id"))
                     && property.Value.ValueKind == JsonValueKind.String
                     && !string.IsNullOrWhiteSpace(property.Value.GetString()))
                 {

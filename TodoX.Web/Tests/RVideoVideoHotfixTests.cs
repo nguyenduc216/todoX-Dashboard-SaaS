@@ -400,6 +400,64 @@ public sealed class RVideoVideoHotfixTests
     }
 
     [Theory]
+    [InlineData("provider_unavailable", "Dịch vụ hiện không khả dụng, vui lòng thử lại sau.")]
+    [InlineData("provider_timeout", "The provider timed out while submitting the request.")]
+    public void RVideoServiceUnavailableSubmitIsPendingReconciliationUnlessProviderExplicitlyRejected(
+        string errorCode,
+        string message)
+    {
+        var exception = new Ai79TaskSubmitException(
+            message,
+            "",
+            HttpStatusCode.ServiceUnavailable,
+            errorCode,
+            sanitizedRequestMetadataJson: "{\"model\":\"veo_omni\"}");
+
+        Assert.False(IsDefinitivelyRejectedSubmitForTest(exception));
+    }
+
+    [Fact]
+    public void RVideoServiceUnavailableWithExplicitModelRejectionAllowsFallback()
+    {
+        var exception = new Ai79TaskSubmitException(
+            "Model unavailable for this request.",
+            "{\"error\":\"model unavailable\"}",
+            HttpStatusCode.ServiceUnavailable,
+            "provider_failure",
+            sanitizedRequestMetadataJson: "{\"model\":\"veo_omni\"}");
+
+        Assert.True(IsDefinitivelyRejectedSubmitForTest(exception));
+    }
+
+    [Fact]
+    public void RVideoRequestIdIsNotAcceptedAsPollableTaskId()
+    {
+        var exception = new Ai79TaskSubmitException(
+            "79AI submit outcome is unknown.",
+            "{\"request_id\":\"request-123\",\"status\":\"accepted\"}",
+            HttpStatusCode.OK,
+            "provider_error",
+            sanitizedRequestMetadataJson: "{\"model\":\"veo_omni\"}");
+
+        Assert.False(IsDefinitivelyRejectedSubmitForTest(exception));
+    }
+
+    [Theory]
+    [InlineData("{\"task_id\":\"task-123\",\"error\":\"late error\"}")]
+    [InlineData("{\"id_base\":\"video-123\"}")]
+    public void RVideoPollableTaskIdentityWinsOverAmbiguousSubmitError(string responseJson)
+    {
+        var exception = new Ai79TaskSubmitException(
+            "79AI submit response included a pollable task identity.",
+            responseJson,
+            HttpStatusCode.ServiceUnavailable,
+            "provider_failure",
+            sanitizedRequestMetadataJson: "{\"model\":\"veo_omni\"}");
+
+        Assert.False(IsDefinitivelyRejectedSubmitForTest(exception));
+    }
+
+    [Theory]
     [InlineData("unauthorized", "invalid access token", HttpStatusCode.Unauthorized, "AUTHENTICATION_FAILURE", false)]
     [InlineData("insufficient_balance", "insufficient balance", HttpStatusCode.ServiceUnavailable, "BILLING_FAILURE", false)]
     [InlineData("bad_request", "invalid prompt", HttpStatusCode.BadRequest, "INVALID_INPUT", false)]

@@ -15,7 +15,8 @@ public sealed class DanceSellRepositoryTests
         Assert.Contains("mode, orientation", section, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("@logicalRequestId", section, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("@orientation", section, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("character_orientation AS CharacterOrientation", section, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("orientation AS CharacterOrientation", section, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("character_orientation AS CharacterOrientation", section, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -27,7 +28,8 @@ public sealed class DanceSellRepositoryTests
         Assert.DoesNotContain("mode, character_orientation,", section, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("mode, orientation", section, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("@orientation", section, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("character_orientation AS CharacterOrientation", section, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("orientation AS CharacterOrientation", section, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("character_orientation AS CharacterOrientation", section, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -56,6 +58,20 @@ public sealed class DanceSellRepositoryTests
         Assert.Contains("motion_video_url", updateMotion, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("request_json=jsonb_set(COALESCE(request_json, '{}'::jsonb), '{durationSeconds}'", updateMotion, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("source_stage_status='ready'", updateMotion, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void GetByIdSql_UsesRuntimeOrientationColumnAndPreservesNullRenderJobId()
+    {
+        var source = ReadRepositorySource();
+        var selectStart = source.IndexOf("private const string SelectSql", StringComparison.Ordinal);
+        Assert.True(selectStart >= 0);
+        var selectSql = source[selectStart..];
+
+        Assert.Contains("render_job_id AS RenderJobId", selectSql, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("orientation AS CharacterOrientation", selectSql, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("character_orientation AS CharacterOrientation", selectSql, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("request_json::text AS RequestJson", selectSql, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

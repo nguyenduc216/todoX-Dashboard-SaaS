@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json;
 using Microsoft.Extensions.Configuration;
 using TodoX.Web.Models.Catalog;
 using TodoX.Web.Services.DanceSell;
@@ -149,6 +150,54 @@ public sealed class RDanceCustomerStatusAndPointsRegressionTests
         Assert.DoesNotContain("_job = null", reload[postLoadCatch..]);
         Assert.Contains("await InvokeAsync(StateHasChanged);", reload[..postLoadCatch]);
         Assert.Contains("return;", reload[..postLoadCatch]);
+    }
+
+    [Fact]
+    public void RdanceDraftLoadPreservesNullableRenderJobAndRequestIdentity()
+    {
+        var repository = ReadRepoFile("Services", "DanceSell", "DanceSellRepository.cs");
+        var selectStart = repository.IndexOf("private const string SelectSql", StringComparison.Ordinal);
+        Assert.True(selectStart >= 0);
+        var selectSql = repository[selectStart..];
+
+        Assert.Contains("render_job_id AS RenderJobId", selectSql);
+        Assert.Contains("orientation AS CharacterOrientation", selectSql);
+        Assert.DoesNotContain("character_orientation AS CharacterOrientation", selectSql);
+        Assert.Contains("request_json::text AS RequestJson", selectSql);
+        Assert.Contains("COALESCE((request_json->>'autoFinish')::boolean, false) AS AutoFinish", selectSql);
+        Assert.Contains("COALESCE(NULLIF(request_json->>'ratio', ''), '9:16') AS Ratio", selectSql);
+
+        using var document = JsonDocument.Parse("""
+            {
+              "ratio": "9:16",
+              "serviceId": "abcf33cd-6b69-4c8d-9daa-e84d92fc80ec",
+              "autoFinish": true,
+              "serviceCode": "FASHION_VIDEO",
+              "durationSeconds": 10
+            }
+            """);
+
+        Assert.Equal(10, document.RootElement.GetProperty("durationSeconds").GetInt32());
+        Assert.Equal("FASHION_VIDEO", document.RootElement.GetProperty("serviceCode").GetString());
+        Assert.Equal(
+            Guid.Parse("abcf33cd-6b69-4c8d-9daa-e84d92fc80ec"),
+            document.RootElement.GetProperty("serviceId").GetGuid());
+        Assert.True(document.RootElement.GetProperty("autoFinish").GetBoolean());
+    }
+
+    [Fact]
+    public void RdanceDraftDetailDoesNotLookupMissingRenderJob()
+    {
+        var detail = ReadRepoFile("Components", "Pages", "RDanceJobDetail.razor");
+        var reloadStart = detail.IndexOf("private async Task ReloadAsync", StringComparison.Ordinal);
+        var reloadEnd = detail.IndexOf("private static string ClassifyPrimaryJobLoadError", reloadStart, StringComparison.Ordinal);
+        var reload = detail[reloadStart..reloadEnd];
+
+        Assert.Contains("_job.RenderJobId is Guid renderJobId", reload);
+        Assert.Contains("? await RenderJobs.GetAsync(renderJobId)", reload);
+        Assert.Contains(": null", reload);
+        Assert.DoesNotContain("RenderJobs.GetAsync(Guid.Empty)", reload);
+        Assert.DoesNotContain("RenderJobs.GetAsync(_job.RenderJobId.Value)", reload);
     }
 
     [Fact]

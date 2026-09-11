@@ -280,16 +280,16 @@ public sealed class RVideoSceneVideoRecoveryAndDiagnosticsTests
     [Fact]
     public void SceneVideoSubmitCatchPersistsCompleteAi79DiagnosticsWithoutSecrets()
     {
-        var source = ReadRepoFile("Services", "VideoRender", "SceneVideoWorkerHandler.cs");
+        var source = ReadRepoFile("Services", "Render", "SceneVideoJobWorker.cs");
 
-        Assert.Contains("AddAi79SubmitDiagnosticsAsync(job, policy, ex, CancellationToken.None)", source);
+        Assert.Contains("AddAi79SubmitDiagnosticsAsync(jobs, job, ex, stoppingToken)", source);
         Assert.Contains("exceptionType = nameof(Ai79TaskSubmitException)", source);
         Assert.Contains("provider = \"79ai\"", source);
-        Assert.Contains("model = policy.Model", source);
-        Assert.Contains("httpStatusCode = (int?)exception.HttpStatusCode", source);
-        Assert.Contains("providerErrorCode = exception.ErrorCode", source);
-        Assert.Contains("sanitizedResponseJson = SanitizeDiagnosticJson(exception.SanitizedResponseJson)", source);
-        Assert.Contains("sanitizedRequestMetadataJson = SanitizeDiagnosticJson(exception.SanitizedRequestMetadataJson)", source);
+        Assert.Contains("model = job.ModelCode", source);
+        Assert.Contains("httpStatusCode = (int?)ai79.HttpStatusCode", source);
+        Assert.Contains("providerErrorCode = ai79.ErrorCode", source);
+        Assert.Contains("sanitizedResponseJson = SanitizeDiagnosticJson(ai79.SanitizedResponseJson)", source);
+        Assert.Contains("sanitizedRequestMetadataJson = SanitizeDiagnosticJson(ai79.SanitizedRequestMetadataJson)", source);
         Assert.Contains("attemptCount = job.AttemptCount", source);
         Assert.Contains("maxAttempts = job.MaxAttempts", source);
         Assert.Contains("RVIDEO_79AI_SUBMIT_DIAGNOSTICS", source);
