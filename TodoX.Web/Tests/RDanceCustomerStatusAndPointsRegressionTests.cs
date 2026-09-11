@@ -96,6 +96,62 @@ public sealed class RDanceCustomerStatusAndPointsRegressionTests
     }
 
     [Fact]
+    public void RdanceDetailClassifiesPrimaryJobLoadErrorsOnlyAsNotFoundOrUnauthorized()
+    {
+        var detail = ReadRepoFile("Components", "Pages", "RDanceJobDetail.razor");
+        var classifierStart = detail.IndexOf("private static string ClassifyPrimaryJobLoadError", StringComparison.Ordinal);
+        Assert.True(classifierStart >= 0);
+        var classifierEnd = detail.IndexOf("\n    private ", classifierStart + 1, StringComparison.Ordinal);
+        var classifier = detail[classifierStart..classifierEnd];
+
+        Assert.Contains("\"DANCE_SELL_NOT_FOUND\" => LoadNotFoundMessage", classifier);
+        Assert.Contains("\"DANCE_SELL_UNAUTHORIZED\" => LoadUnauthorizedMessage", classifier);
+        Assert.Contains("_ => DetailRefreshErrorMessage", classifier);
+        Assert.Contains("private const string LoadNotFoundMessage", detail);
+        Assert.Contains("private const string LoadUnauthorizedMessage", detail);
+    }
+
+    [Fact]
+    public void RdanceDetailKeepsLoadedJobWhenPostLoadRefreshFails()
+    {
+        var detail = ReadRepoFile("Components", "Pages", "RDanceJobDetail.razor");
+        var reloadStart = detail.IndexOf("private async Task ReloadAsync", StringComparison.Ordinal);
+        var reloadEnd = detail.IndexOf("private static string ClassifyPrimaryJobLoadError", reloadStart, StringComparison.Ordinal);
+        var reload = detail[reloadStart..reloadEnd];
+
+        var loadCall = reload.IndexOf("_job = await DanceSell.GetAsync(JobId, AuthState.CurrentUser);", StringComparison.Ordinal);
+        var postLoadCall = reload.IndexOf("RenderJobs.GetAsync(renderJobId)", StringComparison.Ordinal);
+        var postLoadCatch = reload.IndexOf("_loadError = DetailRefreshErrorMessage;", StringComparison.Ordinal);
+        Assert.True(loadCall >= 0);
+        Assert.True(postLoadCall > loadCall);
+        Assert.True(postLoadCatch > postLoadCall);
+
+        var postLoadCatchBlock = reload[postLoadCatch..];
+        Assert.DoesNotContain("_job = null", postLoadCatchBlock);
+        Assert.DoesNotContain("LoadNotFoundMessage", postLoadCatchBlock);
+        Assert.Contains("Logger.LogWarning(ex, \"RDance detail refresh failed after primary job load", postLoadCatchBlock);
+    }
+
+    [Fact]
+    public void RdanceDetailClearsJobOnlyWhenPrimaryJobLoadFails()
+    {
+        var detail = ReadRepoFile("Components", "Pages", "RDanceJobDetail.razor");
+        var reloadStart = detail.IndexOf("private async Task ReloadAsync", StringComparison.Ordinal);
+        var reloadEnd = detail.IndexOf("private static string ClassifyPrimaryJobLoadError", reloadStart, StringComparison.Ordinal);
+        var reload = detail[reloadStart..reloadEnd];
+
+        var primaryCatch = reload.IndexOf("_loadError = ClassifyPrimaryJobLoadError(ex);", StringComparison.Ordinal);
+        var postLoadCatch = reload.IndexOf("_loadError = DetailRefreshErrorMessage;", StringComparison.Ordinal);
+
+        Assert.True(primaryCatch >= 0);
+        Assert.True(postLoadCatch > primaryCatch);
+        Assert.Contains("_job = null", reload[..primaryCatch]);
+        Assert.DoesNotContain("_job = null", reload[postLoadCatch..]);
+        Assert.Contains("await InvokeAsync(StateHasChanged);", reload[..postLoadCatch]);
+        Assert.Contains("return;", reload[..postLoadCatch]);
+    }
+
+    [Fact]
     public void RdanceDetailOnePageUiMatchesMockupStructure()
     {
         var detail = ReadRepoFile("Components", "Pages", "RDanceJobDetail.razor");

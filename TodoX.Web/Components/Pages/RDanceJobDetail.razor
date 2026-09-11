@@ -27,6 +27,7 @@
 @inject IJSRuntime JS
 @inject NavigationManager Navigation
 @inject IRDanceFeatureService RDanceFeatures
+@inject ILogger<RDanceJobDetail> Logger
 @implements IDisposable
 
 <PageTitle>Video nhảy quảng cáo thời trang</PageTitle>
@@ -683,6 +684,9 @@
     private bool _autoFinish = true;
     private string _ratio = "9:16";
     private const string DefaultTitle = "Video nhảy quảng cáo thời trang";
+    private const string LoadNotFoundMessage = "Không tìm thấy video quảng cáo thời trang.";
+    private const string LoadUnauthorizedMessage = "Bạn không có quyền xem video này.";
+    private const string DetailRefreshErrorMessage = "Không thể tải đầy đủ thông tin video. Vui lòng thử tải lại.";
     private string _title = DefaultTitle;
     private string _category = "shirt";
     private string _tiktokUrl = string.Empty;
@@ -1070,6 +1074,22 @@
         try
         {
             _job = await DanceSell.GetAsync(JobId, AuthState.CurrentUser);
+        }
+        catch (Exception ex)
+        {
+            _job = null;
+            _renderJob = null;
+            _latestReference = null;
+            _latestMotionOperation = null;
+            _referenceVersions = Array.Empty<DanceSellReferenceVersionDto>();
+            _loadError = ClassifyPrimaryJobLoadError(ex);
+            Logger.LogWarning(ex, "RDance primary job load failed for job {JobId}.", JobId);
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
+        try
+        {
             _title = string.IsNullOrWhiteSpace(_job.Title) ? DefaultTitle : _job.Title.Trim();
             _autoFinish = _job.AutoFinish;
             _ratio = string.Equals(_job.Ratio, "16:9", StringComparison.Ordinal) ? "16:9" : "9:16";
@@ -1093,18 +1113,20 @@
         }
         catch (Exception ex)
         {
-            _job = null;
-            _renderJob = null;
-            _latestReference = null;
-            _latestMotionOperation = null;
-            _referenceVersions = Array.Empty<DanceSellReferenceVersionDto>();
-            _loadError = ex.Message == "DANCE_SELL_UNAUTHORIZED"
-                ? "Bạn không có quyền xem video này."
-                : "Không tìm thấy video quảng cáo thời trang.";
+            _loadError = DetailRefreshErrorMessage;
+            Logger.LogWarning(ex, "RDance detail refresh failed after primary job load for job {JobId}.", _job.Id);
         }
 
         await InvokeAsync(StateHasChanged);
     }
+
+    private static string ClassifyPrimaryJobLoadError(Exception ex)
+        => ex.Message switch
+        {
+            "DANCE_SELL_NOT_FOUND" => LoadNotFoundMessage,
+            "DANCE_SELL_UNAUTHORIZED" => LoadUnauthorizedMessage,
+            _ => DetailRefreshErrorMessage
+        };
 
     private void HandleAuthChange() => _ = InvokeAsync(async () =>
     {
