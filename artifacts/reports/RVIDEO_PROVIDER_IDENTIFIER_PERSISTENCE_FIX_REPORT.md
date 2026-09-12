@@ -72,4 +72,4 @@ No provider endpoint, payload field, provider routing, model policy, fallback or
 
 ## Commit
 
-Pending final commit and push.
+`1298763fdc0a00d35a111180aafaffc31080fe87` (amended only to record this SHA in the report; see the final pushed SHA below if Git rewrites it).
