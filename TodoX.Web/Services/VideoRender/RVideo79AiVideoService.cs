@@ -20,7 +20,7 @@ public static class RVideoVideoModelPolicy
         new(0, ProviderCode, "veo_omni", "flash"),
         new(1, ProviderCode, "veo_3_1", "fast"),
         new(2, ProviderCode, "veo_3_1", "lite"),
-        new(3, ProviderCode, "grok_video_heavy", null)
+        new(3, ProviderCode, "grok_video_heavy", "normal")
     ];
 
     public static RVideoVideoModelPolicyEntry GetInitial() => Models[0];
@@ -80,7 +80,12 @@ public sealed record RVideo79AiVideoSubmitRequest(
     RVideo79AiProviderImageAsset? SourceImageAsset,
     IReadOnlyList<RVideo79AiProviderImageAsset> ReferenceImageAssets);
 
-public sealed record RVideo79AiVideoSubmitResult(string TaskId, string SanitizedResponseJson, string SanitizedRequestJson);
+public sealed record RVideo79AiVideoSubmitResult(
+    string TaskId,
+    string SanitizedResponseJson,
+    string SanitizedRequestJson,
+    string? ProviderTaskId = null,
+    string? ProviderVideoIdBase = null);
 
 public interface IRVideo79AiVideoService
 {
@@ -259,7 +264,14 @@ public sealed class RVideo79AiVideoService : IRVideo79AiVideoService
             })
         }, JsonOptions);
         var submit = await _client.SubmitAsync(raw, ct);
-        return new RVideo79AiVideoSubmitResult(submit.TaskId, submit.SanitizedResponseJson, sanitizedRequest);
+        var providerVideoIdBase = submit.ProviderVideoIdBase
+            ?? (string.IsNullOrWhiteSpace(submit.ProviderTaskId) ? submit.TaskId : null);
+        return new RVideo79AiVideoSubmitResult(
+            providerVideoIdBase ?? submit.TaskId,
+            submit.SanitizedResponseJson,
+            sanitizedRequest,
+            submit.ProviderTaskId,
+            providerVideoIdBase);
     }
 
     public Task<Ai79TaskStatusResult> PollAsync(RVideo79AiRuntime runtime, string taskId, CancellationToken ct = default)

@@ -34,7 +34,9 @@ public sealed record VideoProviderSubmitResult(
     string ProviderTaskId,
     string? ActualModel,
     string SanitizedRequestJson,
-    string SanitizedResponseJson);
+    string SanitizedResponseJson,
+    string? ProviderTaskIdMetadata = null,
+    string? ProviderVideoIdBase = null);
 
 public sealed record VideoProviderPollRequest(
     long ProviderId,

@@ -51,12 +51,16 @@ public sealed class Ai79VideoGenerationProviderAdapter : IVideoGenerationProvide
                 request.DurationSeconds,
                 source,
                 references), ct);
+            var providerVideoIdBase = result.ProviderVideoIdBase
+                ?? (string.IsNullOrWhiteSpace(result.ProviderTaskId) ? result.TaskId : null);
             return new VideoProviderSubmitResult(
                 request.ProviderCode,
-                result.TaskId,
+                providerVideoIdBase ?? string.Empty,
                 request.RequestedModel,
                 result.SanitizedRequestJson,
-                result.SanitizedResponseJson);
+                result.SanitizedResponseJson,
+                result.ProviderTaskId,
+                providerVideoIdBase);
         }
         catch (Ai79TaskSubmitException ex) when (ex.HttpStatusCode is null or >= System.Net.HttpStatusCode.InternalServerError
             || ex.HttpStatusCode == System.Net.HttpStatusCode.TooManyRequests)

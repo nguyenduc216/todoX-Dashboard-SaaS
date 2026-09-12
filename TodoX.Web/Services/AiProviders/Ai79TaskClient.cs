@@ -46,7 +46,11 @@ public sealed record Ai79TaskStatusRequest(
     bool UseBearerAuth = false,
     string? ProjectId = null);
 
-public sealed record Ai79TaskSubmitResult(string TaskId, string SanitizedResponseJson);
+public sealed record Ai79TaskSubmitResult(
+    string TaskId,
+    string SanitizedResponseJson,
+    string? ProviderTaskId = null,
+    string? ProviderVideoIdBase = null);
 
 public sealed record Ai79MultipartFilePart(
     string FieldName,
@@ -619,7 +623,13 @@ public sealed class Ai79TaskClient : IAi79TaskClient
         using (document)
         {
             var sanitized = SanitizeSecretJson(document.RootElement, accessToken);
-            var taskId = FindTaskId(document.RootElement, operation);
+            var providerVideoIdBase = operation == Ai79TaskOperation.Video
+                ? FindVideoIdBase(document.RootElement)
+                : null;
+            var taskId = providerVideoIdBase ?? FindTaskId(document.RootElement, operation);
+            var providerTaskId = operation == Ai79TaskOperation.Video
+                ? FindTaskIdAlias(document.RootElement)
+                : null;
             var providerError = FindSubmitError(document.RootElement, string.IsNullOrWhiteSpace(taskId), accessToken);
 
             if (!response.IsSuccessStatusCode)
@@ -650,7 +660,7 @@ public sealed class Ai79TaskClient : IAi79TaskClient
                     sanitizedRequestMetadataJson: sanitizedRequestMetadataJson);
             }
 
-            return new Ai79TaskSubmitResult(taskId!, sanitized);
+            return new Ai79TaskSubmitResult(taskId!, sanitized, providerTaskId, providerVideoIdBase);
         }
     }
 
@@ -904,11 +914,12 @@ public sealed class Ai79TaskClient : IAi79TaskClient
             }
             else if (!request.UseBearerAuth && request.Operation == Ai79TaskOperation.Video && !HasSingleVideoInfo(statusRoot))
             {
-                var fallbackPath = ResolveVideosListPath(path);
+                var fallbackPath = NormalizeProviderMediaListPath(request.BaseUrl, ResolveVideosListPath(path));
                 using var fallbackBody = new FormUrlEncodedContent(new Dictionary<string, string>
                 {
                     ["access_token"] = request.AccessToken,
-                    ["domain"] = request.Domain
+                    ["domain"] = request.Domain,
+                    ["project_id"] = request.ProjectId ?? "default"
                 });
                 using var fallbackResponse = await _httpClient.PostAsync(BuildUri(request.BaseUrl, fallbackPath), fallbackBody, ct);
                 var fallbackJson = await ReadJsonAsync(fallbackResponse, request.AccessToken, ct);
@@ -920,6 +931,35 @@ public sealed class Ai79TaskClient : IAi79TaskClient
                 else
                 {
                     statusRoot = fallbackDocument.RootElement;
+                }
+            }
+
+            // 79AI can report SUCCESSFUL before the CDN URL is attached to /video.
+            // Reconcile that known id_base through /videos; a missing URL remains pending.
+            if (!request.UseBearerAuth
+                && request.Operation == Ai79TaskOperation.Video
+                && fallbackDocument is null
+                && Ai79TaskStatusNormalizer.Normalize(FindStatus(statusRoot)) == Ai79TaskStatusNormalizer.Success
+                && string.IsNullOrWhiteSpace(FindVideoOutputUrl(statusRoot)))
+            {
+                var fallbackPath = NormalizeProviderMediaListPath(request.BaseUrl, ResolveVideosListPath(path));
+                using var fallbackBody = new FormUrlEncodedContent(new Dictionary<string, string>
+                {
+                    ["access_token"] = request.AccessToken,
+                    ["domain"] = request.Domain,
+                    ["project_id"] = request.ProjectId ?? "default"
+                });
+                using var fallbackResponse = await _httpClient.PostAsync(BuildUri(request.BaseUrl, fallbackPath), fallbackBody, ct);
+                var fallbackJson = await ReadJsonAsync(fallbackResponse, request.AccessToken, ct);
+                var listDocument = JsonDocument.Parse(fallbackJson);
+                if (TryFindVideoInfoById(listDocument.RootElement, request.TaskId, out var matchedInfo))
+                {
+                    fallbackDocument = listDocument;
+                    statusRoot = matchedInfo;
+                }
+                else
+                {
+                    listDocument.Dispose();
                 }
             }
 
@@ -1242,7 +1282,7 @@ public sealed class Ai79TaskClient : IAi79TaskClient
                 }
             }
 
-            foreach (var containerName in new[] { "task", "data", "result", "response" })
+            foreach (var containerName in new[] { "videoInfo", "task", "data", "result", "response" })
             {
                 if (element.TryGetProperty(containerName, out var child))
                 {

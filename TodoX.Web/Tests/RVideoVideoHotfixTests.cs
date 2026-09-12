@@ -27,6 +27,7 @@ public sealed class RVideoVideoHotfixTests
         });
         Assert.Equal("veo_omni", RVideoVideoModelPolicy.GetInitial().Model);
         Assert.Equal("flash", RVideoVideoModelPolicy.GetInitial().Mode);
+        Assert.Equal("normal", RVideoVideoModelPolicy.Models[3].Mode);
         Assert.True(RVideoVideoModelPolicy.Is79AiProvider("79ai"));
         Assert.True(RVideoVideoModelPolicy.Is79AiProvider("79ai_video"));
         Assert.False(RVideoVideoModelPolicy.Is79AiProvider("yescale_task_video"));
@@ -314,6 +315,27 @@ public sealed class RVideoVideoHotfixTests
     }
 
     [Theory]
+    [InlineData(4, "1080p", new[] { "veo_omni", "veo_3_1", "veo_3_1", "grok_video_heavy" }, new[] { "flash", "fast", "lite", "normal" }, new[] { 4, 4, 4, 6 }, new[] { "1080p", "1080p", "1080p", "720p" })]
+    [InlineData(6, "720p", new[] { "veo_omni", "veo_3_1", "veo_3_1", "grok_video_heavy" }, new[] { "flash", "fast", "lite", "normal" }, new[] { 6, 6, 6, 6 }, new[] { "720p", "720p", "720p", "720p" })]
+    [InlineData(8, "720p", new[] { "veo_omni", "veo_3_1", "veo_3_1", "grok_video_heavy" }, new[] { "flash", "fast", "lite", "normal" }, new[] { 8, 8, 8, 10 }, new[] { "720p", "720p", "720p", "720p" })]
+    [InlineData(10, "1080p", new[] { "veo_omni", "grok_video_heavy" }, new[] { "flash", "normal" }, new[] { 10, 10 }, new[] { "1080p", "720p" })]
+    public void ResolveFallbackCandidatesUsesPolicyOrderAndCatalogCapabilities(
+        int duration,
+        string resolution,
+        string[] expectedModels,
+        string[] expectedModes,
+        int[] expectedDurations,
+        string[] expectedResolutions)
+    {
+        var resolved = ResolveFallbackCandidatesForTest(duration, resolution);
+
+        Assert.Equal(expectedModels, resolved.Select(x => x.Model));
+        Assert.Equal(expectedModes, resolved.Select(x => x.Mode));
+        Assert.Equal(expectedDurations, resolved.Select(x => x.ProviderDuration));
+        Assert.Equal(expectedResolutions, resolved.Select(x => x.ProviderResolution));
+    }
+
+    [Theory]
     [InlineData("provider_failure", "Lỗi Google không thể xử lý đơn này. #22f", "MODEL_PROVIDER_FAILURE")]
     [InlineData("http_503", "service unavailable", "TRANSIENT_PROVIDER_FAILURE")]
     [InlineData("unauthorized", "invalid access token", "AUTHENTICATION_FAILURE")]
@@ -534,6 +556,57 @@ public sealed class RVideoVideoHotfixTests
         Assert.Contains("1080p", options.Resolutions);
         Assert.Contains("9:16", options.Ratios);
         Assert.Contains("16:9", options.Ratios);
+    }
+
+    [Fact]
+    public void AiProviderModelOptionsNormalizerReadsDurationObjectTypeValues()
+    {
+        var options = AiProviderModelOptionsNormalizer.Normalize(null, null, null, null, null, """
+        {
+          "durations": [
+            { "name": "8s", "type": "8" },
+            { "name": "6s", "type": "6" },
+            { "name": "4s", "type": "4" }
+          ]
+        }
+        """);
+
+        Assert.Equal([4, 6, 8], options.Durations);
+    }
+
+    [Fact]
+    public async Task Ai79VideoSubmitPreservesIdBaseAndProviderTaskIdSeparately()
+    {
+        var handler = new CapturingHttpMessageHandler("""{"videoInfo":{"id_base":"id-base-a","task_id":"task-b"}}""");
+        var client = new Ai79TaskClient(new HttpClient(handler));
+
+        var result = await client.SubmitAsync(new Ai79TaskSubmitRequest(
+            "https://example.test/ai", "/create-video", "secret-token", "79ai.net", "veo_omni", "Animate.",
+            Array.Empty<string>(), new Dictionary<string, string?>(), Ai79TaskOperation.Video));
+
+        Assert.Equal("id-base-a", result.TaskId);
+        Assert.Equal("task-b", result.ProviderTaskId);
+        Assert.Equal("id-base-a", result.ProviderVideoIdBase);
+        Assert.DoesNotContain("secret-token", result.SanitizedResponseJson);
+    }
+
+    [Fact]
+    public async Task Ai79VideoPollUsesIdBaseAndReconcilesSuccessfulMissingUrlFromVideos()
+    {
+        var handler = new SequencedHttpMessageHandler(
+            """{"videoInfo":{"id_base":"id-base-a","status":"MEDIA_GENERATION_STATUS_SUCCESSFUL"}}""",
+            """{"data":[{"id_base":"id-base-a","status":"MEDIA_GENERATION_STATUS_SUCCESSFUL","download_url":"https://cdn.example/video.mp4"}]}""");
+        var client = new Ai79TaskClient(new HttpClient(handler));
+
+        var result = await client.GetStatusAsync(new Ai79TaskStatusRequest(
+            "https://example.test/ai", "/video", "secret-token", "79ai.net", "id-base-a", Ai79TaskOperation.Video,
+            TaskIdField: "videoId", ProjectId: "project-1"));
+
+        Assert.Equal(Ai79TaskStatusNormalizer.Success, result.NormalizedStatus);
+        Assert.Equal("https://cdn.example/video.mp4", result.OutputUrl);
+        Assert.Equal("id-base-a", handler.Forms[0]["videoId"]);
+        Assert.DoesNotContain(handler.Forms[0].Values, value => value == "task-b");
+        Assert.Equal("project-1", handler.Forms[1]["project_id"]);
     }
 
     [Fact]
@@ -1915,6 +1988,47 @@ public sealed class RVideoVideoHotfixTests
             SourceImage: null,
             ReferenceImages: Array.Empty<VideoProviderSourceImage>());
 
+    private static IReadOnlyList<(string Model, string? Mode, int ProviderDuration, string ProviderResolution)> ResolveFallbackCandidatesForTest(
+        int duration,
+        string resolution)
+    {
+        var method = typeof(SceneVideoWorkerHandler).GetMethod("ResolveFallbackCandidates", BindingFlags.NonPublic | BindingFlags.Static)!;
+        var catalog = new[]
+        {
+            new AiProviderModelListItemDto
+            {
+                ProviderCode = "79ai", ProviderModelCode = "veo_omni", MediaType = "video", Enabled = true,
+                SupportedModes = ["flash"], SupportedDurations = [4, 6, 8, 10], SupportedResolutions = ["720p", "1080p", "4k"]
+            },
+            new AiProviderModelListItemDto
+            {
+                ProviderCode = "79ai", ProviderModelCode = "veo_3_1", MediaType = "video", Enabled = true,
+                SupportedModes = ["fast", "lite"], SupportedDurations = [4, 6, 8], SupportedResolutions = ["720p", "1080p", "4k"]
+            },
+            new AiProviderModelListItemDto
+            {
+                ProviderCode = "79ai", ProviderModelCode = "grok_video_heavy", MediaType = "video", Enabled = true,
+                SupportedModes = ["normal"], SupportedDurations = [6, 10, 12, 15], SupportedResolutions = ["720p"]
+            }
+        };
+
+        return ((System.Collections.IEnumerable)method.Invoke(null, new object[]
+            {
+                new SceneVideoRenderWorkItemInput { ProviderCode = "79ai", DurationSeconds = duration, Resolution = resolution }, catalog
+            })!)
+            .Cast<object>()
+            .Select(item =>
+            {
+                var policy = item.GetType().GetProperty("Policy")!.GetValue(item)!;
+                return (
+                    (string)policy.GetType().GetProperty("Model")!.GetValue(policy)!,
+                    (string?)policy.GetType().GetProperty("Mode")!.GetValue(policy),
+                    (int)item.GetType().GetProperty("ProviderDurationSeconds")!.GetValue(item)!,
+                    (string)item.GetType().GetProperty("ProviderResolution")!.GetValue(item)!);
+            })
+            .ToArray();
+    }
+
     private static string BuildAttemptLogicalRequestIdForTest(string logicalRequestId, int attemptIndex)
         => attemptIndex == 0 ? logicalRequestId : $"{logicalRequestId}-fallback-{attemptIndex}";
 
@@ -2177,6 +2291,35 @@ public sealed class RVideoVideoHotfixTests
             return new HttpResponseMessage(_statusCode)
             {
                 Content = new StringContent(_responseJson)
+            };
+        }
+    }
+
+    private sealed class SequencedHttpMessageHandler : HttpMessageHandler
+    {
+        private readonly Queue<string> _responses;
+
+        public SequencedHttpMessageHandler(params string[] responses)
+        {
+            _responses = new Queue<string>(responses);
+        }
+
+        public List<Dictionary<string, string>> Forms { get; } = [];
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var form = new Dictionary<string, string>(StringComparer.Ordinal);
+            var body = await request.Content!.ReadAsStringAsync(cancellationToken);
+            foreach (var pair in body.Split('&', StringSplitOptions.RemoveEmptyEntries))
+            {
+                var parts = pair.Split('=', 2);
+                form[Uri.UnescapeDataString(parts[0])] = Uri.UnescapeDataString(parts[1].Replace("+", " ", StringComparison.Ordinal));
+            }
+            Forms.Add(form);
+
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(_responses.Dequeue())
             };
         }
     }

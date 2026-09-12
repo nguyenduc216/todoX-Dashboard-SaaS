@@ -332,9 +332,21 @@ public interface ISceneMediaVersioningService
     Task<IReadOnlyList<SceneVideoVersionDto>> ListSceneVideoVersionsAsync(long sceneId, CurrentUserSession user, int skip = 0, int take = 20, CancellationToken ct = default);
     Task SelectSceneVideoVersionAsync(long sceneId, Guid versionId, Guid? selectedBy, CancellationToken ct = default);
     Task SelectSceneVideoVersionAsync(long sceneId, Guid versionId, CurrentUserSession user, CancellationToken ct = default);
-    Task MarkSceneVideoVersionSubmittedAsync(Guid versionId, string? providerCode, string? modelName, long? providerCapabilityId, string providerTaskId, CancellationToken ct = default);
+    Task MarkSceneVideoVersionSubmittedAsync(
+        Guid versionId,
+        string? providerCode,
+        string? modelName,
+        long? providerCapabilityId,
+        string providerTaskId,
+        string? providerTaskIdMetadata = null,
+        CancellationToken ct = default);
     Task<string?> GetSceneVideoProviderTaskIdAsync(Guid versionId, CancellationToken ct = default);
-    Task MarkSceneVideoPendingReconciliationAsync(Guid versionId, string? errorCode, string? errorMessage, CancellationToken ct = default);
+    Task MarkSceneVideoPendingReconciliationAsync(
+        Guid versionId,
+        string? errorCode,
+        string? errorMessage,
+        CancellationToken ct = default,
+        string? providerTaskIdMetadata = null);
     Task<SceneAudioVersionDto> CreateQueuedSceneAudioVersionAsync(SceneAudioVersionCreateRequest request, CancellationToken ct = default);
     Task CompleteSceneAudioVersionAsync(Guid versionId, SceneAudioVersionCompleteRequest request, CancellationToken ct = default);
     Task FailSceneAudioVersionAsync(Guid versionId, string? errorCode, string? errorMessage, CancellationToken ct = default);
@@ -1030,7 +1042,14 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
         await SelectSceneVideoVersionAsync(sceneId, versionId, user.UserId, ct);
     }
 
-    public async Task MarkSceneVideoVersionSubmittedAsync(Guid versionId, string? providerCode, string? modelName, long? providerCapabilityId, string providerTaskId, CancellationToken ct = default)
+    public async Task MarkSceneVideoVersionSubmittedAsync(
+        Guid versionId,
+        string? providerCode,
+        string? modelName,
+        long? providerCapabilityId,
+        string providerTaskId,
+        string? providerTaskIdMetadata = null,
+        CancellationToken ct = default)
     {
         await _tenant.EnsureLoadedAsync(ct);
         using var conn = await _factory.OpenAsync(ct);
@@ -1041,9 +1060,13 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
                    provider_code=COALESCE(@providerCode, provider_code),
                    provider_capability_id=COALESCE(@providerCapabilityId, provider_capability_id),
                    requested_model=COALESCE(requested_model, @modelName),
-                   actual_model=COALESCE(@modelName, actual_model),
-                   provider_task_id=@providerTaskId,
-                   submitted_at=COALESCE(submitted_at, now()),
+                    actual_model=COALESCE(@modelName, actual_model),
+                    provider_task_id=@providerTaskId,
+                    render_config_json=COALESCE(render_config_json, '{}'::jsonb)
+                        || jsonb_strip_nulls(jsonb_build_object(
+                            'providerVideoIdBase', @providerTaskId,
+                            'providerTaskId', @providerTaskIdMetadata)),
+                    submitted_at=COALESCE(submitted_at, now()),
                    updated_at=now()
              WHERE id=@versionId AND tenant_id=@tenant;
             """,
@@ -1072,7 +1095,12 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
             new { versionId, tenant = _tenant.TenantId });
     }
 
-    public async Task MarkSceneVideoPendingReconciliationAsync(Guid versionId, string? errorCode, string? errorMessage, CancellationToken ct = default)
+    public async Task MarkSceneVideoPendingReconciliationAsync(
+        Guid versionId,
+        string? errorCode,
+        string? errorMessage,
+        CancellationToken ct = default,
+        string? providerTaskIdMetadata = null)
     {
         await _tenant.EnsureLoadedAsync(ct);
         using var conn = await _factory.OpenAsync(ct);
@@ -1082,6 +1110,8 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
                SET status='pending_reconciliation',
                    error_code=@errorCode,
                    error_message=@errorMessage,
+                   render_config_json=COALESCE(render_config_json, '{}'::jsonb)
+                       || jsonb_strip_nulls(jsonb_build_object('providerTaskId', @providerTaskIdMetadata)),
                    updated_at=now()
              WHERE id=@versionId AND tenant_id=@tenant;
             """,

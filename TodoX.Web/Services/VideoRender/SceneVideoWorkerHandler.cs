@@ -386,7 +386,23 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
             .Where(x => !x.IsDeprecated)
             .ToList();
         await EnrichCatalogDurationsAsync(input.ProviderId, catalogModels, ct);
-        var candidates = ResolveFallbackCandidates(input, catalogModels);
+        var candidateResolution = ResolveFallbackCandidateResolution(input, catalogModels);
+        var candidates = candidateResolution.Candidates;
+        if (attemptVersions.Count == 0)
+        {
+            await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_FALLBACK_CANDIDATES_RESOLVED", "info",
+                "Scene-video fallback candidates were resolved against the provider catalog.",
+                new
+                {
+                    projectId = input.ProjectId,
+                    sceneId = input.SceneId,
+                    renderJobId = job.Id,
+                    requestedDuration = input.DurationSeconds,
+                    requestedResolution = input.Resolution,
+                    candidateCount = candidates.Count,
+                    candidates = candidateResolution.Diagnostics
+                }, ct);
+        }
         var attemptIndex = ResolveNextAttemptIndex(input.LogicalRequestId, attemptVersions);
         string? fallbackReason = null;
         while (attemptIndex < candidates.Count)
@@ -401,7 +417,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
             {
                 version = null;
             }
-            if (version is not null && !IsCompatibleVersion(version, input, policy, candidate.ProviderDurationSeconds))
+            if (version is not null && !IsCompatibleVersion(version, input, policy, candidate.ProviderDurationSeconds, candidate.ProviderResolution))
             {
                 await _versions.FailSceneVideoVersionAsync(
                     version.Id,
@@ -435,7 +451,9 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                         input.SourceImageType,
                         attemptIndex,
                         sceneDurationSeconds = input.DurationSeconds,
-                        providerDurationSeconds = candidate.ProviderDurationSeconds
+                        providerDurationSeconds = candidate.ProviderDurationSeconds,
+                        requestedResolution = input.Resolution,
+                        providerResolution = candidate.ProviderResolution
                     },
                     RenderConfigSnapshot: new
                     {
@@ -445,6 +463,8 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                         policy.Mode,
                         sceneDurationSeconds = input.DurationSeconds,
                         providerDurationSeconds = candidate.ProviderDurationSeconds,
+                        requestedResolution = input.Resolution,
+                        providerResolution = candidate.ProviderResolution,
                         provider = input.ProviderCode,
                         capability = input.CapabilityCode
                     },
@@ -486,6 +506,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
 
             var existingTaskId = await _versions.GetSceneVideoProviderTaskIdAsync(version.Id, ct);
             string? taskId = string.IsNullOrWhiteSpace(existingTaskId) ? null : existingTaskId.Trim();
+            string? providerTaskIdMetadata = ReadRenderConfigString(version.RenderConfigJson, "providerTaskId");
             if (IsUnknownSubmission(version, taskId))
             {
                 await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_RECONCILIATION_STARTED", "warning",
@@ -565,7 +586,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                         sceneId = input.SceneId,
                         input.SceneIndex,
                         candidate.ProviderDurationSeconds,
-                        input.Resolution,
+                        candidate.ProviderResolution,
                         input.AspectRatio,
                         attemptIndex
                     },
@@ -689,20 +710,44 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                         policy.Mode,
                         providerPrompt,
                         input.AspectRatio,
-                        input.Resolution,
+                         candidate.ProviderResolution,
                         candidate.ProviderDurationSeconds,
                         sourceImageAsset,
                         referenceImages), ct);
-                    taskId = string.IsNullOrWhiteSpace(submit.ProviderTaskId) ? null : submit.ProviderTaskId.Trim();
+                    taskId = string.IsNullOrWhiteSpace(submit.ProviderVideoIdBase)
+                        ? (string.IsNullOrWhiteSpace(submit.ProviderTaskId) ? null : submit.ProviderTaskId.Trim())
+                        : submit.ProviderVideoIdBase.Trim();
+                    providerTaskIdMetadata = string.IsNullOrWhiteSpace(submit.ProviderTaskIdMetadata)
+                        ? null
+                        : submit.ProviderTaskIdMetadata.Trim();
                     if (string.IsNullOrWhiteSpace(taskId))
                     {
-                        throw new InvalidOperationException("Video provider submit response is missing task_id.");
+                        await MarkPendingReconciliationAsync(
+                            input,
+                            version.Id,
+                            attemptLogicalRequestId,
+                            tariffSnapshot,
+                            "missing_video_id_base",
+                            "79AI accepted a provider task but did not return the id_base required for polling.",
+                            CancellationToken.None,
+                            providerTaskIdMetadata,
+                            policy.Model,
+                            providerTaskIdMetadata);
+                        throw new RenderJobPendingReconciliationException(
+                            "79AI accepted a provider task without the id_base required for polling.");
                     }
 
                     await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_SOURCE_UPLOAD_SUCCESS", "info",
                         "Scene-video source image handoff completed.",
                         new { jobId = job.Id, input.ProjectId, input.SceneId, input.SceneIndex, sourceImageVersionId = sourceVersion.Id, imageInputMode = imageInputMode.ToString() }, ct);
-                    await _versions.MarkSceneVideoVersionSubmittedAsync(version.Id, input.ProviderCode, policy.Model, input.ProviderCapabilityId, taskId, ct);
+                    await _versions.MarkSceneVideoVersionSubmittedAsync(
+                        version.Id,
+                        input.ProviderCode,
+                        policy.Model,
+                        input.ProviderCapabilityId,
+                        taskId,
+                        providerTaskIdMetadata,
+                        ct);
                     await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_SUBMITTED", "info",
                         "Scene-video provider submit completed.",
                         new
@@ -715,7 +760,11 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                             providerCode = input.ProviderCode,
                             modelCode = policy.Model,
                             logicalRequestId = attemptLogicalRequestId,
-                            providerTaskId = taskId
+                            providerTaskId = taskId,
+                            providerVideoIdBase = taskId,
+                            idBase = taskId,
+                            taskId = providerTaskIdMetadata,
+                            providerTaskIdMetadata
                         }, ct);
                     if (attemptIndex > 0)
                     {
@@ -946,7 +995,11 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                             providerCode = input.ProviderCode,
                             modelCode = policy.Model,
                             logicalRequestId = attemptLogicalRequestId,
-                            providerTaskId = taskId
+                            providerTaskId = taskId,
+                            providerVideoIdBase = taskId,
+                            idBase = taskId,
+                            taskId = providerTaskIdMetadata,
+                            providerTaskIdMetadata
                         }, ct);
                 }
                 await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_POLL_STARTED", "info",
@@ -961,7 +1014,10 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                         providerCode = input.ProviderCode,
                         modelCode = policy.Model,
                         logicalRequestId = attemptLogicalRequestId,
-                        providerTaskId = taskId
+                        providerTaskId = taskId,
+                        providerVideoIdBase = taskId,
+                        idBase = taskId,
+                        taskId = providerTaskIdMetadata
                     }, ct);
                 var status = await adapter.PollAsync(new VideoProviderPollRequest(
                     input.ProviderId,
@@ -971,7 +1027,18 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                     taskId!), ct);
                 await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_POLL_RESPONSE", "info",
                     "Scene-video provider poll response received.",
-                    new { jobId = job.Id, input.ProjectId, input.SceneId, input.SceneIndex, taskId, provider = input.ProviderCode, normalizedStatus = status.Status }, ct);
+                new
+                {
+                    jobId = job.Id,
+                    input.ProjectId,
+                    input.SceneId,
+                    input.SceneIndex,
+                    taskId,
+                    idBase = taskId,
+                    providerTaskId = providerTaskIdMetadata,
+                    provider = input.ProviderCode,
+                    normalizedStatus = status.Status
+                }, ct);
                 await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_POLL_COMPLETED", "info",
                     "Scene-video provider poll completed.",
                     new
@@ -985,6 +1052,9 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                         modelCode = status.ActualModel ?? policy.Model,
                         logicalRequestId = attemptLogicalRequestId,
                         providerTaskId = taskId,
+                        providerVideoIdBase = taskId,
+                        idBase = taskId,
+                        taskId = providerTaskIdMetadata,
                         errorCode = status.ErrorCode,
                         providerStatus = status.Status
                     }, ct);
@@ -998,6 +1068,9 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                             sceneId = input.SceneId,
                             sceneIndex = input.SceneIndex,
                             providerTaskId = taskId,
+                            providerVideoIdBase = taskId,
+                            idBase = taskId,
+                            taskId = providerTaskIdMetadata,
                             normalizedStatus = status.Status,
                             providerRawResponse = status.SanitizedResponseJson
                         }, ct);
@@ -1452,7 +1525,13 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                     throw new InvalidOperationException("Provider submit response is missing task_id.");
                 }
 
-                await _versions.MarkSceneVideoVersionSubmittedAsync(version.Id, input.ProviderCode, input.ModelName, input.ProviderCapabilityId, taskId, ct);
+                await _versions.MarkSceneVideoVersionSubmittedAsync(
+                    version.Id,
+                    input.ProviderCode,
+                    input.ModelName,
+                    input.ProviderCapabilityId,
+                    taskId,
+                    ct: ct);
                 await _repo.AddProjectEventAsync(project.Id, "SCENE_VIDEO_PROVIDER_SUBMITTED", "info",
                     $"Scene {input.SceneIndex} submitted to the provider.",
                     new { jobId = job.Id, input.SceneId, input.SceneIndex, taskId, input.ModelName }, ct);
@@ -1732,7 +1811,24 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
 
     private sealed record ResolvedFallbackCandidate(
         RVideoVideoModelPolicyEntry Policy,
-        int ProviderDurationSeconds);
+        int ProviderDurationSeconds,
+        string ProviderResolution);
+
+    private sealed record FallbackCandidateDiagnostic(
+        int Index,
+        string Provider,
+        string Model,
+        string? Mode,
+        int RequestedDuration,
+        int? ProviderDuration,
+        string RequestedResolution,
+        string? ProviderResolution,
+        bool Valid,
+        string? InvalidReason);
+
+    private sealed record FallbackCandidateResolution(
+        IReadOnlyList<ResolvedFallbackCandidate> Candidates,
+        IReadOnlyList<FallbackCandidateDiagnostic> Diagnostics);
 
     private async Task EnrichCatalogDurationsAsync(
         long providerId,
@@ -1775,13 +1871,31 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
     private static IReadOnlyList<ResolvedFallbackCandidate> ResolveFallbackCandidates(
         SceneVideoRenderWorkItemInput input,
         IReadOnlyList<AiProviderModelListItemDto> catalogModels)
+        => ResolveFallbackCandidateResolution(input, catalogModels).Candidates;
+
+    private static FallbackCandidateResolution ResolveFallbackCandidateResolution(
+        SceneVideoRenderWorkItemInput input,
+        IReadOnlyList<AiProviderModelListItemDto> catalogModels)
     {
-        var resolved = new List<(RVideoVideoModelPolicyEntry Policy, HashSet<int> SupportedDurations)>();
+        var resolved = new List<ResolvedFallbackCandidate>();
+        var diagnostics = new List<FallbackCandidateDiagnostic>();
         foreach (var policy in RVideoVideoModelPolicy.Models)
         {
+            var requestedResolution = NormalizeResolution(input.Resolution);
             if (!string.Equals(policy.ProviderCode, input.ProviderCode, StringComparison.OrdinalIgnoreCase)
                 || string.IsNullOrWhiteSpace(policy.Model))
             {
+                diagnostics.Add(new FallbackCandidateDiagnostic(
+                    policy.AttemptIndex,
+                    policy.ProviderCode,
+                    policy.Model,
+                    policy.Mode,
+                    input.DurationSeconds,
+                    null,
+                    requestedResolution,
+                    null,
+                    false,
+                    "policy_provider_or_model_mismatch"));
                 continue;
             }
 
@@ -1793,6 +1907,17 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                 || !model.Enabled
                 || model.IsDeprecated)
             {
+                diagnostics.Add(new FallbackCandidateDiagnostic(
+                    policy.AttemptIndex,
+                    policy.ProviderCode,
+                    policy.Model,
+                    policy.Mode,
+                    input.DurationSeconds,
+                    null,
+                    requestedResolution,
+                    null,
+                    false,
+                    model is null ? "catalog_model_missing" : "catalog_model_disabled_or_deprecated"));
                 continue;
             }
 
@@ -1800,6 +1925,17 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                 || model.SupportedModes.Count == 0
                 || !model.SupportedModes.Contains(policy.Mode, StringComparer.OrdinalIgnoreCase))
             {
+                diagnostics.Add(new FallbackCandidateDiagnostic(
+                    policy.AttemptIndex,
+                    policy.ProviderCode,
+                    policy.Model,
+                    policy.Mode,
+                    input.DurationSeconds,
+                    null,
+                    requestedResolution,
+                    null,
+                    false,
+                    "catalog_mode_not_supported"));
                 continue;
             }
 
@@ -1810,28 +1946,53 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                 .ToHashSet();
             if (supportedDurations.Count == 0)
             {
+                diagnostics.Add(new FallbackCandidateDiagnostic(
+                    policy.AttemptIndex,
+                    policy.ProviderCode,
+                    policy.Model,
+                    policy.Mode,
+                    input.DurationSeconds,
+                    null,
+                    requestedResolution,
+                    null,
+                    false,
+                    "catalog_duration_contract_missing"));
                 continue;
             }
 
-            resolved.Add((policy, supportedDurations));
-        }
-
-        if (resolved.Count == 0)
-        {
-            return Array.Empty<ResolvedFallbackCandidate>();
-        }
-
-        var candidates = new List<ResolvedFallbackCandidate>();
-        foreach (var item in resolved)
-        {
-            var providerDuration = ResolveProviderDuration(input.DurationSeconds, item.SupportedDurations);
-            if (providerDuration is int duration)
+            var providerDuration = ResolveProviderDuration(input.DurationSeconds, supportedDurations);
+            if (providerDuration is not int duration)
             {
-                candidates.Add(new ResolvedFallbackCandidate(item.Policy, duration));
+                diagnostics.Add(new FallbackCandidateDiagnostic(
+                    policy.AttemptIndex,
+                    policy.ProviderCode,
+                    policy.Model,
+                    policy.Mode,
+                    input.DurationSeconds,
+                    null,
+                    requestedResolution,
+                    null,
+                    false,
+                    "requested_duration_not_supported"));
+                continue;
             }
+
+            var providerResolution = ResolveProviderResolution(input.Resolution, model.SupportedResolutions);
+            resolved.Add(new ResolvedFallbackCandidate(policy, duration, providerResolution));
+            diagnostics.Add(new FallbackCandidateDiagnostic(
+                policy.AttemptIndex,
+                policy.ProviderCode,
+                policy.Model,
+                policy.Mode,
+                input.DurationSeconds,
+                duration,
+                requestedResolution,
+                providerResolution,
+                true,
+                null));
         }
 
-        return candidates;
+        return new FallbackCandidateResolution(resolved, diagnostics);
     }
 
     private static int? ResolveProviderDuration(int sceneDurationSeconds, HashSet<int>? safeDurations)
@@ -1848,23 +2009,67 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         return resolved > 0 ? resolved : null;
     }
 
+    private static string ResolveProviderResolution(string? requestedResolution, IReadOnlyList<string>? supportedResolutions)
+    {
+        var requested = NormalizeResolution(requestedResolution);
+        var supported = (supportedResolutions ?? Array.Empty<string>())
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(NormalizeResolution)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (supported.Count == 0 || supported.Contains(requested, StringComparer.OrdinalIgnoreCase))
+        {
+            return requested;
+        }
+
+        return supported
+            .OrderBy(value => Math.Abs(ResolutionRank(value) - ResolutionRank(requested)))
+            .ThenBy(ResolutionRank)
+            .ThenBy(value => value, StringComparer.OrdinalIgnoreCase)
+            .First();
+    }
+
+    private static string NormalizeResolution(string? value)
+        => (value ?? "720p").Trim().ToLowerInvariant() switch
+        {
+            "480p" => "480p",
+            "720p" => "720p",
+            "1080p" => "1080p",
+            "2k" => "2k",
+            "4k" => "4k",
+            _ => "720p"
+        };
+
+    private static int ResolutionRank(string value)
+        => value.Trim().ToLowerInvariant() switch
+        {
+            "480p" => 480,
+            "720p" => 720,
+            "1080p" => 1080,
+            "2k" => 2000,
+            "4k" => 4000,
+            _ => 720
+        };
+
     private static bool IsCompatibleVersion(
         SceneVideoVersionDto version,
         SceneVideoRenderWorkItemInput input,
         RVideoVideoModelPolicyEntry policy,
-        int providerDurationSeconds)
+        int providerDurationSeconds,
+        string providerResolution)
         => !string.IsNullOrWhiteSpace(version.ProviderCode)
            && string.Equals(version.ProviderCode, input.ProviderCode, StringComparison.OrdinalIgnoreCase)
            && version.ProviderCapabilityId == input.ProviderCapabilityId
            && !string.IsNullOrWhiteSpace(version.ModelName)
            && string.Equals(version.ModelName, policy.Model, StringComparison.OrdinalIgnoreCase)
-           && IsCompatibleRenderConfig(version.RenderConfigJson, input, policy, providerDurationSeconds);
+            && IsCompatibleRenderConfig(version.RenderConfigJson, input, policy, providerDurationSeconds, providerResolution);
 
     private static bool IsCompatibleRenderConfig(
         string? renderConfigJson,
         SceneVideoRenderWorkItemInput input,
         RVideoVideoModelPolicyEntry policy,
-        int providerDurationSeconds)
+        int providerDurationSeconds,
+        string providerResolution)
     {
         if (string.IsNullOrWhiteSpace(renderConfigJson))
         {
@@ -1879,7 +2084,8 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                    && string.Equals(ReadJsonString(root, "capability"), input.CapabilityCode, StringComparison.OrdinalIgnoreCase)
                    && string.Equals(ReadJsonString(root, "model"), policy.Model, StringComparison.OrdinalIgnoreCase)
                    && string.Equals(ReadJsonString(root, "mode"), policy.Mode, StringComparison.OrdinalIgnoreCase)
-                   && ReadJsonInt(root, "providerDurationSeconds") == providerDurationSeconds;
+                    && ReadJsonInt(root, "providerDurationSeconds") == providerDurationSeconds
+                    && string.Equals(ReadJsonString(root, "providerResolution"), providerResolution, StringComparison.OrdinalIgnoreCase);
         }
         catch (JsonException)
         {
@@ -1913,6 +2119,24 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
            && value.ValueKind == JsonValueKind.String
             ? value.GetString()
             : null;
+
+    private static string? ReadRenderConfigString(string? renderConfigJson, string propertyName)
+    {
+        if (string.IsNullOrWhiteSpace(renderConfigJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(renderConfigJson);
+            return ReadJsonString(document.RootElement, propertyName);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
 
     private static int? ReadJsonInt(JsonElement element, string propertyName)
         => element.ValueKind == JsonValueKind.Object
@@ -2456,7 +2680,8 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         string errorMessage,
         CancellationToken ct,
         string? providerTaskId = null,
-        string? actualModel = null)
+        string? actualModel = null,
+        string? providerTaskIdMetadata = null)
     {
         await _billing.MarkPendingReconciliationAsync(new AiImageBillingPendingReconciliationRequest
         {
@@ -2468,7 +2693,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         }, ct);
         if (versionId != Guid.Empty)
         {
-            await _versions.MarkSceneVideoPendingReconciliationAsync(versionId, errorCode, errorMessage, ct);
+            await _versions.MarkSceneVideoPendingReconciliationAsync(versionId, errorCode, errorMessage, ct, providerTaskIdMetadata);
         }
     }
 

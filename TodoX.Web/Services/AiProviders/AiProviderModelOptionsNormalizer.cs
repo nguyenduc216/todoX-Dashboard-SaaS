@@ -172,6 +172,16 @@ public static class AiProviderModelOptionsNormalizer
         {
             target.Add(parsed);
         }
+        else if (value.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var name in new[] { "type", "value", "seconds", "duration", "duration_seconds" })
+            {
+                if (value.TryGetProperty(name, out var child))
+                {
+                    AddInt(target, child);
+                }
+            }
+        }
     }
 
     private static string? ElementToString(JsonElement value)
