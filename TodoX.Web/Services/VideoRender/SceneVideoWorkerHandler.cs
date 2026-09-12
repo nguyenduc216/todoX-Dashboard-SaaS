@@ -730,7 +730,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                             "missing_video_id_base",
                             "79AI accepted a provider task but did not return the id_base required for polling.",
                             CancellationToken.None,
-                            providerTaskIdMetadata,
+                            null,
                             policy.Model,
                             providerTaskIdMetadata);
                         throw new RenderJobPendingReconciliationException(

@@ -1007,6 +1007,10 @@ public sealed class RVideoVideoHotfixTests
         Assert.True(string.IsNullOrWhiteSpace(result.ProviderTaskId));
         Assert.True(string.IsNullOrWhiteSpace(result.ProviderVideoIdBase));
         Assert.Equal(string.Empty, result.ProviderTaskId);
+
+        var worker = ReadRepoFile("Services", "VideoRender", "SceneVideoWorkerHandler.cs");
+        var missingIdBaseBlock = worker[worker.IndexOf("missing_video_id_base", StringComparison.Ordinal)..];
+        Assert.Contains("CancellationToken.None,\n                            null,\n                            policy.Model,\n                            providerTaskIdMetadata", missingIdBaseBlock);
     }
 
     [Fact]
