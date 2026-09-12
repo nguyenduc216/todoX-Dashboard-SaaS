@@ -79,7 +79,7 @@ public sealed class AiPricingService : IAiPricingService
         }
 
         var prices = (await _pricingRepo.GetPricesAsync(model.Id, ct)).Where(x => x.Active).ToList();
-        var matched = AiPricingEngine.FindExactPrice(prices, request.Mode, request.Resolution, request.DurationSeconds, request.Ratio);
+        var matched = AiPricingEngine.FindPrice(prices, request.Mode, request.Resolution, request.DurationSeconds, request.Ratio);
         var estimate = AiPricingEngine.BuildEstimate(model, policy, matched, request.Quantity);
         if (!estimate.Success)
         {

@@ -625,6 +625,7 @@ public sealed class RVideoVideoHotfixTests
         Assert.Contains("model.Prices = (await GetPricesAsync(model.Id, ct)).ToList();", method);
         Assert.Contains("model.ModelCapabilities = (await GetCapabilitiesAsync(model.Id, ct)).ToList();", method);
         Assert.Contains("AiProviderModelOptionsNormalizer.Normalize", method);
+        Assert.Contains("model.ModelCapabilities.Where(x => x.Enabled).Select(x => x.ConfigJson)", method);
         Assert.Contains("model.SupportedDurations = options.Durations;", method);
     }
 

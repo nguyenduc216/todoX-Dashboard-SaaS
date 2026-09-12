@@ -17,7 +17,8 @@ public static class AiProviderModelOptionsNormalizer
         IEnumerable<string>? explicitResolutions,
         IEnumerable<string>? explicitRatios,
         IEnumerable<AiModelPriceDto>? prices,
-        string? rawJson = null)
+        string? rawJson = null,
+        IEnumerable<string?>? capabilityConfigJsons = null)
     {
         var modes = new HashSet<string>(CleanStrings(explicitModes), StringComparer.OrdinalIgnoreCase);
         var durations = new SortedSet<int>((explicitDurations ?? Array.Empty<int>()).Where(x => x > 0));
@@ -36,6 +37,10 @@ public static class AiProviderModelOptionsNormalizer
         }
 
         AddFromRaw(rawJson, modes, durations, resolutions, ratios);
+        foreach (var capabilityConfigJson in capabilityConfigJsons ?? Array.Empty<string?>())
+        {
+            AddFromRaw(capabilityConfigJson, modes, durations, resolutions, ratios);
+        }
 
         return new AiProviderModelOptions(
             modes.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList(),

@@ -67,9 +67,10 @@ public sealed class AiProviderModelRepository
         var list = rows.ToList();
         foreach (var model in list)
         {
-            model.Capabilities = (await GetCapabilitiesAsync(model.Id, ct)).Select(x => x.CapabilityCode).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            var capabilities = (await GetCapabilitiesAsync(model.Id, ct)).ToList();
+            model.Capabilities = capabilities.Select(x => x.CapabilityCode).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             model.PriceSummary = await BuildPriceSummaryAsync(conn, model.Id, ct);
-            await PopulateOptionsAsync(conn, model, ct);
+            await PopulateOptionsAsync(conn, model, capabilities, ct);
         }
 
         return list;
@@ -126,7 +127,8 @@ public sealed class AiProviderModelRepository
             model.SupportedResolutions,
             model.SupportedRatios,
             model.Prices,
-            model.RawJson);
+            model.RawJson,
+            model.ModelCapabilities.Where(x => x.Enabled).Select(x => x.ConfigJson));
         model.SupportedModes = options.Modes;
         model.SupportedDurations = options.Durations;
         model.SupportedResolutions = options.Resolutions;
@@ -183,7 +185,8 @@ public sealed class AiProviderModelRepository
             model.SupportedResolutions,
             model.SupportedRatios,
             model.Prices,
-            model.RawJson);
+            model.RawJson,
+            model.ModelCapabilities.Where(x => x.Enabled).Select(x => x.ConfigJson));
         model.SupportedModes = options.Modes;
         model.SupportedDurations = options.Durations;
         model.SupportedResolutions = options.Resolutions;
@@ -696,7 +699,11 @@ public sealed class AiProviderModelRepository
         };
     }
 
-    private static async Task PopulateOptionsAsync(IDbConnection conn, AiProviderModelListItemDto model, CancellationToken ct)
+    private static async Task PopulateOptionsAsync(
+        IDbConnection conn,
+        AiProviderModelListItemDto model,
+        IReadOnlyCollection<AiProviderModelCapabilityDto> capabilities,
+        CancellationToken ct)
     {
         var rawJson = await conn.ExecuteScalarAsync<string?>(
             "SELECT raw_json::text FROM public.todox_ai_provider_model WHERE id = @modelId;",
@@ -710,7 +717,14 @@ public sealed class AiProviderModelRepository
                AND active = true;
             """,
             new { modelId = model.Id })).ToList();
-        var options = AiProviderModelOptionsNormalizer.Normalize(null, null, null, null, prices, rawJson);
+        var options = AiProviderModelOptionsNormalizer.Normalize(
+            null,
+            null,
+            null,
+            null,
+            prices,
+            rawJson,
+            capabilities.Where(x => x.Enabled).Select(x => x.ConfigJson));
         model.SupportedModes = options.Modes;
         model.SupportedDurations = options.Durations;
         model.SupportedResolutions = options.Resolutions;
