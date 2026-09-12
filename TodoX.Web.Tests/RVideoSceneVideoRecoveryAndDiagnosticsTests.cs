@@ -334,12 +334,47 @@ public sealed class RVideoSceneVideoRecoveryAndDiagnosticsTests
         var worker = ReadRepoFile("Services", "VideoRender", "SceneVideoWorkerHandler.cs");
         var versions = ReadRepoFile("Services", "VideoRender", "SceneMediaVersioningService.cs");
 
-        Assert.Contains("IsUnknownSubmission(version, taskId)", worker);
+        Assert.Contains("IsUnknownSubmission(version, providerTaskId, providerVideoIdBase)", worker);
         Assert.Contains("RVIDEO_VIDEO_SUBMIT_UNKNOWN", worker);
         Assert.Contains("RVIDEO_VIDEO_PENDING_RECONCILIATION", worker);
         Assert.Contains("throw new RenderJobPendingReconciliationException", worker);
         Assert.Contains("lower(status)='pending_reconciliation'", versions);
         Assert.Contains("provider_task_id IS NULL OR btrim(provider_task_id) = ''", versions);
+    }
+
+    [Fact]
+    public void Ai79IdentifierPersistenceUsesSeparateTaskAndVideoBaseColumns()
+    {
+        var jobs = ReadRepoFile("Services", "Render", "RenderJobService.cs");
+        var versions = ReadRepoFile("Services", "VideoRender", "SceneMediaVersioningService.cs");
+        var worker = ReadRepoFile("Services", "VideoRender", "SceneVideoWorkerHandler.cs");
+        var adapter = ReadRepoFile("Services", "VideoRender", "Ai79VideoGenerationProviderAdapter.cs");
+
+        Assert.Contains("provider_task_id=@providerTaskId", jobs);
+        Assert.Contains("provider_video_id_base=@providerVideoIdBase", jobs);
+        Assert.Contains("provider_task_id=@providerTaskId", versions);
+        Assert.Contains("provider_video_id_base=@providerVideoIdBase", versions);
+        Assert.Contains("await _jobs.SetProviderIdentifiersAsync(job.Id, providerTaskId, providerVideoIdBase, ct)", worker);
+        Assert.Contains("result.ProviderTaskId ?? string.Empty", adapter);
+        Assert.Contains("providerVideoIdBase", adapter);
+    }
+
+    [Fact]
+    public void Ai79PollingUsesOnlyPersistedVideoBaseAndDoesNotReferenceMetadataColumn()
+    {
+        var worker = ReadRepoFile("Services", "VideoRender", "SceneVideoWorkerHandler.cs");
+        var service = ReadRepoFile("Services", "VideoRender", "RVideo79AiVideoService.cs");
+        var repository = ReadRepoFile("Services", "VideoRender", "VideoRenderRepository.cs");
+        var jobs = ReadRepoFile("Services", "Render", "RenderJobService.cs");
+        var versions = ReadRepoFile("Services", "VideoRender", "SceneMediaVersioningService.cs");
+
+        Assert.Contains("string? taskId = providerVideoIdBase", worker);
+        Assert.Contains("TaskIdField: \"videoId\"", service);
+        Assert.Contains("v.provider_video_id_base IS NOT NULL", repository);
+        Assert.Contains("providerPollCount", jobs);
+        Assert.DoesNotContain("ProviderTaskIdMetadata", worker, StringComparison.Ordinal);
+        Assert.DoesNotContain("providerTaskIdMetadata", versions, StringComparison.Ordinal);
+        Assert.DoesNotContain("providertaskidmetadata", jobs, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

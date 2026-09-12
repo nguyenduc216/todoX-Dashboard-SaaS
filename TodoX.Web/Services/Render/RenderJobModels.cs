@@ -69,6 +69,8 @@ public sealed class RenderJobDto
     public string PointStatus { get; set; } = RenderPointStatuses.NotRequired;
     public string? ProviderCode { get; set; }
     public string? ModelCode { get; set; }
+    public string? ProviderTaskId { get; set; }
+    public string? ProviderVideoIdBase { get; set; }
     public DateTime QueuedAt { get; set; }
     public DateTime? StartedAt { get; set; }
     public DateTime? CompletedAt { get; set; }

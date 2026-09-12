@@ -36,6 +36,7 @@ public interface IRenderJobService
     Task MarkStatusAsync(Guid jobId, string status, object? output = null, string? errorCode = null, string? errorMessage = null, CancellationToken ct = default);
     Task ScheduleRetryAsync(Guid jobId, TimeSpan delay, string errorCode, string errorMessage, CancellationToken ct = default);
     Task<bool> ScheduleProviderPollAsync(Guid jobId, TimeSpan delay, string reasonCode, string reasonMessage, CancellationToken ct = default);
+    Task SetProviderIdentifiersAsync(Guid jobId, string? providerTaskId, string? providerVideoIdBase, CancellationToken ct = default);
     Task<bool> MarkRecoveredCompletedAsync(Guid jobId, long projectId, long sceneId, Guid sceneVideoVersionId, string logicalRequestId, CancellationToken ct = default);
     Task UpsertSnapshotAsync(Guid jobId, object projectSnapshot, object sceneSnapshots, CancellationToken ct = default);
 }
@@ -604,13 +605,14 @@ public sealed class RenderJobService : IRenderJobService
                          (status='queued'
                           AND (retry_after IS NULL OR retry_after <= now())
                           AND attempt_count <= max_attempts
+                          AND (COALESCE(input_json->>'providerPoll', 'false') <> 'true'
+                               OR COALESCE(NULLIF(input_json->>'providerPollCount', '')::int, 0) <= @maxProviderPolls)
                           AND (COALESCE(input_json->>'providerPoll', 'false') = 'true'
                                OR attempt_count < max_attempts))
                          OR (
                               job_type='core_service'
                               AND status='rendering'
                               AND attempt_count=0
-                              AND attempt_count < max_attempts
                               AND worker_key IS NULL
                               AND lock_owner IS NULL
                               AND lock_until IS NULL
@@ -622,16 +624,16 @@ public sealed class RenderJobService : IRenderJobService
         if (includeJobTypes is not null && includeJobTypes.Count > 0)
         {
             sql += " AND job_type = ANY(@jobTypes)";
-            parameters = new { jobTypes = includeJobTypes.ToArray(), excludedJobTypes = excludeJobTypes?.ToArray() ?? Array.Empty<string>() };
+            parameters = new { jobTypes = includeJobTypes.ToArray(), excludedJobTypes = excludeJobTypes?.ToArray() ?? Array.Empty<string>(), maxProviderPolls = GetMaxProviderPolls() };
         }
         else if (excludeJobTypes is not null && excludeJobTypes.Count > 0)
         {
             sql += " AND NOT (job_type = ANY(@excludedJobTypes))";
-            parameters = new { excludedJobTypes = excludeJobTypes.ToArray() };
+            parameters = new { excludedJobTypes = excludeJobTypes.ToArray(), maxProviderPolls = GetMaxProviderPolls() };
         }
         else
         {
-            parameters = new { };
+            parameters = new { maxProviderPolls = GetMaxProviderPolls() };
         }
 
         sql += ResolveClaimOrderSql(includeJobTypes);
@@ -891,7 +893,11 @@ public sealed class RenderJobService : IRenderJobService
             """
             UPDATE render.render_jobs
                SET status='queued',
-                   input_json=COALESCE(input_json, '{}'::jsonb) || '{"providerPoll": true}'::jsonb,
+                   input_json=jsonb_set(
+                       COALESCE(input_json, '{}'::jsonb) || '{"providerPoll": true}'::jsonb,
+                       '{providerPollCount}',
+                       to_jsonb(COALESCE(NULLIF(input_json->>'providerPollCount', '')::int, 0) + 1),
+                       true),
                    retry_after=now() + (@delaySeconds || ' seconds')::interval,
                    error_code=@reasonCode,
                    error_message=@reasonMessage,
@@ -899,9 +905,10 @@ public sealed class RenderJobService : IRenderJobService
                    lock_until=NULL,
                    updated_at=now()
              WHERE id=@jobId
-               AND status IN ('queued', 'preparing', 'rendering', 'post_processing', 'pending_reconciliation', 'failed');
+               AND status IN ('queued', 'preparing', 'rendering', 'post_processing', 'pending_reconciliation', 'failed')
+               AND COALESCE(NULLIF(input_json->>'providerPollCount', '')::int, 0) < @maxProviderPolls;
             """,
-            new { jobId, delaySeconds, reasonCode, reasonMessage });
+            new { jobId, delaySeconds, reasonCode, reasonMessage, maxProviderPolls = GetMaxProviderPolls() });
 
         if (changed <= 0)
         {
@@ -915,6 +922,20 @@ public sealed class RenderJobService : IRenderJobService
             "Provider poll scheduled without consuming the application retry budget.",
             new { retryAfterSeconds = delaySeconds, reasonCode, reasonMessage }, "info", ct);
         return true;
+    }
+
+    public async Task SetProviderIdentifiersAsync(Guid jobId, string? providerTaskId, string? providerVideoIdBase, CancellationToken ct = default)
+    {
+        using var conn = await _factory.OpenAsync(ct);
+        await conn.ExecuteAsync(
+            """
+            UPDATE render.render_jobs
+               SET provider_task_id=@providerTaskId,
+                   provider_video_id_base=@providerVideoIdBase,
+                   updated_at=now()
+             WHERE id=@jobId;
+            """,
+            new { jobId, providerTaskId, providerVideoIdBase });
     }
 
     public async Task<bool> MarkRecoveredCompletedAsync(
@@ -1044,7 +1065,8 @@ public sealed class RenderJobService : IRenderJobService
                cancel_reason AS CancelReason, retry_of_job_id AS RetryOfJobId,
                attempt_count AS AttemptCount, max_attempts AS MaxAttempts, retry_after AS RetryAfter,
                point_cost_estimate AS PointCostEstimate, point_cost_charged AS PointCostCharged,
-               point_status AS PointStatus, provider_code AS ProviderCode, model_code AS ModelCode,
+                point_status AS PointStatus, provider_code AS ProviderCode, model_code AS ModelCode,
+               provider_task_id AS ProviderTaskId, provider_video_id_base AS ProviderVideoIdBase,
                queued_at AS QueuedAt, started_at AS StartedAt, completed_at AS CompletedAt,
                cancelled_at AS CancelledAt, created_at AS CreatedAt, updated_at AS UpdatedAt
           FROM render.render_jobs
@@ -1071,9 +1093,13 @@ public sealed class RenderJobService : IRenderJobService
                   attempt_count AS AttemptCount, max_attempts AS MaxAttempts, retry_after AS RetryAfter,
                   point_cost_estimate AS PointCostEstimate, point_cost_charged AS PointCostCharged,
                   point_status AS PointStatus, provider_code AS ProviderCode, model_code AS ModelCode,
+                  provider_task_id AS ProviderTaskId, provider_video_id_base AS ProviderVideoIdBase,
                   queued_at AS QueuedAt, started_at AS StartedAt, completed_at AS CompletedAt,
                   cancelled_at AS CancelledAt, created_at AS CreatedAt, updated_at AS UpdatedAt;
         """;
 
     private static string ToJson(object value) => JsonSerializer.Serialize(value, JsonOptions);
+
+    private int GetMaxProviderPolls()
+        => Math.Max(1, _configuration.GetValue("VideoRender:MaxReconciliationRetries", 3));
 }

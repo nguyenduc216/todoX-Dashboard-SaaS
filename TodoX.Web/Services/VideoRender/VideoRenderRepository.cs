@@ -1173,6 +1173,8 @@ public sealed class VideoRenderRepository
              WHERE v.tenant_id=@tenant
                AND v.provider_task_id IS NOT NULL
                AND btrim(v.provider_task_id) <> ''
+               AND v.provider_video_id_base IS NOT NULL
+               AND btrim(v.provider_video_id_base) <> ''
                AND v.status IN ('submitted', 'processing', 'pending_reconciliation', 'rendering')
                AND j.job_type='render_scene_video'
                AND j.status NOT IN ('completed', 'cancelled');

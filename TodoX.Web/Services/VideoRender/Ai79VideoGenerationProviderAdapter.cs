@@ -54,11 +54,10 @@ public sealed class Ai79VideoGenerationProviderAdapter : IVideoGenerationProvide
             var providerVideoIdBase = result.ProviderVideoIdBase;
             return new VideoProviderSubmitResult(
                 request.ProviderCode,
-                providerVideoIdBase ?? string.Empty,
+                result.ProviderTaskId ?? string.Empty,
                 request.RequestedModel,
                 result.SanitizedRequestJson,
                 result.SanitizedResponseJson,
-                result.ProviderTaskId,
                 providerVideoIdBase);
         }
         catch (Ai79TaskSubmitException ex) when (ex.HttpStatusCode is null or >= System.Net.HttpStatusCode.InternalServerError

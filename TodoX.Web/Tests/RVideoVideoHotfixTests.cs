@@ -1010,7 +1010,9 @@ public sealed class RVideoVideoHotfixTests
 
         var worker = ReadRepoFile("Services", "VideoRender", "SceneVideoWorkerHandler.cs");
         var missingIdBaseBlock = worker[worker.IndexOf("missing_video_id_base", StringComparison.Ordinal)..];
-        Assert.Contains("CancellationToken.None,\n                            null,\n                            policy.Model,\n                            providerTaskIdMetadata", missingIdBaseBlock);
+        Assert.Contains("missing_video_id_base", missingIdBaseBlock);
+        Assert.Contains("providerVideoIdBase", missingIdBaseBlock);
+        Assert.DoesNotContain("ProviderTaskIdMetadata", worker, StringComparison.Ordinal);
     }
 
     [Fact]

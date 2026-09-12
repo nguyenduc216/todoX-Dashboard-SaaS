@@ -186,6 +186,7 @@ public sealed class SceneVideoVersionDto
     public string? ModelName { get; set; }
     public long? ProviderCapabilityId { get; set; }
     public string? ProviderTaskId { get; set; }
+    public string? ProviderVideoIdBase { get; set; }
     public decimal? DurationSeconds { get; set; }
     public string? AspectRatio { get; set; }
     public string? BillingLogicalRequestId { get; set; }
@@ -338,7 +339,7 @@ public interface ISceneMediaVersioningService
         string? modelName,
         long? providerCapabilityId,
         string providerTaskId,
-        string? providerTaskIdMetadata = null,
+        string? providerVideoIdBase = null,
         CancellationToken ct = default);
     Task<string?> GetSceneVideoProviderTaskIdAsync(Guid versionId, CancellationToken ct = default);
     Task MarkSceneVideoPendingReconciliationAsync(
@@ -346,7 +347,7 @@ public interface ISceneMediaVersioningService
         string? errorCode,
         string? errorMessage,
         CancellationToken ct = default,
-        string? providerTaskIdMetadata = null);
+        string? providerVideoIdBase = null);
     Task<SceneAudioVersionDto> CreateQueuedSceneAudioVersionAsync(SceneAudioVersionCreateRequest request, CancellationToken ct = default);
     Task CompleteSceneAudioVersionAsync(Guid versionId, SceneAudioVersionCompleteRequest request, CancellationToken ct = default);
     Task FailSceneAudioVersionAsync(Guid versionId, string? errorCode, string? errorMessage, CancellationToken ct = default);
@@ -1048,7 +1049,7 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
         string? modelName,
         long? providerCapabilityId,
         string providerTaskId,
-        string? providerTaskIdMetadata = null,
+        string? providerVideoIdBase = null,
         CancellationToken ct = default)
     {
         await _tenant.EnsureLoadedAsync(ct);
@@ -1062,10 +1063,11 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
                    requested_model=COALESCE(requested_model, @modelName),
                     actual_model=COALESCE(@modelName, actual_model),
                     provider_task_id=@providerTaskId,
+                    provider_video_id_base=@providerVideoIdBase,
                     render_config_json=COALESCE(render_config_json, '{}'::jsonb)
                         || jsonb_strip_nulls(jsonb_build_object(
-                            'providerVideoIdBase', @providerTaskId,
-                            'providerTaskId', @providerTaskIdMetadata)),
+                            'providerVideoIdBase', @providerVideoIdBase,
+                            'providerTaskId', @providerTaskId)),
                     submitted_at=COALESCE(submitted_at, now()),
                    updated_at=now()
              WHERE id=@versionId AND tenant_id=@tenant;
@@ -1077,7 +1079,8 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
                 providerCode,
                 modelName,
                 providerCapabilityId,
-                providerTaskId
+                providerTaskId,
+                providerVideoIdBase
             });
     }
 
@@ -1100,7 +1103,7 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
         string? errorCode,
         string? errorMessage,
         CancellationToken ct = default,
-        string? providerTaskIdMetadata = null)
+        string? providerVideoIdBase = null)
     {
         await _tenant.EnsureLoadedAsync(ct);
         using var conn = await _factory.OpenAsync(ct);
@@ -1110,12 +1113,13 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
                SET status='pending_reconciliation',
                    error_code=@errorCode,
                    error_message=@errorMessage,
+                   provider_video_id_base=COALESCE(provider_video_id_base, @providerVideoIdBase),
                    render_config_json=COALESCE(render_config_json, '{}'::jsonb)
-                       || jsonb_strip_nulls(jsonb_build_object('providerTaskId', @providerTaskIdMetadata)),
+                       || jsonb_strip_nulls(jsonb_build_object('providerVideoIdBase', @providerVideoIdBase)),
                    updated_at=now()
              WHERE id=@versionId AND tenant_id=@tenant;
             """,
-            new { versionId, tenant = _tenant.TenantId, errorCode, errorMessage });
+            new { versionId, tenant = _tenant.TenantId, errorCode, errorMessage, providerVideoIdBase });
     }
 
     public async Task<bool> TryRebindSceneVideoVersionRenderJobAsync(Guid versionId, Guid expectedOldJobId, Guid newJobId, CancellationToken ct = default)
@@ -2342,7 +2346,8 @@ public sealed class SceneMediaVersioningService : ISceneMediaVersioningService
                result_media_id AS ResultMediaId, render_job_id AS RenderJobId,
                image_prompt_snapshot AS ImagePromptSnapshot, video_prompt_snapshot AS VideoPromptSnapshot,
                provider_code AS ProviderCode, actual_model AS ModelName, provider_capability_id AS ProviderCapabilityId,
-               provider_task_id AS ProviderTaskId, duration_seconds AS DurationSeconds, aspect_ratio AS AspectRatio,
+               provider_task_id AS ProviderTaskId, provider_video_id_base AS ProviderVideoIdBase,
+               duration_seconds AS DurationSeconds, aspect_ratio AS AspectRatio,
                billing_logical_request_id AS BillingLogicalRequestId, estimated_usd AS EstimatedUsd, actual_usd AS ActualUsd,
                charged_points AS ChargedPoints, refunded_points AS RefundedPoints, cost_source AS CostSource,
                render_config_json::text AS RenderConfigJson,
