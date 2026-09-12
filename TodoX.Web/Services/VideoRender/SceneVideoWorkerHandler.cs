@@ -1220,7 +1220,8 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                         input.CustomerId,
                         input.BillingIntent,
                         input.BillingOperationId,
-                        IsRecovery: !string.IsNullOrWhiteSpace(existingTaskId)), ct);
+                        IsRecovery: !string.IsNullOrWhiteSpace(existingTaskId),
+                        BillableDurationSeconds: candidate.ProviderDurationSeconds), ct);
                     var actualVideoPoints = RVideoSceneVideoCompletionService.CalculateActualVideoPoints(
                         input.DurationSeconds,
                         input.CustomerPointRate);

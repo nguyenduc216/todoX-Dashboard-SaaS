@@ -656,6 +656,20 @@ public sealed class RVideoVideoHotfixTests
     }
 
     [Fact]
+    public void CompletionRequestCarriesProviderDurationSeparatelyFromSceneDuration()
+    {
+        var request = new RVideoSceneVideoCompletionRequest(
+            75, 387, 1, Guid.NewGuid(), Guid.NewGuid(), "scene/video.mp4", "logical-1", "id-base",
+            "https://cdn.example/video.mp4", "79ai", "grok_video_heavy", 1, null, null, 1m, null, "catalog",
+            "9:16", null, 4, null, null, PointBillingIntent.InitialRender, Guid.NewGuid(), false,
+            BillableDurationSeconds: 6);
+
+        Assert.Equal(4, request.DurationSeconds);
+        Assert.Equal(6, request.BillableDurationSeconds);
+        Assert.Equal(12m, RVideoSceneVideoCompletionService.CalculateActualVideoPoints(request.BillableDurationSeconds.Value, 2m));
+    }
+
+    [Fact]
     public void SelectedCompletedImageVersionIsAcceptedAndGuidEmptyIsRejected()
     {
         var method = typeof(SceneVideoRenderHandler).GetMethod("IsCompletedSelectedImageVersion", BindingFlags.NonPublic | BindingFlags.Static);

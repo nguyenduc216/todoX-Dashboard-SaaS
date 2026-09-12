@@ -31,7 +31,8 @@ public sealed record RVideoSceneVideoCompletionRequest(
     Guid? CustomerId,
     PointBillingIntent BillingIntent,
     Guid? BillingOperationId,
-    bool IsRecovery);
+    bool IsRecovery,
+    decimal? BillableDurationSeconds = null);
 
 public interface IRVideoSceneVideoCompletionService
 {
@@ -135,7 +136,7 @@ public sealed class RVideoSceneVideoCompletionService : IRVideoSceneVideoComplet
             new { request.SceneId, request.SceneIndex, request.SceneVideoVersionId, request.ProviderTaskId, mediaId = saved.Id, objectKey },
             ct);
 
-        var durationSeconds = ResolveBillableDurationSeconds(request.DurationSeconds);
+        var durationSeconds = ResolveBillableDurationSeconds(request.BillableDurationSeconds ?? request.DurationSeconds);
         var actualVideoPoints = CalculateActualVideoPoints(durationSeconds, request.CustomerPointRate);
         var chargedPoints = 0m;
         if (request.BillingIntent != PointBillingIntent.SystemRetry)
