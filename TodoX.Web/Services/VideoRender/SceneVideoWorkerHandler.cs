@@ -714,9 +714,9 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                         candidate.ProviderDurationSeconds,
                         sourceImageAsset,
                         referenceImages), ct);
-                    taskId = string.IsNullOrWhiteSpace(submit.ProviderVideoIdBase)
-                        ? (string.IsNullOrWhiteSpace(submit.ProviderTaskId) ? null : submit.ProviderTaskId.Trim())
-                        : submit.ProviderVideoIdBase.Trim();
+                    taskId = RVideoVideoModelPolicy.Is79AiProvider(input.ProviderCode)
+                        ? (string.IsNullOrWhiteSpace(submit.ProviderVideoIdBase) ? null : submit.ProviderVideoIdBase.Trim())
+                        : (string.IsNullOrWhiteSpace(submit.ProviderTaskId) ? null : submit.ProviderTaskId.Trim());
                     providerTaskIdMetadata = string.IsNullOrWhiteSpace(submit.ProviderTaskIdMetadata)
                         ? null
                         : submit.ProviderTaskIdMetadata.Trim();
@@ -1113,7 +1113,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                             ErrorMessage = failure
                         }, ct);
                     }
-                    await LogUsageAsync(input, job, attemptLogicalRequestId, reservation.ChargedPoints, status.SanitizedResponseJson, false, failure, taskId, ct, policy.Model);
+                    await LogUsageAsync(input, job, attemptLogicalRequestId, reservation.ChargedPoints, status.SanitizedResponseJson, false, failure, taskId, ct, policy.Model, candidate.ProviderDurationSeconds);
                     await _versions.FailSceneVideoVersionAsync(version.Id, status.ErrorCode ?? "provider_failure", failure, ct);
                     var failureClassification = ClassifyProviderFailure(status.ErrorCode, failure, null);
                     await AddFallbackFailedEventAsync(
@@ -1223,9 +1223,9 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                         IsRecovery: !string.IsNullOrWhiteSpace(existingTaskId),
                         BillableDurationSeconds: candidate.ProviderDurationSeconds), ct);
                     var actualVideoPoints = RVideoSceneVideoCompletionService.CalculateActualVideoPoints(
-                        input.DurationSeconds,
+                        candidate.ProviderDurationSeconds,
                         input.CustomerPointRate);
-                    await LogUsageAsync(input, job, attemptLogicalRequestId, actualVideoPoints, status.SanitizedResponseJson, true, null, taskId, ct, status.ActualModel ?? policy.Model);
+                    await LogUsageAsync(input, job, attemptLogicalRequestId, actualVideoPoints, status.SanitizedResponseJson, true, null, taskId, ct, status.ActualModel ?? policy.Model, candidate.ProviderDurationSeconds);
                     await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_DOWNLOAD_COMPLETED", "info",
                         "Scene-video provider output was downloaded and persisted locally.",
                         new
@@ -2719,7 +2719,8 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         string? errorMessage,
         string? providerTaskId,
         CancellationToken ct,
-        string? actualModel = null)
+        string? actualModel = null,
+        int? providerDurationSeconds = null)
     {
         await _providers.LogUsageAsync(new AiProviderUsageLog
         {
@@ -2739,7 +2740,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
             ProviderRawCost = input.EstimatedUsd,
             Status = success ? "success" : "failed",
             ErrorMessage = errorMessage,
-            MetadataJson = BuildUsageMetadata(input, logicalRequestId, providerTaskId, providerUsageJson, chargedPoints, actualModel),
+            MetadataJson = BuildUsageMetadata(input, logicalRequestId, providerTaskId, providerUsageJson, chargedPoints, actualModel, providerDurationSeconds),
         }, ct);
     }
 
@@ -2749,7 +2750,8 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         string? providerTaskId,
         string? providerUsageJson,
         decimal chargedPoints,
-        string? actualModel = null)
+        string? actualModel = null,
+        int? providerDurationSeconds = null)
     {
         try
         {
@@ -2764,7 +2766,8 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                 logicalRequestId,
                 providerTaskId,
                 model = actualModel ?? input.ModelName,
-                input.DurationSeconds,
+                requestedDurationSeconds = input.DurationSeconds,
+                providerDurationSeconds = providerDurationSeconds ?? input.DurationSeconds,
                 input.AspectRatio,
                 input.Resolution,
                 chargedPoints,
@@ -2786,7 +2789,8 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                 input.ParentJobId,
                 logicalRequestId,
                 providerTaskId,
-                input.DurationSeconds,
+                requestedDurationSeconds = input.DurationSeconds,
+                providerDurationSeconds = providerDurationSeconds ?? input.DurationSeconds,
                 input.AspectRatio,
                 input.Resolution,
                 chargedPoints,

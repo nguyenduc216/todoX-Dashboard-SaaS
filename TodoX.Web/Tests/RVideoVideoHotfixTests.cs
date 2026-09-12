@@ -116,10 +116,12 @@ public sealed class RVideoVideoHotfixTests
             PricingRuleKey = "rule-1"
         };
 
-        var json = (string)method!.Invoke(null, new object?[] { input, "scene-base-fallback-1", "task-123", "{\"ok\":true}", 9.5m, (string?)null })!;
+        var json = (string)method!.Invoke(null, new object?[] { input, "scene-base-fallback-1", "task-123", "{\"ok\":true}", 9.5m, (string?)null, 14 })!;
         using var doc = JsonDocument.Parse(json);
         Assert.Equal("scene-base-fallback-1", doc.RootElement.GetProperty("logicalRequestId").GetString());
         Assert.Equal("task-123", doc.RootElement.GetProperty("providerTaskId").GetString());
+        Assert.Equal(12, doc.RootElement.GetProperty("requestedDurationSeconds").GetInt32());
+        Assert.Equal(14, doc.RootElement.GetProperty("providerDurationSeconds").GetInt32());
     }
 
     [Fact]
@@ -666,7 +668,11 @@ public sealed class RVideoVideoHotfixTests
 
         Assert.Equal(4, request.DurationSeconds);
         Assert.Equal(6, request.BillableDurationSeconds);
-        Assert.Equal(12m, RVideoSceneVideoCompletionService.CalculateActualVideoPoints(request.BillableDurationSeconds.Value, 2m));
+        Assert.Equal(12m, RVideoSceneVideoCompletionService.CalculateActualVideoPoints(request.BillableDurationSeconds.GetValueOrDefault(), 2m));
+
+        var worker = ReadRepoFile("Services", "VideoRender", "SceneVideoWorkerHandler.cs");
+        Assert.Contains("CalculateActualVideoPoints(\n                        candidate.ProviderDurationSeconds", worker);
+        Assert.Contains("providerDurationSeconds = providerDurationSeconds ?? input.DurationSeconds", worker);
     }
 
     [Fact]
@@ -976,6 +982,31 @@ public sealed class RVideoVideoHotfixTests
                 request.Runtime.ProviderCode,
                 request.Model.Model,
                 request.Model.Mode)));
+    }
+
+    [Fact]
+    public async Task RVideo79AiAdapterDoesNotPromoteTaskIdToPollIdentifierWhenIdBaseIsMissing()
+    {
+        var service = new CapturingRVideo79AiVideoService();
+        var adapter = new Ai79VideoGenerationProviderAdapter(service);
+
+        var result = await adapter.SubmitAsync(new VideoProviderSubmitRequest(
+            18,
+            99,
+            "79ai",
+            RVideoVideoModelPolicy.CapabilityCode,
+            "veo_omni",
+            "flash",
+            "Animate the scene.",
+            "9:16",
+            "720p",
+            6,
+            SourceImage: null,
+            ReferenceImages: Array.Empty<VideoProviderSourceImage>()));
+
+        Assert.True(string.IsNullOrWhiteSpace(result.ProviderTaskId));
+        Assert.True(string.IsNullOrWhiteSpace(result.ProviderVideoIdBase));
+        Assert.Equal(string.Empty, result.ProviderTaskId);
     }
 
     [Fact]

@@ -264,10 +264,9 @@ public sealed class RVideo79AiVideoService : IRVideo79AiVideoService
             })
         }, JsonOptions);
         var submit = await _client.SubmitAsync(raw, ct);
-        var providerVideoIdBase = submit.ProviderVideoIdBase
-            ?? (string.IsNullOrWhiteSpace(submit.ProviderTaskId) ? submit.TaskId : null);
+        var providerVideoIdBase = submit.ProviderVideoIdBase;
         return new RVideo79AiVideoSubmitResult(
-            providerVideoIdBase ?? submit.TaskId,
+            providerVideoIdBase ?? string.Empty,
             submit.SanitizedResponseJson,
             sanitizedRequest,
             submit.ProviderTaskId,

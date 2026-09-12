@@ -51,8 +51,7 @@ public sealed class Ai79VideoGenerationProviderAdapter : IVideoGenerationProvide
                 request.DurationSeconds,
                 source,
                 references), ct);
-            var providerVideoIdBase = result.ProviderVideoIdBase
-                ?? (string.IsNullOrWhiteSpace(result.ProviderTaskId) ? result.TaskId : null);
+            var providerVideoIdBase = result.ProviderVideoIdBase;
             return new VideoProviderSubmitResult(
                 request.ProviderCode,
                 providerVideoIdBase ?? string.Empty,
