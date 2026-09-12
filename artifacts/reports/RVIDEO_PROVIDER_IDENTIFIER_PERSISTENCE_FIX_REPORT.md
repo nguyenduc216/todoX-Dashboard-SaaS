@@ -72,4 +72,6 @@ No provider endpoint, payload field, provider routing, model policy, fallback or
 
 ## Commit
 
-`1298763fdc0a00d35a111180aafaffc31080fe87` (amended only to record this SHA in the report; see the final pushed SHA below if Git rewrites it).
+Implementation commit: `1298763fdc0a00d35a111180aafaffc31080fe87`.
+
+The implementation and report were pushed to `origin/feature/rdn-onepage-ui-revamp`; `991ca98f168f30e996fd2cfc937d980b55467d21` records the initial report publication.
