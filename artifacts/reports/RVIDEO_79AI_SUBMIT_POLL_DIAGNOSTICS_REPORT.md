@@ -86,9 +86,11 @@ Timelapse, DanceSell, or database schema was changed. No migration is needed.
   legacy `request_id`, which the previously-established 79AI video identifier
   contract rejects because it requires the polling `id_base`; this patch did
   not change that behavior.
-- Release build and publish results are recorded after the final validation
-  commands complete.
-- Commit: `ae8bdca` (final SHA will be recorded after the report-only amend).
+- `dotnet build TodoX.Web/TodoX.Web.csproj --configuration Release --no-restore`:
+  passed, 0 errors and 45 existing Razor nullable warnings.
+- `dotnet publish TodoX.Web/TodoX.Web.csproj --configuration Release --no-build
+  --output artifacts/publish/todox-dashboard`: passed; output directory created.
+- Commit: recorded by the final commit below.
 
 ## Remaining Limitations
 
