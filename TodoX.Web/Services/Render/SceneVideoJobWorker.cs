@@ -61,6 +61,17 @@ public sealed class SceneVideoJobWorker : BackgroundService
 
                 try
                 {
+                    if (job.AttemptCount > job.MaxAttempts)
+                    {
+                        _logger.LogError(
+                            "RENDER_JOB_ATTEMPT_BUDGET_EXCEEDED jobId={JobId} jobType={JobType} attemptCount={AttemptCount} maxAttempts={MaxAttempts}",
+                            job.Id,
+                            job.JobType,
+                            job.AttemptCount,
+                            job.MaxAttempts);
+                        throw new RenderJobTerminalFailureException("Render job attempt budget exceeded.");
+                    }
+
                     await jobs.MarkStatusAsync(job.Id, RenderJobStatuses.Rendering, ct: stoppingToken);
                     await dispatcher.DispatchAsync(job, stoppingToken);
                     await jobs.MarkStatusAsync(job.Id, RenderJobStatuses.Completed, ct: stoppingToken);

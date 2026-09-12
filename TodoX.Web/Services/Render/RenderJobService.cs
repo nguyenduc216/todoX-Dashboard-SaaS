@@ -601,11 +601,16 @@ public sealed class RenderJobService : IRenderJobService
         var sql = SelectJobSql +
                   """
                    WHERE (
-                         (status='queued' AND (retry_after IS NULL OR retry_after <= now()))
+                         (status='queued'
+                          AND (retry_after IS NULL OR retry_after <= now())
+                          AND attempt_count <= max_attempts
+                          AND (COALESCE(input_json->>'providerPoll', 'false') = 'true'
+                               OR attempt_count < max_attempts))
                          OR (
                               job_type='core_service'
                               AND status='rendering'
                               AND attempt_count=0
+                              AND attempt_count < max_attempts
                               AND worker_key IS NULL
                               AND lock_owner IS NULL
                               AND lock_until IS NULL
@@ -659,7 +664,7 @@ public sealed class RenderJobService : IRenderJobService
             job.WorkerKey,
             isCoreServiceRecoveryClaim);
 
-        await conn.ExecuteAsync(
+        var claimedRows = await conn.ExecuteAsync(
             """
             UPDATE render.render_jobs
                SET status='preparing',
@@ -673,10 +678,26 @@ public sealed class RenderJobService : IRenderJobService
                    END,
                    started_at=COALESCE(started_at, now()),
                    updated_at=now()
-             WHERE id=@id;
+             WHERE id=@id
+               AND attempt_count <= max_attempts
+               AND (COALESCE(input_json->>'providerPoll', 'false') = 'true'
+                    OR attempt_count < max_attempts);
             """,
             new { id = job.Id, workerKey, lockSeconds = Math.Max(1, (int)lockFor.TotalSeconds) },
             tx);
+
+        if (claimedRows == 0)
+        {
+            _logger.LogWarning(
+                "RENDER_JOB_CLAIM_RESULT jobId={JobId} jobType={JobType} currentStatus={CurrentStatus} attemptCount={AttemptCount} workerKey={WorkerKey} claimResult=attempt_budget_rejected",
+                job.Id,
+                job.JobType,
+                job.Status,
+                job.AttemptCount,
+                workerKey);
+            tx.Commit();
+            return null;
+        }
 
         tx.Commit();
         await AddEventAsync(job.Id, "WORKER_CLAIMED", "Worker claimed render job.", new { workerKey }, ct: ct);

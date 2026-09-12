@@ -11,7 +11,8 @@ public sealed class RenderJobCoreServiceClaimRegressionTests
         var source = ReadSource("TodoX.Web", "Services", "Render", "RenderJobService.cs");
         var claim = Extract(source, "private async Task<RenderJobDto?> ClaimNextInternal(", "internal static string ResolveClaimOrderSql");
 
-        Assert.Contains("(status='queued' AND (retry_after IS NULL OR retry_after <= now()))", claim, StringComparison.Ordinal);
+        Assert.Contains("status='queued'", claim, StringComparison.Ordinal);
+        Assert.Contains("retry_after IS NULL OR retry_after <= now()", claim, StringComparison.Ordinal);
         Assert.Contains("OR (", claim, StringComparison.Ordinal);
         Assert.Contains("job_type='core_service'", claim, StringComparison.Ordinal);
         Assert.Contains("AND status='rendering'", claim, StringComparison.Ordinal);
@@ -41,6 +42,30 @@ public sealed class RenderJobCoreServiceClaimRegressionTests
         Assert.Contains("started_at=COALESCE(started_at, now())", claim, StringComparison.Ordinal);
         Assert.Contains("RENDER_JOB_CLAIM_SELECTED", claim, StringComparison.Ordinal);
         Assert.Contains("RENDER_JOB_CLAIM_RESULT", claim, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ClaimPredicateBlocksNormalQueuedJobsAtMaxAttemptsButPreservesProviderPollClaims()
+    {
+        var source = ReadSource("TodoX.Web", "Services", "Render", "RenderJobService.cs");
+        var claim = Extract(source, "private async Task<RenderJobDto?> ClaimNextInternal(", "internal static string ResolveClaimOrderSql");
+
+        Assert.Contains("AND attempt_count <= max_attempts", claim, StringComparison.Ordinal);
+        Assert.Contains("COALESCE(input_json->>'providerPoll', 'false') = 'true'", claim, StringComparison.Ordinal);
+        Assert.Contains("OR attempt_count < max_attempts", claim, StringComparison.Ordinal);
+        Assert.DoesNotContain("status='pending_reconciliation'", claim, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SceneVideoWorkerRejectsOverBudgetJobsBeforeDispatchingProviderWork()
+    {
+        var source = ReadSource("TodoX.Web", "Services", "Render", "SceneVideoJobWorker.cs");
+
+        Assert.Contains("job.AttemptCount > job.MaxAttempts", source, StringComparison.Ordinal);
+        Assert.Contains("Render job attempt budget exceeded", source, StringComparison.Ordinal);
+        Assert.True(
+            source.IndexOf("job.AttemptCount > job.MaxAttempts", StringComparison.Ordinal)
+            < source.IndexOf("await dispatcher.DispatchAsync(job, stoppingToken)", StringComparison.Ordinal));
     }
 
     [Fact]

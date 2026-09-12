@@ -430,6 +430,37 @@ public sealed class RVideoVideoHotfixTests
     }
 
     [Fact]
+    public void RVideoNotResourcesWithZeroTasksIsAKnownSafeFallbackFailure()
+    {
+        var exception = new Ai79TaskSubmitException(
+            "79AI video submit failed: Dịch vụ hiện không khả dụng, vui lòng thử lại sau.",
+            """{"countTasks":"0","error":"NOT_RESOURCES","message":"Dịch vụ hiện không khả dụng, vui lòng thử lại sau."}""",
+            HttpStatusCode.OK,
+            "provider_error",
+            sanitizedRequestMetadataJson: """{"model":"veo_omni","mode":"flash"}""");
+
+        Assert.True(IsDefinitivelyRejectedSubmitForTest(exception));
+        Assert.Equal("KNOWN_NO_RESOURCES", ClassifyRVideoSubmitFailureForTest(exception));
+        Assert.True(ShouldFallbackForTest("KNOWN_NO_RESOURCES"));
+    }
+
+    [Theory]
+    [InlineData("""{"countTasks":"1","error":"NOT_RESOURCES"}""")]
+    [InlineData("""{"countTasks":"0","error":"NOT_RESOURCES","task_id":"task-accepted"}""")]
+    [InlineData("""{"error":"NOT_RESOURCES"}""")]
+    public void RVideoNotResourcesWithoutProofOfNoTaskRemainsUnknown(string responseJson)
+    {
+        var exception = new Ai79TaskSubmitException(
+            "79AI video submit outcome is not proven safe to fallback.",
+            responseJson,
+            HttpStatusCode.OK,
+            "provider_error",
+            sanitizedRequestMetadataJson: """{"model":"veo_omni"}""");
+
+        Assert.False(IsDefinitivelyRejectedSubmitForTest(exception));
+    }
+
+    [Fact]
     public void RVideoRequestIdIsNotAcceptedAsPollableTaskId()
     {
         var exception = new Ai79TaskSubmitException(
@@ -1912,6 +1943,15 @@ public sealed class RVideoVideoHotfixTests
             "IsDefinitivelyRejectedSubmit",
             BindingFlags.NonPublic | BindingFlags.Static)!;
         return (bool)method.Invoke(null, new object?[] { exception })!;
+    }
+
+    private static string ClassifyRVideoSubmitFailureForTest(Ai79TaskSubmitException exception)
+    {
+        var method = typeof(SceneVideoWorkerHandler).GetMethod(
+            "ClassifyRVideoSubmitFailure",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+        return (string)method!.Invoke(null, new object?[] { exception })!;
     }
 
     private static SceneVideoWorkerHandler CreateWorker(

@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
+using System.Text.Json;
 using TodoX.Web.Services.AiProviders;
 using Xunit;
 
@@ -545,6 +546,39 @@ public sealed class Ai79TaskClientTests
 
         Assert.Equal("provider_error", ex.ErrorCode);
         Assert.Contains("resolution", ex.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task VideoSubmit_NotResourcesZeroTasksPreservesKnownProviderResponse()
+    {
+        var handler = new RecordingJsonHandler(
+            """{"countTasks":"0","domain":"79ai.net","config":{"create_video":{"all":false,"google_veo":false}},"error":"NOT_RESOURCES","message":"Dịch vụ hiện không khả dụng, vui lòng thử lại sau."}""");
+        var client = new Ai79TaskClient(new HttpClient(handler));
+
+        var ex = await Assert.ThrowsAsync<Ai79TaskSubmitException>(() => client.SubmitAsync(new Ai79TaskSubmitRequest(
+            "https://api.gommo.net/ai",
+            "/create-video",
+            "secret-token",
+            "79ai.net",
+            "veo_omni",
+            "Animate the scene.",
+            ["https://cdn.example/scene.png"],
+            new Dictionary<string, string?>
+            {
+                ["mode"] = "flash",
+                ["duration"] = "6",
+                ["ratio"] = "9:16"
+            },
+            Ai79TaskOperation.Video,
+            "image")));
+
+        Assert.Equal(HttpStatusCode.OK, ex.HttpStatusCode);
+        Assert.Equal("provider_error", ex.ErrorCode);
+        using var response = JsonDocument.Parse(ex.SanitizedResponseJson);
+        Assert.Equal("NOT_RESOURCES", response.RootElement.GetProperty("error").GetString());
+        Assert.Equal("0", response.RootElement.GetProperty("countTasks").GetString());
+        Assert.DoesNotContain("secret-token", ex.SanitizedResponseJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("secret-token", ex.SanitizedRequestMetadataJson, StringComparison.Ordinal);
     }
 
     [Theory]

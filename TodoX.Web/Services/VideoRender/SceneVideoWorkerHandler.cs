@@ -161,6 +161,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private const int DefaultMaxReconciliationRetries = 3;
+    private const string KnownNoResourcesFailureClassification = "KNOWN_NO_RESOURCES";
 
     private readonly VideoRenderRepository _repo;
     private readonly ISceneMediaVersioningService _versions;
@@ -222,6 +223,17 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
 
     public async Task HandleAsync(RenderJobDto job, CancellationToken ct)
     {
+        if (job.AttemptCount > job.MaxAttempts)
+        {
+            _logger.LogError(
+                "RVIDEO_ATTEMPT_BUDGET_EXCEEDED jobId={JobId} jobType={JobType} attemptCount={AttemptCount} maxAttempts={MaxAttempts}",
+                job.Id,
+                job.JobType,
+                job.AttemptCount,
+                job.MaxAttempts);
+            throw new RenderJobTerminalFailureException("Render job attempt budget exceeded.");
+        }
+
         var input = JsonSerializer.Deserialize<SceneVideoRenderWorkItemInput>(job.InputJson, JsonOptions)
             ?? throw new InvalidOperationException("Scene video worker input invalid.");
         if (input.ProjectId <= 0 || input.SceneId <= 0 || string.IsNullOrWhiteSpace(input.LogicalRequestId))
@@ -741,8 +753,31 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                     if (canFallback)
                     {
                         var ai79Exception = structuredException!;
-                        var failureClassification = ClassifyProviderFailure(ai79Exception.ErrorCode, ai79Exception.ErrorMessage, ai79Exception.HttpStatusCode);
+                        var failureClassification = ClassifyRVideoSubmitFailure(ai79Exception);
+                        var nextCandidate = attemptIndex + 1 < candidates.Count
+                            ? candidates[attemptIndex + 1]
+                            : null;
                         await AddAi79SubmitDiagnosticsAsync(job, policy, ai79Exception, CancellationToken.None);
+                        if (failureClassification == KnownNoResourcesFailureClassification)
+                        {
+                            await _repo.AddProjectEventAsync(project.Id, "RVIDEO_79AI_NO_RESOURCES", "warning",
+                                "79AI confirmed that no video task was created because resources are unavailable.",
+                                new
+                                {
+                                    projectId = input.ProjectId,
+                                    sceneId = input.SceneId,
+                                    input.SceneIndex,
+                                    renderJobId = job.Id,
+                                    provider = input.ProviderCode,
+                                    model = policy.Model,
+                                    httpStatusCode = (int?)ai79Exception.HttpStatusCode,
+                                    error = "NOT_RESOURCES",
+                                    countTasks = 0,
+                                    fallbackAvailable = nextCandidate is not null,
+                                    nextProvider = nextCandidate?.Policy.ProviderCode,
+                                    nextModel = nextCandidate?.Policy.Model
+                                }, CancellationToken.None);
+                        }
                         await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_SUBMIT_FAILED", "warning",
                             "Scene-video provider submit failed for the current fallback candidate.",
                             new
@@ -802,7 +837,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                             throw new RenderJobTerminalFailureException(ai79Exception.ErrorMessage, ai79Exception);
                         }
 
-                        var nextCandidate = candidates[attemptIndex + 1];
+                        nextCandidate = candidates[attemptIndex + 1];
                         await AddFallbackStartedEventAsync(
                             project,
                             scene,
@@ -1928,6 +1963,11 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
             return false;
         }
 
+        if (IsKnownNoResourcesSubmit(exception))
+        {
+            return true;
+        }
+
         var statusCode = (int)exception.HttpStatusCode.Value;
         if (statusCode == 429 || statusCode >= 500)
         {
@@ -1937,6 +1977,110 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         return statusCode is 400 or 401 or 403 or 404 or 409 or 422
             && HasExplicitProviderRejection(exception.ErrorCode, exception.ErrorMessage);
     }
+
+    private static string ClassifyRVideoSubmitFailure(Ai79TaskSubmitException exception)
+        => IsKnownNoResourcesSubmit(exception)
+            ? KnownNoResourcesFailureClassification
+            : ClassifyProviderFailure(exception.ErrorCode, exception.ErrorMessage, exception.HttpStatusCode);
+
+    private static bool IsKnownNoResourcesSubmit(Ai79TaskSubmitException exception)
+    {
+        if (exception.HttpStatusCode is not { } statusCode
+            || (int)statusCode < 200
+            || (int)statusCode >= 300
+            || HasAcceptedTaskId(exception.SanitizedResponseJson))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(exception.SanitizedResponseJson);
+            return HasNoResourcesMarker(document.RootElement)
+                   && HasZeroCountTasks(document.RootElement);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    private static bool HasNoResourcesMarker(JsonElement element)
+    {
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var property in element.EnumerateObject())
+            {
+                if ((property.Name.Equals("error", StringComparison.OrdinalIgnoreCase)
+                        || property.Name.Equals("error_code", StringComparison.OrdinalIgnoreCase)
+                        || property.Name.Equals("errorCode", StringComparison.OrdinalIgnoreCase)
+                        || property.Name.Equals("code", StringComparison.OrdinalIgnoreCase))
+                    && property.Value.ValueKind == JsonValueKind.String
+                    && string.Equals(property.Value.GetString()?.Trim(), "NOT_RESOURCES", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+
+                if ((property.Value.ValueKind is JsonValueKind.Object or JsonValueKind.Array)
+                    && HasNoResourcesMarker(property.Value))
+                {
+                    return true;
+                }
+            }
+        }
+        else if (element.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in element.EnumerateArray())
+            {
+                if (HasNoResourcesMarker(item))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static bool HasZeroCountTasks(JsonElement element)
+    {
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var property in element.EnumerateObject())
+            {
+                if ((property.Name.Equals("countTasks", StringComparison.OrdinalIgnoreCase)
+                        || property.Name.Equals("count_tasks", StringComparison.OrdinalIgnoreCase))
+                    && IsZeroJsonValue(property.Value))
+                {
+                    return true;
+                }
+
+                if ((property.Value.ValueKind is JsonValueKind.Object or JsonValueKind.Array)
+                    && HasZeroCountTasks(property.Value))
+                {
+                    return true;
+                }
+            }
+        }
+        else if (element.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in element.EnumerateArray())
+            {
+                if (HasZeroCountTasks(item))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsZeroJsonValue(JsonElement value)
+        => value.ValueKind == JsonValueKind.Number
+            ? value.TryGetInt32(out var number) && number == 0
+            : value.ValueKind == JsonValueKind.String
+                && string.Equals(value.GetString()?.Trim(), "0", StringComparison.Ordinal);
 
     private static bool HasExplicitProviderRejection(string? errorCode, string? errorMessage)
     {
@@ -2063,7 +2207,9 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
     }
 
     private static bool ShouldFallback(string classification)
-        => classification is "MODEL_PROVIDER_FAILURE" or "TRANSIENT_PROVIDER_FAILURE";
+        => classification is "MODEL_PROVIDER_FAILURE"
+            or "TRANSIENT_PROVIDER_FAILURE"
+            or KnownNoResourcesFailureClassification;
 
     private async Task AddAi79SubmitDiagnosticsAsync(
         RenderJobDto job,
