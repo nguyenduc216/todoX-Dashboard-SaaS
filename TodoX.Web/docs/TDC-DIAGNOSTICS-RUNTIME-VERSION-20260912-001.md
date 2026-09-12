@@ -206,11 +206,15 @@ Commit message:
 
 ## 17. Push result
 
-Push is pending in this report revision and will be recorded after the branch push completes.
+PASS.
+
+Code commit `6c558733c2830778b9d7230330d41b3c566259db` and report commit `7be4287` were pushed to:
+
+`origin/feature/rdn-onepage-ui-revamp`
 
 ## 18. Working tree status
 
-Publish output is ignored. Before the report commit, the task code commit was clean except for this report. The final status and push result are recorded after committing this report.
+Publish output is ignored. The task files and report are committed. Final working tree status is clean after the follow-up report update.
 
 ## Protected areas untouched
 
