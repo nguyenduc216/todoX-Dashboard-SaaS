@@ -50,7 +50,8 @@ public sealed class Ai79VideoGenerationProviderAdapter : IVideoGenerationProvide
                 request.Resolution,
                 request.DurationSeconds,
                 source,
-                references), ct);
+                references,
+                request.HttpSubmitDiagnostic), ct);
             var providerVideoIdBase = result.ProviderVideoIdBase;
             return new VideoProviderSubmitResult(
                 request.ProviderCode,
@@ -78,7 +79,7 @@ public sealed class Ai79VideoGenerationProviderAdapter : IVideoGenerationProvide
                 ct);
             var status = await _video.PollAsync(runtime, request.ProviderTaskId, ct);
             return new VideoProviderPollResult(
-                status.NormalizedStatus switch
+                IsResourceUnavailable(status.ProviderStatus) ? VideoProviderTaskStatus.ResourceUnavailable : status.NormalizedStatus switch
                 {
                     Ai79TaskStatusNormalizer.Success => VideoProviderTaskStatus.Success,
                     Ai79TaskStatusNormalizer.Failed => VideoProviderTaskStatus.Failed,
@@ -96,4 +97,7 @@ public sealed class Ai79VideoGenerationProviderAdapter : IVideoGenerationProvide
             throw new VideoProviderTransientException(ex.Message, ex.GetType().Name, ex);
         }
     }
+
+    private static bool IsResourceUnavailable(string? providerStatus)
+        => string.Equals(providerStatus?.Trim(), "NOT_RESOURCES", StringComparison.OrdinalIgnoreCase);
 }

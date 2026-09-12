@@ -4,9 +4,35 @@ public enum VideoProviderTaskStatus
 {
     Queued,
     Processing,
+    ResourceUnavailable,
     Success,
     Failed
 }
+
+public enum VideoProviderHttpSubmitDiagnosticStage
+{
+    Request,
+    Response,
+    ResponseParseFailed
+}
+
+public sealed record VideoProviderHttpSubmitDiagnostic(
+    VideoProviderHttpSubmitDiagnosticStage Stage,
+    string Endpoint,
+    string ActualModel,
+    string? Mode,
+    int DurationSeconds,
+    string Ratio,
+    string Resolution,
+    IReadOnlyList<string> ImageUrls,
+    string? PromptPreview = null,
+    int? HttpStatus = null,
+    string? ProviderTaskId = null,
+    string? ProviderVideoIdBase = null,
+    string? ProviderStatus = null,
+    int? CountTasks = null,
+    string? ProviderMessage = null,
+    string? SanitizedResponseJson = null);
 
 public sealed record VideoProviderSourceImage(
     Guid? MediaId,
@@ -27,7 +53,8 @@ public sealed record VideoProviderSubmitRequest(
     string Resolution,
     int DurationSeconds,
     VideoProviderSourceImage? SourceImage,
-    IReadOnlyList<VideoProviderSourceImage> ReferenceImages);
+    IReadOnlyList<VideoProviderSourceImage> ReferenceImages,
+    Func<VideoProviderHttpSubmitDiagnostic, CancellationToken, Task>? HttpSubmitDiagnostic = null);
 
 public sealed record VideoProviderSubmitResult(
     string ProviderCode,

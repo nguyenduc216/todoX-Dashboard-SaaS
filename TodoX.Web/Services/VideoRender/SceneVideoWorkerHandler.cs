@@ -720,7 +720,8 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                          candidate.ProviderResolution,
                         candidate.ProviderDurationSeconds,
                         sourceImageAsset,
-                        referenceImages), ct);
+                        referenceImages,
+                        (diagnostic, token) => AddHttpSubmitDiagnosticAsync(project.Id, job, input, version.Id, diagnostic, token)), ct);
                     providerTaskId = string.IsNullOrWhiteSpace(submit.ProviderTaskId) ? null : submit.ProviderTaskId.Trim();
                     providerVideoIdBase = RVideoVideoModelPolicy.Is79AiProvider(input.ProviderCode)
                         ? (string.IsNullOrWhiteSpace(submit.ProviderVideoIdBase) ? null : submit.ProviderVideoIdBase.Trim())
@@ -1054,6 +1055,34 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                         errorCode = status.ErrorCode,
                         providerStatus = status.Status
                     }, ct);
+                if (status.Status == VideoProviderTaskStatus.ResourceUnavailable)
+                {
+                    await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_PROVIDER_RESOURCES_UNAVAILABLE", "warning",
+                        "79AI reported NOT_RESOURCES for the existing provider task; the same task will be reconciled without a new submit.",
+                        new
+                        {
+                            jobId = job.Id,
+                            input.ProjectId,
+                            input.SceneId,
+                            input.SceneIndex,
+                            providerTaskId,
+                            providerVideoIdBase,
+                            idBase = providerVideoIdBase,
+                            provider = input.ProviderCode,
+                            actualModel = policy.Model,
+                            providerStatus = "NOT_RESOURCES",
+                            status.ErrorCode,
+                            status.ErrorMessage,
+                            providerRawResponse = SanitizeDiagnosticJson(status.SanitizedResponseJson)
+                        }, ct);
+                    await MarkPendingReconciliationAsync(input, version.Id, attemptLogicalRequestId, tariffSnapshot,
+                        "provider_resources_unavailable", "79AI reported NOT_RESOURCES for the existing video task.", ct,
+                        providerTaskId, policy.Model, providerVideoIdBase);
+                    await DeferProviderPollAsync(job, taskId!, TimeSpan.FromSeconds(Math.Max(1, _options.PollIntervalSeconds)),
+                        "SCENE_VIDEO_PROVIDER_RESOURCES_UNAVAILABLE", "79AI reported NOT_RESOURCES; the same task will be polled later.", ct);
+                    return;
+                }
+
                 if (status.Status is VideoProviderTaskStatus.Queued or VideoProviderTaskStatus.Processing)
                 {
                     await _repo.AddProjectEventAsync(project.Id, "SCENE_VIDEO_PROVIDER_PROCESSING", "info",
@@ -2831,6 +2860,57 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         await _repo.AddProjectEventAsync(projectId, "SCENE_VIDEO_RENDER_FAILED", "error",
             $"Scene video render failed for scene {scene.SceneIndex}.",
             new { sceneId = scene.Id, scene.SceneIndex, errorCode, error = errorMessage }, ct);
+    }
+
+    private async Task AddHttpSubmitDiagnosticAsync(
+        long projectId,
+        RenderJobDto job,
+        SceneVideoRenderWorkItemInput input,
+        Guid sceneVideoVersionId,
+        VideoProviderHttpSubmitDiagnostic diagnostic,
+        CancellationToken ct)
+    {
+        var (eventType, level, message) = diagnostic.Stage switch
+        {
+            VideoProviderHttpSubmitDiagnosticStage.Request => (
+                "RVIDEO_VIDEO_HTTP_SUBMIT_REQUEST",
+                "info",
+                "79AI create-video HTTP request is about to be sent."),
+            VideoProviderHttpSubmitDiagnosticStage.ResponseParseFailed => (
+                "RVIDEO_VIDEO_HTTP_SUBMIT_RESPONSE_PARSE_FAILED",
+                "warning",
+                "79AI create-video HTTP response could not be parsed."),
+            _ => (
+                "RVIDEO_VIDEO_HTTP_SUBMIT_RESPONSE",
+                "info",
+                "79AI create-video HTTP response was received.")
+        };
+
+        await _repo.AddProjectEventAsync(projectId, eventType, level, message, new
+        {
+            renderJobId = job.Id,
+            projectId = input.ProjectId,
+            sceneId = input.SceneId,
+            input.SceneIndex,
+            sceneVideoVersionId,
+            providerCode = input.ProviderCode,
+            actualModel = diagnostic.ActualModel,
+            mode = diagnostic.Mode,
+            duration = diagnostic.DurationSeconds,
+            ratio = diagnostic.Ratio,
+            resolution = diagnostic.Resolution,
+            imageCount = diagnostic.ImageUrls.Count,
+            imageUrls = diagnostic.ImageUrls,
+            endpoint = diagnostic.Endpoint,
+            promptPreview = diagnostic.PromptPreview,
+            httpStatus = diagnostic.HttpStatus,
+            providerTaskId = diagnostic.ProviderTaskId,
+            providerVideoIdBase = diagnostic.ProviderVideoIdBase,
+            providerStatus = diagnostic.ProviderStatus,
+            countTasks = diagnostic.CountTasks,
+            providerMessage = diagnostic.ProviderMessage,
+            sanitizedResponseJson = SanitizeDiagnosticJson(diagnostic.SanitizedResponseJson)
+        }, ct);
     }
 
     private static object? BuildSubmitFailureDiagnostics(Exception exception)

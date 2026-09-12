@@ -78,7 +78,8 @@ public sealed record RVideo79AiVideoSubmitRequest(
     string Resolution,
     int DurationSeconds,
     RVideo79AiProviderImageAsset? SourceImageAsset,
-    IReadOnlyList<RVideo79AiProviderImageAsset> ReferenceImageAssets);
+    IReadOnlyList<RVideo79AiProviderImageAsset> ReferenceImageAssets,
+    Func<VideoProviderHttpSubmitDiagnostic, CancellationToken, Task>? HttpSubmitDiagnostic = null);
 
 public sealed record RVideo79AiVideoSubmitResult(
     string TaskId,
@@ -263,14 +264,72 @@ public sealed class RVideo79AiVideoService : IRVideo79AiVideoService
                 image.FileName
             })
         }, JsonOptions);
-        var submit = await _client.SubmitAsync(raw, ct);
-        var providerVideoIdBase = submit.ProviderVideoIdBase;
-        return new RVideo79AiVideoSubmitResult(
-            providerVideoIdBase ?? string.Empty,
-            submit.SanitizedResponseJson,
-            sanitizedRequest,
-            submit.ProviderTaskId,
-            providerVideoIdBase);
+        var endpoint = new Uri(new Uri(request.Runtime.BaseUrl.TrimEnd('/') + "/", UriKind.Absolute), request.Runtime.SubmitPath.TrimStart('/')).ToString();
+        await EmitHttpSubmitDiagnosticAsync(request.HttpSubmitDiagnostic, new VideoProviderHttpSubmitDiagnostic(
+            VideoProviderHttpSubmitDiagnosticStage.Request,
+            endpoint,
+            request.Model.Model,
+            request.Model.Mode,
+            request.DurationSeconds,
+            options["ratio"]!,
+            options["resolution"]!,
+            imageUrls,
+            CreatePromptPreview(request.Prompt)), ct);
+        try
+        {
+            var submit = await _client.SubmitAsync(raw, ct);
+            var providerVideoIdBase = submit.ProviderVideoIdBase;
+            var response = DescribeSubmitResponse(submit.SanitizedResponseJson);
+            await EmitHttpSubmitDiagnosticAsync(request.HttpSubmitDiagnostic, new VideoProviderHttpSubmitDiagnostic(
+                VideoProviderHttpSubmitDiagnosticStage.Response,
+                endpoint,
+                request.Model.Model,
+                request.Model.Mode,
+                request.DurationSeconds,
+                options["ratio"]!,
+                options["resolution"]!,
+                imageUrls,
+                CreatePromptPreview(request.Prompt),
+                submit.HttpStatusCode is { } submitStatus
+                    ? (int)submitStatus
+                    : response.HttpStatus,
+                submit.ProviderTaskId,
+                providerVideoIdBase,
+                response.ProviderStatus,
+                response.CountTasks,
+                response.ProviderMessage,
+                submit.SanitizedResponseJson), ct);
+            return new RVideo79AiVideoSubmitResult(
+                providerVideoIdBase ?? string.Empty,
+                submit.SanitizedResponseJson,
+                sanitizedRequest,
+                submit.ProviderTaskId,
+                providerVideoIdBase);
+        }
+        catch (Ai79TaskSubmitException ex)
+        {
+            var response = DescribeSubmitResponse(ex.SanitizedResponseJson);
+            await EmitHttpSubmitDiagnosticAsync(request.HttpSubmitDiagnostic, new VideoProviderHttpSubmitDiagnostic(
+                string.Equals(ex.ErrorCode, "invalid_json", StringComparison.OrdinalIgnoreCase)
+                    ? VideoProviderHttpSubmitDiagnosticStage.ResponseParseFailed
+                    : VideoProviderHttpSubmitDiagnosticStage.Response,
+                endpoint,
+                request.Model.Model,
+                request.Model.Mode,
+                request.DurationSeconds,
+                options["ratio"]!,
+                options["resolution"]!,
+                imageUrls,
+                CreatePromptPreview(request.Prompt),
+                (int?)ex.HttpStatusCode,
+                response.ProviderTaskId,
+                response.ProviderVideoIdBase,
+                response.ProviderStatus,
+                response.CountTasks,
+                response.ProviderMessage ?? ex.ErrorMessage,
+                ex.SanitizedResponseJson), ct);
+            throw;
+        }
     }
 
     public Task<Ai79TaskStatusResult> PollAsync(RVideo79AiRuntime runtime, string taskId, CancellationToken ct = default)
@@ -319,6 +378,12 @@ public sealed class RVideo79AiVideoService : IRVideo79AiVideoService
     }
 
     private string ResolveProviderImageUrl(string value)
+        => ResolveProviderImageUrl(value, FirstNonBlank(
+            _configuration["TodoX:PublicBaseUrl"],
+            _configuration["App:PublicBaseUrl"],
+            _configuration["Storage:PublicBaseUrl"]));
+
+    internal static string ResolveProviderImageUrl(string value, string? publicBaseUrl)
     {
         if (Uri.TryCreate(value, UriKind.Absolute, out var absolute)
             && (absolute.Scheme == Uri.UriSchemeHttp || absolute.Scheme == Uri.UriSchemeHttps))
@@ -326,10 +391,6 @@ public sealed class RVideo79AiVideoService : IRVideo79AiVideoService
             return absolute.ToString();
         }
 
-        var publicBaseUrl = FirstNonBlank(
-            _configuration["TodoX:PublicBaseUrl"],
-            _configuration["App:PublicBaseUrl"],
-            _configuration["Storage:PublicBaseUrl"]);
         if (!string.IsNullOrWhiteSpace(publicBaseUrl)
             && Uri.TryCreate(new Uri(publicBaseUrl.TrimEnd('/') + "/", UriKind.Absolute), value.TrimStart('/'), out var resolved)
             && (resolved.Scheme == Uri.UriSchemeHttp || resolved.Scheme == Uri.UriSchemeHttps))
@@ -342,6 +403,67 @@ public sealed class RVideo79AiVideoService : IRVideo79AiVideoService
 
     private static string? FirstNonBlank(params string?[] values)
         => values.FirstOrDefault(x => !string.IsNullOrWhiteSpace(x))?.Trim();
+
+    private static async Task EmitHttpSubmitDiagnosticAsync(
+        Func<VideoProviderHttpSubmitDiagnostic, CancellationToken, Task>? callback,
+        VideoProviderHttpSubmitDiagnostic diagnostic,
+        CancellationToken ct)
+    {
+        if (callback is not null)
+        {
+            await callback(diagnostic, ct);
+        }
+    }
+
+    private static string CreatePromptPreview(string? prompt)
+    {
+        var value = (prompt ?? string.Empty).Trim();
+        return value.Length <= 240 ? value : value[..240];
+    }
+
+    private static (int? HttpStatus, string? ProviderTaskId, string? ProviderVideoIdBase, string? ProviderStatus, int? CountTasks, string? ProviderMessage) DescribeSubmitResponse(string? sanitizedResponseJson)
+    {
+        if (string.IsNullOrWhiteSpace(sanitizedResponseJson))
+        {
+            return default;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(sanitizedResponseJson);
+            var root = document.RootElement;
+            return (
+                ReadInt(root, "httpStatus", "http_status", "statusCode"),
+                ReadJsonString(root, "task_id"),
+                ReadJsonString(root, "id_base"),
+                ReadJsonString(root, "status"),
+                ReadInt(root, "countTasks", "count_tasks"),
+                FirstNonBlank(ReadJsonString(root, "message"), ReadJsonString(root, "error_message"), ReadJsonString(root, "error")));
+        }
+        catch (JsonException)
+        {
+            return default;
+        }
+    }
+
+    private static int? ReadInt(JsonElement root, params string[] names)
+    {
+        foreach (var name in names)
+        {
+            if (!root.TryGetProperty(name, out var value)) continue;
+            if (value.TryGetInt32(out var numeric)) return numeric;
+            if (int.TryParse(value.GetString(), out numeric)) return numeric;
+        }
+
+        return null;
+    }
+
+    private static string? ReadJsonString(JsonElement root, string name)
+        => root.ValueKind == JsonValueKind.Object
+           && root.TryGetProperty(name, out var value)
+           && value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : null;
 
     private static string? ReadString(string? json, string name)
     {

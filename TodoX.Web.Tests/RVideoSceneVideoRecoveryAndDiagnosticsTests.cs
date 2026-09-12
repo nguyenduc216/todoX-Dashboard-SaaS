@@ -433,6 +433,77 @@ public sealed class RVideoSceneVideoRecoveryAndDiagnosticsTests
         Assert.Contains("providerTaskId", worker);
     }
 
+    [Theory]
+    [InlineData("/uploads/a.png", "https://dashboard.example/uploads/a.png")]
+    [InlineData("uploads/a.png", "https://dashboard.example/uploads/a.png")]
+    [InlineData("https://example.com/uploads/a.png", "https://example.com/uploads/a.png")]
+    public void RVideo79AiSubmitImageUrlsAreAbsoluteAndNormalized(string input, string expected)
+        => Assert.Equal(expected, RVideo79AiVideoService.ResolveProviderImageUrl(input, "https://dashboard.example/"));
+
+    [Theory]
+    [InlineData("NOT_RESOURCES", VideoProviderTaskStatus.ResourceUnavailable)]
+    [InlineData("PENDING", VideoProviderTaskStatus.Processing)]
+    [InlineData("ACTIVE", VideoProviderTaskStatus.Processing)]
+    [InlineData("PROCESSING", VideoProviderTaskStatus.Processing)]
+    public async Task RVideo79AiPollMapsRawProviderStatusesWithoutTreatingNoResourcesAsProcessing(
+        string providerStatus,
+        VideoProviderTaskStatus expected)
+    {
+        var service = new StubRVideo79AiVideoService
+        {
+            PollResult = new Ai79TaskStatusResult(
+                Ai79TaskStatusNormalizer.Running,
+                $$"""{"status":"{{providerStatus}}"}""",
+                null,
+                null,
+                null,
+                providerStatus)
+        };
+        var adapter = new Ai79VideoGenerationProviderAdapter(service);
+
+        var result = await adapter.PollAsync(new VideoProviderPollRequest(
+            18, 99, "79ai", RVideoVideoModelPolicy.CapabilityCode, "id-base-1"));
+
+        Assert.Equal(expected, result.Status);
+        Assert.Equal("id-base-1", result.ProviderTaskId);
+    }
+
+    [Fact]
+    public void RVideoSubmitDiagnosticsAreEmittedAroundHttpCallWithNoCredentialFields()
+    {
+        var service = ReadRepoFile("Services", "VideoRender", "RVideo79AiVideoService.cs");
+        var worker = ReadRepoFile("Services", "VideoRender", "SceneVideoWorkerHandler.cs");
+
+        Assert.True(service.IndexOf("VideoProviderHttpSubmitDiagnosticStage.Request", StringComparison.Ordinal)
+                    < service.IndexOf("await _client.SubmitAsync(raw, ct)", StringComparison.Ordinal));
+        Assert.Contains("VideoProviderHttpSubmitDiagnosticStage.Response", service);
+        Assert.Contains("VideoProviderHttpSubmitDiagnosticStage.ResponseParseFailed", service);
+        Assert.Contains("RVIDEO_VIDEO_HTTP_SUBMIT_REQUEST", worker);
+        Assert.Contains("RVIDEO_VIDEO_HTTP_SUBMIT_RESPONSE", worker);
+        Assert.Contains("RVIDEO_VIDEO_HTTP_SUBMIT_RESPONSE_PARSE_FAILED", worker);
+        Assert.Contains("sanitizedResponseJson = SanitizeDiagnosticJson(diagnostic.SanitizedResponseJson)", worker);
+        Assert.DoesNotContain("request.Runtime.Credential", worker, StringComparison.Ordinal);
+    }
+
+    private sealed class StubRVideo79AiVideoService : IRVideo79AiVideoService
+    {
+        public Ai79TaskStatusResult PollResult { get; init; } = new(Ai79TaskStatusNormalizer.Running, "{}", null, null, null);
+
+        public Task<RVideo79AiRuntime> ResolveRuntimeAsync(long providerId, long providerCapabilityId, string providerCode, CancellationToken ct = default)
+            => Task.FromResult(new RVideo79AiRuntime(
+                providerId, providerCapabilityId, providerCode, "https://example.test/ai", "/create-video", "/video", "/image-upload",
+                "79ai.net", "default", new ResolvedProviderCredential(), null, null, 0));
+
+        public Task<RVideo79AiProviderImageAsset> UploadSourceImageAsync(RVideo79AiRuntime runtime, RVideo79AiVideoSourceImage source, CancellationToken ct = default)
+            => throw new NotSupportedException();
+
+        public Task<RVideo79AiVideoSubmitResult> SubmitAsync(RVideo79AiVideoSubmitRequest request, CancellationToken ct = default)
+            => throw new NotSupportedException();
+
+        public Task<Ai79TaskStatusResult> PollAsync(RVideo79AiRuntime runtime, string taskId, CancellationToken ct = default)
+            => Task.FromResult(PollResult);
+    }
+
     private static string ReadRepoFile(params string[] parts)
     {
         var path = Path.GetFullPath(Path.Combine(

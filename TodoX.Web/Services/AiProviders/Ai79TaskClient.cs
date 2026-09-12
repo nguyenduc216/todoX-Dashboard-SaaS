@@ -50,7 +50,8 @@ public sealed record Ai79TaskSubmitResult(
     string TaskId,
     string SanitizedResponseJson,
     string? ProviderTaskId = null,
-    string? ProviderVideoIdBase = null);
+    string? ProviderVideoIdBase = null,
+    HttpStatusCode? HttpStatusCode = null);
 
 public sealed record Ai79MultipartFilePart(
     string FieldName,
@@ -189,7 +190,8 @@ public sealed record Ai79TaskStatusResult(
     string SanitizedResponseJson,
     string? OutputUrl,
     string? ErrorCode,
-    string? ErrorMessage);
+    string? ErrorMessage,
+    string? ProviderStatus = null);
 
 public static class Ai79TaskStatusNormalizer
 {
@@ -660,7 +662,7 @@ public sealed class Ai79TaskClient : IAi79TaskClient
                     sanitizedRequestMetadataJson: sanitizedRequestMetadataJson);
             }
 
-            return new Ai79TaskSubmitResult(taskId!, sanitized, providerTaskId, providerVideoIdBase);
+            return new Ai79TaskSubmitResult(taskId!, sanitized, providerTaskId, providerVideoIdBase, response.StatusCode);
         }
     }
 
@@ -973,7 +975,7 @@ public sealed class Ai79TaskClient : IAi79TaskClient
                 var errorCode = FindErrorValue(statusRoot, "error_code", "errorCode", "code");
                 var errorMessage = FindErrorValue(statusRoot, "error_message", "errorMessage", "message", "msg");
 
-                return new Ai79TaskStatusResult(status, sanitized, outputUrl, errorCode, errorMessage);
+                return new Ai79TaskStatusResult(status, sanitized, outputUrl, errorCode, errorMessage, FindStatus(statusRoot));
             }
         }
     }
