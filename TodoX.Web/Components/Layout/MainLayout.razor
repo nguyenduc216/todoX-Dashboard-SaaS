@@ -1,10 +1,12 @@
 @inherits LayoutComponentBase
 @implements IDisposable
+@using TodoX.Web.Services.SystemDiagnostics
 @inject AuthStateService AuthState
 @inject AccountService Accounts
 @inject NavigationMenuRepository NavigationMenus
 @inject WalletService Wallets
 @inject IPointBalanceChangeNotifier PointBalanceChanges
+@inject IRuntimeBuildInfoProvider RuntimeBuildInfo
 @inject NavigationManager Navigation
 @inject ISnackbar Snackbar
 @inject ILogger<MainLayout> Logger
@@ -135,6 +137,15 @@
                 }
             }
         </MudNavMenu>
+        @if (AdminEndpointAuthorization.IsAdmin(AuthState.CurrentUser))
+        {
+            <MudDivider Class="my-2" />
+            <MudNavLink Href="/admin/system/diagnostics"
+                        Match="NavLinkMatch.Prefix"
+                        Icon="@Icons.Material.Filled.Memory">
+                Build @_runtimeBuild.CommitShortSha
+            </MudNavLink>
+        }
     </MudDrawer>
 
     <MudMainContent Class="todox-content">
@@ -160,6 +171,7 @@
     private bool _menuLoaded;
     private decimal? _balance;
     private bool _disposed;
+    private RuntimeBuildInfo _runtimeBuild = new();
 
     private readonly MudTheme _theme = new()
     {
@@ -190,6 +202,7 @@
 
     protected override void OnInitialized()
     {
+        _runtimeBuild = RuntimeBuildInfo.Get();
         AuthState.OnChange += HandleAuthChange;
         PointBalanceChanges.Changed += HandlePointBalanceChanged;
     }
@@ -655,6 +668,28 @@
             }
         }
 
+        if (!existingCodes.Contains("admin_system_diagnostics"))
+        {
+            var diagnosticsItem = new NavigationMenuItemDto
+            {
+                Id = Guid.NewGuid(),
+                Code = "admin_system_diagnostics",
+                Title = "System diagnostics",
+                Href = "/admin/system/diagnostics",
+                IconKey = "Memory",
+                ModuleKeys = Array.Empty<string>(),
+                VisibilityPolicy = "admin_job_monitor",
+                MatchAll = false,
+                SortOrder = 16
+            };
+            var administration = list.FirstOrDefault(g => g.Code.Equals("administration", StringComparison.OrdinalIgnoreCase));
+            if (administration is not null)
+            {
+                diagnosticsItem.GroupId = administration.Id;
+                administration.Items.Add(diagnosticsItem);
+            }
+        }
+
         return list;
     }
 
@@ -833,6 +868,7 @@
         "ContactMail" => Icons.Material.Filled.ContactMail,
         "Article" => Icons.Material.Filled.Article,
         "Monitor" => Icons.Material.Filled.Monitor,
+        "Memory" => Icons.Material.Filled.Memory,
         _ => Icons.Material.Filled.Circle
     };
 
@@ -882,7 +918,8 @@
                 Item("customer_accounts", "Quản lý tài khoản", "/customer-accounts", "ManageAccounts", new[] { "customer_accounts" }, sort: 30),
                 Item("permissions", "Phân quyền", "/permissions", "Security", new[] { "roles", "permissions" }, sort: 40),
                 Item("settings", "Cài đặt hệ thống", "/settings", "Settings", new[] { "settings", "app_settings" }, sort: 50),
-                Item("activity_logs", "Nhật ký hoạt động", "/activity-logs", "Article", new[] { "audit_logs" }, sort: 60)),
+                Item("activity_logs", "Nhật ký hoạt động", "/activity-logs", "Article", new[] { "audit_logs" }, sort: 60),
+                Item("admin_system_diagnostics", "System diagnostics", "/admin/system/diagnostics", "Memory", Array.Empty<string>(), "admin_job_monitor", sort: 70)),
             Group("billing_services", "Dịch vụ & điểm", "AccountBalanceWallet", 30, true,
                 Item("wallets", "Quản lý điểm", "/wallets", "AccountBalanceWallet", new[] { "token_wallets" }, sort: 10),
                 Item("services", "Quản lý dịch vụ", "/services", "Category", new[] { "services" }, sort: 20)),

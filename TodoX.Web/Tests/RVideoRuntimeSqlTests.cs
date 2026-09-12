@@ -739,9 +739,9 @@ public sealed class RVideoRuntimeSqlTests
         var project = File.ReadAllText(Path.Combine(RepoRoot, "TodoX.Web", "TodoX.Web.csproj"), Encoding.UTF8);
 
         Assert.Contains("app.MapGet(\"/system/version\"", program);
-        Assert.Contains("AssemblyInformationalVersionAttribute", program);
-        Assert.Contains("AssemblyMetadataAttribute", program);
-        Assert.Contains("BuildCommit", program);
+        Assert.Contains("IRuntimeBuildInfoProvider buildInfoProvider", program);
+        Assert.Contains("var build = buildInfoProvider.Get();", program);
+        Assert.Contains("commit = build.CommitSha", program);
         Assert.Contains("BuildBranch", project);
         Assert.Contains("BuildTimeUtc", project);
         Assert.Contains("<BuildCommit Condition=\"'$(BuildCommit)' == ''\">unknown</BuildCommit>", project);
@@ -757,9 +757,9 @@ public sealed class RVideoRuntimeSqlTests
         var endpointEnd = program.IndexOf("app.MapPost(\"/api/ai/cost/estimate\"", endpointStart, StringComparison.Ordinal);
         var endpoint = program[endpointStart..endpointEnd];
 
-        Assert.Contains("metadata.TryGetValue", endpoint);
-        Assert.Contains("? value", endpoint);
-        Assert.Contains(": \"unknown\"", endpoint);
+        Assert.Contains("buildInfoProvider.Get()", endpoint);
+        Assert.Contains("commit = build.CommitSha", endpoint);
+        Assert.Contains("branch = build.Branch", endpoint);
         Assert.DoesNotContain("configuration.AsEnumerable()", endpoint);
         Assert.DoesNotContain("ConnectionStrings", endpoint, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("ApiKey", endpoint, StringComparison.OrdinalIgnoreCase);

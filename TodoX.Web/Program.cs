@@ -10,15 +10,14 @@ using TodoX.Web.Services.AiProviders.Kie;
 using TodoX.Web.Services.DanceSell;
 using TodoX.Web.Services.Landing;
 using TodoX.Web.Services.SharedMedia;
+using TodoX.Web.Services.SystemDiagnostics;
 using TodoX.Web.Services.Timelapse;
 using TodoX.Web.Services.VideoRender;
 using MudBlazor.Services;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Options;
-using System.Reflection;
 
 var builder = WebApplication.CreateBuilder(args);
-var instanceStartedUtc = DateTimeOffset.UtcNow;
 
 // Add services to the container.
 builder.Services.AddRazorComponents()
@@ -52,6 +51,8 @@ builder.Services.AddSingleton<SharedMediaPathService>();
 builder.Services.Configure<SharedMediaOptions>(builder.Configuration.GetSection(SharedMediaOptions.SectionName));
 builder.Services.AddScoped<AuditRepository>();
 builder.Services.AddScoped<IAdminJobMonitorService, AdminJobMonitorService>();
+builder.Services.AddSingleton<IRuntimeBuildInfoProvider, RuntimeBuildInfoProvider>();
+builder.Services.AddScoped<ISystemDiagnosticsService, SystemDiagnosticsService>();
 builder.Services.AddScoped<BillingRepository>();
 builder.Services.AddScoped<CatalogRepository>();
 builder.Services.AddScoped<ICustomerDashboardService, CustomerDashboardService>();
@@ -508,29 +509,21 @@ app.MapAiStudioCatalogEndpoints();
 app.MapRVideoEndpoints();
 app.MapSceneAudioEndpoints();
 
-app.MapGet("/system/version", (IConfiguration configuration) =>
+app.MapGet("/system/version", (IConfiguration configuration, IRuntimeBuildInfoProvider buildInfoProvider) =>
 {
-    var assembly = typeof(Program).Assembly;
-    var informationalVersion = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown";
-    var plus = informationalVersion.IndexOf('+');
-    var version = plus >= 0 ? informationalVersion[..plus] : informationalVersion;
-    var metadata = assembly.GetCustomAttributes<AssemblyMetadataAttribute>()
-        .GroupBy(x => x.Key, StringComparer.OrdinalIgnoreCase)
-        .ToDictionary(x => x.Key, x => x.Last().Value, StringComparer.OrdinalIgnoreCase);
-    var buildMetadata = (string key) =>
-        metadata.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value)
-            ? value
-            : "unknown";
-
+    var build = buildInfoProvider.Get();
     return Results.Json(new
     {
-        application = "todoX Dashboard SaaS",
-        environment = app.Environment.EnvironmentName,
-        version,
-        commit = buildMetadata("BuildCommit"),
-        branch = buildMetadata("BuildBranch"),
-        buildTimeUtc = buildMetadata("BuildTimeUtc"),
-        instanceStartedUtc,
+        application = build.ApplicationName,
+        environment = build.Environment,
+        version = build.Version,
+        commit = build.CommitSha,
+        shortCommit = build.CommitShortSha,
+        branch = build.Branch,
+        commitMessage = build.CommitMessage,
+        buildTimeUtc = build.BuildTimeUtc,
+        publishTimeUtc = build.PublishTimeUtc,
+        instanceStartedUtc = build.ProcessStartTimeUtc,
         features = new
         {
             renderQueueEnabled = configuration.GetValue("RenderQueue:Enabled", false),

@@ -6,10 +6,58 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <BuildCommit Condition="'$(BuildCommit)' == ''">unknown</BuildCommit>
     <BuildBranch Condition="'$(BuildBranch)' == ''">local</BuildBranch>
+    <BuildCommitMessage Condition="'$(BuildCommitMessage)' == ''">unknown</BuildCommitMessage>
     <BuildTimeUtc Condition="'$(BuildTimeUtc)' == ''">$([System.DateTime]::UtcNow.ToString("o"))</BuildTimeUtc>
+    <PublishTimeUtc Condition="'$(PublishTimeUtc)' == ''">$([System.DateTime]::UtcNow.ToString("o"))</PublishTimeUtc>
     <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
     <DefaultItemExcludes>$(DefaultItemExcludes);artifacts/**;bin/**;bin2/**;obj/**;publish/**;Tests/**;.codex_bin/**;.codex_obj/**</DefaultItemExcludes>
   </PropertyGroup>
+
+  <Target Name="PopulateBuildMetadataFromGit" BeforeTargets="GenerateAssemblyInfo">
+    <Exec Command="git rev-parse HEAD" ConsoleToMsBuild="true" IgnoreExitCode="true" StandardOutputImportance="Low" StandardErrorImportance="Low">
+      <Output TaskParameter="ConsoleOutput" PropertyName="_GitCommit" />
+    </Exec>
+    <Exec Command="git rev-parse --abbrev-ref HEAD" ConsoleToMsBuild="true" IgnoreExitCode="true" StandardOutputImportance="Low" StandardErrorImportance="Low">
+      <Output TaskParameter="ConsoleOutput" PropertyName="_GitBranch" />
+    </Exec>
+    <Exec Command="git log -1 --pretty=%25s" ConsoleToMsBuild="true" IgnoreExitCode="true" StandardOutputImportance="Low" StandardErrorImportance="Low">
+      <Output TaskParameter="ConsoleOutput" PropertyName="_GitCommitMessage" />
+    </Exec>
+    <PropertyGroup>
+      <BuildCommit Condition="'$(_GitCommit)' != '' and '$(BuildCommit)' == 'unknown'">$(_GitCommit)</BuildCommit>
+      <BuildBranch Condition="'$(_GitBranch)' != '' and '$(BuildBranch)' == 'local'">$(_GitBranch)</BuildBranch>
+      <BuildCommitMessage Condition="'$(_GitCommitMessage)' != '' and '$(BuildCommitMessage)' == 'unknown'">$(_GitCommitMessage)</BuildCommitMessage>
+    </PropertyGroup>
+  </Target>
+
+  <Target Name="GenerateBuildMetadataSource" BeforeTargets="CoreCompile" DependsOnTargets="PopulateBuildMetadataFromGit">
+    <ItemGroup>
+      <_BuildAssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+        <_Parameter1>BuildCommit</_Parameter1>
+        <_Parameter2>$(BuildCommit)</_Parameter2>
+      </_BuildAssemblyAttribute>
+      <_BuildAssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+        <_Parameter1>BuildBranch</_Parameter1>
+        <_Parameter2>$(BuildBranch)</_Parameter2>
+      </_BuildAssemblyAttribute>
+      <_BuildAssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+        <_Parameter1>BuildCommitMessage</_Parameter1>
+        <_Parameter2>$(BuildCommitMessage)</_Parameter2>
+      </_BuildAssemblyAttribute>
+      <_BuildAssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+        <_Parameter1>BuildTimeUtc</_Parameter1>
+        <_Parameter2>$(BuildTimeUtc)</_Parameter2>
+      </_BuildAssemblyAttribute>
+      <_BuildAssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+        <_Parameter1>PublishTimeUtc</_Parameter1>
+        <_Parameter2>$(PublishTimeUtc)</_Parameter2>
+      </_BuildAssemblyAttribute>
+    </ItemGroup>
+    <WriteCodeFragment Language="C#" OutputFile="$(IntermediateOutputPath)BuildMetadata.g.cs" AssemblyAttributes="@(_BuildAssemblyAttribute)" />
+    <ItemGroup>
+      <Compile Include="$(IntermediateOutputPath)BuildMetadata.g.cs" Visible="false" />
+    </ItemGroup>
+  </Target>
 
   <ItemGroup>
     <PackageReference Include="MudBlazor" Version="9.6.0" />
@@ -18,21 +66,6 @@
     <PackageReference Include="BCrypt.Net-Next" Version="4.0.3" />
     <PackageReference Include="SixLabors.ImageSharp" Version="3.1.11" />
     <PackageReference Include="SixLabors.ImageSharp.Drawing" Version="2.1.7" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
-      <_Parameter1>BuildCommit</_Parameter1>
-      <_Parameter2>$(BuildCommit)</_Parameter2>
-    </AssemblyAttribute>
-    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
-      <_Parameter1>BuildBranch</_Parameter1>
-      <_Parameter2>$(BuildBranch)</_Parameter2>
-    </AssemblyAttribute>
-    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
-      <_Parameter1>BuildTimeUtc</_Parameter1>
-      <_Parameter2>$(BuildTimeUtc)</_Parameter2>
-    </AssemblyAttribute>
   </ItemGroup>
 
   <!-- Stale published output lives under ./publish and must not be scanned by the build -->
