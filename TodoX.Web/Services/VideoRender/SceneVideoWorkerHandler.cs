@@ -1363,7 +1363,8 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                 TimeSpan.FromSeconds(Math.Max(1, _options.PollIntervalSeconds)),
                 "SCENE_VIDEO_RECONCILIATION_RETRY",
                 errorMessage,
-                ct);
+                ct,
+                enforceReconciliationLimit: true);
             throw new RenderJobDeferredException(errorMessage);
         }
 
@@ -2659,7 +2660,14 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         string message,
         CancellationToken ct)
     {
-        var scheduled = await _jobs.ScheduleProviderPollAsync(job.Id, delay, reasonCode, message, ct);
+        var scheduled = await _jobs.ScheduleProviderPollAsync(
+            job.Id,
+            delay,
+            reasonCode,
+            message,
+            ct,
+            enforceReconciliationLimit: false,
+            enforceProviderPollTimeout: true);
         if (!scheduled)
         {
             var current = await _jobs.GetAsync(job.Id, ct);
@@ -2671,10 +2679,10 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
             await _jobs.MarkStatusAsync(
                 job.Id,
                 RenderJobStatuses.PendingReconciliation,
-                errorCode: "SCENE_VIDEO_RECONCILIATION_LIMIT_REACHED",
-                errorMessage: "Provider polling reached the configured reconciliation limit.",
+                errorCode: "SCENE_VIDEO_PROVIDER_POLL_TIMEOUT",
+                errorMessage: "Known provider task polling reached the configured elapsed-time timeout; the same provider identifiers were retained for recovery.",
                 ct: ct);
-            throw new RenderJobDeferredException("Provider polling reached the configured reconciliation limit.");
+            throw new RenderJobDeferredException("Known provider task polling reached the configured elapsed-time timeout.");
         }
 
         _logger.LogInformation("RVIDEO_VIDEO_PROVIDER_POLL_DEFERRED jobId={JobId} providerTaskId={ProviderTaskId} delaySeconds={DelaySeconds}",

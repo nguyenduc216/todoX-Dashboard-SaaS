@@ -328,7 +328,14 @@ public sealed class DanceSellRenderHandlerTests
         public Task<RenderJobDto?> ClaimNextByJobTypeAsync(string workerKey, TimeSpan lockFor, IReadOnlyCollection<string> jobTypes, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<RenderJobDto?> ClaimNextExcludingJobTypesAsync(string workerKey, TimeSpan lockFor, IReadOnlyCollection<string> excludedJobTypes, CancellationToken ct = default) => throw new NotImplementedException();
         public Task ScheduleRetryAsync(Guid jobId, TimeSpan delay, string errorCode, string errorMessage, CancellationToken ct = default) => throw new NotImplementedException();
-        public Task<bool> ScheduleProviderPollAsync(Guid jobId, TimeSpan delay, string reasonCode, string reasonMessage, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<bool> ScheduleProviderPollAsync(
+            Guid jobId,
+            TimeSpan delay,
+            string reasonCode,
+            string reasonMessage,
+            CancellationToken ct = default,
+            bool enforceReconciliationLimit = true,
+            bool enforceProviderPollTimeout = false) => throw new NotImplementedException();
         public Task SetProviderIdentifiersAsync(Guid jobId, string? providerTaskId, string? providerVideoIdBase, CancellationToken ct = default) => Task.CompletedTask;
         public Task<bool> MarkRecoveredCompletedAsync(Guid jobId, long projectId, long sceneId, Guid sceneVideoVersionId, string logicalRequestId, CancellationToken ct = default) => Task.FromResult(false);
         public Task<int> GetProviderReconciliationAttemptCountAsync(Guid jobId, CancellationToken ct = default) => Task.FromResult(0);

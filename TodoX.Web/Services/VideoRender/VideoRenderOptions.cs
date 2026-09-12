@@ -10,6 +10,7 @@ public sealed class VideoRenderOptions
     public long MaxVideoBytes { get; set; } = 500 * 1024 * 1024;
     public int SceneSecondsDefault { get; set; } = 8;
     public int PollIntervalSeconds { get; set; } = 5;
+    // PollIntervalSeconds and MaxPollDurationMinutes are the normal provider-poll policy.
     public int MaxPollDurationMinutes { get; set; } = 30;
     public int MaxConsecutivePollErrors { get; set; } = 5;
     public int MaxConcurrentSceneJobs { get; set; } = 3;

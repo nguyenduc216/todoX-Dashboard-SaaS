@@ -35,7 +35,14 @@ public interface IRenderJobService
     Task<RenderJobDto?> ClaimNextExcludingJobTypesAsync(string workerKey, TimeSpan lockFor, IReadOnlyCollection<string> excludedJobTypes, CancellationToken ct = default);
     Task MarkStatusAsync(Guid jobId, string status, object? output = null, string? errorCode = null, string? errorMessage = null, CancellationToken ct = default);
     Task ScheduleRetryAsync(Guid jobId, TimeSpan delay, string errorCode, string errorMessage, CancellationToken ct = default);
-    Task<bool> ScheduleProviderPollAsync(Guid jobId, TimeSpan delay, string reasonCode, string reasonMessage, CancellationToken ct = default);
+    Task<bool> ScheduleProviderPollAsync(
+        Guid jobId,
+        TimeSpan delay,
+        string reasonCode,
+        string reasonMessage,
+        CancellationToken ct = default,
+        bool enforceReconciliationLimit = true,
+        bool enforceProviderPollTimeout = false);
     Task SetProviderIdentifiersAsync(Guid jobId, string? providerTaskId, string? providerVideoIdBase, CancellationToken ct = default);
     Task<bool> MarkRecoveredCompletedAsync(Guid jobId, long projectId, long sceneId, Guid sceneVideoVersionId, string logicalRequestId, CancellationToken ct = default);
     Task UpsertSnapshotAsync(Guid jobId, object projectSnapshot, object sceneSnapshots, CancellationToken ct = default);
@@ -604,11 +611,8 @@ public sealed class RenderJobService : IRenderJobService
                    WHERE (
                          (status='queued'
                           AND (retry_after IS NULL OR retry_after <= now())
-                          AND attempt_count <= max_attempts
-                          AND (COALESCE(input_json->>'providerPoll', 'false') <> 'true'
-                               OR COALESCE(NULLIF(input_json->>'providerPollCount', '')::int, 0) <= @maxProviderPolls)
                           AND (COALESCE(input_json->>'providerPoll', 'false') = 'true'
-                               OR attempt_count < max_attempts))
+                               OR (attempt_count <= max_attempts AND attempt_count < max_attempts)))
                          OR (
                               job_type='core_service'
                               AND status='rendering'
@@ -624,16 +628,16 @@ public sealed class RenderJobService : IRenderJobService
         if (includeJobTypes is not null && includeJobTypes.Count > 0)
         {
             sql += " AND job_type = ANY(@jobTypes)";
-            parameters = new { jobTypes = includeJobTypes.ToArray(), excludedJobTypes = excludeJobTypes?.ToArray() ?? Array.Empty<string>(), maxProviderPolls = GetMaxProviderPolls() };
+            parameters = new { jobTypes = includeJobTypes.ToArray(), excludedJobTypes = excludeJobTypes?.ToArray() ?? Array.Empty<string>() };
         }
         else if (excludeJobTypes is not null && excludeJobTypes.Count > 0)
         {
             sql += " AND NOT (job_type = ANY(@excludedJobTypes))";
-            parameters = new { excludedJobTypes = excludeJobTypes.ToArray(), maxProviderPolls = GetMaxProviderPolls() };
+            parameters = new { excludedJobTypes = excludeJobTypes.ToArray() };
         }
         else
         {
-            parameters = new { maxProviderPolls = GetMaxProviderPolls() };
+            parameters = new { };
         }
 
         sql += ResolveClaimOrderSql(includeJobTypes);
@@ -885,7 +889,9 @@ public sealed class RenderJobService : IRenderJobService
         TimeSpan delay,
         string reasonCode,
         string reasonMessage,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        bool enforceReconciliationLimit = true,
+        bool enforceProviderPollTimeout = false)
     {
         using var conn = await _factory.OpenAsync(ct);
         var delaySeconds = Math.Max(1, (int)delay.TotalSeconds);
@@ -894,9 +900,13 @@ public sealed class RenderJobService : IRenderJobService
             UPDATE render.render_jobs
                SET status='queued',
                    input_json=jsonb_set(
-                       COALESCE(input_json, '{}'::jsonb) || '{"providerPoll": true}'::jsonb,
-                       '{providerPollCount}',
-                       to_jsonb(COALESCE(NULLIF(input_json->>'providerPollCount', '')::int, 0) + 1),
+                       jsonb_set(
+                           COALESCE(input_json, '{}'::jsonb) || '{"providerPoll": true}'::jsonb,
+                           '{providerPollCount}',
+                           to_jsonb(COALESCE(NULLIF(input_json->>'providerPollCount', '')::int, 0) + 1),
+                           true),
+                       '{providerPollStartedAt}',
+                       COALESCE(input_json->'providerPollStartedAt', to_jsonb(now())),
                        true),
                    retry_after=now() + (@delaySeconds || ' seconds')::interval,
                    error_code=@reasonCode,
@@ -906,9 +916,24 @@ public sealed class RenderJobService : IRenderJobService
                    updated_at=now()
              WHERE id=@jobId
                AND status IN ('queued', 'preparing', 'rendering', 'post_processing', 'pending_reconciliation', 'failed')
-               AND COALESCE(NULLIF(input_json->>'providerPollCount', '')::int, 0) < @maxProviderPolls;
+               AND (@enforceReconciliationLimit = false
+                    OR COALESCE(NULLIF(input_json->>'providerPollCount', '')::int, 0) < @maxReconciliationRetries)
+               AND (@enforceProviderPollTimeout = false
+                    OR input_json->>'providerPollStartedAt' IS NULL
+                    OR (input_json->>'providerPollStartedAt')::timestamptz
+                       + (@providerPollTimeoutMinutes || ' minutes')::interval > now());
             """,
-            new { jobId, delaySeconds, reasonCode, reasonMessage, maxProviderPolls = GetMaxProviderPolls() });
+            new
+            {
+                jobId,
+                delaySeconds,
+                reasonCode,
+                reasonMessage,
+                maxReconciliationRetries = GetMaxProviderPolls(),
+                providerPollTimeoutMinutes = GetProviderPollTimeoutMinutes(),
+                enforceReconciliationLimit,
+                enforceProviderPollTimeout
+            });
 
         if (changed <= 0)
         {
@@ -1102,4 +1127,7 @@ public sealed class RenderJobService : IRenderJobService
 
     private int GetMaxProviderPolls()
         => Math.Max(1, _configuration.GetValue("VideoRender:MaxReconciliationRetries", 3));
+
+    private int GetProviderPollTimeoutMinutes()
+        => Math.Max(1, _configuration.GetValue("VideoRender:MaxPollDurationMinutes", 30));
 }

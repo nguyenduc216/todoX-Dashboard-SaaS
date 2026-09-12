@@ -61,7 +61,45 @@ public sealed class RVideoProviderPollingRegressionTests
         Assert.Contains("providerPoll", source);
         Assert.Contains("attempt_count=attempt_count + CASE", source);
         Assert.Contains("input_json=input_json - 'providerPoll'", source);
-        Assert.Contains("input_json=COALESCE(input_json, '{}'::jsonb) || '{\"providerPoll\": true}'::jsonb", source);
+        Assert.Contains("jsonb_set(", ProviderPollMethod(source));
+        Assert.Contains("'{providerPollCount}'", ProviderPollMethod(source));
+        Assert.Contains("'{providerPollStartedAt}'", ProviderPollMethod(source));
+    }
+
+    [Fact]
+    public void NormalProviderPollsDoNotUseTheReconciliationRetryLimit()
+    {
+        var source = ReadRepoFile("Services", "Render", "RenderJobService.cs");
+        var worker = ReadRepoFile("Services", "VideoRender", "SceneVideoWorkerHandler.cs");
+        var providerPoll = ProviderPollMethod(source);
+
+        Assert.Contains("enforceReconciliationLimit: false", worker);
+        Assert.Contains("@enforceReconciliationLimit = false", providerPoll);
+        Assert.Contains("@enforceProviderPollTimeout = false", providerPoll);
+        Assert.Contains("@providerPollTimeoutMinutes", providerPoll);
+    }
+
+    [Fact]
+    public void ProviderPollClaimDoesNotApplySubmitAttemptBudget()
+    {
+        var source = ReadRepoFile("Services", "Render", "RenderJobService.cs");
+        var claim = source[source.IndexOf("WHERE (", StringComparison.Ordinal)..source.IndexOf("internal static string ResolveClaimOrderSql", StringComparison.Ordinal)];
+
+        Assert.Contains("COALESCE(input_json->>'providerPoll', 'false') = 'true'", claim);
+        Assert.Contains("OR (attempt_count <= max_attempts AND attempt_count < max_attempts)", claim);
+        Assert.DoesNotContain("AND attempt_count <= max_attempts\n                           AND (COALESCE(input_json->>'providerPoll'", claim, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void NormalProviderPollTimeoutRetainsKnownTaskInsteadOfResubmitting()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "SceneVideoWorkerHandler.cs");
+
+        Assert.Contains("enforceProviderPollTimeout: true", source);
+        Assert.Contains("SCENE_VIDEO_PROVIDER_POLL_TIMEOUT", source);
+        Assert.Contains("same provider identifiers were retained", source);
+        Assert.Contains("providerPollStartedAt", ReadRepoFile("Services", "Render", "RenderJobService.cs"));
+        Assert.DoesNotContain("SCENE_VIDEO_RECONCILIATION_LIMIT_REACHED", source);
     }
 
     [Fact]
