@@ -392,7 +392,58 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
             .ToList();
         await EnrichCatalogDurationsAsync(input.ProviderId, catalogModels, ct);
         var candidateResolution = ResolveFallbackCandidateResolution(input, catalogModels);
-        var candidates = candidateResolution.Candidates;
+        var candidates = candidateResolution.Candidates.ToList();
+        var historicalCandidates = HydrateHistoricalCandidates(candidates, attemptVersions, input);
+        foreach (var historicalCandidate in historicalCandidates)
+        {
+            var historicalIndex = ParseAttemptIndex(historicalCandidate.Version.LogicalRequestId, input.LogicalRequestId);
+            if (historicalIndex < 0)
+            {
+                continue;
+            }
+
+            if (historicalCandidate.Candidate is null)
+            {
+                await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_HISTORICAL_CANDIDATE_MISMATCH", "warning",
+                    "A persisted scene-video candidate could not be matched to the current fallback catalog.",
+                    new
+                    {
+                        projectId = input.ProjectId,
+                        sceneId = input.SceneId,
+                        renderJobId = job.Id,
+                        logicalRequestId = historicalCandidate.Version.LogicalRequestId,
+                        candidateIndex = historicalIndex,
+                        provider = historicalCandidate.Version.ProviderCode,
+                        model = historicalCandidate.Version.ModelName
+                    }, ct);
+                continue;
+            }
+
+            if (!candidates.Any(x => string.Equals(
+                    BuildCandidateKey(x.Policy, x.ProviderDurationSeconds, x.ProviderResolution),
+                    BuildCandidateKey(historicalCandidate.Candidate.Policy, historicalCandidate.Candidate.ProviderDurationSeconds, historicalCandidate.Candidate.ProviderResolution),
+                    StringComparison.OrdinalIgnoreCase)))
+            {
+                candidates.Insert(Math.Min(historicalIndex, candidates.Count), historicalCandidate.Candidate);
+                await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_HISTORICAL_CANDIDATE_RESOLVED", "info",
+                    "A persisted scene-video candidate was restored into the current fallback ordering.",
+                    new
+                    {
+                        sceneId = input.SceneId,
+                        renderJobId = job.Id,
+                        logicalRequestId = historicalCandidate.Version.LogicalRequestId,
+                        provider = historicalCandidate.Candidate.Policy.ProviderCode,
+                        model = historicalCandidate.Candidate.Policy.Model,
+                        mode = historicalCandidate.Candidate.Policy.Mode,
+                        providerDurationSeconds = historicalCandidate.Candidate.ProviderDurationSeconds,
+                        providerResolution = historicalCandidate.Candidate.ProviderResolution,
+                        resolvedCandidateKey = BuildCandidateKey(
+                            historicalCandidate.Candidate.Policy,
+                            historicalCandidate.Candidate.ProviderDurationSeconds,
+                            historicalCandidate.Candidate.ProviderResolution)
+                    }, ct);
+            }
+        }
         if (attemptVersions.Count == 0)
         {
             await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_FALLBACK_CANDIDATES_RESOLVED", "info",
@@ -408,7 +459,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                     candidates = candidateResolution.Diagnostics
                 }, ct);
         }
-        var attemptIndex = ResolveNextAttemptIndex(input.LogicalRequestId, attemptVersions);
+        var attemptIndex = ResolveNextAttemptIndex(input.LogicalRequestId, attemptVersions, candidates);
         string? fallbackReason = null;
         while (attemptIndex < candidates.Count)
         {
@@ -822,9 +873,12 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                     {
                         var ai79Exception = structuredException!;
                         var failureClassification = ClassifyRVideoSubmitFailure(ai79Exception);
-                        var nextCandidate = attemptIndex + 1 < candidates.Count
-                            ? candidates[attemptIndex + 1]
-                            : null;
+                        var nextCandidate = ResolveNextCandidateAfterFailure(
+                            candidate,
+                            failureClassification,
+                            attemptIndex,
+                            candidates,
+                            catalogModels);
                         await AddAi79SubmitDiagnosticsAsync(job, policy, ai79Exception, CancellationToken.None);
                         if (failureClassification == KnownNoResourcesFailureClassification)
                         {
@@ -887,7 +941,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                             throw ai79Exception;
                         }
 
-                        if (attemptIndex + 1 >= candidates.Count)
+                        if (nextCandidate is null)
                         {
                             await AddFallbackExhaustedEventAsync(
                                 project,
@@ -905,7 +959,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                             throw new RenderJobTerminalFailureException(ai79Exception.ErrorMessage, ai79Exception);
                         }
 
-                        nextCandidate = candidates[attemptIndex + 1];
+                        var nextCandidateIndex = candidates.IndexOf(nextCandidate);
                         if (failureClassification == DurationRejectedFailureClassification
                             && IsSamePolicy(policy, nextCandidate.Policy)
                             && nextCandidate.ProviderDurationSeconds > candidate.ProviderDurationSeconds)
@@ -938,7 +992,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                                 CancellationToken.None);
                         }
                         fallbackReason = failureClassification;
-                        attemptIndex++;
+                        attemptIndex = nextCandidateIndex;
                         continue;
                     }
 
@@ -1185,7 +1239,13 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                         status.SanitizedResponseJson,
                         failure,
                         ct);
-                    if (attemptIndex + 1 < candidates.Count)
+                    var nextStatusCandidate = ResolveNextCandidateAfterFailure(
+                        candidate,
+                        failureClassification,
+                        attemptIndex,
+                        candidates,
+                        catalogModels);
+                    if (nextStatusCandidate is not null)
                     {
                         if (!ShouldFallback(failureClassification))
                         {
@@ -1193,20 +1253,19 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                             throw new RenderJobTerminalFailureException(failure);
                         }
 
-                        var nextCandidate = candidates[attemptIndex + 1];
                         await AddFallbackStartedEventAsync(
                             project,
                             scene,
                             job,
                             input,
                             policy,
-                            nextCandidate.Policy,
+                            nextStatusCandidate.Policy,
                             providerTaskId ?? taskId,
                             failureClassification,
                             status.ErrorCode,
                             ct);
                         fallbackReason = failureClassification;
-                        attemptIndex++;
+                        attemptIndex = candidates.IndexOf(nextStatusCandidate);
                         continue;
                     }
 
@@ -1840,10 +1899,14 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         return null;
     }
 
-    private static int ResolveNextAttemptIndex(string logicalRequestId, IReadOnlyList<SceneVideoVersionDto> versions)
+    private static int ResolveNextAttemptIndex(
+        string logicalRequestId,
+        IReadOnlyList<SceneVideoVersionDto> versions,
+        IReadOnlyList<ResolvedFallbackCandidate> candidates)
     {
         SceneVideoVersionDto? activeVersion = null;
         var maxAttempt = -1;
+        var maxMappedAttempt = -1;
         foreach (var version in versions)
         {
             if (!IsMatchingLogicalRequestId(version.LogicalRequestId, logicalRequestId))
@@ -1858,6 +1921,12 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
             }
 
             maxAttempt = Math.Max(maxAttempt, attempt);
+            var mappedIndex = ResolvePersistedCandidateIndex(version, candidates);
+            if (mappedIndex >= 0)
+            {
+                maxMappedAttempt = Math.Max(maxMappedAttempt, mappedIndex);
+            }
+
             if (IsActiveSceneVideoStatus(version.Status)
                 && (activeVersion is null || attempt > ParseAttemptIndex(activeVersion.LogicalRequestId, logicalRequestId)))
             {
@@ -1867,16 +1936,24 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
 
         if (activeVersion is not null)
         {
-            return ParseAttemptIndex(activeVersion.LogicalRequestId, logicalRequestId);
+            var activeCandidateIndex = ResolvePersistedCandidateIndex(activeVersion, candidates);
+            return activeCandidateIndex >= 0
+                ? activeCandidateIndex
+                : ParseAttemptIndex(activeVersion.LogicalRequestId, logicalRequestId);
         }
 
-        return Math.Max(0, maxAttempt + 1);
+        return Math.Max(0, (maxMappedAttempt >= 0 ? maxMappedAttempt : maxAttempt) + 1);
     }
 
     private sealed record ResolvedFallbackCandidate(
         RVideoVideoModelPolicyEntry Policy,
         int ProviderDurationSeconds,
-        string ProviderResolution);
+        string ProviderResolution,
+        bool IsDurationFallback = false);
+
+    private sealed record HistoricalFallbackCandidate(
+        SceneVideoVersionDto Version,
+        ResolvedFallbackCandidate? Candidate);
 
     private sealed record FallbackCandidateDiagnostic(
         int Index,
@@ -2056,21 +2133,6 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                 providerResolution,
                 true,
                 null));
-            if (ResolveSameModelDurationFallback(duration, supportedDurations) is int durationFallback)
-            {
-                AddResolvedCandidate(resolved, candidateKeys, policy, durationFallback, providerResolution);
-                diagnostics.Add(new FallbackCandidateDiagnostic(
-                    policy.AttemptIndex,
-                    policy.ProviderCode,
-                    policy.Model,
-                    policy.Mode,
-                    input.DurationSeconds,
-                    durationFallback,
-                    requestedResolution,
-                    providerResolution,
-                    true,
-                    "same_model_duration_fallback"));
-            }
         }
 
         return new FallbackCandidateResolution(resolved, diagnostics);
@@ -2110,14 +2172,15 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         HashSet<string> candidateKeys,
         RVideoVideoModelPolicyEntry policy,
         int duration,
-        string providerResolution)
+        string providerResolution,
+        bool isDurationFallback = false)
     {
         if (!candidateKeys.Add(BuildCandidateKey(policy, duration, providerResolution)))
         {
             return;
         }
 
-        resolved.Add(new ResolvedFallbackCandidate(policy, duration, providerResolution));
+        resolved.Add(new ResolvedFallbackCandidate(policy, duration, providerResolution, isDurationFallback));
     }
 
     private static string BuildCandidateKey(
@@ -2126,10 +2189,175 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         string providerResolution)
         => $"{policy.ProviderCode}|{policy.Model}|{policy.Mode}|{duration}|{providerResolution}";
 
+    private static IReadOnlyList<HistoricalFallbackCandidate> HydrateHistoricalCandidates(
+        IReadOnlyList<ResolvedFallbackCandidate> candidates,
+        IReadOnlyList<SceneVideoVersionDto> versions,
+        SceneVideoRenderWorkItemInput input)
+    {
+        var result = new List<HistoricalFallbackCandidate>();
+        foreach (var version in versions.Where(version => IsMatchingLogicalRequestId(version.LogicalRequestId, input.LogicalRequestId)))
+        {
+            var persisted = ResolvePersistedCandidate(version);
+            if (persisted is null)
+            {
+                continue;
+            }
+
+            var existing = candidates.FirstOrDefault(candidate =>
+                string.Equals(
+                    BuildCandidateKey(candidate.Policy, candidate.ProviderDurationSeconds, candidate.ProviderResolution),
+                    BuildCandidateKey(persisted.Policy, persisted.ProviderDurationSeconds, persisted.ProviderResolution),
+                    StringComparison.OrdinalIgnoreCase));
+            result.Add(new HistoricalFallbackCandidate(version, existing ?? persisted));
+        }
+
+        return result;
+    }
+
+    private static int ResolvePersistedCandidateIndex(
+        SceneVideoVersionDto version,
+        IReadOnlyList<ResolvedFallbackCandidate> candidates)
+    {
+        var persisted = ResolvePersistedCandidate(version);
+        if (persisted is null)
+        {
+            return -1;
+        }
+
+        var key = BuildCandidateKey(persisted.Policy, persisted.ProviderDurationSeconds, persisted.ProviderResolution);
+        for (var index = 0; index < candidates.Count; index++)
+        {
+            var candidate = candidates[index];
+            if (string.Equals(
+                    BuildCandidateKey(candidate.Policy, candidate.ProviderDurationSeconds, candidate.ProviderResolution),
+                    key,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return index;
+            }
+        }
+
+        return -1;
+    }
+
+    private static ResolvedFallbackCandidate? ResolvePersistedCandidate(SceneVideoVersionDto version)
+    {
+        if (string.IsNullOrWhiteSpace(version.RenderConfigJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(version.RenderConfigJson);
+            var root = document.RootElement;
+            var provider = ReadJsonString(root, "provider") ?? version.ProviderCode;
+            var model = ReadJsonString(root, "actualModel")
+                        ?? ReadJsonString(root, "model")
+                        ?? ReadJsonString(root, "requestedModel")
+                        ?? version.ModelName;
+            var mode = ReadJsonString(root, "mode") ?? ReadJsonString(root, "requestedMode");
+            var duration = ReadJsonInt(root, "providerDurationSeconds")
+                           ?? ReadJsonInt(root, "requestedDurationSeconds")
+                           ?? (version.DurationSeconds is > 0 ? (int)version.DurationSeconds.Value : null);
+            var resolution = ReadJsonString(root, "providerResolution")
+                             ?? ReadJsonString(root, "requestedResolution")
+                             ?? "720p";
+            if (string.IsNullOrWhiteSpace(provider)
+                || string.IsNullOrWhiteSpace(model)
+                || duration is not > 0)
+            {
+                return null;
+            }
+
+            return new ResolvedFallbackCandidate(
+                new RVideoVideoModelPolicyEntry(
+                    ResolvePolicyAttemptIndex(provider, model, mode),
+                    provider.Trim(),
+                    model.Trim(),
+                    string.IsNullOrWhiteSpace(mode) ? null : mode.Trim()),
+                duration.Value,
+                NormalizeResolution(resolution),
+                IsDurationFallback: false);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static int ResolvePolicyAttemptIndex(string provider, string model, string? mode)
+        => RVideoVideoModelPolicy.Models.FirstOrDefault(policy =>
+               string.Equals(policy.ProviderCode, provider, StringComparison.OrdinalIgnoreCase)
+               && string.Equals(policy.Model, model, StringComparison.OrdinalIgnoreCase)
+               && string.Equals(policy.Mode, mode, StringComparison.OrdinalIgnoreCase))
+           ?.AttemptIndex ?? -1;
+
     private static int? ResolveSameModelDurationFallback(int currentDuration, HashSet<int> supportedDurations)
         => currentDuration is 4 or 6 && supportedDurations.Contains(8) && currentDuration < 8
             ? 8
             : null;
+
+    private static ResolvedFallbackCandidate? ResolveNextCandidateAfterFailure(
+        ResolvedFallbackCandidate current,
+        string failureClassification,
+        int currentIndex,
+        List<ResolvedFallbackCandidate> candidates,
+        IReadOnlyList<AiProviderModelListItemDto> catalogModels)
+    {
+        if (failureClassification == DurationRejectedFailureClassification)
+        {
+            var durationFallback = ResolveSameModelDurationCandidate(current, candidates, catalogModels);
+            if (durationFallback is not null)
+            {
+                return durationFallback;
+            }
+        }
+
+        return candidates
+            .Skip(currentIndex + 1)
+            .FirstOrDefault(candidate => !candidate.IsDurationFallback && !IsSamePolicy(candidate.Policy, current.Policy));
+    }
+
+    private static ResolvedFallbackCandidate? ResolveSameModelDurationCandidate(
+        ResolvedFallbackCandidate current,
+        List<ResolvedFallbackCandidate> candidates,
+        IReadOnlyList<AiProviderModelListItemDto> catalogModels)
+    {
+        var model = catalogModels.FirstOrDefault(x =>
+            string.Equals(x.ProviderCode, current.Policy.ProviderCode, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(x.ProviderModelCode, current.Policy.Model, StringComparison.OrdinalIgnoreCase));
+        if (model is null)
+        {
+            return null;
+        }
+
+        var supportedDurations = model.SupportedDurations
+            .Where(duration => duration > 0)
+            .Distinct()
+            .OrderBy(duration => duration)
+            .ToHashSet();
+        var durationFallback = ResolveSameModelDurationFallback(current.ProviderDurationSeconds, supportedDurations);
+        if (durationFallback is not int nextDuration)
+        {
+            return null;
+        }
+
+        var existing = candidates.FirstOrDefault(candidate =>
+            candidate.IsDurationFallback
+            && IsSamePolicy(candidate.Policy, current.Policy)
+            && candidate.ProviderDurationSeconds == nextDuration
+            && string.Equals(candidate.ProviderResolution, current.ProviderResolution, StringComparison.OrdinalIgnoreCase));
+        if (existing is not null)
+        {
+            return existing;
+        }
+
+        var next = new ResolvedFallbackCandidate(current.Policy, nextDuration, current.ProviderResolution, IsDurationFallback: true);
+        var insertAt = candidates.IndexOf(current);
+        candidates.Insert(insertAt < 0 ? candidates.Count : insertAt + 1, next);
+        return next;
+    }
 
     private static bool IsSamePolicy(RVideoVideoModelPolicyEntry left, RVideoVideoModelPolicyEntry right)
         => string.Equals(left.ProviderCode, right.ProviderCode, StringComparison.OrdinalIgnoreCase)

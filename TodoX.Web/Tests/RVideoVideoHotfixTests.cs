@@ -262,9 +262,9 @@ public sealed class RVideoVideoHotfixTests
             })
             .ToArray();
 
-        Assert.Equal(5, resolved.Length);
-        Assert.Equal([4, 8, 6, 10, 10], resolved.Select(x => x.Duration));
-        Assert.Equal(["veo_omni", "veo_omni", "veo_3_1", "veo_3_1", "veo_3_1"], resolved.Select(x => x.Model));
+        Assert.Equal(3, resolved.Length);
+        Assert.Equal([4, 6, 6], resolved.Select(x => x.Duration));
+        Assert.Equal(["veo_omni", "veo_3_1", "veo_3_1"], resolved.Select(x => x.Model));
     }
 
     [Fact]
@@ -312,13 +312,13 @@ public sealed class RVideoVideoHotfixTests
             .ToArray();
 
         Assert.Equal(
-            [("veo_omni", "flash"), ("veo_omni", "flash"), ("veo_3_1", "fast"), ("veo_3_1", "lite")],
+            [("veo_omni", "flash"), ("veo_3_1", "fast"), ("veo_3_1", "lite")],
             resolved);
     }
 
     [Theory]
-    [InlineData(4, "1080p", new[] { "veo_omni", "veo_omni", "veo_3_1", "veo_3_1", "veo_3_1", "veo_3_1", "grok_video_heavy" }, new[] { "flash", "flash", "fast", "fast", "lite", "lite", "normal" }, new[] { 4, 8, 4, 8, 4, 8, 6 }, new[] { "1080p", "1080p", "1080p", "1080p", "1080p", "1080p", "720p" })]
-    [InlineData(6, "720p", new[] { "veo_omni", "veo_omni", "veo_3_1", "veo_3_1", "veo_3_1", "veo_3_1", "grok_video_heavy" }, new[] { "flash", "flash", "fast", "fast", "lite", "lite", "normal" }, new[] { 6, 8, 6, 8, 6, 8, 6 }, new[] { "720p", "720p", "720p", "720p", "720p", "720p", "720p" })]
+    [InlineData(4, "1080p", new[] { "veo_omni", "veo_3_1", "veo_3_1", "grok_video_heavy" }, new[] { "flash", "fast", "lite", "normal" }, new[] { 4, 4, 4, 6 }, new[] { "1080p", "1080p", "1080p", "720p" })]
+    [InlineData(6, "720p", new[] { "veo_omni", "veo_3_1", "veo_3_1", "grok_video_heavy" }, new[] { "flash", "fast", "lite", "normal" }, new[] { 6, 6, 6, 6 }, new[] { "720p", "720p", "720p", "720p" })]
     [InlineData(8, "720p", new[] { "veo_omni", "veo_3_1", "veo_3_1", "grok_video_heavy" }, new[] { "flash", "fast", "lite", "normal" }, new[] { 8, 8, 8, 10 }, new[] { "720p", "720p", "720p", "720p" })]
     [InlineData(10, "1080p", new[] { "veo_omni", "grok_video_heavy" }, new[] { "flash", "normal" }, new[] { 10, 10 }, new[] { "1080p", "720p" })]
     public void ResolveFallbackCandidatesUsesPolicyOrderAndCatalogCapabilities(

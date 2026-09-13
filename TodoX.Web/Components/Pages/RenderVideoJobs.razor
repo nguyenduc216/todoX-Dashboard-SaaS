@@ -792,6 +792,7 @@ else
         public string AspectRatio { get; set; } = AspectRatioPortrait;
         public string? VideoModelSelectionKey { get; set; }
         public int? VideoDurationOverrideSeconds { get; set; }
+        public bool VideoOverrideTouched { get; set; }
         public bool IsDirty { get; set; }
     }
 
@@ -1063,6 +1064,19 @@ else
             }
         }
 
+        var latestCandidate = ResolveLatestSceneVideoCandidate(scene);
+        if (latestCandidate.ModelCode is not null)
+        {
+            var latestOption = _sceneVideoModelOptions.FirstOrDefault(option =>
+                string.Equals(option.ProviderCode, latestCandidate.ProviderCode, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(option.ModelCode, latestCandidate.ModelCode, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(option.Mode, latestCandidate.Mode, StringComparison.OrdinalIgnoreCase));
+            if (latestOption is not null)
+            {
+                return latestOption;
+            }
+        }
+
         var initial = TodoX.Web.Services.VideoRender.RVideoVideoModelPolicy.GetInitial();
         return _sceneVideoModelOptions.FirstOrDefault(option =>
                    string.Equals(option.ProviderCode, initial.ProviderCode, StringComparison.OrdinalIgnoreCase)
@@ -1084,6 +1098,7 @@ else
 
         var draft = GetSceneDraft(scene);
         draft.VideoModelSelectionKey = option.Key;
+        draft.VideoOverrideTouched = true;
         if (draft.VideoDurationOverrideSeconds is not int duration || !option.Durations.Contains(duration))
         {
             draft.VideoDurationOverrideSeconds = ResolveNearestSceneVideoDuration(scene.DurationSeconds, option.Durations);
@@ -1099,9 +1114,12 @@ else
         }
 
         var draft = GetSceneDraft(scene);
+        var latestCandidate = ResolveLatestSceneVideoCandidate(scene);
         return draft.VideoDurationOverrideSeconds is int duration && option.Durations.Contains(duration)
             ? duration
-            : ResolveNearestSceneVideoDuration(scene.DurationSeconds, option.Durations);
+            : latestCandidate.DurationSeconds is int latestDuration && option.Durations.Contains(latestDuration)
+                ? latestDuration
+                : ResolveNearestSceneVideoDuration(scene.DurationSeconds, option.Durations);
     }
 
     private void OnSceneVideoDurationChanged(VideoProjectSceneDto scene, int value)
@@ -1112,7 +1130,9 @@ else
             return;
         }
 
-        GetSceneDraft(scene).VideoDurationOverrideSeconds = value;
+        var draft = GetSceneDraft(scene);
+        draft.VideoDurationOverrideSeconds = value;
+        draft.VideoOverrideTouched = true;
     }
 
     private IReadOnlyList<int> ResolveSceneVideoDurations(VideoProjectSceneDto scene)
@@ -1127,6 +1147,92 @@ else
         }
 
         return (option, ResolveSceneVideoDurationSelection(scene));
+    }
+
+    private bool IsSceneVideoOverrideIntentional(VideoProjectSceneDto scene, SceneVideoModelOption option, int durationSeconds)
+    {
+        var draft = GetSceneDraft(scene);
+        if (draft.VideoOverrideTouched)
+        {
+            return true;
+        }
+
+        var latestCandidate = ResolveLatestSceneVideoCandidate(scene);
+        return latestCandidate.ModelCode is not null
+               && string.Equals(option.ProviderCode, latestCandidate.ProviderCode, StringComparison.OrdinalIgnoreCase)
+               && string.Equals(option.ModelCode, latestCandidate.ModelCode, StringComparison.OrdinalIgnoreCase)
+               && string.Equals(option.Mode, latestCandidate.Mode, StringComparison.OrdinalIgnoreCase)
+               && latestCandidate.DurationSeconds == durationSeconds;
+    }
+
+    private (string? ProviderCode, string? ModelCode, string? Mode, int? DurationSeconds) ResolveLatestSceneVideoCandidate(VideoProjectSceneDto scene)
+    {
+        var version = ResolveVideoVersion(scene);
+        if (version is null || string.IsNullOrWhiteSpace(version.RenderConfigJson))
+        {
+            return (null, null, null, null);
+        }
+
+        var provider = ReadRenderConfigString(version.RenderConfigJson, "provider") ?? version.ProviderCode;
+        var model = ReadRenderConfigString(version.RenderConfigJson, "actualModel")
+                    ?? ReadRenderConfigString(version.RenderConfigJson, "model")
+                    ?? ReadRenderConfigString(version.RenderConfigJson, "requestedModel")
+                    ?? version.ModelName;
+        var mode = ReadRenderConfigString(version.RenderConfigJson, "mode")
+                   ?? ReadRenderConfigString(version.RenderConfigJson, "requestedMode");
+        var duration = ReadRenderConfigInt(version.RenderConfigJson, "providerDurationSeconds")
+                       ?? ReadRenderConfigInt(version.RenderConfigJson, "requestedDurationSeconds")
+                       ?? (version.DurationSeconds is > 0 ? (int)version.DurationSeconds.Value : null);
+        return (
+            string.IsNullOrWhiteSpace(provider) ? null : provider.Trim(),
+            string.IsNullOrWhiteSpace(model) ? null : model.Trim(),
+            string.IsNullOrWhiteSpace(mode) ? null : mode.Trim(),
+            duration);
+    }
+
+    private static string? ReadRenderConfigString(string? renderConfigJson, string propertyName)
+    {
+        if (string.IsNullOrWhiteSpace(renderConfigJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(renderConfigJson);
+            return document.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object
+                   && document.RootElement.TryGetProperty(propertyName, out var value)
+                   && value.ValueKind == System.Text.Json.JsonValueKind.String
+                ? value.GetString()
+                : null;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static int? ReadRenderConfigInt(string? renderConfigJson, string propertyName)
+    {
+        if (string.IsNullOrWhiteSpace(renderConfigJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(renderConfigJson);
+            return document.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object
+                   && document.RootElement.TryGetProperty(propertyName, out var value)
+                   && value.ValueKind == System.Text.Json.JsonValueKind.Number
+                   && value.TryGetInt32(out var number)
+                ? number
+                : null;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return null;
+        }
     }
 
     private static int ResolveNearestSceneVideoDuration(int sceneDurationSeconds, IReadOnlyList<int> supportedDurations)
@@ -4830,12 +4936,16 @@ else
             }
 
             var selectedOverride = ResolveSceneVideoOverride(scene);
-            if (selectedOverride.Option is not null && selectedOverride.DurationSeconds is int overrideDuration)
+            var overrideDuration = selectedOverride.DurationSeconds;
+            var hasIntentionalOverride = selectedOverride.Option is not null
+                                         && overrideDuration.HasValue
+                                         && IsSceneVideoOverrideIntentional(scene, selectedOverride.Option, overrideDuration.Value);
+            if (hasIntentionalOverride && selectedOverride.Option is not null && overrideDuration.HasValue)
             {
                 input.ManualOverride = true;
                 input.RequestedModelCode = selectedOverride.Option.ModelCode;
                 input.RequestedMode = selectedOverride.Option.Mode;
-                input.RequestedDurationSeconds = overrideDuration;
+                input.RequestedDurationSeconds = overrideDuration.Value;
             }
 
             var jobModelCode = selectedOverride.Option?.ModelCode
