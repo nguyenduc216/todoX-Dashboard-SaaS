@@ -370,6 +370,125 @@ public sealed class RVideoVideoHotfixTests
     }
 
     [Fact]
+    public void FirstPollTimeNotResourcesWithExistingTaskDoesNotTerminalize()
+    {
+        var state = ResolveResourceUnavailablePollStateForTest(
+            events: [],
+            now: DateTimeOffset.Parse("2026-09-13T00:00:00Z"),
+            sanitizedResponseJson: """{"status":"NOT_RESOURCES","percent":0}""");
+
+        Assert.Equal(1, (int)GetProperty(state, "ResourceUnavailableCount")!);
+        Assert.False((bool)GetProperty(state, "ShouldTerminalize")!);
+        Assert.False((bool)GetProperty(state, "HasProgressEvidence")!);
+    }
+
+    [Fact]
+    public void RepeatedPollTimeNotResourcesBelowThresholdDoesNotTerminalize()
+    {
+        var now = DateTimeOffset.Parse("2026-09-13T00:00:25Z");
+        var events = new[]
+        {
+            ResourceUnavailableEvent("2026-09-13T00:00:00Z", "2026-09-13T00:00:00Z")
+        };
+
+        var state = ResolveResourceUnavailablePollStateForTest(events, now, """{"status":"NOT_RESOURCES","percent":0}""");
+
+        Assert.Equal(2, (int)GetProperty(state, "ResourceUnavailableCount")!);
+        Assert.Equal(25, (int)GetProperty(state, "ElapsedSeconds")!);
+        Assert.False((bool)GetProperty(state, "ShouldTerminalize")!);
+    }
+
+    [Fact]
+    public void RepeatedPollTimeNotResourcesAtThresholdTerminalizesWhenNoProgressExists()
+    {
+        var now = DateTimeOffset.Parse("2026-09-13T00:00:35Z");
+        var events = new[]
+        {
+            ResourceUnavailableEvent("2026-09-13T00:00:00Z", "2026-09-13T00:00:00Z"),
+            ResourceUnavailableEvent("2026-09-13T00:00:00Z", "2026-09-13T00:00:10Z")
+        };
+
+        var state = ResolveResourceUnavailablePollStateForTest(events, now, """{"status":"NOT_RESOURCES","percent":0}""");
+
+        Assert.Equal(3, (int)GetProperty(state, "ResourceUnavailableCount")!);
+        Assert.Equal(35, (int)GetProperty(state, "ElapsedSeconds")!);
+        Assert.True((bool)GetProperty(state, "ShouldTerminalize")!);
+    }
+
+    [Fact]
+    public void ProgressHistoryBlocksPollTimeResourceTerminalization()
+    {
+        var now = DateTimeOffset.Parse("2026-09-13T00:00:35Z");
+        var events = new[]
+        {
+            ResourceUnavailableEvent("2026-09-13T00:00:00Z", "2026-09-13T00:00:00Z"),
+            ResourceUnavailableEvent("2026-09-13T00:00:00Z", "2026-09-13T00:00:10Z"),
+            PollProgressEvent("""{"status":"PROCESSING","percent":20}""", "2026-09-13T00:00:15Z")
+        };
+
+        var state = ResolveResourceUnavailablePollStateForTest(events, now, """{"status":"NOT_RESOURCES","percent":0}""");
+
+        Assert.True((bool)GetProperty(state, "HasProgressEvidence")!);
+        Assert.False((bool)GetProperty(state, "ShouldTerminalize")!);
+    }
+
+    [Theory]
+    [InlineData("""{"status":"NOT_RESOURCES","video_id":"video-1","percent":0}""")]
+    [InlineData("""{"status":"NOT_RESOURCES","video_id_default":"video-1","percent":0}""")]
+    [InlineData("""{"status":"NOT_RESOURCES","work_id":"work-1","percent":0}""")]
+    [InlineData("""{"status":"NOT_RESOURCES","download_url":"https://cdn.example/video.mp4","percent":0}""")]
+    [InlineData("""{"status":"NOT_RESOURCES","output_url":"https://cdn.example/video.mp4","percent":0}""")]
+    public void CurrentOutputEvidenceBlocksPollTimeResourceTerminalization(string responseJson)
+    {
+        var now = DateTimeOffset.Parse("2026-09-13T00:00:35Z");
+        var events = new[]
+        {
+            ResourceUnavailableEvent("2026-09-13T00:00:00Z", "2026-09-13T00:00:00Z"),
+            ResourceUnavailableEvent("2026-09-13T00:00:00Z", "2026-09-13T00:00:10Z")
+        };
+
+        var state = ResolveResourceUnavailablePollStateForTest(events, now, responseJson);
+
+        Assert.True((bool)GetProperty(state, "HasProgressEvidence")!);
+        Assert.False((bool)GetProperty(state, "ShouldTerminalize")!);
+    }
+
+    [Fact]
+    public void PollTimeResourceTerminalFallbackUsesNextModelNotDurationFallback()
+    {
+        var resolved = ResolveFallbackCandidateObjectsForTest(6, "720p");
+        var next = ResolveNextCandidateAfterFailureForTest(
+            resolved.Candidates[1],
+            "POLL_RESOURCE_UNAVAILABLE_NO_PROGRESS",
+            1,
+            resolved.Candidates,
+            resolved.Catalog);
+
+        var policy = GetProperty(next!, "Policy")!;
+        Assert.Equal("veo_3_1", (string)GetProperty(policy, "Model")!);
+        Assert.Equal("lite", (string)GetProperty(policy, "Mode")!);
+        Assert.Equal(6, (int)GetProperty(next!, "ProviderDurationSeconds")!);
+    }
+
+    [Fact]
+    public void DurationRejectedStillUsesSameModelHigherDuration()
+    {
+        var resolved = ResolveFallbackCandidateObjectsForTest(6, "720p");
+        var next = ResolveNextCandidateAfterFailureForTest(
+            resolved.Candidates[1],
+            "PROVIDER_DURATION_REJECTED",
+            1,
+            resolved.Candidates,
+            resolved.Catalog);
+
+        var policy = GetProperty(next!, "Policy")!;
+        Assert.Equal("veo_3_1", (string)GetProperty(policy, "Model")!);
+        Assert.Equal("fast", (string)GetProperty(policy, "Mode")!);
+        Assert.Equal(8, (int)GetProperty(next!, "ProviderDurationSeconds")!);
+        Assert.True((bool)GetProperty(next!, "IsDurationFallback")!);
+    }
+
+    [Fact]
     public void RVideoSubmitFailureReleasesCandidateBillingBeforeFallback()
     {
         var source = ReadRepoFile("Services", "VideoRender", "SceneVideoWorkerHandler.cs");
@@ -2267,6 +2386,121 @@ public sealed class RVideoVideoHotfixTests
             "IsDefinitivelyRejectedSubmit",
             BindingFlags.NonPublic | BindingFlags.Static)!;
         return (bool)method.Invoke(null, new object?[] { exception })!;
+    }
+
+    private static object ResolveResourceUnavailablePollStateForTest(
+        IReadOnlyList<RenderJobEventDto> events,
+        DateTimeOffset now,
+        string sanitizedResponseJson)
+    {
+        var method = typeof(SceneVideoWorkerHandler).GetMethod(
+            "ResolveResourceUnavailablePollState",
+            BindingFlags.NonPublic | BindingFlags.Static)!;
+        var job = new RenderJobDto { Id = Guid.NewGuid() };
+        var status = new VideoProviderPollResult(
+            VideoProviderTaskStatus.ResourceUnavailable,
+            "task-1",
+            null,
+            "veo_3_1",
+            "provider_resources_unavailable",
+            "NOT_RESOURCES",
+            sanitizedResponseJson);
+        return method.Invoke(null, new object?[]
+        {
+            job,
+            Guid.NewGuid(),
+            "task-1",
+            "id-base-1",
+            status,
+            events,
+            now,
+            3,
+            TimeSpan.FromSeconds(30)
+        })!;
+    }
+
+    private static object GetProperty(object instance, string name)
+        => instance.GetType().GetProperty(name)!.GetValue(instance)!;
+
+    private static RenderJobEventDto ResourceUnavailableEvent(string firstSeenAt, string createdAt)
+        => new()
+        {
+            EventType = "RVIDEO_VIDEO_RESOURCE_UNAVAILABLE_RETRY",
+            CreatedAt = DateTime.Parse(createdAt, null, System.Globalization.DateTimeStyles.AdjustToUniversal),
+            DataJson = JsonSerializer.Serialize(new
+            {
+                sceneVideoVersionId = Guid.Empty,
+                providerTaskId = "task-1",
+                providerVideoIdBase = "id-base-1",
+                firstSeenAt
+            })
+        };
+
+    private static RenderJobEventDto PollProgressEvent(string providerRawResponse, string createdAt)
+        => new()
+        {
+            EventType = "SCENE_VIDEO_PROVIDER_PROCESSING",
+            CreatedAt = DateTime.Parse(createdAt, null, System.Globalization.DateTimeStyles.AdjustToUniversal),
+            DataJson = JsonSerializer.Serialize(new
+            {
+                sceneVideoVersionId = Guid.Empty,
+                providerTaskId = "task-1",
+                providerVideoIdBase = "id-base-1",
+                normalizedStatus = "Processing",
+                providerRawResponse
+            })
+        };
+
+    private sealed class ResolvedFallbackObjects
+    {
+        public required List<object> Candidates { get; init; }
+        public required IReadOnlyList<AiProviderModelListItemDto> Catalog { get; init; }
+    }
+
+    private static ResolvedFallbackObjects ResolveFallbackCandidateObjectsForTest(int duration, string resolution)
+    {
+        var method = typeof(SceneVideoWorkerHandler).GetMethod("ResolveFallbackCandidates", BindingFlags.NonPublic | BindingFlags.Static)!;
+        var catalog = new[]
+        {
+            new AiProviderModelListItemDto
+            {
+                ProviderCode = "79ai", ProviderModelCode = "veo_omni", MediaType = "video", Enabled = true,
+                SupportedModes = ["flash"], SupportedDurations = [4, 6, 8, 10], SupportedResolutions = ["720p"]
+            },
+            new AiProviderModelListItemDto
+            {
+                ProviderCode = "79ai", ProviderModelCode = "veo_3_1", MediaType = "video", Enabled = true,
+                SupportedModes = ["fast", "lite"], SupportedDurations = [4, 6, 8], SupportedResolutions = ["720p"]
+            },
+            new AiProviderModelListItemDto
+            {
+                ProviderCode = "79ai", ProviderModelCode = "grok_video_heavy", MediaType = "video", Enabled = true,
+                SupportedModes = ["normal"], SupportedDurations = [6, 10], SupportedResolutions = ["720p"]
+            }
+        };
+        var items = ((System.Collections.IEnumerable)method.Invoke(null, new object[]
+        {
+            new SceneVideoRenderWorkItemInput { ProviderCode = "79ai", DurationSeconds = duration, Resolution = resolution },
+            catalog
+        })!).Cast<object>().ToList();
+        return new ResolvedFallbackObjects { Candidates = items, Catalog = catalog };
+    }
+
+    private static object? ResolveNextCandidateAfterFailureForTest(
+        object current,
+        string classification,
+        int currentIndex,
+        List<object> candidates,
+        IReadOnlyList<AiProviderModelListItemDto> catalog)
+    {
+        var method = typeof(SceneVideoWorkerHandler).GetMethod("ResolveNextCandidateAfterFailure", BindingFlags.NonPublic | BindingFlags.Static)!;
+        var candidateType = current.GetType();
+        var typedList = (System.Collections.IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(candidateType))!;
+        foreach (var candidate in candidates)
+        {
+            typedList.Add(candidate);
+        }
+        return method.Invoke(null, new object?[] { current, classification, currentIndex, typedList, catalog });
     }
 
     private static string ClassifyRVideoSubmitFailureForTest(Ai79TaskSubmitException exception)

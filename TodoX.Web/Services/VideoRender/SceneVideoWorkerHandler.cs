@@ -167,6 +167,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
     private const int DefaultMaxReconciliationRetries = 3;
     private const string KnownNoResourcesFailureClassification = "KNOWN_NO_RESOURCES";
     private const string DurationRejectedFailureClassification = "PROVIDER_DURATION_REJECTED";
+    private const string PollResourceUnavailableNoProgressFailureClassification = "POLL_RESOURCE_UNAVAILABLE_NO_PROGRESS";
 
     private readonly VideoRenderRepository _repo;
     private readonly ISceneMediaVersioningService _versions;
@@ -1144,6 +1145,16 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                     }, ct);
                 if (status.Status == VideoProviderTaskStatus.ResourceUnavailable)
                 {
+                    var resourceUnavailableState = ResolveResourceUnavailablePollState(
+                        job,
+                        version.Id,
+                        providerTaskId,
+                        providerVideoIdBase,
+                        status,
+                        await _jobs.GetEventsAsync(job.Id, ct),
+                        DateTimeOffset.UtcNow,
+                        GetResourceUnavailablePollThreshold(),
+                        GetResourceUnavailableGracePeriod());
                     await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_PROVIDER_RESOURCES_UNAVAILABLE", "warning",
                         "79AI reported NOT_RESOURCES for the existing provider task; the same task will be reconciled without a new submit.",
                         new
@@ -1158,9 +1169,132 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                             provider = input.ProviderCode,
                             actualModel = policy.Model,
                             providerStatus = "NOT_RESOURCES",
+                            resourceUnavailableState.ResourceUnavailableCount,
+                            resourceUnavailableState.FirstSeenAt,
+                            resourceUnavailableState.ElapsedSeconds,
+                            resourceUnavailableState.Percent,
+                            resourceUnavailableState.HasProgressEvidence,
+                            resourceUnavailableState.Threshold,
+                            resourceUnavailableState.GraceSeconds,
                             status.ErrorCode,
                             status.ErrorMessage,
                             providerRawResponse = SanitizeDiagnosticJson(status.SanitizedResponseJson)
+                        }, ct);
+                    if (resourceUnavailableState.ShouldTerminalize)
+                    {
+                        var failure = status.ErrorMessage ?? "79AI repeatedly reported NOT_RESOURCES for the existing video task without progress evidence.";
+                        await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_RESOURCE_UNAVAILABLE_TERMINAL", "warning",
+                            "Scene-video provider task repeatedly reported NOT_RESOURCES without progress; terminalizing the current model candidate.",
+                            new
+                            {
+                                projectId = input.ProjectId,
+                                sceneId = input.SceneId,
+                                input.SceneIndex,
+                                renderJobId = job.Id,
+                                sceneVideoVersionId = version.Id,
+                                providerTaskId,
+                                providerVideoIdBase,
+                                idBase = providerVideoIdBase,
+                                provider = input.ProviderCode,
+                                model = policy.Model,
+                                mode = policy.Mode,
+                                providerDurationSeconds = candidate.ProviderDurationSeconds,
+                                resourceUnavailableState.ResourceUnavailableCount,
+                                resourceUnavailableState.FirstSeenAt,
+                                resourceUnavailableState.ElapsedSeconds,
+                                resourceUnavailableState.Percent,
+                                resourceUnavailableState.HasProgressEvidence,
+                                failureClassification = PollResourceUnavailableNoProgressFailureClassification
+                            }, ct);
+                        if (reservation.BillingRecordId is not null)
+                        {
+                            await _billing.CompleteAsync(new AiImageBillingCompleteRequest
+                            {
+                                LogicalRequestId = attemptLogicalRequestId,
+                                Success = false,
+                                ActualModel = policy.Model,
+                                ProviderTaskId = providerTaskId ?? taskId,
+                                ProviderUsageJson = status.SanitizedResponseJson,
+                                TariffSnapshotJson = tariffSnapshot,
+                                ErrorMessage = failure
+                            }, ct);
+                        }
+                        await LogUsageAsync(input, job, attemptLogicalRequestId, reservation.ChargedPoints, status.SanitizedResponseJson, false, failure, providerTaskId ?? taskId, ct, policy.Model, candidate.ProviderDurationSeconds);
+                        await _versions.FailSceneVideoVersionAsync(version.Id, status.ErrorCode ?? "provider_resources_unavailable", failure, ct);
+                        await AddFallbackFailedEventAsync(
+                            project,
+                            scene,
+                            job,
+                            input,
+                            policy,
+                            providerTaskId ?? taskId,
+                            PollResourceUnavailableNoProgressFailureClassification,
+                            status.ErrorCode,
+                            status.SanitizedResponseJson,
+                            failure,
+                            ct);
+                        var nextResourceCandidate = ResolveNextCandidateAfterFailure(
+                            candidate,
+                            PollResourceUnavailableNoProgressFailureClassification,
+                            attemptIndex,
+                            candidates,
+                            catalogModels);
+                        if (nextResourceCandidate is not null)
+                        {
+                            await AddFallbackStartedEventAsync(
+                                project,
+                                scene,
+                                job,
+                                input,
+                                policy,
+                                nextResourceCandidate.Policy,
+                                providerTaskId ?? taskId,
+                                PollResourceUnavailableNoProgressFailureClassification,
+                                status.ErrorCode,
+                                ct);
+                            fallbackReason = PollResourceUnavailableNoProgressFailureClassification;
+                            attemptIndex = candidates.IndexOf(nextResourceCandidate);
+                            continue;
+                        }
+
+                        await AddFallbackExhaustedEventAsync(
+                            project,
+                            scene,
+                            job,
+                            input,
+                            policy,
+                            providerTaskId ?? taskId,
+                            PollResourceUnavailableNoProgressFailureClassification,
+                            status.ErrorCode,
+                            status.SanitizedResponseJson,
+                            failure,
+                            ct);
+                        await FailAsync(project.Id, scene, version.Id, status.ErrorCode ?? "provider_resources_unavailable", failure, ct);
+                        throw new RenderJobTerminalFailureException(failure);
+                    }
+
+                    await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_RESOURCE_UNAVAILABLE_RETRY", "warning",
+                        "79AI reported NOT_RESOURCES for an existing provider task; keeping the same task until the no-progress threshold is reached.",
+                        new
+                        {
+                            projectId = input.ProjectId,
+                            sceneId = input.SceneId,
+                            input.SceneIndex,
+                            renderJobId = job.Id,
+                            sceneVideoVersionId = version.Id,
+                            providerTaskId,
+                            providerVideoIdBase,
+                            idBase = providerVideoIdBase,
+                            provider = input.ProviderCode,
+                            model = policy.Model,
+                            mode = policy.Mode,
+                            resourceUnavailableState.ResourceUnavailableCount,
+                            resourceUnavailableState.FirstSeenAt,
+                            resourceUnavailableState.ElapsedSeconds,
+                            resourceUnavailableState.Percent,
+                            resourceUnavailableState.HasProgressEvidence,
+                            resourceUnavailableState.Threshold,
+                            resourceUnavailableState.GraceSeconds
                         }, ct);
                     await MarkPendingReconciliationAsync(input, version.Id, attemptLogicalRequestId, tariffSnapshot,
                         "provider_resources_unavailable", "79AI reported NOT_RESOURCES for the existing video task.", ct,
@@ -1955,6 +2089,16 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         SceneVideoVersionDto Version,
         ResolvedFallbackCandidate? Candidate);
 
+    private sealed record ResourceUnavailablePollState(
+        int ResourceUnavailableCount,
+        DateTimeOffset FirstSeenAt,
+        int ElapsedSeconds,
+        int? Percent,
+        bool HasProgressEvidence,
+        int Threshold,
+        int GraceSeconds,
+        bool ShouldTerminalize);
+
     private sealed record FallbackCandidateDiagnostic(
         int Index,
         string Provider,
@@ -2188,6 +2332,307 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         int duration,
         string providerResolution)
         => $"{policy.ProviderCode}|{policy.Model}|{policy.Mode}|{duration}|{providerResolution}";
+
+    private static ResourceUnavailablePollState ResolveResourceUnavailablePollState(
+        RenderJobDto job,
+        Guid versionId,
+        string? providerTaskId,
+        string? providerVideoIdBase,
+        VideoProviderPollResult currentStatus,
+        IReadOnlyList<RenderJobEventDto> events,
+        DateTimeOffset now,
+        int threshold,
+        TimeSpan gracePeriod)
+    {
+        var normalizedTaskId = providerTaskId?.Trim();
+        var normalizedIdBase = providerVideoIdBase?.Trim();
+        var matchingEvents = events
+            .Where(evt => EventMatchesProviderTask(evt, versionId, normalizedTaskId, normalizedIdBase))
+            .ToList();
+        var previousRetryEvents = matchingEvents
+            .Where(evt => string.Equals(evt.EventType, "RVIDEO_VIDEO_RESOURCE_UNAVAILABLE_RETRY", StringComparison.OrdinalIgnoreCase)
+                          || string.Equals(evt.EventType, "RVIDEO_VIDEO_PROVIDER_RESOURCES_UNAVAILABLE", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        var previousFirstSeen = previousRetryEvents
+            .Select(ReadFirstSeenAt)
+            .Where(value => value is not null)
+            .Select(value => value!.Value)
+            .OrderBy(value => value)
+            .FirstOrDefault();
+        var firstSeenAt = previousFirstSeen == default ? now : previousFirstSeen;
+        var resourceUnavailableCount = previousRetryEvents.Count + 1;
+        var elapsedSeconds = Math.Max(0, (int)Math.Floor((now - firstSeenAt).TotalSeconds));
+        var hasProgressEvidence = HasProviderProgressEvidence(currentStatus)
+                                  || matchingEvents.Any(HasProviderProgressEvidence);
+        var percent = ReadProviderPercent(currentStatus.SanitizedResponseJson);
+        var hasIdentifiers = !string.IsNullOrWhiteSpace(normalizedTaskId) && !string.IsNullOrWhiteSpace(normalizedIdBase);
+        var isNoProgressNow = currentStatus.Status == VideoProviderTaskStatus.ResourceUnavailable
+                              && !HasProviderProgressEvidence(currentStatus)
+                              && (percent is null or <= 0);
+        var shouldTerminalize = hasIdentifiers
+                                && isNoProgressNow
+                                && !hasProgressEvidence
+                                && resourceUnavailableCount >= Math.Max(1, threshold)
+                                && elapsedSeconds >= Math.Max(0, (int)gracePeriod.TotalSeconds);
+
+        return new ResourceUnavailablePollState(
+            resourceUnavailableCount,
+            firstSeenAt,
+            elapsedSeconds,
+            percent,
+            hasProgressEvidence,
+            Math.Max(1, threshold),
+            Math.Max(0, (int)gracePeriod.TotalSeconds),
+            shouldTerminalize);
+    }
+
+    private static bool EventMatchesProviderTask(
+        RenderJobEventDto evt,
+        Guid versionId,
+        string? providerTaskId,
+        string? providerVideoIdBase)
+    {
+        if (string.IsNullOrWhiteSpace(evt.DataJson))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(evt.DataJson);
+            var root = document.RootElement;
+            var eventVersionId = ReadJsonString(root, "sceneVideoVersionId");
+            var eventTaskId = ReadJsonString(root, "providerTaskId") ?? ReadJsonString(root, "taskId");
+            var eventIdBase = ReadJsonString(root, "providerVideoIdBase") ?? ReadJsonString(root, "idBase");
+            var versionMatches = Guid.TryParse(eventVersionId, out var parsedVersionId) && parsedVersionId == versionId;
+            var taskMatches = !string.IsNullOrWhiteSpace(providerTaskId)
+                              && string.Equals(eventTaskId, providerTaskId, StringComparison.OrdinalIgnoreCase);
+            var idBaseMatches = !string.IsNullOrWhiteSpace(providerVideoIdBase)
+                                && string.Equals(eventIdBase, providerVideoIdBase, StringComparison.OrdinalIgnoreCase);
+            return versionMatches || taskMatches || idBaseMatches;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    private static DateTimeOffset? ReadFirstSeenAt(RenderJobEventDto evt)
+    {
+        if (!string.IsNullOrWhiteSpace(evt.DataJson))
+        {
+            try
+            {
+                using var document = JsonDocument.Parse(evt.DataJson);
+                var root = document.RootElement;
+                var firstSeen = ReadJsonString(root, "firstSeenAt");
+                if (DateTimeOffset.TryParse(firstSeen, out var parsedFirstSeen))
+                {
+                    return parsedFirstSeen;
+                }
+            }
+            catch (JsonException)
+            {
+                // Ignore malformed event data and fall back to the event timestamp.
+            }
+        }
+
+        return evt.CreatedAt == default
+            ? null
+            : new DateTimeOffset(DateTime.SpecifyKind(evt.CreatedAt, DateTimeKind.Utc));
+    }
+
+    private static bool HasProviderProgressEvidence(VideoProviderPollResult status)
+        => !string.IsNullOrWhiteSpace(status.OutputUrl)
+           || HasProviderProgressEvidence(status.SanitizedResponseJson)
+           || (status.Status == VideoProviderTaskStatus.Processing
+               && ReadProviderPercent(status.SanitizedResponseJson) is > 0);
+
+    private static bool HasProviderProgressEvidence(RenderJobEventDto evt)
+    {
+        if (string.IsNullOrWhiteSpace(evt.DataJson))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(evt.DataJson);
+            var root = document.RootElement;
+            var normalizedStatus = ReadJsonString(root, "normalizedStatus") ?? ReadJsonString(root, "providerStatus");
+            if (string.Equals(normalizedStatus, nameof(VideoProviderTaskStatus.Success), StringComparison.OrdinalIgnoreCase)
+                || string.Equals(normalizedStatus, "SUCCESSFUL", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            var providerRawResponse = ReadJsonString(root, "providerRawResponse");
+            if (HasProviderProgressEvidence(providerRawResponse))
+            {
+                return true;
+            }
+
+            return HasProviderProgressEvidence(root.GetRawText());
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    private static bool HasProviderProgressEvidence(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            return HasProviderProgressEvidence(document.RootElement);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    private static bool HasProviderProgressEvidence(JsonElement element)
+    {
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var property in element.EnumerateObject())
+            {
+                var name = property.Name;
+                var value = property.Value;
+                if (name.Equals("percent", StringComparison.OrdinalIgnoreCase)
+                    || name.Equals("progress", StringComparison.OrdinalIgnoreCase)
+                    || name.Equals("progressPercent", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (ReadJsonNumber(value) is > 0)
+                    {
+                        return true;
+                    }
+                }
+
+                if (name.Equals("video_id", StringComparison.OrdinalIgnoreCase)
+                    || name.Equals("videoId", StringComparison.OrdinalIgnoreCase)
+                    || name.Equals("video_id_default", StringComparison.OrdinalIgnoreCase)
+                    || name.Equals("videoIdDefault", StringComparison.OrdinalIgnoreCase)
+                    || name.Equals("download_url", StringComparison.OrdinalIgnoreCase)
+                    || name.Equals("downloadUrl", StringComparison.OrdinalIgnoreCase)
+                    || name.Equals("output_url", StringComparison.OrdinalIgnoreCase)
+                    || name.Equals("outputUrl", StringComparison.OrdinalIgnoreCase)
+                    || name.Equals("url", StringComparison.OrdinalIgnoreCase)
+                    || name.Equals("work_id", StringComparison.OrdinalIgnoreCase)
+                    || name.Equals("workId", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (value.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(value.GetString()))
+                    {
+                        return true;
+                    }
+                }
+
+                if (name.Equals("status", StringComparison.OrdinalIgnoreCase)
+                    || name.Equals("providerStatus", StringComparison.OrdinalIgnoreCase)
+                    || name.Equals("normalizedStatus", StringComparison.OrdinalIgnoreCase))
+                {
+                    var status = value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+                    if (status is not null
+                        && (status.Equals("ACTIVE", StringComparison.OrdinalIgnoreCase)
+                            || status.Equals("PROCESSING", StringComparison.OrdinalIgnoreCase)
+                            || status.Equals("SUCCESSFUL", StringComparison.OrdinalIgnoreCase)
+                            || status.Equals(nameof(VideoProviderTaskStatus.Success), StringComparison.OrdinalIgnoreCase)))
+                    {
+                        return true;
+                    }
+                }
+
+                if ((value.ValueKind == JsonValueKind.Object || value.ValueKind == JsonValueKind.Array)
+                    && HasProviderProgressEvidence(value))
+                {
+                    return true;
+                }
+            }
+        }
+        else if (element.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in element.EnumerateArray())
+            {
+                if (HasProviderProgressEvidence(item))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static int? ReadProviderPercent(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            return ReadProviderPercent(document.RootElement);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static int? ReadProviderPercent(JsonElement element)
+    {
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var property in element.EnumerateObject())
+            {
+                if (property.Name.Equals("percent", StringComparison.OrdinalIgnoreCase)
+                    || property.Name.Equals("progress", StringComparison.OrdinalIgnoreCase)
+                    || property.Name.Equals("progressPercent", StringComparison.OrdinalIgnoreCase))
+                {
+                    return ReadJsonNumber(property.Value);
+                }
+
+                if (property.Value.ValueKind is JsonValueKind.Object or JsonValueKind.Array
+                    && ReadProviderPercent(property.Value) is int nested)
+                {
+                    return nested;
+                }
+            }
+        }
+        else if (element.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in element.EnumerateArray())
+            {
+                if (ReadProviderPercent(item) is int nested)
+                {
+                    return nested;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static int? ReadJsonNumber(JsonElement value)
+    {
+        if (value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var number))
+        {
+            return number;
+        }
+
+        return value.ValueKind == JsonValueKind.String && int.TryParse(value.GetString(), out number)
+            ? number
+            : null;
+    }
 
     private static IReadOnlyList<HistoricalFallbackCandidate> HydrateHistoricalCandidates(
         IReadOnlyList<ResolvedFallbackCandidate> candidates,
@@ -2845,7 +3290,14 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
         => classification is "MODEL_PROVIDER_FAILURE"
             or "TRANSIENT_PROVIDER_FAILURE"
             or DurationRejectedFailureClassification
-            or KnownNoResourcesFailureClassification;
+            or KnownNoResourcesFailureClassification
+            or PollResourceUnavailableNoProgressFailureClassification;
+
+    private int GetResourceUnavailablePollThreshold()
+        => Math.Max(1, _config.GetValue("VideoRender:ProviderResourceUnavailablePollThreshold", 3));
+
+    private TimeSpan GetResourceUnavailableGracePeriod()
+        => TimeSpan.FromSeconds(Math.Max(0, _config.GetValue("VideoRender:ProviderResourceUnavailableGraceSeconds", 30)));
 
     private async Task AddDurationFallbackStartedEventAsync(
         VideoProjectDto project,
