@@ -388,7 +388,7 @@ public sealed class RVideoVideoHotfixTests
         var now = DateTimeOffset.Parse("2026-09-13T00:00:25Z");
         var events = new[]
         {
-            ResourceUnavailableEvent("2026-09-13T00:00:00Z", "2026-09-13T00:00:00Z")
+            ResourceUnavailableProviderEvent("2026-09-13T00:00:00Z", "2026-09-13T00:00:00Z")
         };
 
         var state = ResolveResourceUnavailablePollStateForTest(events, now, """{"status":"NOT_RESOURCES","percent":0}""");
@@ -404,14 +404,42 @@ public sealed class RVideoVideoHotfixTests
         var now = DateTimeOffset.Parse("2026-09-13T00:00:35Z");
         var events = new[]
         {
-            ResourceUnavailableEvent("2026-09-13T00:00:00Z", "2026-09-13T00:00:00Z"),
-            ResourceUnavailableEvent("2026-09-13T00:00:00Z", "2026-09-13T00:00:10Z")
+            ResourceUnavailableProviderEvent("2026-09-13T00:00:00Z", "2026-09-13T00:00:00Z"),
+            ResourceUnavailableRetryEvent("2026-09-13T00:00:00Z", "2026-09-13T00:00:00Z"),
+            ResourceUnavailableProviderEvent("2026-09-13T00:00:00Z", "2026-09-13T00:00:10Z"),
+            ResourceUnavailableRetryEvent("2026-09-13T00:00:00Z", "2026-09-13T00:00:10Z")
         };
 
-        var state = ResolveResourceUnavailablePollStateForTest(events, now, """{"status":"NOT_RESOURCES","percent":0}""");
+        var state = ResolveResourceUnavailablePollStateForTest(
+            events,
+            now,
+            """{"status":"NOT_RESOURCES","percent":0}""",
+            graceSeconds: 0);
 
         Assert.Equal(3, (int)GetProperty(state, "ResourceUnavailableCount")!);
         Assert.Equal(35, (int)GetProperty(state, "ElapsedSeconds")!);
+        Assert.True((bool)GetProperty(state, "ShouldTerminalize")!);
+    }
+
+    [Fact]
+    public void ResourceUnavailableCountUsesDistinctCanonicalPollObservations()
+    {
+        var now = DateTimeOffset.Parse("2026-09-13T00:00:35Z");
+        var events = new[]
+        {
+            ResourceUnavailableProviderEvent("2026-09-13T00:00:00Z", "2026-09-13T00:00:00Z"),
+            ResourceUnavailableRetryEvent("2026-09-13T00:00:00Z", "2026-09-13T00:00:00Z"),
+            ResourceUnavailableProviderEvent("2026-09-13T00:00:00Z", "2026-09-13T00:00:10Z"),
+            ResourceUnavailableRetryEvent("2026-09-13T00:00:00Z", "2026-09-13T00:00:10Z")
+        };
+
+        var state = ResolveResourceUnavailablePollStateForTest(
+            events,
+            now,
+            """{"status":"NOT_RESOURCES","percent":0}""",
+            graceSeconds: 0);
+
+        Assert.Equal(3, (int)GetProperty(state, "ResourceUnavailableCount")!);
         Assert.True((bool)GetProperty(state, "ShouldTerminalize")!);
     }
 
@@ -421,8 +449,8 @@ public sealed class RVideoVideoHotfixTests
         var now = DateTimeOffset.Parse("2026-09-13T00:00:35Z");
         var events = new[]
         {
-            ResourceUnavailableEvent("2026-09-13T00:00:00Z", "2026-09-13T00:00:00Z"),
-            ResourceUnavailableEvent("2026-09-13T00:00:00Z", "2026-09-13T00:00:10Z"),
+            ResourceUnavailableProviderEvent("2026-09-13T00:00:00Z", "2026-09-13T00:00:00Z"),
+            ResourceUnavailableProviderEvent("2026-09-13T00:00:00Z", "2026-09-13T00:00:10Z"),
             PollProgressEvent("""{"status":"PROCESSING","percent":20}""", "2026-09-13T00:00:15Z")
         };
 
@@ -443,14 +471,37 @@ public sealed class RVideoVideoHotfixTests
         var now = DateTimeOffset.Parse("2026-09-13T00:00:35Z");
         var events = new[]
         {
-            ResourceUnavailableEvent("2026-09-13T00:00:00Z", "2026-09-13T00:00:00Z"),
-            ResourceUnavailableEvent("2026-09-13T00:00:00Z", "2026-09-13T00:00:10Z")
+            ResourceUnavailableProviderEvent("2026-09-13T00:00:00Z", "2026-09-13T00:00:00Z"),
+            ResourceUnavailableProviderEvent("2026-09-13T00:00:00Z", "2026-09-13T00:00:10Z")
         };
 
         var state = ResolveResourceUnavailablePollStateForTest(events, now, responseJson);
 
         Assert.True((bool)GetProperty(state, "HasProgressEvidence")!);
         Assert.False((bool)GetProperty(state, "ShouldTerminalize")!);
+    }
+
+    [Fact]
+    public void UnrelatedUrlDoesNotCountAsProviderProgressEvidence()
+    {
+        var now = DateTimeOffset.Parse("2026-09-13T00:00:35Z");
+        var events = new[]
+        {
+            ResourceUnavailableProviderEvent("2026-09-13T00:00:00Z", "2026-09-13T00:00:00Z"),
+            ResourceUnavailableRetryEvent("2026-09-13T00:00:00Z", "2026-09-13T00:00:00Z"),
+            ResourceUnavailableProviderEvent("2026-09-13T00:00:00Z", "2026-09-13T00:00:10Z"),
+            ResourceUnavailableRetryEvent("2026-09-13T00:00:00Z", "2026-09-13T00:00:10Z"),
+            UnrelatedUrlEvent("2026-09-13T00:00:15Z")
+        };
+
+        var state = ResolveResourceUnavailablePollStateForTest(
+            events,
+            now,
+            """{"status":"NOT_RESOURCES","percent":0}""",
+            graceSeconds: 0);
+
+        Assert.False((bool)GetProperty(state, "HasProgressEvidence")!);
+        Assert.True((bool)GetProperty(state, "ShouldTerminalize")!);
     }
 
     [Fact]
@@ -2391,7 +2442,8 @@ public sealed class RVideoVideoHotfixTests
     private static object ResolveResourceUnavailablePollStateForTest(
         IReadOnlyList<RenderJobEventDto> events,
         DateTimeOffset now,
-        string sanitizedResponseJson)
+        string sanitizedResponseJson,
+        int graceSeconds = 30)
     {
         var method = typeof(SceneVideoWorkerHandler).GetMethod(
             "ResolveResourceUnavailablePollState",
@@ -2415,14 +2467,28 @@ public sealed class RVideoVideoHotfixTests
             events,
             now,
             3,
-            TimeSpan.FromSeconds(30)
+            TimeSpan.FromSeconds(graceSeconds)
         })!;
     }
 
     private static object GetProperty(object instance, string name)
         => instance.GetType().GetProperty(name)!.GetValue(instance)!;
 
-    private static RenderJobEventDto ResourceUnavailableEvent(string firstSeenAt, string createdAt)
+    private static RenderJobEventDto ResourceUnavailableProviderEvent(string firstSeenAt, string createdAt)
+        => new()
+        {
+            EventType = "RVIDEO_VIDEO_PROVIDER_RESOURCES_UNAVAILABLE",
+            CreatedAt = DateTime.Parse(createdAt, null, System.Globalization.DateTimeStyles.AdjustToUniversal),
+            DataJson = JsonSerializer.Serialize(new
+            {
+                sceneVideoVersionId = Guid.Empty,
+                providerTaskId = "task-1",
+                providerVideoIdBase = "id-base-1",
+                firstSeenAt
+            })
+        };
+
+    private static RenderJobEventDto ResourceUnavailableRetryEvent(string firstSeenAt, string createdAt)
         => new()
         {
             EventType = "RVIDEO_VIDEO_RESOURCE_UNAVAILABLE_RETRY",
@@ -2433,6 +2499,26 @@ public sealed class RVideoVideoHotfixTests
                 providerTaskId = "task-1",
                 providerVideoIdBase = "id-base-1",
                 firstSeenAt
+            })
+        };
+
+    private static RenderJobEventDto UnrelatedUrlEvent(string createdAt)
+        => new()
+        {
+            EventType = "SCENE_VIDEO_PROVIDER_PROCESSING",
+            CreatedAt = DateTime.Parse(createdAt, null, System.Globalization.DateTimeStyles.AdjustToUniversal),
+            DataJson = JsonSerializer.Serialize(new
+            {
+                sceneVideoVersionId = Guid.Empty,
+                providerTaskId = "task-1",
+                providerVideoIdBase = "id-base-1",
+                normalizedStatus = "NOT_RESOURCES",
+                providerRawResponse = new
+                {
+                    sourceImageUrl = "https://cdn.example/source.png",
+                    endpointUrl = "https://api.example/ai/video",
+                    callbackUrl = "https://app.example/callback"
+                }
             })
         };
 

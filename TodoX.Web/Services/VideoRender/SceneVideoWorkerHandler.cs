@@ -2350,8 +2350,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
             .Where(evt => EventMatchesProviderTask(evt, versionId, normalizedTaskId, normalizedIdBase))
             .ToList();
         var previousRetryEvents = matchingEvents
-            .Where(evt => string.Equals(evt.EventType, "RVIDEO_VIDEO_RESOURCE_UNAVAILABLE_RETRY", StringComparison.OrdinalIgnoreCase)
-                          || string.Equals(evt.EventType, "RVIDEO_VIDEO_PROVIDER_RESOURCES_UNAVAILABLE", StringComparison.OrdinalIgnoreCase))
+            .Where(evt => string.Equals(evt.EventType, "RVIDEO_VIDEO_PROVIDER_RESOURCES_UNAVAILABLE", StringComparison.OrdinalIgnoreCase))
             .ToList();
         var previousFirstSeen = previousRetryEvents
             .Select(ReadFirstSeenAt)
@@ -2524,7 +2523,6 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                     || name.Equals("downloadUrl", StringComparison.OrdinalIgnoreCase)
                     || name.Equals("output_url", StringComparison.OrdinalIgnoreCase)
                     || name.Equals("outputUrl", StringComparison.OrdinalIgnoreCase)
-                    || name.Equals("url", StringComparison.OrdinalIgnoreCase)
                     || name.Equals("work_id", StringComparison.OrdinalIgnoreCase)
                     || name.Equals("workId", StringComparison.OrdinalIgnoreCase))
                 {

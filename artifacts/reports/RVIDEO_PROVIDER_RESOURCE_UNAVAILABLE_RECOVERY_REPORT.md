@@ -23,9 +23,9 @@ For an existing task with both `providerTaskId` and `providerVideoIdBase`:
 - The classification is `POLL_RESOURCE_UNAVAILABLE_NO_PROGRESS`.
 - Same-model duration fallback remains limited to `PROVIDER_DURATION_REJECTED`; resource starvation advances to the next model candidate.
 
-The resource-unavailable count and first-seen time are derived from persisted `render_job_events` data, so the decision survives worker restart without schema changes.
+The resource-unavailable count and first-seen time are derived from persisted `render_job_events` data, so the decision survives worker restart without schema changes. `RVIDEO_VIDEO_PROVIDER_RESOURCES_UNAVAILABLE` is the canonical persisted observation event and is counted once per poll. The companion `RVIDEO_VIDEO_RESOURCE_UNAVAILABLE_RETRY` event is diagnostic/scheduling metadata only and is never included in the observation count.
 
-Progress evidence includes a positive progress/percent value, `ACTIVE`, `PROCESSING`, or `SUCCESSFUL` status evidence, provider video/work identifiers, and output/download URLs. A task without both durable identifiers is never treated as safely terminalizable.
+Progress evidence includes a positive progress/percent value, `ACTIVE`, `PROCESSING`, or `SUCCESSFUL` status evidence, provider video/work identifiers, and explicit output/download URLs. Arbitrary `url`, source-image, endpoint, and callback URL properties are not treated as provider progress. A task without both durable identifiers is never treated as safely terminalizable.
 
 ## Scene 312 Recovery Procedure
 
@@ -52,6 +52,7 @@ Passed:
 
 - `dotnet test Tests\TodoX.Web.Phase1B.Tests.csproj -c Release --no-restore --filter "FullyQualifiedName~RVideoVideoHotfixTests"` compiled and ran; the new hotfix cases passed, with 113 passed and 4 pre-existing legacy source/assertion failures.
 - `dotnet test Tests\TodoX.Web.Phase1B.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~FirstPollTimeNotResources|FullyQualifiedName~RepeatedPollTimeNotResources|FullyQualifiedName~ProgressHistoryBlocks|FullyQualifiedName~CurrentOutputEvidence|FullyQualifiedName~PollTimeResourceTerminalFallback|FullyQualifiedName~DurationRejectedStillUses"`: 11 passed, 0 failed.
+- Canonical-observation and false-positive regression tests: 13 passed, 0 failed.
 - `dotnet build TodoX.Web\TodoX.Web.csproj --configuration Release --no-restore`: passed, 0 errors.
 - `git diff --check`: passed.
 
