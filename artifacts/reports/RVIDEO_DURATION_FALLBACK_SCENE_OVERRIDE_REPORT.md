@@ -78,7 +78,9 @@ The broader filter `FullyQualifiedName~RVideo|FullyQualifiedName~79Ai|FullyQuali
 
 ## Commit
 
-Commit SHA: `9ce7216`
+Implementation commit SHA: `ac4391b36cd8c840e21e4735e16e89d04be6481e`.
+
+This report file is committed with the final pushed branch state after the implementation commit.
 
 ## Remaining Risks
 
