@@ -107,7 +107,7 @@ Result: passed to `artifacts/publish/todox-dashboard`.
 
 ## Commit
 
-Commit: pending
+Commit: `01aeb3b2652b59a05de7d8a6139ce8b7da24992f`
 
 The report itself is stored under `artifacts`, which is ignored by the repository's normal ignore rules; it is force-added separately so the requested artifact is versioned.
 
