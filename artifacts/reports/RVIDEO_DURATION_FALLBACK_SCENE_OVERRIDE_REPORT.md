@@ -105,7 +105,7 @@ Diff hygiene:
 
 Commit:
 
-- Pending until commit is created.
+- Implementation commit: `d64d8e1e8e81dfc10ea524ff13877f2de35194b2`.
 
 ## Remaining Risks
 
