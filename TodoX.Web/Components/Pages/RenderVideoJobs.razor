@@ -13,6 +13,7 @@
 @inject TodoX.Web.Services.Render.ISceneImageRenderService SceneImages
 @inject TodoX.Web.Services.AiCharacters.IAiCharacterService Characters
 @inject TodoX.Web.Services.IAiStudioCatalogService Catalog
+@inject TodoX.Web.Services.AiProviders.IAiProviderModelService ProviderModels
 @inject TodoX.Web.Services.VideoRender.ITodoXVideoPromptParser PromptParser
 @inject TodoX.Web.Services.AiProviders.IAiImageRenderRouter ImageRenderRouter
 @inject TodoX.Web.Services.AiProviders.IAiProviderService AiProviders
@@ -492,6 +493,27 @@ else
                                                     </MudTooltip>
                                                 </MudStack>
                                                 </div>
+                                                @if (SceneVideoModelOptions.Count > 0)
+                                                {
+                                                    <MudGrid Class="scene-video-override-grid">
+                                                        <MudItem xs="12" sm="7">
+                                                            <MudSelect T="string" Label="Model video" Value="@ResolveSceneVideoModelSelection(scene)" ValueChanged="@((string value) => OnSceneVideoModelChanged(scene, value))" Dense="true" Variant="Variant.Outlined">
+                                                                @foreach (var option in SceneVideoModelOptions)
+                                                                {
+                                                                    <MudSelectItem T="string" Value="@option.Key">@option.DisplayName</MudSelectItem>
+                                                                }
+                                                            </MudSelect>
+                                                        </MudItem>
+                                                        <MudItem xs="12" sm="5">
+                                                            <MudSelect T="int" Label="Thời lượng" Value="@ResolveSceneVideoDurationSelection(scene)" ValueChanged="@((int value) => OnSceneVideoDurationChanged(scene, value))" Dense="true" Variant="Variant.Outlined">
+                                                                @foreach (var duration in ResolveSceneVideoDurations(scene))
+                                                                {
+                                                                    <MudSelectItem T="int" Value="@duration">@($"{duration}s")</MudSelectItem>
+                                                                }
+                                                            </MudSelect>
+                                                        </MudItem>
+                                                    </MudGrid>
+                                                }
                                                 @if (_sceneRerenderErrors.TryGetValue(scene.Id, out var sceneErr) && !string.IsNullOrWhiteSpace(sceneErr))
                                                 {
                                                     <MudText Typo="Typo.caption" Color="Color.Error">@sceneErr</MudText>
@@ -735,6 +757,7 @@ else
     private readonly Dictionary<long, IReadOnlyList<TodoX.Web.Services.VideoRender.SceneVideoVersionDto>> _videoVersions = new();
     private readonly Dictionary<long, IReadOnlyList<TodoX.Web.Services.VideoRender.SceneAudioVersionDto>> _audioVersions = new();
     private readonly Dictionary<long, SceneEditorState> _sceneDrafts = new();
+    private IReadOnlyList<SceneVideoModelOption> _sceneVideoModelOptions = Array.Empty<SceneVideoModelOption>();
     private IReadOnlyList<TodoX.Web.Services.VideoRender.FinalVideoVersionDto> _finalVersions = Array.Empty<TodoX.Web.Services.VideoRender.FinalVideoVersionDto>();
     private readonly Dictionary<Guid, IReadOnlyList<TodoX.Web.Services.VideoRender.FinalVideoVersionItemDto>> _finalVersionItems = new();
     private ProviderOptionDto? _defaultImageToVideoProvider;
@@ -767,8 +790,18 @@ else
         public Guid? SelectedImageVersionId { get; set; }
         public Guid? SelectedVideoVersionId { get; set; }
         public string AspectRatio { get; set; } = AspectRatioPortrait;
+        public string? VideoModelSelectionKey { get; set; }
+        public int? VideoDurationOverrideSeconds { get; set; }
         public bool IsDirty { get; set; }
     }
+
+    private sealed record SceneVideoModelOption(
+        string Key,
+        string ProviderCode,
+        string ModelCode,
+        string? Mode,
+        string DisplayName,
+        IReadOnlyList<int> Durations);
 
     private const string AspectRatioLandscape = "16:9";
     private const string AspectRatioPortrait = "9:16";
@@ -953,6 +986,160 @@ else
         }
 
         return true;
+    }
+
+    private IReadOnlyList<SceneVideoModelOption> SceneVideoModelOptions => _sceneVideoModelOptions;
+
+    private async Task LoadSceneVideoModelOptionsAsync()
+    {
+        var models = await ProviderModels.GetModelsAsync(
+            TodoX.Web.Services.VideoRender.RVideoVideoModelPolicy.ProviderCode,
+            mediaType: "video",
+            enabled: true);
+        _sceneVideoModelOptions = models
+            .Where(model => model.AllowUserSelect && !model.IsDeprecated)
+            .SelectMany(BuildSceneVideoModelOptions)
+            .OrderBy(option => ResolvePolicyRank(option.ModelCode, option.Mode))
+            .ThenBy(option => option.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IEnumerable<SceneVideoModelOption> BuildSceneVideoModelOptions(TodoX.Web.Models.AiProviderModelListItemDto model)
+    {
+        var durations = model.SupportedDurations
+            .Where(duration => duration > 0)
+            .Distinct()
+            .OrderBy(duration => duration)
+            .ToArray();
+        if (durations.Length == 0)
+        {
+            yield break;
+        }
+
+        foreach (var policy in TodoX.Web.Services.VideoRender.RVideoVideoModelPolicy.Models.Where(policy =>
+                     string.Equals(policy.ProviderCode, model.ProviderCode, StringComparison.OrdinalIgnoreCase)
+                     && string.Equals(policy.Model, model.ProviderModelCode, StringComparison.OrdinalIgnoreCase)
+                     && !string.IsNullOrWhiteSpace(policy.Mode)
+                     && (model.SupportedModes.Count == 0 || model.SupportedModes.Contains(policy.Mode, StringComparer.OrdinalIgnoreCase))))
+        {
+            var mode = policy.Mode!;
+            var label = string.IsNullOrWhiteSpace(model.DisplayName) ? model.ProviderModelCode : model.DisplayName.Trim();
+            yield return new SceneVideoModelOption(
+                BuildSceneVideoModelOptionKey(model.ProviderCode, model.ProviderModelCode, mode),
+                model.ProviderCode,
+                model.ProviderModelCode,
+                mode,
+                $"{label} / {mode}",
+                durations);
+        }
+    }
+
+    private static int ResolvePolicyRank(string modelCode, string? mode)
+    {
+        var policy = TodoX.Web.Services.VideoRender.RVideoVideoModelPolicy.Models.FirstOrDefault(x =>
+            string.Equals(x.Model, modelCode, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(x.Mode, mode, StringComparison.OrdinalIgnoreCase));
+        return policy?.AttemptIndex ?? int.MaxValue;
+    }
+
+    private static string BuildSceneVideoModelOptionKey(string providerCode, string modelCode, string? mode)
+        => $"{providerCode.Trim()}|{modelCode.Trim()}|{mode?.Trim()}";
+
+    private SceneVideoModelOption? ResolveSceneVideoModelOption(VideoProjectSceneDto scene)
+    {
+        if (_sceneVideoModelOptions.Count == 0)
+        {
+            return null;
+        }
+
+        var draft = GetSceneDraft(scene);
+        if (!string.IsNullOrWhiteSpace(draft.VideoModelSelectionKey))
+        {
+            var selected = _sceneVideoModelOptions.FirstOrDefault(option =>
+                string.Equals(option.Key, draft.VideoModelSelectionKey, StringComparison.OrdinalIgnoreCase));
+            if (selected is not null)
+            {
+                return selected;
+            }
+        }
+
+        var initial = TodoX.Web.Services.VideoRender.RVideoVideoModelPolicy.GetInitial();
+        return _sceneVideoModelOptions.FirstOrDefault(option =>
+                   string.Equals(option.ProviderCode, initial.ProviderCode, StringComparison.OrdinalIgnoreCase)
+                   && string.Equals(option.ModelCode, initial.Model, StringComparison.OrdinalIgnoreCase)
+                   && string.Equals(option.Mode, initial.Mode, StringComparison.OrdinalIgnoreCase))
+               ?? _sceneVideoModelOptions.First();
+    }
+
+    private string ResolveSceneVideoModelSelection(VideoProjectSceneDto scene)
+        => ResolveSceneVideoModelOption(scene)?.Key ?? string.Empty;
+
+    private void OnSceneVideoModelChanged(VideoProjectSceneDto scene, string value)
+    {
+        var option = _sceneVideoModelOptions.FirstOrDefault(x => string.Equals(x.Key, value, StringComparison.OrdinalIgnoreCase));
+        if (option is null)
+        {
+            return;
+        }
+
+        var draft = GetSceneDraft(scene);
+        draft.VideoModelSelectionKey = option.Key;
+        if (draft.VideoDurationOverrideSeconds is not int duration || !option.Durations.Contains(duration))
+        {
+            draft.VideoDurationOverrideSeconds = ResolveNearestSceneVideoDuration(scene.DurationSeconds, option.Durations);
+        }
+    }
+
+    private int ResolveSceneVideoDurationSelection(VideoProjectSceneDto scene)
+    {
+        var option = ResolveSceneVideoModelOption(scene);
+        if (option is null)
+        {
+            return scene.DurationSeconds;
+        }
+
+        var draft = GetSceneDraft(scene);
+        return draft.VideoDurationOverrideSeconds is int duration && option.Durations.Contains(duration)
+            ? duration
+            : ResolveNearestSceneVideoDuration(scene.DurationSeconds, option.Durations);
+    }
+
+    private void OnSceneVideoDurationChanged(VideoProjectSceneDto scene, int value)
+    {
+        var option = ResolveSceneVideoModelOption(scene);
+        if (option is null || !option.Durations.Contains(value))
+        {
+            return;
+        }
+
+        GetSceneDraft(scene).VideoDurationOverrideSeconds = value;
+    }
+
+    private IReadOnlyList<int> ResolveSceneVideoDurations(VideoProjectSceneDto scene)
+        => ResolveSceneVideoModelOption(scene)?.Durations ?? Array.Empty<int>();
+
+    private (SceneVideoModelOption? Option, int? DurationSeconds) ResolveSceneVideoOverride(VideoProjectSceneDto scene)
+    {
+        var option = ResolveSceneVideoModelOption(scene);
+        if (option is null)
+        {
+            return (null, null);
+        }
+
+        return (option, ResolveSceneVideoDurationSelection(scene));
+    }
+
+    private static int ResolveNearestSceneVideoDuration(int sceneDurationSeconds, IReadOnlyList<int> supportedDurations)
+    {
+        if (supportedDurations.Count == 0)
+        {
+            return Math.Max(1, sceneDurationSeconds);
+        }
+
+        return supportedDurations.FirstOrDefault(duration => duration >= sceneDurationSeconds)
+            is int nearest and > 0
+                ? nearest
+                : supportedDurations.Max();
     }
 
     private string ProjectAspectRatio => HasProjectAspectRatio ? _aspectRatio : "Chưa chọn";
@@ -1491,11 +1678,13 @@ else
                 try
                 {
                     _defaultImageToVideoProvider = await AiProviders.GetDefaultProviderAsync(TodoX.Web.Services.VideoRender.RVideoVideoModelPolicy.CapabilityCode);
+                    await LoadSceneVideoModelOptionsAsync();
                 }
                 catch (Exception ex)
                 {
                     Logger.LogWarning(ex, "RVIDEO_RELOAD_VIDEO_PROVIDER_FAILED projectId={ProjectId}", _project.Id);
                     _defaultImageToVideoProvider = null;
+                    _sceneVideoModelOptions = Array.Empty<SceneVideoModelOption>();
                     _loadWarning = "Không thể tải cấu hình tạo video. Có thể xem preview hiện có và thử lại sau.";
                 }
                 await ReloadJobsAsync();
@@ -4640,6 +4829,18 @@ else
                 input.ReuseExistingSceneVideoVersion = reuseExistingVersion;
             }
 
+            var selectedOverride = ResolveSceneVideoOverride(scene);
+            if (selectedOverride.Option is not null && selectedOverride.DurationSeconds is int overrideDuration)
+            {
+                input.ManualOverride = true;
+                input.RequestedModelCode = selectedOverride.Option.ModelCode;
+                input.RequestedMode = selectedOverride.Option.Mode;
+                input.RequestedDurationSeconds = overrideDuration;
+            }
+
+            var jobModelCode = selectedOverride.Option?.ModelCode
+                ?? _defaultImageToVideoProvider?.ModelName
+                ?? TodoX.Web.Services.VideoRender.RVideoVideoModelPolicy.GetInitial().Model;
             var (job, alreadyActive) = await RenderJobs.EnqueueForSceneIfNoneActiveAsync(new RenderJobCreateModel
             {
                 JobType = TodoX.Web.Services.VideoRender.SceneVideoRenderHandler.JobTypeName,
@@ -4649,7 +4850,7 @@ else
                 Prompt = new { projectId = _project.Id, sceneId = scene.Id },
                 LogCode = BuildLogCode(),
                 ProviderCode = TodoX.Web.Services.VideoRender.RVideoVideoModelPolicy.ProviderCode,
-                ModelCode = _defaultImageToVideoProvider?.ModelName ?? TodoX.Web.Services.VideoRender.RVideoVideoModelPolicy.GetInitial().Model,
+                ModelCode = jobModelCode,
                 MaxAttempts = 1,
                 PointCostEstimate = 0,
                 PointStatus = RenderPointStatuses.Pending
@@ -4678,7 +4879,7 @@ else
                 _ => $"Đã enqueue render video cho scene {scene.SceneIndex}."
             };
             await LogProjectEvent(eventType, "info", eventMessage,
-                new { job.Id, sceneId = scene.Id, scene.SceneIndex, provider = _defaultImageToVideoProvider?.ProviderCode, model = _defaultImageToVideoProvider?.ModelName, billingIntent = billingIntent.ToString() });
+                new { job.Id, sceneId = scene.Id, scene.SceneIndex, provider = TodoX.Web.Services.VideoRender.RVideoVideoModelPolicy.ProviderCode, model = jobModelCode, selectedOverride.Option?.Mode, selectedOverride.DurationSeconds, billingIntent = billingIntent.ToString() });
             Snackbar.Add(eventMessage, Severity.Success);
             await StartPolling();
         }

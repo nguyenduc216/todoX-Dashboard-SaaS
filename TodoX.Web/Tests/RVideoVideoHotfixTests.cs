@@ -262,9 +262,9 @@ public sealed class RVideoVideoHotfixTests
             })
             .ToArray();
 
-        Assert.Equal(3, resolved.Length);
-        Assert.Equal([4, 6, 6], resolved.Select(x => x.Duration));
-        Assert.Equal(["veo_omni", "veo_3_1", "veo_3_1"], resolved.Select(x => x.Model));
+        Assert.Equal(5, resolved.Length);
+        Assert.Equal([4, 8, 6, 10, 10], resolved.Select(x => x.Duration));
+        Assert.Equal(["veo_omni", "veo_omni", "veo_3_1", "veo_3_1", "veo_3_1"], resolved.Select(x => x.Model));
     }
 
     [Fact]
@@ -312,13 +312,13 @@ public sealed class RVideoVideoHotfixTests
             .ToArray();
 
         Assert.Equal(
-            [("veo_omni", "flash"), ("veo_3_1", "fast"), ("veo_3_1", "lite")],
+            [("veo_omni", "flash"), ("veo_omni", "flash"), ("veo_3_1", "fast"), ("veo_3_1", "lite")],
             resolved);
     }
 
     [Theory]
-    [InlineData(4, "1080p", new[] { "veo_omni", "veo_3_1", "veo_3_1", "grok_video_heavy" }, new[] { "flash", "fast", "lite", "normal" }, new[] { 4, 4, 4, 6 }, new[] { "1080p", "1080p", "1080p", "720p" })]
-    [InlineData(6, "720p", new[] { "veo_omni", "veo_3_1", "veo_3_1", "grok_video_heavy" }, new[] { "flash", "fast", "lite", "normal" }, new[] { 6, 6, 6, 6 }, new[] { "720p", "720p", "720p", "720p" })]
+    [InlineData(4, "1080p", new[] { "veo_omni", "veo_omni", "veo_3_1", "veo_3_1", "veo_3_1", "veo_3_1", "grok_video_heavy" }, new[] { "flash", "flash", "fast", "fast", "lite", "lite", "normal" }, new[] { 4, 8, 4, 8, 4, 8, 6 }, new[] { "1080p", "1080p", "1080p", "1080p", "1080p", "1080p", "720p" })]
+    [InlineData(6, "720p", new[] { "veo_omni", "veo_omni", "veo_3_1", "veo_3_1", "veo_3_1", "veo_3_1", "grok_video_heavy" }, new[] { "flash", "flash", "fast", "fast", "lite", "lite", "normal" }, new[] { 6, 8, 6, 8, 6, 8, 6 }, new[] { "720p", "720p", "720p", "720p", "720p", "720p", "720p" })]
     [InlineData(8, "720p", new[] { "veo_omni", "veo_3_1", "veo_3_1", "grok_video_heavy" }, new[] { "flash", "fast", "lite", "normal" }, new[] { 8, 8, 8, 10 }, new[] { "720p", "720p", "720p", "720p" })]
     [InlineData(10, "1080p", new[] { "veo_omni", "grok_video_heavy" }, new[] { "flash", "normal" }, new[] { 10, 10 }, new[] { "1080p", "720p" })]
     public void ResolveFallbackCandidatesUsesPolicyOrderAndCatalogCapabilities(
@@ -644,6 +644,70 @@ public sealed class RVideoVideoHotfixTests
         Assert.Contains("sanitizedRequestMetadataJson", source);
         Assert.DoesNotContain("AccessToken", source);
         Assert.DoesNotContain("Authorization", source);
+    }
+
+    [Fact]
+    public void SceneVideoWorkerSupportsSameModelDurationFallbackBeforeModelFallback()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "SceneVideoWorkerHandler.cs");
+
+        Assert.Contains("ResolveSameModelDurationFallback", source);
+        Assert.Contains("\"RVIDEO_VIDEO_DURATION_FALLBACK_STARTED\"", source);
+        Assert.Contains("failureClassification == DurationRejectedFailureClassification", source);
+        Assert.Contains("same_model_duration_fallback", source);
+    }
+
+    [Fact]
+    public void RVideoSubmitFailureClassifiesExplicitDurationRejectionForDurationFallback()
+    {
+        var exception = new Ai79TaskSubmitException(
+            "Requested duration is not supported for this provider model.",
+            """{"error":"duration_not_supported","message":"duration is invalid"}""",
+            HttpStatusCode.BadRequest,
+            "bad_request",
+            sanitizedRequestMetadataJson: """{"model":"veo_3_1","mode":"fast","duration":4}""");
+
+        Assert.Equal("PROVIDER_DURATION_REJECTED", ClassifyRVideoSubmitFailureForTest(exception));
+        Assert.True(ShouldFallbackForTest("PROVIDER_DURATION_REJECTED"));
+    }
+
+    [Fact]
+    public void RVideoSubmitFailureDoesNotTreatNotResourcesAsDurationRejection()
+    {
+        var exception = new Ai79TaskSubmitException(
+            "NOT_RESOURCES",
+            """{"countTasks":"0","error":"NOT_RESOURCES"}""",
+            HttpStatusCode.OK,
+            "provider_error",
+            sanitizedRequestMetadataJson: """{"model":"veo_omni","mode":"flash","duration":4}""");
+
+        Assert.Equal("KNOWN_NO_RESOURCES", ClassifyRVideoSubmitFailureForTest(exception));
+    }
+
+    [Fact]
+    public void RenderVideoJobsPageLoadsCatalogDurationsAndAppliesPerSceneOverride()
+    {
+        var source = ReadRepoFile("Components", "Pages", "RenderVideoJobs.razor");
+
+        Assert.Contains("ProviderModels.GetModelsAsync", source);
+        Assert.Contains("model.SupportedDurations", source);
+        Assert.Contains("ResolveSceneVideoOverride(scene)", source);
+        Assert.Contains("input.ManualOverride = true", source);
+        Assert.Contains("input.RequestedModelCode", source);
+        Assert.Contains("input.RequestedDurationSeconds", source);
+        Assert.Contains("RVIDEO_VIDEO_MANUAL_RERENDER_REQUESTED", source);
+    }
+
+    [Fact]
+    public void SceneVideoRenderHandlerValidatesManualOverrideAgainstCatalogDurations()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "SceneVideoRenderHandler.cs");
+
+        Assert.Contains("IsValidManualVideoOverrideAsync", source);
+        Assert.Contains("model.SupportedDurations.Contains(durationSeconds)", source);
+        Assert.Contains("RVIDEO_VIDEO_MANUAL_RERENDER_REJECTED", source);
+        Assert.Contains("RequestedDurationSeconds = input.ManualOverride ? requestedDuration : null", source);
+        Assert.Contains("DurationSeconds = requestedDuration", source);
     }
 
     [Fact]
