@@ -32,6 +32,10 @@ public sealed class SceneVideoRenderInput
     public string? ExistingLogicalRequestId { get; set; }
     public Guid? ExistingSceneVideoVersionId { get; set; }
     public bool ReuseExistingSceneVideoVersion { get; set; }
+    public string? RequestedModelCode { get; set; }
+    public string? RequestedMode { get; set; }
+    public int? RequestedDurationSeconds { get; set; }
+    public bool ManualOverride { get; set; }
 
     public void ApplySharedReferenceImage(RVideoSceneImageReferenceSelection reference)
     {
@@ -108,6 +112,7 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
     private readonly IVideoRenderEligibilityService _eligibility;
     private readonly IVideoPromptValidator _promptValidator;
     private readonly IRVideoTrustedPayerContextService _payers;
+    private readonly IAiProviderModelService _models;
     private readonly IConfiguration _config;
     private readonly ILogger<SceneVideoRenderHandler> _logger;
 
@@ -129,6 +134,7 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
         IVideoRenderEligibilityService eligibility,
         IVideoPromptValidator promptValidator,
         IRVideoTrustedPayerContextService payers,
+        IAiProviderModelService models,
         IConfiguration config,
         ILogger<SceneVideoRenderHandler> logger)
     {
@@ -147,6 +153,7 @@ public sealed class SceneVideoRenderHandler : IRenderJobHandler
         _eligibility = eligibility;
         _promptValidator = promptValidator;
         _payers = payers;
+        _models = models;
         _config = config;
         _logger = logger;
     }

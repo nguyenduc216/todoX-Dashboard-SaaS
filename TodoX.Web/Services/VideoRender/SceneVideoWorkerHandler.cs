@@ -59,6 +59,10 @@ public sealed class SceneVideoRenderWorkItemInput
     public VideoSceneImageInputMode ImageInputMode { get; set; } = VideoSceneImageInputMode.LegacySelectedSource;
     public Guid? ExistingSceneVideoVersionId { get; set; }
     public bool ReuseExistingSceneVideoVersion { get; set; }
+    public string? RequestedModelCode { get; set; }
+    public string? RequestedMode { get; set; }
+    public int? RequestedDurationSeconds { get; set; }
+    public bool ManualOverride { get; set; }
 }
 
 public enum VideoSceneImageInputMode
@@ -162,6 +166,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private const int DefaultMaxReconciliationRetries = 3;
     private const string KnownNoResourcesFailureClassification = "KNOWN_NO_RESOURCES";
+    private const string DurationRejectedFailureClassification = "PROVIDER_DURATION_REJECTED";
 
     private readonly VideoRenderRepository _repo;
     private readonly ISceneMediaVersioningService _versions;
@@ -452,6 +457,10 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                         attemptIndex,
                         sceneDurationSeconds = input.DurationSeconds,
                         providerDurationSeconds = candidate.ProviderDurationSeconds,
+                        manualOverride = input.ManualOverride,
+                        requestedModel = input.RequestedModelCode,
+                        requestedMode = input.RequestedMode,
+                        requestedDurationSeconds = input.RequestedDurationSeconds ?? input.DurationSeconds,
                         requestedResolution = input.Resolution,
                         providerResolution = candidate.ProviderResolution
                     },
@@ -463,6 +472,10 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                         policy.Mode,
                         sceneDurationSeconds = input.DurationSeconds,
                         providerDurationSeconds = candidate.ProviderDurationSeconds,
+                        manualOverride = input.ManualOverride,
+                        requestedModel = input.RequestedModelCode,
+                        requestedMode = input.RequestedMode,
+                        requestedDurationSeconds = input.RequestedDurationSeconds ?? input.DurationSeconds,
                         requestedResolution = input.Resolution,
                         providerResolution = candidate.ProviderResolution,
                         provider = input.ProviderCode,
@@ -893,17 +906,37 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                         }
 
                         nextCandidate = candidates[attemptIndex + 1];
-                        await AddFallbackStartedEventAsync(
-                            project,
-                            scene,
-                            job,
-                            input,
-                            policy,
-                            nextCandidate.Policy,
-                            null,
-                            failureClassification,
-                            ai79Exception.ErrorCode,
-                            CancellationToken.None);
+                        if (failureClassification == DurationRejectedFailureClassification
+                            && IsSamePolicy(policy, nextCandidate.Policy)
+                            && nextCandidate.ProviderDurationSeconds > candidate.ProviderDurationSeconds)
+                        {
+                            await AddDurationFallbackStartedEventAsync(
+                                project,
+                                scene,
+                                job,
+                                input,
+                                policy,
+                                candidate.ProviderDurationSeconds,
+                                nextCandidate.ProviderDurationSeconds,
+                                failureClassification,
+                                ai79Exception.ErrorCode,
+                                ai79Exception.ErrorMessage,
+                                CancellationToken.None);
+                        }
+                        else
+                        {
+                            await AddFallbackStartedEventAsync(
+                                project,
+                                scene,
+                                job,
+                                input,
+                                policy,
+                                nextCandidate.Policy,
+                                null,
+                                failureClassification,
+                                ai79Exception.ErrorCode,
+                                CancellationToken.None);
+                        }
                         fallbackReason = failureClassification;
                         attemptIndex++;
                         continue;
@@ -1910,7 +1943,9 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
     {
         var resolved = new List<ResolvedFallbackCandidate>();
         var diagnostics = new List<FallbackCandidateDiagnostic>();
-        foreach (var policy in RVideoVideoModelPolicy.Models)
+        var policies = ResolveOrderedPolicies(input);
+        var candidateKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var policy in policies)
         {
             var requestedResolution = NormalizeResolution(input.Resolution);
             if (!string.Equals(policy.ProviderCode, input.ProviderCode, StringComparison.OrdinalIgnoreCase)
@@ -2009,7 +2044,7 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
             }
 
             var providerResolution = ResolveProviderResolution(input.Resolution, model.SupportedResolutions);
-            resolved.Add(new ResolvedFallbackCandidate(policy, duration, providerResolution));
+            AddResolvedCandidate(resolved, candidateKeys, policy, duration, providerResolution);
             diagnostics.Add(new FallbackCandidateDiagnostic(
                 policy.AttemptIndex,
                 policy.ProviderCode,
@@ -2021,10 +2056,85 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                 providerResolution,
                 true,
                 null));
+            if (ResolveSameModelDurationFallback(duration, supportedDurations) is int durationFallback)
+            {
+                AddResolvedCandidate(resolved, candidateKeys, policy, durationFallback, providerResolution);
+                diagnostics.Add(new FallbackCandidateDiagnostic(
+                    policy.AttemptIndex,
+                    policy.ProviderCode,
+                    policy.Model,
+                    policy.Mode,
+                    input.DurationSeconds,
+                    durationFallback,
+                    requestedResolution,
+                    providerResolution,
+                    true,
+                    "same_model_duration_fallback"));
+            }
         }
 
         return new FallbackCandidateResolution(resolved, diagnostics);
     }
+
+    private static IReadOnlyList<RVideoVideoModelPolicyEntry> ResolveOrderedPolicies(SceneVideoRenderWorkItemInput input)
+    {
+        var policies = RVideoVideoModelPolicy.Models.ToList();
+        if (!input.ManualOverride || string.IsNullOrWhiteSpace(input.RequestedModelCode))
+        {
+            return policies;
+        }
+
+        var requestedModel = input.RequestedModelCode.Trim();
+        var requestedMode = input.RequestedMode?.Trim();
+        var selected = policies.FirstOrDefault(policy =>
+            string.Equals(policy.ProviderCode, input.ProviderCode, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(policy.Model, requestedModel, StringComparison.OrdinalIgnoreCase)
+            && (string.IsNullOrWhiteSpace(requestedMode)
+                || string.Equals(policy.Mode, requestedMode, StringComparison.OrdinalIgnoreCase)));
+        if (selected is null)
+        {
+            selected = new RVideoVideoModelPolicyEntry(
+                -1,
+                input.ProviderCode,
+                requestedModel,
+                string.IsNullOrWhiteSpace(requestedMode) ? null : requestedMode);
+        }
+
+        return new[] { selected }
+            .Concat(policies.Where(policy => !IsSamePolicy(policy, selected)))
+            .ToList();
+    }
+
+    private static void AddResolvedCandidate(
+        List<ResolvedFallbackCandidate> resolved,
+        HashSet<string> candidateKeys,
+        RVideoVideoModelPolicyEntry policy,
+        int duration,
+        string providerResolution)
+    {
+        if (!candidateKeys.Add(BuildCandidateKey(policy, duration, providerResolution)))
+        {
+            return;
+        }
+
+        resolved.Add(new ResolvedFallbackCandidate(policy, duration, providerResolution));
+    }
+
+    private static string BuildCandidateKey(
+        RVideoVideoModelPolicyEntry policy,
+        int duration,
+        string providerResolution)
+        => $"{policy.ProviderCode}|{policy.Model}|{policy.Mode}|{duration}|{providerResolution}";
+
+    private static int? ResolveSameModelDurationFallback(int currentDuration, HashSet<int> supportedDurations)
+        => currentDuration is 4 or 6 && supportedDurations.Contains(8) && currentDuration < 8
+            ? 8
+            : null;
+
+    private static bool IsSamePolicy(RVideoVideoModelPolicyEntry left, RVideoVideoModelPolicyEntry right)
+        => string.Equals(left.ProviderCode, right.ProviderCode, StringComparison.OrdinalIgnoreCase)
+           && string.Equals(left.Model, right.Model, StringComparison.OrdinalIgnoreCase)
+           && string.Equals(left.Mode, right.Mode, StringComparison.OrdinalIgnoreCase);
 
     private static int? ResolveProviderDuration(int sceneDurationSeconds, HashSet<int>? safeDurations)
     {
@@ -2227,6 +2337,11 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
             return true;
         }
 
+        if (IsDurationRejectedError(exception))
+        {
+            return true;
+        }
+
         var statusCode = (int)exception.HttpStatusCode.Value;
         if (statusCode == 429 || statusCode >= 500)
         {
@@ -2240,7 +2355,40 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
     private static string ClassifyRVideoSubmitFailure(Ai79TaskSubmitException exception)
         => IsKnownNoResourcesSubmit(exception)
             ? KnownNoResourcesFailureClassification
+            : IsDurationRejectedError(exception)
+                ? DurationRejectedFailureClassification
             : ClassifyProviderFailure(exception.ErrorCode, exception.ErrorMessage, exception.HttpStatusCode);
+
+    private static bool IsDurationRejectedError(Ai79TaskSubmitException exception)
+    {
+        if (IsKnownNoResourcesSubmit(exception)
+            || IsTransientSubmit(exception)
+            || HasAcceptedTaskId(exception.SanitizedResponseJson))
+        {
+            return false;
+        }
+
+        var text = $"{exception.ErrorCode} {exception.ErrorMessage} {exception.SanitizedResponseJson}".ToLowerInvariant();
+        var hasDurationSignal = text.Contains("duration", StringComparison.Ordinal)
+                                || text.Contains("seconds", StringComparison.Ordinal)
+                                || text.Contains("second", StringComparison.Ordinal)
+                                || text.Contains("4s", StringComparison.Ordinal)
+                                || text.Contains("6s", StringComparison.Ordinal)
+                                || text.Contains("8s", StringComparison.Ordinal);
+        if (!hasDurationSignal)
+        {
+            return false;
+        }
+
+        return text.Contains("unsupported", StringComparison.Ordinal)
+               || text.Contains("not supported", StringComparison.Ordinal)
+               || text.Contains("invalid", StringComparison.Ordinal)
+               || text.Contains("unavailable", StringComparison.Ordinal)
+               || text.Contains("not available", StringComparison.Ordinal)
+               || text.Contains("only 8", StringComparison.Ordinal)
+               || text.Contains("8 seconds", StringComparison.Ordinal)
+               || text.Contains("8s", StringComparison.Ordinal);
+    }
 
     private static bool IsKnownNoResourcesSubmit(Ai79TaskSubmitException exception)
     {
@@ -2468,7 +2616,40 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
     private static bool ShouldFallback(string classification)
         => classification is "MODEL_PROVIDER_FAILURE"
             or "TRANSIENT_PROVIDER_FAILURE"
+            or DurationRejectedFailureClassification
             or KnownNoResourcesFailureClassification;
+
+    private async Task AddDurationFallbackStartedEventAsync(
+        VideoProjectDto project,
+        VideoProjectSceneDto scene,
+        RenderJobDto job,
+        SceneVideoRenderWorkItemInput input,
+        RVideoVideoModelPolicyEntry policy,
+        int fromDuration,
+        int toDuration,
+        string reason,
+        string? providerErrorCode,
+        string? providerMessage,
+        CancellationToken ct)
+    {
+        await _repo.AddProjectEventAsync(project.Id, "RVIDEO_VIDEO_DURATION_FALLBACK_STARTED", "warning",
+            "Scene-video provider rejected the current duration; retrying the same model with a higher supported duration.",
+            new
+            {
+                projectId = project.Id,
+                sceneId = scene.Id,
+                input.SceneIndex,
+                renderJobId = job.Id,
+                providerCode = input.ProviderCode,
+                modelCode = policy.Model,
+                mode = policy.Mode,
+                fromDuration,
+                toDuration,
+                reason,
+                providerErrorCode,
+                providerMessage
+            }, ct);
+    }
 
     private async Task AddAi79SubmitDiagnosticsAsync(
         RenderJobDto job,
