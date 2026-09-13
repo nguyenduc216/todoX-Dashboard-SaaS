@@ -1180,6 +1180,31 @@ public sealed class SceneVideoWorkerHandler : IRenderJobHandler
                             status.ErrorMessage,
                             providerRawResponse = SanitizeDiagnosticJson(status.SanitizedResponseJson)
                         }, ct);
+                    await _jobs.AddEventAsync(job.Id, "RVIDEO_VIDEO_PROVIDER_RESOURCES_UNAVAILABLE",
+                        "79AI reported NOT_RESOURCES for the existing provider task.",
+                        new
+                        {
+                            projectId = input.ProjectId,
+                            sceneId = input.SceneId,
+                            input.SceneIndex,
+                            sceneVideoVersionId = version.Id,
+                            renderJobId = job.Id,
+                            provider = input.ProviderCode,
+                            model = policy.Model,
+                            mode = policy.Mode,
+                            providerTaskId,
+                            providerVideoIdBase,
+                            idBase = providerVideoIdBase,
+                            providerStatus = "NOT_RESOURCES",
+                            resourceUnavailableState.ResourceUnavailableCount,
+                            resourceUnavailableState.Percent,
+                            resourceUnavailableState.HasProgressEvidence,
+                            resourceUnavailableState.Threshold,
+                            resourceUnavailableState.GraceSeconds,
+                            firstSeenAt = resourceUnavailableState.FirstSeenAt,
+                            resourceUnavailableState.ElapsedSeconds,
+                            providerRawResponse = SanitizeDiagnosticJson(status.SanitizedResponseJson)
+                        }, "warning", ct);
                     if (resourceUnavailableState.ShouldTerminalize)
                     {
                         var failure = status.ErrorMessage ?? "79AI repeatedly reported NOT_RESOURCES for the existing video task without progress evidence.";

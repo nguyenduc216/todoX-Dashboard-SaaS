@@ -505,6 +505,34 @@ public sealed class RVideoVideoHotfixTests
     }
 
     [Fact]
+    public void PollResourceUnavailablePersistsCanonicalObservationInRenderJobEvents()
+    {
+        var source = ReadRepoFile("Services", "VideoRender", "SceneVideoWorkerHandler.cs");
+        var pollBranch = source.IndexOf("if (status.Status == VideoProviderTaskStatus.ResourceUnavailable)", StringComparison.Ordinal);
+        var canonicalProjectEvent = source.IndexOf(
+            "RVIDEO_VIDEO_PROVIDER_RESOURCES_UNAVAILABLE",
+            pollBranch,
+            StringComparison.Ordinal);
+        var canonicalJobEvent = source.IndexOf(
+            "_jobs.AddEventAsync(job.Id, \"RVIDEO_VIDEO_PROVIDER_RESOURCES_UNAVAILABLE\"",
+            canonicalProjectEvent,
+            StringComparison.Ordinal);
+        var terminalBranch = source.IndexOf(
+            "if (resourceUnavailableState.ShouldTerminalize)",
+            canonicalJobEvent,
+            StringComparison.Ordinal);
+
+        Assert.True(pollBranch >= 0);
+        Assert.True(canonicalProjectEvent >= pollBranch);
+        Assert.True(canonicalJobEvent >= canonicalProjectEvent);
+        Assert.True(terminalBranch > canonicalJobEvent);
+        Assert.Contains("sceneVideoVersionId = version.Id", source[canonicalJobEvent..terminalBranch]);
+        Assert.Contains("providerTaskId", source[canonicalJobEvent..terminalBranch]);
+        Assert.Contains("providerVideoIdBase", source[canonicalJobEvent..terminalBranch]);
+        Assert.Contains("firstSeenAt = resourceUnavailableState.FirstSeenAt", source[canonicalJobEvent..terminalBranch]);
+    }
+
+    [Fact]
     public void PollTimeResourceTerminalFallbackUsesNextModelNotDurationFallback()
     {
         var resolved = ResolveFallbackCandidateObjectsForTest(6, "720p");
