@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
 using TodoX.Web.Services.AiProviders;
 using TodoX.Web.Services.Media;
 
@@ -105,6 +106,7 @@ public sealed class RVideo79AiVideoService : IRVideo79AiVideoService
     private readonly IAi79TaskClient _client;
     private readonly IMediaFileService _media;
     private readonly IConfiguration _configuration;
+    private readonly ILogger<RVideo79AiVideoService> _logger;
 
     public RVideo79AiVideoService(
         AiProviderRepository providerRepository,
@@ -112,7 +114,8 @@ public sealed class RVideo79AiVideoService : IRVideo79AiVideoService
         IProviderCredentialRepository credentialRepository,
         IAi79TaskClient client,
         IMediaFileService media,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        ILogger<RVideo79AiVideoService> logger)
     {
         _providerRepository = providerRepository;
         _credentials = credentials;
@@ -120,6 +123,7 @@ public sealed class RVideo79AiVideoService : IRVideo79AiVideoService
         _client = client;
         _media = media;
         _configuration = configuration;
+        _logger = logger;
     }
 
     public async Task<RVideo79AiRuntime> ResolveRuntimeAsync(long providerId, long providerCapabilityId, string providerCode, CancellationToken ct = default)
@@ -265,7 +269,7 @@ public sealed class RVideo79AiVideoService : IRVideo79AiVideoService
             })
         }, JsonOptions);
         var endpoint = new Uri(new Uri(request.Runtime.BaseUrl.TrimEnd('/') + "/", UriKind.Absolute), request.Runtime.SubmitPath.TrimStart('/')).ToString();
-        await EmitHttpSubmitDiagnosticAsync(request.HttpSubmitDiagnostic, new VideoProviderHttpSubmitDiagnostic(
+        await TryEmitHttpSubmitDiagnosticAsync(request.HttpSubmitDiagnostic, new VideoProviderHttpSubmitDiagnostic(
             VideoProviderHttpSubmitDiagnosticStage.Request,
             endpoint,
             request.Model.Model,
@@ -280,7 +284,7 @@ public sealed class RVideo79AiVideoService : IRVideo79AiVideoService
             var submit = await _client.SubmitAsync(raw, ct);
             var providerVideoIdBase = submit.ProviderVideoIdBase;
             var response = DescribeSubmitResponse(submit.SanitizedResponseJson);
-            await EmitHttpSubmitDiagnosticAsync(request.HttpSubmitDiagnostic, new VideoProviderHttpSubmitDiagnostic(
+            await TryEmitHttpSubmitDiagnosticAsync(request.HttpSubmitDiagnostic, new VideoProviderHttpSubmitDiagnostic(
                 VideoProviderHttpSubmitDiagnosticStage.Response,
                 endpoint,
                 request.Model.Model,
@@ -309,7 +313,7 @@ public sealed class RVideo79AiVideoService : IRVideo79AiVideoService
         catch (Ai79TaskSubmitException ex)
         {
             var response = DescribeSubmitResponse(ex.SanitizedResponseJson);
-            await EmitHttpSubmitDiagnosticAsync(request.HttpSubmitDiagnostic, new VideoProviderHttpSubmitDiagnostic(
+            await TryEmitHttpSubmitDiagnosticAsync(request.HttpSubmitDiagnostic, new VideoProviderHttpSubmitDiagnostic(
                 string.Equals(ex.ErrorCode, "invalid_json", StringComparison.OrdinalIgnoreCase)
                     ? VideoProviderHttpSubmitDiagnosticStage.ResponseParseFailed
                     : VideoProviderHttpSubmitDiagnosticStage.Response,
@@ -404,14 +408,33 @@ public sealed class RVideo79AiVideoService : IRVideo79AiVideoService
     private static string? FirstNonBlank(params string?[] values)
         => values.FirstOrDefault(x => !string.IsNullOrWhiteSpace(x))?.Trim();
 
-    private static async Task EmitHttpSubmitDiagnosticAsync(
+    private async Task TryEmitHttpSubmitDiagnosticAsync(
         Func<VideoProviderHttpSubmitDiagnostic, CancellationToken, Task>? callback,
         VideoProviderHttpSubmitDiagnostic diagnostic,
         CancellationToken ct)
     {
-        if (callback is not null)
+        if (callback is null)
+        {
+            return;
+        }
+
+        try
         {
             await callback(diagnostic, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "RVIDEO 79AI submit diagnostic failed. Stage={Stage}, Endpoint={Endpoint}, Model={Model}, Mode={Mode}",
+                diagnostic.Stage,
+                diagnostic.Endpoint,
+                diagnostic.ActualModel,
+                diagnostic.Mode);
         }
     }
 

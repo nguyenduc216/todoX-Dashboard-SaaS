@@ -2,6 +2,8 @@ using System.Net;
 using System.Reflection;
 using System.Runtime.Serialization;
 using System.Text.Json;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging.Abstractions;
 using TodoX.Web.Services.AiProviders;
 using TodoX.Web.Services.Render;
 using TodoX.Web.Services.VideoRender;
@@ -12,6 +14,123 @@ namespace TodoX.Web.Tests;
 public sealed class RVideoSceneVideoRecoveryAndDiagnosticsTests
 {
     private static readonly BindingFlags NonPublicStatic = BindingFlags.NonPublic | BindingFlags.Static;
+
+    [Fact]
+    public async Task RVideoSubmitContinuesWhenRequestDiagnosticCallbackFails()
+    {
+        var client = new SubmitClient();
+        var service = CreateRVideoService(client);
+        var callbackCalls = 0;
+
+        var result = await service.SubmitAsync(CreateSubmitRequest((_, _) =>
+        {
+            callbackCalls++;
+            if (callbackCalls == 1)
+                throw new InvalidOperationException("diagnostic sink failed");
+            return Task.CompletedTask;
+        }));
+
+        Assert.Equal(1, client.SubmitCalls);
+        Assert.Equal("video-base-1", result.TaskId);
+        Assert.Equal("task-1", result.ProviderTaskId);
+        Assert.Equal("video-base-1", result.ProviderVideoIdBase);
+        Assert.Equal(2, callbackCalls);
+    }
+
+    [Fact]
+    public async Task RVideoSubmitContinuesWhenResponseDiagnosticCallbackFails()
+    {
+        var client = new SubmitClient();
+        var service = CreateRVideoService(client);
+        var stages = new List<VideoProviderHttpSubmitDiagnosticStage>();
+
+        var result = await service.SubmitAsync(CreateSubmitRequest((diagnostic, _) =>
+        {
+            stages.Add(diagnostic.Stage);
+            if (diagnostic.Stage == VideoProviderHttpSubmitDiagnosticStage.Response)
+                throw new InvalidOperationException("diagnostic sink failed");
+            return Task.CompletedTask;
+        }));
+
+        Assert.Equal("video-base-1", result.TaskId);
+        Assert.Equal(new[] { VideoProviderHttpSubmitDiagnosticStage.Request, VideoProviderHttpSubmitDiagnosticStage.Response }, stages);
+    }
+
+    [Fact]
+    public async Task RVideoSubmitPreservesOriginalAi79ExceptionWhenResponseDiagnosticFails()
+    {
+        var expected = new Ai79TaskSubmitException(
+            "provider failed",
+            """{"error":"unavailable"}""",
+            System.Net.HttpStatusCode.ServiceUnavailable,
+            "provider_unavailable");
+        var client = new SubmitClient { Exception = expected };
+        var service = CreateRVideoService(client);
+
+        var actual = await Assert.ThrowsAsync<Ai79TaskSubmitException>(() => service.SubmitAsync(CreateSubmitRequest((_, _) =>
+            throw new InvalidOperationException("diagnostic sink failed"))));
+
+        Assert.Same(expected, actual);
+        Assert.Equal(expected.ErrorCode, actual.ErrorCode);
+        Assert.Equal(expected.HttpStatusCode, actual.HttpStatusCode);
+        Assert.Equal(expected.SanitizedResponseJson, actual.SanitizedResponseJson);
+    }
+
+    [Fact]
+    public async Task RVideoSubmitPropagatesCallerCancellationFromDiagnosticCallback()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var client = new SubmitClient();
+        var service = CreateRVideoService(client);
+        var callbackStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Func<VideoProviderHttpSubmitDiagnostic, CancellationToken, Task> callback = async (_, _) =>
+        {
+            callbackStarted.SetResult();
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellation.Token);
+        };
+
+        var submit = service.SubmitAsync(CreateSubmitRequest(callback), cancellation.Token);
+        await callbackStarted.Task;
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => submit);
+        Assert.Equal(0, client.SubmitCalls);
+    }
+
+    private static RVideo79AiVideoService CreateRVideoService(SubmitClient client)
+        => new(null!, null!, null!, client, null!, new ConfigurationBuilder().Build(), NullLogger<RVideo79AiVideoService>.Instance);
+
+    private static RVideo79AiVideoSubmitRequest CreateSubmitRequest(
+        Func<VideoProviderHttpSubmitDiagnostic, CancellationToken, Task>? callback)
+        => new(
+            new RVideo79AiRuntime(
+                18, 99, "79ai", "https://api.example.test", "/create-video", "/video", "/image-upload",
+                "79ai.net", "project-1", new ResolvedProviderCredential { Secret = "secret" }, null, null, 0),
+            new RVideoVideoModelPolicyEntry(1, "79ai", "veo_3_1", "fast"),
+            "prompt", "16:9", "720p", 4, null, [], callback);
+
+    private sealed class SubmitClient : IAi79TaskClient
+    {
+        public int SubmitCalls { get; private set; }
+        public Ai79TaskSubmitException? Exception { get; init; }
+
+        public Task<Ai79TaskSubmitResult> SubmitAsync(Ai79TaskSubmitRequest request, CancellationToken ct = default)
+        {
+            SubmitCalls++;
+            if (Exception is not null) throw Exception;
+            return Task.FromResult(new Ai79TaskSubmitResult(
+                "legacy-task", """{"task_id":"task-1","id_base":"video-base-1","status":"PENDING"}""",
+                "task-1", "video-base-1", System.Net.HttpStatusCode.OK));
+        }
+
+        public Task<Ai79TaskSubmitResult> SubmitMultipartAsync(Ai79MultipartTaskSubmitRequest request, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<Ai79MediaUploadResult> UploadMediaAsync(Ai79MediaUploadRequest request, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<Ai79ProviderMediaListResult> ListImagesAsync(Ai79ProviderMediaListRequest request, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<Ai79ProviderMediaListResult> ListVideosAsync(Ai79ProviderMediaListRequest request, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<Ai79TaskSubmitResult> SubmitMotionControlAsync(Ai79MotionControlSubmitRequest request, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<Ai79ImageUploadResult> UploadImageAsync(Ai79ImageUploadRequest request, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<Ai79TaskStatusResult> GetStatusAsync(Ai79TaskStatusRequest request, CancellationToken ct = default) => throw new NotSupportedException();
+    }
 
     [Fact]
     public void BuildSubmitRequestMetadata_IncludesSafeEffectiveFieldsAndImageMetadata()

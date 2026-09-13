@@ -80,16 +80,21 @@ Timelapse, DanceSell, or database schema was changed. No migration is needed.
 
 ## Validation
 
-- `dotnet test TodoX.Web.Tests/TodoX.Web.Tests.csproj --configuration Release --no-restore --filter "FullyQualifiedName~RVideoSceneVideoRecoveryAndDiagnosticsTests"`: passed, 23/23.
-- The broader RVIDEO/79AI filtered test run had 62 pass and 2 known legacy
-  `Ai79TaskClientTests` failures. Those tests provide responses containing only
-  legacy `request_id`, which the previously-established 79AI video identifier
-  contract rejects because it requires the polling `id_base`; this patch did
-  not change that behavior.
+- `dotnet test TodoX.Web.Tests/TodoX.Web.Tests.csproj --configuration Release --no-restore --filter "FullyQualifiedName~RVideoSceneVideoRecoveryAndDiagnosticsTests"`: passed, 27/27.
+- Added submit diagnostic isolation coverage: request callback failure does not block the provider submit, response callback failure does not convert a successful submit into a failure, the original `Ai79TaskSubmitException` instance is preserved, and caller cancellation still propagates.
+- Diagnostic callback failures are logged with stage, endpoint, model, and mode only. Credentials, authorization headers, raw request data, and raw response data are never logged.
+- The broader RVIDEO/79AI/VideoRender filtered test run had 115 pass and 3
+  unrelated pre-existing regression failures:
+  `DanceSellPhase2ValidationTests.ReferencePrompt_MatchesTheVerified79AiTryOnPromptExactly`,
+  `RVideoAutosaveWorkflowTests.SceneGrid_IsTwoColumnsOnDesktopAndOneColumnNarrow`,
+  and `StaticImageBillingPolicyRegressionTests.RVideoInitialEstimateWiresStaticImageBillingSetting`.
+  None exercises the changed diagnostic callback isolation. This patch did not
+  change those protected subsystems.
 - `dotnet build TodoX.Web/TodoX.Web.csproj --configuration Release --no-restore`:
   passed, 0 errors and 45 existing Razor nullable warnings.
 - `dotnet publish TodoX.Web/TodoX.Web.csproj --configuration Release --no-build
   --output artifacts/publish/todox-dashboard`: passed; output directory created.
+- Publish output: `artifacts/publish/todox-dashboard`.
 - Commit: recorded by the final commit below.
 
 ## Remaining Limitations
