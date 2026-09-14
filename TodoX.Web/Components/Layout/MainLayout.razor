@@ -633,6 +633,28 @@
             }
         }
 
+        if (!existingCodes.Contains("admin_job_monitor"))
+        {
+            var monitorItem = new NavigationMenuItemDto
+            {
+                Id = Guid.NewGuid(),
+                Code = "admin_job_monitor",
+                Title = "Giám sát job",
+                Href = "/admin/job-monitor",
+                IconKey = "Monitor",
+                ModuleKeys = Array.Empty<string>(),
+                VisibilityPolicy = "admin_job_monitor",
+                MatchAll = false,
+                SortOrder = 15
+            };
+            var administration = list.FirstOrDefault(g => g.Code.Equals("administration", StringComparison.OrdinalIgnoreCase));
+            if (administration is not null)
+            {
+                monitorItem.GroupId = administration.Id;
+                administration.Items.Add(monitorItem);
+            }
+        }
+
         return list;
     }
 
@@ -765,6 +787,11 @@
             return CanAdminAvatarManager;
         }
 
+        if (item.VisibilityPolicy.Equals("admin_job_monitor", StringComparison.OrdinalIgnoreCase))
+        {
+            return AdminEndpointAuthorization.IsAdmin(AuthState.CurrentUser);
+        }
+
         if (item.VisibilityPolicy.Equals("customer_only", StringComparison.OrdinalIgnoreCase))
         {
             return AuthState.CurrentUser?.IsCustomer == true;
@@ -805,6 +832,7 @@
         "SettingsEthernet" => Icons.Material.Filled.SettingsEthernet,
         "ContactMail" => Icons.Material.Filled.ContactMail,
         "Article" => Icons.Material.Filled.Article,
+        "Monitor" => Icons.Material.Filled.Monitor,
         _ => Icons.Material.Filled.Circle
     };
 

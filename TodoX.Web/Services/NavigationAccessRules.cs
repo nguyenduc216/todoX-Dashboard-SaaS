@@ -68,6 +68,12 @@ public static class NavigationAccessRules
             return false;
         }
 
+        if (path.StartsWith("/admin/job-monitor", StringComparison.OrdinalIgnoreCase)
+            && !AdminEndpointAuthorization.IsAdmin(user))
+        {
+            return false;
+        }
+
         if (user.IsCustomer && IsAdminOnlyPath(path))
         {
             return false;
