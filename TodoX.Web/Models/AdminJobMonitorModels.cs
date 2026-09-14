@@ -7,6 +7,7 @@ public sealed class AdminJobMonitorQuery
     public string? Search { get; set; }
     public string? Service { get; set; }
     public string? Status { get; set; }
+    public string? Account { get; set; }
     public DateTime? FromUtc { get; set; }
     public DateTime? ToUtc { get; set; }
     public string Sort { get; set; } = "newest";
@@ -33,6 +34,7 @@ public sealed class AdminJobMonitorStats
 
 public sealed class AdminJobMonitorFilterOptions
 {
+    public IReadOnlyList<AdminJobMonitorFilterOption> Accounts { get; init; } = Array.Empty<AdminJobMonitorFilterOption>();
     public IReadOnlyList<AdminJobMonitorFilterOption> Services { get; init; } = Array.Empty<AdminJobMonitorFilterOption>();
     public IReadOnlyList<AdminJobMonitorFilterOption> Statuses { get; init; } = Array.Empty<AdminJobMonitorFilterOption>();
 }
@@ -66,6 +68,7 @@ public sealed class AdminJobMonitorJobSummary
     public decimal ConsumedPoints { get; init; }
     public string? ProviderCode { get; init; }
     public string? ModelCode { get; init; }
+    public int? DurationSeconds { get; init; }
 }
 
 public sealed class AdminJobMonitorDetail

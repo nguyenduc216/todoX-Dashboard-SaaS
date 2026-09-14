@@ -47,6 +47,41 @@ public sealed class AdminJobMonitorTests
     }
 
     [Fact]
+    public void JobMonitorUi_UsesMockupGridFiltersThumbnailDurationAndDrawerRatio()
+    {
+        var page = ReadSource("TodoX.Web", "Components", "Pages", "AdminJobMonitor.razor");
+        var css = ReadSource("TodoX.Web", "Components", "Pages", "AdminJobMonitor.razor.css");
+
+        Assert.Contains("_query.Account", page, StringComparison.Ordinal);
+        Assert.Contains("Tất cả tài khoản", page, StringComparison.Ordinal);
+        Assert.Contains("monitor-date-range", page, StringComparison.Ordinal);
+        Assert.Contains("thumb-duration", page, StringComparison.Ordinal);
+        Assert.Contains("Duration(context)", page, StringComparison.Ordinal);
+        Assert.Contains("DurationSeconds", page, StringComparison.Ordinal);
+
+        Assert.Contains("--job-monitor-columns", css, StringComparison.Ordinal);
+        Assert.Contains("grid-template-columns: var(--job-monitor-columns)", css, StringComparison.Ordinal);
+        Assert.Contains("border-right: 1px solid", css, StringComparison.Ordinal);
+        Assert.Contains("aspect-ratio: 9 / 16", css, StringComparison.Ordinal);
+        Assert.Contains("grid-template-columns: minmax(150px, 1.05fr) minmax(155px, 1.15fr) minmax(145px, 1.05fr) minmax(145px, 1.05fr) minmax(125px, .9fr) minmax(220px, 1.7fr) auto", css, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void JobMonitorService_SupportsAccountFilterAndListDurationFromExistingPayloads()
+    {
+        var service = ReadSource("TodoX.Web", "Services", "AdminJobMonitorService.cs");
+        var models = ReadSource("TodoX.Web", "Models", "AdminJobMonitorModels.cs");
+
+        Assert.Contains("Accounts = accounts.ToList()", service, StringComparison.Ordinal);
+        Assert.Contains("Guid.TryParse(query.Account", service, StringComparison.Ordinal);
+        Assert.Contains("where.Append(\" AND r.user_id = @account\")", service, StringComparison.Ordinal);
+        Assert.Contains("COALESCE(r.options, '{}'::jsonb)::text AS OptionsJson", service, StringComparison.Ordinal);
+        Assert.Contains("DurationSeconds = ReadFirstInt(row.InputJson", service, StringComparison.Ordinal);
+        Assert.Contains("public string? Account { get; set; }", models, StringComparison.Ordinal);
+        Assert.Contains("public int? DurationSeconds { get; init; }", models, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void JobMonitorService_ProvidesServerSidePagingFiltersDetailsAndAudit()
     {
         var service = ReadSource("TodoX.Web", "Services", "AdminJobMonitorService.cs");

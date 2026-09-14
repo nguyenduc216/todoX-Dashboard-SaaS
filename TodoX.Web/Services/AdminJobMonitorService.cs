@@ -205,6 +205,19 @@ public sealed class AdminJobMonitorService : IAdminJobMonitorService
             new { tenant = _tenant.TenantId },
             cancellationToken: ct));
 
+        var accounts = await connection.QueryAsync<AdminJobMonitorFilterOption>(new CommandDefinition(
+            """
+            SELECT u.id::text AS Value,
+                   COALESCE(NULLIF(u.full_name, ''), NULLIF(u.display_name, ''), u.username, u.email, u.id::text) AS Label
+              FROM render.render_jobs r
+              JOIN auth.app_users u ON u.id = r.user_id AND u.tenant_id = r.tenant_id
+             WHERE r.tenant_id = @tenant
+             GROUP BY u.id, u.full_name, u.display_name, u.username, u.email
+             ORDER BY Label, Value;
+            """,
+            new { tenant = _tenant.TenantId },
+            cancellationToken: ct));
+
         var statuses = new[]
         {
             new AdminJobMonitorFilterOption { Value = "pending", Label = "Pending" },
@@ -215,6 +228,7 @@ public sealed class AdminJobMonitorService : IAdminJobMonitorService
 
         return new AdminJobMonitorFilterOptions
         {
+            Accounts = accounts.ToList(),
             Services = services.ToList(),
             Statuses = statuses
         };
@@ -406,6 +420,7 @@ public sealed class AdminJobMonitorService : IAdminJobMonitorService
             Search = Normalize(query.Search),
             Service = Normalize(query.Service),
             Status = Normalize(query.Status),
+            Account = Normalize(query.Account),
             FromUtc = query.FromUtc,
             ToUtc = query.ToUtc,
             Sort = Normalize(query.Sort) ?? "newest"
@@ -453,6 +468,12 @@ public sealed class AdminJobMonitorService : IAdminJobMonitorService
                      OR upper(COALESCE(r.job_type, '')) = upper(@service)
                  )
                 """);
+        }
+
+        if (Guid.TryParse(query.Account, out var accountId))
+        {
+            parameters.Add("account", accountId);
+            where.Append(" AND r.user_id = @account");
         }
 
         if (!string.IsNullOrWhiteSpace(query.Status))
@@ -530,7 +551,9 @@ public sealed class AdminJobMonitorService : IAdminJobMonitorService
             EstimatedPoints = row.EstimatedPoints,
             ConsumedPoints = row.ConsumedPoints,
             ProviderCode = row.ProviderCode,
-            ModelCode = row.ModelCode
+            ModelCode = row.ModelCode,
+            DurationSeconds = ReadFirstInt(row.InputJson, "durationSeconds", "duration")
+                ?? ReadFirstInt(row.OptionsJson, "durationSeconds", "duration")
         };
     }
 
@@ -849,6 +872,7 @@ public sealed class AdminJobMonitorService : IAdminJobMonitorService
         public int ProgressPercent { get; init; }
         public string InputJson { get; init; } = "{}";
         public string OutputJson { get; init; } = "{}";
+        public string OptionsJson { get; init; } = "{}";
         public decimal EstimatedPoints { get; init; }
         public decimal ConsumedPoints { get; init; }
         public string? ProviderCode { get; init; }
@@ -861,7 +885,6 @@ public sealed class AdminJobMonitorService : IAdminJobMonitorService
     {
         public string PromptJson { get; init; } = "{}";
         public string ReferenceJson { get; init; } = "[]";
-        public string OptionsJson { get; init; } = "{}";
         public string? ErrorCode { get; init; }
         public string? ErrorMessage { get; init; }
         public string PointStatus { get; init; } = string.Empty;

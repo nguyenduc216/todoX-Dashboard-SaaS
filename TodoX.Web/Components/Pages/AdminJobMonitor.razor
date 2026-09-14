@@ -23,7 +23,7 @@ else if (!_admin)
 else
 {
     <MudStack Spacing="3" Class="admin-job-monitor">
-        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="flex-wrap gap-3">
+        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="admin-job-monitor-heading">
             <div>
                 <MudText Typo="Typo.h4" Class="todox-page-title">Giám sát job hệ thống</MudText>
                 <MudText Class="todox-page-subtitle">Theo dõi toàn bộ job xử lý của tất cả tài khoản.</MudText>
@@ -34,7 +34,7 @@ else
             </MudStack>
         </MudStack>
 
-        <MudGrid Spacing="2">
+        <MudGrid Spacing="2" Class="admin-job-monitor-stats">
             <MudItem xs="12" sm="6" md="3">
                 <div class="monitor-stat">
                     <MudIcon Icon="@Icons.Material.Filled.Description" />
@@ -62,7 +62,14 @@ else
         </MudGrid>
 
         <MudPaper Class="monitor-filters" Elevation="0">
-            <MudTextField @bind-Value="_query.Search" Label="Tìm kiếm job, tài khoản hoặc ID..." Variant="Variant.Outlined" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" />
+            <div class="monitor-date-range">
+                <MudDatePicker Date="@FromDate" DateChanged="SetFromDate" Label="Từ ngày" Variant="Variant.Outlined" />
+                <MudDatePicker Date="@ToDate" DateChanged="SetToDate" Label="Đến ngày" Variant="Variant.Outlined" />
+            </div>
+            <MudSelect T="string" @bind-Value="_query.Account" Label="Tất cả tài khoản" Variant="Variant.Outlined" Dense="true">
+                <MudSelectItem Value="@((string?)null)">Tất cả tài khoản</MudSelectItem>
+                @foreach (var item in _options.Accounts) { <MudSelectItem Value="@item.Value">@item.Label</MudSelectItem> }
+            </MudSelect>
             <MudSelect T="string" @bind-Value="_query.Service" Label="Dịch vụ" Variant="Variant.Outlined" Dense="true">
                 <MudSelectItem Value="@((string?)null)">Tất cả dịch vụ</MudSelectItem>
                 @foreach (var item in _options.Services) { <MudSelectItem Value="@item.Value">@item.Label</MudSelectItem> }
@@ -74,13 +81,12 @@ else
                 <MudSelectItem Value="@("failed")">Thất bại</MudSelectItem>
                 <MudSelectItem Value="@("pending")">Đang chờ</MudSelectItem>
             </MudSelect>
-            <MudDatePicker Date="@FromDate" DateChanged="SetFromDate" Label="Từ ngày" Variant="Variant.Outlined" />
-            <MudDatePicker Date="@ToDate" DateChanged="SetToDate" Label="Đến ngày" Variant="Variant.Outlined" />
             <MudSelect T="string" @bind-Value="_query.Sort" Label="Sắp xếp" Variant="Variant.Outlined" Dense="true">
                 <MudSelectItem Value="@("newest")">Mới nhất</MudSelectItem>
                 <MudSelectItem Value="@("oldest")">Cũ nhất</MudSelectItem>
                 <MudSelectItem Value="@("updated")">Cập nhật gần nhất</MudSelectItem>
             </MudSelect>
+            <MudTextField @bind-Value="_query.Search" Label="Tìm kiếm..." Variant="Variant.Outlined" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" />
             <MudButton Class="todox-primary-btn" StartIcon="@Icons.Material.Filled.Refresh" OnClick="ReloadAsync">Làm mới</MudButton>
         </MudPaper>
 
@@ -91,7 +97,7 @@ else
                 </HeaderContent>
                 <RowTemplate>
                     <MudTr @onclick="@(() => OpenDetailsAsync(context))">
-                        <MudTd><button class="monitor-thumb" type="button" @onclick:stopPropagation="true" @onclick="@(() => OpenDetailsAsync(context))"><img src="@Thumb(context)" alt="Kết quả" /></button></MudTd>
+                        <MudTd><button class="monitor-thumb" type="button" @onclick:stopPropagation="true" @onclick="@(() => OpenDetailsAsync(context))"><img src="@Thumb(context)" alt="Kết quả" /><span class="thumb-duration">@Duration(context)</span></button></MudTd>
                         <MudTd>@context.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm:ss")</MudTd>
                         <MudTd><span class="account-name">@context.AccountName</span><small>@context.AccountEmail</small></MudTd>
                         <MudTd><span class="service-cell"><MudIcon Icon="@Icons.Material.Filled.VideoLibrary" />@DisplayService(context)</span></MudTd>
@@ -252,6 +258,9 @@ else
     private static string ShortId(Guid id) => $"job_{id:N}"[..12];
     private static string DisplayService(AdminJobMonitorJobSummary job) => string.IsNullOrWhiteSpace(job.ServiceName) ? job.ServiceCode : job.ServiceName;
     private static string Stage(AdminJobMonitorJobSummary job) => string.IsNullOrWhiteSpace(job.CurrentStage) ? StatusText(job.Status) : job.CurrentStage;
+    private static string Duration(AdminJobMonitorJobSummary job) => job.DurationSeconds is int seconds
+        ? $"{seconds / 60}:{seconds % 60:00}"
+        : "--:--";
     private static string StatusText(string status) => status.ToLowerInvariant() switch { "queued" or "pending" or "draft" => "Đang chờ", "completed" => "Hoàn thành", "failed" or "timeout" => "Thất bại", "cancelled" => "Đã hủy", _ => "Đang xử lý" };
     private static Color StatusColor(string status) => status.ToLowerInvariant() switch { "completed" => Color.Success, "failed" or "timeout" => Color.Error, "queued" or "pending" => Color.Warning, _ => Color.Info };
     private static string Thumb(AdminJobMonitorJobSummary job) => job.ThumbnailUrl ?? Placeholder;
