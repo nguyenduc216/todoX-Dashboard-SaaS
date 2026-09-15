@@ -4,6 +4,7 @@ using Microsoft.Extensions.Configuration;
 using TodoX.Web.Models.Catalog;
 using TodoX.Web.Services.DanceSell;
 using TodoX.Web.Services;
+using TodoX.Web.Services.Platform;
 using Xunit;
 
 namespace TodoX.Web.Tests;
@@ -500,13 +501,129 @@ public sealed class RDanceCustomerStatusAndPointsRegressionTests
 
         Assert.Contains("ReadGuid(job.RequestJson, \"serviceId\", \"service_id\")", pricing);
         Assert.Contains("await _catalog.GetByIdAsync(id, ct)", pricing);
-        Assert.Contains("await _sellPrices.EstimateAsync", pricing);
+        Assert.Contains("await _pointPricing.ResolveRateAsync", pricing);
+        Assert.Contains("PointPricingResourceTypes.Video", pricing);
         Assert.Contains("FixedTodoXServiceCatalog.RDance", pricing);
         Assert.Contains("ServiceId = ServiceId", create);
         Assert.Contains("ServiceCode = ServiceCode", create);
         Assert.Contains("ServiceId = service?.Id", phase2);
         Assert.Contains("ServiceCode = service?.ServiceCode", phase2);
         Assert.Contains("DANCE_SELL_SERVICE_ID_MISMATCH", phase2);
+    }
+
+    [Theory]
+    [InlineData("premium", 3, 84)]
+    [InlineData("standard", 1.6, 44.8)]
+    public async Task RdanceFashionPricingUsesServicePointRateForActualDuration(
+        string quality,
+        decimal customVideoRate,
+        decimal expectedPoints)
+    {
+        var serviceId = Guid.NewGuid();
+        var pointPricing = new CapturingPointPricingService(customVideoRate);
+        var catalog = new FakeCoreServiceCatalogService(new CoreServiceView(
+            serviceId,
+            "FASHION_VIDEO",
+            "Thời trang",
+            TodoXServiceEngineTypes.RDance,
+            null,
+            null,
+            null,
+            JsonDocument.Parse("{}").RootElement.Clone(),
+            JsonDocument.Parse("{}").RootElement.Clone(),
+            Array.Empty<CoreServicePriceView>(),
+            true,
+            1));
+        var pricing = new DanceSellCustomerPricing(
+            new ThrowingServiceSellPriceResolver(),
+            pointPricing,
+            catalog);
+        var job = new DanceSellJobDto
+        {
+            RequestJson = $$"""{"serviceId":"{{serviceId}}","serviceCode":"FASHION_VIDEO"}"""
+        };
+
+        var estimate = await pricing.EstimateAsync(job, 28, quality, 0);
+
+        Assert.Equal(expectedPoints, estimate.TotalPoints);
+        Assert.Equal(serviceId, pointPricing.LastResolvedServiceId);
+        Assert.Equal(PointPricingResourceTypes.Video, pointPricing.LastResolvedResourceType);
+        Assert.Equal(quality, pointPricing.LastResolvedQualityTier);
+        Assert.Equal(28, estimate.Video.Count);
+        Assert.Equal(0, estimate.Image.Count);
+        Assert.Equal(0, estimate.Voice.Count);
+    }
+
+    [Fact]
+    public async Task RdanceFashionPricingDoesNotUseDurationSpecificLegacySceneLookup()
+    {
+        var serviceId = Guid.NewGuid();
+        var pointPricing = new CapturingPointPricingService(1.6m);
+        var catalog = new FakeCoreServiceCatalogService(new CoreServiceView(
+            serviceId,
+            "FASHION_VIDEO",
+            "Thời trang",
+            TodoXServiceEngineTypes.RDance,
+            null,
+            null,
+            null,
+            JsonDocument.Parse("{}").RootElement.Clone(),
+            JsonDocument.Parse("{}").RootElement.Clone(),
+            Array.Empty<CoreServicePriceView>(),
+            true,
+            1));
+        var pricing = new DanceSellCustomerPricing(
+            new ThrowingServiceSellPriceResolver(),
+            pointPricing,
+            catalog);
+        var job = new DanceSellJobDto
+        {
+            RequestJson = $$"""{"serviceId":"{{serviceId}}","serviceCode":"FASHION_VIDEO"}"""
+        };
+
+        var estimate = await pricing.EstimateAsync(job, 28, ServiceSellPriceQualityTiers.Standard, 0);
+
+        Assert.NotNull(estimate);
+        Assert.Equal(44.8m, estimate.TotalPoints);
+        Assert.Equal(ServiceSellPriceQualityTiers.Standard, estimate.Video.Quality);
+        Assert.Equal(1.6m, estimate.Video.Rate);
+        Assert.Equal("service_override", estimate.Video.Source);
+    }
+
+    [Fact]
+    public async Task RdanceFashionPricingPreservesMissingConfigurationFailure()
+    {
+        var serviceId = Guid.NewGuid();
+        var pointPricing = new CapturingPointPricingService(0, throwOnResolve: true);
+        var catalog = new FakeCoreServiceCatalogService(new CoreServiceView(
+            serviceId,
+            "FASHION_VIDEO",
+            "Thời trang",
+            TodoXServiceEngineTypes.RDance,
+            null,
+            null,
+            null,
+            JsonDocument.Parse("{}").RootElement.Clone(),
+            JsonDocument.Parse("{}").RootElement.Clone(),
+            Array.Empty<CoreServicePriceView>(),
+            true,
+            1));
+        var pricing = new DanceSellCustomerPricing(
+            new ThrowingServiceSellPriceResolver(),
+            pointPricing,
+            catalog);
+        var job = new DanceSellJobDto
+        {
+            RequestJson = $$"""{"serviceId":"{{serviceId}}","serviceCode":"FASHION_VIDEO"}"""
+        };
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            pricing.EstimateAsync(job, 28, ServiceSellPriceQualityTiers.Standard, 0));
+
+        Assert.Contains("POINT_RATE_NOT_CONFIGURED", ex.Message);
+        Assert.Equal(serviceId, pointPricing.LastResolvedServiceId);
+        Assert.Equal(PointPricingResourceTypes.Video, pointPricing.LastResolvedResourceType);
+        Assert.Equal(ServiceSellPriceQualityTiers.Standard, pointPricing.LastResolvedQualityTier);
     }
 
     [Fact]
@@ -685,4 +802,118 @@ public sealed class RDanceCustomerStatusAndPointsRegressionTests
 
     private static string ReadRepoFile(params string[] parts)
         => File.ReadAllText(Path.Combine(new[] { AppContext.BaseDirectory, "..", "..", "..", ".." }.Concat(parts).ToArray()), Encoding.UTF8);
+
+    private sealed class CapturingPointPricingService : IPointPricingService
+    {
+        private readonly decimal _videoRate;
+        private readonly bool _throwOnResolve;
+
+        public CapturingPointPricingService(decimal videoRate, bool throwOnResolve = false)
+        {
+            _videoRate = videoRate;
+            _throwOnResolve = throwOnResolve;
+        }
+
+        public PointPricingEstimateRequest? LastRequest { get; private set; }
+        public Guid? LastResolvedServiceId { get; private set; }
+        public string? LastResolvedResourceType { get; private set; }
+        public string? LastResolvedQualityTier { get; private set; }
+
+        public Task<PointPricingRate> ResolveRateAsync(
+            Guid? serviceId,
+            string resourceType,
+            string qualityTier,
+            CancellationToken ct = default)
+        {
+            LastResolvedServiceId = serviceId;
+            LastResolvedResourceType = resourceType;
+            LastResolvedQualityTier = qualityTier;
+            if (_throwOnResolve)
+            {
+                throw new InvalidOperationException($"POINT_RATE_NOT_CONFIGURED: {resourceType}/{qualityTier}");
+            }
+
+            return Task.FromResult(new PointPricingRate(
+                resourceType,
+                qualityTier,
+                _videoRate,
+                "per_second",
+                "service_override",
+                serviceId));
+        }
+
+        public Task<PointPricingEstimate> EstimateAsync(
+            PointPricingEstimateRequest request,
+            CancellationToken ct = default)
+        {
+            LastRequest = request;
+            var imageRate = new PointPricingRate(
+                PointPricingResourceTypes.Image,
+                request.ImageQuality,
+                0,
+                "per_render",
+                "service_override",
+                request.ServiceId);
+            var videoRate = new PointPricingRate(
+                PointPricingResourceTypes.Video,
+                request.VideoQuality,
+                _videoRate,
+                "per_second",
+                "service_override",
+                request.ServiceId);
+            var voiceRate = new PointPricingRate(
+                PointPricingResourceTypes.Voice,
+                request.VoiceQuality,
+                0,
+                "per_render",
+                "service_override",
+                request.ServiceId);
+
+            return Task.FromResult(PointPricingCalculator.Estimate(
+                request.ImageCount,
+                imageRate,
+                request.VideoSeconds,
+                videoRate,
+                request.VoiceCount,
+                voiceRate));
+        }
+    }
+
+    private sealed class FakeCoreServiceCatalogService : ICoreServiceCatalogService
+    {
+        private readonly CoreServiceView _service;
+
+        public FakeCoreServiceCatalogService(CoreServiceView service)
+        {
+            _service = service;
+        }
+
+        public Task<IReadOnlyList<CoreServiceView>> ListAsync(CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyList<CoreServiceView>>(new[] { _service });
+
+        public Task<CoreServiceView?> GetByCodeAsync(string serviceCode, CancellationToken ct = default)
+            => Task.FromResult<CoreServiceView?>(
+                string.Equals(serviceCode, _service.ServiceCode, StringComparison.OrdinalIgnoreCase)
+                    ? _service
+                    : null);
+
+        public Task<CoreServiceView?> GetByIdAsync(Guid serviceId, CancellationToken ct = default)
+            => Task.FromResult<CoreServiceView?>(
+                serviceId == _service.Id ? _service : null);
+    }
+
+    private sealed class ThrowingServiceSellPriceResolver : IServiceSellPriceResolver
+    {
+        public Task<IReadOnlyList<ServiceSellPriceDto>> GetActivePricesAsync(Guid serviceId, CancellationToken ct = default)
+            => throw new InvalidOperationException("Legacy service sell price lookup should not be used.");
+
+        public Task<ServiceSellPriceResolution> ResolveImagePriceAsync(Guid serviceId, string qualityTier, CancellationToken ct = default)
+            => throw new InvalidOperationException("Legacy service sell price lookup should not be used.");
+
+        public Task<ServiceSellPriceResolution> ResolveVideoScenePriceAsync(Guid serviceId, string qualityTier, int durationSeconds, CancellationToken ct = default)
+            => throw new InvalidOperationException("Legacy service sell price lookup should not be used.");
+
+        public Task<ServiceSellPriceEstimate> EstimateAsync(ServiceSellPriceEstimateRequest request, CancellationToken ct = default)
+            => throw new InvalidOperationException("Legacy service sell price lookup should not be used.");
+    }
 }

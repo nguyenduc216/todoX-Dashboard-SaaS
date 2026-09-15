@@ -52,30 +52,30 @@ public sealed class DanceSellCustomerPricing : IDanceSellCustomerPricing
                 false), ct);
         }
 
-        var sceneCount = durationSeconds > 0 ? 1 : 0;
-        var sellEstimate = await _sellPrices.EstimateAsync(new ServiceSellPriceEstimateRequest(
+        var videoRate = await _pointPricing.ResolveRateAsync(
             service.Id,
+            PointPricingResourceTypes.Video,
             qualityTier,
-            sceneCount > 0 ? durationSeconds : null,
-            sceneCount,
-            imageCount), ct);
-        if (!sellEstimate.Success)
-        {
-            throw new InvalidOperationException(sellEstimate.Message ?? "DANCE_SELL_CUSTOMER_PRICE_NOT_CONFIGURED");
-        }
-
-        var imageRate = ToRate(
-            sellEstimate.ImagePrice,
-            PointPricingResourceTypes.Image,
-            qualityTier,
-            "per_render");
-        var videoRate = ToVideoRate(sellEstimate.VideoScenePrice, qualityTier, durationSeconds);
+            ct);
+        var imageRate = imageCount > 0
+            ? await _pointPricing.ResolveRateAsync(
+                service.Id,
+                PointPricingResourceTypes.Image,
+                qualityTier,
+                ct)
+            : new PointPricingRate(
+                PointPricingResourceTypes.Image,
+                qualityTier,
+                0,
+                "per_render",
+                "not_used",
+                service.Id);
         var voiceRate = new PointPricingRate(
             PointPricingResourceTypes.Voice,
             ServiceSellPriceQualityTiers.Standard,
             0,
             "per_render",
-            "service_sell",
+            "not_used",
             service.Id);
 
         return PointPricingCalculator.Estimate(
@@ -115,33 +115,6 @@ public sealed class DanceSellCustomerPricing : IDanceSellCustomerPricing
         }
 
         return service;
-    }
-
-    private static PointPricingRate ToRate(
-        ServiceSellPriceDto? price,
-        string resourceType,
-        string qualityTier,
-        string unit)
-        => new(
-            resourceType,
-            qualityTier,
-            price?.SellPoints ?? 0,
-            unit,
-            "service_sell",
-            price?.ServiceId);
-
-    private static PointPricingRate ToVideoRate(ServiceSellPriceDto? price, string qualityTier, int durationSeconds)
-    {
-        var rate = durationSeconds > 0
-            ? (price?.SellPoints ?? 0) / durationSeconds
-            : 0;
-        return new PointPricingRate(
-            PointPricingResourceTypes.Video,
-            qualityTier,
-            rate,
-            "per_scene",
-            "service_sell",
-            price?.ServiceId);
     }
 
     private static Guid? ReadGuid(string? rawJson, params string[] propertyNames)
