@@ -39,7 +39,10 @@ public sealed class AdminJobMonitorTests
         Assert.Contains("Input / Output", page, StringComparison.Ordinal);
         Assert.Contains("Logs", page, StringComparison.Ordinal);
         Assert.Contains("Chỉ xem - Quản trị viên", page, StringComparison.Ordinal);
-        Assert.Contains("Đăng nhập nhanh", page, StringComparison.Ordinal);
+        Assert.Contains("Tìm kiếm job, tài khoản hoặc Job ID...", page, StringComparison.Ordinal);
+        Assert.Contains("HandleSearchKeyDown", page, StringComparison.Ordinal);
+        Assert.Contains("SetTimePreset", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("ImpersonateAsync", page, StringComparison.Ordinal);
         Assert.Contains("InputLinks", page, StringComparison.Ordinal);
         Assert.Contains("Provider", page, StringComparison.Ordinal);
         Assert.DoesNotContain("Delete", page, StringComparison.OrdinalIgnoreCase);
@@ -54,7 +57,7 @@ public sealed class AdminJobMonitorTests
 
         Assert.Contains("_query.Account", page, StringComparison.Ordinal);
         Assert.Contains("Tất cả tài khoản", page, StringComparison.Ordinal);
-        Assert.Contains("monitor-date-range", page, StringComparison.Ordinal);
+        Assert.Contains("monitor-custom-date-range", page, StringComparison.Ordinal);
         Assert.Contains("thumb-duration", page, StringComparison.Ordinal);
         Assert.Contains("Duration(context)", page, StringComparison.Ordinal);
         Assert.Contains("DurationSeconds", page, StringComparison.Ordinal);
@@ -64,6 +67,8 @@ public sealed class AdminJobMonitorTests
         Assert.Contains("border-right: 1px solid", css, StringComparison.Ordinal);
         Assert.Contains("aspect-ratio: 9 / 16", css, StringComparison.Ordinal);
         Assert.Contains("grid-template-columns: minmax(150px, 1.05fr) minmax(155px, 1.15fr) minmax(145px, 1.05fr) minmax(145px, 1.05fr) minmax(125px, .9fr) minmax(220px, 1.7fr) auto", css, StringComparison.Ordinal);
+        Assert.DoesNotContain(".monitor-table-panel { overflow-x: auto", css, StringComparison.Ordinal);
+        Assert.DoesNotContain(".monitor-table { min-width: 1040px", css, StringComparison.Ordinal);
     }
 
     [Fact]
